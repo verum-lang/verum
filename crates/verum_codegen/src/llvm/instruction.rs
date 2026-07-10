@@ -1931,6 +1931,14 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
+        Instruction::SetCallWitness { .. } => {
+            // #44-B Tier-0 sidecar: witnesses ride interpreter frames.
+            // AOT has no frame witness table — the paired CallM's
+            // erased-T behavior is preserved by the LoadT(Generic)
+            // const-fold below; the sidecar is a no-op here.
+            Ok(())
+        }
+
         Instruction::LoadT { dst, type_ref } => {
             // Type references are lowered as pointer type (runtime type info)
             // #44-B: a Generic payload has no witness at AOT (frames are
@@ -23960,6 +23968,11 @@ fn lower_extended<'ctx>(
     match ExtendedSubOpcode::from_byte(sub_op) {
         Some(ExtendedSubOpcode::Reserved) => {
             // No-op anchor — encoders shouldn't emit, but tolerate.
+            Ok(())
+        }
+        Some(ExtendedSubOpcode::SetCallWitness) => {
+            // #44-B Tier-0 sidecar (see the typed-variant arm in
+            // lower_instruction) — no frame witness table at AOT.
             Ok(())
         }
         Some(ExtendedSubOpcode::ProcessExit) => {

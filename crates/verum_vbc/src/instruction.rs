@@ -10549,6 +10549,20 @@ pub enum ExtendedSubOpcode {
     /// call is emitted before the allocation, trapping mismatches
     /// via `verum_panic`.
     MakeVariantTyped = 0x01,
+    /// Generic-witness sidecar (#44-B). Sub-op `0x02`. Wire format:
+    /// `[0x1F][0x02][varint:count][TypeRef * count]`.
+    ///
+    /// Carries the call site's STATIC type arguments to the NEXT
+    /// frame-pushing `CallM` dispatch without changing the CallM wire
+    /// format — the string-keyed dynamic dispatch (and every builtin
+    /// runtime intercept behind it) is preserved. The interpreter
+    /// stores the vector in a pending slot; `handle_call_method` takes
+    /// it at entry and attaches it to the callee frame it pushes (a
+    /// builtin-intercept outcome simply drops it). Emitted by codegen
+    /// immediately before the CallM it annotates; `Generic` entries are
+    /// resolved against the CURRENT frame's witness table at execution
+    /// time (nested generic chains).
+    SetCallWitness = 0x02,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10789,6 +10803,7 @@ impl ExtendedSubOpcode {
         match byte {
             0x00 => Some(Self::Reserved),
             0x01 => Some(Self::MakeVariantTyped),
+            0x02 => Some(Self::SetCallWitness),
             0x10 => Some(Self::ProcessExit),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
@@ -10869,6 +10884,7 @@ impl ExtendedSubOpcode {
         match self {
             Self::Reserved => "EXT_RESERVED",
             Self::MakeVariantTyped => "EXT_MAKE_VARIANT_TYPED",
+            Self::SetCallWitness => "EXT_SET_CALL_WITNESS",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
             Self::ScriptEngineNew => "EXT_SCRIPT_ENGINE_NEW",
             Self::ScriptEngineFree => "EXT_SCRIPT_ENGINE_FREE",
@@ -12540,6 +12556,13 @@ pub enum Instruction {
     ///
 
     /// Encoded under `Opcode::Extended = 0x1F` with sub-op
+    /// Generic-witness sidecar (#44-B): carries static type args to the
+    /// immediately-following `CallM` (see `ExtendedSubOpcode::SetCallWitness`).
+    SetCallWitness {
+        /// Positional type arguments (TypeParamId order of the callee).
+        type_args: Vec<crate::types::TypeRef>,
+    },
+
     /// `ExtendedSubOpcode::MakeVariantTyped = 0x01`. Wire format:
     /// `[0x1F][0x01][reg:dst][varint:type_id][varint:tag]
     /// [varint:field_count]`.

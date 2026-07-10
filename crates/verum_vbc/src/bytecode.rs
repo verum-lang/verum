@@ -98,6 +98,17 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*src, output);
         }
 
+        // Generic-witness sidecar (#44-B):
+        // `[0x1F][0x02][varint:count][TypeRef * count]`.
+        Instruction::SetCallWitness { type_args } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::SetCallWitness.to_byte());
+            encode_varint(type_args.len() as u64, output);
+            for tr in type_args {
+                encode_type_ref(tr, output);
+            }
+        }
+
         Instruction::LoadK { dst, const_id } => {
             output.push(Opcode::LoadK.to_byte());
             encode_reg(*dst, output);
@@ -4955,6 +4966,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             // `Instruction::Extended { sub_op, operands: vec![] }`.
             let sub_op = decode_u8(data, offset)?;
             match ExtendedSubOpcode::from_byte(sub_op) {
+                Some(ExtendedSubOpcode::SetCallWitness) => {
+                    // `[varint:count][TypeRef * count]` — structural decode
+                    // so the validator / disassembler / AOT lowering see the
+                    // typed variant.
+                    let count = decode_varint(data, offset)? as usize;
+                    let mut type_args = Vec::with_capacity(count.min(16));
+                    for _ in 0..count {
+                        type_args.push(decode_type_ref(data, offset)?);
+                    }
+                    Ok(Instruction::SetCallWitness { type_args })
+                }
                 Some(ExtendedSubOpcode::MakeVariantTyped) => {
                     // #146 Phase 3a — `[reg:dst][varint:type_id]
                     // [varint:tag][varint:field_count]`.

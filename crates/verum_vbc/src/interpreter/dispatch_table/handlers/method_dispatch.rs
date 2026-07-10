@@ -33,6 +33,29 @@ use super::string_helpers::{
 // Re-import CBGR helper functions
 use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable, resolve_arg_value};
 
+/// FATREF-RECV-CLASSIFY-1: a FatRef viewing exactly ONE NaN-boxed Value
+/// slot (`reserved == 0 && len == 1`) is a REFERENCE to a value, not a
+/// data slice — iterator-yielded element refs (`for w in xs.iter()`,
+/// then `(*w).method()`) arrive at method dispatch in this shape.
+/// Returns the referent for CLASSIFICATION purposes only; callers must
+/// NOT rebind the dispatch receiver (a genuine 1-element slice keeps
+/// slice semantics on the built-in array paths).  `None` for every
+/// other value shape.
+fn fat_ref_single_referent(v: &Value) -> Option<Value> {
+    if !v.is_fat_ref() {
+        return None;
+    }
+    let fat = v.as_fat_ref();
+    if fat.reserved == 0 && fat.len() == 1 && !fat.ptr().is_null() {
+        // SAFETY: len == 1 with elem-size tag 0 guarantees one readable
+        // Value slot at the base pointer (same contract the GET_E
+        // FatRef read path relies on).
+        Some(unsafe { *(fat.ptr() as *const Value) })
+    } else {
+        None
+    }
+}
+
 // Re-import debug helpers
 use super::debug::format_value_for_print;
 
@@ -63,6 +86,14 @@ pub(in super::super) fn handle_call_method(
     let args = read_reg_range(state)?;
 
     let receiver = state.get_reg(receiver_reg);
+
+    // #44-B: take the generic-witness sidecar staged by the preceding
+    // `Extended/SetCallWitness` (if any). Attached to whichever callee
+    // frame this dispatch pushes; every non-push outcome (builtin
+    // intercept, identity fallback, error) drops it — no leakage into
+    // unrelated later calls by construction.
+    let mut call_witness_sidecar: Option<Box<[crate::types::TypeRef]>> =
+        state.pending_call_witness.take();
 
     if std::env::var("VERUM_TRACE_CALLM_EQ").is_ok() {
         let mname = state.module.strings.get(StringId(method_id)).unwrap_or("?");
@@ -143,6 +174,9 @@ pub(in super::super) fn handle_call_method(
                 .call_stack
                 .push_frame(func_id, reg_count, return_pc, dst)?;
             state.registers.push_frame(reg_count);
+            if let Some(w) = call_witness_sidecar.take() {
+                state.call_stack.set_generic_witnesses(w);
+            }
             for i in 0..args.count {
                 let arg_value = state
                     .registers
@@ -302,6 +336,9 @@ pub(in super::super) fn handle_call_method(
                     .call_stack
                     .push_frame(func_id, reg_count, resume_pc, dst)?;
                 state.registers.push_frame(reg_count);
+                if let Some(w) = call_witness_sidecar.take() {
+                    state.call_stack.set_generic_witnesses(w);
+                }
 
                 // Restore registers
                 let new_reg_base = state.reg_base();
@@ -398,6 +435,9 @@ pub(in super::super) fn handle_call_method(
                         .call_stack
                         .push_frame(func_id, reg_count, return_pc, dst)?;
                     state.registers.push_frame(reg_count);
+                    if let Some(w) = call_witness_sidecar.take() {
+                        state.call_stack.set_generic_witnesses(w);
+                    }
 
                     let new_reg_base = state.reg_base();
                     for (i, val) in restore_regs.iter().enumerate() {
@@ -1888,21 +1928,35 @@ pub(in super::super) fn handle_call_method(
     // Text — `receiver.is_ptr()` is false, so the existing pass
     // returns None and falls through.
     if was_dyn_dispatch && found_func_id.is_none() {
+        // FATREF-RECV-CLASSIFY-1: a FatRef viewing exactly ONE NaN-boxed
+        // Value slot (`reserved == 0 && len == 1`) is a REFERENCE to a
+        // value, not a data slice — `(*w)` on an iterator-yielded
+        // element ref arrives here in that shape.  Classify by the
+        // REFERENT (the receiver itself is left untouched: a genuine
+        // 1-element slice must keep slice semantics on the built-in
+        // array paths that ran earlier).  Pre-fix the classifier saw
+        // `other`, fell into the bare-suffix scan, and executed an
+        // arbitrary same-suffix body — observed live:
+        // `(*w).to_ascii_uppercase()` on a Text element ran
+        // `Byte.to_ascii_uppercase` (fid 2816) and returned the text
+        // unchanged (integration_words_then_uppercase).
+        let classify_target: Value = fat_ref_single_referent(&dispatch_receiver)
+            .unwrap_or(dispatch_receiver);
         // First: NaN-box classifiers for non-pointer receivers (Text
         // small-string, Int, Bool, Float, Unit).
-        let concrete_type: Option<String> = if dispatch_receiver.is_small_string()
-            || is_heap_string(&dispatch_receiver)
+        let concrete_type: Option<String> = if classify_target.is_small_string()
+            || is_heap_string(&classify_target)
         {
             Some("Text".to_string())
-        } else if dispatch_receiver.is_int() {
+        } else if classify_target.is_int() {
             Some("Int".to_string())
-        } else if dispatch_receiver.is_bool() {
+        } else if classify_target.is_bool() {
             Some("Bool".to_string())
-        } else if dispatch_receiver.is_float() {
+        } else if classify_target.is_float() {
             Some("Float".to_string())
-        } else if dispatch_receiver.is_unit() {
+        } else if classify_target.is_unit() {
             Some("Unit".to_string())
-        } else if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+        } else if classify_target.is_ptr() && !classify_target.is_nil() {
             // Heap-pointer receiver: recover concrete type from
             // ObjectHeader.type_id.  Same path the existing first-pass
             // receiver-type lookup at ~L1700 uses, but reached here
@@ -1911,7 +1965,7 @@ pub(in super::super) fn handle_call_method(
             // arm, dispatching `f"{Equal}"` through `format_display<T:
             // Display>(value: &T)` for `Equal: Ordering` falls into
             // the bare-suffix scan and picks an arbitrary `*.fmt`.
-            let ptr = dispatch_receiver.as_ptr::<u8>();
+            let ptr = classify_target.as_ptr::<u8>();
             if !ptr.is_null()
                 && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
             {
@@ -2033,11 +2087,21 @@ pub(in super::super) fn handle_call_method(
             // method. Pre-fix this saw `TypeId::SHARED` and
             // produced no type name, falling through to the
             // catch-all panic.
-            let receiver_type: Option<String> = if dispatch_receiver.is_ptr()
-                && !dispatch_receiver.is_nil()
+            // FATREF-RECV-CLASSIFY-1: see the dyn-classifier sibling —
+            // classify through a single-Value FatRef so `(*w).method()`
+            // on an element ref recovers the REFERENT's type here
+            // instead of falling to the suffix scan.
+            let classify_target: Value = fat_ref_single_referent(&dispatch_receiver)
+                .unwrap_or(dispatch_receiver);
+            let receiver_type: Option<String> = if classify_target.is_small_string()
+                || is_heap_string(&classify_target)
+            {
+                (!is_already_qualified).then(|| "Text".to_string())
+            } else if classify_target.is_ptr()
+                && !classify_target.is_nil()
                 && !is_already_qualified
             {
-                let ptr = dispatch_receiver.as_ptr::<u8>();
+                let ptr = classify_target.as_ptr::<u8>();
                 if ptr.is_null() {
                     None
                 } else if (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
@@ -2461,10 +2525,58 @@ pub(in super::super) fn handle_call_method(
                     .call_stack
                     .push_frame(target_func_id, reg_count, return_pc, dst)?;
             state.registers.push_frame(reg_count);
+            if let Some(w) = call_witness_sidecar.take() {
+                state.call_stack.set_generic_witnesses(w);
+            }
 
             if takes_self {
+                // SELF-MUT-RECV-COHERENCE-1: the callee's DESCRIPTOR is the
+                // authority on the receiver convention.  When it declares
+                // `&mut self` (param[0] is a Mutable Reference named `self`)
+                // but the call site passed the receiver BY VALUE — which
+                // happens whenever the codegen-time registry had no entry
+                // under the call's key (prelude-only compiles resolve
+                // `Text.make_ascii_uppercase` only at RUNTIME; the compile-
+                // time `lookup_function` miss skipped the RefMut wrap) —
+                // synthesize the CBGR ref to the CALLER's receiver register
+                // here.  Without this, the body's `*self = X` DEREF_MUT
+                // wrote into the callee-frame COPY and every `&mut self`
+                // stdlib method was a silent no-op, with mount-set-dependent
+                // reproduction (the worst failure shape).  Mutability is a
+                // callee-declared fact; honoring it must not depend on
+                // call-site registry timing.
+                let callee_wants_mut_self = func
+                    .params
+                    .first()
+                    .map(|p| {
+                        matches!(
+                            &p.type_ref,
+                            crate::types::TypeRef::Reference {
+                                mutability: crate::types::Mutability::Mutable,
+                                ..
+                            }
+                        ) && state
+                            .module
+                            .strings
+                            .get(p.name)
+                            .is_some_and(|n| n == "self")
+                    })
+                    .unwrap_or(false);
+                let receiver_to_pass = if callee_wants_mut_self
+                    && !is_cbgr_ref(&receiver)
+                    && !receiver.is_thin_ref()
+                    && !receiver.is_fat_ref()
+                {
+                    let abs = caller_base + receiver_reg.0 as u32;
+                    let generation = state.registers.get_generation(abs);
+                    Value::from_i64(
+                        super::cbgr_helpers::encode_cbgr_ref_mut(abs, generation),
+                    )
+                } else {
+                    receiver
+                };
                 // First arg is receiver (self)
-                state.registers.set(new_base, Reg(0), receiver);
+                state.registers.set(new_base, Reg(0), receiver_to_pass);
                 // Copy remaining arguments
                 for i in 0..args.count {
                     let arg_value = state

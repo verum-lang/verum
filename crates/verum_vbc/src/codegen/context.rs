@@ -2131,9 +2131,19 @@ impl CodegenContext {
         // Pillar 1: register-keyed — must not leak across functions (and
         // closures re-use low register indices for their own params).
         self.object_ref_param_regs.clear();
-        self.generic_type_params.clear();
-        self.generic_type_params_ordered.clear();
-        self.const_generic_params.clear();
+        // GENERIC PARAMS ARE NOT CLEARED HERE (#44-B contract repair).
+        // compile_function documents (mod.rs ~14078): "For impl methods,
+        // impl generics are PRE-SET by compile_item before calling this,
+        // so we add to them rather than clearing." The item-level walks
+        // (compile_item / compile_item_lenient / pending-default drain)
+        // own the clear+populate; this mid-sequence clear ERASED the
+        // impl-level generics for EVERY impl method body — `T.default()`
+        // inside `implement<T> Maybe<T>` saw an empty param set, missed
+        // the witness intercept, and collapsed into the type-namespace
+        // LoadNil stub (Maybe.flatten's None arm returned nil). Closures
+        // and generators (their compiles also route through here) must
+        // ALSO see the enclosing function's generics, so not clearing is
+        // correct for them too.
         self.byte_array_vars.clear();
         self.typed_array_vars.clear();
         self.active_pattern_cache.clear();

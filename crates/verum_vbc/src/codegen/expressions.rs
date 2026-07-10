@@ -9365,6 +9365,15 @@ impl VbcCodegen {
                     }
                 }
                 if (is_module_ns || is_type_ns) && !receiver_is_known_value {
+                    if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                        eprintln!(
+                            "[tpcall] type-ns LoadNil stub: {}.{} in fn {} (generics_ordered={:?})",
+                            parts.join("."),
+                            method.name.as_str(),
+                            self.ctx.current_function.as_deref().unwrap_or("?"),
+                            self.ctx.generic_type_params_ordered,
+                        );
+                    }
                     let result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadNil { dst: result });
                     return Ok(Some(result));
@@ -11102,6 +11111,22 @@ impl VbcCodegen {
         // If so, we need to create a CBGR reference to the receiver and pass that
         // instead of the value directly. This enables `*self = value` inside the
         // method to write back to the caller's variable.
+        // SELF-MUT-STUB-CARRY-1 oracle: VERUM_TRACE_SELFMUT=<substr>
+        // prints the registry entry the RefMut decision keys on — the
+        // FunctionInfo.id range identifies the producing registration
+        // path (stage-1 bootstrap stubs: u32::MAX-0x100_0000-…, variant
+        // ctors: u32::MAX-tag, loader-remapped archive fns: low ids).
+        if let Ok(w) = std::env::var("VERUM_TRACE_SELFMUT")
+            && effective_method_name.contains(w.as_str())
+        {
+            match self.ctx.lookup_function(&effective_method_name) {
+                Some(fi) => eprintln!(
+                    "[selfmut] key='{}' id={} takes_self_mut_ref={} params={}",
+                    effective_method_name, fi.id.0, fi.takes_self_mut_ref, fi.param_count,
+                ),
+                None => eprintln!("[selfmut] key='{}' => NOT FOUND", effective_method_name),
+            }
+        }
         let actual_receiver =
             if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
                 if func_info.takes_self_mut_ref {
@@ -11259,8 +11284,75 @@ impl VbcCodegen {
             // builtin intercepts (the devirt denylist above exists for
             // exactly this reason), and a direct CallG to the stdlib body
             // bypasses them. Witness delivery for WKT-intercepted methods
-            // needs a channel that PRESERVES CallM dispatch — deliberately
-            // not attempted here.
+            // needs a channel that PRESERVES CallM dispatch — that channel
+            // is the `SetCallWitness` sidecar below.
+            //
+            // #44-B: when the name-resolvable callee is a GENERIC body and
+            // the receiver's static instantiation derives witnesses, stage
+            // them via `Extended/SetCallWitness` immediately before the
+            // CallM. Dispatch stays string-keyed (builtin intercepts
+            // preserved — the cycle-4 regression class); the interpreter
+            // attaches the staged vector to the frame it pushes, giving
+            // the shared generic body (`Maybe.flatten`'s `T.default()`)
+            // its `LoadT(Generic)` witness at Tier-0. Non-push outcomes
+            // drop the sidecar harmlessly.
+            let sidecar_args: Option<Vec<crate::types::TypeRef>> = self
+                .ctx
+                .lookup_function_with_arity(&effective_method_name, args.len() + 1)
+                .filter(|fi| {
+                    fi.param_count == args.len() + 1
+                        && fi.id.0 != u32::MAX
+                        && fi.id.0 != u32::MAX / 2
+                        && fi.variant_tag.is_none()
+                        && fi.intrinsic_name.is_none()
+                })
+                .map(|fi| fi.id.0)
+                .and_then(|fid| {
+                    let mut with_recv: verum_common::List<Expr> =
+                        verum_common::List::new();
+                    with_recv.push(receiver.clone());
+                    for a in args.iter() {
+                        with_recv.push(a.clone());
+                    }
+                    self.record_generic_instantiation(fid, &with_recv)
+                })
+                // ARCHIVE-BLIND fallback: user-script codegen has no stdlib
+                // FunctionDescriptors (self.functions is module-local), so
+                // the structural binder above derives nothing for stdlib
+                // methods. For an impl method the witnesses ARE the
+                // receiver's own instantiation args — `implement<T>
+                // Maybe<T>` puts the type's params first in the positional
+                // order (generic_type_params_ordered convention), so
+                // `Maybe<Maybe<Int>>` ⇒ [Maybe<Int>]. Methods with extra
+                // fn-level generics get only the impl prefix; the body's
+                // out-of-range LoadT(Generic) loads nil and keeps the
+                // legacy fallback.
+                .or_else(|| {
+                    let recv_ty = self.infer_expr_type_name(receiver)?;
+                    match self.type_name_to_type_ref_mono(recv_ty.trim()) {
+                        Some(crate::types::TypeRef::Instantiated {
+                            args: inst_args,
+                            ..
+                        }) if !inst_args.is_empty() => Some(inst_args),
+                        _ => None,
+                    }
+                })
+                .filter(|ta| {
+                    !ta.is_empty()
+                        && ta
+                            .iter()
+                            .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
+                });
+            if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                eprintln!(
+                    "[tpcall] sidecar? method={} derived={:?}",
+                    effective_method_name,
+                    sidecar_args.as_ref().map(|v| v.len()),
+                );
+            }
+            if let Some(type_args) = sidecar_args {
+                self.ctx.emit(Instruction::SetCallWitness { type_args });
+            }
             self.ctx.emit(Instruction::CallM {
                 dst: result,
                 receiver: actual_receiver,
@@ -13457,6 +13549,17 @@ impl VbcCodegen {
         // Uses extract_expr_type_name which handles variables, field access, method calls etc.
         let scrutinee_type = self.extract_expr_type_name(scrutinee);
 
+        // TUPLE-TYPE-TRACK-1 oracle: VERUM_TRACE_SCRUT=1 prints every
+        // match-scrutinee type resolution (the input to variant-payload
+        // binding types).
+        if std::env::var("VERUM_TRACE_SCRUT").is_ok() {
+            eprintln!(
+                "[scrut] fn={} type={:?}",
+                self.ctx.current_function.as_deref().unwrap_or("?"),
+                scrutinee_type,
+            );
+        }
+
         // Store the scrutinee type for pattern binding to use
         let prev_scrutinee_type = self.ctx.match_scrutinee_type.take();
         self.ctx.match_scrutinee_type = scrutinee_type;
@@ -15609,6 +15712,17 @@ impl VbcCodegen {
                                         }
                                     };
 
+                                    // TUPLE-TYPE-TRACK-1 oracle: pairs with the
+                                    // [scrut] trace — shows what the variant-payload
+                                    // binding actually registered.
+                                    if std::env::var("VERUM_TRACE_SCRUT").is_ok()
+                                        && let PatternKind::Ident { name, .. } = &pat.kind
+                                    {
+                                        eprintln!(
+                                            "[scrut-bind] var='{}' field_type={:?} scrutinee={:?}",
+                                            name.name, field_type, self.ctx.match_scrutinee_type,
+                                        );
+                                    }
                                     if let Some(type_name) = field_type
                                         && let PatternKind::Ident { name, .. } = &pat.kind
                                     {
@@ -20640,6 +20754,22 @@ impl VbcCodegen {
                 }
                 None
             }
+            // TUPLE-TYPE-TRACK-1: `pair.0` parses as TupleIndex (NOT Field) —
+            // without this arm the outer access of a chain like
+            // `pair.0.digits` inferred base_type=None and
+            // `resolve_field_index` fell to the global most-fields guess
+            // (PgNumeric.digits@4 over BigInt.digits@1 → OOB GetF).
+            // Newtype projection first (X(T) → T), positional tuple
+            // element second.
+            ExprKind::TupleIndex { expr: base, index } => {
+                let base_type = self.extract_expr_type_name(base)?;
+                if *index == 0
+                    && let Some(inner) = self.ctx.newtype_inner_type.get(&base_type)
+                {
+                    return Some(inner.clone());
+                }
+                VbcCodegen::tuple_element_type_name(&base_type, *index as usize)
+            }
             // Array/List literal: [1, 2, 3] or [0; 10]
             ExprKind::Array(array_expr) => {
                 // Try to infer element type from first element for List<T> tracking
@@ -22209,6 +22339,18 @@ impl VbcCodegen {
                     }
                 }
                 None
+            }
+            // TUPLE-TYPE-TRACK-1: `pair.0` parses as TupleIndex — mirror
+            // of the extract_expr_type_name arm (see there for the D2
+            // failure shape this closes).
+            ExprKind::TupleIndex { expr: base, index } => {
+                let base_type = self.infer_expr_type_name(base)?;
+                if *index == 0
+                    && let Some(inner) = self.ctx.newtype_inner_type.get(&base_type)
+                {
+                    return Some(inner.clone());
+                }
+                VbcCodegen::tuple_element_type_name(&base_type, *index as usize)
             }
             // Function call OR variant constructor: look up the
             // return type. Variant constructors are critical for

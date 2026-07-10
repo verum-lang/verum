@@ -428,6 +428,12 @@ pub struct InterpreterState {
     /// Call stack.
     pub call_stack: CallStack,
 
+    /// Generic-witness sidecar (#44-B): type args staged by
+    /// `Extended/SetCallWitness` for the immediately-following `CallM`.
+    /// `handle_call_method` takes this at entry and attaches it to the
+    /// callee frame it pushes; builtin-intercept outcomes drop it.
+    pub pending_call_witness: Option<Box<[crate::types::TypeRef]>>,
+
     /// Heap allocator.
     pub heap: Heap,
 
@@ -2594,6 +2600,7 @@ impl InterpreterState {
             shared_writes: HashMap::new(),
             registers: RegisterFile::new(),
             call_stack: CallStack::with_max_depth(config.max_stack_depth),
+            pending_call_witness: None,
             heap: Heap::with_threshold(config.max_heap_size),
             stats: ExecutionStats::default(),
             config,

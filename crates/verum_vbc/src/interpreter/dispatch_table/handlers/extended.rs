@@ -125,6 +125,30 @@ pub(in super::super) fn handle_extended(
             // older interpreters.
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::SetCallWitness) => {
+            // #44-B generic-witness sidecar: stage the call site's static
+            // type args for the immediately-following CallM. `Generic`
+            // entries resolve against the CURRENT frame's witness table
+            // (nested generic chains), mirroring handle_call_generic.
+            let count = super::bytecode_io::read_varint(state)? as usize;
+            let mut type_args: Vec<crate::types::TypeRef> =
+                Vec::with_capacity(count.min(16));
+            for _ in 0..count {
+                let tr = super::bytecode_io::read_type_ref(state)?;
+                let resolved = match &tr {
+                    crate::types::TypeRef::Generic(param) => state
+                        .call_stack
+                        .current_generic_witnesses()
+                        .and_then(|ta| ta.get(param.0 as usize))
+                        .cloned()
+                        .unwrap_or(tr),
+                    _ => tr,
+                };
+                type_args.push(resolved);
+            }
+            state.pending_call_witness = Some(type_args.into_boxed_slice());
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::MakeVariantTyped) => {
             // Wire format: `reg:dst + varint:type_id + varint:tag +
             // varint:field_count`.
