@@ -4153,13 +4153,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             ],
             false
         );
+        // POSIX: int pthread_join / pthread_detach — i32 returns,
+        // pthread_t is a pointer on darwin. Must match the FFI
+        // declarations in core/sys/darwin/libsystem.vr or the two
+        // paths collide at the LLVM module level (#46).
         declare_fn!(
             "pthread_join",
-            i64_type,
+            i32_type,
             &[ptr_type.into(), ptr_type.into()],
             false
         );
-        declare_fn!("pthread_detach", i64_type, &[i64_type.into()], false);
+        declare_fn!("pthread_detach", i32_type, &[ptr_type.into()], false);
 
         // pthread rwlock functions (used by RwLock.vr)
         declare_fn!(

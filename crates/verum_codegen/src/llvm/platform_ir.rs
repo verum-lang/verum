@@ -13157,7 +13157,10 @@ impl<'ctx> PlatformIR<'ctx> {
         let pthread_create_fn = self.get_or_declare_fn(
             module,
             "pthread_create",
-            i64_type.fn_type(
+            // POSIX: int pthread_create(...) — i32 return. The FFI
+            // declaration (core/sys/darwin/libsystem.vr) already says
+            // Int32; an i64 here collides at the module level (#46).
+            ctx.i32_type().fn_type(
                 &[
                     ptr_type.into(),
                     ptr_type.into(),
@@ -13715,7 +13718,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let pthread_join_fn = self.get_or_declare_fn(
             module,
             "pthread_join",
-            i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+            // POSIX: int pthread_join(...) — i32 return (#46).
+            ctx.i32_type().fn_type(&[ptr_type.into(), ptr_type.into()], false),
         );
         let dealloc_fn = self.get_or_declare_fn(
             module,
@@ -13916,7 +13920,10 @@ impl<'ctx> PlatformIR<'ctx> {
         let pthread_create_fn = self.get_or_declare_fn(
             module,
             "pthread_create",
-            i64_type.fn_type(
+            // POSIX: int pthread_create(...) — i32 return. The FFI
+            // declaration (core/sys/darwin/libsystem.vr) already says
+            // Int32; an i64 here collides at the module level (#46).
+            ctx.i32_type().fn_type(
                 &[
                     ptr_type.into(),
                     ptr_type.into(),
@@ -14069,7 +14076,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let pthread_join_fn = self.get_or_declare_fn(
             module,
             "pthread_join",
-            i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+            // POSIX: int pthread_join(...) — i32 return (#46).
+            ctx.i32_type().fn_type(&[ptr_type.into(), ptr_type.into()], false),
         );
 
         let builder = ctx.create_builder();
@@ -16740,10 +16748,12 @@ impl<'ctx> PlatformIR<'ctx> {
                 let exit_fn = self.get_or_declare_fn(
                     module,
                     "_exit",
-                    void_type.fn_type(&[i64_type.into()], false),
+                    // POSIX: void _exit(int) — i32 param; the FFI decl
+                    // says Int32 and an i64 here collides (#46).
+                    void_type.fn_type(&[ctx.i32_type().into()], false),
                 );
                 builder
-                    .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
+                    .build_call(exit_fn, &[ctx.i32_type().const_int(1, false).into()], "")
                     .or_llvm_err()?;
                 builder.build_unreachable().or_llvm_err()?;
             }
@@ -17022,10 +17032,11 @@ impl<'ctx> PlatformIR<'ctx> {
                 let exit_fn = self.get_or_declare_fn(
                     module,
                     "_exit",
-                    void_type.fn_type(&[i64_type.into()], false),
+                    // POSIX: void _exit(int) — i32 param (#46).
+                    void_type.fn_type(&[ctx.i32_type().into()], false),
                 );
                 builder
-                    .build_call(exit_fn, &[i64_type.const_int(134, false).into()], "")
+                    .build_call(exit_fn, &[ctx.i32_type().const_int(134, false).into()], "")
                     .or_llvm_err()?;
                 builder.build_unreachable().or_llvm_err()?;
             }
@@ -19433,7 +19444,8 @@ impl<'ctx> PlatformIR<'ctx> {
             ("close", i64_type.fn_type(&[i64_type.into()], false)),
             (
                 "pthread_create",
-                i64_type.fn_type(
+                // POSIX int return — matches the FFI Int32 (#46).
+                i32_type.fn_type(
                     &[
                         ptr_type.into(),
                         ptr_type.into(),
@@ -19445,7 +19457,8 @@ impl<'ctx> PlatformIR<'ctx> {
             ),
             (
                 "pthread_join",
-                i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+                // POSIX int return — matches the FFI Int32 (#46).
+                i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
             ),
             (
                 "clock_gettime",

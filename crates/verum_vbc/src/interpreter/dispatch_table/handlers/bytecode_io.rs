@@ -191,6 +191,89 @@ pub(super) fn skip_type_ref(state: &mut InterpreterState) -> InterpreterResult<(
     Ok(())
 }
 
+/// Read (decode) one serialized `TypeRef` from the bytecode stream.
+///
+/// Structural counterpart of [`skip_type_ref`] — same wire format as
+/// `crate::bytecode::encode_type_ref`; keep the three in sync.  Used by
+/// `handle_call_generic` to materialize CallG type args into the callee
+/// frame (#44-B generic-witness plumbing) and by `handle_loadt`, whose
+/// pre-fix varint read silently desynced the instruction stream on any
+/// LoadT whose payload was a full TypeRef.
+///
+/// Function/Rank2/Tuple payloads are structurally consumed but
+/// head-summarized (the interpreter only ever needs the head type for
+/// dispatch); Concrete / Generic / Instantiated — the forms generic
+/// dispatch needs — round-trip exactly. Reference/Array/Slice/
+/// AssociatedProjection unwrap to their base.
+pub(super) fn read_type_ref(
+    state: &mut InterpreterState,
+) -> InterpreterResult<crate::types::TypeRef> {
+    use crate::types::{TypeParamId, TypeRef};
+    let tag = read_u8(state)?;
+    Ok(match tag {
+        0x00 => TypeRef::Concrete(TypeId(read_varint(state)? as u32)),
+        0x01 => TypeRef::Generic(TypeParamId(read_varint(state)? as u16)),
+        0x02 => {
+            let base = TypeId(read_varint(state)? as u32);
+            let n = read_varint(state)? as usize;
+            let mut args = Vec::with_capacity(n);
+            for _ in 0..n {
+                args.push(read_type_ref(state)?);
+            }
+            TypeRef::Instantiated { base, args }
+        }
+        0x03 | 0x08 => {
+            if tag == 0x08 {
+                read_varint(state)?; // type_param_count
+            }
+            let np = read_varint(state)?;
+            for _ in 0..np {
+                read_type_ref(state)?;
+            }
+            read_type_ref(state)?; // return type
+            let nc = read_varint(state)?;
+            for _ in 0..nc {
+                read_varint(state)?;
+            }
+            // Head-summarized: dispatch never inspects fn-type internals.
+            TypeRef::Concrete(TypeId(0))
+        }
+        0x04 => {
+            let inner = read_type_ref(state)?;
+            read_u8(state)?; // mutability
+            read_u8(state)?; // tier
+            inner
+        }
+        0x05 => {
+            let n = read_varint(state)? as usize;
+            for _ in 0..n {
+                read_type_ref(state)?;
+            }
+            TypeRef::Concrete(TypeId(0))
+        }
+        0x06 => {
+            let elem = read_type_ref(state)?;
+            read_varint(state)?;
+            elem
+        }
+        0x07 => read_type_ref(state)?,
+        0x09 => {
+            let base = read_type_ref(state)?;
+            let len = read_varint(state)? as usize;
+            for _ in 0..len {
+                read_u8(state)?;
+            }
+            base
+        }
+        other => {
+            return Err(InterpreterError::InvalidBytecode {
+                pc: state.pc() as usize,
+                message: format!("invalid TypeRef tag {} in stream", other),
+            });
+        }
+    })
+}
+
 // ============================================================================
 // Tensor Register Helpers
 // ============================================================================

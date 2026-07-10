@@ -5826,15 +5826,13 @@ impl VbcCodegen {
         func_id: u32,
         args: &verum_common::List<verum_ast::Expr>,
     ) -> Option<Vec<crate::types::TypeRef>> {
-        // OPT-IN gate.  The AOT generic-monomorphization pipeline
-        // (CallG emission → seed → specialize → route → devirtualize) is under
-        // active reconstruction (#3).  Until it lands green, keep it OFF by
-        // default so every generic call emits a plain `Call` exactly as before
-        // — zero behavior change, zero regression risk.  Set
-        // VERUM_ENABLE_MONO_AOT=1 to exercise the new path.
-        if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_none() {
-            return None;
-        }
+        // #44-B: type-arg DERIVATION always runs — the interpreter's
+        // generic-witness plumbing (CallG → frame witness table →
+        // LoadT(Generic) → CallM-on-TypeRef) needs the static type args
+        // at Tier-0. Only the mono SEED recording (specialize → route →
+        // devirtualize, still under reconstruction #3) stays behind
+        // VERUM_ENABLE_MONO_AOT.
+        let mono_seed = std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some();
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let found = self
                 .functions
@@ -5909,34 +5907,60 @@ impl VbcCodegen {
                 .trim()
                 .to_string()
         };
-        fn outer_type_param(tr: &crate::types::TypeRef) -> Option<u32> {
-            match tr {
-                crate::types::TypeRef::Generic(tp) => Some(tp.0 as u32),
-                crate::types::TypeRef::Reference { inner, .. } => outer_type_param(inner),
-                _ => None,
+        // STRUCTURAL binding (#44-B): walk param-TypeRef against the
+        // argument's inferred TypeRef so nested generics bind too —
+        // `self: Maybe<Maybe<T>>` against `Maybe<Maybe<Int>>` binds
+        // T=Int. The old binder only matched a BARE `Generic` head
+        // (optionally behind references), so every method whose type
+        // param sits inside the receiver's instantiation derived
+        // nothing and the call never carried witnesses.
+        fn bind_generic(
+            param: &crate::types::TypeRef,
+            arg: &crate::types::TypeRef,
+            bindings: &mut std::collections::BTreeMap<u32, crate::types::TypeRef>,
+        ) {
+            use crate::types::TypeRef as TR;
+            match (param, arg) {
+                (TR::Generic(tp), concrete) => {
+                    if !matches!(concrete, TR::Generic(_)) {
+                        bindings.entry(tp.0 as u32).or_insert_with(|| concrete.clone());
+                    }
+                }
+                (TR::Reference { inner: pi, .. }, TR::Reference { inner: ai, .. }) => {
+                    bind_generic(pi, ai, bindings)
+                }
+                (TR::Reference { inner: pi, .. }, a) => bind_generic(pi, a, bindings),
+                (p, TR::Reference { inner: ai, .. }) => bind_generic(p, ai, bindings),
+                (
+                    TR::Instantiated { base: pb, args: pa },
+                    TR::Instantiated { base: ab, args: aa },
+                ) if pb == ab => {
+                    for (pp, aa_) in pa.iter().zip(aa.iter()) {
+                        bind_generic(pp, aa_, bindings);
+                    }
+                }
+                _ => {}
             }
         }
         let mut bindings: std::collections::BTreeMap<u32, crate::types::TypeRef> =
             std::collections::BTreeMap::new();
         for (i, ptr) in param_trs.iter().enumerate() {
-            if let Some(tp_id) = outer_type_param(ptr) {
-                if let Some(arg) = args.get(i) {
-                    if let Some(concrete) = self.infer_expr_type_name(arg) {
-                        let stripped = strip_ref(&concrete);
-                        let base = stripped.split('<').next().unwrap_or(&stripped).trim();
-                        if base.is_empty()
-                            || verum_common::well_known_types::looks_like_type_param(base)
-                        {
-                            continue;
-                        }
-                        // Preserve the FULL instantiation (e.g. `ReadyFuture<Text>`
-                        // → Instantiated{RF,[Text]}) rather than collapsing to the
-                        // bare base id.  Monomorphization needs the args to resolve
-                        // associated types (`F.Output = Text`) and text-mark the
-                        // payload, so `print` emits the string, not the pointer-int.
-                        if let Some(tr) = self.type_name_to_type_ref_mono(&stripped) {
-                            bindings.entry(tp_id).or_insert(tr);
-                        }
+            if let Some(arg) = args.get(i) {
+                if let Some(concrete) = self.infer_expr_type_name(arg) {
+                    let stripped = strip_ref(&concrete);
+                    let base = stripped.split('<').next().unwrap_or(&stripped).trim();
+                    if base.is_empty()
+                        || verum_common::well_known_types::looks_like_type_param(base)
+                    {
+                        continue;
+                    }
+                    // Preserve the FULL instantiation (e.g. `ReadyFuture<Text>`
+                    // → Instantiated{RF,[Text]}) rather than collapsing to the
+                    // bare base id.  Monomorphization needs the args to resolve
+                    // associated types (`F.Output = Text`) and text-mark the
+                    // payload, so `print` emits the string, not the pointer-int.
+                    if let Some(tr) = self.type_name_to_type_ref_mono(&stripped) {
+                        bind_generic(ptr, &tr, &mut bindings);
                     }
                 }
             }
@@ -5958,9 +5982,38 @@ impl VbcCodegen {
         if bindings.is_empty() {
             return None;
         }
-        let type_args: Vec<crate::types::TypeRef> = bindings.into_values().collect();
-        self.pending_specializations
-            .push((func_id, type_args.clone()));
+        // POSITIONAL contract (#44-B): the witness consumer indexes the
+        // vector by TypeParamId (`LoadT { Generic(idx) }` →
+        // `type_args[idx]`), so emit a DENSE vector over the callee's
+        // declared type params — unresolved slots carry
+        // `TypeRef::Generic(i)` placeholders (runtime: no witness → nil
+        // → legacy fallback), never collapse to a shorter list.
+        let param_count = self
+            .functions
+            .iter()
+            .find(|f| f.descriptor.id.0 == func_id)
+            .map(|f| f.descriptor.type_params.len())
+            .unwrap_or(0)
+            .max(
+                bindings
+                    .keys()
+                    .next_back()
+                    .map(|k| *k as usize + 1)
+                    .unwrap_or(0),
+            );
+        let type_args: Vec<crate::types::TypeRef> = (0..param_count)
+            .map(|i| {
+                bindings.get(&(i as u32)).cloned().unwrap_or(
+                    crate::types::TypeRef::Generic(crate::types::TypeParamId(
+                        i as u16,
+                    )),
+                )
+            })
+            .collect();
+        if mono_seed {
+            self.pending_specializations
+                .push((func_id, type_args.clone()));
+        }
         Some(type_args)
     }
 
@@ -8261,6 +8314,53 @@ impl VbcCodegen {
                 _ => false,
             };
             if matched {
+                // #44-B: when the receiver is a NAMED fn/impl type param
+                // with a known position, emit the generic-witness form —
+                // `LoadT { Generic(idx) }` + `CallM` on the loaded
+                // TypeRef. At runtime a CallG-delivered witness resolves
+                // the param to a concrete type and the CallM dispatches
+                // `{ConcreteType}.default` statically; with NO witness
+                // LoadT yields nil and the dispatcher's nil-receiver
+                // fallback reproduces the historical identity (0/0/1) —
+                // strictly-better, never-worse than the old hardcode.
+                let witness_idx: Option<usize> = match &receiver.kind {
+                    ExprKind::Path(path)
+                        if path.segments.len() == 1 =>
+                    {
+                        match &path.segments[0] {
+                            PathSegment::Name(ident) => self
+                                .ctx
+                                .generic_type_params_ordered
+                                .iter()
+                                .position(|p| p == ident.name.as_str()),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(idx) = witness_idx {
+                    let recv = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadT {
+                        dst: recv,
+                        type_ref: crate::types::TypeRef::Generic(
+                            crate::types::TypeParamId(idx as u16),
+                        ),
+                    });
+                    let method_id =
+                        self.ctx.intern_string_raw(method.name.as_str());
+                    let result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CallM {
+                        dst: result,
+                        receiver: recv,
+                        method_id,
+                        args: crate::instruction::RegRange {
+                            start: Reg(0),
+                            count: 0,
+                        },
+                    });
+                    self.ctx.free_temp(recv);
+                    return Ok(Some(result));
+                }
                 let result = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadI {
                     dst: result,
@@ -12080,14 +12180,33 @@ impl VbcCodegen {
 
         let result = self.ctx.alloc_temp();
 
-        self.ctx.emit(Instruction::Call {
-            dst: result,
-            func_id: func_info.id.0,
-            args: crate::instruction::RegRange {
-                start: args_start,
-                count: args.len() as u8,
-            },
-        });
+        // #44-B: method-shaped static calls (receiver prepended as
+        // args[0]) carry generic witnesses when derivable — same
+        // contract as `compile_call`'s CallG site. `m.flatten()` binds
+        // T from the receiver's instantiation and the callee's LoadT
+        // (Generic) resolves it at Tier-0 through the frame witness
+        // table.
+        let call_args = crate::instruction::RegRange {
+            start: args_start,
+            count: args.len() as u8,
+        };
+        match self.record_generic_instantiation(func_info.id.0, args) {
+            Some(type_args) if !type_args.is_empty() => {
+                self.ctx.emit(Instruction::CallG {
+                    dst: result,
+                    func_id: func_info.id.0,
+                    type_args,
+                    args: call_args,
+                });
+            }
+            _ => {
+                self.ctx.emit(Instruction::Call {
+                    dst: result,
+                    func_id: func_info.id.0,
+                    args: call_args,
+                });
+            }
+        }
 
         Ok(Some(result))
     }

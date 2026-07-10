@@ -106,6 +106,12 @@ impl FuncNameIndex {
 pub struct FunctionContext<'a, 'ctx> {
     /// Sticky VBC-authored type hints (see set_sticky_type_hint).
     sticky_type_hints: std::collections::HashMap<u16, String>,
+    /// Registers holding a `LoadT { Generic(_) }` result (#44-B). At
+    /// AOT there is no frame witness table — the lowering emits a null
+    /// pointer — so a `CallM` on such a register must const-fold the
+    /// erased-T identity (`default`/`zero` → 0, `one` → 1) instead of
+    /// dispatching through a null receiver. Per-function state.
+    pub loadt_generic_regs: std::collections::HashSet<u16>,
     /// LLVM function being built.
     function: FunctionValue<'ctx>,
 
@@ -670,6 +676,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
         Self {
             sticky_type_hints: std::collections::HashMap::new(),
+            loadt_generic_regs: std::collections::HashSet::new(),
             function,
             module,
             vbc_module: None,
@@ -772,6 +779,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
         Self {
             sticky_type_hints: std::collections::HashMap::new(),
+            loadt_generic_regs: std::collections::HashSet::new(),
             function,
             module,
             vbc_module: Some(vbc_module),

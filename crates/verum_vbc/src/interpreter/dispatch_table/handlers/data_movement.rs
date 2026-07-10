@@ -79,8 +79,41 @@ pub(in super::super) fn handle_loadt(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
-    let type_id = read_varint(state)? as u32;
-    state.set_reg(dst, Value::from_type(TypeId(type_id)));
+    // #44-B: LoadT's wire payload is a FULL TypeRef
+    // (bytecode.rs::encode_type_ref) — the pre-fix bare-varint read
+    // consumed only the tag byte and silently desynced the stream.
+    // Concrete/Instantiated load their head TypeId; Generic resolves
+    // through the frame's CallG-delivered witness table, which is what
+    // gives `T.default()` a real receiver at Tier-0. An unresolvable
+    // Generic (no witness) loads nil — callers keep their legacy
+    // erased-T fallbacks.
+    let tr = super::bytecode_io::read_type_ref(state)?;
+    let resolved: Option<TypeId> = {
+        fn head_id(
+            tr: &crate::types::TypeRef,
+            frame_args: Option<&[crate::types::TypeRef]>,
+        ) -> Option<TypeId> {
+            match tr {
+                crate::types::TypeRef::Concrete(id) => Some(*id),
+                crate::types::TypeRef::Instantiated { base, .. } => Some(*base),
+                crate::types::TypeRef::Generic(param) => frame_args
+                    .and_then(|ta| ta.get(param.0 as usize))
+                    .and_then(|inner| match inner {
+                        // One level is enough: entries were resolved
+                        // against the caller chain at CallG time.
+                        crate::types::TypeRef::Generic(_) => None,
+                        other => head_id(other, None),
+                    }),
+                _ => None,
+            }
+        }
+        let frame_args = state.call_stack.current_generic_witnesses();
+        head_id(&tr, frame_args)
+    };
+    match resolved {
+        Some(id) => state.set_reg(dst, Value::from_type(id)),
+        None => state.set_reg(dst, Value::nil()),
+    }
     Ok(DispatchResult::Continue)
 }
 

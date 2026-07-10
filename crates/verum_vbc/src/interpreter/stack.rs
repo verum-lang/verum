@@ -90,6 +90,14 @@ pub struct CallStack {
 
     /// Maximum allowed depth.
     max_depth: usize,
+
+    /// Generic witnesses delivered by `CallG` call sites (#44-B), keyed
+    /// by the DEPTH of the frame they belong to (`frames.len()` at push
+    /// time). Kept out of `CallFrame` so the frame stays `Copy` — the
+    /// overwhelming majority of frames carry no witnesses. `pop_frame`
+    /// drops entries above the new depth, so lookups never see a stale
+    /// table from a dead frame.
+    generic_witnesses: Vec<(usize, Box<[crate::types::TypeRef]>)>,
 }
 
 impl Default for CallStack {
@@ -109,6 +117,7 @@ impl CallStack {
         Self {
             frames: Vec::with_capacity(32),
             max_depth,
+            generic_witnesses: Vec::new(),
         }
     }
 
@@ -158,7 +167,34 @@ impl CallStack {
 
     /// Returns the popped frame.
     pub fn pop_frame(&mut self) -> InterpreterResult<CallFrame> {
-        self.frames.pop().ok_or(InterpreterError::StackUnderflow)
+        let popped = self.frames.pop().ok_or(InterpreterError::StackUnderflow)?;
+        // #44-B: drop witness tables owned by frames at or above the
+        // popped depth (single choke point — every unwind path pops
+        // through here).
+        while self
+            .generic_witnesses
+            .last()
+            .is_some_and(|(d, _)| *d > self.frames.len())
+        {
+            self.generic_witnesses.pop();
+        }
+        Ok(popped)
+    }
+
+    /// Attach a `CallG`-delivered generic-witness table to the CURRENT
+    /// (just-pushed) frame (#44-B). Consumed by `LoadT` on a
+    /// `TypeRef::Generic` payload via [`Self::current_generic_witnesses`].
+    pub fn set_generic_witnesses(&mut self, args: Box<[crate::types::TypeRef]>) {
+        self.generic_witnesses.push((self.frames.len(), args));
+    }
+
+    /// The generic-witness table of the CURRENT frame, if its call site
+    /// delivered one via `CallG`.
+    pub fn current_generic_witnesses(&self) -> Option<&[crate::types::TypeRef]> {
+        self.generic_witnesses
+            .last()
+            .filter(|(d, _)| *d == self.frames.len())
+            .map(|(_, ta)| ta.as_ref())
     }
 
     /// Returns the current (topmost) frame.

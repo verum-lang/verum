@@ -558,11 +558,27 @@ pub(in super::super) fn handle_call_generic(
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
     // Read type_args as a TypeRef vector: varint(count) + TypeRef * count.
-    // Type args are static (used only by AOT monomorphization); the
-    // interpreter dispatches dynamically and just skips past them.
+    // #44-B: materialize them for the callee frame — a `LoadT` on a
+    // `TypeRef::Generic` payload inside the shared generic body resolves
+    // its type param against this table (Tier-0 generic witness).  A
+    // still-generic entry (caller itself generic, invoked without its
+    // own CallG chain) is resolved against the CALLER frame's table
+    // here, so witnesses propagate through nested generic calls.
     let type_args_count = read_varint(state)? as usize;
+    let mut type_args: Vec<crate::types::TypeRef> =
+        Vec::with_capacity(type_args_count);
     for _ in 0..type_args_count {
-        super::bytecode_io::skip_type_ref(state)?;
+        let tr = super::bytecode_io::read_type_ref(state)?;
+        let resolved = match &tr {
+            crate::types::TypeRef::Generic(param) => state
+                .call_stack
+                .current_generic_witnesses()
+                .and_then(|ta| ta.get(param.0 as usize))
+                .cloned()
+                .unwrap_or(tr),
+            _ => tr,
+        };
+        type_args.push(resolved);
     }
     let args = read_reg_range(state)?;
 
@@ -611,6 +627,13 @@ pub(in super::super) fn handle_call_generic(
     let new_base = state
         .call_stack
         .push_frame(func_id, reg_count, return_pc, dst)?;
+
+    // #44-B: deliver the generic witnesses to the callee frame.
+    if !type_args.is_empty() {
+        state
+            .call_stack
+            .set_generic_witnesses(type_args.into_boxed_slice());
+    }
 
     // Allocate registers for new frame
     state.registers.push_frame(reg_count);

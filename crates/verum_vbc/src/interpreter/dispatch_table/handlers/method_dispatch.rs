@@ -99,6 +99,81 @@ pub(in super::super) fn handle_call_method(
         method_name.clone()
     };
 
+    // #44-B: STATIC dispatch on a TYPE value receiver. A `CallM` whose
+    // receiver register holds a TypeRef value is a static method call
+    // on that type — the shape `T.default()` compiles to once the
+    // generic witness is resolved (`LoadT(Generic)` + `CallM`), and the
+    // general `SomeType.method()` dynamic form. Resolve
+    // "{TypeName}.{method}" through the canonical body-preferring
+    // suffix walker and invoke WITHOUT a self argument. Unresolvable →
+    // fall through to the legacy paths (nil-receiver fallbacks keep
+    // erased-T behavior unchanged).
+    if receiver.is_type_ref() {
+        let type_id = receiver.as_type_id();
+        let resolved: Option<(crate::module::FunctionId, u16, bool)> = state
+            .module
+            .get_type(type_id)
+            .and_then(|td| state.module.strings.get(td.name))
+            .map(|n| n.to_string())
+            .and_then(|type_name| {
+                let qualified = format!("{}.{}", type_name, bare_method_name);
+                state.module.find_function_by_name(&qualified)
+            })
+            .and_then(|fid| state.module.get_function(fid).map(|f| (fid, f)))
+            .and_then(|(fid, func)| {
+                let takes_self = func
+                    .params
+                    .first()
+                    .and_then(|p| state.module.strings.get(p.name))
+                    .map(|n| n == "self")
+                    .unwrap_or(false);
+                if takes_self {
+                    // A value method — a TYPE is not a valid self.
+                    None
+                } else {
+                    Some((fid, func.register_count, func.bytecode_length > 0))
+                }
+            });
+        if let Some((func_id, reg_count, has_body)) = resolved
+            && has_body
+        {
+            let return_pc = state.pc();
+            let caller_base = state.reg_base();
+            let new_base = state
+                .call_stack
+                .push_frame(func_id, reg_count, return_pc, dst)?;
+            state.registers.push_frame(reg_count);
+            for i in 0..args.count {
+                let arg_value = state
+                    .registers
+                    .get(caller_base, Reg(args.start.0 + i as u16));
+                state.registers.set(new_base, Reg(i as u16), arg_value);
+            }
+            state.set_pc(0);
+            state.record_call();
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
+    // #44-B legacy fallback: a `T.default()`-class call whose generic
+    // witness was unavailable (caller reached the shared body through a
+    // plain `Call`, so `LoadT(Generic)` loaded nil). Preserve the
+    // historical erased-T identity — `default`/`zero` → 0, `one` → 1 —
+    // exactly what the pre-witness codegen hardcoded at these sites.
+    if receiver.is_nil() && args.count == 0 {
+        match bare_method_name.as_str() {
+            "default" | "zero" => {
+                state.set_reg(dst, Value::from_i64(0));
+                return Ok(DispatchResult::Continue);
+            }
+            "one" => {
+                state.set_reg(dst, Value::from_i64(1));
+                return Ok(DispatchResult::Continue);
+            }
+            _ => {}
+        }
+    }
+
     // **High-level Rust intercept** — TcpStream method calls
     // (`read`, `write`, `flush`, `close`) bypass the libSystem
     // `sys_send`/`sys_recv`/`sys_close` FFI chain. See VBC-NET-2

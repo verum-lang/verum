@@ -1931,8 +1931,17 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
-        Instruction::LoadT { dst, type_ref: _ } => {
+        Instruction::LoadT { dst, type_ref } => {
             // Type references are lowered as pointer type (runtime type info)
+            // #44-B: a Generic payload has no witness at AOT (frames are
+            // native, no witness table) — track the register so CallM
+            // const-folds the erased-T identity instead of dispatching
+            // through the null receiver below.
+            if matches!(type_ref, TypeRef::Generic(_)) {
+                ctx.loadt_generic_regs.insert(dst.0);
+            } else {
+                ctx.loadt_generic_regs.remove(&dst.0);
+            }
             let llvm_val = ctx.types().ptr_type().const_null();
             ctx.set_register(dst.0, llvm_val.into());
             Ok(())
@@ -12899,6 +12908,31 @@ fn lower_call_method<'ctx>(
         .get_string(StringId(method_id))
         .unwrap_or("")
         .to_string();
+
+    // #44-B: erased-T identity const-fold. The receiver register holds
+    // a `LoadT { Generic(_) }` result — at AOT there is no generic
+    // witness (frames are native), the register is a null pointer, and
+    // dispatching through it would trap. Reproduce the historical
+    // erased-T semantics statically: default/zero → 0, one → 1.
+    // (When AOT monomorphization is enabled, the specializer rewrites
+    // the LoadT to a concrete type before lowering and this branch
+    // never fires for the specialized bodies.)
+    if ctx.loadt_generic_regs.contains(&receiver.0) && args.count == 0 {
+        let bare = method_name_str
+            .rsplit('.')
+            .next()
+            .unwrap_or(method_name_str.as_str());
+        let identity: Option<u64> = match bare {
+            "default" | "zero" => Some(0),
+            "one" => Some(1),
+            _ => None,
+        };
+        if let Some(v) = identity {
+            let llvm_val = ctx.types().i64_type().const_int(v, false);
+            ctx.set_register(dst.0, llvm_val.into());
+            return Ok(());
+        }
+    }
 
     // Coherent reference model: the built-in `deref` on a reference is the
     // identity on the reference value — it yields the reference; the following
