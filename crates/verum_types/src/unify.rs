@@ -4667,6 +4667,31 @@ impl Unifier {
             return Ok(Substitution::new());
         }
 
+        // TEMPLATE-PIN TRAP (#41): binding a var that BELONGS to a registered
+        // type's declaration (type_var_orders) pins the TEMPLATE globally —
+        // always a bug upstream (a registry template leaked into unification
+        // unfreshened). Gated diagnostic to locate the leaking door.
+        if std::env::var("VERUM_TRACE_CTOR").is_ok()
+            && self
+                .type_var_orders
+                .iter()
+                .any(|(_, order)| order.contains(&var))
+        {
+            let owner: Vec<_> = self
+                .type_var_orders
+                .iter()
+                .filter(|(_, o)| o.contains(&var))
+                .map(|(n, _)| n.as_str().to_string())
+                .collect();
+            eprintln!(
+                "[ctor-trace] TEMPLATE-PIN bind_var {:?} (owner {:?}) := {:?}\n{}",
+                var,
+                owner,
+                ty,
+                std::backtrace::Backtrace::force_capture()
+            );
+        }
+
         // Occurs check: var must not appear in ty
         if ty.free_vars().contains(&var) {
             // When the cycle is through a reference or container type (e.g., T = &T,

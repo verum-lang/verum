@@ -798,6 +798,14 @@ impl TypeChecker {
                     // Look up the variant constructor
                     match variants.get(tag) {
                         Some(payload_ty) => {
+                            if std::env::var("VERUM_TRACE_CTOR").is_ok()
+                                && (tag == "Right" || tag == "Left")
+                            {
+                                eprintln!(
+                                    "[ctor-trace] bind_pattern {}: payload={:?}",
+                                    tag, payload_ty
+                                );
+                            }
                             // Delegate to bind_variant_record_payload for consistent handling
                             self.bind_variant_record_payload(
                                 tag,
