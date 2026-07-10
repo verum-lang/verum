@@ -103,16 +103,18 @@ fn typecheck_exporters() -> (NoopExporter, StdoutExporter) {
     (NoopExporter.new(), StdoutExporter.new())
 }
 
-fn typecheck_in_memory(tx: core.async.channel.Sender<Text>) -> InMemoryExporter {
-    InMemoryExporter.from_sender(tx)
+fn typecheck_in_memory() -> (InMemoryExporter, Text, Int) {
+    let sink = InMemoryExporter.new();
+    let handle = sink.clone();
+    (handle, sink.take_text(), sink.lines_len())
 }
 
 fn typecheck_export(exp: &NoopExporter, spans: &List<SpanData>) -> TraceExportResult {
     exp.export(spans)
 }
 
-fn typecheck_exporter_handle(spans: &List<SpanData>, exp: InMemoryExporter) -> TraceExportResult {
-    let h = ExporterHandle.in_memory(exp);
+fn typecheck_exporter_handle(spans: &List<SpanData>) -> TraceExportResult {
+    let h = ExporterHandle.in_memory(InMemoryExporter.new());
     h.export(spans)
         .combine(h.force_flush(Duration.from_secs(1)))
         .combine(h.shutdown(Duration.from_secs(1)))

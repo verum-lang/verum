@@ -514,43 +514,125 @@ implement SpanExporter for StdoutExporter {
 // side holds the Receiver and drains it with take(). No shared mutable
 // cell is involved, so no shared-identity support is required.
 
-public type InMemoryExporter is {
-    tx: Sender<Text>,
+/// Guarded line store on the proven primitive set: single-variant
+/// payload enums, Mutex as a direct record field, match-payload reads
+/// (clone/primitive only), whole-value guard stores. The store is a
+/// (count, joined-text) pair — no container manipulation crosses the
+/// payload boundary.
+type LineCell is {
+    state: Mutex<LineState>,
 };
 
-implement InMemoryExporter {
-    /// Build from a caller-instantiated Sender. The channel pair MUST
-    /// be created in the caller's compile context
-    /// (`bounded<Text>(cap)`): cross-module generic instantiation
-    /// inside the baked stdlib does not materialize yet, so this
-    /// module cannot call `bounded` itself. The payload is the
-    /// rendered span line (see the StdoutExporter line shape) — the
-    /// channel ring carries simple values reliably; complex records do
-    /// not survive it yet.
-    public fn from_sender(tx: Sender<Text>) -> InMemoryExporter {
-        InMemoryExporter { tx: tx }
+/// Single-payload carrier record (the signal-registry idiom stores a
+/// single payload; multi-field tuple variants are unproven).
+type LineBuf is {
+    count: Int,
+    text: Text,
+};
+
+implement LineBuf {
+    public fn buf_count(&self) -> Int { self.count }
+    public fn buf_text(&self) -> Text { self.text.clone() }
+    public fn buf_appended(&self, line: Text) -> LineBuf {
+        let mut t = self.text.clone();
+        t.push_str(&line);
+        t.push('\n');
+        LineBuf { count: self.count + 1, text: t }
+    }
+}
+
+type LineState is
+    | Lines(LineBuf);
+
+implement LineCell {
+    public fn line_cell_push(&self, line: Text) {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut next: LineBuf = LineBuf { count: 0, text: "".into() };
+        match &*guard {
+            LineState.Lines(buf) => {
+                next = buf.buf_appended(line);
+            }
+        }
+        *guard = LineState.Lines(next);
     }
 
-    /// Additional handle onto the same buffer (Sender clone).
+    public fn line_cell_take(&self) -> Text {
+        let mut guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut out: Text = "".into();
+        match &*guard {
+            LineState.Lines(buf) => {
+                out = buf.buf_text();
+            }
+        }
+        *guard = LineState.Lines(LineBuf { count: 0, text: "".into() });
+        out
+    }
+
+    public fn line_cell_len(&self) -> Int {
+        let guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut n_out: Int = 0;
+        match &*guard {
+            LineState.Lines(buf) => {
+                n_out = buf.buf_count();
+            }
+        }
+        n_out
+    }
+}
+
+public type InMemoryExporter is
+    | MemLines(Shared<LineCell>);
+
+implement InMemoryExporter {
+    public fn new() -> InMemoryExporter {
+        InMemoryExporter.MemLines(Shared.new(LineCell {
+            state: Mutex.new(LineState.Lines(LineBuf { count: 0, text: "".into() })),
+        }))
+    }
+
+    /// Additional handle onto the same buffer.
     public fn clone(&self) -> InMemoryExporter {
-        InMemoryExporter { tx: self.tx.clone() }
+        match self {
+            InMemoryExporter.MemLines(c) => InMemoryExporter.MemLines(c.clone()),
+        }
     }
 
     /// Uniquely-named worker so handle dispatch resolves on any
-    /// receiver-tracking tier.
+    /// receiver-tracking tier. The payload is the rendered span line
+    /// (see the StdoutExporter line shape).
     public fn mem_export(&self, spans: &List<SpanData>) -> TraceExportResult {
-        let mut i = 0;
-        while i < spans.len() {
-            let line = format_span_line(&spans[i]);
-            match self.tx.try_send(line) {
-                Result.Ok(_) => {}
-                Result.Err(_) => {
-                    return TraceExportResult.Failure(ExportError.queue_full());
+        match self {
+            InMemoryExporter.MemLines(c) => {
+                let mut i = 0;
+                while i < spans.len() {
+                    let line = format_span_line(&spans[i]);
+                    c.line_cell_push(line);
+                    i = i + 1;
                 }
             }
-            i = i + 1;
         }
         TraceExportResult.Success
+    }
+
+    /// Drain: newline-joined rendered lines collected so far.
+    public fn take_text(&self) -> Text {
+        match self {
+            InMemoryExporter.MemLines(c) => c.line_cell_take(),
+        }
+    }
+
+    /// Test hook: push a raw line without going through export.
+    public fn push_line_for_tests(&self, line: Text) {
+        match self {
+            InMemoryExporter.MemLines(c) => c.line_cell_push(line),
+        }
+    }
+
+    /// Number of collected lines.
+    public fn lines_len(&self) -> Int {
+        match self {
+            InMemoryExporter.MemLines(c) => c.line_cell_len(),
+        }
     }
 }
 

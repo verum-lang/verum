@@ -14,7 +14,6 @@
 mount core.tracing.tracer.{TracerProvider, TracerHandle, NoopTracer};
 mount core.tracing.processor.{ProcessorHandle};
 mount core.tracing.exporter.{ExporterHandle, InMemoryExporter};
-mount core.async.channel.{bounded, Sender, Receiver};
 mount core.tracing.span.{Span, SpanInner};
 mount core.tracing.data.{SpanKind, SpanStatus, SpanStatusCode, SpanLink, SpanData};
 mount core.tracing.sampler.{SamplingDecision, TraceIdRatio, always_on, always_off, trace_id_ratio};
@@ -31,22 +30,10 @@ mount core.base.maybe.{Maybe, Some, None};
 // Harness helpers
 // -----------------------------------------------------------------------------
 
-/// Test-side sink: the channel is instantiated HERE (caller compile
-/// context) because cross-module generic instantiation inside the
-/// baked stdlib does not materialize yet.
-fn sink_pair() -> (InMemoryExporter, Receiver<Text>) {
-    let (tx, rx) = bounded<Text>(256);
-    (InMemoryExporter.from_sender(tx), rx)
-}
-
-fn take_all_lines(rx: &mut Receiver<Text>) -> List<Text> {
-    let mut out: List<Text> = List.new();
-    loop {
-        match rx.try_recv() {
-            Result.Ok(s) => { out.push(s); }
-            Result.Err(_) => { return out; }
-        }
-    }
+/// Test-side sink pair: two handles onto one guarded line store.
+fn sink_pair() -> (InMemoryExporter, InMemoryExporter) {
+    let sink = InMemoryExporter.new();
+    (sink.clone(), sink)
 }
 
 fn make_provider(exporter: InMemoryExporter) -> TracerProvider {
@@ -69,45 +56,45 @@ fn start_simple_span(provider: &TracerProvider, name: &Text) -> Span {
 
 @test
 fn test_end_delivers_span_to_exporter() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"work".into());
     span.end();
-    let got = take_all_lines(&mut sink);
-    assert_eq(got.len(), 1);
-    assert(got[0].contains(&"work".into()));
+    assert_eq(sink.lines_len(), 1);
+    let blob = sink.take_text();
+    assert(blob.contains(&"work".into()));
 }
 
 @test
 fn test_end_is_idempotent_single_export() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"once".into());
     span.end();
     span.end();
     span.end();
-    assert_eq(take_all_lines(&mut sink).len(), 1);
+    assert_eq(sink.lines_len(), 1);
 }
 
 @test
 fn test_exported_span_carries_identity_and_kind() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"identity".into());
     let ctx = span.context();
     span.end();
-    let got = take_all_lines(&mut sink);
-    assert_eq(got.len(), 1);
-    assert(got[0].contains(&ctx.trace_id().to_hex()));
-    assert(got[0].contains(&ctx.span_id().to_hex()));
-    assert(got[0].contains(&"kind=SERVER".into()));
-    assert(got[0].contains(&"sampled=true".into()));
-    assert(got[0].contains(&"parent=-".into()));
+    assert_eq(sink.lines_len(), 1);
+    let blob = sink.take_text();
+    assert(blob.contains(&ctx.trace_id().to_hex()));
+    assert(blob.contains(&ctx.span_id().to_hex()));
+    assert(blob.contains(&"kind=SERVER".into()));
+    assert(blob.contains(&"sampled=true".into()));
+    assert(blob.contains(&"parent=-".into()));
 }
 
 @test
 fn test_exported_span_carries_attributes_events_status() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"detail".into());
     span.set_attribute("http.method".into(), AttributeValue.Text("GET".into()));
@@ -115,17 +102,17 @@ fn test_exported_span_carries_attributes_events_status() {
     span.add_event_now("validated".into());
     span.set_status(SpanStatus.ok());
     span.end();
-    let got = take_all_lines(&mut sink);
-    assert_eq(got.len(), 1);
-    assert(got[0].contains(&"http.method=\"GET\"".into()));
-    assert(got[0].contains(&"http.status_code=200".into()));
-    assert(got[0].contains(&"events=1".into()));
-    assert(got[0].contains(&"status=OK".into()));
+    assert_eq(sink.lines_len(), 1);
+    let blob = sink.take_text();
+    assert(blob.contains(&"http.method=\"GET\"".into()));
+    assert(blob.contains(&"http.status_code=200".into()));
+    assert(blob.contains(&"events=1".into()));
+    assert(blob.contains(&"status=OK".into()));
 }
 
 @test
 fn test_mutation_after_end_is_ignored() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"frozen".into());
     span.set_attribute("kept".into(), AttributeValue.Int(1));
@@ -133,12 +120,12 @@ fn test_mutation_after_end_is_ignored() {
     span.set_attribute("dropped".into(), AttributeValue.Int(2));
     span.add_event_now("late".into());
     span.update_name("renamed".into());
-    let got = take_all_lines(&mut sink);
-    assert_eq(got.len(), 1);
-    assert(got[0].contains(&"frozen".into()));
-    assert(got[0].contains(&"kept=1".into()));
-    assert(!got[0].contains(&"dropped".into()));
-    assert(got[0].contains(&"events=0".into()));
+    assert_eq(sink.lines_len(), 1);
+    let blob = sink.take_text();
+    assert(blob.contains(&"frozen".into()));
+    assert(blob.contains(&"kept=1".into()));
+    assert(!blob.contains(&"dropped".into()));
+    assert(blob.contains(&"events=0".into()));
 }
 
 // =============================================================================
@@ -147,26 +134,24 @@ fn test_mutation_after_end_is_ignored() {
 
 @test
 fn test_status_error_wins_over_ok() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"status1".into());
     span.set_status(SpanStatus.ok());
     span.set_status(SpanStatus.error("boom".into()));
     span.end();
-    let got = take_all_lines(&mut sink);
-    assert(got[0].contains(&"status=ERROR".into()));
+    assert(sink.take_text().contains(&"status=ERROR".into()));
 }
 
 @test
 fn test_status_error_is_final() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"status2".into());
     span.set_status(SpanStatus.error("first".into()));
     span.set_status(SpanStatus.ok());
     span.end();
-    let got = take_all_lines(&mut sink);
-    assert(got[0].contains(&"status=ERROR".into()));
+    assert(sink.take_text().contains(&"status=ERROR".into()));
 }
 
 // =============================================================================
@@ -175,7 +160,7 @@ fn test_status_error_is_final() {
 
 @test
 fn test_child_span_inherits_trace_and_links_parent() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let tracer = provider.tracer(&"suite".into(), &"1".into());
     let links1: List<SpanLink> = List.new();
@@ -192,14 +177,13 @@ fn test_child_span_inherits_trace_and_links_parent() {
     assert(!child_ctx.span_id().eq(&parent_ctx.span_id()));
     child.end();
     parent.end();
-    let got = take_all_lines(&mut sink);
-    assert_eq(got.len(), 2);
-    // Child exported first (ended first): its line must carry the
-    // parent's span id and the shared trace id.
+    assert_eq(sink.lines_len(), 2);
+    let blob = sink.take_text();
+    // Child line carries the parent's span id + the shared trace id.
     let parent_sid = parent_ctx.span_id().to_hex();
     let expect = f"parent={parent_sid}";
-    assert(got[0].contains(&expect));
-    assert(got[0].contains(&parent_ctx.trace_id().to_hex()));
+    assert(blob.contains(&expect));
+    assert(blob.contains(&parent_ctx.trace_id().to_hex()));
 }
 
 // =============================================================================
@@ -209,7 +193,7 @@ fn test_child_span_inherits_trace_and_links_parent() {
 
 @test
 fn test_dropped_span_keeps_valid_context_and_exports_nothing() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = TracerProvider.builder()
         .with_sampler(always_off())
         .with_processor(ProcessorHandle.simple(ExporterHandle.in_memory(exporter)))
@@ -222,7 +206,7 @@ fn test_dropped_span_keeps_valid_context_and_exports_nothing() {
     assert(!span.is_recording());
     span.set_attribute("ignored".into(), AttributeValue.Int(1));
     span.end();
-    assert_eq(take_all_lines(&mut sink).len(), 0);
+    assert_eq(sink.lines_len(), 0);
 }
 
 @test
@@ -230,7 +214,7 @@ fn test_record_only_span_records_but_never_exports() {
     // A recording span whose context is NOT sampled models the
     // RecordOnly decision: the processor receives it on end(), but the
     // exporter must never see it.
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let unsampled_ctx = SpanContext.new(
         generate_trace_id(), generate_span_id(),
         TraceFlags.default(), TraceState.empty(), false,
@@ -260,7 +244,7 @@ fn test_record_only_span_records_but_never_exports() {
     span.set_attribute("recorded".into(), AttributeValue.Int(1));
     span.end();
     // Recording but unsampled: processor received it, exporter must not.
-    assert_eq(take_all_lines(&mut sink).len(), 0);
+    assert_eq(sink.lines_len(), 0);
 }
 
 // =============================================================================
@@ -410,7 +394,7 @@ fn test_noop_tracer_passes_parent_context_through() {
 
 @test
 fn test_provider_force_flush_and_shutdown_succeed() {
-    let (exporter, mut sink) = sink_pair();
+    let (exporter, sink) = sink_pair();
     let provider = make_provider(exporter);
     let span = start_simple_span(&provider, &"lifecycle".into());
     span.end();
@@ -418,7 +402,7 @@ fn test_provider_force_flush_and_shutdown_succeed() {
     assert(flushed.is_success());
     let down = provider.shutdown(Duration.from_secs(1));
     assert(down.is_success());
-    assert_eq(take_all_lines(&mut sink).len(), 1);
+    assert_eq(sink.lines_len(), 1);
 }
 
 fn main() {}
