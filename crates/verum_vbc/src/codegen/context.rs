@@ -1232,8 +1232,7 @@ impl TierContext {
         // to one span-derived ExprId made the surviving tier last-wins in
         // hash order. Sorted RefId walk → deterministic collision winner
         // (highest RefId, stable across bakes).
-        let mut ordered: Vec<(&verum_cbgr::tier_types::RefId, _)> =
-            result.decisions.iter().collect();
+        let mut ordered: Vec<_> = result.decisions.iter().collect();
         ordered.sort_by_key(|(rid, _)| rid.0);
 
         for (ref_id, tier) in ordered {
@@ -1261,8 +1260,7 @@ impl TierContext {
         // Extract Tier0 reasons from the analysis result (same sorted
         // walk as `decisions` above — one collision discipline).
         let mut tier0_reasons = Map::new();
-        let mut ordered_reasons: Vec<(&verum_cbgr::tier_types::RefId, _)> =
-            result.decisions.iter().collect();
+        let mut ordered_reasons: Vec<_> = result.decisions.iter().collect();
         ordered_reasons.sort_by_key(|(rid, _)| rid.0);
         for (ref_id, tier) in ordered_reasons {
             if let Some(reason) = tier.reason() {

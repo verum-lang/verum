@@ -937,8 +937,18 @@ fn register_module_metadata(
                 | "Float32" | "Float64"
         )
     }
+    // ARCH-P2 (metadata determinism): both walks below were HashMap
+    // hash-order — the per-primitive method-list ORDER and the
+    // insertion order of synthesized descriptors into the
+    // insertion-ordered `meta.types` flipped per bake (byte-diff of two
+    // runtime.core_metadata bakes: a 143-byte primitive-name run,
+    // Int32/Float/… vs UInt32/ISize/… — the tail of the types table).
+    // Deterministic: sorted function keys feed the buckets; sorted
+    // parent names drive the merge/insert loop.
     let mut synthesized_primitives: HashMap<Text, List<Text>> = HashMap::new();
-    for (key, _fn_desc) in meta.functions.iter() {
+    let mut fn_keys_sorted: Vec<&Text> = meta.functions.keys().collect();
+    fn_keys_sorted.sort();
+    for key in fn_keys_sorted {
         let dot = match key.as_str().find('.') {
             Some(d) => d,
             None => continue,
@@ -959,7 +969,10 @@ fn register_module_metadata(
             bucket.push(method_simple);
         }
     }
-    for (parent_name, methods) in synthesized_primitives {
+    let mut synthesized_sorted: Vec<(Text, List<Text>)> =
+        synthesized_primitives.into_iter().collect();
+    synthesized_sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    for (parent_name, methods) in synthesized_sorted {
         // **Merge-or-synthesize**: when the primitive is already in
         // `meta.types` (from some prior Pass 1/2 registration via
         // source-declared impl block), MERGE the discovered methods
