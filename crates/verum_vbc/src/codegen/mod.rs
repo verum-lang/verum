@@ -575,6 +575,21 @@ pub struct VbcCodegen {
     /// Populated from record type declarations.
     type_field_layouts: std::collections::HashMap<String, Vec<String>>,
 
+    /// Simple type names CLAIMED by a declaration in the module(s) being
+    /// compiled (as opposed to archive/stdlib imports). A local
+    /// declaration shadows an earlier archive registration of the same
+    /// simple name — the compiling unit's own `type Entry is {…};` must
+    /// win over stdlib's `http_cache.Entry` for field-index resolution
+    /// (RECORD-LITERAL-SETF-IDX-0: both literal fields resolved against
+    /// the stdlib layout, missed, and fell back to index 0). Archive
+    /// body remap is unaffected: it prefers module-QUALIFIED type keys.
+    /// Keyed by (module_name, type_name): the claim is idempotent across
+    /// repeated declaration passes over the SAME module, while a later
+    /// module declaring the same simple name re-claims it for its own
+    /// bodies (each module's literals resolve against its own types;
+    /// already-compiled bodies keep their baked indices).
+    user_claimed_type_names: std::collections::HashSet<(String, String)>,
+
     /// Type field type names: maps (type_name, field_name) → field_type_name.
     /// Used to infer the type of field access expressions for chained access.
     type_field_type_names: std::collections::HashMap<(String, String), String>,
@@ -1568,6 +1583,7 @@ impl VbcCodegen {
             field_name_indices: std::collections::HashMap::new(),
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
+            user_claimed_type_names: std::collections::HashSet::new(),
             type_field_type_names: std::collections::HashMap::new(),
             type_field_refinements: std::collections::HashMap::new(),
             static_mut_type_names: std::collections::HashMap::new(),
@@ -2174,6 +2190,56 @@ impl VbcCodegen {
                     .user_defined_types
                     .insert(type_decl.name.name.to_string());
             }
+        }
+    }
+
+    /// Claim `type_name` for a declaration in the module being compiled.
+    ///
+    /// A local declaration SHADOWS an earlier archive/stdlib registration
+    /// of the same simple name: it gets a fresh TypeId bound to the simple
+    /// key, and any stale simple-key layout is evicted so the local
+    /// declaration's own registration wins. Archive types stay reachable
+    /// through their module-qualified keys (which both layout registration
+    /// and `merge_archive_function_bodies` prefer), so stdlib bodies keep
+    /// remapping to the right descriptors.
+    ///
+    /// Idempotent per module: declaration passes run more than once over a
+    /// module; only that module's first claim allocates/evicts.
+    fn claim_user_type_name(&mut self, module_name: &str, type_name: &str) {
+        if !self
+            .user_claimed_type_names
+            .insert((module_name.to_string(), type_name.to_string()))
+        {
+            return;
+        }
+        // First claim by THIS module: bind the simple key to a fresh id.
+        // If the key was already bound (archive import or an earlier
+        // module's claim), the local declaration shadows it for this
+        // module's bodies — evict the stale simple-key layout cache so
+        // the local registration claims it (or_insert-guarded
+        // downstream). Qualified keys are untouched.
+        let type_id = self.alloc_user_type_id();
+        if let Some(old_id) = self
+            .type_name_to_id
+            .insert(type_name.to_string(), type_id)
+        {
+            self.type_field_layouts.remove(type_name);
+            // The finalize type-table gate requires ONE descriptor per
+            // NAME. The shadowed descriptor keeps its identity under its
+            // module-QUALIFIED name (which archive body remap prefers
+            // anyway): rename it to an existing qualified alias when one
+            // is registered, else synthesize a collision-free one.
+            let qualified = self
+                .type_name_to_id
+                .iter()
+                .find(|(k, v)| **v == old_id && k.contains('.'))
+                .map(|(k, _)| k.clone())
+                .unwrap_or_else(|| format!("shadowed${}${}", type_name, old_id.0));
+            if let Some(td) = self.types.iter_mut().find(|t| t.id == old_id) {
+                let sid = crate::types::StringId(self.ctx.intern_string_raw(&qualified));
+                td.name = sid;
+            }
+            self.type_name_to_id.entry(qualified).or_insert(old_id);
         }
     }
 
@@ -5592,10 +5658,11 @@ impl VbcCodegen {
             }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
-                if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name, type_id);
-                }
+                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
+                // simple key even when an archive/stdlib type already holds
+                // it (fresh id + stale-layout eviction; per-module idempotent).
+                let module_key = format!("file:{:?}", module.file_id);
+                self.claim_user_type_name(&module_key, &type_name);
             }
         }
 
@@ -5673,10 +5740,11 @@ impl VbcCodegen {
             }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
-                if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name, type_id);
-                }
+                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
+                // simple key even when an archive/stdlib type already holds
+                // it (fresh id + stale-layout eviction; per-module idempotent).
+                let module_key = format!("file:{:?}", module.file_id);
+                self.claim_user_type_name(&module_key, &type_name);
             }
         }
 
@@ -5732,10 +5800,11 @@ impl VbcCodegen {
             }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
-                if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name, type_id);
-                }
+                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
+                // simple key even when an archive/stdlib type already holds
+                // it (fresh id + stale-layout eviction; per-module idempotent).
+                let module_key = format!("file:{:?}", module.file_id);
+                self.claim_user_type_name(&module_key, &type_name);
             }
         }
 
@@ -5786,10 +5855,11 @@ impl VbcCodegen {
             }
             if let ItemKind::Type(type_decl) = &item.kind {
                 let type_name = type_decl.name.name.to_string();
-                if !self.type_name_to_id.contains_key(&type_name) {
-                    let type_id = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name, type_id);
-                }
+                // RECORD-LITERAL-SETF-IDX-0: a local declaration claims the
+                // simple key even when an archive/stdlib type already holds
+                // it (fresh id + stale-layout eviction; per-module idempotent).
+                let module_key = format!("file:{:?}", module.file_id);
+                self.claim_user_type_name(&module_key, &type_name);
             }
         }
 
