@@ -16623,7 +16623,12 @@ impl VbcCodegen {
             .collect();
 
         // 3. Build id → (name, info) map for referenced stage-3 ids.
-        // PREFER qualified names (more dots → canonical).
+        // Canonical ranked choice (see canonical_name_better) — the
+        // previous dots-only rule left EQUAL-dot ties (bare vs
+        // `name#arity`, both zero dots) to HashMap walk order: THE
+        // last per-bake byte dice (`on_signal` vs `on_signal#2` as a
+        // stage-3 stub descriptor name, caught by the symbolized
+        // strdice backtrace pointing exactly here).
         let mut id_to_entry: std::collections::HashMap<u32, (String, crate::codegen::FunctionInfo)> =
             std::collections::HashMap::new();
         for (name, info) in self.ctx.functions.iter() {
@@ -16636,9 +16641,7 @@ impl VbcCodegen {
             id_to_entry
                 .entry(info.id.0)
                 .and_modify(|(existing_name, _)| {
-                    let existing_dots = existing_name.matches('.').count();
-                    let new_dots = name.matches('.').count();
-                    if new_dots > existing_dots {
+                    if Self::canonical_name_better(name, existing_name) {
                         *existing_name = name.clone();
                     }
                 })
@@ -16812,17 +16815,7 @@ impl VbcCodegen {
     /// module string tables via the equal-dots tie falling through to
     /// first-seen (both spellings have zero dots).
     fn canonical_name_better(new: &str, cur: &str) -> bool {
-        let nd = new.matches('.').count();
-        let cd = cur.matches('.').count();
-        if nd != cd {
-            return nd > cd;
-        }
-        let nh = new.contains('#');
-        let ch = cur.contains('#');
-        if nh != ch {
-            return !nh;
-        }
-        new < cur
+        crate::codegen::context::canonical_name_better(new, cur)
     }
 
     fn emit_missing_stub_descriptors_with_callm(&mut self, include_callm: bool) {

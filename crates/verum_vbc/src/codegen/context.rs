@@ -24,6 +24,31 @@ use verum_common::Map;
 
 /// Tracks all state needed during function compilation.
 #[derive(Debug)]
+/// ARCH-P2 canonical id→name choice — ONE total order over a
+/// FunctionId's registration-key set, shared by every site that picks
+/// a serialized/recorded name (stub descriptors ×3 incl. stage-3,
+/// `external_function_names`, const force-emission, stage-3 stub-name
+/// recording). HashMap walk / arrival order is per-process; any
+/// first-seen or tie-kept choice is a bake dice.
+///   1. more dots wins (most-qualified, identity-bearing; the trailing
+///      segment recovers the canonical bare name);
+///   2. equal dots: a non-`#` spelling beats a `name#arity` mirror
+///      (dice-9: `#` is kept ONLY when it is the id's sole spelling);
+///   3. still tied: lexicographically smallest.
+pub(crate) fn canonical_name_better(new: &str, cur: &str) -> bool {
+    let nd = new.matches('.').count();
+    let cd = cur.matches('.').count();
+    if nd != cd {
+        return nd > cd;
+    }
+    let nh = new.contains('#');
+    let ch = cur.contains('#');
+    if nh != ch {
+        return !nh;
+    }
+    new < cur
+}
+
 pub struct CodegenContext {
     /// Register allocator for current function.
     pub registers: RegisterAllocator,
@@ -1952,7 +1977,13 @@ impl CodegenContext {
                         .filter(|l| l.contains("verum_"))
                         .take(12)
                         .collect();
-                    eprintln!("[strdice] intern {:?}\n{}", value, frames.join("\n"));
+                    eprintln!(
+                        "[strdice] intern {:?} module={:?} strings_len={}\n{}",
+                        value,
+                        self.current_source_module.as_deref(),
+                        self.strings.len(),
+                        frames.join("\n")
+                    );
                 }
             }
             let id = self.strings.len() as u32;
@@ -2482,9 +2513,18 @@ impl CodegenContext {
         let is_stage3 = |id: u32| -> bool {
             id <= STAGE3_BASE && id >= STAGE3_BASE.saturating_sub(STAGE3_WIDTH)
         };
+        // ARCH-P2: the recorded spelling is CANONICAL over arrivals —
+        // first-seen let bare vs `name#arity` flip with registration
+        // order, which flipped the recovered stage-3 stub descriptor
+        // name per bake (the on_signal byte dice).
         if is_stage3(info.id.0) {
             self.stage3_stub_names
                 .entry(info.id.0)
+                .and_modify(|existing| {
+                    if canonical_name_better(&name, existing) {
+                        *existing = name.clone();
+                    }
+                })
                 .or_insert_with(|| name.clone());
         }
         if let Some(existing) = self.functions.get(&name)
@@ -2492,6 +2532,11 @@ impl CodegenContext {
         {
             self.stage3_stub_names
                 .entry(existing.id.0)
+                .and_modify(|existing_name| {
+                    if canonical_name_better(&name, existing_name) {
+                        *existing_name = name.clone();
+                    }
+                })
                 .or_insert_with(|| name.clone());
         }
         if self.prefer_existing_functions {
