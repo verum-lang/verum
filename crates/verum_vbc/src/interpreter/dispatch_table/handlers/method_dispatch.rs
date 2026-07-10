@@ -986,6 +986,19 @@ pub(in super::super) fn handle_call_method(
         return Ok(DispatchResult::Continue);
     }
 
+    // NOTE(#41 poll-Debug class): an attempted primitive-receiver
+    // compiled-body resolution here (route bare `fmt_debug`/`fmt` on
+    // Int/Float/Bool receivers to the compiled `Int.fmt_debug` etc.
+    // before the suffix scan) was REVERTED: it exposed the
+    // Formatter/TextFormatter TWIN-TYPE corruption — DebugList.finish's
+    // baked `write_str` resolves to TextFormatter.write_str (2-field
+    // layout, reads `spec` at field 1) while the runtime object is the
+    // 1-field protocols.vr `Formatter` → OOB heap write → SIGBUS in the
+    // poll suite. The fundamental fix is the Formatter/TextFormatter
+    // MERGE (redundancy-elimination directive); until then the
+    // suffix-scan recursion fails soft (StackOverflow) instead of
+    // corrupting the heap.
+
     // Try built-in array/list methods (map, filter, fold, etc.)
     if dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
