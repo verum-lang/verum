@@ -211,7 +211,10 @@ pub fn compare_outcomes(vbc: &EngineOutcome, tree: &EngineOutcome) -> Verdict {
 }
 
 fn compare_values(vbc: &Comparable, tree: &Comparable) -> Verdict {
-    // Opaque never participates in value comparison.
+    // Opaque never participates in value comparison — including opaque
+    // LEAVES inside structurally-decoded containers (a list of AST nodes
+    // decodes as a Seq of Opaques; its container shape alone proves
+    // nothing about value agreement).
     match (vbc, tree) {
         (Comparable::Opaque(a), Comparable::Opaque(b)) => Verdict::OpaqueBoth {
             vbc: (*a).to_string(),
@@ -222,22 +225,17 @@ fn compare_values(vbc: &Comparable, tree: &Comparable) -> Verdict {
             tree_kind: tree.kind(),
             detail: format!("vbc: {vbc}; tree: {tree}"),
         },
+        _ if vbc.contains_opaque() || tree.contains_opaque() => Verdict::OpaqueBoth {
+            vbc: format!("opaque-leaf in {vbc}"),
+            tree: format!("opaque-leaf in {tree}"),
+        },
         _ if vbc.kind() != tree.kind() => Verdict::TypeMismatch {
             vbc_kind: vbc.kind(),
             tree_kind: tree.kind(),
             detail: format!("vbc: {vbc}; tree: {tree}"),
         },
-        (Comparable::Float(a), Comparable::Float(b)) => {
-            if float_eq(*a, *b) {
-                Verdict::Agree
-            } else {
-                Verdict::ValueMismatch {
-                    detail: format!("vbc: {vbc}; tree: {tree}"),
-                }
-            }
-        }
         _ => {
-            if vbc == tree {
+            if structural_eq(vbc, tree) {
                 Verdict::Agree
             } else {
                 Verdict::ValueMismatch {
@@ -245,5 +243,29 @@ fn compare_values(vbc: &Comparable, tree: &Comparable) -> Verdict {
                 }
             }
         }
+    }
+}
+
+/// Recursive value equality over the comparable domain: floats compare
+/// with [`float_eq`] at every depth (a `List<Float>` deserves the same
+/// epsilon treatment as a bare `Float`); sequences require matching kind
+/// labels, length, and element-wise equality; maps compare their
+/// canonically-sorted entry lists pairwise. Scalars fall back to
+/// structural `PartialEq`.
+fn structural_eq(a: &Comparable, b: &Comparable) -> bool {
+    match (a, b) {
+        (Comparable::Float(x), Comparable::Float(y)) => float_eq(*x, *y),
+        (Comparable::Seq(ka, xs), Comparable::Seq(kb, ys)) => {
+            ka == kb
+                && xs.len() == ys.len()
+                && xs.iter().zip(ys.iter()).all(|(x, y)| structural_eq(x, y))
+        }
+        (Comparable::MapV(xs), Comparable::MapV(ys)) => {
+            xs.len() == ys.len()
+                && xs.iter().zip(ys.iter()).all(|((kx, vx), (ky, vy))| {
+                    structural_eq(kx, ky) && structural_eq(vx, vy)
+                })
+        }
+        _ => a == b,
     }
 }

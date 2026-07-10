@@ -101,7 +101,7 @@ pub fn classify(fixture: &Fixture, verdict: &Verdict) -> (Status, String) {
 
 /// Run one fixture through both engines and classify.
 pub fn run_fixture(fixture: &Fixture) -> FixtureReport {
-    let meta_fn = match build_meta_function(fixture.source, fixture.fn_name) {
+    let (meta_fn, context_items) = match build_meta_function(fixture.source, fixture.fn_name) {
         Ok(f) => f,
         Err(e) => {
             return FixtureReport {
@@ -116,7 +116,7 @@ pub fn run_fixture(fixture: &Fixture) -> FixtureReport {
         }
     };
 
-    let vbc = run_vbc(&meta_fn, &fixture.args);
+    let vbc = run_vbc(&meta_fn, &context_items, &fixture.args);
     let tree = run_tree_walk(&meta_fn, &fixture.args);
     let verdict = compare_outcomes(&vbc, &tree);
     let (status, explanation) = classify(fixture, &verdict);

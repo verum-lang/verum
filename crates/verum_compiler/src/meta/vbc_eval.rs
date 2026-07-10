@@ -37,7 +37,11 @@ pub fn vbc_meta_engine_selected() -> bool {
 /// mismatch returns `Err` — callers fall back to the tree-walk (the
 /// hybrid never silently changes semantics; divergences surface in
 /// the differential harness instead).
-pub fn vbc_eval_meta_expr(expr: &Expr, span: Span) -> Result<ConstValue, String> {
+pub fn vbc_eval_meta_expr(
+    expr: &Expr,
+    span: Span,
+    context_items: &[verum_ast::Item],
+) -> Result<ConstValue, String> {
     let synthetic = MetaFunction {
         name: Text::from("__vbc_meta_eval"),
         module: Text::from("__synthetic"),
@@ -52,7 +56,7 @@ pub fn vbc_eval_meta_expr(expr: &Expr, span: Span) -> Result<ConstValue, String>
     };
     let mut executor = VbcExecutor::new();
     let raw = executor
-        .execute_raw(&synthetic, &[])
+        .execute_raw_with_items(&synthetic, context_items, &[])
         .map_err(|e| format!("vbc meta engine: {e:?}"))?;
     decode_const(&raw.interpreter.state, raw.value)
 }
@@ -98,11 +102,24 @@ fn decode_const(
             out.insert(Text::from(key.as_str()), decode_const(state, v)?);
         }
         Ok(ConstValue::Map(out))
+    } else if let Some(fields) = state.record_named_fields(value) {
+        // Record leg: the stamped header names the module TypeDescriptor,
+        // whose declared field order drives the walk. Decoded as a TUPLE
+        // of field values BY DESIGN — the tree-walk evaluator's record
+        // arm does exactly that (evaluator.rs MetaExpr::Record: "Records
+        // become tuples of field values"), and step-(ii/iii) convergence
+        // means matching the observable engine surface. Once the
+        // tree-walk retires, this is the single place to upgrade records
+        // to a name-preserving MetaValue (the names are already here).
+        let mut out: List<ConstValue> = List::new();
+        for (_name, v) in fields {
+            out.push(decode_const(state, v)?);
+        }
+        Ok(ConstValue::Tuple(out))
     } else {
         Err(
-            "vbc meta engine: undecodable result (records/opaque) — \
-             tree-walk fallback; the record leg is the remaining \
-             step-(iii) item"
+            "vbc meta engine: undecodable result (sum-variants/opaque) — \
+             tree-walk fallback"
                 .to_string(),
         )
     }

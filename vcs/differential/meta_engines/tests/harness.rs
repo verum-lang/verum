@@ -168,9 +168,44 @@ fn extractor_tree_walk_domain() {
         from_tree_walk(&MetaValue::Text(Text::from("hi"))),
         Comparable::Text("hi".to_string())
     );
-    // Collections are opaque by contract.
+    // Collections decode STRUCTURALLY (ARCH-P4 step-ii): arrays and
+    // tuples become kind-labelled sequences, recursively.
+    let mut arr: List<MetaValue> = List::new();
+    arr.push(MetaValue::Int(1));
+    arr.push(MetaValue::Int(2));
     assert_eq!(
-        from_tree_walk(&MetaValue::Array(List::new())),
-        Comparable::Opaque("tree-array")
+        from_tree_walk(&MetaValue::Array(arr)),
+        Comparable::Seq(
+            "seq-list",
+            vec![Comparable::Int(1), Comparable::Int(2)]
+        )
+    );
+    let mut tup: List<MetaValue> = List::new();
+    tup.push(MetaValue::Int(7));
+    tup.push(MetaValue::Text(Text::from("x")));
+    assert_eq!(
+        from_tree_walk(&MetaValue::Tuple(tup)),
+        Comparable::Seq(
+            "seq-tuple",
+            vec![Comparable::Int(7), Comparable::Text("x".to_string())]
+        )
+    );
+    // A list with an undecodable leaf keeps the container shape but the
+    // leaf is Opaque — and the COMPARATOR refuses to value-compare it
+    // (contains_opaque gate). AST nodes stay opaque wholesale.
+    let mut with_ast: List<MetaValue> = List::new();
+    with_ast.push(MetaValue::Set(verum_common::OrderedSet::new()));
+    let decoded = from_tree_walk(&MetaValue::Array(with_ast));
+    assert!(decoded.contains_opaque(), "opaque leaf must be preserved");
+    // Maps decode key-sorted (canonical order, layout-free).
+    let mut m: verum_common::OrderedMap<Text, MetaValue> = verum_common::OrderedMap::new();
+    m.insert(Text::from("b"), MetaValue::Int(2));
+    m.insert(Text::from("a"), MetaValue::Int(1));
+    assert_eq!(
+        from_tree_walk(&MetaValue::Map(m)),
+        Comparable::MapV(vec![
+            (Comparable::Text("a".to_string()), Comparable::Int(1)),
+            (Comparable::Text("b".to_string()), Comparable::Int(2)),
+        ])
     );
 }

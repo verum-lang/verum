@@ -1918,6 +1918,15 @@ impl<'s> CompilationPipeline<'s> {
 
         let mut errors: Vec<(String, MetaError)> = Vec::new();
 
+        // Non-function items for the VBC meta engine's synthetic module
+        // (ARCH-P4) — see the sibling collection in find_and_eval_const_blocks.
+        let vbc_context_items: Vec<verum_ast::Item> = module
+            .items
+            .iter()
+            .filter(|i| !matches!(i.kind, ItemKind::Function(_)))
+            .cloned()
+            .collect();
+
         // 1. Evaluate meta fn bodies with NO parameters (fully evaluable at compile time)
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
@@ -1968,8 +1977,12 @@ impl<'s> CompilationPipeline<'s> {
                 // never silently change; divergences belong to the
                 // differential harness). Default engine unchanged.
                 if crate::meta::vbc_eval::vbc_meta_engine_selected() {
-                    if crate::meta::vbc_eval::vbc_eval_meta_expr(&body_expr, body_expr.span)
-                        .is_ok()
+                    if crate::meta::vbc_eval::vbc_eval_meta_expr(
+                        &body_expr,
+                        body_expr.span,
+                        &vbc_context_items,
+                    )
+                    .is_ok()
                     {
                         continue;
                     }
@@ -2069,6 +2082,17 @@ impl<'s> CompilationPipeline<'s> {
         use verum_ast::decl::ItemKind;
         use verum_ast::expr::ExprKind;
 
+        // Non-function items (type declarations) ride to the VBC meta
+        // engine's synthetic module so record-typed consts compile
+        // (ARCH-P4; the tree-walk is name-blind to type decls).
+        let context_items: Vec<verum_ast::Item> = module
+            .items
+            .iter()
+            .filter(|i| !matches!(i.kind, ItemKind::Function(_)))
+            .cloned()
+            .collect();
+        let context_items = context_items.as_slice();
+
         // Walk all function bodies for @const blocks
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
@@ -2082,7 +2106,7 @@ impl<'s> CompilationPipeline<'s> {
                         }
                         verum_ast::decl::FunctionBody::Expr(expr) => expr.clone(),
                     };
-                    self.collect_const_blocks_from_expr(&body_expr, module_path, errors);
+                    self.collect_const_blocks_from_expr(&body_expr, module_path, context_items, errors);
                 }
             }
         }
@@ -2093,6 +2117,7 @@ impl<'s> CompilationPipeline<'s> {
         &self,
         expr: &verum_ast::expr::Expr,
         module_path: &Text,
+        context_items: &[verum_ast::Item],
         errors: &mut Vec<(String, crate::meta::MetaError)>,
     ) {
         use verum_ast::expr::ExprKind;
@@ -2103,9 +2128,16 @@ impl<'s> CompilationPipeline<'s> {
                 for arg in args.iter() {
                     // ARCH-P4 step (ii): VBC-engine-first under the
                     // flag; fail-closed to the tree-walk (see the
-                    // sibling @meta gate above).
+                    // sibling @meta gate above). The module's type
+                    // items ride along so record-typed consts compile.
                     if crate::meta::vbc_eval::vbc_meta_engine_selected() {
-                        if crate::meta::vbc_eval::vbc_eval_meta_expr(arg, arg.span).is_ok() {
+                        if crate::meta::vbc_eval::vbc_eval_meta_expr(
+                            arg,
+                            arg.span,
+                            context_items,
+                        )
+                        .is_ok()
+                        {
                             continue;
                         }
                     }
@@ -2134,25 +2166,25 @@ impl<'s> CompilationPipeline<'s> {
                 for stmt in &block.stmts {
                     match &stmt.kind {
                         verum_ast::stmt::StmtKind::Expr { expr: e, .. } => {
-                            self.collect_const_blocks_from_expr(e, module_path, errors);
+                            self.collect_const_blocks_from_expr(e, module_path, context_items, errors);
                         }
                         verum_ast::stmt::StmtKind::Let {
                             value: Maybe::Some(e),
                             ..
                         } => {
-                            self.collect_const_blocks_from_expr(e, module_path, errors);
+                            self.collect_const_blocks_from_expr(e, module_path, context_items, errors);
                         }
                         _ => {}
                     }
                 }
                 if let Maybe::Some(e) = &block.expr {
-                    self.collect_const_blocks_from_expr(e, module_path, errors);
+                    self.collect_const_blocks_from_expr(e, module_path, context_items, errors);
                 }
             }
             ExprKind::Call { func, args, .. } => {
-                self.collect_const_blocks_from_expr(func, module_path, errors);
+                self.collect_const_blocks_from_expr(func, module_path, context_items, errors);
                 for arg in args.iter() {
-                    self.collect_const_blocks_from_expr(arg, module_path, errors);
+                    self.collect_const_blocks_from_expr(arg, module_path, context_items, errors);
                 }
             }
             _ => {

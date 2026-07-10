@@ -9,7 +9,7 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use verum_ast::{decl::ItemKind, FileId, MetaValue};
+use verum_ast::{decl::ItemKind, FileId, Item, MetaValue};
 use verum_common::{Maybe, Text};
 use verum_compiler::meta::vbc_executor::VbcExecutor;
 use verum_compiler::{MetaContext, MetaFunction, MetaRegistry};
@@ -71,7 +71,10 @@ impl std::fmt::Display for Arg {
 /// [`MetaFunction`] for `fn_name` through the **production** registration
 /// path (`MetaRegistry::register_meta_function`), so body/param/return-type
 /// conversion matches what the compiler does for real meta functions.
-pub fn build_meta_function(source: &str, fn_name: &str) -> Result<MetaFunction, String> {
+pub fn build_meta_function(
+    source: &str,
+    fn_name: &str,
+) -> Result<(MetaFunction, Vec<Item>), String> {
     let parser = VerumParser::new();
     let module = parser
         .parse_module_str(source, FileId::new(0))
@@ -80,6 +83,11 @@ pub fn build_meta_function(source: &str, fn_name: &str) -> Result<MetaFunction, 
     let module_path = Text::from(FIXTURE_MODULE);
     let mut registry = MetaRegistry::new();
     let mut found = false;
+    // Non-function items (type declarations a record-returning fixture
+    // references) ride along to the VBC engine's synthetic module — the
+    // tree-walk is name-blind to them (its record arm ignores the type),
+    // but VBC codegen must stamp real type headers.
+    let mut context_items: Vec<Item> = Vec::new();
     for item in module.items.iter() {
         if let ItemKind::Function(decl) = &item.kind {
             registry
@@ -88,6 +96,8 @@ pub fn build_meta_function(source: &str, fn_name: &str) -> Result<MetaFunction, 
             if decl.name.as_str() == fn_name {
                 found = true;
             }
+        } else {
+            context_items.push(item.clone());
         }
     }
     if !found {
@@ -95,7 +105,7 @@ pub fn build_meta_function(source: &str, fn_name: &str) -> Result<MetaFunction, 
     }
 
     match registry.resolve_meta_call(&module_path, &Text::from(fn_name)) {
-        Maybe::Some(f) => Ok(f),
+        Maybe::Some(f) => Ok((f, context_items)),
         Maybe::None => Err(format!("registered fixture fn '{fn_name}' did not resolve")),
     }
 }
@@ -103,13 +113,14 @@ pub fn build_meta_function(source: &str, fn_name: &str) -> Result<MetaFunction, 
 /// Run one fixture through engine A — the VBC executor (compile the meta fn
 /// to bytecode via `VbcCodegen`, execute on the Tier-0 interpreter, decode
 /// the raw result value against the interpreter heap).
-pub fn run_vbc(meta_fn: &MetaFunction, args: &[Arg]) -> EngineOutcome {
+pub fn run_vbc(meta_fn: &MetaFunction, context_items: &[Item], args: &[Arg]) -> EngineOutcome {
     let vbc_args: Vec<Value> = args.iter().map(|a| a.to_vbc()).collect();
     let mf = meta_fn.clone();
+    let items = context_items.to_vec();
     let result = catch_unwind(AssertUnwindSafe(move || {
         let mut executor = VbcExecutor::new();
         executor
-            .execute_raw(&mf, &vbc_args)
+            .execute_raw_with_items(&mf, &items, &vbc_args)
             // Decode while the interpreter (and its heap) is alive.
             .map(|raw| extractor::from_vbc(&raw.interpreter.state, raw.value))
     }));

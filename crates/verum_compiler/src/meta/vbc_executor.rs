@@ -250,17 +250,42 @@ impl VbcExecutor {
         meta_func: &MetaFunction,
         args: &[Value],
     ) -> VbcExecutionResult<RawExecution> {
+        self.execute_raw_with_items(meta_func, &[], args)
+    }
+
+    /// [`execute_raw`](Self::execute_raw) with extra AST items compiled
+    /// into the synthetic module ahead of the meta function.
+    ///
+    /// Meta functions do not float free — their bodies reference the
+    /// enclosing module's TYPE declarations (record literals, variant
+    /// constructors). The tree-walk evaluator is name-blind to those
+    /// (its record arm ignores the type), but VBC codegen must stamp
+    /// real type headers, so the declarations have to be present in the
+    /// compiled module. Callers (the ARCH-P4 bridge, the differential
+    /// harness) pass the module's non-function items here.
+    pub fn execute_raw_with_items(
+        &mut self,
+        meta_func: &MetaFunction,
+        extra_items: &[Item],
+        args: &[Value],
+    ) -> VbcExecutionResult<RawExecution> {
         let func_name = &meta_func.name;
         debug!("Executing meta function '{}' via VBC (raw value mode)", func_name);
 
         // Step 1: Synthetic module whose main wrapper is typed with the meta
         // function's own return type (NOT TokenStream).
-        let synthetic_module =
-            self.create_synthetic_module(meta_func, meta_func.return_type.clone());
+        let synthetic_module = self.create_synthetic_module_with_items(
+            meta_func,
+            extra_items,
+            meta_func.return_type.clone(),
+        );
 
         // Step 2: Compile to VBC under a raw-mode cache key so the
         // TokenStream-typed module for the same function is never reused.
-        let cache_key = Text::from(format!("{}::__raw", func_name));
+        // The extra-item count keys context-bearing variants apart; callers
+        // that vary items under ONE function name must clear_cache between
+        // runs (the harness builds a fresh executor per fixture).
+        let cache_key = Text::from(format!("{}::__raw+{}", func_name, extra_items.len()));
         let vbc_module = self.compile_module(&synthetic_module, func_name, cache_key)?;
 
         // Step 3: Execute with interpreter; skip TokenStream extraction.
@@ -327,6 +352,18 @@ impl VbcExecutor {
     /// wrapper: `TokenStream` for [`execute`](Self::execute), the meta
     /// function's own return type for [`execute_raw`](Self::execute_raw).
     fn create_synthetic_module(&self, meta_func: &MetaFunction, wrapper_return: Type) -> Module {
+        self.create_synthetic_module_with_items(meta_func, &[], wrapper_return)
+    }
+
+    /// [`create_synthetic_module`](Self::create_synthetic_module) with
+    /// caller-supplied items (type declarations the meta body references)
+    /// compiled ahead of the wrapper pair.
+    fn create_synthetic_module_with_items(
+        &self,
+        meta_func: &MetaFunction,
+        extra_items: &[Item],
+        wrapper_return: Type,
+    ) -> Module {
         // Create the function declaration from the MetaFunction
         let func_decl = self.meta_func_to_decl(meta_func);
 
@@ -339,21 +376,24 @@ impl VbcExecutor {
             wrapper_return,
         );
 
-        // Build the module with both functions
-        let items: List<Item> = vec![
-            Item {
-                kind: ItemKind::Function(func_decl),
-                attributes: List::new(),
-                span: meta_func.span,
-            },
-            Item {
-                kind: ItemKind::Function(main_func),
-                attributes: List::new(),
-                span: meta_func.span,
-            },
-        ]
-        .into_iter()
-        .collect();
+        // Build the module: context items first (types the body needs),
+        // then the meta function and its entry wrapper.
+        let items: List<Item> = extra_items
+            .iter()
+            .cloned()
+            .chain([
+                Item {
+                    kind: ItemKind::Function(func_decl),
+                    attributes: List::new(),
+                    span: meta_func.span,
+                },
+                Item {
+                    kind: ItemKind::Function(main_func),
+                    attributes: List::new(),
+                    span: meta_func.span,
+                },
+            ])
+            .collect();
 
         Module::new(items, self.synthetic_file_id, meta_func.span)
     }

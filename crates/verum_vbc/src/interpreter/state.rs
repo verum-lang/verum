@@ -2952,6 +2952,51 @@ impl InterpreterState {
         }
     }
 
+    /// Read a stamped RECORD object into `(field_name, Value)` pairs in
+    /// declared field order, or `None` if `val` is not one.
+    ///
+    /// Mirrors `list_elements` / `map_entries`: normalize through the
+    /// reference shapes, then require an `ObjectHeader` whose `type_id`
+    /// resolves in the module's type table to a `TypeKind::Record` with
+    /// named fields matching the payload slot count. Sum-type variants,
+    /// builtin containers, and anything unresolvable read as `None` —
+    /// callers fall back rather than mis-structure. Used by the meta
+    /// engine (ARCH-P4) to marshal record results structurally.
+    pub fn record_named_fields(&self, val: Value) -> Option<Vec<(String, Value)>> {
+        use crate::interpreter::heap::OBJECT_HEADER_SIZE;
+        let val = self.normalize_collection_value(val);
+        if val.is_nil() || !val.is_ptr() || val.is_boxed_int() {
+            return None;
+        }
+        let ptr = val.as_ptr::<u8>();
+        if ptr.is_null()
+            || !(ptr as usize)
+                .is_multiple_of(std::mem::align_of::<crate::interpreter::heap::ObjectHeader>())
+        {
+            return None;
+        }
+        // SAFETY: a non-null, aligned pointer-tagged Value addresses an ObjectHeader.
+        let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
+        let td = self.module.get_type(header.type_id)?;
+        if td.kind != crate::types::TypeKind::Record || td.fields.is_empty() {
+            return None;
+        }
+        let slot_count = header.size as usize / std::mem::size_of::<Value>();
+        if td.fields.len() != slot_count || slot_count > 4096 {
+            return None;
+        }
+        // SAFETY: header validated as a Record payload of `slot_count` Values.
+        unsafe {
+            let data = ptr.add(OBJECT_HEADER_SIZE) as *const Value;
+            let mut out = Vec::with_capacity(slot_count);
+            for (i, fd) in td.fields.iter().enumerate() {
+                let name = self.module.get_string(fd.name)?.to_string();
+                out.push((name, *data.add(i)));
+            }
+            Some(out)
+        }
+    }
+
     /// Gets a function descriptor by ID from the current module.
     pub fn get_function(&self, id: FunctionId) -> Option<&crate::module::FunctionDescriptor> {
         self.module.get_function(id)

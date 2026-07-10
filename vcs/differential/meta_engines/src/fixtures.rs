@@ -423,15 +423,52 @@ pub fn all_fixtures() -> Vec<Fixture> {
             },
         },
         Fixture {
-            name: "pin_collections_opaque",
-            description: "List literal: both engines return collections the extractor refuses to decode",
+            name: "agree_list_structural",
+            description: "List literal decodes structurally on both engines (step-ii landed)",
             source: "fn ar() -> List<Int> { [1, 2, 3] }",
             fn_name: "ar",
             args: vec![],
+            expect: Expectation::Agree,
+        },
+        Fixture {
+            name: "agree_list_nested",
+            description: "nested list-of-lists decodes recursively",
+            source: "fn nn() -> List<List<Int>> { [[1, 2], [3]] }",
+            fn_name: "nn",
+            args: vec![],
+            expect: Expectation::Agree,
+        },
+        Fixture {
+            name: "agree_record_as_tuple",
+            description: "record literal (declaration-ordered fields) reduces to a field tuple on both engines",
+            source: "type Pt is { x: Int, y: Int };\nfn mk() -> Pt { Pt { x: 7, y: 9 } }",
+            fn_name: "mk",
+            args: vec![],
+            expect: Expectation::Agree,
+        },
+        Fixture {
+            name: "agree_record_mixed_scalars",
+            description: "record with Int/Float/Bool/Text fields decodes leaf-exactly",
+            source: "type Rec is { a: Int, b: Float, c: Bool, d: Text };\n\
+                     fn mr() -> Rec { Rec { a: 1, b: 2.5, c: true, d: \"hey\" } }",
+            fn_name: "mr",
+            args: vec![],
+            expect: Expectation::Agree,
+        },
+        Fixture {
+            name: "probe_record_field_order",
+            description: "record literal written OUT of declaration order: tree-walk tuples in \
+                          SOURCE order, VBC stamps memory in DECLARED order",
+            source: "type Wh is { x: Int, y: Int };\nfn wo() -> Wh { Wh { y: 9, x: 7 } }",
+            fn_name: "wo",
+            args: vec![],
             expect: Expectation::Pinned {
-                shape: PinShape::OpaqueBoth,
-                note: "extractor contract: collections are Opaque (never mis-compared); \
-                       structural decode is step (ii) with script_engine::extract_owned as donor.",
+                shape: PinShape::Value,
+                note: "tree-walk MetaExpr::Record collects fields in literal order \
+                       (evaluator.rs: 'Records become tuples of field values') -> (9, 7); \
+                       VBC record_named_fields walks the TypeDescriptor's declared order \
+                       -> (7, 9). The tree-walk's source-order tuple is the crutch; dies \
+                       with the tree-walk (Pillar 4 end state).",
             },
         },
     ];
