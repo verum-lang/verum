@@ -591,6 +591,16 @@ impl MetaAsyncExecutor {
         expr: &Expr,
         context: &mut MetaContext,
     ) -> Result<ConstValue, MetaError> {
+        // ARCH-P4 step (iii): VBC-engine-first under the flag,
+        // fail-closed to the tree-walk (same gate as the pipeline's
+        // @meta/@const consumers). Task expressions carry no module
+        // type items at this surface — record-typed results fall
+        // back until the async surface threads them.
+        if crate::meta::vbc_eval::vbc_meta_engine_selected()
+            && let Ok(v) = crate::meta::vbc_eval::vbc_eval_meta_expr(expr, expr.span, &[])
+        {
+            return Ok(v);
+        }
         // Convert to meta expr and evaluate
         let meta_expr = context.ast_expr_to_meta_expr(expr)?;
         context.eval_meta_expr(&meta_expr)
