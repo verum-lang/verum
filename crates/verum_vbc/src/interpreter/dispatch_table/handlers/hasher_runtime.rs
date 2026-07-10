@@ -118,31 +118,15 @@ pub(in super::super) fn try_intercept_default_hasher(
                 } else {
                     Vec::new()
                 }
-            } else if bytes_val.is_ptr() && !bytes_val.is_nil() {
-                // Heap-string Text view: `[hdr][len:u64][bytes…]`.
-                let p = bytes_val.as_ptr::<u8>();
-                if p.is_null()
-                    || !(p as usize)
-                        .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-                {
-                    Vec::new()
+            } else if let Some((b_ptr, b_len)) = heap::value_as_text_record(&bytes_val) {
+                // Canonical heap Text record (ARCH-P5 final leg — the
+                // `[hdr][len:u64][bytes…]` legacy arm is retired).
+                if !b_ptr.is_null() && b_len > 0 {
+                    // SAFETY: the TEXT record producer contract
+                    // guarantees `b_len` readable bytes at `b_ptr`.
+                    unsafe { std::slice::from_raw_parts(b_ptr, b_len) }.to_vec()
                 } else {
-                    let h = unsafe { heap::ObjectHeader::ref_or_stub(p) };
-                    if h.type_id == crate::types::TypeId::TEXT
-                        || h.type_id == crate::types::TypeId(0x0001)
-                    {
-                        let data = unsafe { p.add(heap::OBJECT_HEADER_SIZE) };
-                        let len = unsafe { *(data as *const u64) } as usize;
-                        let bytes_ptr = unsafe { data.add(8) };
-                        if len > 0 && len <= 1_000_000 {
-                            unsafe { std::slice::from_raw_parts(bytes_ptr, len) }
-                                .to_vec()
-                        } else {
-                            Vec::new()
-                        }
-                    } else {
-                        Vec::new()
-                    }
+                    Vec::new()
                 }
             } else {
                 Vec::new()

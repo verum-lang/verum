@@ -1067,11 +1067,18 @@ implement Text {
     /// Panics on allocation failure. For a fallible counterpart see
     /// `try_grow`.
     fn grow(&mut self) {
-        let new_cap = if self.cap == 0 {
+        let base_cap = if self.cap == 0 {
             16  // Initial allocation
         } else {
             self.cap * 2
         };
+        // COW-promotion coverage: a static/immutable Text (cap == 0 —
+        // literals, runtime-produced canonical records) can carry an
+        // arbitrary len. The new buffer must hold the existing bytes
+        // plus one appended byte and the null terminator, otherwise
+        // the memcpy below overflows a 16-byte initial allocation.
+        let needed = self.len + 1;
+        let new_cap = if base_cap < needed { needed } else { base_cap };
         let new_ptr = unsafe { alloc(new_cap + 1, 1) };  // +1 for null terminator
         if is_null(new_ptr) {
             panic(f"Text.grow: allocator returned null for {new_cap + 1} bytes (old_cap={self.cap})");

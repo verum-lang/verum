@@ -220,11 +220,21 @@ type-level impossible); the byte-blob special case.
     codegen stamp pin); 18 .vr probes green (interp);
     pre-existing `for b in text.as_bytes()` SIGSEGV fixed by
     construction.
-  * Remaining tail: unify the legacy heap-Text form
-    (TypeId 0x0001 `[len][bytes]`, produced by alloc_string/concat)
-    with the canonical TEXT `{ptr,len,cap}` record so exactly ONE
-    heap layout survives; then the two-layout branch in read_text
-    and twins retires the same way the FatRef arm did.
+  * ONE heap layout (final leg): the legacy `TypeId(0x0001)`
+    `[len:u64][bytes…]` byte-blob is RETIRED. Every interpreter
+    heap-Text producer emits ONE self-contained TEXT record
+    `[ObjectHeader(TEXT)]{ptr,len,cap}[bytes…]` (`Heap::alloc_text`
+    / `alloc_text_with_capacity`), readers dispatch through
+    `heap::text_record_payload` / `value_as_text_record` — no
+    dual-layout branch remains. `cap == 0` is the immutable/COW
+    marker (matches AOT rodata `{ptr,len,0}`); capacity-carrying
+    records reserve `cap + 1` bytes per text.vr's owned-buffer
+    convention. Pinned by
+    `crates/verum_vbc/tests/text_record_arch_p5_tests.rs` +
+    `core-tests/text/storage/`. Folded fixes: `grow`'s cap==0
+    branch now covers `len` (COW-promoting a >16-byte static
+    overflowed a 17-byte buffer); builder records stored an object
+    header as a bytes pointer (`reserve` garbage).
 
 ---
 

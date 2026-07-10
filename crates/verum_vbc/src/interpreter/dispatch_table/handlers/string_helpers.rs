@@ -34,8 +34,6 @@ use crate::value::Value;
 /// follow to absolute register, ThinRef → follow to pointee Value.
 /// After deref the unwrapped Value goes through the existing branches.
 pub(super) fn extract_string(value: &Value, state: &InterpreterState) -> String {
-    use heap::OBJECT_HEADER_SIZE;
-
     // Auto-deref CBGR register-refs and ThinRefs before classification.
     // This MUST run first — otherwise the small_string / fat_ref / ptr
     // checks below all return false and the function falls through to
@@ -80,52 +78,23 @@ pub(super) fn extract_string(value: &Value, state: &InterpreterState) -> String 
             String::new()
         } else {
             // The pointer points TO the ObjectHeader.
-            // Layout: [ObjectHeader (24 bytes)][len: u64 (8 bytes)][byte data...]
             let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
-            // Check for string types: TEXT (0x7004) or concat/heap-string (0x0001)
-            if header.type_id == crate::types::TypeId::TEXT
-                || header.type_id == crate::types::TypeId(0x0001)
-            {
-                // Builder Text `{Value(ptr), Value(len), Value(cap)}` is exactly 24 bytes;
-                // read from (ptr, len) fields. Heap-string path uses `[len:u64][bytes…]`.
-                let data_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) };
-                if header.size as usize == 24 {
-                    let field0 = unsafe { *(data_ptr as *const Value) };
-                    let field1 = unsafe { *((data_ptr as *const Value).add(1)) };
-                    if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
-                        let b_ptr = if field0.is_nil() {
-                            std::ptr::null()
-                        } else {
-                            field0.as_ptr::<u8>() as *const u8
-                        };
-                        let b_len = field1.as_i64() as usize;
-                        if !b_ptr.is_null() && b_len > 0 && b_len <= 1_000_000 {
-                            let bytes = unsafe { std::slice::from_raw_parts(b_ptr, b_len) };
-                            return String::from_utf8_lossy(bytes).to_string();
-                        }
+            // Canonical heap Text: a TEXT-stamped `{ptr, len, cap}`
+            // record (ARCH-P5 final leg — the legacy `TypeId(0x0001)`
+            // `[len:u64][bytes…]` form is retired; every producer
+            // emits the record, so no dual-layout branch remains).
+            if header.type_id == crate::types::TypeId::TEXT {
+                // SAFETY: TEXT header established; producers guarantee
+                // the record payload contract.
+                if let Some((b_ptr, b_len)) = unsafe { heap::text_record_payload(ptr) } {
+                    if b_ptr.is_null() || b_len == 0 {
                         return String::new();
                     }
-                }
-                // Read length from after the header
-                let len_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) as *const u64 };
-                let len = unsafe { *len_ptr } as usize;
-                if len > 0 && len <= 1_000_000 {
-                    let bytes_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE + 8) };
-                    let bytes = unsafe { std::slice::from_raw_parts(bytes_ptr, len) };
+                    let bytes = unsafe { std::slice::from_raw_parts(b_ptr, b_len) };
                     String::from_utf8_lossy(bytes).to_string()
-                } else if len == 0 {
-                    String::new()
                 } else {
-                    // Fallback: try header.size field for TEXT type
-                    let sz = header.size as usize;
-                    if sz > 0 && sz <= 1_000_000 {
-                        let data_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) };
-                        let bytes = unsafe { std::slice::from_raw_parts(data_ptr, sz) };
-                        String::from_utf8_lossy(bytes).to_string()
-                    } else {
-                        String::new()
-                    }
+                    String::new()
                 }
             } else {
                 format!("<ptr@{:p}>", ptr)
@@ -137,7 +106,9 @@ pub(super) fn extract_string(value: &Value, state: &InterpreterState) -> String 
 }
 
 /// Allocates a string on the heap or as a small string, returning a Value.
-/// Uses small-string optimization when the string fits in 6 bytes.
+/// Uses small-string optimization when the string fits in 6 bytes; the
+/// heap path produces the canonical TEXT `{ptr, len, cap=0}` record
+/// (see `Heap::alloc_text`, ARCH-P5 final leg).
 pub(super) fn alloc_string_value(
     state: &mut InterpreterState,
     s: &str,
@@ -145,19 +116,8 @@ pub(super) fn alloc_string_value(
     if let Some(sv) = Value::from_small_string(s) {
         return Ok(sv);
     }
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    let alloc_size = 8 + len;
-    let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+    let obj = state.heap.alloc_text(s.as_bytes())?;
     state.record_allocation();
-    let base_ptr = obj.as_ptr() as *mut u8;
-    unsafe {
-        let data_offset = heap::OBJECT_HEADER_SIZE;
-        let len_ptr = base_ptr.add(data_offset) as *mut u64;
-        *len_ptr = len as u64;
-        let bytes_ptr = base_ptr.add(data_offset + 8);
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-    }
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
@@ -179,8 +139,6 @@ pub(super) fn alloc_string_value(
 /// branch; non-Text-shaped values delegate to `extract_string`'s debug
 /// formats so behavior is identical outside the byte-transparent shapes.
 pub(super) fn extract_text_bytes(value: &Value, state: &InterpreterState) -> Vec<u8> {
-    use heap::OBJECT_HEADER_SIZE;
-
     // Auto-deref CBGR register-refs and ThinRefs — same discipline as
     // `extract_string`.
     let mut v = *value;
@@ -216,38 +174,18 @@ pub(super) fn extract_text_bytes(value: &Value, state: &InterpreterState) -> Vec
             return Vec::new();
         }
         let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-        if header.type_id == crate::types::TypeId::TEXT
-            || header.type_id == crate::types::TypeId(0x0001)
-        {
-            let data_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) };
-            // Builder Text `{Value(ptr), Value(len), Value(cap)}` — 24-byte payload.
-            if header.size as usize == 24 {
-                let field0 = unsafe { *(data_ptr as *const Value) };
-                let field1 = unsafe { *((data_ptr as *const Value).add(1)) };
-                if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
-                    let b_ptr = if field0.is_nil() {
-                        std::ptr::null()
-                    } else {
-                        field0.as_ptr::<u8>() as *const u8
-                    };
-                    let b_len = field1.as_i64() as usize;
-                    if !b_ptr.is_null() && b_len > 0 && b_len <= 1_000_000 {
-                        return unsafe { std::slice::from_raw_parts(b_ptr, b_len) }.to_vec();
-                    }
+        // Canonical heap Text record (ARCH-P5 final leg — the legacy
+        // `TypeId(0x0001)` `[len:u64][bytes…]` arm is retired).
+        if header.type_id == crate::types::TypeId::TEXT {
+            // SAFETY: TEXT header established; producers guarantee the
+            // record payload contract.
+            if let Some((b_ptr, b_len)) = unsafe { heap::text_record_payload(ptr) } {
+                if b_ptr.is_null() || b_len == 0 {
                     return Vec::new();
                 }
+                return unsafe { std::slice::from_raw_parts(b_ptr, b_len) }.to_vec();
             }
-            // Flat heap-string `[len: u64][bytes…]`.
-            let len_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) as *const u64 };
-            let len = unsafe { *len_ptr } as usize;
-            if len > 0 && len <= 1_000_000 {
-                let bytes_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE + 8) };
-                return unsafe { std::slice::from_raw_parts(bytes_ptr, len) }.to_vec();
-            }
-            if len == 0 {
-                return Vec::new();
-            }
-            // Oversize-len recovery path — delegate (matches extract_string).
+            return Vec::new();
         }
     }
     extract_string(&v, state).into_bytes()
@@ -260,8 +198,8 @@ pub(super) fn extract_text_bytes(value: &Value, state: &InterpreterState) -> Vec
 /// string optimization for <= 6 bytes, heap otherwise) — representation
 /// for complete strings is unchanged. Byte strings that are NOT valid
 /// UTF-8 (a `push_byte` sequence mid-code-point) are ALWAYS heap-
-/// allocated: the `[len: u64][bytes…]` heap blob is byte-transparent,
-/// whereas the NaN-boxed SmallString requires valid UTF-8
+/// allocated: the canonical TEXT record's byte storage is byte-
+/// transparent, whereas the NaN-boxed SmallString requires valid UTF-8
 /// (`SmallString::as_str` asserts it in debug builds). This preserves
 /// the invariant that every SSO small-string Value contains valid UTF-8.
 pub(super) fn alloc_text_bytes_value(
@@ -271,21 +209,9 @@ pub(super) fn alloc_text_bytes_value(
     if let Ok(s) = std::str::from_utf8(bytes) {
         return alloc_string_value(state, s);
     }
-    let len = bytes.len();
-    let alloc_size = 8 + len;
-    let obj = state.heap.alloc(crate::types::TypeId(0x0001), alloc_size)?;
+    let obj = state.heap.alloc_text(bytes)?;
     state.record_allocation();
-    let base_ptr = obj.as_ptr() as *mut u8;
-    // SAFETY: obj was just allocated with size 8 + len. Writing the length
-    // as u64 at data_offset, then copying `len` bytes of raw data after it.
-    unsafe {
-        let data_offset = heap::OBJECT_HEADER_SIZE;
-        let len_ptr = base_ptr.add(data_offset) as *mut u64;
-        *len_ptr = len as u64;
-        let bytes_ptr = base_ptr.add(data_offset + 8);
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), bytes_ptr, len);
-    }
-    Ok(Value::from_ptr(base_ptr))
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
 /// Check if a Value is a heap-allocated string (pointer to object with TEXT type id or concat layout).
@@ -306,16 +232,16 @@ pub(super) fn is_heap_string(v: &Value) -> bool {
         return false;
     }
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-    // TEXT type, the concat type (0x0001), or a BYTE_SLICE byte view
-    // (ARCH-P5).  The BYTE_SLICE arm keeps `deep_value_eq`'s
-    // string-likeness classification treating `Text.as_bytes()`
-    // results as byte-comparable text — the semantics the retired
-    // `len <= 1_000_000` FatRef heuristic arm provided (no Text VALUE
-    // is FatRef-encoded anymore).  Pairs with the BYTE_SLICE branches
-    // in `extract_string` and `resolve_string_value` so all three
-    // sites agree.
+    // TEXT record or a BYTE_SLICE byte view (ARCH-P5).  The legacy
+    // 0x0001 concat form is retired — every heap Text is the canonical
+    // `{ptr, len, cap}` record.  The BYTE_SLICE arm keeps
+    // `deep_value_eq`'s string-likeness classification treating
+    // `Text.as_bytes()` results as byte-comparable text — the
+    // semantics the retired `len <= 1_000_000` FatRef heuristic arm
+    // provided (no Text VALUE is FatRef-encoded anymore).  Pairs with
+    // the BYTE_SLICE branches in `extract_string` and
+    // `resolve_string_value` so all three sites agree.
     header.type_id == crate::types::TypeId::TEXT
-        || header.type_id == crate::types::TypeId(0x0001)
         || header.type_id == crate::types::TypeId::BYTE_SLICE
 }
 
@@ -357,49 +283,23 @@ pub(super) fn resolve_string_value(v: &Value, state: &InterpreterState) -> Strin
         let ptr = v.as_ptr::<u8>();
         if !ptr.is_null() {
             unsafe {
-                let data_offset = heap::OBJECT_HEADER_SIZE;
                 let header = heap::ObjectHeader::ref_or_stub(ptr);
-                let size = header.size as usize;
-
-                // Text objects come in two runtime shapes sharing
-                // `TypeId::TEXT`:
-                //  * static / intrinsic-built heap string — data is
-                //  `[len:u64][bytes…]` right after the header.
-                //  * stdlib builder `Text {ptr, len, cap}` — three
-                //  NaN-boxed Value fields (exactly 24 bytes).
-                // Reading a u64 at offset 0 for a builder Text returns
-                // the `ptr` field NaN-boxed form, i.e. garbage. Detect
-                // the builder case by size + field tags.
-                if size == 24 {
-                    let field0 = *(ptr.add(data_offset) as *const Value);
-                    let field1 = *((ptr.add(data_offset) as *const Value).add(1));
-                    if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
-                        let builder_ptr = if field0.is_nil() {
-                            std::ptr::null()
-                        } else {
-                            field0.as_ptr::<u8>() as *const u8
-                        };
-                        let builder_len = field1.as_i64() as usize;
-                        if builder_ptr.is_null() || builder_len == 0 {
+                // Canonical heap Text record (ARCH-P5 final leg — the
+                // legacy typeless `[len:u64][bytes…]` probe is retired
+                // with the 0x0001 form).  Non-UTF-8 byte content falls
+                // through to the string-table / debug-format fallbacks,
+                // matching the previous strict-UTF-8 behaviour here.
+                if header.type_id == crate::types::TypeId::TEXT {
+                    // SAFETY: TEXT header established; producers
+                    // guarantee the record payload contract.
+                    if let Some((b_ptr, b_len)) = heap::text_record_payload(ptr) {
+                        if b_ptr.is_null() || b_len == 0 {
                             return String::new();
                         }
-                        if builder_len <= 65536 {
-                            let bytes = std::slice::from_raw_parts(builder_ptr, builder_len);
-                            if let Ok(s) = std::str::from_utf8(bytes) {
-                                return s.to_string();
-                            }
+                        let bytes = std::slice::from_raw_parts(b_ptr, b_len);
+                        if let Ok(s) = std::str::from_utf8(bytes) {
+                            return s.to_string();
                         }
-                    }
-                }
-
-                // Heap-string fallback: `[len:u64][bytes…]`.
-                let len_ptr = ptr.add(data_offset) as *const u64;
-                let len = *len_ptr as usize;
-                if len <= 65536 {
-                    let bytes_ptr = ptr.add(data_offset + 8);
-                    let bytes = std::slice::from_raw_parts(bytes_ptr, len);
-                    if let Ok(s) = std::str::from_utf8(bytes) {
-                        return s.to_string();
                     }
                 }
             }

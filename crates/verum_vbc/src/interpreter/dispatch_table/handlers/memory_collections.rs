@@ -1377,16 +1377,10 @@ pub(in super::super) fn handle_array_len(
             state.set_reg(dst, Value::from_i64(ss.len() as i64));
             return Ok(DispatchResult::Continue);
         } else if inner_val.is_ptr() && !inner_val.is_nil() {
-            // Recursively get length from the inner value
-            let inner_ptr = inner_val.as_ptr::<u8>();
-            let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
-            if inner_header.type_id == crate::types::TypeId::TEXT
-                || inner_header.type_id == crate::types::TypeId(0x0001)
-            {
-                // Heap string layout: [ObjectHeader][len: u64][bytes...]
-                let len_ptr = unsafe { inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const u64 };
-                let len = (unsafe { *len_ptr }) as i64;
-                state.set_reg(dst, Value::from_i64(len));
+            // Recursively get length from the inner value — canonical
+            // TEXT record (ARCH-P5 final leg): len is record field 1.
+            if let Some((_p, len)) = heap::value_as_text_record(&inner_val) {
+                state.set_reg(dst, Value::from_i64(len as i64));
                 return Ok(DispatchResult::Continue);
             }
         }
@@ -1417,33 +1411,16 @@ pub(in super::super) fn handle_array_len(
         // Map/Set layout: [count, capacity, entries_ptr] - read count
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         (unsafe { (*data_ptr).as_i64() }) as usize
-    } else if header.type_id == crate::types::TypeId::TEXT
-        || header.type_id == crate::types::TypeId(0x0001)
-    {
-        // Text objects come in two runtime shapes sharing the same TypeId:
-        //  * static / intrinsic-built heap string: `[ObjectHeader][len:u64][bytes…]`
-        //  * stdlib builder `Text {ptr, len, cap}`: three NaN-boxed Value fields,
-        //  where field 1 (offset HEADER+8) carries the integer length.
-        // Distinguish by data size. A three-Value struct is exactly 24 bytes;
-        // heap strings are `8 + n` bytes where `n` is the byte count — the
-        // only overlap with 24 is a 16-byte string, which we fall through to
-        // the struct branch if and only if field 0 is also a tagged integer
-        // (the `ptr` slot for a struct Text is a pointer, not a small int),
-        // keeping the common case of 16-byte static strings correct.
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
-        if header_size == 24 {
-            let field0 = unsafe { *(data_ptr as *const Value) };
-            let field1 = unsafe { *(data_ptr as *const Value).add(1) };
-            // Builder layout: field 0 is a pointer (or nil), field 1 is the len Int.
-            if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
-                return {
-                    state.set_reg(dst, Value::from_i64(field1.as_i64()));
-                    Ok(DispatchResult::Continue)
-                };
-            }
+    } else if header.type_id == crate::types::TypeId::TEXT {
+        // Canonical heap Text record `{ptr, len, cap}` (ARCH-P5 final
+        // leg — the `[len:u64][bytes…]` legacy layout is retired):
+        // byte length is record field 1.
+        // SAFETY: TEXT header established; producers guarantee the
+        // record payload contract.
+        match unsafe { heap::text_record_payload(ptr) } {
+            Some((_p, len)) => len,
+            None => 0,
         }
-        let len_ptr = data_ptr as *const u64;
-        (unsafe { *len_ptr }) as usize
     } else if header.type_id == TypeId::CHANNEL {
         // Channel layout: [len, cap, head, buffer_ptr, closed] — read len (field 0)
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -1760,34 +1737,23 @@ pub(crate) fn value_hash(v: Value) -> usize {
     }
 
     // For heap strings, hash the actual string bytes, not the pointer.
-    // Text objects come in two layouts under `TypeId::TEXT`:
-    //  * static heap string: [header][len:u64][bytes…]
-    //  * stdlib builder `{ptr, len, cap}`: three NaN-boxed Value fields
-    //  (24 bytes). Reading a u64 at offset 0 of a builder returns the
-    //  NaN-boxed `ptr` bit pattern as a "length", which then drives an
-    //  out-of-bounds byte loop.
+    // A heap Text is the canonical `{ptr, len, cap}` record (ARCH-P5
+    // final leg); a BYTE_SLICE byte view carries `{ptr, len}` raw
+    // slots.  Both classify as `is_heap_string`, so resolve the byte
+    // range through the matching typed reader.
     if super::string_helpers::is_heap_string(&v) {
         let ptr = v.as_ptr::<u8>();
-        let data_offset = heap::OBJECT_HEADER_SIZE;
-        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-        let (bytes_ptr, len): (*const u8, usize) = if header.size as usize == 24 {
-            let field0 = unsafe { *(ptr.add(data_offset) as *const Value) };
-            let field1 = unsafe { *((ptr.add(data_offset) as *const Value).add(1)) };
-            if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
-                let bp = if field0.is_nil() {
-                    std::ptr::null()
-                } else {
-                    field0.as_ptr::<u8>() as *const u8
-                };
-                (bp, field1.as_i64() as usize)
+        let (bytes_ptr, len): (*const u8, usize) =
+            if let Some((p, l)) = heap::value_as_byte_slice(&v) {
+                (p as *const u8, l as usize)
             } else {
-                let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
-                (unsafe { ptr.add(data_offset + 8) as *const u8 }, len)
-            }
-        } else {
-            let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
-            (unsafe { ptr.add(data_offset + 8) as *const u8 }, len)
-        };
+                // SAFETY: `is_heap_string` established a TEXT header;
+                // producers guarantee the record payload contract.
+                match unsafe { heap::text_record_payload(ptr) } {
+                    Some((p, l)) => (p, l),
+                    None => (std::ptr::null(), 0),
+                }
+            };
         let mut hash = FNV_OFFSET;
         // Mix in a string discriminator so strings don't collide with ints
         hash ^= 0xFF;
@@ -1902,9 +1868,8 @@ pub(crate) fn value_eq(a: Value, b: Value) -> bool {
     false
 }
 
-/// Compare the content of two heap-allocated strings by value,
-/// transparently handling builder `Text {ptr, len, cap}` vs heap-string
-/// `[len:u64][bytes…]` layouts.
+/// Compare the content of two heap-allocated strings by value —
+/// canonical TEXT records and BYTE_SLICE byte views (ARCH-P5).
 #[inline]
 fn heap_string_content_eq(a: &Value, b: &Value) -> bool {
     let (a_ptr, a_len) = text_value_bytes_and_len(a);
@@ -1923,29 +1888,18 @@ fn heap_string_content_eq(a: &Value, b: &Value) -> bool {
     a_bytes == b_bytes
 }
 
-/// Extract (ptr, len) from a Text value (heap-string or builder layout).
+/// Extract (ptr, len) from a heap Text value: the canonical TEXT
+/// `{ptr, len, cap}` record or a BYTE_SLICE byte view (ARCH-P5 —
+/// the `[len:u64][bytes…]` legacy layout is retired).
 #[inline]
 fn text_value_bytes_and_len(v: &Value) -> (*const u8, usize) {
-    let data_offset = heap::OBJECT_HEADER_SIZE;
-    let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() {
-        return (std::ptr::null(), 0);
+    if let Some((p, l)) = heap::value_as_byte_slice(v) {
+        return (p as *const u8, l as usize);
     }
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-    if header.size as usize == 24 {
-        let f0 = unsafe { *(ptr.add(data_offset) as *const Value) };
-        let f1 = unsafe { *((ptr.add(data_offset) as *const Value).add(1)) };
-        if (f0.is_ptr() || f0.is_nil()) && f1.is_int() {
-            let bp = if f0.is_nil() {
-                std::ptr::null()
-            } else {
-                f0.as_ptr::<u8>() as *const u8
-            };
-            return (bp, f1.as_i64() as usize);
-        }
+    if let Some((p, l)) = heap::value_as_text_record(v) {
+        return (p, l);
     }
-    let len = unsafe { *(ptr.add(data_offset) as *const u64) } as usize;
-    (unsafe { ptr.add(data_offset + 8) as *const u8 }, len)
+    (std::ptr::null(), 0)
 }
 
 /// NewMap (0x6B) - Create new map with default capacity.

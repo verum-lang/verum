@@ -1,0 +1,152 @@
+// =============================================================================
+// core-tests/text/storage/unit_test.vr
+// =============================================================================
+//
+// ARCH-P5 final leg — ONE canonical heap Text layout.  Every Tier-0
+// heap Text producer (literals via the constant pool, concat,
+// to_string, from_utf8, the push_* mutator intercepts) allocates a
+// SINGLE self-contained TEXT record
+// `[ObjectHeader(TEXT)]{ptr, len, cap}[bytes…]`, retiring the legacy
+// `TypeId(0x0001)` `[len:u64][bytes…]` form — the last dual
+// representation in the Text ABI.  Tier-1 has always used the record
+// (`verum_text_alloc` / rodata `{ptr, len, cap=0}` globals), so these
+// probes pin the SAME observable behavior on both tiers.
+//
+// Covered surfaces: from_utf8 → push round-trip, concat → byte
+// indexing (record + BYTE_SLICE composition), f-string rendering of a
+// concat result, eq of concat vs literal (cross-producer records),
+// push/push_str on a fresh empty Text (COW promotion — cap == 0 is
+// the static/immutable marker, first mutation must allocate), len
+// after mutation, and multi-byte UTF-8 content through the record.
+//
+// Rust twins in `crates/verum_vbc/tests/text_record_arch_p5_tests.rs`.
+// =============================================================================
+
+mount core.text.{Text, Utf8Error};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: from_utf8 → push round-trip
+// =============================================================================
+
+@test
+fn storage_from_utf8_push_round_trip() {
+    let src: Text = "hello world, heap-sized source";
+    let decoded = Text.from_utf8(src.as_bytes());
+    match decoded {
+        Ok(t) => {
+            let mut owned = t;
+            owned.push('!');
+            assert_eq(owned, "hello world, heap-sized source!");
+            assert_eq(owned.len(), 31);
+        },
+        Err(_) => panic("from_utf8 of valid UTF-8 must succeed"),
+    };
+}
+
+@test
+fn storage_from_utf8_push_str_round_trip() {
+    let src: Text = "canonical record bytes";
+    let decoded = Text.from_utf8(src.as_bytes());
+    match decoded {
+        Ok(t) => {
+            let mut owned = t;
+            owned.push_str(&" appended tail");
+            assert_eq(owned, "canonical record bytes appended tail");
+        },
+        Err(_) => panic("from_utf8 of valid UTF-8 must succeed"),
+    };
+}
+
+// =============================================================================
+// Section 2: concat then index bytes
+// =============================================================================
+
+@test
+fn storage_concat_then_index_bytes() {
+    let a: Text = "hello world, ";
+    let b: Text = "concat tail";
+    let joined = a + b;
+    let bytes = joined.as_bytes();
+    assert_eq(bytes.len(), 24);
+    assert_eq(bytes[0] as Int, 104);  // 'h'
+    assert_eq(bytes[13] as Int, 99);  // 'c' — first byte past lhs
+    assert_eq(bytes[23] as Int, 108); // 'l' — last byte
+}
+
+@test
+fn storage_concat_len() {
+    let a: Text = "hello world, ";
+    let b: Text = "concat tail";
+    let joined = a + b;
+    assert_eq(joined.len(), 24);
+    assert(!joined.is_empty());
+}
+
+// =============================================================================
+// Section 3: f-string of a concat result
+// =============================================================================
+
+@test
+fn storage_fstring_of_concat_result() {
+    let a: Text = "hello world, ";
+    let b: Text = "concat tail";
+    let joined = a + b;
+    let rendered = f"[{joined}]";
+    assert_eq(rendered, "[hello world, concat tail]");
+}
+
+// =============================================================================
+// Section 4: eq of concat vs literal (cross-producer records)
+// =============================================================================
+
+@test
+fn storage_concat_eq_literal() {
+    let a: Text = "hello world, ";
+    let b: Text = "concat tail";
+    let joined = a + b;
+    assert_eq(joined, "hello world, concat tail");
+    assert(joined == "hello world, concat tail");
+    assert(joined != "hello world, concat tail!");
+}
+
+// =============================================================================
+// Section 5: push on a fresh empty Text (COW promotion)
+// =============================================================================
+
+@test
+fn storage_push_on_fresh_empty() {
+    // cap == 0 marks the empty record static/immutable — the first
+    // push must allocate fresh storage, never write through the
+    // empty pointer.
+    let mut t: Text = Text.new();
+    assert(t.is_empty());
+    t.push('a');
+    assert_eq(t, "a");
+    t.push_str(&"bcdefghij-past-sso-budget");
+    assert_eq(t, "abcdefghij-past-sso-budget");
+    assert_eq(t.len(), 26);
+}
+
+@test
+fn storage_push_str_on_empty_literal() {
+    let mut t: Text = "";
+    t.push_str(&"grown from an empty literal, heap-sized");
+    assert_eq(t, "grown from an empty literal, heap-sized");
+}
+
+// =============================================================================
+// Section 6: multi-byte UTF-8 through the record
+// =============================================================================
+
+@test
+fn storage_unicode_concat_round_trip() {
+    let a: Text = "omega: Ω, ";
+    let b: Text = "root: √ tail";
+    let joined = a + b;
+    assert_eq(joined, "omega: Ω, root: √ tail");
+    // Ω is 2 bytes (0xCE 0xA9), √ is 3 bytes — byte length exceeds
+    // char count.
+    assert_eq(joined.as_bytes().len(), 25);
+}

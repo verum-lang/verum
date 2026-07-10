@@ -2723,12 +2723,13 @@ impl InterpreterState {
     }
 
     /// Reads a Verum `Text` value into an owned `String`, or `None` if it isn't
-    /// text. Handles the inline small-string form and the heap form
-    /// (`TypeId(0x0001)`, payload `[len:u64][utf8 bytes]`). This is the
-    /// canonical reader the scripting engine uses to capture a script's `Text`
-    /// while it is still valid.
+    /// text. Handles the inline small-string form, the BYTE_SLICE byte view,
+    /// and the canonical heap Text record (`TypeId::TEXT`, payload
+    /// `{ptr, len, cap}` — see `Heap::alloc_text`). This is the canonical
+    /// reader the scripting engine uses to capture a script's `Text` while it
+    /// is still valid.
     pub fn read_text(&self, value: Value) -> Option<String> {
-        use crate::interpreter::heap::{ObjectHeader, OBJECT_HEADER_SIZE};
+        use crate::interpreter::heap::ObjectHeader;
         use crate::types::TypeId;
         if value.is_small_string() {
             return Some(value.as_small_string().as_str().to_string());
@@ -2756,38 +2757,24 @@ impl InterpreterState {
         }
         // SAFETY: a non-null, aligned pointer-tagged Value points at an ObjectHeader.
         let header = unsafe { &*(ptr as *const ObjectHeader) };
-        // TypeId::TEXT (4, the `{ptr,len,cap}` builder produced by stdlib Text
-        // methods) and TypeId(0x0001) (the `[len:u64][bytes]` concat/alloc form).
-        if header.type_id != TypeId::TEXT && header.type_id != TypeId(0x0001) {
+        // TypeId::TEXT (4): the ONE heap Text layout — the `{ptr,len,cap}`
+        // record every producer emits (ARCH-P5 final leg; the legacy
+        // `TypeId(0x0001)` `[len:u64][bytes]` arm is retired).  The size
+        // guard rejects malformed TEXT stamps whose payload cannot hold
+        // the three record slots.
+        if header.type_id != TypeId::TEXT
+            || (header.size as usize) < crate::interpreter::heap::TEXT_RECORD_SIZE
+        {
             return None;
         }
-        // SAFETY: header validated; both Text payload layouts are read below.
+        // SAFETY: TEXT header validated; producers guarantee the record
+        // payload contract (`heap::text_record_payload`).
         unsafe {
-            let data = ptr.add(OBJECT_HEADER_SIZE);
-            // Builder layout: a 24-byte payload whose first two Values are
-            // `{ bytes_ptr | Nil, byte_len : Int }` (mirrors text_value_bytes_and_len).
-            if header.size as usize == 24 {
-                let f0 = *(data as *const Value);
-                let f1 = *((data as *const Value).add(1));
-                if (f0.is_ptr() || f0.is_nil()) && f1.is_int() {
-                    let len = f1.as_i64().max(0) as usize;
-                    if f0.is_nil() || len == 0 {
-                        return Some(String::new());
-                    }
-                    let bp = f0.as_ptr::<u8>();
-                    if bp.is_null() {
-                        return Some(String::new());
-                    }
-                    let bytes = std::slice::from_raw_parts(bp, len);
-                    return Some(String::from_utf8_lossy(bytes).into_owned());
-                }
+            let (bp, len) = crate::interpreter::heap::text_record_payload(ptr)?;
+            if bp.is_null() || len == 0 {
+                return Some(String::new());
             }
-            // Canonical layout: `[len:u64][bytes]` (see alloc_string).
-            let len = *(data as *const u64) as usize;
-            if len > (1usize << 30) {
-                return None;
-            }
-            let bytes = std::slice::from_raw_parts(data.add(8), len);
+            let bytes = std::slice::from_raw_parts(bp, len);
             Some(String::from_utf8_lossy(bytes).into_owned())
         }
     }

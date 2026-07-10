@@ -652,9 +652,9 @@ fn intercept_write_dispatch(
     }
 }
 
-/// Quick shape probe — does this Value carry text payload (TEXT type
-/// id, the 0x0001 concat layout, or a small string)? Used to
-/// dispatch between text-write and byte-write at `write(path, ...)`.
+/// Quick shape probe — does this Value carry text payload (the
+/// canonical TEXT record or a small string)? Used to dispatch between
+/// text-write and byte-write at `write(path, ...)`.
 fn value_is_text(v: &Value) -> bool {
     if v.is_small_string() {
         return true;
@@ -663,11 +663,10 @@ fn value_is_text(v: &Value) -> bool {
         return false;
     }
     let ptr = v.as_ptr::<u8>();
-    match unsafe { heap::ObjectHeader::try_type_id(ptr) } {
-        Some(TypeId::TEXT) => true,
-        Some(t) if t == TypeId(0x0001) => true,
-        _ => false,
-    }
+    matches!(
+        unsafe { heap::ObjectHeader::try_type_id(ptr) },
+        Some(TypeId::TEXT)
+    )
 }
 
 // ============================================================================
