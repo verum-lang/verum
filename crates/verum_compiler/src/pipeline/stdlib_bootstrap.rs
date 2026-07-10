@@ -1327,6 +1327,9 @@ impl<'s> CompilationPipeline<'s> {
                     };
                 type_checker.set_current_module_path(per_file_module_path);
 
+                // ALIAS-VS-MARKER scope (#41): the declaring file's local
+                // visibility gates `type X is Name;` alias-vs-marker.
+                type_checker.set_alias_scope_from_items(&ast_module.items);
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                         let filtered_decl =
@@ -1709,6 +1712,24 @@ impl<'s> CompilationPipeline<'s> {
         // runs build_module ONCE at the end to perform the function-id
         // remap on the union of all per-file bodies.  No merge step;
         // no inherent-method drops.
+
+        // ARCH-P2 set-stability evidence channel + freeze contract.
+        //
+        // Phase split within one stdlib module: Pass 1a/1b/1c above REGISTER
+        // every type layout this module's bodies can see (imports from the
+        // dependency-ordered global registry + own declarations); Pass 2
+        // below (and finalize) must only READ that set.  A layout key that
+        // appears during body compilation would be a lazy on-miss
+        // registration — the class that would make `resolve_field_index`'s
+        // candidate set run-order-dependent.  `VERUM_TRACE_LAZY_LAYOUT=1`
+        // names every such straggler (ADDED/MUTATED lines) and dumps the
+        // canonical post-set for cross-bake diffing; the len snapshot backs
+        // the debug_assert freeze after finalize.
+        let trace_lazy_layout = std::env::var_os("VERUM_TRACE_LAZY_LAYOUT").is_some();
+        let pre_body_layout_count = codegen.type_layout_count();
+        let pre_body_layouts: Option<std::collections::BTreeMap<String, Vec<String>>> =
+            trace_lazy_layout.then(|| codegen.export_type_layouts().into_iter().collect());
+
         for ast_module in ast_modules {
             // `compile_items_into_state` is the lenient single-pool
             // accumulator: it walks the AST item-by-item via
@@ -1753,6 +1774,67 @@ impl<'s> CompilationPipeline<'s> {
             .finalize_module_from_state()
             .map_err(|e| anyhow::anyhow!("finalize stdlib module {}: {}", module.name, e))?;
         let total_func_count = merged_vbc.functions.len();
+
+        // ARCH-P2 freeze contract: the layout set visible to body-phase
+        // field-index resolution must be fully established by the
+        // declaration passes.  Pass 2 + finalize may only READ it.  A
+        // straggler here means a lazy on-miss registration crept back in
+        // — the class that makes `resolve_field_index`'s candidate set
+        // dependent on body-compilation order.  Always-on warn (cheap
+        // usize compare) so release bakes surface regressions too;
+        // debug_assert hard-fails dev builds.  Empirical baseline
+        // 2026-07-10: 0 escapees across all 585 stdlib modules.
+        let post_body_layout_count = codegen.type_layout_count();
+        if post_body_layout_count != pre_body_layout_count {
+            eprintln!(
+                "[LAZY-LAYOUT] module={} FREEZE-VIOLATION: type_field_layouts len {} -> {} during body phase (set VERUM_TRACE_LAZY_LAYOUT=1 to name the keys)",
+                module.name, pre_body_layout_count, post_body_layout_count
+            );
+        }
+        debug_assert_eq!(
+            pre_body_layout_count,
+            post_body_layout_count,
+            "ARCH-P2 freeze contract: type layouts registered during body phase of stdlib module {}",
+            module.name
+        );
+
+        // ARCH-P2 evidence channel, post-finalize half: name every layout
+        // key that appeared or changed during body compilation (lazy
+        // registration = a freeze-contract escapee), then dump the full
+        // canonical set for cross-bake diffing.
+        if let Some(pre) = pre_body_layouts {
+            let post: std::collections::BTreeMap<String, Vec<String>> =
+                codegen.export_type_layouts().into_iter().collect();
+            for (k, v) in &post {
+                match pre.get(k) {
+                    None => eprintln!(
+                        "[LAZY-LAYOUT] module={} ADDED-DURING-BODIES {} = [{}]",
+                        module.name,
+                        k,
+                        v.join(",")
+                    ),
+                    Some(old) if old != v => eprintln!(
+                        "[LAZY-LAYOUT] module={} MUTATED-DURING-BODIES {} [{}] -> [{}]",
+                        module.name,
+                        k,
+                        old.join(","),
+                        v.join(",")
+                    ),
+                    _ => {}
+                }
+            }
+            for k in pre.keys() {
+                if !post.contains_key(k) {
+                    eprintln!(
+                        "[LAZY-LAYOUT] module={} REMOVED-DURING-BODIES {}",
+                        module.name, k
+                    );
+                }
+            }
+            for (k, v) in &post {
+                eprintln!("[LAYOUT-SET] {}\t{}\t{}", module.name, k, v.join(","));
+            }
+        }
 
         // Export newly registered functions and protocols to global registries.
         //

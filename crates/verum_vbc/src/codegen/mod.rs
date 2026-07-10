@@ -692,6 +692,15 @@ pub struct VbcCodegen {
     /// Consulted first by `resolve_type_alias`.
     local_concrete_types: std::collections::HashSet<String>,
 
+    /// ALIAS-VS-MARKER scope (#41): type names the CURRENT module can
+    /// see locally (own decls + braced/leaf mounts), computed by the
+    /// shared `verum_ast::decl::locally_visible_type_names` oracle.
+    /// Gates `declared_alias_target_name`'s existence check so an
+    /// unrelated module's type in the accumulated `type_name_to_id`
+    /// table cannot flip a local `type X is Name;` marker into a
+    /// cross-module alias. `None` outside module compilation.
+    alias_scope: Option<std::collections::HashSet<String>>,
+
     /// Context name → ContextRef ID mapping for context string table.
     /// Enables context name resolution from opaque ContextRef IDs.
     context_name_to_id: std::collections::HashMap<String, u32>,
@@ -1198,9 +1207,20 @@ impl VbcCodegen {
                 // Only an alias when the marker name is an existing type:
                 // a same/earlier-module declared type, or a primitive.
                 use verum_common::well_known_types::type_names;
-                let known = self.type_name_to_id.contains_key(target)
-                    || type_names::is_primitive_value_type(target)
+                let is_builtin = type_names::is_primitive_value_type(target)
                     || type_names::is_numeric_type(target);
+                // SCOPE GATE (#41 semaphore class): `type_name_to_id`
+                // accumulates types beyond this module; require the
+                // target to be locally visible (own decl / braced or
+                // leaf mount) unless it is a language builtin.
+                if !is_builtin {
+                    if let Some(scope) = &self.alias_scope {
+                        if !scope.contains(target) {
+                            return None;
+                        }
+                    }
+                }
+                let known = self.type_name_to_id.contains_key(target) || is_builtin;
                 if !known {
                     return None;
                 }
@@ -1737,6 +1757,7 @@ impl VbcCodegen {
             // Type alias registry for method resolution
             type_aliases: std::collections::HashMap::new(),
             local_concrete_types: std::collections::HashSet::new(),
+            alias_scope: None,
             // Context name registry for ContextRef string table
             context_name_to_id: std::collections::HashMap::new(),
             context_names: Vec::new(),
@@ -2339,6 +2360,7 @@ impl VbcCodegen {
 
             // Compile the function body
             self.ctx.generic_type_params.clear();
+            self.ctx.generic_type_params_ordered.clear();
             self.ctx.const_generic_params.clear();
             if let Err(e) = self.compile_function(&default_func, Some(&type_name)) {
                 // Skip - some default methods may have unresolvable dependencies
@@ -3373,6 +3395,19 @@ impl VbcCodegen {
         self.type_field_layouts.clone()
     }
 
+    /// Number of registered type-field layouts.  ARCH-P2 freeze-contract
+    /// probe: the stdlib bake snapshots this BEFORE body compilation
+    /// (Pass 2) and asserts it unchanged after finalize — every layout a
+    /// body-phase field-index resolution can see must have been
+    /// registered by the declaration passes (Pass 1a/1b/1c + registry
+    /// import), never lazily on-miss.  Traced 2026-07-10: 0 lazy
+    /// registrations across all 585 stdlib modules
+    /// (`VERUM_TRACE_LAZY_LAYOUT=1` evidence channel in
+    /// `stdlib_bootstrap.rs`).
+    pub fn type_layout_count(&self) -> usize {
+        self.type_field_layouts.len()
+    }
+
     /// Import record field layouts from a global registry (built by the
     /// stdlib bootstrap from previously-compiled modules).  **Additive,
     /// first-wins**: an entry is inserted ONLY when this codegen has no
@@ -3964,6 +3999,7 @@ impl VbcCodegen {
         match &item.kind {
             ItemKind::Function(func) => {
                 self.ctx.generic_type_params.clear();
+            self.ctx.generic_type_params_ordered.clear();
                 self.ctx.const_generic_params.clear();
                 if let Err(e) = self.compile_function(func, None) {
                     // Symmetric with the impl-item branch below. Promoted to
@@ -4103,9 +4139,11 @@ impl VbcCodegen {
                             }
                         }
                         self.ctx.generic_type_params.clear();
+            self.ctx.generic_type_params_ordered.clear();
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
                             self.ctx.generic_type_params.insert(g.clone());
+                            self.ctx.generic_type_params_ordered.push(g.clone());
                         }
                         for g in &impl_const_generics {
                             self.ctx.const_generic_params.insert(g.clone());
@@ -4205,6 +4243,7 @@ impl VbcCodegen {
             }
             ItemKind::Pattern(pat_decl) => {
                 self.ctx.generic_type_params.clear();
+            self.ctx.generic_type_params_ordered.clear();
                 self.ctx.const_generic_params.clear();
                 let _ = self.compile_pattern_as_function(pat_decl);
             }
@@ -5767,6 +5806,11 @@ impl VbcCodegen {
         // ("undefined variable: IoError") and dropping to a lenient
         // panic-stub. Runs AFTER the TypeId pre-alloc loop so same-module
         // alias targets are already in `type_name_to_id`.
+        // ALIAS-VS-MARKER scope (#41): local visibility for the alias
+        // decisions below, from this module's own AST.
+        self.alias_scope = Some(verum_ast::decl::locally_visible_type_names(
+            module.items.as_slice(),
+        ));
         for item in module.items.iter() {
             if !self.should_compile_item(item) {
                 continue;
@@ -13439,6 +13483,7 @@ impl VbcCodegen {
             ItemKind::Function(func) => {
                 // Clear generic params for standalone functions (impl methods set them before calling)
                 self.ctx.generic_type_params.clear();
+            self.ctx.generic_type_params_ordered.clear();
                 self.ctx.const_generic_params.clear();
                 self.compile_function(func, None)?;
                 // Compile any nested functions in this function's body
@@ -13509,9 +13554,11 @@ impl VbcCodegen {
                         // Set impl block generics before compiling function
                         // compile_function will add function's own generics to this
                         self.ctx.generic_type_params.clear();
+            self.ctx.generic_type_params_ordered.clear();
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
                             self.ctx.generic_type_params.insert(g.clone());
+                            self.ctx.generic_type_params_ordered.push(g.clone());
                         }
                         for g in &impl_const_generics {
                             self.ctx.const_generic_params.insert(g.clone());
@@ -13586,6 +13633,7 @@ impl VbcCodegen {
             // Active pattern declarations - compile body as a function
             ItemKind::Pattern(pat_decl) => {
                 self.ctx.generic_type_params.clear();
+            self.ctx.generic_type_params_ordered.clear();
                 self.ctx.const_generic_params.clear();
                 self.compile_pattern_as_function(pat_decl)?;
             }
@@ -13854,6 +13902,7 @@ impl VbcCodegen {
             match &generic.kind {
                 verum_ast::ty::GenericParamKind::Type { name, .. } => {
                     self.ctx.generic_type_params.insert(name.name.to_string());
+                    self.ctx.generic_type_params_ordered.push(name.name.to_string());
                 }
                 verum_ast::ty::GenericParamKind::Const { name, .. } => {
                     self.ctx.const_generic_params.insert(name.name.to_string());
@@ -13863,6 +13912,7 @@ impl VbcCodegen {
                 // recognized in expressions and doesn't cause "undefined variable" errors.
                 verum_ast::ty::GenericParamKind::Context { name } => {
                     self.ctx.generic_type_params.insert(name.name.to_string());
+                    self.ctx.generic_type_params_ordered.push(name.name.to_string());
                 }
                 _ => {} // Meta/Lifetime generics not handled at VBC level
             }
