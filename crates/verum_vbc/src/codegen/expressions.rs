@@ -1921,7 +1921,11 @@ impl VbcCodegen {
                 // have a runtime value. Return a type reference placeholder.
                 if self.ctx.generic_type_params.contains(&name.to_string()) {
                     if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
-                        eprintln!("[tpcall] bare-TP LoadNil: {}", name);
+                        eprintln!(
+                            "[tpcall] bare-TP LoadNil: {} in fn {}",
+                            name,
+                            self.ctx.current_function.as_deref().unwrap_or("?")
+                        );
                     }
                     let dest = self.ctx.alloc_temp();
                     // Load type parameter index as a marker (will be handled by intrinsic)

@@ -4141,10 +4141,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         );
         declare_fn!("pthread_cond_destroy", i32_type, &[ptr_type.into()], false);
 
-        // pthread thread functions — i64 Verum ABI to match platform_ir.rs
+        // pthread thread functions — POSIX int returns (i32), matching the
+        // FFI declarations in core/sys/darwin/libsystem.vr and the
+        // canonicalized platform_ir.rs sites (#46).
         declare_fn!(
             "pthread_create",
-            i64_type,
+            i32_type,
             &[
                 ptr_type.into(),
                 ptr_type.into(),
