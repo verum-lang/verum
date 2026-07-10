@@ -402,6 +402,12 @@ pub struct CodegenContext {
     /// appear in expressions like `@intrinsic("size_of", T)`.
     pub generic_type_params: HashSet<String>,
 
+    /// Same params in DECLARATION ORDER (#44-B): `TypeRef::Generic(idx)`
+    /// witnesses are positional, so `T.default()`-class emission needs
+    /// T's index among the enclosing function's generics. Maintained in
+    /// lockstep with `generic_type_params`; cleared per function.
+    pub generic_type_params_ordered: Vec<String>,
+
     /// Const generic parameters in scope for the current function.
     ///
 
@@ -1335,6 +1341,7 @@ impl CodegenContext {
             pending_let_tuple_types: None,
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
+            generic_type_params_ordered: Vec::new(),
             const_generic_params: HashSet::new(),
             newtype_names: HashSet::new(),
             newtype_inner_type: HashMap::new(),
@@ -1361,6 +1368,7 @@ impl CodegenContext {
             tier_context,
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
+            generic_type_params_ordered: Vec::new(),
             const_generic_params: HashSet::new(),
             typed_array_vars: HashMap::new(),
             byte_array_vars: HashSet::new(),
@@ -2124,6 +2132,7 @@ impl CodegenContext {
         // closures re-use low register indices for their own params).
         self.object_ref_param_regs.clear();
         self.generic_type_params.clear();
+        self.generic_type_params_ordered.clear();
         self.const_generic_params.clear();
         self.byte_array_vars.clear();
         self.typed_array_vars.clear();
@@ -3707,6 +3716,7 @@ impl CodegenContext {
         }
         self.variable_type_names.clear();
         self.generic_type_params.clear();
+        self.generic_type_params_ordered.clear();
         self.const_generic_params.clear();
         self.required_contexts.clear();
     }

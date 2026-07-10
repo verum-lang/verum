@@ -54,12 +54,36 @@ pub fn get_runtime_metadata() -> Option<Arc<CoreMetadata>> {
                     Some(Arc::new(meta))
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        target: "embedded_stdlib_metadata",
-                        "failed to decode embedded stdlib metadata: {} — typecheck falls back to source",
-                        e
-                    );
-                    None
+                    // #45: same loud-failure contract as the VBC archive
+                    // (embedded_stdlib_vbc.rs). An EMBEDDED metadata blob
+                    // that fails to decode is a build-system inconsistency
+                    // (stale blob vs current CoreMetadata layout), and the
+                    // silent source fallback runs a semantically DIFFERENT
+                    // typecheck path — measured flipping suites from 7 to 14
+                    // failures with zero visible signal.
+                    if std::env::var("VERUM_ALLOW_STDLIB_SOURCE_FALLBACK").is_ok() {
+                        tracing::warn!(
+                            target: "embedded_stdlib_metadata",
+                            "failed to decode embedded stdlib metadata: {} — \
+                             VERUM_ALLOW_STDLIB_SOURCE_FALLBACK set, typecheck falls back to source",
+                            e
+                        );
+                        None
+                    } else {
+                        panic!(
+                            "FATAL: this compiler binary embeds stdlib typecheck metadata \
+                             ({} KB) that failed to decode: {}\n\
+                             The embedded blob was generated with an older CoreMetadata \
+                             layout than this reader.\n\
+                             Fix: regenerate and re-embed:\n\
+                             \x20   verum stdlib precompile --out <CARGO_TARGET_DIR>/precompiled-stdlib/runtime.vbca\n\
+                             \x20   touch crates/verum_compiler/build.rs && cargo build -p verum_cli\n\
+                             Escape hatch (slow, typechecks stdlib from source): \
+                             VERUM_ALLOW_STDLIB_SOURCE_FALLBACK=1",
+                            EMBEDDED_RUNTIME_METADATA.len() / 1024,
+                            e,
+                        );
+                    }
                 }
             }
         })

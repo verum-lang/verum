@@ -190,7 +190,15 @@ impl TypeChecker {
                                 // Register the type declaration to resolve type aliases.
                                 // This ensures that type aliases like `type X is { ... }` are resolved
                                 // to their underlying Record types, not just stored as Named references.
-                                if let Err(e) = self.register_type_declaration(type_decl) {
+                                // ALIAS-VS-MARKER scope (#41): lazy registration
+                                // must carry the declaring module's local
+                                // visibility, same as the bulk passes.
+                                let prev_alias_scope = self.alias_scope.take();
+                                self.alias_scope =
+                                    Some(Self::compute_alias_scope(&items));
+                                let reg_result = self.register_type_declaration(type_decl);
+                                self.alias_scope = prev_alias_scope;
+                                if let Err(e) = reg_result {
                                     tracing::debug!(
                                         "Failed to register type '{}' from module {}: {}",
                                         name,
@@ -449,7 +457,14 @@ impl TypeChecker {
                         for item in items.iter() {
                             if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                                 if type_decl.name.name.as_str() == type_name {
-                                    if let Err(e) = self.register_type_declaration(type_decl) {
+                                    // ALIAS-VS-MARKER scope (#41)
+                                    let prev_alias_scope = self.alias_scope.take();
+                                    self.alias_scope =
+                                        Some(Self::compute_alias_scope(items));
+                                    let reg_result =
+                                        self.register_type_declaration(type_decl);
+                                    self.alias_scope = prev_alias_scope;
+                                    if let Err(e) = reg_result {
                                         tracing::debug!(
                                             "Failed to register type '{}' from inline module: {}",
                                             type_name,
@@ -1488,9 +1503,14 @@ impl TypeChecker {
                                         verum_ast::ItemKind::Type(type_decl)
                                             if type_decl.name.name.as_str() == item_name =>
                                         {
-                                            if let Err(e) =
-                                                self.register_type_declaration(type_decl)
-                                            {
+                                            // ALIAS-VS-MARKER scope (#41)
+                                            let prev_alias_scope = self.alias_scope.take();
+                                            self.alias_scope =
+                                                Some(Self::compute_alias_scope(items));
+                                            let reg_result =
+                                                self.register_type_declaration(type_decl);
+                                            self.alias_scope = prev_alias_scope;
+                                            if let Err(e) = reg_result {
                                                 tracing::debug!(
                                                     "Failed to register type from crate path: {}",
                                                     e
@@ -1604,7 +1624,14 @@ impl TypeChecker {
                                     verum_ast::ItemKind::Type(type_decl)
                                         if type_decl.name.name.as_str() == item_name =>
                                     {
-                                        if let Err(e) = self.register_type_declaration(type_decl) {
+                                        // ALIAS-VS-MARKER scope (#41)
+                                        let prev_alias_scope = self.alias_scope.take();
+                                        self.alias_scope =
+                                            Some(Self::compute_alias_scope(items));
+                                        let reg_result =
+                                            self.register_type_declaration(type_decl);
+                                        self.alias_scope = prev_alias_scope;
+                                        if let Err(e) = reg_result {
                                             tracing::debug!(
                                                 "Failed to register type from super path: {}",
                                                 e

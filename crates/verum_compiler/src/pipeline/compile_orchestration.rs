@@ -1089,12 +1089,16 @@ impl<'s> CompilationPipeline<'s> {
                         // same-named stdlib types don't collide on flat lookup).
                         for (module_path, stdlib_mod) in &stdlib_entries {
                             checker.set_current_module_path(module_path.clone());
+                            // ALIAS-VS-MARKER scope (#41).
+                            checker.set_alias_scope_from_items(&stdlib_mod.items);
                             checker.register_all_type_names(&stdlib_mod.items);
                         }
                         // S0b: Resolve stdlib type definitions
                         let mut resolution_stack = List::new();
                         for (module_path, stdlib_mod) in &stdlib_entries {
                             checker.set_current_module_path(module_path.clone());
+                            // ALIAS-VS-MARKER scope (#41).
+                            checker.set_alias_scope_from_items(&stdlib_mod.items);
                             for item in &stdlib_mod.items {
                                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                                     let _ = checker
@@ -1105,6 +1109,8 @@ impl<'s> CompilationPipeline<'s> {
                         // S1: Register stdlib function signatures
                         for (module_path, stdlib_mod) in &stdlib_entries {
                             checker.set_current_module_path(module_path.clone());
+                            // ALIAS-VS-MARKER scope (#41).
+                            checker.set_alias_scope_from_items(&stdlib_mod.items);
                             for item in &stdlib_mod.items {
                                 if let verum_ast::ItemKind::Function(func) = &item.kind {
                                     if !checker.is_function_preregistered(func.name.name.as_str()) {
@@ -1116,6 +1122,8 @@ impl<'s> CompilationPipeline<'s> {
                         // S2: Register stdlib protocols
                         for (module_path, stdlib_mod) in &stdlib_entries {
                             checker.set_current_module_path(module_path.clone());
+                            // ALIAS-VS-MARKER scope (#41).
+                            checker.set_alias_scope_from_items(&stdlib_mod.items);
                             for item in &stdlib_mod.items {
                                 if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                                     let _ = checker.register_protocol(protocol_decl);
@@ -1146,6 +1154,8 @@ impl<'s> CompilationPipeline<'s> {
                 checker.set_user_code_phase();
 
                 // Pass 1: Register type declarations
+                // ALIAS-VS-MARKER scope (#41).
+                checker.set_alias_scope_from_items(&module.items);
                 for item in &module.items {
                     if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                         if let Err(e) = checker.register_type_declaration(type_decl) {

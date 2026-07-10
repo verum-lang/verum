@@ -1057,6 +1057,8 @@ impl<'s> CompilationPipeline<'s> {
                     let mut resolution_stack = List::new();
                     for (module_path, stdlib_mod) in &stdlib_entries {
                         checker.set_current_module_path(module_path.clone());
+                        // ALIAS-VS-MARKER scope (#41).
+                        checker.set_alias_scope_from_items(&stdlib_mod.items);
                         for item in &stdlib_mod.items {
                             if let ItemKind::Type(type_decl) = &item.kind {
                                 if let Err(e) = checker
@@ -1071,6 +1073,8 @@ impl<'s> CompilationPipeline<'s> {
                     // Pass S1: Register stdlib function signatures
                     for (module_path, stdlib_mod) in &stdlib_entries {
                         checker.set_current_module_path(module_path.clone());
+                        // ALIAS-VS-MARKER scope (#41).
+                        checker.set_alias_scope_from_items(&stdlib_mod.items);
                         for item in &stdlib_mod.items {
                             if let ItemKind::Function(func) = &item.kind {
                                 if !checker.is_function_preregistered(func.name.name.as_str()) {
@@ -1085,6 +1089,8 @@ impl<'s> CompilationPipeline<'s> {
                     // Pass S2: Register stdlib protocols
                     for (module_path, stdlib_mod) in &stdlib_entries {
                         checker.set_current_module_path(module_path.clone());
+                        // ALIAS-VS-MARKER scope (#41).
+                        checker.set_alias_scope_from_items(&stdlib_mod.items);
                         for item in &stdlib_mod.items {
                             if let ItemKind::Protocol(protocol_decl) = &item.kind {
                                 if let Err(e) = checker.register_protocol(protocol_decl) {
@@ -1126,6 +1132,8 @@ impl<'s> CompilationPipeline<'s> {
 
         // Sub-pass 2: Register all type declarations first
         // This ensures types are available when checking functions that reference them
+        // ALIAS-VS-MARKER scope (#41).
+        checker.set_alias_scope_from_items(&module.items);
         for item in &module.items {
             if let ItemKind::Type(type_decl) = &item.kind {
                 if let Err(type_error) = checker.register_type_declaration(type_decl) {

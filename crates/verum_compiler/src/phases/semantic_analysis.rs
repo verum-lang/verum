@@ -414,6 +414,8 @@ impl CompilationPhase for SemanticAnalysisPhase {
         // Pass 0b: Resolve all type BODIES (now all type names are known)
         for (i, module) in modules.iter().enumerate() {
             let is_stdlib = i < stdlib_count;
+            // ALIAS-VS-MARKER scope (#41): per declaring module.
+            phase_checker.set_alias_scope_from_items(&module.items);
             for item in &module.items {
                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                     if let Err(e) = phase_checker.register_type_declaration(type_decl) {

@@ -1194,6 +1194,18 @@ pub struct TypeChecker {
     /// conflict where `core.base.ordering.Ordering` (Less|Equal|Greater) gets overwritten
     /// by `core.sync.atomic.Ordering` (Relaxed|Acquire|Release|AcqRel|SeqCst).
     explicit_imports: std::collections::HashSet<String>,
+    /// ALIAS-VS-MARKER scope (#41 semaphore class): the set of type names
+    /// the CURRENTLY-REGISTERING module can see LOCALLY — its own type
+    /// declarations plus braced/leaf mount imports. `type_defs` is a
+    /// process-global flat namespace, so `variant_decl_alias_target`'s
+    /// "target names an existing type" check would otherwise let an
+    /// unrelated module's type (e.g. core.net.tls13's `Closed`) flip a
+    /// local `type SemaphoreError is Closed;` from marker-sum to alias.
+    /// `None` = no module context available (legacy permissive behavior).
+    /// Glob mounts contribute nothing: every legitimate stdlib alias
+    /// target is same-file, braced-mounted, or a language builtin
+    /// (verified across all 57 single-name `is`-declarations in core/).
+    pub(crate) alias_scope: Option<std::collections::HashSet<String>>,
     /// Flag indicating we are currently inside a `register_type_declaration` call
     /// triggered by an explicit import (`mount foo.{Bar}`). When true, the provenance
     /// check in register_type_declaration_body allows the registration to proceed

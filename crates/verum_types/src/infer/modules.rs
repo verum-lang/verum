@@ -326,6 +326,9 @@ impl TypeChecker {
         // Handle Option<Vec<Item>>
         if let Some(items) = &module.items {
             // Phase 1: Register type declarations first
+            // ALIAS-VS-MARKER scope (#41): inline module's local visibility.
+            let prev_alias_scope = self.alias_scope.take();
+            self.alias_scope = Some(Self::compute_alias_scope(items));
             for item in items.iter() {
                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                     if let Err(e) = self.register_type_declaration(type_decl) {
@@ -340,6 +343,7 @@ impl TypeChecker {
                     }
                 }
             }
+            self.alias_scope = prev_alias_scope;
 
             // Phase 2: Register function signatures for forward references
             // IMPORTANT: Functions declared inside `module X { ... }` are module-scoped

@@ -3684,6 +3684,60 @@ impl Spanned for PatternDecl {
     }
 }
 
+/// Type names a module can see LOCALLY, computable from its own AST
+/// alone: its own `type` declarations plus every leaf name its mounts
+/// bring in directly (braced `mount a.{B, C as D}` members, bare-path
+/// leaves `mount a.B`, and mount-level aliases). Glob mounts contribute
+/// nothing — their contents cannot be decided locally.
+///
+/// Shared oracle for the ALIAS-VS-MARKER decision on
+/// `type X is SomeName;` declarations (#41): both the typechecker
+/// (`verum_types` `variant_decl_alias_target`) and VBC codegen
+/// (`declared_alias_target_name`) must gate their "target names an
+/// existing type" checks on this set, because their type registries are
+/// process-global flat namespaces — an unrelated module's type (e.g.
+/// core.net.tls13's `Closed`) must not flip a local
+/// `type SemaphoreError is Closed;` from marker-sum to alias.
+pub fn locally_visible_type_names(
+    items: &[Item],
+) -> std::collections::HashSet<String> {
+    fn walk(tree: &MountTree, set: &mut std::collections::HashSet<String>) {
+        match &tree.kind {
+            MountTreeKind::Path(p) => {
+                if let verum_common::Maybe::Some(alias) = &tree.alias {
+                    set.insert(alias.name.as_str().to_string());
+                } else if let Some(crate::ty::PathSegment::Name(id)) =
+                    p.segments.last()
+                {
+                    set.insert(id.name.as_str().to_string());
+                }
+            }
+            MountTreeKind::Nested { trees, .. } => {
+                for t in trees.iter() {
+                    walk(t, set);
+                }
+            }
+            MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+        }
+    }
+    let mut set = std::collections::HashSet::new();
+    for item in items {
+        match &item.kind {
+            ItemKind::Type(td) => {
+                set.insert(td.name.name.as_str().to_string());
+            }
+            ItemKind::Mount(m) => {
+                if let verum_common::Maybe::Some(alias) = &m.alias {
+                    set.insert(alias.name.as_str().to_string());
+                }
+                walk(&m.tree, &mut set);
+            }
+            _ => {}
+        }
+    }
+    set
+}
+
 #[cfg(test)]
 mod proof_body_kind_tests {
     use super::*;

@@ -88,6 +88,8 @@ impl<'s> CompilationPipeline<'s> {
         // S0b: Resolve stdlib type definitions
         let mut resolution_stack = verum_common::List::new();
         for stdlib_mod in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                     if let Err(e) =
@@ -101,6 +103,8 @@ impl<'s> CompilationPipeline<'s> {
         }
         // S1: Register stdlib function signatures
         for stdlib_mod in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Function(func) = &item.kind {
                     if let Err(e) = checker.register_function_signature(func) {
@@ -112,6 +116,8 @@ impl<'s> CompilationPipeline<'s> {
         }
         // S2: Register stdlib protocols
         for stdlib_mod in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                     if let Err(e) = checker.register_protocol(protocol_decl) {
@@ -123,6 +129,8 @@ impl<'s> CompilationPipeline<'s> {
         }
         // S3: Register stdlib impl blocks
         for stdlib_mod in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
                     if let Err(e) = checker.register_impl_block(impl_decl) {
@@ -228,6 +236,8 @@ impl<'s> CompilationPipeline<'s> {
         // S0b: Resolve stdlib type definitions
         let mut resolution_stack = verum_common::List::new();
         for (_, stdlib_mod) in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                     let _ = checker.resolve_type_definition(type_decl, &mut resolution_stack);
@@ -236,6 +246,8 @@ impl<'s> CompilationPipeline<'s> {
         }
         // S1: Register stdlib function signatures
         for (_, stdlib_mod) in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Function(func) = &item.kind {
                     let _ = checker.register_function_signature(func);
@@ -250,6 +262,8 @@ impl<'s> CompilationPipeline<'s> {
         }
         // S2: Register stdlib protocols
         for (_, stdlib_mod) in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                     let _ = checker.register_protocol(protocol_decl);
@@ -258,6 +272,8 @@ impl<'s> CompilationPipeline<'s> {
         }
         // S3: Register stdlib impl blocks
         for (_, stdlib_mod) in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
                     let _ = checker.register_impl_block(impl_decl);
@@ -282,6 +298,8 @@ impl<'s> CompilationPipeline<'s> {
         // S5: Register all const and static declarations as variables
         // This makes constants visible in function bodies.
         for (_, stdlib_mod) in &stdlib_modules {
+            // ALIAS-VS-MARKER scope (#41).
+            checker.set_alias_scope_from_items(&stdlib_mod.items);
             for item in &stdlib_mod.items {
                 if let verum_ast::ItemKind::Const(const_decl) = &item.kind {
                     checker.pre_register_const(const_decl);

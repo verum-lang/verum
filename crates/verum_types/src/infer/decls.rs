@@ -678,6 +678,31 @@ impl TypeChecker {
         if target == type_decl.name.name.as_str() {
             return None;
         }
+        // SCOPE GATE (#41 semaphore class): the existence check below reads
+        // `type_defs`, a process-global flat namespace. Without a visibility
+        // gate, an unrelated module's type (core.net.tls13's `Closed`)
+        // flips this module's `type SemaphoreError is Closed;` from
+        // marker-sum to a cross-module alias — and which way it goes
+        // depends on registration order. When the registration flow knows
+        // the declaring module's items (`alias_scope`), only targets the
+        // module can see LOCALLY (own decls, braced/leaf mounts) or
+        // language builtins are alias-eligible. Verified: every legitimate
+        // single-name alias in core/ (56 of 57) has its target same-file,
+        // braced-mounted, or builtin; the 57th IS the poison case.
+        if let Some(scope) = &self.alias_scope {
+            let is_builtin_name = matches!(
+                target,
+                "Int" | "Float" | "Bool" | "Char" | "Text" | "Unit" | "Byte"
+                    | "Int8" | "Int16" | "Int32" | "Int64"
+                    | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                    | "ISize" | "USize" | "Float32" | "Float64"
+                    | "I8" | "I16" | "I32" | "I64"
+                    | "U8" | "U16" | "U32" | "U64"
+            );
+            if !is_builtin_name && !scope.contains(target) {
+                return None;
+            }
+        }
         let is_existing_type = matches!(
             self.ctx.lookup_type(target),
             Option::Some(
@@ -698,6 +723,31 @@ impl TypeChecker {
             kind: verum_ast::ty::TypeKind::Path(verum_ast::ty::Path::single(v.name.clone())),
             span: v.span,
         })
+    }
+
+    /// Compute the ALIAS-VS-MARKER visibility set for a module's items
+    /// (see `alias_scope` on the struct): the module's own type-decl
+    /// names plus every leaf name its mounts bring in directly (braced
+    /// `mount a.{B, C as D}` members and bare-path leaves `mount a.B`).
+    /// Glob mounts contribute nothing — their contents cannot be decided
+    /// locally, and every legitimate stdlib alias target is same-file,
+    /// braced-mounted, or a language builtin.
+    pub fn compute_alias_scope(
+        items: &[verum_ast::Item],
+    ) -> std::collections::HashSet<String> {
+        verum_ast::decl::locally_visible_type_names(items)
+    }
+
+    /// Set the ALIAS-VS-MARKER scope from a module's items for the
+    /// duration of a registration pass (public wrapper for pipeline
+    /// callers outside this crate). Pair with [`Self::clear_alias_scope`].
+    pub fn set_alias_scope_from_items(&mut self, items: &[verum_ast::Item]) {
+        self.alias_scope = Some(Self::compute_alias_scope(items));
+    }
+
+    /// Clear the ALIAS-VS-MARKER scope after a registration pass.
+    pub fn clear_alias_scope(&mut self) {
+        self.alias_scope = None;
     }
 
     /// Register a sum (variant/enum) type declaration body.

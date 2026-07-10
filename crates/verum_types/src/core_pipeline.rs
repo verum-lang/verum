@@ -395,6 +395,23 @@ impl StdlibTypeRegistry {
         ast: &Module,
         module_name: &str,
     ) -> Result<RegistrationResult, RegistrationError> {
+        // ALIAS-VS-MARKER scope (#41): give the registration passes the
+        // declaring module's locally-visible type names so
+        // `variant_decl_alias_target` cannot alias to an unrelated
+        // module's type through the flat global namespace. Cleared on
+        // every exit path via the inner-fn wrap.
+        type_checker.alias_scope = Some(TypeChecker::compute_alias_scope(&ast.items));
+        let result = self.register_module_inner(type_checker, ast, module_name);
+        type_checker.alias_scope = None;
+        result
+    }
+
+    fn register_module_inner(
+        &mut self,
+        type_checker: &mut TypeChecker,
+        ast: &Module,
+        module_name: &str,
+    ) -> Result<RegistrationResult, RegistrationError> {
         use verum_ast::ItemKind;
 
         let start = Instant::now();
@@ -622,6 +639,10 @@ impl StdlibTypeRegistry {
         // PASS 1: Register ALL type names (for forward references)
         // ═══════════════════════════════════════════════════════════════
         for (_module_name, ast) in ordered_modules.iter().chain(extra_modules.iter()) {
+            // ALIAS-VS-MARKER scope (#41): per-module local visibility for
+            // the alias-vs-marker decision inside name registration.
+            type_checker.alias_scope =
+                Some(TypeChecker::compute_alias_scope(&ast.items));
             for item in &ast.items {
                 if let ItemKind::Type(type_decl) = &item.kind {
                     type_checker.register_type_name_only(type_decl);
@@ -629,6 +650,7 @@ impl StdlibTypeRegistry {
                 }
             }
         }
+        type_checker.alias_scope = None;
 
         if self.verbose {
             eprintln!("    Registered {} type names", result.types_registered);
@@ -669,6 +691,10 @@ impl StdlibTypeRegistry {
         // PASS 3: Resolve ALL type definitions
         // ═══════════════════════════════════════════════════════════════
         for (module_name, ast) in ordered_modules.iter().chain(extra_modules.iter()) {
+            // ALIAS-VS-MARKER scope (#41): same per-module gate for full
+            // type-definition resolution.
+            type_checker.alias_scope =
+                Some(TypeChecker::compute_alias_scope(&ast.items));
             for item in &ast.items {
                 if let ItemKind::Type(type_decl) = &item.kind {
                     if let Err(e) = type_checker.register_type_declaration(type_decl) {
@@ -684,6 +710,7 @@ impl StdlibTypeRegistry {
                 }
             }
         }
+        type_checker.alias_scope = None;
 
         if self.verbose {
             eprintln!(

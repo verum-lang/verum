@@ -1330,8 +1330,29 @@ impl TypeChecker {
                         })
                         .unwrap_or("");
 
-                    // Verify the pattern name matches the type name
-                    if tag == type_name {
+                    // Verify the pattern name matches the type name.
+                    // ALIAS HOP (#41 async_ops): the pattern may use an
+                    // alias of the scrutinee's type — `JoinHandleOpaque(v)`
+                    // over RawJoinHandleOpaque when
+                    // `type JoinHandleOpaque is RawJoinHandleOpaque;`.
+                    // Resolve the tag's alias chain before comparing, so
+                    // newtype/tuple-struct destructure works through the
+                    // alias exactly as it does on the underlying name.
+                    let tag_matches_type = tag == type_name
+                        || matches!(
+                            self.ctx.lookup_type(tag),
+                            Option::Some(Type::Named { path, .. })
+                                if path
+                                    .segments
+                                    .last()
+                                    .and_then(|seg| match seg {
+                                        verum_ast::ty::PathSegment::Name(id) =>
+                                            Some(id.name.as_str()),
+                                        _ => None,
+                                    })
+                                    == Some(type_name)
+                        );
+                    if tag_matches_type {
                         // Check for newtype first
                         let inner_key = format!("__newtype_inner_{}", type_name);
                         if let Option::Some(inner_ty) = self.ctx.lookup_type(&inner_key) {
@@ -1416,7 +1437,7 @@ impl TypeChecker {
 
                     // Handle generic wrapper destructure for Named types: Heap(inner_val) matching Heap<T>
                     if let Type::Named { args, .. } = &expanded_ty {
-                        if tag == type_name && args.len() == 1 {
+                        if tag_matches_type && args.len() == 1 {
                             if let Some(variant_data) = data {
                                 use verum_ast::pattern::VariantPatternData;
                                 match variant_data {

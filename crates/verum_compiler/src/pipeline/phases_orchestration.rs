@@ -590,6 +590,8 @@ impl<'s> CompilationPipeline<'s> {
                 let mut resolution_stack = List::new();
                 for (module_path, stdlib_mod) in &stdlib_entries {
                     checker.set_current_module_path(module_path.clone());
+                    // ALIAS-VS-MARKER scope (#41).
+                    checker.set_alias_scope_from_items(&stdlib_mod.items);
                     for item in &stdlib_mod.items {
                         if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                             if let Err(e) =
@@ -604,6 +606,8 @@ impl<'s> CompilationPipeline<'s> {
                 // Pass S1: Register stdlib function signatures
                 for (module_path, stdlib_mod) in &stdlib_entries {
                     checker.set_current_module_path(module_path.clone());
+                    // ALIAS-VS-MARKER scope (#41).
+                    checker.set_alias_scope_from_items(&stdlib_mod.items);
                     for item in &stdlib_mod.items {
                         if let verum_ast::ItemKind::Function(func) = &item.kind {
                             if !checker.is_function_preregistered(func.name.name.as_str()) {
@@ -616,6 +620,8 @@ impl<'s> CompilationPipeline<'s> {
                 // Pass S2: Register stdlib protocols
                 for (module_path, stdlib_mod) in &stdlib_entries {
                     checker.set_current_module_path(module_path.clone());
+                    // ALIAS-VS-MARKER scope (#41).
+                    checker.set_alias_scope_from_items(&stdlib_mod.items);
                     for item in &stdlib_mod.items {
                         if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                             let _ = checker.register_protocol(protocol_decl);
@@ -683,6 +689,8 @@ impl<'s> CompilationPipeline<'s> {
 
         // Pass 1b: Resolve all type definitions now that all names are known
         // This replaces placeholders with actual type definitions
+        // ALIAS-VS-MARKER scope (#41): the user module's local visibility.
+        checker.set_alias_scope_from_items(&module.items);
         let mut resolution_stack = List::new();
         for item in &module.items {
             if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
