@@ -3468,17 +3468,25 @@ impl CodegenContext {
         suffix: &str,
         expected_param_count: usize,
     ) -> Option<&FunctionInfo> {
+        // ARCH-P2: first-match over the HashMap walk was a per-bake dice
+        // — with colliding suffixes (the doc's IpAddr.V6 vs SocketAddr.V6
+        // case) the picked constructor flipped MakeVariant tag + payload
+        // layout across bakes. Deterministic rule: lexicographically-
+        // smallest matching key wins (mirrors the min-by-key scans at
+        // resolve_function_key stage 4 and the field-index scans).
+        let mut best: Option<(&String, &FunctionInfo)> = None;
         for (name, info) in &self.functions {
             // Only consider variant constructors (must have variant_tag set)
             if info.variant_tag.is_some()
                 && name.ends_with(suffix)
                 && info.param_count == expected_param_count
                 && info.variant_payload_types.is_some()
+                && best.map(|(b, _)| name < b).unwrap_or(true)
             {
-                return Some(info);
+                best = Some((name, info));
             }
         }
-        None
+        best.map(|(_, info)| info)
     }
 
     // ==================== Closure Compilation Context ====================

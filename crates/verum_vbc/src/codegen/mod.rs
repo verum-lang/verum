@@ -15654,26 +15654,33 @@ impl VbcCodegen {
             // Cross-module field access: type might be registered under a qualified name
             // (e.g., "module_a.Point") but accessed with simple name ("Point") or vice versa.
             // Search for any registered type whose simple name matches.
+            // ARCH-P2: first-match over the HashMap walk was a per-bake
+            // dice (same class as the sorted scan below) — pick the
+            // lexicographically-smallest qualified name instead.
             {
                 let simple_name = tn.rsplit('.').next().unwrap_or(tn);
+                let mut best: Option<(&String, usize)> = None;
                 for (type_n, fields) in &self.type_field_layouts {
                     let registered_simple = type_n.rsplit('.').next().unwrap_or(type_n);
                     if registered_simple == simple_name
                         && type_n != tn
                         && let Some(pos) = fields.iter().position(|f| f == field_name)
+                        && best.map(|(b, _)| type_n < b).unwrap_or(true)
                     {
-                        if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
-                            tracing::debug!(
-                                "[FIELD] {}.{} → cross-module match '{}' idx {} (fields: {:?})",
-                                tn,
-                                field_name,
-                                type_n,
-                                pos,
-                                fields
-                            );
-                        }
-                        return pos as u32;
+                        best = Some((type_n, pos));
                     }
+                }
+                if let Some((type_n, pos)) = best {
+                    if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                        tracing::debug!(
+                            "[FIELD] {}.{} → cross-module match '{}' idx {} (canonical min-key)",
+                            tn,
+                            field_name,
+                            type_n,
+                            pos
+                        );
+                    }
+                    return pos as u32;
                 }
             }
 

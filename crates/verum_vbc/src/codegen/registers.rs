@@ -363,13 +363,14 @@ impl RegisterAllocator {
     /// for all named variables (excludes temporaries).
     pub fn collect_debug_variables(&self) -> Vec<(String, u16, bool, u16)> {
         let mut result = Vec::new();
-        let mut param_idx = 0u16;
 
         for (name, info) in &self.variables {
             match info.kind {
                 RegisterKind::Parameter => {
-                    param_idx += 1;
-                    result.push((name.clone(), info.reg.0, true, param_idx));
+                    // arg_index is assigned AFTER the sort below —
+                    // numbering during the HashMap walk was a per-bake
+                    // dice in the DWARF vars (ARCH-P2).
+                    result.push((name.clone(), info.reg.0, true, 0));
                 }
                 RegisterKind::Local | RegisterKind::Captured => {
                     result.push((name.clone(), info.reg.0, false, 0));
@@ -382,6 +383,15 @@ impl RegisterAllocator {
 
         // Sort by register index for deterministic output
         result.sort_by_key(|&(_, reg, _, _)| reg);
+        // Parameters occupy the low registers in declaration order —
+        // number them in sorted (register) order.
+        let mut param_idx = 0u16;
+        for entry in result.iter_mut() {
+            if entry.2 {
+                param_idx += 1;
+                entry.3 = param_idx;
+            }
+        }
         result
     }
 
