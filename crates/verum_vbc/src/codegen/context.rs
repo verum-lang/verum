@@ -19,11 +19,6 @@ use std::collections::{HashMap, HashSet};
 use verum_cbgr::tier_types::Tier0Reason;
 use verum_common::Map;
 
-/// Context for VBC code generation.
-///
-
-/// Tracks all state needed during function compilation.
-#[derive(Debug)]
 /// ARCH-P2 canonical id→name choice — ONE total order over a
 /// FunctionId's registration-key set, shared by every site that picks
 /// a serialized/recorded name (stub descriptors ×3 incl. stage-3,
@@ -49,6 +44,11 @@ pub(crate) fn canonical_name_better(new: &str, cur: &str) -> bool {
     new < cur
 }
 
+/// Context for VBC code generation.
+///
+
+/// Tracks all state needed during function compilation.
+#[derive(Debug)]
 pub struct CodegenContext {
     /// Register allocator for current function.
     pub registers: RegisterAllocator,
