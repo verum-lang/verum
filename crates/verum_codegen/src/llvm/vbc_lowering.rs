@@ -978,19 +978,23 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // First pass: collect (name, arity) pairs that have multiple bodies.
         //
         // TEXT-AOT-CHARS-PUSH-1 / FUNC-REGISTRY-QUALIFICATION-1 class:
-        // also record, per colliding key, the ordinal of the last
-        // occurrence with a NON-EMPTY body. The dedup below historically
-        // kept the positionally-LAST occurrence ("user overrides
-        // stdlib") — but for stdlib-internal duplicates (two
-        // `Char.encode_utf8` definitions) the last one could be the
-        // BODYLESS intrinsic wrapper shell, so the surviving LLVM
-        // symbol lowered to a `skipped_entry: ret 0` stub and every
-        // caller got 0 (Text.push encoded zero bytes). Prefer the last
-        // occurrence that actually HAS instructions; fall back to the
-        // positional-last when none do.
+        // also record, per colliding key, the ordinal of the FIRST
+        // occurrence with a NON-EMPTY body. This mirrors the Tier-0
+        // dispatch rule (`VbcModule::find_function_by_name`, ARCH-P2):
+        // a real body beats a stub, and among same-bodiedness entries
+        // the LOWEST id wins. The dedup historically kept the LAST
+        // non-empty occurrence, which diverged from the interpreter
+        // whenever duplicate stdlib methods differ semantically — e.g.
+        // the two `Int.checked_mul` descriptors (by-value wrapper vs a
+        // `&self` variant whose body starts with ChkRef/Deref): Tier-0
+        // called the by-value one, AOT lowered only the `&self` one,
+        // and every by-value call site SIGSEGV'd dereferencing a raw
+        // integer receiver (DUP-METHOD-SELF-KIND-1). Bodiless shells
+        // (`Char.encode_utf8` empty wrapper) still lose to any
+        // non-empty body regardless of position.
         let mut body_count: std::collections::HashMap<(String, usize), usize> =
             std::collections::HashMap::new();
-        let mut last_nonempty_ordinal: std::collections::HashMap<(String, usize), usize> =
+        let mut first_nonempty_ordinal: std::collections::HashMap<(String, usize), usize> =
             std::collections::HashMap::new();
         for func_desc in &vbc_module.functions {
             if let Some(ref instrs) = func_desc.instructions {
@@ -999,7 +1003,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 let cnt = body_count.entry(key.clone()).or_default();
                 *cnt += 1;
                 if !instrs.is_empty() {
-                    last_nonempty_ordinal.insert(key, *cnt);
+                    first_nonempty_ordinal.entry(key).or_insert(*cnt);
                 }
             }
         }
@@ -1028,16 +1032,16 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 let dedupe_key = (func_name.to_string(), func_desc.params.len());
                 if let Some(&count) = body_count.get(&dedupe_key) {
                     if count > 1 {
-                        let keep_ordinal = last_nonempty_ordinal
+                        let keep_ordinal = first_nonempty_ordinal
                             .get(&dedupe_key)
                             .copied()
-                            .unwrap_or(count);
+                            .unwrap_or(1);
                         let seen = lowered_llvm_fns.entry(dedupe_key).or_insert(0);
                         *seen += 1;
                         if *seen != keep_ordinal {
-                            // Not the survivor (last NON-EMPTY body wins;
-                            // positional-last only when all are empty) —
-                            // skip it.
+                            // Not the survivor (FIRST non-empty body wins —
+                            // the Tier-0 dispatch order; positional-first
+                            // when all are empty) — skip it.
                             continue;
                         }
                     }
@@ -1887,8 +1891,26 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // Simple approach: skip body lowering for ANY function whose LLVM
                     // function name doesn't match the expected name.
                     self.module.add_function(&unique_name, fn_type, None)
+                } else if existing.count_basic_blocks() == 0 && existing.get_type() == fn_type {
+                    // Same arity, same signature, and the existing symbol is a
+                    // BODYLESS declaration — created speculatively by an earlier
+                    // call site (resolve_llvm_function declares callees it can't
+                    // find yet). Define INTO that declaration so every
+                    // already-emitted call binds to the real body.
+                    //
+                    // LLVMAddFunction does NOT return the existing function on a
+                    // name hit — it silently auto-renames the new one (`.N`
+                    // suffix). Before this arm, the body landed in
+                    // `Int.checked_mul.18` while every call site stayed bound to
+                    // the bodyless `Int.checked_mul` declaration, which linked
+                    // against the degraded const-zero stub: `checked_mul(a, b)`
+                    // returned 0 → pattern-match read it as `Maybe.None` at AOT
+                    // while Tier-0 returned `Some` (CHECKED-MUL-DECLARE-SHADOW-1).
+                    existing
                 } else {
-                    // Same arity — LLVMAddFunction returns the existing function (safe)
+                    // Same arity but the existing function already has a body
+                    // (duplicate VBC name) or a different signature — keep the
+                    // historical auto-rename path.
                     self.module.add_function(&func_name, fn_type, None)
                 }
             } else {

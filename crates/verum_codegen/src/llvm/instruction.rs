@@ -12964,6 +12964,15 @@ fn lower_call_method<'ctx>(
             if let Some(vbc) = ctx.vbc_module() {
                 // Find all types that have a protocol method matching method_name
                 let mut dispatch_entries: Vec<(u32, String)> = Vec::new();
+                // One type id must appear in the switch AT MOST once: a
+                // type can match several protocol-method slots with the
+                // same `.{method}` suffix (two protocols sharing a method
+                // name, duplicate stdlib registrations), and a repeated
+                // case value is verifier-invalid IR that SIGSEGVs the LLVM
+                // pass pipeline (`duplicate case value in switch`,
+                // label dyn_<tid>2). First match wins.
+                let mut seen_dyn_tids: std::collections::HashSet<u32> =
+                    std::collections::HashSet::new();
 
                 // Search by function name suffix instead of variant StringId,
                 // because StringIds from source modules aren't remapped during merge.
@@ -12979,7 +12988,10 @@ fn lower_call_method<'ctx>(
                                 // Match "Circle.area" when method_name is "area"
                                 if fname.ends_with(&method_suffix) {
                                     if let Some(llvm_fn) = ctx.get_module().get_function(fname) {
-                                        dispatch_entries.push((type_desc.id.0, fname.to_string()));
+                                        if seen_dyn_tids.insert(type_desc.id.0) {
+                                            dispatch_entries
+                                                .push((type_desc.id.0, fname.to_string()));
+                                        }
                                     }
                                 }
                             }
@@ -13103,6 +13115,23 @@ fn lower_call_method<'ctx>(
                                             )
                                             .or_llvm_err()?;
                                         Ok(coerced.into())
+                                    } else if arg_bv.is_int_value()
+                                        && expected.is_int_type()
+                                        && arg_bv.into_int_value().get_type()
+                                            != expected.into_int_type()
+                                    {
+                                        // int-width mismatch (i64 arg into an
+                                        // i1/i16/i32 param) — trunc/extend to
+                                        // the declared width.
+                                        let coerced = ctx
+                                            .builder()
+                                            .build_int_cast(
+                                                arg_bv.into_int_value(),
+                                                expected.into_int_type(),
+                                                "dyn_arg_icast",
+                                            )
+                                            .or_llvm_err()?;
+                                        Ok(coerced.into())
                                     } else {
                                         Ok(*arg)
                                     }
@@ -13132,6 +13161,36 @@ fn lower_call_method<'ctx>(
                                 )
                                 .or_llvm_err()?
                                 .into()
+                        } else if ret_val.is_int_value()
+                            && ret_val.into_int_value().get_type() != i64_type
+                        {
+                            // i1 Bool / narrow-int returns must widen — the
+                            // merge phi is i64 and a mixed-type incoming is
+                            // verifier-invalid IR.
+                            ctx.builder()
+                                .build_int_z_extend(
+                                    ret_val.into_int_value(),
+                                    i64_type,
+                                    "dyn_ret_zext",
+                                )
+                                .or_llvm_err()?
+                                .into()
+                        } else if ret_val.is_float_value() {
+                            let f64_ty = ctx.types().f64_type();
+                            let as_f64 = if ret_val.into_float_value().get_type() != f64_ty {
+                                ctx.builder()
+                                    .build_float_ext(
+                                        ret_val.into_float_value(),
+                                        f64_ty,
+                                        "dyn_ret_fpext",
+                                    )
+                                    .or_llvm_err()?
+                            } else {
+                                ret_val.into_float_value()
+                            };
+                            ctx.builder()
+                                .build_bit_cast(as_f64, i64_type, "dyn_ret_fbits")
+                                .or_llvm_err()?
                         } else {
                             ret_val
                         };
@@ -17784,6 +17843,13 @@ fn lower_call_method<'ctx>(
             // type-id switch `dyn:` dispatch uses, over every compiled
             // `Type.method` candidate with a matching arity.
             let mut entries: Vec<(u32, String)> = Vec::new();
+            // vbc.types can carry DUPLICATE descriptors for one type id
+            // (stdlib re-registration / duplicate public names debt).
+            // Each switch case value must be unique — a repeated id is
+            // verifier-invalid IR ("duplicate case value in switch")
+            // and SIGSEGVs the pass pipeline.
+            let mut seen_tids: std::collections::HashSet<u32> =
+                std::collections::HashSet::new();
             if let Some(vbc) = ctx.vbc_module() {
                 for type_desc in &vbc.types {
                     let tname = vbc.get_string(type_desc.name).unwrap_or("");
@@ -17794,7 +17860,9 @@ fn lower_call_method<'ctx>(
                     if let Some(f) = ctx.get_module().get_function(&qual) {
                         if f.count_basic_blocks() > 0 {
                             let pc = f.count_params() as usize;
-                            if pc == args.count as usize + 1 {
+                            if pc == args.count as usize + 1
+                                && seen_tids.insert(type_desc.id.0)
+                            {
                                 entries.push((type_desc.id.0, qual));
                             }
                         }
@@ -28313,6 +28381,22 @@ fn build_runtime_type_switch<'ctx>(
                             .build_ptr_to_int(arg_bv.into_pointer_value(), i64_type, "rts_arg_i64")
                             .or_llvm_err()?;
                         Ok(coerced.into())
+                    } else if arg_bv.is_int_value()
+                        && expected.is_int_type()
+                        && arg_bv.into_int_value().get_type() != expected.into_int_type()
+                    {
+                        // Narrow-int params (i16 rhs of `Int16.checked_mul`,
+                        // i1 Bool) declared at native width: an i64 arg fed
+                        // straight through is a verifier-invalid call.
+                        let coerced = ctx
+                            .builder()
+                            .build_int_cast(
+                                arg_bv.into_int_value(),
+                                expected.into_int_type(),
+                                "rts_arg_icast",
+                            )
+                            .or_llvm_err()?;
+                        Ok(coerced.into())
                     } else {
                         Ok(*arg)
                     }
@@ -28330,11 +28414,32 @@ fn build_runtime_type_switch<'ctx>(
             .try_as_basic_value()
             .basic()
             .unwrap_or(i64_type.const_zero().into());
+        // The merge phi is i64: every incoming must be coerced — a target
+        // whose return stayed at its native LLVM type (i1 Bool from
+        // `AllocError.eq`, f64 Float) fed the phi verifier-invalid IR
+        // ("instruction forward referenced with type 'i64'").
         let ret_i64: BasicValueEnum = if ret_val.is_pointer_value() {
             ctx.builder()
                 .build_ptr_to_int(ret_val.into_pointer_value(), i64_type, "rts_ret_i64")
                 .or_llvm_err()?
                 .into()
+        } else if ret_val.is_int_value() && ret_val.into_int_value().get_type() != i64_type {
+            ctx.builder()
+                .build_int_z_extend(ret_val.into_int_value(), i64_type, "rts_ret_zext")
+                .or_llvm_err()?
+                .into()
+        } else if ret_val.is_float_value() {
+            let f64_ty = ctx.types().f64_type();
+            let as_f64 = if ret_val.into_float_value().get_type() != f64_ty {
+                ctx.builder()
+                    .build_float_ext(ret_val.into_float_value(), f64_ty, "rts_ret_fpext")
+                    .or_llvm_err()?
+            } else {
+                ret_val.into_float_value()
+            };
+            ctx.builder()
+                .build_bit_cast(as_f64, i64_type, "rts_ret_fbits")
+                .or_llvm_err()?
         } else {
             ret_val
         };

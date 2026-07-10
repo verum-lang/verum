@@ -13333,6 +13333,16 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let span_alloca = builder
             .build_alloca(i64_type, "span")
             .or_llvm_err()?;
+        // Continuation-byte cursor for cont_loop. Hoisted to the entry
+        // block: an alloca inside the per-character path grows the stack
+        // on every multi-byte char, and the original emission placed it
+        // AFTER cont_check's terminator — instructions after a
+        // terminator are verifier-invalid IR ("Instruction does not
+        // dominate all uses"), which SIGSEGV'd the pass pipeline once
+        // this helper became reachable.
+        let j_alloca = builder
+            .build_alloca(i64_type, "j")
+            .or_llvm_err()?;
         builder.build_unconditional_branch(loop_header).or_llvm_err()?;
 
         // ^loop_header: i < len ? load_lead : ret_ok
@@ -13455,14 +13465,17 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let too_long = builder
             .build_int_compare(verum_llvm::IntPredicate::SGT, span_end, len, "too_long")
             .or_llvm_err()?;
+        let cont_init = context.append_basic_block(func, "cont_init");
         let cont_loop = context.append_basic_block(func, "cont_loop");
         let cont_body = context.append_basic_block(func, "cont_body");
         builder
-            .build_conditional_branch(too_long, ret_bad, cont_loop)
+            .build_conditional_branch(too_long, ret_bad, cont_init)
             .or_llvm_err()?;
-        let j_alloca = builder
-            .build_alloca(i64_type, "j")
-            .or_llvm_err()?;
+
+        // ^cont_init: j = i + 1 (first continuation byte). A separate
+        // block — the original code emitted these instructions after
+        // cont_check's conditional branch, i.e. after a terminator.
+        builder.position_at_end(cont_init);
         let one = i64_type.const_int(1, false);
         let j_init = builder
             .build_int_add(i_cur, one, "j_init")
