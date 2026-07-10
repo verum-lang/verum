@@ -421,7 +421,7 @@ is conformance-tested.
 
 ## Session 2026-07-09 — core/time full-hierarchy re-audit: interp 314→442 green (+mod suite, +6 regression files) + §G single-representation closure + qualified-path resolution + AOT-100% campaign opened
 
-**Interp: 8/9 time modules fully GREEN** (duration 105/107, instant 32/33, system_time 55/56, julian 49/49, rfc3339 52/52, duration_parse 60/60, cron 42/42, interval 33/33, mod 29/29); the 5 residual reds are pins of two open cross-cutting defects: List.sort-on-records raw-Value compare (sorted_durations/future_instants_sort/timestamps_sort — collections/interp task) and test-pipeline `d / 2` Div misroute (divide_then_multiply).
+**Interp: ALL 9 time modules fully GREEN — 442/442** (final state 2026-07-10 after the ORD-DISPATCH sort fix, the operator-overload kind-guard, and the type-position qualified-path gate; duration 107/107, instant 33/33, system_time 56/56, julian 49/49, rfc3339 52/52, duration_parse 60/60, cron 42/42, interval 33/33, mod 29/29 — plus runtime/mod integration 11/11 un-gated by the type-position fix).
 
 **Fundamental fixes landed** (commits b9a2b3f10, f0ccdba80, 9efe589fa, 04acf0cf4, 5fa2cfef7, + tests/audits):
 1. **§G/§H CLOSED** — deleted the Duration/Instant raw-Int intrinsic alias rows; heap-record Verum bodies are the single representation on every tier (`Duration.millis(1500).as_secs()` divided a heap POINTER pre-fix).
