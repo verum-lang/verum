@@ -18,3 +18,4 @@ public mount core.tracing.data.ExporterHandle;
 public mount core.tracing.data.NoopExporter;
 public mount core.tracing.data.StdoutExporter;
 public mount core.tracing.data.InMemoryExporter;
+public mount core.tracing.data.FileExporter;

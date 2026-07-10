@@ -14,7 +14,7 @@ mount core.tracing.{
     AlwaysOn, AlwaysOff, TraceIdRatio, ParentBased,
     always_on, always_off, trace_id_ratio, parent_based,
     TraceExportResult, ExportError, ExportErrorKind,
-    SpanExporter, ExporterHandle, NoopExporter, StdoutExporter, InMemoryExporter,
+    SpanExporter, ExporterHandle, NoopExporter, StdoutExporter, InMemoryExporter, FileExporter,
     SpanProcessor, ProcessorHandle, SimpleProcessor, BatchProcessor, CompositeProcessor,
     Span, SpanKind, SpanStatus, SpanStatusCode, SpanEvent, SpanLink, SpanData,
     IdGenerator, DefaultIdGenerator, IdGeneratorHandle, default_id_generator,
@@ -111,6 +111,12 @@ fn typecheck_in_memory() -> (InMemoryExporter, Text, Int) {
 
 fn typecheck_export(exp: &NoopExporter, spans: &List<SpanData>) -> TraceExportResult {
     exp.export(spans)
+}
+
+fn typecheck_file_exporter(spans: &List<SpanData>) -> TraceExportResult {
+    let e = FileExporter.new("/tmp/vcs-tracing-basic.log".into());
+    let h = ExporterHandle.file("/tmp/vcs-tracing-basic.log".into());
+    e.file_export(spans).combine(h.export(spans))
 }
 
 fn typecheck_exporter_handle(spans: &List<SpanData>) -> TraceExportResult {

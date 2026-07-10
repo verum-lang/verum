@@ -164,6 +164,7 @@ public mount .data.ExporterHandle;
 public mount .data.NoopExporter;
 public mount .data.StdoutExporter;
 public mount .data.InMemoryExporter;
+public mount .data.FileExporter;
 public mount .data.SpanProcessor;
 public mount .data.ProcessorHandle;
 public mount .data.SimpleProcessor;

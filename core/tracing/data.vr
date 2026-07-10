@@ -35,6 +35,7 @@ mount core.tracing.resource.{Resource};
 mount core.sync.mutex.{Mutex};
 mount core.tracing.attribute.{AttributeValue};
 mount core.async.channel.{Sender, Receiver, bounded};
+mount core.io.file.{read_to_string as file_read_to_string, write as file_write};
 mount core.async.task.{spawn_detached};
 mount core.async.timer.{sleep};
 mount core.sync.atomic.{AtomicU64, MemoryOrdering};
@@ -651,6 +652,69 @@ implement SpanExporter for InMemoryExporter {
 }
 
 // =============================================================================
+// FileExporter — newline-delimited span lines appended to a file
+// =============================================================================
+//
+
+// The observation channel is the FILESYSTEM: every export renders the
+// batch into canonical span lines (the StdoutExporter shape) and
+// appends them to `path`. Cross-handle and cross-process observation
+// come for free — read the file. This is the same role the OTel spec's
+// file exporter plays; a future revision moves to an O(1) append handle
+// once buffered appends are proven across both tiers.
+
+public type FileExporter is {
+    path: Text,
+};
+
+implement FileExporter {
+    public fn new(path: Text) -> FileExporter {
+        FileExporter { path: path }
+    }
+
+    public fn clone(&self) -> FileExporter {
+        FileExporter { path: self.path.clone() }
+    }
+
+    /// Uniquely-named worker so handle dispatch resolves on any
+    /// receiver-tracking tier. Read-append-write per batch: correct and
+    /// simple; suited to dev/test volumes, not production streams.
+    public fn file_export(&self, spans: &List<SpanData>) -> TraceExportResult {
+        let mut blob: Text = match file_read_to_string(&self.path) {
+            Result.Ok(existing) => existing,
+            Result.Err(_) => "".into(),
+        };
+        let mut i = 0;
+        while i < spans.len() {
+            let line = format_span_line(&spans[i]);
+            blob.push_str(&line);
+            blob.push('\n');
+            i = i + 1;
+        }
+        match file_write(&self.path, &blob) {
+            Result.Ok(_) => TraceExportResult.Success,
+            Result.Err(_) => TraceExportResult.Failure(ExportError.transport(
+                "file exporter: write failed".into(),
+            )),
+        }
+    }
+}
+
+implement SpanExporter for FileExporter {
+    fn export(&self, spans: &List<SpanData>) -> TraceExportResult {
+        self.file_export(spans)
+    }
+
+    fn force_flush(&self, _t: Duration) -> TraceExportResult {
+        TraceExportResult.Success
+    }
+
+    fn shutdown(&self, _t: Duration) -> TraceExportResult {
+        TraceExportResult.Success
+    }
+}
+
+// =============================================================================
 // ExporterHandle — closed-world dispatch over the in-tree exporters
 // =============================================================================
 
@@ -661,6 +725,8 @@ public type ExporterHandle is
     | EhStdout(StdoutExporter)
     /// Collecting test sink.
     | EhInMemory(InMemoryExporter)
+    /// Newline-delimited span lines appended to a file.
+    | EhFile(FileExporter)
     /// Third-party exporter behind the SpanExporter protocol. NOTE:
     /// invoking a custom exporter requires protocol-object dispatch,
     /// which the VBC interpreter does not implement yet — construction
@@ -679,6 +745,10 @@ implement ExporterHandle {
         ExporterHandle.EhInMemory(exporter)
     }
 
+    public fn file(path: Text) -> ExporterHandle {
+        ExporterHandle.EhFile(FileExporter.new(path))
+    }
+
     public fn custom(exporter: Shared<dyn SpanExporter>) -> ExporterHandle {
         ExporterHandle.EhCustom(exporter)
     }
@@ -688,6 +758,7 @@ implement ExporterHandle {
             ExporterHandle.EhNoop => TraceExportResult.Success,
             ExporterHandle.EhStdout(e) => e.stdout_export(spans),
             ExporterHandle.EhInMemory(e) => e.mem_export(spans),
+            ExporterHandle.EhFile(e) => e.file_export(spans),
             ExporterHandle.EhCustom(e) => e.export(spans),
         }
     }
@@ -697,6 +768,7 @@ implement ExporterHandle {
             ExporterHandle.EhNoop => TraceExportResult.Success,
             ExporterHandle.EhStdout(_) => TraceExportResult.Success,
             ExporterHandle.EhInMemory(_) => TraceExportResult.Success,
+            ExporterHandle.EhFile(_) => TraceExportResult.Success,
             ExporterHandle.EhCustom(e) => e.force_flush(_timeout),
         }
     }
@@ -706,6 +778,7 @@ implement ExporterHandle {
             ExporterHandle.EhNoop => TraceExportResult.Success,
             ExporterHandle.EhStdout(_) => TraceExportResult.Success,
             ExporterHandle.EhInMemory(_) => TraceExportResult.Success,
+            ExporterHandle.EhFile(_) => TraceExportResult.Success,
             ExporterHandle.EhCustom(e) => e.shutdown(timeout),
         }
     }
@@ -715,6 +788,7 @@ implement ExporterHandle {
             ExporterHandle.EhNoop => ExporterHandle.EhNoop,
             ExporterHandle.EhStdout(e) => ExporterHandle.EhStdout(e.clone()),
             ExporterHandle.EhInMemory(e) => ExporterHandle.EhInMemory(e.clone()),
+            ExporterHandle.EhFile(e) => ExporterHandle.EhFile(e.clone()),
             ExporterHandle.EhCustom(e) => ExporterHandle.EhCustom(e.clone()),
         }
     }

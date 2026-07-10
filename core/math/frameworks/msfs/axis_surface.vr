@@ -17,7 +17,7 @@
 // file carries the same statements as `@framework(msfs, …)`-cited
 // axioms over the shared `LAbsCandidate` witness protocol — exactly
 // the pattern of `meta_cls`'s `*_full` forms and
-// `absolute_layer::msfs_id_x_violates_pi_4`. Each axiom's content is
+// `absolute_layer.msfs_id_x_violates_pi_4`. Each axiom's content is
 // "the L_Abs triple remains contradictory along this axis / through
 // this bypass", i.e. requires the triple, ensures false.
 // =============================================================================
