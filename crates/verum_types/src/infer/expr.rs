@@ -201,6 +201,39 @@ impl TypeChecker {
         None
     }
 
+
+    /// EXHAUSTIVENESS-UNRESOLVED-PAYLOAD (#41): true when the scrutinee's
+    /// variant payloads contain an UNRESOLVED type — a unification var, a
+    /// bare generic type param (`T`), or an associated-type projection
+    /// (`::Output[...]`). Nested-constructor coverage over such a payload is
+    /// UNDECIDABLE at check time (`match f.poll(cx) { Poll.Ready(Ok(_)) |
+    /// Poll.Ready(Err(_)) | Poll.Pending }` inside `fn tag<F: Future>` — the
+    /// payload is `F.Output`), so a non-exhaustive verdict must degrade to
+    /// the W0601 warning path instead of hard-failing compilation with
+    /// `Ready(_) not covered` (13 async tests).
+    fn scrut_has_unresolved_payload(ty: &Type) -> bool {
+        fn unresolved(t: &Type) -> bool {
+            match t {
+                Type::Var(_) => true,
+                Type::Generic { name, args } => {
+                    name.as_str().starts_with("::")
+                        || verum_common::well_known_types::looks_like_type_param(name.as_str())
+                        || args.iter().any(unresolved)
+                }
+                Type::Named { args, .. } => args.iter().any(unresolved),
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } => unresolved(inner),
+                _ => false,
+            }
+        }
+        if let Type::Variant(variants) = ty {
+            variants.iter().any(|(_, payload)| unresolved(payload))
+        } else {
+            false
+        }
+    }
+
     /// Inner implementation of check_expr.
     fn check_expr_inner(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         let _global_guard = GlobalDepthGuard::enter()?;
@@ -494,7 +527,9 @@ impl TypeChecker {
                                 .join(", ");
                             let msg =
                                 format!("non-exhaustive patterns: `{}` not covered", witness_str);
-                            if has_complex_patterns {
+                            if has_complex_patterns
+                                || Self::scrut_has_unresolved_payload(&resolved_scrut)
+                            {
                                 // Complex patterns may cause false positives - use warning
                                 let diag = Diagnostic::new_warning(
                                     msg,
@@ -4744,7 +4779,9 @@ impl TypeChecker {
                                         "non-exhaustive patterns: `{}` not covered",
                                         witness_str
                                     );
-                                    if has_complex_patterns {
+                                    if has_complex_patterns
+                                        || Self::scrut_has_unresolved_payload(&resolved_scrut)
+                                    {
                                         let diag = Diagnostic::new_warning(
                                             msg,
                                             span_to_line_col(expr.span),

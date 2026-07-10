@@ -8325,6 +8325,24 @@ impl VbcCodegen {
                     self.ctx
                         .mounted_types
                         .insert(alias_name.clone(), full_path.join("."));
+                    // Task #13: a RENAMING type mount
+                    // (`mount X.{Duration as SysDuration}`) must also
+                    // land in the plain type-alias table so static-call
+                    // qualification resolves through it:
+                    // `SysDuration.from_nanos(x)` →
+                    // resolve_type_alias("SysDuration") = "Duration" →
+                    // lookup_function("Duration.from_nanos") → direct
+                    // Call. Pre-fix the alias existed only in
+                    // `mounted_types` (record-key resolution), so the
+                    // static callsite missed every lookup and degraded
+                    // to a CallM on an evaluated type-name value — the
+                    // runtime "method 'from_nanos' not found on
+                    // receiver of runtime kind Int" panic (the original
+                    // `Time.sleep` / SysDuration case).
+                    if alias_name != func_name {
+                        self.type_aliases
+                            .insert(alias_name.clone(), func_name.clone());
+                    }
                 }
 
                 // Try to look up the function in the registry with various qualified names

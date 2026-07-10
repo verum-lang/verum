@@ -610,6 +610,21 @@ impl TypeChecker {
                                     resolved.as_str(),
                                     item_name.as_str(),
                                 )?;
+                                // Task #13: braced-item ALIASES
+                                // (`mount X.{Widget as W}`) were dropped
+                                // by this shortcut — only the original
+                                // name got registered and `W.make(7)`
+                                // failed E100 'unbound variable: W'
+                                // (the cross-file `process_import` route
+                                // threads `local_name`, but this early
+                                // return meant it never ran).  Bind the
+                                // alias to the freshly-imported item.
+                                if let Maybe::Some(alias) = &tree.alias {
+                                    self.register_mount_item_alias(
+                                        item_name.as_str(),
+                                        alias,
+                                    );
+                                }
                             }
                         }
                         return Ok(());
@@ -951,6 +966,44 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    /// Bind a braced-mount item ALIAS (`mount X.{Widget as W}`) after
+    /// the original item has been imported (task #13).
+    ///
+    /// Mirrors the `type W is Widget;` alias-decl registration for
+    /// TYPES (alias table + unifier + type_defs Named indirection) so
+    /// the alias works in type position, static calls (`W.make(...)`)
+    /// and unification; VALUES / functions re-bind the original's
+    /// scheme under the alias name.
+    fn register_mount_item_alias(&mut self, item_name: &str, alias: &verum_ast::Ident) {
+        let alias_text: Text = alias.name.clone();
+        if alias_text.as_str() == item_name {
+            return;
+        }
+        // TYPE alias — mirror the TypeDeclBody::Alias registration.
+        if self.ctx.lookup_type(item_name).is_some() {
+            let aliased = Type::Named {
+                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                    Text::from(item_name),
+                    alias.span,
+                )),
+                args: List::new(),
+            };
+            self.ctx.define_alias(alias_text.clone(), aliased.clone());
+            self.unifier
+                .register_type_alias(alias_text.clone(), aliased);
+            let named = Type::Named {
+                path: verum_ast::ty::Path::single(alias.clone()),
+                args: List::new(),
+            };
+            self.define_type_in_current_module(alias_text.clone(), named);
+        }
+        // VALUE / function alias — re-bind the original's scheme.
+        let orig: Text = Text::from(item_name);
+        if let Some(scheme) = self.ctx.env.lookup(&orig).cloned() {
+            self.ctx.env.insert(alias_text, scheme);
+        }
     }
 
     /// Import a single item from an inline module.
