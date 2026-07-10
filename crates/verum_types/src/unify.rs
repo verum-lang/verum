@@ -3087,13 +3087,36 @@ impl Unifier {
                             }
 
                             // Unify each Generic arg with the corresponding extracted arg
+                            // TEMPLATE-VAR-CAPTURE (#41): when the actual
+                            // Variant is the UNSUBSTITUTED template (its
+                            // payloads still carry the declaration's own
+                            // Type::Vars), the extracted args ARE those
+                            // template vars. Unifying `Int` against them
+                            // binds the TEMPLATE globally — the first
+                            // `match r { SR.Right(x) => ... }` over
+                            // `SelectResult<Int, Int>` pinned `B := Int`
+                            // forever, so a later `SelectResult<Int, Text>`
+                            // failed "expected 'Text', found 'Int'".
+                            // Freshen template vars (one consistent
+                            // substitution across all extracted args) so
+                            // the binding is per-use.
+                            let mut freshen = Substitution::new();
+                            for ex in extracted_args.iter() {
+                                for v in ex.free_vars() {
+                                    if type_var_order.contains(&v)
+                                        && !freshen.contains_key(&v)
+                                    {
+                                        freshen.insert(v, Type::Var(TypeVar::fresh()));
+                                    }
+                                }
+                            }
                             let mut subst = Substitution::new();
                             for (generic_arg, extracted_arg) in
                                 args.iter().zip(extracted_args.iter())
                             {
                                 let s = self.unify_inner(
                                     &generic_arg.apply_subst(&subst),
-                                    &extracted_arg.apply_subst(&subst),
+                                    &extracted_arg.apply_subst(&freshen).apply_subst(&subst),
                                     span,
                                 )?;
                                 subst = subst.compose(&s);

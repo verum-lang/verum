@@ -14,6 +14,27 @@ use verum_ast::span::Span;
 use verum_common::well_known_types::WellKnownType as WKT;
 use verum_common::{List, Map, Maybe, Set, Text, ToText};
 
+
+/// TEMPLATE-VAR-FRESHEN (#41): the get_constructors fallbacks below build a
+/// `Type::Variant` from the REGISTRY TEMPLATE payload types, whose free
+/// `Type::Var`s are the type's ORIGINAL declaration variables. Binding a
+/// pattern against those template vars lets the first match GLOBALLY capture
+/// them in the unifier (`match r { SelectResult.Right(x) => assert_eq(x, 0) }`
+/// over `SelectResult<Int, Int>` bound the template `B := Int` forever, so a
+/// later `SelectResult<Int, Text>` match failed "expected 'Int', found
+/// 'Text'"). Instantiate the template with fresh unification vars per use.
+fn freshen_template_vars(ty: &Type) -> Type {
+    let free = ty.free_vars();
+    if free.is_empty() {
+        return ty.clone();
+    }
+    let mut subst = crate::Substitution::new();
+    for v in free {
+        subst.insert(v, Type::Var(TypeVar::fresh()));
+    }
+    ty.apply_subst(&subst)
+}
+
 impl TypeChecker {
     /// Check compound destructuring assignment: (x, y) += (dx, dy)
     ///
@@ -994,7 +1015,8 @@ impl TypeChecker {
                                 variants.insert(ctor.name.clone(), payload_ty);
                             }
                             if !variants.is_empty() {
-                                expanded_ty = Type::Variant(variants);
+                                expanded_ty =
+                                    freshen_template_vars(&Type::Variant(variants));
                             }
                         }
                     }
@@ -1496,7 +1518,8 @@ impl TypeChecker {
                             variants.insert(ctor.name.clone(), payload_ty);
                         }
                         if !variants.is_empty() {
-                            let variant_type = Type::Variant(variants);
+                            let variant_type =
+                                freshen_template_vars(&Type::Variant(variants));
                             return self.bind_pattern(pattern, &variant_type);
                         }
                     }
@@ -1593,7 +1616,11 @@ impl TypeChecker {
                                     variants.insert(ctor.name.clone(), payload_ty);
                                 }
                                 if !variants.is_empty() {
-                                    variant_map = Some(variants);
+                                    let freshened =
+                                        freshen_template_vars(&Type::Variant(variants));
+                                    if let Type::Variant(vs) = freshened {
+                                        variant_map = Some(vs);
+                                    }
                                 }
                             }
                         }
