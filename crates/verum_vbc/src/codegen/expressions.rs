@@ -36413,6 +36413,15 @@ impl FreeVarAnalyzer {
                 self.visit_expr(expr);
             }
 
+            // f-string / safe-prefix interpolation: embedded expressions
+            // reference enclosing-scope variables, which must be captured
+            // when the interpolation appears inside a closure body.
+            ExprKind::InterpolatedString { exprs, .. } => {
+                for e in exprs.iter() {
+                    self.visit_expr(e);
+                }
+            }
+
             // Note: Let bindings are statements (StmtKind::Let), not expressions
             // Pattern matching "let" in conditions is handled via ConditionKind::Let
 
@@ -36663,6 +36672,44 @@ mod tests {
     fn test_expressions_module_exists() {
         // Canary: module compiles and links. An empty body is enough —
         // if this file failed to compile, the test binary wouldn't link.
+    }
+
+    /// Regression (register A3(b)): variables referenced ONLY inside
+    /// an f-string interpolation must be reported as free variables,
+    /// or closures like `map_err(|_| E(f"{i}"))` never capture `i`
+    /// and the whole enclosing fn lenient-stubs with
+    /// "undefined variable: i".
+    #[test]
+    fn free_var_analyzer_sees_through_interpolated_strings() {
+        use super::FreeVarAnalyzer;
+        use verum_ast::{Expr, ExprKind, FileId, Span};
+        use verum_ast::ty::{Ident, Path};
+
+        let span = Span::new(0, 0, FileId::new(0));
+        let free_ref = Expr::new(
+            ExprKind::Path(Path::single(Ident::new("i", span))),
+            span,
+        );
+        let bound_ref = Expr::new(
+            ExprKind::Path(Path::single(Ident::new("x", span))),
+            span,
+        );
+        let fstring = Expr::new(
+            ExprKind::InterpolatedString {
+                handler: "f".into(),
+                parts: ["".into(), "-".into(), "".into()]
+                    .into_iter()
+                    .collect(),
+                exprs: [free_ref, bound_ref].into_iter().collect(),
+            },
+            span,
+        );
+
+        // `x` is a closure parameter (bound); `i` comes from the
+        // enclosing scope and must surface as free.
+        let mut analyzer = FreeVarAnalyzer::new(&["x".to_string()]);
+        analyzer.visit_expr(&fstring);
+        assert_eq!(analyzer.free_vars(), vec!["i".to_string()]);
     }
 
     /// Cross-compilation-correctness: when the build target is Linux,
