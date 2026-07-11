@@ -134,7 +134,7 @@ Key difference: In `fn<R>(...)`, `R` is universally quantified inside the functi
 | **Keywords** | `context`, `provide`, `using` | (inferred from code) |
 | **Values** | Database, Logger, FS, etc. | Pure, IO, Async, Fallible, Mutates |
 | **Phase** | Runtime (~5-30ns) | Compile-time (0ns) |
-| **Crate** | `verum_context` | `verum_types/computational_properties.rs` |
+| **Crate** | (context runtime lives in verum_compiler/verum_vbc) | `verum_types/computational_properties.rs` |
 
 ```rust
 // Function type combines BOTH:
@@ -162,7 +162,7 @@ Function {
 
 ```rust
 // CORRECT
-use verum_std::core::{List, Text, Map, Set, Maybe, Heap, Shared};
+use verum_common::core::{List, Text, Map, Set, Maybe, Heap, Shared};
 
 // FORBIDDEN - Never use Rust std types
 use std::vec::Vec;        // Use List
@@ -230,7 +230,7 @@ use std::collections::*;  // Use Map/Set
 | **verum_lexer** | Tokenization (logos) | `token.rs`, `lexer.rs` |
 | **verum_fast_parser** | Fast recursive-descent parser | `lib.rs`, main parser used |
 | **verum_parser** | Legacy parser (partial) | Kept for compatibility |
-| **verum_types** | Type checking | `infer.rs`, `unify.rs`, `refinement.rs` |
+| **verum_types** | Type checking | `infer/` (dir), `unify.rs`, `refinement.rs` |
 | **verum_smt** | SMT verification (z3) | `z3_backend.rs`, `verify.rs`, `tactics.rs` |
 | **verum_vbc** | **VBC bytecode** (core execution) | `codegen/`, `interpreter/`, `intrinsics/` |
 | **verum_codegen** | VBC→LLVM (AOT path) | `llvm/`, VBC lowering to LLVM IR |
@@ -240,6 +240,12 @@ use std::collections::*;  // Use Map/Set
 | **verum_lsp** | IDE support, script parsing | `backend.rs`, `completion.rs`, `script/` |
 | **verum_interactive** | REPL and Playbook TUI | `playbook/`, re-exports from verum_lsp |
 | **verum_cli** | CLI toolchain | `commands/` (build, run, test, playbook) |
+| **verum_kernel** | Proof kernel (trusted core) | `proof_tree.rs` (KernelRule) |
+| **verum_syntax** | Lossless red-green tree parser infra | grammar-facing surface |
+| **verum_dap** | Debug Adapter Protocol | debugger integration |
+| **verum_protocol_types** | Shared protocol type defs | LSP/DAP wire types |
+| **verum_stdlib_precompiler** | Bakes core/ into the embedded .vbca archive | build-time tool |
+| **verum_core** | Core support crate | shared runtime pieces |
 
 ### core/ Directory (Verum Standard Library)
 
@@ -297,11 +303,11 @@ perf(crate): Optimize by X%
 
 ```
 1. verum_common
-2. verum_cbgr, verum_std
-3. verum_ast, verum_lexer, verum_parser, verum_diagnostics, verum_error
-4. verum_types, verum_smt, verum_modules
-5. verum_runtime, verum_codegen, verum_context, verum_resolve, verum_verification
-6. verum_compiler (includes derives module), verum_lsp, verum_cli
+2. verum_cbgr
+3. verum_ast, verum_lexer, verum_syntax, verum_fast_parser, verum_parser, verum_diagnostics, verum_error
+4. verum_types, verum_smt, verum_kernel, verum_modules
+5. verum_vbc, verum_codegen, verum_verification
+6. verum_compiler, verum_lsp, verum_dap, verum_interactive, verum_cli, verum_stdlib_precompiler
 ```
 
 ## Reference Documentation
