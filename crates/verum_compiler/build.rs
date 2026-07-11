@@ -19,6 +19,63 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
+
+/// BAKE-RACE-LOCK-1 (task #44): advisory inter-process lock for the stdlib
+/// precompile refresh.  O_EXCL lockfile carrying `pid@unix-seconds`; waits
+/// up to ~10 minutes for a live holder (a real bake takes ~7), steals locks
+/// older than 30 minutes (crashed holder).  Returns true when THIS process
+/// owns the lock (and must remove it); false when we proceeded lockless
+/// after exhausting the wait (never wedge a build forever on lock trouble —
+/// the double-checked checksum still bounds the damage to the pre-fix
+/// behaviour).
+fn acquire_bake_lock(lock_path: &std::path::Path) -> bool {
+    use std::io::Write;
+    let now_secs = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(lock_path)
+        {
+            Ok(mut f) => {
+                let _ = write!(f, "{}@{}", std::process::id(), now_secs());
+                return true;
+            }
+            Err(_) => {
+                // Stale-steal: a holder older than 30 minutes is presumed dead.
+                let stale = std::fs::read_to_string(lock_path)
+                    .ok()
+                    .and_then(|s| {
+                        s.trim()
+                            .rsplit('@')
+                            .next()
+                            .and_then(|ts| ts.parse::<u64>().ok())
+                    })
+                    .map(|held_at| now_secs().saturating_sub(held_at) > 30 * 60)
+                    .unwrap_or(true); // unreadable/empty lock counts as stale
+                if stale {
+                    let _ = std::fs::remove_file(lock_path);
+                    continue;
+                }
+                if std::time::Instant::now() >= deadline {
+                    println!(
+                        "cargo:warning=Stdlib precompile: bake lock at {} held past the 10-minute wait — proceeding WITHOUT the lock (double-checked checksum still applies)",
+                        lock_path.display()
+                    );
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
+    }
+}
+
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -223,6 +280,44 @@ fn main() {
             _ => true,
         };
         if needs_refresh {
+            // ── BAKE-RACE-LOCK-1 (task #44) ──────────────────────────────
+            // Two hazards observed live (2026-07-11): (a) CONCURRENT builds
+            // (this build + a workspace `cargo check` + peer sessions) each
+            // saw the missing/stale checksum and spawned their own
+            // precompiler into the SAME output dir — last-writer-wins
+            // decided the artifact, and one racer running a stale
+            // precompiler image silently discarded a format bump while the
+            // checksum recorded success; (b) the precompiler writes the two
+            // artifacts IN PLACE over ~seconds, so a concurrent build.rs
+            // embed step could read a torn/partial archive.
+            //
+            // Fix: (1) an advisory inter-process lock via O_EXCL lockfile
+            // with stale-steal (a crashed holder can't wedge builds
+            // forever); (2) DOUBLE-CHECK the checksum after acquiring —
+            // if another process finished the bake while we waited, reuse
+            // its result; (3) the bake writes into a per-PID STAGING dir
+            // and the artifacts move into place via atomic rename, so
+            // readers only ever observe a complete pair.
+            let lock_path = precompile_dir.join(".bake.lock");
+            let _ = std::fs::create_dir_all(&precompile_dir);
+            let lock_acquired = acquire_bake_lock(&lock_path);
+            // Double-checked refresh decision under the lock.
+            let still_needs_refresh = {
+                let stored_now = std::fs::read_to_string(&checksum_path)
+                    .ok()
+                    .map(|s| s.trim().to_string());
+                !matches!(
+                    &stored_now,
+                    Some(h) if h.as_str() == current_hash.as_str()
+                        && precompile_archive.is_file()
+                )
+            };
+            if !still_needs_refresh {
+                println!(
+                    "cargo:warning=Stdlib precompile: another build refreshed the artefacts while we waited on the bake lock (blake3 {}) — reusing",
+                    &current_hash[..16]
+                );
+            } else {
             println!(
                 "cargo:warning=Refreshing stdlib precompile artefacts (blake3 changed or archive missing)"
             );
@@ -238,6 +333,10 @@ fn main() {
             // hour stalls we hit when the outer build invalidates
             // the precompile checksum.
             let nested_target = project_root.join("target").join("precompile-bootstrap");
+            // BAKE-RACE-LOCK-1(3): stage, then atomically publish.
+            let staging_dir = precompile_dir.join(format!(".staging-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            let _ = std::fs::create_dir_all(&staging_dir);
             let status = std::process::Command::new("cargo")
                 .args([
                     "run",
@@ -252,21 +351,37 @@ fn main() {
                 .current_dir(&project_root)
                 .env("VERUM_NO_AUTO_PRECOMPILE", "1") // prevent recursion
                 .env("CARGO_TARGET_DIR", &nested_target) // belt-and-braces
-                // Direct the archive at THIS build's target root (matches
-                // where we read+embed it below), so isolated builds don't
-                // clobber the shared `<project_root>/target` archive.
-                .env("VERUM_PRECOMPILE_OUT_DIR", &precompile_dir)
+                // Bake into THIS build's private staging dir; the publish
+                // below renames the pair into the shared location only on
+                // success (readers never see a torn/partial archive).
+                .env("VERUM_PRECOMPILE_OUT_DIR", &staging_dir)
                 .status();
             match status {
                 Ok(s) if s.success() => {
-                    let _ = std::fs::create_dir_all(checksum_path.parent().unwrap());
-                    let _ = std::fs::write(&checksum_path, &current_hash);
-                    println!(
-                        "cargo:warning=Stdlib precompile refreshed; checksum updated to {}",
-                        &current_hash[..16]
-                    );
+                    let staged_vbca = staging_dir.join("runtime.vbca");
+                    let staged_meta = staging_dir.join("runtime.core_metadata");
+                    let publish_meta = precompile_dir.join("runtime.core_metadata");
+                    let published = staged_vbca.is_file()
+                        && staged_meta.is_file()
+                        && std::fs::rename(&staged_meta, &publish_meta).is_ok()
+                        && std::fs::rename(&staged_vbca, &precompile_archive).is_ok();
+                    if published {
+                        let _ = std::fs::create_dir_all(checksum_path.parent().unwrap());
+                        let _ = std::fs::write(&checksum_path, &current_hash);
+                        println!(
+                            "cargo:warning=Stdlib precompile refreshed; checksum updated to {}",
+                            &current_hash[..16]
+                        );
+                    } else {
+                        println!(
+                            "cargo:warning=Stdlib precompile staging publish FAILED (missing or unrenameable staged artefacts at {}) — continuing with last-good artefacts",
+                            staging_dir.display()
+                        );
+                    }
+                    let _ = std::fs::remove_dir_all(&staging_dir);
                 }
                 Ok(s) => {
+                    let _ = std::fs::remove_dir_all(&staging_dir);
                     println!(
                         "cargo:warning=verum_stdlib_precompiler exited with {} — \
                          continuing with stale artefacts (typecheck/codegen will use last-good)",
@@ -274,12 +389,17 @@ fn main() {
                     );
                 }
                 Err(e) => {
+                    let _ = std::fs::remove_dir_all(&staging_dir);
                     println!(
                         "cargo:warning=verum_stdlib_precompiler invocation failed: {} — \
                          continuing with stale artefacts",
                         e
                     );
                 }
+            }
+            }
+            if lock_acquired {
+                let _ = std::fs::remove_file(&lock_path);
             }
         } else {
             println!(
