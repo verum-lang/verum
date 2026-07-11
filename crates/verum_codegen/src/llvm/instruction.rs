@@ -18080,6 +18080,70 @@ fn lower_call_method<'ctx>(
         receiver_val = adjusted.into();
     }
 
+    // CALLM-RECEIVER-SPILL (task #22 leg 1): VBC never emits `Ref` for a
+    // method RECEIVER, so `self.ns.cmp(&other.ns)` passes the raw GetF
+    // VALUE while a `&self`-scalar callee (`Int.cmp`, primitives.vr:684)
+    // begins with ChkRef/Deref — at AOT that is a real load through the
+    // value (fault addr = the value itself, e.g. 1e9 for
+    // `Duration.secs(1) <`). Tier-0 tolerates it via NaN-box runtime
+    // tags. When the RESOLVED callee's param 0 is declared `&scalar`
+    // and the receiver register holds a value (not an already-tracked
+    // address), spill it to a stack slot and pass the ADDRESS — the
+    // exact `ref_prim` recipe `lower_ref` uses for explicit `&x`.
+    // Receivers already carrying addresses (ref-params, GetE element
+    // refs) pass through untouched.
+    let callee_wants_scalar_ref_self = param_count > args.count as usize
+        && ctx.vbc_module().is_some_and(|vbc| {
+            // O(1) via the Phase-1.5 name index; the descriptor lookup
+            // stays on the module for the param type_refs.
+            ctx.func_name_index()
+                .and_then(|ix| ix.find_by_name(&func_name))
+                .and_then(|entry| vbc.functions.get(entry.index))
+                .is_some_and(|fd| {
+                    fd.params.first().is_some_and(|p| {
+                        matches!(
+                            &p.type_ref,
+                            verum_vbc::types::TypeRef::Reference { inner, .. }
+                                if matches!(
+                                    inner.as_ref(),
+                                    verum_vbc::types::TypeRef::Concrete(tid)
+                                        if matches!(
+                                            *tid,
+                                            verum_vbc::types::TypeId::INT
+                                                | verum_vbc::types::TypeId::FLOAT
+                                                | verum_vbc::types::TypeId::BOOL
+                                                | verum_vbc::types::TypeId::U8
+                                                | verum_vbc::types::TypeId::I8
+                                                | verum_vbc::types::TypeId::U16
+                                                | verum_vbc::types::TypeId::I16
+                                                | verum_vbc::types::TypeId::U32
+                                                | verum_vbc::types::TypeId::I32
+                                                | verum_vbc::types::TypeId::U64
+                                                | verum_vbc::types::TypeId::F32
+                                        )
+                                )
+                        )
+                    })
+                })
+        });
+    if callee_wants_scalar_ref_self
+        && !ctx.is_ref_param_register(receiver.0)
+        && ctx.get_gete_element_ptr(receiver.0).is_none()
+    {
+        let i64_type = ctx.types().i64_type();
+        let recv_i64 = as_i64(ctx, receiver_val, "recv_spill_val")?;
+        let slot = ctx
+            .builder()
+            .build_alloca(i64_type, "recv_spill")
+            .or_llvm_err()?;
+        ctx.builder().build_store(slot, recv_i64).or_llvm_err()?;
+        let addr = ctx
+            .builder()
+            .build_ptr_to_int(slot, i64_type, "recv_spill_addr")
+            .or_llvm_err()?;
+        receiver_val = addr.into();
+    }
+
     // Collect all available values: [receiver, arg0, arg1, ...]
     let mut all_vals: Vec<BasicValueEnum> = Vec::with_capacity(args.count as usize + 1);
     all_vals.push(receiver_val);
