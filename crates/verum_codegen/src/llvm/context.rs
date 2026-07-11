@@ -68,7 +68,40 @@ impl FuncNameIndex {
                 name: fname.to_string(),
                 param_count: func_desc.params.len() as u16,
             };
-            by_name.insert(fname.to_string(), entry.clone());
+            // NAME-OWNERSHIP COHERENCE (task #22 regression root): the
+            // by_name winner MUST be the same descriptor Phase-2 body
+            // dedup lowers — FIRST NON-EMPTY body, positional-first when
+            // all are empty (the Tier-0 find_function_by_name rule).
+            // The historical blind insert was LAST-wins: for the two
+            // `Int.checked_mul` descriptors (by-value first, `&self`
+            // ChkRef/Deref variant last) every index consumer — call
+            // resolution, the BODY-FACT receiver/arg spill scans — read
+            // the `&self` BODY while the by-value one was lowered, so
+            // callers spilled an address into a by-value callee
+            // (parse("5m") → garbage × unit → Overflow → Err).
+            let has_body = |fd: &verum_vbc::module::FunctionDescriptor| -> bool {
+                fd.bytecode_length > 0
+                    || fd
+                        .instructions
+                        .as_ref()
+                        .map(|i| !i.is_empty())
+                        .unwrap_or(false)
+            };
+            match by_name.get(fname) {
+                Some(existing) => {
+                    let existing_has_body = vbc_module
+                        .functions
+                        .get(existing.index)
+                        .map(has_body)
+                        .unwrap_or(false);
+                    if !existing_has_body && has_body(func_desc) {
+                        by_name.insert(fname.to_string(), entry.clone());
+                    }
+                }
+                None => {
+                    by_name.insert(fname.to_string(), entry.clone());
+                }
+            }
             // Index by method suffix (part after last '.')
             if let Some(dot_pos) = fname.rfind('.') {
                 let suffix = &fname[dot_pos..]; // e.g., ".push"
