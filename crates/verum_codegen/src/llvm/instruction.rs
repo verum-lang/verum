@@ -29413,12 +29413,64 @@ fn lower_set_element<'ctx>(
     let index = as_i64(ctx, ctx.get_register(idx.0)?, "index")?;
     let val = ctx.get_register(value.0)?;
     let i64_type = ctx.types().i64_type();
+    let i8_type = ctx.types().i8_type();
+    let ptr_type = ctx.types().ptr_type();
     let is_list = ctx.is_list_register(arr.0);
+    let is_slice = ctx.is_slice_register(arr.0);
+    let val_i64 = as_i64(ctx, val, "sete_val")?;
+
+    // AOT-SETE-SLICE-PARITY-1: the WRITE side must mirror the READ side's
+    // slice model exactly (the read/write representation asymmetry on
+    // slices is a kernel-soundness class — the Tier-0 twin was
+    // SET_E-FATREF-1).  Pre-fix `lower_set_element` had NO slice handling
+    // at all: `buf[i] = v` through a slice-shaped value treated the Pack
+    // DESCRIPTOR `{ptr@24, len@32}` as the element array and stored an
+    // i64 at descriptor_base + idx*8 — stomping the descriptor's data
+    // pointer/len words (later reads through the descriptor then SEGV or
+    // return garbage; a large share of the AOT text-suite signal-crash
+    // cluster).  Byte-slices store the TRUNCATED byte through the
+    // descriptor's data ptr, exactly inverse to `lower_get_element`'s
+    // zext byte read.
+    //
+    // Marked-slice fast path (compile-time slice mark).
+    if is_slice {
+        // SAFETY: GEP into the Pack/slice descriptor to read the backing
+        // data pointer at offset 24 (past the 24-byte object header).
+        let ptr_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(
+                    i8_type,
+                    arr_ptr,
+                    &[i64_type.const_int(24, false)],
+                    "sete_slice_ptr_slot",
+                )
+                .or_llvm_err()?
+        };
+        let data_int = ctx
+            .builder()
+            .build_load(i64_type, ptr_slot, "sete_slice_data_int")
+            .or_llvm_err()?
+            .into_int_value();
+        let data_ptr = ctx
+            .builder()
+            .build_int_to_ptr(data_int, ptr_type, "sete_slice_data")
+            .or_llvm_err()?;
+        let byte_val = ctx
+            .builder()
+            .build_int_truncate(val_i64, i8_type, "sete_byte_val")
+            .or_llvm_err()?;
+        // SAFETY: GEP into the slice backing data to store a byte at the given index.
+        let byte_ptr = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_type, data_ptr, &[index], "sete_byte_ptr")
+                .or_llvm_err()?
+        };
+        ctx.builder().build_store(byte_ptr, byte_val).or_llvm_err()?;
+        return Ok(());
+    }
 
     // For list registers, load the backing pointer from LIST_PTR_OFFSET (field 0 = offset 24)
-    let data_ptr = if is_list {
-        let ptr_type = ctx.types().ptr_type();
-        let i8_type = ctx.types().i8_type();
+    if is_list {
         // SAFETY: GEP into the List object (NewG layout) to read the backing data pointer at LIST_PTR_OFFSET (24)
         let backing_slot = unsafe {
             ctx.builder()
@@ -29435,25 +29487,125 @@ fn lower_set_element<'ctx>(
             .build_load(i64_type, backing_slot, "backing_int")
             .or_llvm_err()?
             .into_int_value();
-        ctx.builder()
+        let data_ptr = ctx
+            .builder()
             .build_int_to_ptr(backing_int, ptr_type, "backing_ptr")
-            .or_llvm_err()?
-    } else {
-        arr_ptr
-    };
+            .or_llvm_err()?;
+        // GEP into the element array
+        // SAFETY: GEP into list data array to access an element; the index is validated against the list length before access
+        let elem_ptr = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr")
+                .or_llvm_err()?
+        };
+        ctx.builder().build_store(elem_ptr, val).or_llvm_err()?;
+        return Ok(());
+    }
 
-    // GEP into the element array
-    // SAFETY: GEP into list data array to access an element; the index is validated against the list length before access
-    let elem_ptr = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr")
-            .or_llvm_err()?
-    };
+    // Unmarked, non-list: runtime PACK-HEADER-STAMP branch — the exact
+    // mirror of `lower_get_element`'s.  A slice that crossed a function
+    // boundary as a `&[Byte]` param (or came back out of a record field)
+    // carries no compile-time mark; discriminate at runtime by the
+    // stamped header TypeId (TUPLE 521 / BYTE_SLICE 528 — PACK-HEADER-
+    // STAMP-1) and byte-store through the descriptor's data ptr;
+    // everything else keeps the pre-existing direct i64-stride store.
+    let i32_type = ctx.types().context().i32_type();
+    let cur_bb = ctx
+        .builder()
+        .get_insert_block()
+        .or_internal("lower_set_element: no insert block")?;
+    let func = cur_bb
+        .get_parent()
+        .or_internal("lower_set_element: block has no parent")?;
+    let llvm_ctx = ctx.llvm_context();
+    let bb_pack = llvm_ctx.append_basic_block(func, "sete_pack");
+    let bb_orig = llvm_ctx.append_basic_block(func, "sete_orig");
+    let bb_merge = llvm_ctx.append_basic_block(func, "sete_merge");
 
+    let tid = ctx
+        .builder()
+        .build_load(i32_type, arr_ptr, "sete_hdr_tid")
+        .or_llvm_err()?
+        .into_int_value();
+    let is_tuple_pack = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::EQ,
+            tid,
+            i32_type.const_int(TypeId::TUPLE.0 as u64, false),
+            "sete_is_tuple_pack",
+        )
+        .or_llvm_err()?;
+    let is_byte_slice = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::EQ,
+            tid,
+            i32_type.const_int(TypeId::BYTE_SLICE.0 as u64, false),
+            "sete_is_byte_slice",
+        )
+        .or_llvm_err()?;
+    let is_pack = ctx
+        .builder()
+        .build_or(is_tuple_pack, is_byte_slice, "sete_is_pack")
+        .or_llvm_err()?;
     ctx.builder()
-        .build_store(elem_ptr, val)
+        .build_conditional_branch(is_pack, bb_pack, bb_orig)
         .or_llvm_err()?;
 
+    // bb_pack: byte-stride store through the Pack's data ptr (field 0 @24).
+    ctx.builder().position_at_end(bb_pack);
+    // SAFETY: GEP into the Pack object to read the backing data pointer at offset 24.
+    let pk_ptr_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(
+                i8_type,
+                arr_ptr,
+                &[i64_type.const_int(24, false)],
+                "sete_pk_ptr_slot",
+            )
+            .or_llvm_err()?
+    };
+    let pk_data_int = ctx
+        .builder()
+        .build_load(i64_type, pk_ptr_slot, "sete_pk_data_int")
+        .or_llvm_err()?
+        .into_int_value();
+    let pk_data = ctx
+        .builder()
+        .build_int_to_ptr(pk_data_int, ptr_type, "sete_pk_data")
+        .or_llvm_err()?;
+    let pk_byte_val = ctx
+        .builder()
+        .build_int_truncate(val_i64, i8_type, "sete_pk_byte_val")
+        .or_llvm_err()?;
+    // SAFETY: GEP into the slice backing data to store a byte at the given index.
+    let pk_byte_ptr = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i8_type, pk_data, &[index], "sete_pk_byte_ptr")
+            .or_llvm_err()?
+    };
+    ctx.builder()
+        .build_store(pk_byte_ptr, pk_byte_val)
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_unconditional_branch(bb_merge)
+        .or_llvm_err()?;
+
+    // bb_orig: the pre-existing direct i64-stride store.
+    ctx.builder().position_at_end(bb_orig);
+    // SAFETY: GEP into the element array; index validated upstream.
+    let elem_ptr = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i64_type, arr_ptr, &[index], "elem_ptr")
+            .or_llvm_err()?
+    };
+    ctx.builder().build_store(elem_ptr, val).or_llvm_err()?;
+    ctx.builder()
+        .build_unconditional_branch(bb_merge)
+        .or_llvm_err()?;
+
+    ctx.builder().position_at_end(bb_merge);
     Ok(())
 }
 
