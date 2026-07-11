@@ -329,21 +329,41 @@ pub fn execute(opts: TestOptions) -> Result<()> {
 
     // Match the main thread's 16 MiB stack so workers don't SIGBUS
     // mid-stdlib-load.
+    // GENERATE-NATIVE-WORKER-RACE-1 (task #49): a 1-thread pool is NOT
+    // "no parallelism" — `p.install(run_one)` moves the whole compiler
+    // pipeline onto a rayon WORKER thread, and LLVM's lazily
+    // cxa-guard-registered pass statics then race the pool's park/wake
+    // path (the exact §23 semaphore corruption the eager
+    // `Target::initialize_native` + pipeline rayon-fence were built
+    // against — both assume codegen runs on the MAIN thread). With
+    // `--test-threads 1` skip the pool entirely so the single test
+    // executes on the main thread — the same stable configuration as
+    // `verum build`.
     let pool: Option<rayon::ThreadPool> = if manifest.test.parallel {
         let n = opts.test_threads.unwrap_or_else(num_cpus::get).max(1);
-        const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
-        Some(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(n)
-                .stack_size(WORKER_STACK_SIZE)
-                .build()
-                .map_err(|e| CliError::Custom(format!("rayon: {}", e)))?,
-        )
+        if n <= 1 {
+            None
+        } else {
+            const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+            Some(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(n)
+                    .stack_size(WORKER_STACK_SIZE)
+                    .build()
+                    .map_err(|e| CliError::Custom(format!("rayon: {}", e)))?,
+            )
+        }
     } else {
         None
     };
 
     let run_one = |t: &Test| (t.name.clone(), run_single_test(t, &test_target_dir, &cfg));
+
+    // GENERATE-NATIVE-WORKER-RACE-1: recursion terminator for the
+    // uniform AOT process-isolation. The parent sets this env in
+    // `run_aot_subprocess`; the child compiles its single test
+    // in-process (main thread, no pool).
+    let aot_child = std::env::var_os("VERUM_TEST_AOT_CHILD").is_some();
 
     let results: Vec<(Text, TestResult)> = match &pool {
         Some(p) => {
@@ -364,7 +384,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
             // races. The child matches a single test (`active.len() == 1`) and
             // runs it in-process, terminating the recursion. Interp stays
             // in-process (no LLVM, no race).
-            if opts.tier == Tier::Aot && active.len() > 1 {
+            if opts.tier == Tier::Aot && !aot_child {
                 p.install(|| {
                     active
                         .par_iter()
@@ -375,6 +395,18 @@ pub fn execute(opts: TestOptions) -> Result<()> {
                 p.install(|| active.par_iter().map(|t| run_one(t)).collect())
             }
         }
+        // No pool (threads=1 or [test].parallel=false): AOT still goes
+        // through per-test subprocesses UNLESS we ARE the subprocess —
+        // GENERATE-NATIVE-WORKER-RACE-1 makes process isolation
+        // uniform (the old `active.len() > 1` gate ran single-test AOT
+        // in-process ON A WORKER, which is exactly the racy shape).
+        // The child (VERUM_TEST_AOT_CHILD=1, threads=1, no pool) runs
+        // its one test in-process on the MAIN thread — the stable
+        // `verum build` configuration — terminating the recursion.
+        None if opts.tier == Tier::Aot && !aot_child => active
+            .iter()
+            .map(|t| (t.name.clone(), run_aot_subprocess(t)))
+            .collect(),
         None => active.iter().map(|t| run_one(t)).collect(),
     };
 
@@ -855,6 +887,9 @@ fn run_aot_subprocess(test: &Test) -> TestResult {
         .arg(test.name.as_str())
         .arg("--format")
         .arg("terse")
+        // GENERATE-NATIVE-WORKER-RACE-1: mark the child so it runs its
+        // single test in-process (main thread) instead of recursing.
+        .env("VERUM_TEST_AOT_CHILD", "1")
         .output();
     match out {
         Ok(o) if o.status.success() => TestResult::Pass {
