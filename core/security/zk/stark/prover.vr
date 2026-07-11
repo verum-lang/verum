@@ -3,7 +3,7 @@
 // =============================================================================
 //
 
-// `prove(air, witness, params) → Proof`. The witness is the trace
+// `prove(air, witness, params) → StarkProof`. The witness is the trace
 // (a length × width matrix of field elements). The prover:
 //
 //   1. Encodes trace columns as polynomials over the field.
@@ -36,13 +36,13 @@ mount core.*;
 mount core.security.zk.stark.air.{Air, ProofParams, AirError};
 
 // =============================================================================
-// Proof
+// StarkProof
 // =============================================================================
 
 /// STARK proof. Wire size scales with `O(log² N · query_count)` —
 /// typically 50-200 KB for production parameters. Fully self-contained;
 /// no SRS or extra setup data needed at verifier side beyond the AIR.
-public type Proof is {
+public type StarkProof is {
     bytes: List<Byte>,
 };
 
@@ -98,7 +98,7 @@ public fn prove(
     trace:         &[Byte],
     public_inputs: &[List<Byte>],
     params:        &ProofParams,
-) -> Result<Proof, ProverError> {
+) -> Result<StarkProof, ProverError> {
     if public_inputs.len() != air.public_input_arity {
         return Err(PublicInputArityMismatch {
             expected: air.public_input_arity,
@@ -129,7 +129,7 @@ public fn prove(
 // =============================================================================
 
 type ProveResult is
-    | Ok(Proof)
+    | Ok(StarkProof)
     | ConstraintFailed(Text, Int)
     | FriFailed(Text)
     | BackendFailed(Text);

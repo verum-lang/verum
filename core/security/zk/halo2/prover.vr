@@ -3,7 +3,7 @@
 // =============================================================================
 //
 
-// `prove(circuit, witness, srs) → Proof`. The witness is the secret
+// `prove(circuit, witness, srs) → Halo2Proof`. The witness is the secret
 // data that satisfies the circuit's constraints; the prover commits
 // to it via KZG10 and produces a non-interactive proof (Fiat-Shamir
 // over a Merlin transcript).
@@ -64,7 +64,7 @@ public type VerifyingKey is {
 /// a few hundred bytes (constants for the commitment + linearisation
 /// + opening proofs); independent of circuit size in the asymptotic
 /// regime, ~1-2 KB in practice.
-public type Proof is {
+public type Halo2Proof is {
     bytes: List<Byte>,
 };
 
@@ -124,7 +124,7 @@ public fn prove<F: fn(&mut SynthesizeContext) -> Result<(), CircuitError>>(
     pk:           &ProvingKey,
     public_inputs: &List<List<Byte>>,    // one Fp value per Instance column
     synthesize:   F,
-) -> Result<Proof, ProverError> {
+) -> Result<Halo2Proof, ProverError> {
     let result = @intrinsic(
         "verum.crypto.halo2_prove",
         pk, public_inputs, synthesize
@@ -145,7 +145,7 @@ public fn prove_with_aux<F: fn(&mut SynthesizeContext) -> Result<(), CircuitErro
     public_inputs: &List<List<Byte>>,
     aux:          &List<Byte>,        // backend-defined auxiliary blob
     synthesize:   F,
-) -> Result<Proof, ProverError> {
+) -> Result<Halo2Proof, ProverError> {
     let result = @intrinsic(
         "verum.crypto.halo2_prove_with_aux",
         pk, public_inputs, aux, synthesize
@@ -167,7 +167,7 @@ type PrecomputeResult is
     | Err(Text);
 
 type ProveResult is
-    | Ok(Proof)
+    | Ok(Halo2Proof)
     | WitnessFailed(Text)
     | TranscriptFailed(Text)
     | BackendFailed(Text);

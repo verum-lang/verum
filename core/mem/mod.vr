@@ -195,7 +195,7 @@ public mount core.intrinsics.runtime.mem_raw.*;
 
 /// Thread-local heap with lock-free fast path.
 public mount .heap.{
-    LocalHeap, PageHeader, PageQueue, HeapStats, HeapError,
+    LocalHeap, HeapPageHeader, PageQueue, HeapStats, HeapError,
     get_heap, init_thread_heap, shutdown_thread_heap,
     heap_alloc, heap_alloc_zeroed, heap_free, heap_free_validated,
     get_heap_stats,

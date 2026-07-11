@@ -90,7 +90,7 @@ public mount .exec.{
     run_with_cancel, sh_with_cancel,
 };
 
-public mount .executor.{ Executor, RetryPolicy };
+public mount .executor.{ Executor, ShellRetryPolicy };
 
 public mount .jobs.{
     JobHandle, background, background_with_grace,

@@ -37,7 +37,7 @@
 //     describes their state-transition system as: a row of N fields
 //     evolves into the next row by a fixed transition function plus
 //     boundary conditions. AIR encodes both as low-degree polynomials.
-//   * `prover.vr`  — `prove(air, witness) → Proof`.
+//   * `prover.vr`  — `prove(air, witness) → StarkProof`.
 //   * `verifier.vr`— `verify(air_vk, proof, public_inputs) → Bool`.
 //
 // =============================================================================
@@ -67,7 +67,7 @@ public mount .air.{
 };
 
 public mount .prover.{
-    Proof, prove, ProverError,
+    StarkProof, prove, ProverError,
 };
 
 public mount .verifier.{

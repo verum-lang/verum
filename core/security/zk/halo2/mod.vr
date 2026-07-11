@@ -50,7 +50,7 @@
 //    Gate / Lookup. The user constructs an immutable circuit
 //    description; the prover instantiates witness values into the
 //    column layout it specifies.
-//  * `prover`  — `prove(circuit, witness, srs) → Proof`.
+//  * `prover`  — `prove(circuit, witness, srs) → Halo2Proof`.
 //  * `verifier`— `verify(circuit_vk, proof, public_inputs) → Bool`.
 //  * `srs`     — universal Structured Reference String generation +
 //    serialisation. The chain operator runs `setup(k)` once per
@@ -105,7 +105,7 @@ public mount .circuit.{
 };
 
 public mount .prover.{
-    Proof, ProvingKey, prove, prove_with_aux, ProverError,
+    Halo2Proof, ProvingKey, prove, prove_with_aux, ProverError,
 };
 
 public mount .verifier.{

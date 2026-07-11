@@ -27,7 +27,7 @@ mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
-    Tokenizer, Token, options_default,
+    Fts5VtabTokenizer, Token, options_default,
 };
 mount core.database.sqlite.native.vtabs.fts5.query.{RowMatch};
 
@@ -40,7 +40,7 @@ public fn highlight(
     matched_terms: &List<Text>,
     open: &Text,
     close: &Text,
-    tokeniser: &Heap<dyn Tokenizer>,
+    tokeniser: &Heap<dyn Fts5VtabTokenizer>,
 ) -> Text {
     let opts = options_default();
     let tokens = (&**tokeniser).tokenise(text, &opts);
@@ -98,7 +98,7 @@ public fn snippet(
     close: &Text,
     ellipsis: &Text,
     nwords: Int,
-    tokeniser: &Heap<dyn Tokenizer>,
+    tokeniser: &Heap<dyn Fts5VtabTokenizer>,
 ) -> Text {
     let opts = options_default();
     let tokens = (&**tokeniser).tokenise(text, &opts);

@@ -9,7 +9,7 @@
 // upstream FTS5:
 //
 
-//  * `tokenizer/` — Tokenizer protocol + 4 built-in implementations
+//  * `tokenizer/` — Fts5VtabTokenizer protocol + 4 built-in implementations
 //  (simple / porter / unicode61 / trigram)
 //  * `segment` — immutable on-disk segment of (term → posting list)
 //  pairs sorted lexicographically

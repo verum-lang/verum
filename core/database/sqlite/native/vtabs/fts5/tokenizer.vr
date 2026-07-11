@@ -1,5 +1,5 @@
 // =============================================================================
-// fts5/tokenizer.vr — Tokenizer protocol + 4 built-in implementations
+// fts5/tokenizer.vr — Fts5VtabTokenizer protocol + 4 built-in implementations
 // =============================================================================
 // Spec: sqlite-native.md §16.2 — fts5/tokenizer/
 //
@@ -49,7 +49,7 @@ public type Fts5VtabToken is {
 };
 
 // -----------------------------------------------------------------------------
-// Tokenizer protocol
+// Fts5VtabTokenizer protocol
 // -----------------------------------------------------------------------------
 
 public type TokenizerOptions is {
@@ -72,7 +72,7 @@ public fn options_default() -> TokenizerOptions {
     }
 }
 
-public type Tokenizer is protocol {
+public type Fts5VtabTokenizer is protocol {
     fn name(&self) -> Text;
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken>;
 };
@@ -84,7 +84,7 @@ public type Tokenizer is protocol {
 public type Fts5VtabSimpleTokenizer is { unit: Bool };
 public fn simple_tokenizer() -> Fts5VtabSimpleTokenizer { Fts5VtabSimpleTokenizer { unit: true } }
 
-implement Tokenizer for Fts5VtabSimpleTokenizer {
+implement Fts5VtabTokenizer for Fts5VtabSimpleTokenizer {
     fn name(&self) -> Text { "simple".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {
@@ -159,7 +159,7 @@ fn is_separator(b: Byte, options: &TokenizerOptions) -> Bool {
 public type Fts5VtabPorterTokenizer is { unit: Bool };
 public fn porter_tokenizer() -> Fts5VtabPorterTokenizer { Fts5VtabPorterTokenizer { unit: true } }
 
-implement Tokenizer for Fts5VtabPorterTokenizer {
+implement Fts5VtabTokenizer for Fts5VtabPorterTokenizer {
     fn name(&self) -> Text { "porter".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {
@@ -228,7 +228,7 @@ fn bs_replace_at(_len: &mut Int, _at: Int, _new_byte: Int) {
 public type Fts5VtabUnicode61Tokenizer is { unit: Bool };
 public fn unicode61_tokenizer() -> Fts5VtabUnicode61Tokenizer { Fts5VtabUnicode61Tokenizer { unit: true } }
 
-implement Tokenizer for Fts5VtabUnicode61Tokenizer {
+implement Fts5VtabTokenizer for Fts5VtabUnicode61Tokenizer {
     fn name(&self) -> Text { "unicode61".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {
@@ -310,7 +310,7 @@ fn is_combining_lead(b: Byte) -> Bool {
 public type Fts5VtabTrigramTokenizer is { unit: Bool };
 public fn trigram_tokenizer() -> Fts5VtabTrigramTokenizer { Fts5VtabTrigramTokenizer { unit: true } }
 
-implement Tokenizer for Fts5VtabTrigramTokenizer {
+implement Fts5VtabTokenizer for Fts5VtabTrigramTokenizer {
     fn name(&self) -> Text { "trigram".clone() }
 
     fn tokenise(&self, input: &Text, options: &TokenizerOptions) -> List<Fts5VtabToken> {

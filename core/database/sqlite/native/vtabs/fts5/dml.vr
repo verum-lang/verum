@@ -34,7 +34,7 @@ mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
-    Tokenizer, Token, TokenizerOptions, options_default,
+    Fts5VtabTokenizer, Token, TokenizerOptions, options_default,
 };
 mount core.database.sqlite.native.vtabs.fts5.index.{Index};
 
@@ -71,7 +71,7 @@ public fn insert_row(
     idx: &mut Index,
     rowid: Int64,
     columns: List<Text>,
-    tokeniser: &Heap<dyn Tokenizer>,
+    tokeniser: &Heap<dyn Fts5VtabTokenizer>,
     options: &TokenizerOptions,
 ) {
     let mut col_idx: Int = 0;
@@ -100,7 +100,7 @@ public fn update_row(
     old_rowid: Int64,
     new_rowid: Int64,
     new_columns: List<Text>,
-    tokeniser: &Heap<dyn Tokenizer>,
+    tokeniser: &Heap<dyn Fts5VtabTokenizer>,
     options: &TokenizerOptions,
 ) {
     delete_row(tombstones, old_rowid);

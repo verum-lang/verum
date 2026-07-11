@@ -34,10 +34,10 @@ mount core.shell.exec.{run, sh_check, run_with_cancel, sh_with_cancel};
 mount core.shell.result.{ShellResult, ShellError};
 
 // =============================================================================
-// RetryPolicy — when and how often to retry
+// ShellRetryPolicy — when and how often to retry
 // =============================================================================
 
-public type RetryPolicy is {
+public type ShellRetryPolicy is {
     /// Total attempts: original + retries. `1` means no retries.
     max_attempts: Int,
     /// Exponential / fibonacci backoff source.
@@ -48,11 +48,11 @@ public type RetryPolicy is {
     retry_on:     fn(&ShellError) -> Bool,
 }
 
-implement RetryPolicy {
+implement ShellRetryPolicy {
     /// Simple policy: up to `max` attempts, exponential backoff 1s..30s,
     /// retry on any error except permission denial.
-    public fn simple(max: Int) -> RetryPolicy {
-        RetryPolicy {
+    public fn simple(max: Int) -> ShellRetryPolicy {
+        ShellRetryPolicy {
             max_attempts: max,
             backoff:      Backoff.exponential_full_jitter(
                 Duration.from_millis(1000),
@@ -63,8 +63,8 @@ implement RetryPolicy {
     }
 
     /// Retry only on specific exit codes.
-    public fn on_exit_codes(max: Int, codes: List<Int>) -> RetryPolicy {
-        RetryPolicy {
+    public fn on_exit_codes(max: Int, codes: List<Int>) -> ShellRetryPolicy {
+        ShellRetryPolicy {
             max_attempts: max,
             backoff:      Backoff.exponential_full_jitter(
                 Duration.from_millis(500),
@@ -78,8 +78,8 @@ implement RetryPolicy {
     }
 
     /// Build with a custom backoff and predicate.
-    public fn custom(max: Int, backoff: Backoff, retry_on: fn(&ShellError) -> Bool) -> RetryPolicy {
-        RetryPolicy { max_attempts: max, backoff, retry_on }
+    public fn custom(max: Int, backoff: Backoff, retry_on: fn(&ShellError) -> Bool) -> ShellRetryPolicy {
+        ShellRetryPolicy { max_attempts: max, backoff, retry_on }
     }
 }
 
@@ -90,9 +90,9 @@ fn is_permission_denied(e: &ShellError) -> Bool {
     }
 }
 
-implement Clone for RetryPolicy {
-    fn clone(&self) -> RetryPolicy {
-        RetryPolicy {
+implement Clone for ShellRetryPolicy {
+    fn clone(&self) -> ShellRetryPolicy {
+        ShellRetryPolicy {
             max_attempts: self.max_attempts,
             backoff:      self.backoff.clone(),
             retry_on:     self.retry_on,
@@ -106,7 +106,7 @@ implement Clone for RetryPolicy {
 
 public type Executor is {
     timeout:        Maybe<Duration>,
-    retry:          Maybe<RetryPolicy>,
+    retry:          Maybe<ShellRetryPolicy>,
     cancel_token:   Maybe<CancellationToken>,
     /// Grace period before SIGKILL after SIGTERM. Default: 5s.
     grace:          Duration,
@@ -125,7 +125,7 @@ implement Executor {
     public fn with_timeout(mut self, t: Duration) -> Executor {
         self.timeout = Maybe.Some(t); self
     }
-    public fn with_retry(mut self, p: RetryPolicy) -> Executor {
+    public fn with_retry(mut self, p: ShellRetryPolicy) -> Executor {
         self.retry = Maybe.Some(p); self
     }
     public fn with_cancel(mut self, t: CancellationToken) -> Executor {

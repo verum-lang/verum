@@ -53,14 +53,14 @@ mount core.math.internal.{Value};
 // Tokenization
 // =============================================================================
 
-// Tokenizer protocol for encoding/decoding text to tokens
-public type Tokenizer is protocol {
+// LlmTokenizer protocol for encoding/decoding text to tokens
+public type LlmTokenizer is protocol {
     fn encode(&self, text: &Text) -> List<U32>;
     fn decode(&self, tokens: &[U32]) -> Text;
     fn vocab_size(&self) -> USize;
 };
 
-// BPE (Byte-Pair Encoding) Tokenizer
+// BPE (Byte-Pair Encoding) LlmTokenizer
 public type BPETokenizer is {
     vocab: Map<Text, U32>,
     merges: List<(Text, Text)>,
@@ -84,7 +84,7 @@ implement BPETokenizer {
     }
 }
 
-implement Tokenizer for BPETokenizer {
+implement LlmTokenizer for BPETokenizer {
     fn encode(&self, text: &Text) -> List<U32> {
         @vbc(TOKENIZER_ENCODE, self, text)
     }
@@ -111,7 +111,7 @@ implement SentencePieceTokenizer {
     }
 }
 
-implement Tokenizer for SentencePieceTokenizer {
+implement LlmTokenizer for SentencePieceTokenizer {
     fn encode(&self, text: &Text) -> List<U32> {
         @vbc(TOKENIZER_SPM_ENCODE, self, text)
     }
@@ -567,7 +567,7 @@ public type LLMAgent<M, Tok> is {
 implement<M, Tok> LLMAgent<M, Tok>
 where
     M: Module<DynTensor<USize>, DynTensor<Float>>,
-    Tok: Tokenizer,
+    Tok: LlmTokenizer,
 {
     // Create new LLM agent
     public fn new(model: M, tokenizer: Tok, system_prompt: Text) -> Self {
@@ -622,7 +622,7 @@ where
 implement<M, Tok> Agent for LLMAgent<M, Tok>
 where
     M: Module<DynTensor<USize>, DynTensor<Float>>,
-    Tok: Tokenizer,
+    Tok: LlmTokenizer,
 {
     fn think(&mut self, observation: &Text) -> Text {
         self.memory.push(AgentMessage { role: AgentRole.User, content: observation.clone() });
@@ -666,7 +666,7 @@ public type ReActAgent<M, Tok> is {
 implement<M, Tok> ReActAgent<M, Tok>
 where
     M: Module<DynTensor<USize>, DynTensor<Float>>,
-    Tok: Tokenizer,
+    Tok: LlmTokenizer,
 {
     // Create new ReAct agent
     public fn new(model: M, tokenizer: Tok) -> Self {
@@ -1692,7 +1692,7 @@ public type ToolChoice is
 implement<M, Tok> FunctionCallingAgent<M, Tok>
 where
     M: Module<DynTensor<USize>, DynTensor<Float>>,
-    Tok: Tokenizer,
+    Tok: LlmTokenizer,
 {
     // Create new function calling agent
     public fn new(model: M, tokenizer: Tok) -> Self {

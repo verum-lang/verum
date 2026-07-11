@@ -30,7 +30,7 @@
 module core.security.zk.stark.verifier;
 mount core.*;
 mount core.security.zk.stark.air.{Air, ProofParams};
-mount core.security.zk.stark.prover.{Proof};
+mount core.security.zk.stark.prover.{StarkProof};
 
 // =============================================================================
 // AirVk — verifier-side digest of an AIR
@@ -87,7 +87,7 @@ implement Display for VerifierError {
 
 public fn verify(
     vk:            &AirVk,
-    proof:         &Proof,
+    proof:         &StarkProof,
     public_inputs: &List<List<Byte>>,
     params:        &ProofParams,
 ) -> Result<(), VerifierError> {
@@ -114,7 +114,7 @@ public fn verify(
 /// (Ben-Sasson 2018 §4).
 public fn verify_batch(
     vk:                 &AirVk,
-    proofs_with_inputs: &List<(Proof, List<List<Byte>>)>,
+    proofs_with_inputs: &List<(StarkProof, List<List<Byte>>)>,
     params:             &ProofParams,
 ) -> Result<(), VerifierError> {
     if proofs_with_inputs.is_empty() {

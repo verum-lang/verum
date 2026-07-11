@@ -24,7 +24,7 @@
 )
 module core.security.zk.halo2.verifier;
 mount core.*;
-mount core.security.zk.halo2.prover.{Proof, VerifyingKey};
+mount core.security.zk.halo2.prover.{Halo2Proof, VerifyingKey};
 mount core.security.zk.halo2.srs.{UniversalSrs};
 
 // =============================================================================
@@ -76,7 +76,7 @@ implement Display for VerifierError {
 public fn verify(
     vk:           &VerifyingKey,
     public_inputs: &List<List<Byte>>,
-    proof:        &Proof,
+    proof:        &Halo2Proof,
     srs:          &UniversalSrs,
 ) -> Result<(), VerifierError> {
     match @intrinsic(
@@ -98,7 +98,7 @@ public fn verify(
 /// reducing N+1 pairings to 2 pairings + N field ops.
 public fn verify_batch(
     vk:                 &VerifyingKey,
-    proofs_with_inputs: &List<(Proof, List<List<Byte>>)>,
+    proofs_with_inputs: &List<(Halo2Proof, List<List<Byte>>)>,
     srs:                &UniversalSrs,
 ) -> Result<(), VerifierError> {
     if proofs_with_inputs.is_empty() {
