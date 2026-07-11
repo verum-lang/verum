@@ -32,7 +32,7 @@ module core.database.sqlite.native.hooks_api.dispatcher;
 //      the SQLite C-API semantics; "no hook installed" is a fast
 //      path returning the default decision (Allow / Continue / 0).
 //   3. **HookContext typed payloads** — `UpdateHookCtx`,
-//      `PreUpdateHookCtx`, `AuthorizerCtx`, `TraceCtx` — pure data
+//      `PreUpdateHookCtx`, `AuthorizerCtx`, `TraceHookCtx` — pure data
 //      records that the dispatch site populates and the hook
 //      callback observes.
 //
@@ -53,6 +53,12 @@ module core.database.sqlite.native.hooks_api.dispatcher;
 mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.ext.hooks.{
+    CommitDecision, CdAllow, CdAbort,
+    AuthDecision, AdAllow, AdDeny, AdIgnore,
+};
+mount core.database.sqlite.native.hooks_api.op.{UpdateOp, UoInsert, UoUpdate, UoDelete};
+mount core.database.sqlite.native.progress.handler.{ProgressDecision, PdContinue, PdInterrupt};
 mount core.database.sqlite.native.hooks_api.registration.{
     HookRegistration, HookKind,
     HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
@@ -104,22 +110,20 @@ implement ExtendedHooksEngine {
 // Typed decision results — mirror SQLite C-API return values
 // -----------------------------------------------------------------------------
 
-public type CommitDecision is
-      CdAllow
-    | CdAbort(Text);    // text = error message visible to caller
+// CommitDecision / AuthDecision come from the ext.hooks authority —
+// the local copies were verbatim twins feeding the bare-name
+// first-wins dispatch class.
 
-public type AuthDecision is
-      AdAllow
-    | AdDeny
-    | AdIgnore;         // matches SQLITE_OK / SQLITE_DENY / SQLITE_IGNORE
+/// Named ...Hook...: busy_timeout.handler owns the bare `BusyHookDecision`
+/// with a NANOSECOND payload; this hook-surface variant carries
+/// MILLISECONDS — the names stay distinct so the units cannot be
+/// silently conflated through bare-name dispatch.
+public type BusyHookDecision is
+      BhRetry(after_ms: Int)   // sleep N ms then retry
+    | BhGiveUp;                 // surface SQLITE_BUSY to caller
 
-public type BusyDecision is
-      BdRetry(after_ms: Int)   // sleep N ms then retry
-    | BdGiveUp;                 // surface SQLITE_BUSY to caller
-
-public type ProgressDecision is
-      PdContinue
-    | PdInterrupt;              // interrupts the statement
+// ProgressDecision comes from progress.handler (identical variants —
+// the local copy was a verbatim twin).
 
 // -----------------------------------------------------------------------------
 // Typed contexts — payload handed to each hook callback
@@ -136,7 +140,6 @@ public type UpdateHookCtx is {
     rowid: Int64,
 }
 
-public type UpdateOp is UoInsert | UoUpdate | UoDelete;
 
 public type PreUpdateHookCtx is {
     op: UpdateOp,
@@ -158,8 +161,10 @@ public type AuthorizerCtx is {
     arg4: Text,
 }
 
-public type TraceCtx is {
-    event: TraceEvent,
+/// Named ...Hook...: observability.span owns the bare `TraceHookCtx`
+/// (distributed-tracing span context); this is the trace-HOOK payload.
+public type TraceHookCtx is {
+    event: TraceEventKind,
     /// SQL text that triggered the event (always present for
     /// TeStmtPrepared / TeStmtClose; SQL prefix for TeStep).
     sql: Text,
@@ -168,7 +173,9 @@ public type TraceCtx is {
     elapsed_ns: Int64,
 }
 
-public type TraceEvent is
+/// Named ...Kind: the payload-carrying `TraceEventKind` lives in
+/// ext.hooks; this enum only tags TraceHookCtx.
+public type TraceEventKind is
       TeStmtPrepared
     | TeStmtRow
     | TeStmtClose
@@ -230,15 +237,15 @@ public fn fire_authorizer(engine: &ExtendedHooksEngine, ctx: AuthorizerCtx) -> A
 /// SQLITE_BUSY.  `retry_count` is the number of times we've already
 /// retried this operation — passed so the handler can implement
 /// bounded back-off.
-public fn fire_busy_handler(engine: &ExtendedHooksEngine, retry_count: Int) -> BusyDecision {
+public fn fire_busy_handler(engine: &ExtendedHooksEngine, retry_count: Int) -> BusyHookDecision {
     if !is_installed(&engine.busy) {
-        return BdGiveUp;
+        return BhGiveUp;
     }
     let _ = retry_count;
     // Foundation: default policy (no handler installed) gives up
     // immediately — surfaces SQLITE_BUSY to the caller.  Real
     // dispatch pulls the registered handler's decision.
-    BdRetry(0)
+    BhRetry(0)
 }
 
 /// Fire the progress handler.  Called every N opcodes during VDBE
@@ -255,7 +262,7 @@ public fn fire_progress_handler(engine: &ExtendedHooksEngine, opcode_count: Int)
 /// Fire the trace hook.  Called at three points: statement prepare,
 /// statement-row emission, statement close.  No decision —
 /// observational only.
-public fn fire_trace_hook(engine: &ExtendedHooksEngine, ctx: TraceCtx) {
+public fn fire_trace_hook(engine: &ExtendedHooksEngine, ctx: TraceHookCtx) {
     if !is_installed(&engine.trace) { return; }
     let _ = ctx;
 }

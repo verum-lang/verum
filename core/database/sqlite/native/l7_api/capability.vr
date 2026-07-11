@@ -37,6 +37,10 @@ module core.database.sqlite.native.l7_api.capability;
 
 mount core.*;
 mount base.Text;
+mount core.database.common.capability.{
+    Capability, CanRead, CanWrite, CanDdl,
+    CAP_READ, CAP_WRITE, CAP_TX, CAP_ADMIN,
+};
 
 // -----------------------------------------------------------------------------
 // Marker types — zero-sized; carry capability at the type level
@@ -58,43 +62,23 @@ public type AdminCap is ();
 // Protocol bounds — constrain generic implements / functions
 // -----------------------------------------------------------------------------
 
-/// Capability hierarchy participant.  Every cap implements this so
-/// `Connection<C: Capability>` can be the catch-all bound for
-/// methods available regardless of mode (introspection, schema
-/// generation, BEGIN read-only transactions, …).
-public type Capability is protocol {
-    fn capability_name() -> Text;
-}
-
-/// Capability that permits read access.  Trivially implemented by
-/// all three marker types.  Methods needing read access (every
-/// method, since write+DDL imply read) bound on this.
-public type CanRead is protocol {
-    fn cap_can_read() -> Bool;
-}
-
-/// Capability that permits write access (INSERT / UPDATE / DELETE).
-/// Implemented by `WriteCap` and `AdminCap`.
-public type CanWrite is protocol {
-    fn cap_can_write() -> Bool;
-}
-
-/// Capability that permits DDL (CREATE / DROP / ALTER / VACUUM /
-/// writable_schema).  Implemented by `AdminCap` only.
-public type CanDdl is protocol {
-    fn cap_can_ddl() -> Bool;
-}
+// The capability CONTRACT is the platform-wide one from
+// database/common — one protocol family across every driver (the
+// duplicate local family was a verbatim twin and fed the bare-name
+// first-wins dispatch class). The sqlite marker types below implement
+// the common protocols; only the markers stay driver-local.
 
 // -----------------------------------------------------------------------------
 // ReadCap implementations — read only
 // -----------------------------------------------------------------------------
 
 implement Capability for ReadCap {
-    fn capability_name() -> Text { "read".clone() }
+    fn cap_name() -> Text { "read".clone() }
+    fn cap_mask() -> Int  { CAP_READ }
 }
 
 implement CanRead for ReadCap {
-    fn cap_can_read() -> Bool { true }
+    fn _cap_can_read() -> Bool { true }
 }
 
 // -----------------------------------------------------------------------------
@@ -102,15 +86,16 @@ implement CanRead for ReadCap {
 // -----------------------------------------------------------------------------
 
 implement Capability for WriteCap {
-    fn capability_name() -> Text { "write".clone() }
+    fn cap_name() -> Text { "write".clone() }
+    fn cap_mask() -> Int  { CAP_READ | CAP_WRITE | CAP_TX }
 }
 
 implement CanRead for WriteCap {
-    fn cap_can_read() -> Bool { true }
+    fn _cap_can_read() -> Bool { true }
 }
 
 implement CanWrite for WriteCap {
-    fn cap_can_write() -> Bool { true }
+    fn _cap_can_write() -> Bool { true }
 }
 
 // -----------------------------------------------------------------------------
@@ -118,17 +103,18 @@ implement CanWrite for WriteCap {
 // -----------------------------------------------------------------------------
 
 implement Capability for AdminCap {
-    fn capability_name() -> Text { "admin".clone() }
+    fn cap_name() -> Text { "admin".clone() }
+    fn cap_mask() -> Int  { CAP_READ | CAP_WRITE | CAP_TX | CAP_ADMIN }
 }
 
 implement CanRead for AdminCap {
-    fn cap_can_read() -> Bool { true }
+    fn _cap_can_read() -> Bool { true }
 }
 
 implement CanWrite for AdminCap {
-    fn cap_can_write() -> Bool { true }
+    fn _cap_can_write() -> Bool { true }
 }
 
 implement CanDdl for AdminCap {
-    fn cap_can_ddl() -> Bool { true }
+    fn _cap_can_ddl() -> Bool { true }
 }
