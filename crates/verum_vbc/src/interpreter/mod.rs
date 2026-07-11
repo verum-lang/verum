@@ -451,22 +451,14 @@ impl Interpreter {
         if self.state.module.global_ctors.is_empty() {
             return Ok(());
         }
-        // Stub-id ranges from `stdlib_bootstrap` — skip any ctor whose
-        // id lives in a stage-1/2/3 stub range. The producing module's
-        // real body wasn't merged (e.g. its archive failed to load),
-        // so invoking it would FunctionNotFound. The pre-fix behavior
-        // crashed the entire test-runner; skipping these ctors lets
-        // tests that DON'T touch the un-resolved static still run.
-        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
-        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
-        const STAGE3_STUB_BASE: u32 = u32::MAX - 0x100_0000;
-        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
-        let is_stub_id = |id: u32| -> bool {
-            let s1 = id <= STAGE1_STUB_BASE && id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
-            let s2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
-            let s3 = id <= STAGE3_STUB_BASE && id >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
-            s1 || s2 || s3
-        };
+        // Canonical stub-id ranges (`crate::stub_ranges`) — skip any
+        // ctor whose id lives in a pre-registration sentinel band. The
+        // producing module's real body wasn't merged (e.g. its archive
+        // failed to load), so invoking it would FunctionNotFound. The
+        // pre-fix behavior crashed the entire test-runner; skipping
+        // these ctors lets tests that DON'T touch the un-resolved
+        // static still run.
+        let is_stub_id = |id: u32| -> bool { crate::stub_ranges::is_stub_id(id) };
         let mut ctors: Vec<(u32, FunctionId)> = self
             .state
             .module

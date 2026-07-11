@@ -9462,13 +9462,10 @@ impl VbcCodegen {
                 // `full_fsync`/`sync_directory`/umbrella-re-export stubs in
                 // the precompiled stdlib archive).
                 if is_module_ns {
-                    const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
-                    const STAGE3_WIDTH: u32 = 0x10_0000;
                     if let Some(info) = self.ctx.lookup_function(&method.name).cloned()
                         && info.param_count == args.len()
                         && info.variant_tag.is_none()
-                        && (info.id.0 <= STAGE3_BASE
-                            && info.id.0 >= STAGE3_BASE.saturating_sub(STAGE3_WIDTH))
+                        && crate::stub_ranges::is_name_resolved_stub_id(info.id.0)
                     {
                         return self.compile_static_method_call(&info, args);
                     }

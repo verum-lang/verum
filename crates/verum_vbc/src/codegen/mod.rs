@@ -8312,14 +8312,12 @@ impl VbcCodegen {
         // overlay (the stub-overwrite-gate-intended path).  Real bodies
         // with sentinel IDs are the SUCCESS case for a future stages-1+2
         // reland; only true stubs (no instructions) should be dropped.
-        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
-        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
-        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
-        let in_stage1 =
-            new_id <= STAGE1_STUB_BASE && new_id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
-        let in_stage2 =
-            new_id <= STAGE2_STUB_BASE && new_id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
-        if (in_stage1 || in_stage2) && vbc_func.instructions.is_empty() {
+        // Stages 1-2 only by design (`crate::stub_ranges`): stage-3/4
+        // stubs are codegen-context entries that never reach this
+        // function-push path with empty bodies.
+        if (crate::stub_ranges::in_stage1(new_id) || crate::stub_ranges::in_stage2(new_id))
+            && vbc_func.instructions.is_empty()
+        {
             return;
         }
         if let Some(existing_idx) = self.functions.iter().position(|f| f.descriptor.id.0 == new_id)
@@ -12621,7 +12619,11 @@ impl VbcCodegen {
     /// - Negated integer literals: `-(42)`
     /// - Parenthesized integer literals: `(42)`
     /// - Constructor calls with single literal arg: `Duration(0)`
-    fn extract_const_literal_value(expr: &verum_ast::Expr) -> Option<i64> {
+    ///
+    /// `pub` so the stdlib bootstrap's stage-4 const pre-registration
+    /// (`verum_compiler::pipeline::stdlib_bootstrap`) shares this ONE
+    /// implementation when deciding inline (`__const_val_N`) vs stub.
+    pub fn extract_const_literal_value(expr: &verum_ast::Expr) -> Option<i64> {
         use verum_ast::ExprKind;
         use verum_ast::literal::LiteralKind;
 
@@ -17016,15 +17018,13 @@ impl VbcCodegen {
     /// stub body is ever executed.
     fn emit_stage3_stub_descriptors(&mut self) {
         use std::collections::HashSet;
-        // Mirror the STAGE3 range from
-        // `verum_compiler::pipeline::stdlib_bootstrap`.
-        const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
-        const STUB_RANGE_WIDTH: u32 = 0x10_0000; // 1M slots
-        let is_stage3 = |id: u32| -> bool {
-            id <= STAGE3_BASE && id >= STAGE3_BASE.saturating_sub(STUB_RANGE_WIDTH)
-        };
+        // Canonical ranges: `crate::stub_ranges`.  Covers the two
+        // name-resolved bands — stage-3 free-fn stubs (task #47) and
+        // stage-4 module-const stubs — both are patched to the real
+        // FunctionId BY NAME at archive load.
+        let is_name_stub = crate::stub_ranges::is_name_resolved_stub_id;
 
-        // 1. Collect stage-3 referenced ids from emitted bytecode.
+        // 1. Collect stage-3/4 referenced ids from emitted bytecode.
         let mut referenced: HashSet<u32> = HashSet::new();
         for vbc_func in self.functions.iter() {
             for instr in &vbc_func.instructions {
@@ -17035,7 +17035,7 @@ impl VbcCodegen {
                     | Instruction::NewClosure { func_id, .. }
                     | Instruction::Spawn { func_id, .. }
                     | Instruction::GenCreate { func_id, .. } => {
-                        if is_stage3(*func_id) {
+                        if is_name_stub(*func_id) {
                             referenced.insert(*func_id);
                         }
                     }
@@ -17064,7 +17064,7 @@ impl VbcCodegen {
         let mut id_to_entry: std::collections::HashMap<u32, (String, crate::codegen::FunctionInfo)> =
             std::collections::HashMap::new();
         for (name, info) in self.ctx.functions.iter() {
-            if !is_stage3(info.id.0) {
+            if !is_name_stub(info.id.0) {
                 continue;
             }
             if !referenced.contains(&info.id.0) {
@@ -18178,19 +18178,8 @@ impl VbcCodegen {
         // identity fallback) and tripped the lenient panic in
         // `calls.rs:117` at runtime.
         //
-        // Range definitions mirror `stdlib_bootstrap::pre_register_*`
-        // and `interpreter/dispatch_table/handlers/calls.rs:69-72`.
-        // Width is 0x10_0000 (1M slots per stage).
-        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
-        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
-        const STAGE3_STUB_BASE: u32 = u32::MAX - 0x100_0000;
-        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
-        let is_stage_stub = |id: u32| -> bool {
-            let s1 = id <= STAGE1_STUB_BASE && id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
-            let s2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
-            let s3 = id <= STAGE3_STUB_BASE && id >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
-            s1 || s2 || s3
-        };
+        // Ranges are canonical in `crate::stub_ranges` (stages 1-4).
+        let is_stage_stub = |id: u32| -> bool { crate::stub_ranges::is_stub_id(id) };
         for func in &self.functions {
             for instr in &func.instructions {
                 let fid = match instr {
@@ -20337,29 +20326,20 @@ struct ArchiveBodyRemap<'a> {
 
 impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
     fn map_function(&self, src: crate::module::FunctionId) -> crate::module::FunctionId {
-        // Stage-1/2/3 stub-id range definitions (mirrored from
-        // `stdlib_bootstrap::merge_codegen_into_self`). A user-side
-        // `ctx_func_by_name` mapping that points to a stub-range id
-        // means the producing module's REAL body wasn't merged into
-        // ctx yet — bypassing the Tier 2a return below avoids freezing
-        // the unresolved stub id into the rewritten body. Tier 2b
-        // (archive-wide name index) then has a chance to find the
-        // real body that's already loaded as part of a later archive.
+        // Canonical stub-id ranges (`crate::stub_ranges`, stages 1-4).
+        // A user-side `ctx_func_by_name` mapping that points to a
+        // stub-range id means the producing module's REAL body wasn't
+        // merged into ctx yet — bypassing the Tier 2a return below
+        // avoids freezing the unresolved stub id into the rewritten
+        // body. Tier 2b (archive-wide name index) then has a chance to
+        // find the real body that's already loaded as part of a later
+        // archive.
         //
         // Without this gate, task #47's `global_ctors` cascade fires
         // FunctionNotFound(0xFEFF****) at runtime for every cross-
         // module Call whose target's stub_id leaked into ctx because
         // the dependency was loaded out of resolution order.
-        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
-        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
-        const STAGE3_STUB_BASE: u32 = u32::MAX - 0x100_0000;
-        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
-        let is_stub_id = |id: u32| -> bool {
-            let s1 = id <= STAGE1_STUB_BASE && id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
-            let s2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
-            let s3 = id <= STAGE3_STUB_BASE && id >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
-            s1 || s2 || s3
-        };
+        let is_stub_id = |id: u32| -> bool { crate::stub_ranges::is_stub_id(id) };
         // **Tier 0 (task #47) — cross-module Call by qualified name.**
         // `external_function_names` is the precompile's authoritative
         // record that `src`, in THIS module's bodies, is a cross-module

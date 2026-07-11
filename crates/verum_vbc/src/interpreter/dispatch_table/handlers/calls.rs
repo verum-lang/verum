@@ -66,28 +66,17 @@ pub(in super::super) fn handle_call(
     // the archive (see `verum_vbc::module::VbcModule::stub_names`)
     // when present; otherwise falls back to the bare id for
     // diagnosis.
-    const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
-    const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
-    const STAGE3_STUB_BASE: u32 = u32::MAX - 0x100_0000;
-    const STUB_RANGE_WIDTH: u32 = 0x10_0000;
-    let in_stage1 =
-        func_id.0 <= STAGE1_STUB_BASE && func_id.0 >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
-    let in_stage2 =
-        func_id.0 <= STAGE2_STUB_BASE && func_id.0 >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
-    // Task #47 stage-3 pre-register stubs: uniquely-named public free
-    // fns get a stub slot in [STAGE3_BASE - WIDTH, STAGE3_BASE] during
-    // `pre_register_unique_public_free_functions`. When the producing
-    // module's real body lands, the registry entry is overwritten,
-    // BUT any bytecode that compiled BEFORE the overwrite still holds
-    // the stub_id at its Call sites. `ArchiveBodyRemap::map_function`
-    // (codegen/mod.rs:16488) now actively rejects stub-range ids in
-    // Tier 2a/2b so the remap can chase the real id via the archive-
-    // wide name index — this branch is a runtime safety net for the
-    // case where even that fallback misses (e.g. the producing module
-    // failed to compile, the unique-name index has no real-body
+    // Canonical stub-id ranges live in `crate::stub_ranges` (stages
+    // 1-4). When the producing module's real body lands, the registry
+    // entry is overwritten, BUT any bytecode that compiled BEFORE the
+    // overwrite still holds the stub_id at its Call sites.
+    // `ArchiveBodyRemap::map_function` actively rejects stub-range ids
+    // in Tier 2a/2b so the remap can chase the real id via the
+    // archive-wide name index — this branch is a runtime safety net
+    // for the case where even that fallback misses (e.g. the producing
+    // module failed to compile, the unique-name index has no real-body
     // entry, or the body lives only in a still-unloaded archive).
-    let in_stage3 =
-        func_id.0 <= STAGE3_STUB_BASE && func_id.0 >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
+    let stub_stage = crate::stub_ranges::stage_of(func_id.0);
 
     // Get function descriptor — extract needed fields to release borrow.
     // For sentinel-range IDs, we check lookup AND body before panicking:
@@ -98,21 +87,8 @@ pub(in super::super) fn handle_call(
     let func = match state.module.get_function(func_id) {
         Some(f) => f,
         None => {
-            if in_stage1 || in_stage2 || in_stage3 {
-                let stage = if in_stage1 {
-                    "1"
-                } else if in_stage2 {
-                    "2"
-                } else {
-                    "3"
-                };
-                let stub_class = if in_stage1 {
-                    "canonical-type static method"
-                } else if in_stage2 {
-                    "stdlib variant constructor"
-                } else {
-                    "uniquely-named public free fn (task #47)"
-                };
+            if let Some(stage) = stub_stage {
+                let stub_class = crate::stub_ranges::stub_class(func_id.0).unwrap_or("stub");
                 return Err(InterpreterError::Panic {
                     message: format!(
                         "[lenient] stage-{} {} stub never resolved (func_id={}); the producing stdlib module failed precompile OR the body lives in an archive that wasn't loaded — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
@@ -123,21 +99,10 @@ pub(in super::super) fn handle_call(
             return Err(InterpreterError::FunctionNotFound(func_id));
         }
     };
-    if (in_stage1 || in_stage2 || in_stage3) && func.bytecode_length == 0 {
-        let stage = if in_stage1 {
-            "1"
-        } else if in_stage2 {
-            "2"
-        } else {
-            "3"
-        };
-        let stub_class = if in_stage1 {
-            "canonical-type static method"
-        } else if in_stage2 {
-            "stdlib variant constructor"
-        } else {
-            "uniquely-named public free fn (task #47)"
-        };
+    if let Some(stage) = stub_stage
+        && func.bytecode_length == 0
+    {
+        let stub_class = crate::stub_ranges::stub_class(func_id.0).unwrap_or("stub");
         return Err(InterpreterError::Panic {
             message: format!(
                 "[lenient] stage-{} {} stub never overlaid (func_id={}); descriptor present but bytecode_length=0 — the producing stdlib module failed to emit a body. Check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",

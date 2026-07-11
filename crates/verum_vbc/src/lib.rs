@@ -78,6 +78,8 @@ pub mod value;
 pub mod bytecode;
 pub mod compression;
 pub mod deserialize;
+/// Canonical stub-id sentinel ranges for stdlib pre-registration stages.
+pub mod stub_ranges;
 pub mod encoding;
 pub mod serialize;
 pub mod validate;

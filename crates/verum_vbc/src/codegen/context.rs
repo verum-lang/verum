@@ -2570,26 +2570,20 @@ impl CodegenContext {
                 self.scoped_functions.insert(key, info.clone());
             }
         }
-        // **Task #47 stage-3 stub-name preservation** — record
-        // every stub-id we observe BEFORE the bare-name slot in
-        // `functions` potentially gets overwritten by a real-id
-        // registration.  See `stage3_stub_names` field doc.
+        // **Stub-name preservation (task #47 stage-3 + stage-4
+        // consts)** — record every name-resolved stub-id we observe
+        // BEFORE the bare-name slot in `functions` potentially gets
+        // overwritten by a real-id registration.  See
+        // `stage3_stub_names` field doc.  Ranges are canonical in
+        // `crate::stub_ranges`; we check BOTH the incoming info AND
+        // any existing entry so we catch the stub-id at either side
+        // of the overwrite.
         //
-        // The stage-3 sentinel range is
-        // `[u32::MAX - 0x100_0000 - 0x10_0000, u32::MAX - 0x100_0000]`
-        // = `[0xFEEFFFFF, 0xFEFFFFFF]`.  We check BOTH the incoming
-        // info AND any existing entry so we catch the stub-id at
-        // either side of the overwrite.
-        const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
-        const STAGE3_WIDTH: u32 = 0x10_0000;
-        let is_stage3 = |id: u32| -> bool {
-            id <= STAGE3_BASE && id >= STAGE3_BASE.saturating_sub(STAGE3_WIDTH)
-        };
         // ARCH-P2: the recorded spelling is CANONICAL over arrivals —
         // first-seen let bare vs `name#arity` flip with registration
         // order, which flipped the recovered stage-3 stub descriptor
         // name per bake (the on_signal byte dice).
-        if is_stage3(info.id.0) {
+        if crate::stub_ranges::is_name_resolved_stub_id(info.id.0) {
             self.stage3_stub_names
                 .entry(info.id.0)
                 .and_modify(|existing| {
@@ -2600,7 +2594,7 @@ impl CodegenContext {
                 .or_insert_with(|| name.clone());
         }
         if let Some(existing) = self.functions.get(&name)
-            && is_stage3(existing.id.0)
+            && crate::stub_ranges::is_name_resolved_stub_id(existing.id.0)
         {
             self.stage3_stub_names
                 .entry(existing.id.0)

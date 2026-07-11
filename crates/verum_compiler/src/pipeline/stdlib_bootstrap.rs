@@ -571,6 +571,18 @@ impl<'s> CompilationPipeline<'s> {
         }
         self.pre_register_unique_public_free_functions(&all_parsed_modules)?;
 
+        // Phase 2.8 (stage-4): same architectural rule for public
+        // module-level CONSTS — uniquely-named consts must resolve
+        // from any cross-module use site regardless of compile order
+        // (consts are zero-arg fns in VBC-land; literal initializers
+        // pre-register as inline `__const_val_N`).
+        if config.verbose {
+            eprintln!(
+                "Phase 2.8 (stage-4): Pre-registering uniquely-named public consts globally..."
+            );
+        }
+        self.pre_register_unique_public_consts(&all_parsed_modules)?;
+
         // ====================================================================
         // STEP 4: Compile each module to VBC
         // ====================================================================
@@ -859,7 +871,8 @@ impl<'s> CompilationPipeline<'s> {
                         // module ctx's `register_function` allows
                         // overwrite when the existing entry is a stub
                         // — sentinel-id detection at the call site).
-                        let stub_id = FunctionId(u32::MAX - 0x40_0000 - stubs_registered as u32);
+                        let stub_id =
+                            FunctionId(verum_vbc::stub_ranges::STAGE1_BASE - stubs_registered as u32);
                         let param_count = func.params.len();
                         let param_names: Vec<String> = (0..param_count)
                             .map(|i| format!("_arg{}", i))
@@ -1072,7 +1085,7 @@ impl<'s> CompilationPipeline<'s> {
                         // variant-tag sentinel descent
                         // (`u32::MAX - tag`).
                         let stub_id =
-                            FunctionId(u32::MAX - 0xC0_0000 - variants_registered as u32);
+                            FunctionId(verum_vbc::stub_ranges::STAGE2_BASE - variants_registered as u32);
                         let param_names: Vec<String> = (0..arity)
                             .map(|i| format!("_arg{}", i))
                             .collect();
@@ -1200,7 +1213,7 @@ impl<'s> CompilationPipeline<'s> {
                         continue;
                     }
                     let stub_id =
-                        FunctionId(u32::MAX - 0x100_0000 - stubs_registered as u32);
+                        FunctionId(verum_vbc::stub_ranges::STAGE3_BASE - stubs_registered as u32);
                     let param_count = func.params.len();
                     let param_names: Vec<String> = (0..param_count)
                         .map(|i| format!("_arg{}", i))
@@ -1236,6 +1249,142 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!(
                 "[task #47 stage-3] pre-registered {} uniquely-named public free-fn stubs",
                 stubs_registered
+            );
+        }
+        Ok(())
+    }
+
+    /// **Stage-4 (register A3-const)** — pre-register every public
+    /// module-level `const` whose simple name is GLOBALLY UNIQUE
+    /// across the stdlib, BEFORE per-module compilation.
+    ///
+    /// Root defect class: module compile order comes from
+    /// `core_source.rs`'s hardcoded `known_deps` map, which only
+    /// covers ~17 top-level directories — sibling modules like
+    /// `…l1_pager` vs `…l1_pager.journal` have NO ordering edge, so a
+    /// consumer can compile before its producer.  A cross-module
+    /// FUNCTION reference survives that (stage-3 stubs + archive
+    /// name-remap late-bind it), but a cross-module CONST identifier
+    /// hard-failed as "undefined variable" and lenient-stubbed the
+    /// whole consuming fn (`wal_scan` / `WAL_HEADER_SIZE` witness).
+    ///
+    /// Consts are zero-arg functions in VBC-land, so they ride the
+    /// exact stage-3 rails, with one improvement: when the const's
+    /// initializer is a compile-time integer literal
+    /// (`extract_const_literal_value`), the pre-registration carries
+    /// `intrinsic_name = "__const_val_N"` — consumers INLINE the
+    /// value (`LoadI N`) with no Call emitted, no descriptor, no
+    /// remap.  Non-literal consts get a plain stage-4 stub id:
+    /// call sites emit `Call(stub_id)`, `emit_stage3_stub_descriptors`
+    /// (which covers both name-resolved bands) synthesizes the
+    /// name-carrying extern descriptor, and
+    /// `ArchiveBodyRemap::map_function` chases the real body by name
+    /// at archive load.
+    ///
+    /// Uniqueness gate mirrors stage-3: a const name is eligible only
+    /// if it appears exactly ONCE as a public const across the stdlib
+    /// AND does not collide with any public free fn (checked via the
+    /// same counting pass plus the registry guard below).  Public
+    /// `static`s are excluded — they are TLS-slot backed, not
+    /// zero-arg-fn backed.
+    fn pre_register_unique_public_consts(
+        &mut self,
+        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+    ) -> Result<()> {
+        use verum_ast::ItemKind;
+        use verum_ast::decl::Visibility;
+        use verum_vbc::codegen::FunctionInfo;
+        use verum_vbc::module::FunctionId;
+
+        // Pass 1a: count public const simple names across the stdlib.
+        let mut const_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        // Pass 1b: collect public FN names so a const that shares a
+        // name with any public fn is skipped (the fn owns the slot).
+        let mut fn_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (_module_name, ast_modules) in all_modules {
+            for (_file_path, ast_module) in ast_modules {
+                for item in ast_module.items.iter() {
+                    match &item.kind {
+                        ItemKind::Const(c) if matches!(c.visibility, Visibility::Public) => {
+                            *const_counts.entry(c.name.name.to_string()).or_insert(0) += 1;
+                        }
+                        ItemKind::Function(f) if matches!(f.visibility, Visibility::Public) => {
+                            fn_names.insert(f.name.name.to_string());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Pass 2: register the uniquely-named consts.
+        let mut consts_registered: usize = 0;
+        let mut inlined: usize = 0;
+        for (_module_name, ast_modules) in all_modules {
+            for (_file_path, ast_module) in ast_modules {
+                for item in ast_module.items.iter() {
+                    let c = match &item.kind {
+                        ItemKind::Const(c) => c,
+                        _ => continue,
+                    };
+                    if !matches!(c.visibility, Visibility::Public) {
+                        continue;
+                    }
+                    let name = c.name.name.to_string();
+                    if const_counts.get(&name).copied().unwrap_or(0) != 1
+                        || fn_names.contains(&name)
+                    {
+                        continue;
+                    }
+                    // Don't shadow earlier-stage stubs or anything
+                    // already registered.
+                    if self.global_function_registry.contains_key(&name) {
+                        continue;
+                    }
+                    // Literal initializer → inline registration; the
+                    // consumer emits `LoadI N` directly (zero-cost,
+                    // no stub resolution involved).
+                    let intrinsic_name =
+                        verum_vbc::codegen::VbcCodegen::extract_const_literal_value(&c.value)
+                            .map(|v| format!("__const_val_{}", v));
+                    if intrinsic_name.is_some() {
+                        inlined += 1;
+                    }
+                    let stub_id = FunctionId(
+                        verum_vbc::stub_ranges::STAGE4_BASE - consts_registered as u32,
+                    );
+                    let info = FunctionInfo {
+                        id: stub_id,
+                        param_count: 0,
+                        param_names: vec![],
+                        param_type_names: vec![],
+                        is_async: false,
+                        is_generator: false,
+                        contexts: vec![],
+                        return_type: None,
+                        yield_type: None,
+                        intrinsic_name,
+                        variant_tag: None,
+                        parent_type_name: None,
+                        variant_payload_types: None,
+                        is_partial_pattern: false,
+                        takes_self_mut_ref: false,
+                        return_type_name: None,
+                        return_type_inner: None,
+                        is_const: true,
+                        is_transparent_wrapper: false,
+                        param_closure_return_type_names: Vec::new(),
+                    };
+                    self.global_function_registry.insert(name, info);
+                    consts_registered += 1;
+                }
+            }
+        }
+        if std::env::var("VERUM_TRACE_STUB").is_ok() {
+            eprintln!(
+                "[stage-4] pre-registered {} uniquely-named public consts ({} inline-literal)",
+                consts_registered, inlined
             );
         }
         Ok(())
@@ -1893,19 +2042,10 @@ impl<'s> CompilationPipeline<'s> {
         // inverted: it used `id >= STAGE2_BASE` which excludes EVERY
         // stub (stubs are BELOW their base).  This second attempt
         // gets the direction right: check `BASE - WIDTH <= id <= BASE`.
-        const STAGE1_BASE: u32 = u32::MAX - 0x40_0000;
-        const STAGE2_BASE: u32 = u32::MAX - 0xC0_0000;
-        // Stage-3 (task #47): uniquely-named public free-fn stubs
-        // pre-registered by `pre_register_unique_public_free_functions`.
-        // Base must mirror that helper's id assignment exactly.
-        const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
-        const STUB_RANGE_WIDTH: u32 = 0x10_0000; // 1M slots/stage
-        let is_in_stub_range = |id: u32| -> bool {
-            let in_stage1 = id <= STAGE1_BASE && id >= STAGE1_BASE - STUB_RANGE_WIDTH;
-            let in_stage2 = id <= STAGE2_BASE && id >= STAGE2_BASE - STUB_RANGE_WIDTH;
-            let in_stage3 = id <= STAGE3_BASE && id >= STAGE3_BASE - STUB_RANGE_WIDTH;
-            in_stage1 || in_stage2 || in_stage3
-        };
+        // Ranges are canonical in `verum_vbc::stub_ranges` (stages
+        // 1-4); the per-stage `pre_register_*` helpers below assign
+        // `id = BASE - <stub_index>` from the same constants.
+        let is_in_stub_range = |id: u32| -> bool { verum_vbc::stub_ranges::is_stub_id(id) };
         let new_functions = codegen.export_functions();
         for (name, info) in new_functions {
             let is_stub = matches!(
