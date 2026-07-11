@@ -867,7 +867,10 @@ impl<'s> CompilationPipeline<'s> {
         // Our pass pipeline (SROA+mem2reg+DSE+ADCE) already provides
         // the critical optimizations; the TargetMachine just needs O2.
         let llvm_opt_level = match opt_level {
-            0 => verum_codegen::llvm::verum_llvm::OptimizationLevel::None,
+            // GLOBALISEL-NULLMMO-1 (see llvm_lowering.rs): never select
+            // machine code through GlobalISel — clamp 0 to Less so
+            // SelectionDAG runs (the RegBankSelect null-MMO crash).
+            0 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Less,
             1 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Less,
             _ => verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,
         };

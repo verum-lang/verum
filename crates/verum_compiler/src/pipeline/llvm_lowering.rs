@@ -242,7 +242,18 @@ impl<'s> CompilationPipeline<'s> {
             .map_err(|e| anyhow::anyhow!("Failed to get target: {}", e))?;
 
         let opt_level = match self.session.options().optimization_level {
-            0 => verum_codegen::llvm::verum_llvm::OptimizationLevel::None,
+            // GLOBALISEL-NULLMMO-1 (task #21 codegen-crash root): at
+            // OptimizationLevel::None AArch64 selects via GlobalISel,
+            // whose RegBankSelect dereferences a load's memory operand
+            // unconditionally (AArch64RegisterBankInfo::isLoadFromFPType,
+            // KERN_INVALID_ADDRESS at 0x0 — symbolized via the
+            // unstripped-twin trick, .ips frames 0-10). Loads that
+            // legitimately drop their MMO crash the WHOLE compile,
+            // intermittently per emitted-IR shape. Clamp machine-code
+            // selection to Less: SelectionDAG replaces the buggy path;
+            // the IR-level pass pipeline is governed separately, so
+            // -O0 semantics are unchanged.
+            0 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Less,
             1 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Less,
             2 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,
             _ => verum_codegen::llvm::verum_llvm::OptimizationLevel::Aggressive,

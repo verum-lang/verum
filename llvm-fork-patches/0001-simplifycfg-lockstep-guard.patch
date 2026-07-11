@@ -1,0 +1,63 @@
+From 65079ecd677aad9d7cc8ac447784a1e7f97f441e Mon Sep 17 00:00:00 2001
+From: old8man <oldman@gst.st>
+Date: Sat, 11 Jul 2026 22:29:15 +0300
+Subject: [PATCH] [VERUM] SimplifyCFG: guard LockstepReverseIterator exhaustion
+ in sinkCommonCodeFromPredecessors
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The forward/backward profitability scans step the lockstep iterator
+without isValid() — the instruction-counting walk and the
+profitability walk skip debug instructions asymmetrically, so the
+iterator can exhaust the shortest predecessor while Idx < ScanIdx;
+ProfitableToSinkInstruction then dereferences (*LRI)[0] blind
+(KERN_INVALID_ADDRESS at 0x0 inside codegen-prep, crashing the whole
+compile). Three guards: the lambda reads an exhausted iterator as
+nothing-more-to-sink; both scan loops check isValid(). Sinking fewer
+instructions is always sound; the optimization stays on.
+---
+ llvm/lib/Transforms/Utils/SimplifyCFG.cpp | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/llvm/lib/Transforms/Utils/SimplifyCFG.cpp b/llvm/lib/Transforms/Utils/SimplifyCFG.cpp
+index a75f29000..3d95e147f 100644
+--- a/llvm/lib/Transforms/Utils/SimplifyCFG.cpp
++++ b/llvm/lib/Transforms/Utils/SimplifyCFG.cpp
+@@ -2451,6 +2451,15 @@ static bool sinkCommonCodeFromPredecessors(BasicBlock *BB,
+     // actually sink before encountering instruction that is unprofitable to
+     // sink?
+     auto ProfitableToSinkInstruction = [&](LockstepReverseIterator<true> &LRI) {
++      // VERUM: an exhausted lockstep iterator must read as "nothing
++      // more to sink", never dereference. The forward/backward scans
++      // below can step LRI past the shortest predecessor's first
++      // instruction while Idx is still short of ScanIdx (the counting
++      // walk and the profitability walk skip debug instructions
++      // asymmetrically); (*LRI)[0] was a null-deref crash
++      // (sinkCommonCodeFromPredecessors, KERN_INVALID_ADDRESS at 0).
++      if (!LRI.isValid() || (*LRI).empty() || (*LRI)[0] == nullptr)
++        return false;
+       unsigned NumPHIInsts = 0;
+       for (Use &U : (*LRI)[0]->operands()) {
+         auto It = PHIOperands.find(&U);
+@@ -2488,7 +2497,7 @@ static bool sinkCommonCodeFromPredecessors(BasicBlock *BB,
+     LRI.reset();
+     int Idx = 0;
+     SmallPtrSet<Value *, 4> InstructionsProfitableToSink;
+-    while (Idx < ScanIdx) {
++    while (Idx < ScanIdx && LRI.isValid()) {
+       if (!ProfitableToSinkInstruction(LRI)) {
+         // Too many PHIs would be created.
+         LLVM_DEBUG(
+@@ -2518,7 +2527,7 @@ static bool sinkCommonCodeFromPredecessors(BasicBlock *BB,
+           "We already know that the last instruction is unprofitable to sink");
+       ++LRI;
+       --Idx;
+-      while (Idx >= 0) {
++      while (Idx >= 0 && LRI.isValid()) {
+         // If we detect that an instruction becomes unprofitable to sink,
+         // all earlier instructions won't be sunk either,
+         // so preemptively keep InstructionsProfitableToSink in sync.
+-- 
+2.50.1 (Apple Git-155)
+

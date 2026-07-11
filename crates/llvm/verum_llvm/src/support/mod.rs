@@ -200,6 +200,32 @@ fn test_load_visible_symbols() {
 
 /// Determines whether or not LLVM has been configured to run in multithreaded mode. (Inkwell currently does
 /// not officially support multithreaded mode)
+/// Parse LLVM `cl::opt` command-line options programmatically.
+///
+
+/// The host process's argv never reaches LLVM, so internal knobs
+/// (`-simplifycfg-sink-common=false`, pass-debug flags, …) are
+/// unreachable without this. argv[0] is a dummy program name.
+/// LLVM parses these into GLOBAL option storage — call once, before
+/// any pass pipeline runs; repeated calls with conflicting values
+/// are rejected by LLVM with an error printed to stderr.
+pub fn parse_command_line_options(args: &[&str], overview: &str) {
+    use verum_llvm_sys::llvm::support::LLVMParseCommandLineOptions;
+    let c_args: Vec<std::ffi::CString> = std::iter::once("verum")
+        .chain(args.iter().copied())
+        .map(|a| std::ffi::CString::new(a).expect("nul in llvm cl option"))
+        .collect();
+    let ptrs: Vec<*const ::libc::c_char> = c_args.iter().map(|c| c.as_ptr()).collect();
+    let c_overview = std::ffi::CString::new(overview).expect("nul in overview");
+    unsafe {
+        LLVMParseCommandLineOptions(
+            ptrs.len() as ::libc::c_int,
+            ptrs.as_ptr(),
+            c_overview.as_ptr(),
+        );
+    }
+}
+
 pub fn is_multithreaded() -> bool {
     use verum_llvm_sys::core::LLVMIsMultithreaded;
 

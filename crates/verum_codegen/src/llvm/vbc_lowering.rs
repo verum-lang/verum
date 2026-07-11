@@ -766,6 +766,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let _ = verum_llvm::targets::Target::initialize_native(
                 &verum_llvm::targets::InitializationConfig::default(),
             );
+            // SIMPLIFYCFG-SINK-NULL-1 (task #21 layer 2) is fixed AT THE
+            // SOURCE in the in-tree LLVM fork: sinkCommonCodeFromPredecessors'
+            // profitability scans now guard LockstepReverseIterator
+            // exhaustion instead of dereferencing (*LRI)[0] blind
+            // (llvm-project/llvm/lib/Transforms/Utils/SimplifyCFG.cpp).
+            // A cl-option containment (-simplifycfg-sink-common=false)
+            // was tried first and did NOT take effect through
+            // LLVMParseCommandLineOptions at this init point — and a
+            // transform-wide switch-off is a compromise regardless; the
+            // fork patch removes the crash class while keeping the
+            // optimization.
         });
         if let Ok(target) = verum_llvm::targets::Target::from_triple(&triple) {
             if let Some(tm) = target.create_target_machine(
@@ -1255,6 +1266,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         // Phase 3.55: Remove self-recursive functions from broken @cfg dispatch
         self.remove_self_recursive_functions();
+
+        // Phase 3.6 REMOVED (SIMPLIFYCFG-SINK-NULL-1 attempt): a
+        // per-function `f.verify()` sweep here crashed DETERMINISTICALLY
+        // — the LLVM Verifier itself null-derefs on the same invalid IR
+        // (the documented Verifier::visitCallBase SIGSEGV that motivated
+        // the module-verify skip). The codegen-prep SimplifyCFG crash
+        // must be fixed at the invalid-IR PRODUCER (arity-collision
+        // wrapper generation), not by post-hoc verification.
 
         if let Some(f) = self.module.get_function("parallel_map") {
             tracing::debug!(
@@ -4263,6 +4282,53 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             false
         );
         declare_fn!("free", ctx.void_type(), &[ptr_type.into()], false);
+    }
+
+    /// SIMPLIFYCFG-SINK-NULL-1: replace the body of every function the
+    /// LLVM verifier rejects with a `ret 0` stub. Runs where the module
+    /// verifier is gated off (arity collisions) — codegen-prep passes
+    /// inside `write_to_file` (SimplifyCFG sinking) crash on invalid IR
+    /// that reaches them.
+    fn stub_verifier_rejected_functions(&mut self) {
+        let ctx = self.context;
+        let mut stubbed = 0usize;
+        let mut func = self.module.get_first_function();
+        while let Some(f) = func {
+            let next = f.get_next_function();
+            if f.count_basic_blocks() > 0 && !f.verify(false) {
+                while let Some(bb) = f.get_first_basic_block() {
+                    unsafe {
+                        bb.delete().ok();
+                    }
+                }
+                let entry = ctx.append_basic_block(f, "verifier_stub");
+                let builder = ctx.create_builder();
+                builder.position_at_end(entry);
+                match f.get_type().get_return_type() {
+                    Some(ty) => {
+                        let zero = ty.const_zero();
+                        let _ = builder.build_return(Some(&zero));
+                    }
+                    None => {
+                        let _ = builder.build_return(None);
+                    }
+                }
+                if std::env::var_os("VERUM_TRACE_VERIFIER_STUBS").is_some() {
+                    eprintln!(
+                        "[verifier-stub] {}",
+                        f.get_name().to_string_lossy()
+                    );
+                }
+                stubbed += 1;
+            }
+            func = next;
+        }
+        if stubbed > 0 {
+            tracing::warn!(
+                "stubbed {} verifier-rejected function bodies (SIMPLIFYCFG-SINK-NULL-1)",
+                stubbed
+            );
+        }
     }
 
     fn remove_invalid_functions(&mut self) {

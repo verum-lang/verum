@@ -340,7 +340,9 @@ impl CodegenTiersPhase {
 
         // Convert optimization level
         let opt_level = match self.aot_config.opt_level {
-            AotOptLevel::O0 => verum_llvm::OptimizationLevel::None,
+            // GLOBALISEL-NULLMMO-1 (see llvm_lowering.rs): SelectionDAG
+            // only — GlobalISel's RegBankSelect null-MMO crash at O0.
+            AotOptLevel::O0 => verum_llvm::OptimizationLevel::Less,
             AotOptLevel::O1 => verum_llvm::OptimizationLevel::Less,
             AotOptLevel::O2 => verum_llvm::OptimizationLevel::Default,
             AotOptLevel::O3 | AotOptLevel::Os | AotOptLevel::Oz => {
