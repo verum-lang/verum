@@ -13048,6 +13048,47 @@ fn lower_call_method<'ctx>(
 
                     // Read type_id from object header (first i64 at ptr)
                     let recv_i64 = as_i64(ctx, receiver_val, "recv_i64")?;
+                    // RTS-SCALAR-GUARD (task #22 leg 1b) — same
+                    // pointer-plausibility gate as the runtime-type-
+                    // switch fallback: a scalar receiver must take the
+                    // default arm, not deref its own value as a header.
+                    let dyn_fn0 = ctx.function();
+                    let dyn_cx0 = ctx.llvm_context();
+                    let dyn_load_bb = dyn_cx0.append_basic_block(dyn_fn0, "dyn_hdr_load");
+                    let dyn_guard_default_bb =
+                        dyn_cx0.append_basic_block(dyn_fn0, "dyn_guard_default");
+                    let dyn_floor_val: u64 =
+                        if super::target_triple::target_is_darwin(&ctx.get_module()) {
+                            0x1_0000_0000
+                        } else {
+                            0x1_0000
+                        };
+                    let dyn_floor = i64_type.const_int(dyn_floor_val, false);
+                    let dyn_above = ctx
+                        .builder()
+                        .build_int_compare(IntPredicate::UGE, recv_i64, dyn_floor, "dyn_above_floor")
+                        .or_llvm_err()?;
+                    let dyn_align_bits = ctx
+                        .builder()
+                        .build_and(recv_i64, i64_type.const_int(7, false), "dyn_align_bits")
+                        .or_llvm_err()?;
+                    let dyn_aligned = ctx
+                        .builder()
+                        .build_int_compare(
+                            IntPredicate::EQ,
+                            dyn_align_bits,
+                            i64_type.const_zero(),
+                            "dyn_aligned",
+                        )
+                        .or_llvm_err()?;
+                    let dyn_plausible = ctx
+                        .builder()
+                        .build_and(dyn_above, dyn_aligned, "dyn_ptr_plausible")
+                        .or_llvm_err()?;
+                    ctx.builder()
+                        .build_conditional_branch(dyn_plausible, dyn_load_bb, dyn_guard_default_bb)
+                        .or_llvm_err()?;
+                    ctx.builder().position_at_end(dyn_load_bb);
                     let recv_ptr = ctx
                         .builder()
                         .build_int_to_ptr(recv_i64, ptr_type, "recv_ptr")
@@ -13109,6 +13150,22 @@ fn lower_call_method<'ctx>(
                     };
                     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
                     incoming.push((default_val, default_bb));
+
+                    // RTS-SCALAR-GUARD: an implausible-pointer receiver IS
+                    // the primitive/Copy case the default arm describes —
+                    // for `clone` its identity clone is the raw value
+                    // itself (no deref happened on this path), otherwise
+                    // the zero contract applies.
+                    ctx.builder().position_at_end(dyn_guard_default_bb);
+                    ctx.builder()
+                        .build_unconditional_branch(merge_bb)
+                        .or_llvm_err()?;
+                    let guard_val: BasicValueEnum<'ctx> = if method_name == "clone" {
+                        recv_i64.into()
+                    } else {
+                        i64_type.const_zero().into()
+                    };
+                    incoming.push((guard_val, dyn_guard_default_bb));
 
                     for (bb, fname) in &case_blocks {
                         ctx.builder().position_at_end(*bb);
@@ -14597,7 +14654,16 @@ fn lower_call_method<'ctx>(
         let from_reg_types = ctx.reg_types().type_name(receiver.0);
         // Priority 2: VBC method_type_prefix (compile-time resolution)
         let from_prefix = method_type_prefix;
-        from_sticky.or(from_reg_types).or(from_prefix)
+        // Priority 3 (task #22 leg 1b-recovery): SCALAR static type
+        // recovered at GetF from the field descriptor — lets
+        // `self.ns.cmp(...)` resolve `Int.cmp` DIRECTLY (so the
+        // leg-1a receiver spill fires) instead of degrading to the
+        // runtime type switch, which cannot dispatch raw scalars.
+        let from_scalar = ctx.get_scalar_register_type(receiver.0);
+        from_sticky
+            .or(from_reg_types)
+            .or(from_prefix)
+            .or(from_scalar)
     };
     if std::env::var("VERUM_TRACE_NEXT_DISPATCH").is_ok() && method_name_str == "next" {
         eprintln!(
@@ -18092,15 +18158,18 @@ fn lower_call_method<'ctx>(
     // exact `ref_prim` recipe `lower_ref` uses for explicit `&x`.
     // Receivers already carrying addresses (ref-params, GetE element
     // refs) pass through untouched.
+    // Archive descriptors erase `&self` to `self: Unit` (metadata renders
+    // Int.cmp's param as Unit), so the SIGNATURE cannot carry this fact
+    // for stdlib methods. The callee BODY is the carried fact instead:
+    // a method that treats param0 as a reference begins by ChkRef/Deref
+    // on Reg(0) before ever writing it.
     let callee_wants_scalar_ref_self = param_count > args.count as usize
         && ctx.vbc_module().is_some_and(|vbc| {
-            // O(1) via the Phase-1.5 name index; the descriptor lookup
-            // stays on the module for the param type_refs.
             ctx.func_name_index()
                 .and_then(|ix| ix.find_by_name(&func_name))
                 .and_then(|entry| vbc.functions.get(entry.index))
                 .is_some_and(|fd| {
-                    fd.params.first().is_some_and(|p| {
+                    let sig_says_ref_scalar = fd.params.first().is_some_and(|p| {
                         matches!(
                             &p.type_ref,
                             verum_vbc::types::TypeRef::Reference { inner, .. }
@@ -18123,7 +18192,37 @@ fn lower_call_method<'ctx>(
                                         )
                                 )
                         )
-                    })
+                    });
+                    let body_derefs_param0 = fd.instructions.as_ref().is_some_and(|instrs| {
+                        for ins in instrs.iter().take(8) {
+                            match ins {
+                                verum_vbc::Instruction::ChkRef { ref_reg }
+                                    if ref_reg.0 == 0 =>
+                                {
+                                    return true;
+                                }
+                                verum_vbc::Instruction::Deref { ref_reg, .. }
+                                    if ref_reg.0 == 0 =>
+                                {
+                                    return true;
+                                }
+                                // param0 rebound before any deref — not a ref body.
+                                verum_vbc::Instruction::Mov { dst, .. }
+                                    if dst.0 == 0 =>
+                                {
+                                    return false;
+                                }
+                                _ => {}
+                            }
+                        }
+                        false
+                    });
+                    // Only spill for scalar-receiver dispatch: the RECEIVER
+                    // register must not be a tracked heap object (records
+                    // pass their pointer as self legitimately).
+                    (sig_says_ref_scalar || body_derefs_param0)
+                        && ctx.get_obj_register_type(receiver.0).is_none()
+                        && !ctx.is_struct_register(receiver.0)
                 })
         });
     if callee_wants_scalar_ref_self
@@ -21104,7 +21203,67 @@ fn lower_cbgr_extended<'ctx>(
                 .builder()
                 .build_load(i64_type, field_ptr, "refield_loaded")
                 .or_llvm_err()?;
-            ctx.set_register(dst, loaded);
+            // REFFIELD-SCALAR-ADDR-1 (task #22): the load above is right
+            // for RECORD-typed fields (the slot holds the object's heap
+            // pointer — one hop yields the address). For a SCALAR field
+            // the loaded value is RAW data, and passing it onward as a
+            // `&Int` argument made the callee's deref read THROUGH the
+            // value (`Duration.cmp`'s `&other.nanos` fed `Int.cmp`
+            // `other=1e9` → fault addr 1e9). When the base object's type
+            // and field descriptor resolve to a primitive, spill the
+            // loaded value to a stack slot and yield the ADDRESS —
+            // refs are addresses; the callee's single deref lands on
+            // the slot. Unknown metadata keeps the historical load.
+            let scalar_field = ctx
+                .get_obj_register_type(base_reg)
+                .map(|s| s.to_string())
+                .and_then(|base_ty| {
+                    let vbc = ctx.vbc_module()?;
+                    let stripped = base_ty.split('<').next().unwrap_or(&base_ty).to_string();
+                    let td = vbc
+                        .types
+                        .iter()
+                        .find(|t| vbc.get_type_name(t.id).as_deref() == Some(stripped.as_str()))?;
+                    let fd = td.fields.get(field_idx)?;
+                    match &fd.type_ref {
+                        verum_vbc::types::TypeRef::Concrete(tid) => Some(matches!(
+                            *tid,
+                            verum_vbc::types::TypeId::INT
+                                | verum_vbc::types::TypeId::FLOAT
+                                | verum_vbc::types::TypeId::BOOL
+                                | verum_vbc::types::TypeId::U8
+                                | verum_vbc::types::TypeId::I8
+                                | verum_vbc::types::TypeId::U16
+                                | verum_vbc::types::TypeId::I16
+                                | verum_vbc::types::TypeId::U32
+                                | verum_vbc::types::TypeId::I32
+                                | verum_vbc::types::TypeId::U64
+                                | verum_vbc::types::TypeId::F32
+                        )),
+                        _ => Some(false),
+                    }
+                })
+                .unwrap_or(false);
+            if scalar_field {
+                let slot = ctx
+                    .builder()
+                    .build_alloca(i64_type, "refield_scalar_slot")
+                    .or_llvm_err()?;
+                ctx.builder()
+                    .build_store(slot, loaded.into_int_value())
+                    .or_llvm_err()?;
+                let addr = ctx
+                    .builder()
+                    .build_ptr_to_int(slot, i64_type, "refield_scalar_addr")
+                    .or_llvm_err()?;
+                ctx.set_register(dst, addr.into());
+                // Compare lowering derefs marked scalar refs
+                // (deref_if_lone_ref) — same mark lower_ref's
+                // ref_prim path sets.
+                ctx.mark_ref_param_register(dst);
+            } else {
+                ctx.set_register(dst, loaded);
+            }
             Ok(())
         }
         0x0A => {
@@ -28413,8 +28572,58 @@ fn build_runtime_type_switch<'ctx>(
     let ptr_type = ctx.types().ptr_type();
     let receiver_val = ctx.get_register(receiver.0)?;
 
-    // Read type_id from the object header (first word at the pointer).
+    // RTS-SCALAR-GUARD (task #22 leg 1b): runtime type dispatch reads
+    // the type-id header THROUGH the receiver. Tier-0 checks the
+    // NaN-box tag before dispatching; the AOT register model carries
+    // raw i64s, so a SCALAR receiver whose static kind the lowering
+    // lost (`self.ns` GetF results arrive with type_name=None) was
+    // dereferenced as a pointer — fault addr = the value (1e9 for
+    // `Duration.secs(1) <`). Mirror the tag check with a pointer-
+    // plausibility test: non-null, 8-aligned, above the platform heap
+    // floor. Implausible receivers take the DEFAULT arm — the same
+    // contract as an unmatched type id ("primitive receiver").
     let recv_i64 = as_i64(ctx, receiver_val, "rts_recv_i64")?;
+    let current_fn0 = ctx.function();
+    let llvm_cx0 = ctx.llvm_context();
+    let load_bb = llvm_cx0.append_basic_block(current_fn0, "rts_hdr_load");
+    let guard_default_bb = llvm_cx0.append_basic_block(current_fn0, "rts_guard_default");
+    // Platform heap floor by TARGET triple (never host cfg): darwin
+    // user heaps live above 4 GiB, so small-magnitude scalars
+    // (1e9 = 0x3B9ACA00, 8-aligned!) must fail the gate there;
+    // elsewhere keep the conservative page floor.
+    let heap_floor_val: u64 = if super::target_triple::target_is_darwin(&ctx.get_module()) {
+        0x1_0000_0000
+    } else {
+        0x1_0000
+    };
+    let heap_floor = i64_type.const_int(heap_floor_val, false);
+    let above_floor = ctx
+        .builder()
+        .build_int_compare(IntPredicate::UGE, recv_i64, heap_floor, "rts_above_floor")
+        .or_llvm_err()?;
+    let align_bits = ctx
+        .builder()
+        .build_and(recv_i64, i64_type.const_int(7, false), "rts_align_bits")
+        .or_llvm_err()?;
+    let aligned = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::EQ,
+            align_bits,
+            i64_type.const_zero(),
+            "rts_aligned",
+        )
+        .or_llvm_err()?;
+    let plausible = ctx
+        .builder()
+        .build_and(above_floor, aligned, "rts_ptr_plausible")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(plausible, load_bb, guard_default_bb)
+        .or_llvm_err()?;
+
+    // Read type_id from the object header (first word at the pointer).
+    ctx.builder().position_at_end(load_bb);
     let recv_ptr = ctx
         .builder()
         .build_int_to_ptr(recv_i64, ptr_type, "rts_recv_ptr")
@@ -28457,6 +28666,14 @@ fn build_runtime_type_switch<'ctx>(
         .or_llvm_err()?;
     let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
     incoming.push((i64_type.const_zero().into(), default_bb));
+
+    // RTS-SCALAR-GUARD: implausible-pointer receivers join the merge
+    // through the same zero-result contract as an unmatched type id.
+    ctx.builder().position_at_end(guard_default_bb);
+    ctx.builder()
+        .build_unconditional_branch(merge_bb)
+        .or_llvm_err()?;
+    incoming.push((i64_type.const_zero().into(), guard_default_bb));
 
     for (bb, fname) in &case_blocks {
         ctx.builder().position_at_end(*bb);
@@ -34101,6 +34318,18 @@ fn lower_get_field<'ctx>(
                                     if let Some(ft_name) = vbc_mod.get_type_name(*tid) {
                                         if !is_primitive_type_name(&ft_name) {
                                             ctx.set_obj_register_type(dst.0, ft_name.to_string());
+                                        } else {
+                                            // task #22 leg 1b-recovery: record the
+                                            // SCALAR field type in the resolution-only
+                                            // map so `self.ns.cmp(...)` binds Int.cmp
+                                            // DIRECTLY (and the leg-1a receiver spill
+                                            // fires) instead of degrading to the
+                                            // runtime type switch, which cannot
+                                            // dispatch a raw scalar.
+                                            ctx.set_scalar_register_type(
+                                                dst.0,
+                                                ft_name.to_string(),
+                                            );
                                         }
                                     }
                                 }

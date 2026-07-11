@@ -2775,6 +2775,40 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     if is_text {
                         ctx.mark_text_register(i as u16);
                     }
+                    // task #22 leg 1b-recovery: USER-record/variant params
+                    // (incl. `self`) get their nominal type into the obj
+                    // map so downstream GetF recovers FIELD types (scalar
+                    // map) and S2 resolves `self.ns.cmp(...)` DIRECTLY —
+                    // pre-fix `Duration.cmp`'s self was untracked, the
+                    // whole recovery chain never started, and the call
+                    // degraded to the scalar-unsound runtime type switch.
+                    if let TypeRef::Concrete(tid) = effective_type {
+                        let known_builtin = matches!(
+                            *tid,
+                            TypeId::INT
+                                | TypeId::FLOAT
+                                | TypeId::BOOL
+                                | TypeId::TEXT
+                                | TypeId::LIST
+                                | TypeId::MAP
+                                | TypeId::UNIT
+                                | TypeId::PTR
+                                | TypeId::NEVER
+                        );
+                        if !known_builtin
+                            && ctx.get_obj_register_type(i as u16).is_none()
+                        {
+                            if let Some(tname) = vbc_module.get_type_name(*tid) {
+                                if tname
+                                    .chars()
+                                    .next()
+                                    .is_some_and(|c| c.is_ascii_uppercase())
+                                {
+                                    ctx.set_obj_register_type(i as u16, tname.to_string());
+                                }
+                            }
+                        }
+                    }
                     let is_list = match effective_type {
                         TypeRef::Concrete(tid) => *tid == TypeId::LIST,
                         TypeRef::Instantiated { base, .. } => *base == TypeId::LIST,

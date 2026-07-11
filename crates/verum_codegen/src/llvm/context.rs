@@ -359,6 +359,14 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Used by GetF to look up the correct type's field metadata instead of
     /// blindly using the function name prefix (which is only correct for `self`).
     obj_register_types: HashMap<u16, String>,
+    /// SCALAR static types recovered for registers (e.g. a GetF of an
+    /// Int field). Kept SEPARATE from `obj_register_types`: consumers
+    /// of the obj map assume heap objects (lower_ref pass-through,
+    /// collection intercepts), while this map only informs method
+    /// RESOLUTION (S2 receiver matching) so `self.ns.cmp(...)` binds
+    /// `Int.cmp` directly instead of degrading to the runtime type
+    /// switch (task #22 leg 1b-recovery).
+    scalar_register_types: HashMap<u16, String>,
 
     /// Tracks the inner struct type name for registers holding Maybe<Heap<T>> variants.
     /// When GetF loads a field of type Maybe<Heap<Foo>>, we record the innermost struct
@@ -738,6 +746,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
             obj_register_types: HashMap::new(),
+            scalar_register_types: HashMap::new(),
             maybe_inner_types: HashMap::new(),
             variant_registers: std::collections::HashSet::new(),
 
@@ -841,6 +850,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
             obj_register_types: HashMap::new(),
+            scalar_register_types: HashMap::new(),
             maybe_inner_types: HashMap::new(),
             variant_registers: std::collections::HashSet::new(),
 
@@ -1859,6 +1869,16 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Set the object type name for a register.
     /// Used by GetF to look up field metadata from the correct type.
+    /// Record a SCALAR static type for method-resolution purposes only.
+    pub fn set_scalar_register_type(&mut self, reg: u16, type_name: String) {
+        self.scalar_register_types.insert(reg, type_name);
+    }
+
+    /// Scalar static type recovered for `reg`, if any.
+    pub fn get_scalar_register_type(&self, reg: u16) -> Option<&str> {
+        self.scalar_register_types.get(&reg).map(|s| s.as_str())
+    }
+
     pub fn set_obj_register_type(&mut self, reg: u16, type_name: String) {
         self.obj_register_types.insert(reg, type_name);
     }
