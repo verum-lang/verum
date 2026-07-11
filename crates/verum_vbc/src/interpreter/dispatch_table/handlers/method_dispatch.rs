@@ -985,6 +985,15 @@ pub(in super::super) fn handle_call_method(
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
     }
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        let rk = if dispatch_receiver.is_int() { "int".to_string() }
+            else if dispatch_receiver.is_float() { "float".to_string() }
+            else if dispatch_receiver.is_ptr() {
+                let a = dispatch_receiver.as_ptr::<u8>() as usize;
+                format!("ptr({:#x} interior={})", a, state.cbgr_mutable_ptrs.contains(&a))
+            } else { "other".to_string() };
+        eprintln!("[callm-flow] A-post-primitive method={} recv={}", method_name, rk);
+    }
 
     // PRIMITIVE-RECEIVER FMT RESOLUTION (#41 poll-Debug class).
     // Pinned rule (see the Unit-receiver intercept): a primitive's
@@ -1049,6 +1058,9 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] B-pre-array method={}", method_name);
+    }
     // Try built-in array/list methods (map, filter, fold, etc.)
     if dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
@@ -1106,6 +1118,9 @@ pub(in super::super) fn handle_call_method(
     let prefer_user_compiled = method_name != bare_method_name
         && state.module.find_function_by_name(&method_name).is_some()
         && !force_intrinsic_variant_dispatch;
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] C-pre-variant-1 method={}", method_name);
+    }
     if !prefer_user_compiled
         && dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
@@ -1253,7 +1268,11 @@ pub(in super::super) fn handle_call_method(
     // Extract type name from receiver (supports both SmallString and heap-allocated strings)
     let receiver_type_name: Option<String> = if receiver.is_small_string() {
         Some(receiver.as_small_string().as_str().to_string())
-    } else if receiver.is_ptr() && !receiver.is_nil() {
+    } else if receiver.is_regular_ptr() && !receiver.is_nil() {
+        // FATREF-DISPATCH-ROUTE-1 (#51): regular-pointer contract — a
+        // FatRef/ThinRef marker passed the old `is_ptr` gate and this
+        // probe dereferenced marker bits at +OBJECT_HEADER_SIZE (the
+        // chained-slice `sub1.slice(..)` crash point).
         // Try reading as heap-allocated string: [ObjectHeader][len: u64][bytes...]
         let base_ptr = receiver.as_ptr::<u8>();
         if !base_ptr.is_null() {
@@ -1896,8 +1915,8 @@ pub(in super::super) fn handle_call_method(
                 const DRAIN_CAP: usize = 16_777_216;
                 loop {
                     let item = super::super::call_function_sync(state, next_fid, &[iter_val])?;
-                    if !item.is_ptr() || item.is_nil() {
-                        break; // nil-shaped next result: treat as exhausted
+                    if !item.is_regular_ptr() || item.is_nil() {
+                        break; // nil/non-heap-shaped next result: exhausted
                     }
                     let iptr = item.as_ptr::<u8>();
                     // SAFETY: next() returns a heap Maybe variant; tag read only.
@@ -2782,6 +2801,9 @@ pub(in super::super) fn handle_call_method(
     // — the variant layout is type-erased and the closure carries
     // the type-specific work — so it is sound to retry here as a
     // safety net before panicking.
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] D-pre-variant-2 method={}", method_name);
+    }
     if dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
         && let Some(result) = dispatch_variant_method(
@@ -2866,7 +2888,12 @@ pub(in super::super) fn handle_call_method(
     // exist in the module — so we never override an explicit
     // qualified-name match.  Pinned in
     // `core-tests/collections/slice/regression_test.vr` §A.
-    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] F-safety-net method={}", method_name);
+    }
+    if (dispatch_receiver.is_regular_ptr() || dispatch_receiver.is_fat_ref())
+        && !dispatch_receiver.is_nil()
+    {
         let try_safety_net = if method_name.contains('.') {
             // Qualified — only fire when the qualified form doesn't
             // exist (otherwise prefer the exact qualified match).
@@ -2875,9 +2902,25 @@ pub(in super::super) fn handle_call_method(
             true
         };
         if try_safety_net {
-            let ptr = dispatch_receiver.as_ptr::<u8>();
-            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-            let recv_type_id = header.type_id;
+            // FATREF-DISPATCH-ROUTE-1 (#51): a FatRef receiver has NO
+            // heap header to probe (its payload is marker bits) — its
+            // runtime kind IS the slice, so route through the same
+            // Slice-first static-prefix table the LIST-kind bridge
+            // uses. `recv_type_id = LIST` engages exactly that branch
+            // below without touching memory.
+            let recv_type_id = if dispatch_receiver.is_fat_ref() {
+                if std::env::var("VERUM_TRACE_FATREF_ROUTE").is_ok() {
+                    eprintln!(
+                        "[fatref-route] method='{}' bare='{}' → Slice-first prefix table",
+                        method_name, bare_method_name
+                    );
+                }
+                crate::types::TypeId::LIST
+            } else {
+                let ptr = dispatch_receiver.as_ptr::<u8>();
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                header.type_id
+            };
             // Strategy 1: TypeId-aware exact qualified lookup.
             let mut found: Option<crate::module::FunctionId> = state
                 .module
@@ -9024,7 +9067,10 @@ pub(super) fn build_set_from_values(
 /// `make_some_value` / `make_none_value`): `[ObjectHeader][tag:u32]
 /// [field_count:u32][payload_0:Value…]` — tag 0 = None, tag 1 = Some.
 pub(super) fn unwrap_maybe_some(value: Value) -> Option<Value> {
-    if !value.is_ptr() || value.is_nil() {
+    // FATREF-DISPATCH-ROUTE-1 (#51): variant probes accept ONLY regular
+    // heap pointers — `is_ptr()` passes FatRef/ThinRef markers, and
+    // `variant_payload(marker, 0)` dereferences marker bits (+0x18).
+    if !value.is_regular_ptr() || value.is_nil() {
         return None;
     }
     let ptr = value.as_ptr::<u8>();
@@ -9146,6 +9192,14 @@ pub(super) fn dispatch_variant_method(
     args: &RegRange,
     method_full: &str,
 ) -> InterpreterResult<Option<Value>> {
+    // FATREF-DISPATCH-ROUTE-1 (#51): header-probing dispatchers accept
+    // ONLY regular heap pointers. A FatRef/ThinRef shares TAG_POINTER,
+    // so a bare `as_ptr()` here returned the FAT_REF_MARKER payload and
+    // `variant_header_pair` dereferenced marker bits (+0x18 fault on
+    // `sub1.slice(..)` — the chained-slice receiver).
+    if !receiver.is_regular_ptr() {
+        return Ok(None);
+    }
     let base_ptr = receiver.as_ptr::<u8>();
     if base_ptr.is_null() {
         return Ok(None);
@@ -9497,6 +9551,11 @@ pub(super) fn dispatch_array_method(
     method: &str,
     args: &RegRange,
 ) -> InterpreterResult<Option<Value>> {
+    // FATREF-DISPATCH-ROUTE-1 (#51): same regular-pointer contract as
+    // dispatch_variant_method — marker-carrying refs never probe headers.
+    if !receiver.is_regular_ptr() {
+        return Ok(None);
+    }
     let ptr = receiver.as_ptr::<u8>();
     // Safety: validate pointer alignment before dereferencing as ObjectHeader
     if ptr.is_null() || ((ptr as usize) & (std::mem::align_of::<heap::ObjectHeader>() - 1)) != 0 {
@@ -9570,6 +9629,16 @@ pub(super) fn dispatch_array_method(
     // call site passing a Verum-built buffer to a C-ABI syscall.
     // Closes RUNTIME-2 from `internal/diag/sqlite-real/FINDINGS.md`.
     if method == "as_slice" || method == "as_mut_slice" {
+        // SLICE-REP-UNIFY-1 (#51): the identity cast leaked raw LIST
+        // pointers into slice positions, forking the slice
+        // representation (`&xs[..]` → FatRef, `xs.as_slice()` → List
+        // ptr) — FatRef-only consumers (slice_subslice / split_at)
+        // then crashed or silently no-op'd. Route through THE
+        // canonical slice constructor; non-container receivers keep
+        // the historic identity (C-ABI buffer pass-through, RUNTIME-2).
+        if let Some(slice_val) = super::cbgr::container_to_slice_fat_ref(state, receiver) {
+            return Ok(Some(slice_val));
+        }
         return Ok(Some(receiver));
     }
 

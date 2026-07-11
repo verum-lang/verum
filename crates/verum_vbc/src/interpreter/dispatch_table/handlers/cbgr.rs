@@ -930,6 +930,86 @@ pub(in super::super) fn handle_drop_ref(
 
 /// Note: The interpreter provides simplified implementations for these operations.
 /// The AOT compiler generates optimized code with full CBGR semantics.
+
+/// SLICE-REP-UNIFY-1 (#51 runtime leg 2): THE canonical constructor of
+/// a slice value over a runtime container. Verum's slice representation
+/// is the FatRef (`{data_ptr, len, reserved=elem_size}`); the historic
+/// `as_slice` identity-cast intercept leaked raw LIST pointers into
+/// slice positions, forking the representation — `&xs[..]` produced a
+/// FatRef while `xs.as_slice()` produced a List ptr, and every
+/// FatRef-only consumer (slice_subslice, split_at) either crashed or
+/// silently no-op'd on the latter.
+///
+
+/// Accepts: an existing FatRef / BYTE_SLICE view (identity — already
+/// canonical), a LIST / BYTE_LIST heap object (follows `backing_ptr`
+/// to the element data), or a typed raw array (U8/U16/U32/U64 —
+/// element data starts after the header; stride recorded in
+/// `reserved`). Anything else → None (caller decides the fallback).
+pub(in super::super) fn container_to_slice_fat_ref(
+    state: &crate::interpreter::InterpreterState,
+    src: Value,
+) -> Option<Value> {
+    if src.is_fat_ref() || heap::value_as_byte_slice(&src).is_some() {
+        return Some(src);
+    }
+    if !src.is_regular_ptr() {
+        return None;
+    }
+    let base_ptr = src.as_ptr::<u8>();
+    let header = unsafe { heap::ObjectHeader::try_from_ptr(base_ptr) }?;
+    let epoch = (state.cbgr_epoch & 0xFFFF) as u16;
+    match header.type_id {
+        TypeId::LIST | TypeId::BYTE_LIST => {
+            // Layout: [ObjectHeader][len: Value][cap: Value][backing_ptr: Value]
+            let len =
+                unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) }.as_i64();
+            let backing_val = unsafe {
+                *(base_ptr.add(heap::OBJECT_HEADER_SIZE + 16) as *const Value)
+            };
+            let data_ptr = if backing_val.is_ptr() && !backing_val.is_nil() {
+                unsafe { backing_val.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) }
+            } else if len == 0 {
+                // Never-pushed list: no backing yet — a dangling-free
+                // empty slice over the header edge is sound (len 0
+                // forbids every deref).
+                unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE) }
+            } else {
+                return None;
+            };
+            let mut fat_ref = FatRef::slice(
+                data_ptr,
+                0,
+                epoch,
+                Capabilities::MUT_EXCLUSIVE,
+                len.max(0) as u64,
+            );
+            fat_ref.reserved = if header.type_id == TypeId::BYTE_LIST { 1 } else { 0 };
+            Some(Value::from_fat_ref(fat_ref))
+        }
+        TypeId::U8 | TypeId::U16 | TypeId::U32 | TypeId::U64 => {
+            let stride: u32 = match header.type_id {
+                TypeId::U8 => 1,
+                TypeId::U16 => 2,
+                TypeId::U32 => 4,
+                _ => 8,
+            };
+            let data_ptr = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            let len = (header.size as u64) / stride as u64;
+            let mut fat_ref = FatRef::slice(
+                data_ptr,
+                0,
+                epoch,
+                Capabilities::MUT_EXCLUSIVE,
+                len,
+            );
+            fat_ref.reserved = stride;
+            Some(Value::from_fat_ref(fat_ref))
+        }
+        _ => None,
+    }
+}
+
 pub(in super::super) fn handle_cbgr_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -1026,6 +1106,35 @@ pub(in super::super) fn handle_cbgr_extended(
             // breaking every spec that builds a reference with `&arr[i]`.
             state.cbgr_mutable_ptrs.insert(elem_ptr as usize);
             state.set_reg(dst, Value::from_ptr(elem_ptr));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(CbgrSubOpcode::RefRawAddr) => {
+            // Interior reference from a raw ADDRESS in an int register
+            // (`&*self.ptr.offset(i)` — see the opcode doc). Mirrors the
+            // RefListElement tail: register the address as a heap-interior
+            // pointer so the generic Deref / dispatch / GetVariantData
+            // paths read the pointee Value, then hand out a ptr Value.
+            // Format: dst:reg, addr:reg
+            let dst = read_reg(state)?;
+            let addr_reg = read_reg(state)?;
+            let addr_val = state.get_reg(addr_reg);
+            let addr: usize = if addr_val.is_int() {
+                addr_val.as_i64() as usize
+            } else if addr_val.is_ptr() && !addr_val.is_nil() {
+                addr_val.as_ptr::<u8>() as usize
+            } else {
+                0
+            };
+            if addr == 0 {
+                state.set_reg(dst, Value::nil());
+            } else {
+                state.cbgr_mutable_ptrs.insert(addr);
+                if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+                    eprintln!("[raw-addr] insert {:#x}", addr);
+                }
+                state.set_reg(dst, Value::from_ptr(addr as *mut u8));
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -1621,7 +1730,14 @@ pub(in super::super) fn handle_cbgr_extended(
             let start_reg = read_reg(state)?;
             let end_reg = read_reg(state)?;
 
-            let src = state.get_reg(src_reg);
+            // SLICE-SUBSLICE-RESOLVE-1 (#51 runtime leg): the receiver
+            // arrives as a register-encoded CBGR ref / ThinRef when the
+            // callee param is `slice: &[T]` — resolve to the referent
+            // FatRef BEFORE classifying (GetE/IterInit precedent).
+            // Pre-fix the unresolved ref fell through the FatRef and
+            // byte-slice arms into a SILENT `src` passthrough:
+            // `s.slice(1,5)` returned the WHOLE slice.
+            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg));
             let start = state.get_reg(start_reg).as_i64() as u64;
             let end = state.get_reg(end_reg).as_i64() as u64;
 
@@ -1676,7 +1792,16 @@ pub(in super::super) fn handle_cbgr_extended(
                     });
                 }
             } else {
-                src
+                // Never a guessed slot / silent identity — a receiver
+                // that is neither a FatRef nor a byte-slice view means
+                // the ref-resolution contract above was violated.
+                return Err(crate::interpreter::InterpreterError::Panic {
+                    message: format!(
+                        "slice_subslice: receiver is neither FatRef nor byte-slice \
+                         (bits {:#x}) — SLICE-SUBSLICE-RESOLVE-1",
+                        src.to_bits()
+                    ),
+                });
             };
             state.set_reg(dst, result);
             Ok(DispatchResult::Continue)
@@ -1690,34 +1815,45 @@ pub(in super::super) fn handle_cbgr_extended(
             let src_reg = read_reg(state)?;
             let mid_reg = read_reg(state)?;
 
-            let src = state.get_reg(src_reg);
+            // SLICE-SUBSLICE-RESOLVE-1: same ref-resolution contract as
+            // SliceSubslice above.
+            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg));
             let mid = state.get_reg(mid_reg).as_i64() as u64;
 
             if src.is_fat_ref() {
                 let fat_ref = src.as_fat_ref();
                 let len = fat_ref.len();
                 if mid <= len {
-                    let element_size = std::mem::size_of::<Value>();
+                    // Honour the reserved elem-size (0 = NaN-boxed
+                    // Value, 1/2/4/8 = raw widths) — a fixed
+                    // sizeof(Value) stride walks 8x past byte slices.
+                    let element_size = if fat_ref.reserved == 0 {
+                        std::mem::size_of::<Value>()
+                    } else {
+                        fat_ref.reserved as usize
+                    };
 
                     // Left slice: [0, mid)
-                    let left_ref = crate::value::FatRef::new(
+                    let mut left_ref = crate::value::FatRef::new(
                         fat_ref.ptr(),
                         fat_ref.generation(),
                         fat_ref.epoch(),
                         fat_ref.capabilities(),
                         mid,
                     );
+                    left_ref.reserved = fat_ref.reserved;
 
                     // Right slice: [mid, len)
                     let right_ptr =
                         unsafe { (fat_ref.ptr() as *const u8).add(mid as usize * element_size) };
-                    let right_ref = crate::value::FatRef::new(
+                    let mut right_ref = crate::value::FatRef::new(
                         right_ptr as *mut u8,
                         fat_ref.generation(),
                         fat_ref.epoch(),
                         fat_ref.capabilities(),
                         len - mid,
                     );
+                    right_ref.reserved = fat_ref.reserved;
 
                     state.set_reg(dst1, Value::from_fat_ref(left_ref));
                     state.set_reg(dst2, Value::from_fat_ref(right_ref));
@@ -1748,8 +1884,13 @@ pub(in super::super) fn handle_cbgr_extended(
                     });
                 }
             } else {
-                state.set_reg(dst1, Value::nil());
-                state.set_reg(dst2, Value::nil());
+                return Err(crate::interpreter::InterpreterError::Panic {
+                    message: format!(
+                        "slice_split_at: receiver is neither FatRef nor byte-slice \
+                         (bits {:#x}) — SLICE-SUBSLICE-RESOLVE-1",
+                        src.to_bits()
+                    ),
+                });
             }
             Ok(DispatchResult::Continue)
         }

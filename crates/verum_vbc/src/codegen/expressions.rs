@@ -3955,6 +3955,18 @@ impl VbcCodegen {
                     // `&*p ≡ p` — `ptr_reg` already holds the heap-anchored
                     // pointer, which is the exact `&T` the surrounding code
                     // expects and which survives every frame boundary.
+                    // NOTE (#48, 2026-07-12): a RefRawAddr materialization
+                    // here (interior-registered `Value::from_ptr`) was
+                    // built and REVERTED — the erased-T deref downstream
+                    // reads `*(addr as *const Value)`, but List literal-
+                    // coerced buffers hold RAW unboxed i64 elements, so
+                    // the read misinterprets (float-bits) and widening
+                    // the interior-deref surface SIGSEGVed async/poll
+                    // (stale `cbgr_mutable_ptrs` entries — the set is
+                    // never cleaned on free). The REAL contract fix is
+                    // element-repr carried facts on the buffer (see
+                    // task #48 notes / [[session_2026-07-11_glob_mount_
+                    // ctor_pattern_rigidity_47]]).
                     if is_static_raw_method {
                         self.ctx.mark_raw_pointer(ptr_reg);
                     }
@@ -35015,7 +35027,6 @@ impl VbcCodegen {
         parts: &verum_common::List<verum_common::Text>,
         exprs: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
-        eprintln!("[MARKER] compile_interpolated_string parts={} exprs={}", parts.len(), exprs.len());
         // Build string by concatenating parts and expressions
         let dest = self.ctx.alloc_temp();
 

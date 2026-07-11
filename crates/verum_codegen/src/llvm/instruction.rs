@@ -21186,6 +21186,25 @@ fn lower_cbgr_extended<'ctx>(
             ctx.mark_interior_list_ref(dst);
             Ok(())
         }
+        0x0D => {
+            // **RefRawAddr** (#48) — interior reference from a raw
+            // ADDRESS computed as an int (`&*self.ptr.offset(i)`).
+            // Tier-1's reference model uses real machine pointers, so
+            // the lowering is the identity: the address value IS the
+            // pointer. Copy it through (marked as an interior list
+            // ref for DEREF-INTERIOR-1 parity, mirroring
+            // RefListElement) — downstream Deref reads the pointee.
+            // Format: `dst:reg, addr:reg`.
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let addr_reg = op_reg(operands, 1);
+            let addr = ctx.get_register(addr_reg)?;
+            ctx.set_register(dst, addr);
+            ctx.mark_interior_list_ref(dst);
+            Ok(())
+        }
         0x0C => {
             // **RefField** (task #17 close) — produce a heap-anchored
             // interior pointer to a record field by field-index.  Mirror

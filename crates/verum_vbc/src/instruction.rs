@@ -8941,6 +8941,16 @@ pub enum CbgrSubOpcode {
     ///
     /// Format: `dst:reg, base:reg, field_idx:varint`
     RefField = 0x0C,
+    /// Interior reference from a RAW ADDRESS already computed as an
+    /// integer (`&*self.ptr.offset(i)` — pointer arithmetic yields the
+    /// element address in an int register). Registers the address as a
+    /// heap-interior pointer (Task#7 `cbgr_mutable_ptrs` discipline) and
+    /// produces `Value::from_ptr(addr)`, so every downstream consumer
+    /// (generic Deref, method dispatch, GetVariantData) reads the
+    /// pointee Value instead of printing/propagating the address int
+    /// (#48: `f"{[7]:?}"` rendered `[45710041792]`).
+    /// Format: `dst:reg, addr:reg`.
+    RefRawAddr = 0x0D,
 
     // ========================================================================
     // Capability Operations (0x10-0x1F)
@@ -9286,6 +9296,7 @@ impl CbgrSubOpcode {
             0x0A => Some(Self::RefSliceRaw),
             0x0B => Some(Self::RefListElement),
             0x0C => Some(Self::RefField),
+            0x0D => Some(Self::RefRawAddr),
             // Capability Operations
             0x10 => Some(Self::CapAttenuate),
             0x11 => Some(Self::CapTransfer),
@@ -9382,6 +9393,7 @@ impl CbgrSubOpcode {
             Self::RefSliceRaw        => m!("CBGR_REF_SLICE_RAW",     SliceInteriorReferences, cref=true,  mcaps=false, val=false),
             Self::RefListElement     => m!("CBGR_REF_LIST_ELEM",     SliceInteriorReferences, cref=true,  mcaps=false, val=false),
             Self::RefField           => m!("CBGR_REF_FIELD",         SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefRawAddr          => m!("CBGR_REF_RAW_ADDR",      SliceInteriorReferences, cref=true,  mcaps=false, val=false),
 
             // ===== Capability Operations (0x10-0x1F) =====
             Self::CapAttenuate       => m!("CBGR_CAP_ATTENUATE",     CapabilityOperations,    cref=false, mcaps=true,  val=false),
@@ -17772,8 +17784,8 @@ mod tests {
         for_every_cbgr_sub_opcode(|op| {
             if op.creates_reference() { count += 1; }
         });
-        assert_eq!(count, 15,
-            "creates_reference count drift: expected 15 (added RefField for task #121)");
+        assert_eq!(count, 16,
+            "creates_reference count drift: expected 16 (RefField #121, RefRawAddr #48)");
         // Named regression assertions for the closed gaps:
         assert!(CbgrSubOpcode::SliceSubslice.creates_reference(),
             "SliceSubslice produces a new FatRef per its format docs");
