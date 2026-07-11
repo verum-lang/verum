@@ -953,6 +953,20 @@ impl<'s> CompilationPipeline<'s> {
                             is_transparent_wrapper: false,
                             param_closure_return_type_names: Vec::new(),
                         };
+                        // [diag] VERUM_TRACE_STUB=<substring> logs each
+                        // stage-1 registration by qualified name — the
+                        // count-only summary below can't answer "did
+                        // <Type>.<method> get a stub?" during class-(a)
+                        // triage.
+                        if let Ok(filter) = std::env::var("VERUM_TRACE_STUB")
+                            && filter != "1"
+                            && qualified.contains(&filter)
+                        {
+                            eprintln!(
+                                "[stage-1] stub '{}' id={} arity={}",
+                                qualified, stub_id.0, param_count
+                            );
+                        }
                         self.global_function_registry
                             .insert(qualified, info.clone());
                         // Also register simple-name (first-wins) so

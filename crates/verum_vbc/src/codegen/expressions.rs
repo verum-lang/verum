@@ -5424,6 +5424,21 @@ impl VbcCodegen {
                             self.ctx.functions.len()
                         );
                     }
+                    // [diag] VERUM_TRACE_UNDEF_FN=<substring> — eprintln
+                    // twin of the debug trace above so bake logs (WARN
+                    // default) carry the near-match evidence during
+                    // class-(a) triage without a debug flood.
+                    if let Ok(filter) = std::env::var("VERUM_TRACE_UNDEF_FN")
+                        && func_name.contains(&filter)
+                    {
+                        eprintln!(
+                            "[undef-fn] '{}' in {} — exact key present: {}; near: {:?}",
+                            func_name,
+                            self.ctx.current_function.as_deref().unwrap_or("<top>"),
+                            self.ctx.functions.contains_key(&func_name),
+                            near_matches
+                        );
+                    }
                     // LEN-FREE-FN-1: `len(x)` free-function form is sugar for
                     // `x.len()`. We reach here ONLY after user-function
                     // resolution has failed — so a user-defined `fn len` (e.g.
