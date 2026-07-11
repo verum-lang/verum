@@ -43,6 +43,7 @@
 module core.database.mysql.async_connection;
 
 mount core.*;
+mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
@@ -467,7 +468,7 @@ public async fn connect(
 
     Result.Ok(AsyncMysqlConnection {
         tx: tx,
-        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
+        join: Shared.new(Mutex.new(Maybe.Some(join))),
         connection_id: connection_id,
         cancel_cfg: cancel_cfg,
     })

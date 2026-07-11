@@ -1082,10 +1082,12 @@ implement<T> Future for OneshotReceiver<T> {
 
 // Create oneshot channel.
 public fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
+    let no_value: Maybe<T> = Maybe.None;
+    let no_waker: Maybe<Waker> = Maybe.None;
     let inner = Shared.new(OneshotInner {
         sent: AtomicBool.new(false),
-        value: sync.mutex.Mutex.new(Maybe.None as Maybe<T>),
-        waker: sync.mutex.Mutex.new(Maybe.None as Maybe<Waker>),
+        value: Mutex.new(no_value),
+        waker: Mutex.new(no_waker),
     });
 
     (

@@ -45,6 +45,7 @@
 module core.database.postgres.composite_registry;
 
 mount core.*;
+mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.postgres.wire.typed.{
@@ -121,7 +122,7 @@ public type CompositeRegistry is {
 implement CompositeRegistry {
     public fn new() -> CompositeRegistry {
         CompositeRegistry {
-            inner: Shared.new(sync.mutex.Mutex.new(List.new())),
+            inner: Shared.new(Mutex.new(List.new())),
         }
     }
 

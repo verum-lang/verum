@@ -54,6 +54,7 @@
 module core.database.postgres.async_listener;
 
 mount core.*;
+mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
@@ -230,7 +231,7 @@ public async fn connect_listener_async(
 
     Result.Ok(AsyncPgListener {
         cmd_tx: cmd_tx,
-        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
+        join: Shared.new(Mutex.new(Maybe.Some(join))),
     })
 }
 

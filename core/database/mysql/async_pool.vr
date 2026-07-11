@@ -19,6 +19,7 @@
 module core.database.mysql.async_pool;
 
 mount core.*;
+mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
@@ -111,7 +112,7 @@ implement AsyncMysqlPool {
             config: config,
             pool_cfg: pool_cfg,
             available_tx: tx,
-            available_rx: Shared.new(sync.mutex.Mutex.new(rx)),
+            available_rx: Shared.new(Mutex.new(rx)),
             current: Shared.new(AtomicInt.new(opened)),
         })
     }
