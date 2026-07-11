@@ -13189,6 +13189,39 @@ impl TypeChecker {
                                 // Try alias resolution directly
                                 if let Option::Some(alias_ty) = self.ctx.resolve_alias(type_name) {
                                     let alias_ty = alias_ty.clone();
+                                    // #47 class B — SELF-ALIAS GUARD: metadata
+                                    // loading registers a variant type's
+                                    // self-referential placeholder in the alias
+                                    // registry (`ControlFlow` → `ControlFlow`).
+                                    // Recursing on it strips the instance's
+                                    // type args at depth-out (`ControlFlow<
+                                    // Result<!,Text>, Int>` → `ControlFlow`)
+                                    // and never reaches the constructor-driven
+                                    // build; pattern payloads then stay rigid
+                                    // `Named("C")`. A same-head alias is not an
+                                    // alias — build from constructors, which
+                                    // substitutes via __type_params_/metadata.
+                                    let alias_head_same = match &alias_ty {
+                                        Type::Named { path: ap, .. } => ap
+                                            .segments
+                                            .last()
+                                            .map(|seg| match seg {
+                                                verum_ast::ty::PathSegment::Name(id) => {
+                                                    id.name.as_str() == type_name
+                                                }
+                                                _ => false,
+                                            })
+                                            .unwrap_or(false),
+                                        Type::Generic { name: an, .. } => {
+                                            an.as_str() == type_name
+                                        }
+                                        _ => false,
+                                    };
+                                    if alias_head_same {
+                                        return self.try_build_variant_from_constructors(
+                                            type_name, args, ty,
+                                        );
+                                    }
                                     // For alias resolution, substitute actual type args into the alias target
                                     // before recursing. This preserves the concrete args (e.g., Stream<T>)
                                     // instead of leaving formal params (e.g., T).
@@ -13402,20 +13435,51 @@ impl TypeChecker {
         name: &str,
         expected_arity: Option<usize>,
     ) -> Option<Type> {
+        self.try_resolve_variant_constructor_with_arity_for(name, expected_arity, None)
+    }
+
+    /// Like [`Self::try_resolve_variant_constructor_with_arity`], with an
+    /// EXPECTED-PARENT hint (#47): a bare constructor name shared by
+    /// several sum types (`Continue` on both ControlFlow<B,C> and
+    /// ReduceResult<R>) used to resolve first-registered-wins even when
+    /// the caller's expected type NAMES the parent — `let cf:
+    /// ControlFlow<Text, Int> = Continue(42);` bound 42 against
+    /// ReduceResult's payload and failed `expected 'Text', found 'Int'`
+    /// (79 base/ops + 22 control tests). When the hint matches a
+    /// registered parent (exact or dotted-suffix), it wins outright.
+    pub(super) fn try_resolve_variant_constructor_with_arity_for(
+        &self,
+        name: &str,
+        expected_arity: Option<usize>,
+        expected_parent: Option<&str>,
+    ) -> Option<Type> {
         if crate::ctor_trace_enabled() {
             eprintln!(
-                "[ctor-trace] try_resolve_variant_constructor_with_arity('{}', {:?})",
-                name, expected_arity
+                "[ctor-trace] try_resolve_variant_constructor_with_arity('{}', {:?}, hint={:?})",
+                name, expected_arity, expected_parent
             );
         }
         let ctor_text = verum_common::Text::from(name);
         let parents = self.variant_constructor_parents.get(&ctor_text)?;
+        if crate::ctor_trace_enabled() {
+            eprintln!("[ctor-trace]   parents={:?}", parents.iter().map(|p| p.as_str()).collect::<Vec<_>>());
+        }
         // Pick the parent whose constructor for `name` accepts the
         // expected arity, when arity context is available AND multiple
         // parents are in the registry.  Otherwise fall through to the
         // first-registered-wins discipline (mirrors
         // `register_variant_type_name_first_wins`).
-        let parent_name = if let (Some(arity), true) =
+        let hinted: Option<Text> = expected_parent.and_then(|want| {
+            parents.iter().find(|p| {
+                let ps = p.as_str();
+                ps == want
+                    || ps.rsplit('.').next() == Some(want)
+                    || want.rsplit('.').next() == Some(ps)
+            }).cloned()
+        });
+        let parent_name = if let Some(h) = hinted {
+            h
+        } else if let (Some(arity), true) =
             (expected_arity, parents.len() > 1)
         {
             let mut chosen: Option<Text> = None;
@@ -13451,11 +13515,30 @@ impl TypeChecker {
         // Build fresh type variables for the parent's generic
         // parameters so the constructor instantiation is open
         // (caller's expected type drives unification).
-        let generics_count = self
+        let mut generics_count = self
             .type_generics_count
             .get(&parent_name)
             .copied()
             .unwrap_or(0);
+        if generics_count == 0 {
+            // #47 — same priority chain as the tv_subst KEY sources
+            // below: a registration path that filled the constructor
+            // registry but not `type_generics_count` must not degrade
+            // the ctor to a rigid argless instantiation (payload keeps
+            // its `Named("C")` placeholder and mis-binds positionally
+            // at the call site).
+            let params_key: verum_common::Text =
+                format!("__type_params_{}", parent_name).into();
+            if let Option::Some(Type::Record(param_record)) =
+                self.ctx.lookup_type(params_key.as_str())
+            {
+                generics_count = param_record.len();
+            } else if let Maybe::Some(metadata) = &self.core_metadata
+                && let Some(td) = metadata.types.get(&parent_name)
+            {
+                generics_count = td.generic_params.len();
+            }
+        }
         let fresh_args: List<Type> = (0..generics_count)
             .map(|_| Type::Var(crate::ty::TypeVar::fresh()))
             .collect();
@@ -13642,6 +13725,12 @@ impl TypeChecker {
                 .collect();
             Self::substitute_typevars_in_type(&return_type, &leftover)
         };
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace] try_resolve OUT: params={:?} ret={:?}",
+                params, return_type
+            );
+        }
         if params.is_empty() {
             // Unit-position variant (None, Less, …) — return the
             // constructed value directly, not a function.
@@ -13935,6 +14024,15 @@ impl TypeChecker {
         fallback: &Type,
     ) -> Type {
         let type_name = verum_common::Text::from(name);
+        if crate::ctor_trace_enabled() {
+            let has = self.ctx.get_constructors(&type_name).map(|c| c.len());
+            eprintln!(
+                "[ctor-trace] try_build_variant('{}') args={} ctors={:?}",
+                name,
+                args.len(),
+                has
+            );
+        }
         if let Some(constructors) = self.ctx.get_constructors(&type_name) {
             if !constructors.is_empty() {
                 // Build variant map from inductive constructors
@@ -14621,9 +14719,10 @@ impl TypeChecker {
                 .unwrap_or(false);
             if is_variant_of_recv
                 && let Some(ctor_ty) = self
-                    .try_resolve_variant_constructor_with_arity(
+                    .try_resolve_variant_constructor_with_arity_for(
                         method.name.as_str(),
                         Some(args.len()),
+                        Some(recv_type_name),
                     )
             {
                 let (params_opt, return_type) = match &ctor_ty {

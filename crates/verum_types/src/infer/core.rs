@@ -824,6 +824,28 @@ impl TypeChecker {
             if !type_desc.generic_params.is_empty() {
                 self.type_generics_count
                     .insert(name.clone(), type_desc.generic_params.len());
+                // Mirror the eager `__type_params_<name>` record too —
+                // ordered param names drive by-name substitution in
+                // `expand_generic_to_variant` / ctor resolution /
+                // `try_build_variant_from_constructors` (#47 class B;
+                // twin write in env.rs `register_stdlib_constructors_
+                // from_metadata`).
+                let type_params_key: verum_common::Text =
+                    format!("__type_params_{}", name).into();
+                if self.ctx.lookup_type(type_params_key.as_str()).is_none() {
+                    let mut param_record: indexmap::IndexMap<
+                        verum_common::Text,
+                        crate::ty::Type,
+                    > = indexmap::IndexMap::new();
+                    for gp in type_desc.generic_params.iter() {
+                        param_record
+                            .insert(gp.name.clone(), crate::ty::Type::Int);
+                    }
+                    self.ctx.define_type(
+                        type_params_key,
+                        crate::ty::Type::Record(param_record),
+                    );
+                }
             }
 
             // Type alias: also register in BOTH the ctx's alias

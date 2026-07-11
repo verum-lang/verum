@@ -722,6 +722,15 @@ impl TypeChecker {
 
                 // Expand the scrutinee type and check if it's a variant
                 let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty);
+                if crate::ctor_trace_enabled() {
+                    let st = format!("{:?}", scheme.ty);
+                    let et = format!("{:?}", expanded_ty);
+                    eprintln!(
+                        "[ctor-trace] bind_pattern expand: scheme.ty={} -> expanded={}",
+                        &st[..st.len().min(600)],
+                        &et[..et.len().min(600)]
+                    );
+                }
 
                 // If the pattern is explicitly qualified and the qualifier
                 // resolves to a known variant type in scope, prefer the
@@ -957,6 +966,15 @@ impl TypeChecker {
 
                 // Expand Generic types like Maybe<T> and Result<T,E> to their variant form
                 let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty);
+                if crate::ctor_trace_enabled() {
+                    let st = format!("{:?}", scheme.ty);
+                    let et = format!("{:?}", expanded_ty);
+                    eprintln!(
+                        "[ctor-trace] bind_pattern expand: scheme.ty={} -> expanded={}",
+                        &st[..st.len().min(600)],
+                        &et[..et.len().min(600)]
+                    );
+                }
 
                 // If the pattern is explicitly qualified and the qualifier
                 // resolves to a known variant type in scope, prefer the

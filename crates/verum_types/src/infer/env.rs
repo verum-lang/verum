@@ -160,6 +160,44 @@ impl TypeChecker {
                 self.ctx
                     .register_inductive_type(type_name.clone(), constructors);
 
+                // Mirror the eager loader's `type_generics_count` write
+                // (same discipline as `ensure_stdlib_type_loaded`,
+                // core.rs:813). Without it this pre-load path registers
+                // the ctors but leaves the parent's generic arity
+                // unknown — `try_resolve_variant_constructor_with_arity`
+                // then synthesises a rigid argless `Named { parent }`
+                // ctor type whose payload keeps the registration-time
+                // `Named("C")` placeholder, and the Call arm's
+                // positional bind maps it to the FIRST expected arg:
+                // `let cf: ControlFlow<Text, Int> = Continue(42)` failed
+                // with `expected 'Text', found 'Int'` (#47, glob-mount
+                // form only — braced mounts import through a path that
+                // does record the count).
+                if !type_desc.generic_params.is_empty() {
+                    self.type_generics_count
+                        .insert(type_name.clone(), type_desc.generic_params.len());
+                    // Also mirror the eager `__type_params_<name>` record
+                    // (decls.rs writer): ordered param NAMES drive by-name
+                    // substitution in `expand_generic_to_variant`, the
+                    // ctor resolver's key-source #2 and struct-field
+                    // instantiation. Without it the ControlFlow<B,C>
+                    // payload placeholders stay rigid `Named("C")` and
+                    // positional fallbacks mis-bind (#47 class B).
+                    let type_params_key: verum_common::Text =
+                        format!("__type_params_{}", type_name).into();
+                    if self.ctx.lookup_type(type_params_key.as_str()).is_none() {
+                        let mut param_record: indexmap::IndexMap<
+                            verum_common::Text,
+                            Type,
+                        > = indexmap::IndexMap::new();
+                        for gp in type_desc.generic_params.iter() {
+                            param_record.insert(gp.name.clone(), Type::Int);
+                        }
+                        self.ctx
+                            .define_type(type_params_key, Type::Record(param_record));
+                    }
+                }
+
                 // **Fundamental fix (Task #43 audit)** — also populate
                 // `variant_constructor_parents` so the Call expression's
                 // bare-name variant-constructor dispatch arm

@@ -64,6 +64,24 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 #[allow(unused_imports)]
 use verum_modules::resolver::NameKind;
 
+/// Head (last dotted segment) simple name of a type — the #47
+/// expected-parent hint for multi-parent bare-constructor
+/// disambiguation (`Continue` on both ControlFlow and ReduceResult).
+fn expected_parent_head(ty: &Type) -> Option<String> {
+    // NOTE: name-level alias chains are resolved by the caller via
+    // `Self::expected_parent_hint` — this helper is purely structural.
+
+    match ty {
+        Type::Named { path, .. } => path.segments.iter().rev().find_map(|s| match s {
+            verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str().to_owned()),
+            _ => None,
+        }),
+        Type::Generic { name, .. } => Some(name.as_str().to_owned()),
+        _ => None,
+    }
+}
+
+
 impl TypeChecker {
     pub fn synth_expr(&mut self, expr: &Expr) -> Result<InferResult> {
         self.metrics.synth_count += 1;
@@ -663,19 +681,29 @@ impl TypeChecker {
                 // checked (this is the `mount core.prelude.*` path that reaches
                 // the method-call arg resolver before `F` concretises). Both
                 // drive the constructor-as-function coercion.
-                let expected_fn_arity = match &resolved_expected {
-                    Type::Function { params, .. } => Some(params.len()),
+                let (expected_fn_arity, expected_fn_ret_head) = match &resolved_expected {
+                    Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } => (Some(params.len()), self.expected_parent_hint(return_type)),
                     Type::Var(tv) => match self.get_function_type_bound(tv) {
-                        verum_common::Maybe::Some(Type::Function { params, .. }) => {
-                            Some(params.len())
-                        }
-                        _ => None,
+                        verum_common::Maybe::Some(Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        }) => (Some(params.len()), self.expected_parent_hint(&return_type)),
+                        _ => (None, None),
                     },
-                    _ => None,
+                    _ => (None, None),
                 };
                 if let Some(arity) = expected_fn_arity
                     && let Some(ctor_ty) = self
-                        .try_resolve_variant_constructor_with_arity(constructor_name, Some(arity))
+                        .try_resolve_variant_constructor_with_arity_for(
+                            constructor_name,
+                            Some(arity),
+                            expected_fn_ret_head.as_deref(),
+                        )
                 {
                     self.unifier.unify(&ctor_ty, &resolved_expected, expr.span)?;
                     return Ok(InferResult::new(ctor_ty));
@@ -713,6 +741,16 @@ impl TypeChecker {
 
                 // Expand expected type to variant form
                 let resolved_expected_call = self.unifier.apply(expected);
+                // #47 alias-hop: `type Deep is ControlFlow<X, Y>;` must
+                // present the ALIASED target (head name + concrete args)
+                // to the gate, the parent hint and the positional bind
+                // below — the raw alias head has no registered ctor
+                // parent and an empty args list, so the arm either
+                // skipped (args gate) or resolved first-registered-wins.
+                let resolved_expected_call = self
+                    .unifier
+                    .try_expand_alias(&resolved_expected_call)
+                    .unwrap_or(resolved_expected_call);
                 let expanded_expected = self.expand_generic_to_variant(&resolved_expected_call);
                 // **Architectural fallback** (closes iterator §D / task #14
                 // §3.2): when `expand_generic_to_variant` doesn't produce a
@@ -756,10 +794,13 @@ impl TypeChecker {
                         .variant_constructor_parents
                         .get(&Text::from(constructor_name))
                         .is_some()
-                    && let Some(ctor_ty) = self.try_resolve_variant_constructor_with_arity(
-                        constructor_name,
-                        Some(call_args.len()),
-                    )
+                    && let Some(ctor_ty) = self
+                        .try_resolve_variant_constructor_with_arity_for(
+                            constructor_name,
+                            Some(call_args.len()),
+                            self.expected_parent_hint(&resolved_expected_call)
+                                .as_deref(),
+                        )
                 {
                     if let Type::Function {
                         params,
@@ -6005,6 +6046,23 @@ impl TypeChecker {
             },
             _ => ty.clone(),
         }
+    }
+
+    /// #47 — expected-parent hint with alias resolution: structural
+    /// alias expansion first (`type Deep is ControlFlow<..>` → head
+    /// "ControlFlow"), then the unifier's name-level alias chain.
+    fn expected_parent_hint(&self, ty: &Type) -> Option<String> {
+        if let Some(expanded) = self.unifier.try_expand_alias(ty)
+            && let Some(h) = expected_parent_head(&expanded)
+        {
+            return Some(h);
+        }
+        let head = expected_parent_head(ty)?;
+        Some(
+            self.unifier
+                .resolve_aliased_head_text(&head)
+                .unwrap_or(head),
+        )
     }
 
     fn infer_expr_call(&mut self, expr: &Expr) -> Result<InferResult> {
