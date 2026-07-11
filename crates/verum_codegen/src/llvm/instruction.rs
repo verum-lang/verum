@@ -18279,11 +18279,75 @@ fn lower_call_method<'ctx>(
         receiver_val = addr.into();
     }
 
+    // BODY-FACT-ARG-SPILL (task #22 leg 2): the same contract as the
+    // receiver spill, applied to every ARGUMENT position. Archive
+    // descriptors erase `&T` params to bare types, so the callee BODY
+    // is the carried fact: a Deref(Reg(i)) before any Reg(i) write
+    // marks param i as reading THROUGH its argument. Value arguments
+    // for such params spill to stack slots and pass the ADDRESS
+    // (`self.nanos.cmp(&other.nanos)` — arg1 was the raw i64 nanos;
+    // Int.cmp's `*other` faulted on the value). Already-address args
+    // (ref-marked, GetE element ptrs) pass through.
+    let deref_params: Vec<bool> = ctx
+        .vbc_module()
+        .and_then(|vbc| {
+            ctx.func_name_index()
+                .and_then(|ix| ix.find_by_name(&func_name))
+                .and_then(|entry| vbc.functions.get(entry.index))
+                .and_then(|fd| fd.instructions.as_ref())
+                .map(|instrs| {
+                    let n = param_count.min(8);
+                    let mut derefs = vec![false; n];
+                    let mut written = vec![false; n];
+                    for ins in instrs.iter().take(16) {
+                        match ins {
+                            verum_vbc::Instruction::Deref { ref_reg, .. }
+                                if (ref_reg.0 as usize) < n && !written[ref_reg.0 as usize] =>
+                            {
+                                derefs[ref_reg.0 as usize] = true;
+                            }
+                            verum_vbc::Instruction::Mov { dst, .. }
+                                if (dst.0 as usize) < n =>
+                            {
+                                written[dst.0 as usize] = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    derefs
+                })
+        })
+        .unwrap_or_default();
+
     // Collect all available values: [receiver, arg0, arg1, ...]
     let mut all_vals: Vec<BasicValueEnum> = Vec::with_capacity(args.count as usize + 1);
     all_vals.push(receiver_val);
-    for r in args.iter() {
-        all_vals.push(ctx.get_register(r.0)?);
+    let param_offset = if param_count > args.count as usize { 1 } else { 0 };
+    for (ai, r) in args.iter().enumerate() {
+        let mut v = ctx.get_register(r.0)?;
+        let pidx = ai + param_offset;
+        let wants_deref = deref_params.get(pidx).copied().unwrap_or(false);
+        if wants_deref
+            && !ctx.is_ref_param_register(r.0)
+            && ctx.get_gete_element_ptr(r.0).is_none()
+            && ctx.get_obj_register_type(r.0).is_none()
+            && !ctx.is_struct_register(r.0)
+            && v.is_int_value()
+        {
+            let i64_type = ctx.types().i64_type();
+            let vi = as_i64(ctx, v, "arg_spill_val")?;
+            let slot = ctx
+                .builder()
+                .build_alloca(i64_type, "arg_spill")
+                .or_llvm_err()?;
+            ctx.builder().build_store(slot, vi).or_llvm_err()?;
+            let addr = ctx
+                .builder()
+                .build_ptr_to_int(slot, i64_type, "arg_spill_addr")
+                .or_llvm_err()?;
+            v = addr.into();
+        }
+        all_vals.push(v);
     }
 
     // Determine if this is a static method (skip receiver) or instance method
@@ -21239,67 +21303,15 @@ fn lower_cbgr_extended<'ctx>(
                 .builder()
                 .build_load(i64_type, field_ptr, "refield_loaded")
                 .or_llvm_err()?;
-            // REFFIELD-SCALAR-ADDR-1 (task #22): the load above is right
-            // for RECORD-typed fields (the slot holds the object's heap
-            // pointer — one hop yields the address). For a SCALAR field
-            // the loaded value is RAW data, and passing it onward as a
-            // `&Int` argument made the callee's deref read THROUGH the
-            // value (`Duration.cmp`'s `&other.nanos` fed `Int.cmp`
-            // `other=1e9` → fault addr 1e9). When the base object's type
-            // and field descriptor resolve to a primitive, spill the
-            // loaded value to a stack slot and yield the ADDRESS —
-            // refs are addresses; the callee's single deref lands on
-            // the slot. Unknown metadata keeps the historical load.
-            let scalar_field = ctx
-                .get_obj_register_type(base_reg)
-                .map(|s| s.to_string())
-                .and_then(|base_ty| {
-                    let vbc = ctx.vbc_module()?;
-                    let stripped = base_ty.split('<').next().unwrap_or(&base_ty).to_string();
-                    let td = vbc
-                        .types
-                        .iter()
-                        .find(|t| vbc.get_type_name(t.id).as_deref() == Some(stripped.as_str()))?;
-                    let fd = td.fields.get(field_idx)?;
-                    match &fd.type_ref {
-                        verum_vbc::types::TypeRef::Concrete(tid) => Some(matches!(
-                            *tid,
-                            verum_vbc::types::TypeId::INT
-                                | verum_vbc::types::TypeId::FLOAT
-                                | verum_vbc::types::TypeId::BOOL
-                                | verum_vbc::types::TypeId::U8
-                                | verum_vbc::types::TypeId::I8
-                                | verum_vbc::types::TypeId::U16
-                                | verum_vbc::types::TypeId::I16
-                                | verum_vbc::types::TypeId::U32
-                                | verum_vbc::types::TypeId::I32
-                                | verum_vbc::types::TypeId::U64
-                                | verum_vbc::types::TypeId::F32
-                        )),
-                        _ => Some(false),
-                    }
-                })
-                .unwrap_or(false);
-            if scalar_field {
-                let slot = ctx
-                    .builder()
-                    .build_alloca(i64_type, "refield_scalar_slot")
-                    .or_llvm_err()?;
-                ctx.builder()
-                    .build_store(slot, loaded.into_int_value())
-                    .or_llvm_err()?;
-                let addr = ctx
-                    .builder()
-                    .build_ptr_to_int(slot, i64_type, "refield_scalar_addr")
-                    .or_llvm_err()?;
-                ctx.set_register(dst, addr.into());
-                // Compare lowering derefs marked scalar refs
-                // (deref_if_lone_ref) — same mark lower_ref's
-                // ref_prim path sets.
-                ctx.mark_ref_param_register(dst);
-            } else {
-                ctx.set_register(dst, loaded);
-            }
+            // REFFIELD-SCALAR-ADDR-1 REVERTED (task #22 leg 2 lesson): yielding
+            // the slot ADDRESS satisfied deref-consumers (Int.cmp) but broke
+            // every VALUE consumer — `d.as_nanos()` returned the stack
+            // address itself (dp AOT 53→9). The load is the correct read
+            // semantics; deref-consumers are fixed at the CALL boundary
+            // instead (BODY-FACT-ARG-SPILL below): the callee's body names
+            // which params it derefs, and those arguments spill to slots
+            // at the call site.
+            ctx.set_register(dst, loaded);
             Ok(())
         }
         0x0A => {
@@ -33411,8 +33423,13 @@ fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
     // consumers (lower_ref is_heap_type, CallM receiver typing) see
     // the post-Mov binding register (task #22 leg 2: the tuple-elem
     // hint on reg3 never reached `&halves.0`'s Ref on reg5).
-    if let Some(hint) = ctx.sticky_type_hint(src.0).map(|s| s.to_string()) {
-        ctx.set_sticky_type_hint(dst.0, hint);
+    match ctx.sticky_type_hint(src.0).map(|s| s.to_string()) {
+        Some(hint) => ctx.set_sticky_type_hint(dst.0, hint),
+        // Unhinted source OVERWRITES dst — a stale sticky (Priority-0
+        // in receiver typing) on a reused register mis-dispatched
+        // every later method call through it (dp AOT 53→9:
+        // `d.as_nanos()` read garbage through a wrong impl).
+        None => ctx.clear_sticky_type_hint(dst.0),
     }
     let value = ctx.get_register(src.0)?;
     ctx.set_register(dst.0, value);

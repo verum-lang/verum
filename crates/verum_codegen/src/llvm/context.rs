@@ -1010,6 +1010,12 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// the pre-pass `CustomIterator` typing before the loop's CallM).
     /// Consulted as Priority-0 by the receiver-type computation; only
     /// registers VBC explicitly hinted live here (anti-over-fire).
+    /// Remove a sticky hint (Mov with an unhinted source overwrites the
+    /// destination register's value — a stale hint must not outlive it).
+    pub fn clear_sticky_type_hint(&mut self, reg: u16) {
+        self.sticky_type_hints.remove(&reg);
+    }
+
     pub fn set_sticky_type_hint(&mut self, reg: u16, type_name: String) {
         self.sticky_type_hints.insert(reg, type_name);
     }
