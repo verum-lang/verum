@@ -44,19 +44,19 @@ public fn tag_nibble(e: &JsonbElementType) -> Int {
 }
 
 public fn from_nibble(n: Int) -> Maybe<JsonbElementType> {
-    if n == 0  { return Maybe.Some(EtNull); }
-    if n == 1  { return Maybe.Some(EtTrue); }
-    if n == 2  { return Maybe.Some(EtFalse); }
-    if n == 3  { return Maybe.Some(EtInt); }
-    if n == 4  { return Maybe.Some(EtInt5); }
-    if n == 5  { return Maybe.Some(EtFloat); }
-    if n == 6  { return Maybe.Some(EtFloat5); }
-    if n == 7  { return Maybe.Some(EtText); }
-    if n == 8  { return Maybe.Some(EtTextJ); }
-    if n == 9  { return Maybe.Some(EtText5); }
-    if n == 10 { return Maybe.Some(EtTextRaw); }
-    if n == 11 { return Maybe.Some(EtArray); }
-    if n == 12 { return Maybe.Some(EtObject); }
+    if n == 0  { return Maybe.Some(JsonbElementType.EtNull); }
+    if n == 1  { return Maybe.Some(JsonbElementType.EtTrue); }
+    if n == 2  { return Maybe.Some(JsonbElementType.EtFalse); }
+    if n == 3  { return Maybe.Some(JsonbElementType.EtInt); }
+    if n == 4  { return Maybe.Some(JsonbElementType.EtInt5); }
+    if n == 5  { return Maybe.Some(JsonbElementType.EtFloat); }
+    if n == 6  { return Maybe.Some(JsonbElementType.EtFloat5); }
+    if n == 7  { return Maybe.Some(JsonbElementType.EtText); }
+    if n == 8  { return Maybe.Some(JsonbElementType.EtTextJ); }
+    if n == 9  { return Maybe.Some(JsonbElementType.EtText5); }
+    if n == 10 { return Maybe.Some(JsonbElementType.EtTextRaw); }
+    if n == 11 { return Maybe.Some(JsonbElementType.EtArray); }
+    if n == 12 { return Maybe.Some(JsonbElementType.EtObject); }
     Maybe.None
 }
 

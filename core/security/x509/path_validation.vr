@@ -294,7 +294,7 @@ fn name_constraints_state_empty() -> NameConstraintsState {
 public fn validate_path(input: &PathValidationInput) -> Result<ValidatedPath, PathError> {
     let chain = &input.chain;
     let n = chain.len();
-    if n == 0 { return Result.Err(EmptyChain); }
+    if n == 0 { return Result.Err(PathError.EmptyChain); }
     if n > MAX_CHAIN_LENGTH { return Result.Err(TooLong { length: n, limit: MAX_CHAIN_LENGTH }); }
 
     // The chain is provided EE-first, anchor-last. The algorithm

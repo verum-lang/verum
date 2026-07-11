@@ -158,6 +158,17 @@ public fn extended_is_success(e: &ExtendedCode) -> Bool {
     primary_is_success(&e.primary)
 }
 
+/// Well-known IOERR extended codes as ready `ExtendedCode` values —
+/// the names l7_api/backup.vr mounts (previously phantom: mounted but
+/// never declared, so backup_step/backup-write paths lenient-stubbed).
+public fn ExtIoErrRead() -> ExtendedCode {
+    extended_of(PrimaryCode.PcIoErr, IOERR_READ)
+}
+
+public fn ExtIoErrWrite() -> ExtendedCode {
+    extended_of(PrimaryCode.PcIoErr, IOERR_WRITE)
+}
+
 /// Well-known IOERR extensions (subset — full list in §20.5 of the spec).
 public const IOERR_READ: Int            = 1;
 public const IOERR_SHORT_READ: Int      = 2;

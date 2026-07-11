@@ -232,7 +232,7 @@ public fn backup_step(
             Result.Ok(f) => f,
             Result.Err(_) => {
                 return BoFailed {
-                    code: ExtIoErrRead,
+                    code: ExtIoErrRead(),
                     reason: f"backup: pager_read failed at page {src_page_no}".clone(),
                 };
             }
@@ -248,7 +248,7 @@ public fn backup_step(
             Result.Ok(_) => {}
             Result.Err(_) => {
                 return BoFailed {
-                    code: ExtIoErrWrite,
+                    code: ExtIoErrWrite(),
                     reason: f"backup: pager_write failed at page {src_page_no}".clone(),
                 };
             }
