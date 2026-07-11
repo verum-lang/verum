@@ -39,10 +39,10 @@ public fn mode_name(m: &CheckpointMode) -> Text {
 }
 
 public fn parse_mode(text: &Text) -> Maybe<CheckpointMode> {
-    if *text == "passive".clone()  { return Maybe.Some(CmPassive); }
-    if *text == "full".clone()     { return Maybe.Some(CmFull); }
-    if *text == "restart".clone()  { return Maybe.Some(CmRestart); }
-    if *text == "truncate".clone() { return Maybe.Some(CmTruncate); }
+    if *text == "passive".clone()  { return Maybe.Some(CheckpointMode.CmPassive); }
+    if *text == "full".clone()     { return Maybe.Some(CheckpointMode.CmFull); }
+    if *text == "restart".clone()  { return Maybe.Some(CheckpointMode.CmRestart); }
+    if *text == "truncate".clone() { return Maybe.Some(CheckpointMode.CmTruncate); }
     Maybe.None
 }
 

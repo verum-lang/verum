@@ -158,7 +158,7 @@ public fn rollback_parse_header(buf: &[Byte]) -> Result<RollbackHeader, Rollback
     let mut i: Int = 0;
     while i < 8 {
         if buf[i] != expected_magic[i] {
-            return Result.Err(BadMagic);
+            return Result.Err(RollbackError.BadMagic);
         }
         i = i + 1;
     }

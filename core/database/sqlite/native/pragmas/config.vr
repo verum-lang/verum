@@ -75,10 +75,10 @@ public fn synchronous_code(s: &Synchronous) -> Int {
 }
 
 public fn synchronous_from_int(n: Int) -> Maybe<Synchronous> {
-    if n == 0 { return Maybe.Some(SyncOff); }
-    if n == 1 { return Maybe.Some(SyncNormal); }
-    if n == 2 { return Maybe.Some(SyncFull); }
-    if n == 3 { return Maybe.Some(SyncExtra); }
+    if n == 0 { return Maybe.Some(Synchronous.SyncOff); }
+    if n == 1 { return Maybe.Some(Synchronous.SyncNormal); }
+    if n == 2 { return Maybe.Some(Synchronous.SyncFull); }
+    if n == 3 { return Maybe.Some(Synchronous.SyncExtra); }
     Maybe.None
 }
 

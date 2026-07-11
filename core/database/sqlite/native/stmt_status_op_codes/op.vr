@@ -36,15 +36,15 @@ public fn op_code(o: &StmtStatusOp) -> Int {
 }
 
 public fn from_code(code: Int) -> Maybe<StmtStatusOp> {
-    if code == 1  { return Maybe.Some(SsFullscanStep); }
-    if code == 2  { return Maybe.Some(SsSort); }
-    if code == 3  { return Maybe.Some(SsAutoIndex); }
-    if code == 4  { return Maybe.Some(SsVmStep); }
-    if code == 5  { return Maybe.Some(SsReprepare); }
-    if code == 6  { return Maybe.Some(SsRun); }
-    if code == 7  { return Maybe.Some(SsFilterMiss); }
-    if code == 8  { return Maybe.Some(SsFilterHit); }
-    if code == 99 { return Maybe.Some(SsMemUsed); }
+    if code == 1  { return Maybe.Some(StmtStatusOp.SsFullscanStep); }
+    if code == 2  { return Maybe.Some(StmtStatusOp.SsSort); }
+    if code == 3  { return Maybe.Some(StmtStatusOp.SsAutoIndex); }
+    if code == 4  { return Maybe.Some(StmtStatusOp.SsVmStep); }
+    if code == 5  { return Maybe.Some(StmtStatusOp.SsReprepare); }
+    if code == 6  { return Maybe.Some(StmtStatusOp.SsRun); }
+    if code == 7  { return Maybe.Some(StmtStatusOp.SsFilterMiss); }
+    if code == 8  { return Maybe.Some(StmtStatusOp.SsFilterHit); }
+    if code == 99 { return Maybe.Some(StmtStatusOp.SsMemUsed); }
     Maybe.None
 }
 

@@ -52,8 +52,8 @@ public fn cache_mode_text(c: &CacheMode) -> Text {
 }
 
 public fn parse_cache(text: &Text) -> Maybe<CacheMode> {
-    if *text == "shared".clone()  { return Maybe.Some(CmShared); }
-    if *text == "private".clone() { return Maybe.Some(CmPrivate); }
+    if *text == "shared".clone()  { return Maybe.Some(CacheMode.CmShared); }
+    if *text == "private".clone() { return Maybe.Some(CacheMode.CmPrivate); }
     Maybe.None
 }
 

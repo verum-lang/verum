@@ -82,7 +82,7 @@ implement InputParser {
     /// Feed a slice of bytes to the parser.
     /// Returns the number of events recognized.
     public fn feed(&mut self, data: &[Byte]) -> Int {
-        let count = 0;
+        let mut count = 0;
         for i in 0..data.len() {
             count = count + self.process_byte(data[i]);
         }

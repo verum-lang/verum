@@ -275,7 +275,7 @@ implement WindowsThread {
     /// Wait for thread to finish.
     public fn join(&mut self) -> Result<(), WindowsThreadError> {
         if self.finished {
-            return Result.Err(AlreadyJoined);
+            return Result.Err(WindowsThreadError.AlreadyJoined);
         }
 
         let result = WaitForSingleObject(self.handle, INFINITE);
@@ -316,7 +316,7 @@ implement WindowsThread {
     /// Detach thread (will be cleaned up automatically when done).
     public fn detach(&mut self) -> Result<(), WindowsThreadError> {
         if self.finished {
-            return Result.Err(AlreadyDetached);
+            return Result.Err(WindowsThreadError.AlreadyDetached);
         }
 
         CloseHandle(self.handle);
@@ -794,44 +794,25 @@ implement Drop for Win32Semaphore {
 public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Result<(), OSError> {
     // Convert nanosecond timeout to milliseconds for WaitOnAddress.
     // Round up to avoid premature timeout (1ns → 1ms, not 0ms).
-    let timeout_ms: UInt32 = match timeout {
-        Maybe.None => INFINITE,
-        Maybe.Some(ns) => {
-            if ns == 0 {
-                0 as UInt32
-            } else {
-                // Ceiling division: (ns + 999_999) / 1_000_000
-                let ms = (ns + 999_999) / 1_000_000;
-                if ms > 0xFFFFFFFE {
-                    // Cap at INFINITE - 1 to distinguish from true INFINITE
-                    0xFFFFFFFE as UInt32
-                } else {
-                    ms as UInt32
-                }
-            }
-        }
+    // Route through the canonical futex intrinsic (registry:
+    // InlineSequence FutexWait). Tier-0 lowers it to the interpreter's
+    // parking table (real blocking without the WaitOnAddress FFI that
+    // was unresolvable at Tier-0); AOT lowers it to the per-platform
+    // verum_futex_wait runtime shim (WaitOnAddress on Windows).
+    // Canonical ABI: 0 = woken, -11 = value mismatch, -110 = timeout,
+    // timeout_ns == 0 = block indefinitely.
+    let t: UInt64 = match timeout {
+        Maybe.Some(ns) => ns,
+        Maybe.None => 0_u64,
     };
-
-    let expected_val: Int = expected;
-
-    let ok = WaitOnAddress(
-        addr as &unsafe Byte,
-        &expected_val as &unsafe Byte,
-        @size_of(Int),
-        timeout_ms,
-    );
-
-    if ok {
-        Result.Ok(())
+    let result: Int = @intrinsic("futex_wait", addr as &unsafe Byte, expected, t);
+    if result == -110 {
+        Result.Err(OSError.Timeout)
     } else {
-        let err = GetLastError();
-        if err == 1460 {
-            // ERROR_TIMEOUT (0x5B4) — wait expired
-            Result.Err(OSError.Timeout)
-        } else {
-            // Treat as spurious wakeup — return Ok like Linux futex does
-            Result.Ok(())
-        }
+        // 0 = woken; -11 = value changed; anything else is treated as
+        // a spurious wakeup — return Ok like the WaitOnAddress path
+        // did (callers loop and re-check their predicate).
+        Result.Ok(())
     }
 }
 
@@ -847,12 +828,12 @@ public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Resul
 
 /// This is the Windows equivalent of `futex(addr, FUTEX_WAKE, count)`.
 public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
-    if count <= 1 {
-        WakeByAddressSingle(addr as &unsafe Byte);
+    // Canonical futex intrinsic — see futex_wait above. Unlike the
+    // void WakeByAddress* pair this returns the woken count.
+    let woken: Int = @intrinsic("futex_wake", addr as &unsafe Byte, count);
+    if woken < 0 {
+        Result.Ok(0)
     } else {
-        WakeByAddressAll(addr as &unsafe Byte);
+        Result.Ok(woken)
     }
-    // WaitOnAddress wake functions are void — no error return.
-    // Return 0 as we cannot know how many threads were actually woken.
-    Result.Ok(0)
 }

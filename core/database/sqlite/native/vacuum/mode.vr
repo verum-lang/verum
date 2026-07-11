@@ -32,9 +32,9 @@ public fn auto_vacuum_code(m: &AutoVacuumMode) -> Int {
 }
 
 public fn auto_vacuum_from_code(c: Int) -> Maybe<AutoVacuumMode> {
-    if c == 0 { return Maybe.Some(AvNone); }
-    if c == 1 { return Maybe.Some(AvFull); }
-    if c == 2 { return Maybe.Some(AvIncremental); }
+    if c == 0 { return Maybe.Some(AutoVacuumMode.AvNone); }
+    if c == 1 { return Maybe.Some(AutoVacuumMode.AvFull); }
+    if c == 2 { return Maybe.Some(AutoVacuumMode.AvIncremental); }
     Maybe.None
 }
 

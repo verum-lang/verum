@@ -441,29 +441,21 @@ public const FUTEX_BITSET_MATCH_ANY: UInt32 = 0xFFFFFFFF;
 /// * `Result.Err(EINTR)` - Interrupted by signal
 /// * `Result.Err(ETIMEDOUT)` - Timeout expired
 public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Result<(), OSError> {
-    let (timeout_ptr, ts) = match timeout_ns {
-        Maybe.Some(ns) => {
-            let sec = ns / 1_000_000_000;
-            let nsec = ns % 1_000_000_000;
-            let ts: [Int64; 2] = [sec as Int64, nsec as Int64];
-            (&ts as Int, ts)
-        }
-        Maybe.None => (0, [0_i64, 0_i64]),
+    // Route through the canonical futex intrinsic (registry:
+    // InlineSequence FutexWait). Tier-0 lowers it to the interpreter's
+    // parking table (real blocking without the raw-syscall FFI that
+    // was unresolvable at Tier-0); AOT lowers it to the per-platform
+    // verum_futex_wait runtime shim (SYS_FUTEX on Linux). Canonical
+    // ABI codes are Linux-namespace already (0 woken / -11 EAGAIN /
+    // -110 ETIMEDOUT; timeout_ns == 0 = infinite), so the error
+    // surface below is byte-identical to the raw-syscall version.
+    let t: UInt64 = match timeout_ns {
+        Maybe.Some(ns) => ns,
+        Maybe.None => 0_u64,
     };
-
-    let result = unsafe {
-        syscall_raw(
-            SYS_FUTEX,
-            addr as Int,
-            FUTEX_WAIT_PRIVATE,
-            expected,
-            timeout_ptr,
-            0, 0
-        )
-    };
-
+    let result: Int = @intrinsic("futex_wait", addr as &unsafe Byte, expected, t);
     if result < 0 {
-        Result.Err(OSError.from_code(-result as Int))
+        Result.Err(OSError.from_code(-result))
     } else {
         Result.Ok(())
     }
@@ -480,20 +472,13 @@ public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Re
 /// # Returns
 /// Number of threads woken.
 public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
-    let result = unsafe {
-        syscall_raw(
-            SYS_FUTEX,
-            addr as Int,
-            FUTEX_WAKE_PRIVATE,
-            count,
-            0, 0, 0
-        )
-    };
-
-    if result < 0 {
-        Result.Err(OSError.from_code(-result as Int))
+    // Canonical futex intrinsic — see futex_wait above. Returns the
+    // number of waiters woken, matching FUTEX_WAKE's return value.
+    let woken: Int = @intrinsic("futex_wake", addr as &unsafe Byte, count);
+    if woken < 0 {
+        Result.Err(OSError.from_code(-woken))
     } else {
-        Result.Ok(result)
+        Result.Ok(woken)
     }
 }
 

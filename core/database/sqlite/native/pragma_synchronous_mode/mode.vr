@@ -26,10 +26,10 @@ public fn code(m: &SyncMode) -> Int {
 }
 
 public fn from_code(c: Int) -> Maybe<SyncMode> {
-    if c == 0 { return Maybe.Some(SmOff); }
-    if c == 1 { return Maybe.Some(SmNormal); }
-    if c == 2 { return Maybe.Some(SmFull); }
-    if c == 3 { return Maybe.Some(SmExtra); }
+    if c == 0 { return Maybe.Some(SyncMode.SmOff); }
+    if c == 1 { return Maybe.Some(SyncMode.SmNormal); }
+    if c == 2 { return Maybe.Some(SyncMode.SmFull); }
+    if c == 3 { return Maybe.Some(SyncMode.SmExtra); }
     Maybe.None
 }
 

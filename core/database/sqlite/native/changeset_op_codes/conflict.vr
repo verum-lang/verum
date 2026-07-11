@@ -63,9 +63,9 @@ public fn disposition_code(d: &Disposition) -> Int {
 }
 
 public fn disposition_from_code(code: Int) -> Maybe<Disposition> {
-    if code == 0 { return Maybe.Some(DpOmit); }
-    if code == 1 { return Maybe.Some(DpReplace); }
-    if code == 2 { return Maybe.Some(DpAbort); }
+    if code == 0 { return Maybe.Some(Disposition.DpOmit); }
+    if code == 1 { return Maybe.Some(Disposition.DpReplace); }
+    if code == 2 { return Maybe.Some(Disposition.DpAbort); }
     Maybe.None
 }
 

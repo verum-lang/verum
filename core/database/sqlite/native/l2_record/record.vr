@@ -288,7 +288,7 @@ public fn decode_record_header(
         // appended the over-run serial type; downstream readers
         // walked into payload bytes thinking they were headers.
         if pos + n > header_end {
-            return Result.Err(Corrupt);
+            return Result.Err(RecordError.Corrupt);
         }
         let st = match serial_type_decode(code) {
             Result.Ok(s)  => s,
@@ -301,7 +301,7 @@ public fn decode_record_header(
     // bytes; a short header (loop exited because `pos == header_end`
     // mid-byte) is also corruption.
     if pos != header_end {
-        return Result.Err(Corrupt);
+        return Result.Err(RecordError.Corrupt);
     }
     Result.Ok((types, (header_end - start)))
 }

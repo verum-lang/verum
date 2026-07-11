@@ -52,22 +52,22 @@ public fn op_code(o: &ConstraintOp) -> Int {
 }
 
 public fn from_code(code: Int) -> Maybe<ConstraintOp> {
-    if code ==  2 { return Maybe.Some(CoEq); }
-    if code ==  4 { return Maybe.Some(CoGt); }
-    if code ==  8 { return Maybe.Some(CoLe); }
-    if code == 16 { return Maybe.Some(CoLt); }
-    if code == 32 { return Maybe.Some(CoGe); }
-    if code == 64 { return Maybe.Some(CoMatch); }
-    if code == 65 { return Maybe.Some(CoLike); }
-    if code == 66 { return Maybe.Some(CoGlob); }
-    if code == 67 { return Maybe.Some(CoRegexp); }
-    if code == 68 { return Maybe.Some(CoNe); }
-    if code == 69 { return Maybe.Some(CoIsNot); }
-    if code == 70 { return Maybe.Some(CoIsNotNull); }
-    if code == 71 { return Maybe.Some(CoIsNull); }
-    if code == 72 { return Maybe.Some(CoIs); }
-    if code == 73 { return Maybe.Some(CoLimit); }
-    if code == 74 { return Maybe.Some(CoOffset); }
+    if code ==  2 { return Maybe.Some(ConstraintOp.CoEq); }
+    if code ==  4 { return Maybe.Some(ConstraintOp.CoGt); }
+    if code ==  8 { return Maybe.Some(ConstraintOp.CoLe); }
+    if code == 16 { return Maybe.Some(ConstraintOp.CoLt); }
+    if code == 32 { return Maybe.Some(ConstraintOp.CoGe); }
+    if code == 64 { return Maybe.Some(ConstraintOp.CoMatch); }
+    if code == 65 { return Maybe.Some(ConstraintOp.CoLike); }
+    if code == 66 { return Maybe.Some(ConstraintOp.CoGlob); }
+    if code == 67 { return Maybe.Some(ConstraintOp.CoRegexp); }
+    if code == 68 { return Maybe.Some(ConstraintOp.CoNe); }
+    if code == 69 { return Maybe.Some(ConstraintOp.CoIsNot); }
+    if code == 70 { return Maybe.Some(ConstraintOp.CoIsNotNull); }
+    if code == 71 { return Maybe.Some(ConstraintOp.CoIsNull); }
+    if code == 72 { return Maybe.Some(ConstraintOp.CoIs); }
+    if code == 73 { return Maybe.Some(ConstraintOp.CoLimit); }
+    if code == 74 { return Maybe.Some(ConstraintOp.CoOffset); }
     if code >= 150 { return Maybe.Some(CoFunction(code)); }
     Maybe.None
 }

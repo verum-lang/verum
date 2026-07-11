@@ -85,7 +85,7 @@ public fn appendix_e2() -> List<RecordVector> {
 
     // (Null) — header 02 0x00, no payload.
     out.push(record_vec("null".clone(),
-        types(&[StNull]),
+        types(&[RecordEncodingSerialType.StNull]),
         bytes(&[0x02, 0x00])));
 
     // 1_i8
@@ -110,7 +110,7 @@ public fn appendix_e2() -> List<RecordVector> {
 
     // (Null, 'X') — text length 1
     out.push(record_vec("null_text".clone(),
-        types(&[StNull, StText(1)]),
+        types(&[RecordEncodingSerialType.StNull, RecordEncodingSerialType.StText(1)]),
         bytes(&[0x03, 0x00, 0x0F, 0x58])));
 
     // (BLOB[4]) — header 02 0x14, payload 4 bytes

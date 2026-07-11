@@ -230,7 +230,7 @@ implement AsyncPgoutputBufferedConsumer {
                     return Maybe.Some(BcTerminated(e));
                 }
                 Maybe.Some(CdcClosed)        => {
-                    return Maybe.Some(BcClosed);
+                    return Maybe.Some(BufferedChange.BcClosed);
                 }
                 Maybe.Some(CdcStreamStart(s)) => {
                     self.handle_stream_start(&s);

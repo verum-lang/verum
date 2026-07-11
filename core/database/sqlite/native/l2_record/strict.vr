@@ -129,13 +129,13 @@ public fn strict_type_from_text(declared: &Text) -> Result<StrictType, StrictCon
     }
     let n = end - start;
     // Compare against the five accepted tokens.
-    if is_ascii_literal(raw, start, n, "any")     { return Result.Ok(Any); }
-    if is_ascii_literal(raw, start, n, "int")     { return Result.Ok(Integer); }
-    if is_ascii_literal(raw, start, n, "integer") { return Result.Ok(Integer); }
-    if is_ascii_literal(raw, start, n, "real")    { return Result.Ok(Real); }
-    if is_ascii_literal(raw, start, n, "text")    { return Result.Ok(Text); }
-    if is_ascii_literal(raw, start, n, "blob")    { return Result.Ok(Blob); }
-    Result.Err(UnknownType(declared.clone()))
+    if is_ascii_literal(raw, start, n, "any")     { return Result.Ok(StrictType.Any); }
+    if is_ascii_literal(raw, start, n, "int")     { return Result.Ok(StrictType.Integer); }
+    if is_ascii_literal(raw, start, n, "integer") { return Result.Ok(StrictType.Integer); }
+    if is_ascii_literal(raw, start, n, "real")    { return Result.Ok(StrictType.Real); }
+    if is_ascii_literal(raw, start, n, "text")    { return Result.Ok(StrictType.Text); }
+    if is_ascii_literal(raw, start, n, "blob")    { return Result.Ok(StrictType.Blob); }
+    Result.Err(StrictConstraintError.UnknownType(declared.clone()))
 }
 
 fn is_ascii_literal(raw: &[Byte], start: Int, n: Int, lit: &str) -> Bool {

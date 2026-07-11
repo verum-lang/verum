@@ -231,7 +231,7 @@ public fn password(message: Text) -> IoResult<Text> {
     loop {
         terminal.draw(|frame| {
             let area = frame.size();
-            let masked = "";
+            let mut masked = "";
             for _ in 0..value.len() { masked = masked + "•"; }
             let mut lines = List.new();
             lines.push(Line.raw(f"{message}: {masked}"));

@@ -565,27 +565,31 @@ const ETIMEDOUT: Int = 60;
 
 /// Compatible with sys/linux/thread.futex_wait signature.
 public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Result<(), OSError> {
-    let timeout_us: UInt32 = match timeout_ns {
-        Maybe.Some(ns) => {
-            let us = ns / 1000;
-            if us > 0xFFFFFFFF { 0xFFFFFFFF } else { us as UInt32 }
-        }
-        Maybe.None => 0,  // 0 = infinite wait for __ulock_wait
+    // Route through the canonical futex intrinsic (registry:
+    // InlineSequence FutexWait). Tier-0 lowers it to the interpreter's
+    // parking table (real cross-thread blocking, no FFI symbol
+    // needed — the raw __ulock_wait extern was unresolvable at Tier-0
+    // and lenient-stubbed every consumer); AOT lowers it to the
+    // per-platform verum_futex_wait runtime shim, which uses
+    // __ulock_wait on Darwin. Canonical ABI: 0 = woken,
+    // -11 = *addr != expected at entry, -110 = timeout,
+    // timeout_ns == 0 = block indefinitely. The &Int cell aliases the
+    // low 32 bits on little-endian — same convention as the raw-FFI
+    // path this replaces.
+    let t: UInt64 = match timeout_ns {
+        Maybe.Some(ns) => ns,
+        Maybe.None => 0_u64,
     };
-
-    let result = unsafe {
-        __ulock_wait(
-            UL_COMPARE_AND_WAIT | ULF_NO_ERRNO,
-            addr as &unsafe Byte,
-            expected as UInt64,
-            timeout_us,
-        )
-    };
-
-    if result < 0 {
-        Result.Err(OSError.from_code(-result as Int))
-    } else {
+    let result: Int = @intrinsic("futex_wait", addr as &unsafe Byte, expected, t);
+    if result == 0 || result == -11 {
+        // 0 = woken; -11 = value already changed. The __ulock path
+        // returned Ok for both — preserve the contract (callers loop
+        // and re-check their predicate).
         Result.Ok(())
+    } else if result == -110 {
+        Result.Err(OSError.from_code(ETIMEDOUT))
+    } else {
+        Result.Err(OSError.from_code(-result))
     }
 }
 
@@ -597,24 +601,15 @@ public fn futex_wait(addr: &Int, expected: Int, timeout_ns: Maybe<UInt64>) -> Re
 public fn futex_wake(addr: &Int, count: Int) -> Result<Int, OSError> {
     // __ulock_wake with UL_COMPARE_AND_WAIT wakes one thread.
     // For wake-all, add ULF_WAKE_ALL flag.
-    let op = if count <= 1 {
-        UL_COMPARE_AND_WAIT | ULF_NO_ERRNO
+    // Canonical futex intrinsic — see futex_wait above for the tier
+    // routing rationale. Returns the number of waiters woken (never
+    // an errno for the no-waiter case, matching the old ENOENT→Ok(0)
+    // special case).
+    let woken: Int = @intrinsic("futex_wake", addr as &unsafe Byte, count);
+    if woken < 0 {
+        Result.Err(OSError.from_code(-woken))
     } else {
-        UL_COMPARE_AND_WAIT | ULF_NO_ERRNO | ULF_WAKE_ALL
-    };
-
-    let result = unsafe {
-        __ulock_wake(op, addr as &unsafe Byte, 0)
-    };
-
-    if result < 0 {
-        // -ENOENT means no waiters — not an error for wake
-        if -result == 2 {  // ENOENT on macOS = 2
-            return Result.Ok(0);
-        }
-        Result.Err(OSError.from_code(-result as Int))
-    } else {
-        Result.Ok(count)
+        Result.Ok(woken)
     }
 }
 
