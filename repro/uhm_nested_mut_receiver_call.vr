@@ -1,0 +1,68 @@
+// L-4 (2026-07-11): GC-EPOCH VALUE CORRUPTION in the VBC interpreter.
+// After the total allocation count crosses a threshold (~10^3-10^4 small
+// array/struct allocations; exact epoch depends on program shape), calls
+// involving struct values degrade in TWO PHASES:
+//   Phase 1 (SILENT, the dangerous one): a struct-returning call's result
+//     ALIASES one of its arguments (same failure mode as L-2, now
+//     epoch-triggered). Observed: d.dephase(&m) returning an alias of d,
+//     and a fieldwise copy() method returning an alias of self — a
+//     subsequent in-place mutation then corrupts the "copied-from" value,
+//     producing wrong numerics with no diagnostic (observed as a Fano
+//     channel applying its contraction twice: phi/81 instead of phi/9).
+//   Phase 2 (crash): an argument register is later read with an enum tag
+//     where a pointer is expected: "Invalid operand: GetE: expected
+//     pointer in R1, got tag=Some(0)"; also downstream refinement
+//     violations from garbage args ("refinement violation: return value
+//     of `exp`").
+// This file is the minimal Phase-2 crash: a &mut-receiver wrapper method
+// (uniform -> next) called in a loop plus one by-ref array call. The
+// nesting is NOT the root cause — it merely shifts the allocation/frame
+// shape into the failing epoch (the direct-next() variant of this same
+// program passes at this length and fails at longer runs).
+// Workarounds used by the SYNARC-Omega M1 self-test (uhm_core):
+//   scalar-returning calls remain reliable at all epochs; struct-returning
+//   and multi-pointer-arg calls are confined to a low-allocation "safe
+//   zone" (t < 500) at the start of the run.
+// Found by the SYNARC-Omega M1 materialization gate (code/uhm_core).
+type D is { re: [Float; 49] };
+
+implement D {
+    public fn scale(&self, m: &[Float; 49]) -> D {
+        let mut re = self.re;
+        for x in 0..49 {
+            re[x] = re[x] * m[x];
+        }
+        D { re: re }
+    }
+}
+
+fn cycle(d: &D) -> D {
+    let m = [0.5; 49];
+    d.scale(&m)
+}
+
+type Lcg is { state: Int };
+implement Lcg {
+    public fn next(&mut self) -> Int {
+        self.state = (1103515245 * self.state + 12345) % 2147483648;
+        self.state
+    }
+    public fn uniform(&mut self) -> Float {
+        (self.next() as Float) / 2147483648.0 * 2.0 - 1.0
+    }
+}
+
+fn main() {
+    let mut rng = Lcg { state: 20260710 };
+    let mut acc = 0.0;
+    for t in 0..2000 {
+        let mut re = [0.0; 49];
+        for x in 0..49 {
+            re[x] = rng.uniform() * 0.1;
+        }
+        let d = D { re: re };
+        let c = cycle(&d);
+        acc = acc + c.re[0];
+    }
+    print(f"acc = {acc}");
+}

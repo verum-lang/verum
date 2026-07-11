@@ -1,0 +1,14 @@
+// Minimal repro: user type sharing a short name with a PRIVATE stdlib type
+// (core/runtime/task_queue.vr RingBuffer<T>) hijacks static method dispatch.
+type RingBuffer is { frames: List<Int>, capacity: Int, write_pos: Int };
+
+implement RingBuffer {
+    public fn new(capacity: Int) -> RingBuffer {
+        RingBuffer { frames: List.with_capacity(capacity), capacity: capacity, write_pos: 0 }
+    }
+}
+
+fn main() {
+    let b = RingBuffer.new(16);
+    print(f"cap={b.capacity}");
+}
