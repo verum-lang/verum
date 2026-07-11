@@ -31,12 +31,12 @@ public type OSError is {
 
 implement OSError {
     /// Create a new OS error with code and message.
-    fn new(code: Int, message: Text) -> OSError {
+    public fn new(code: Int, message: Text) -> OSError {
         OSError { code: code, message: message }
     }
 
     /// Create an OS error from just an error code.
-    fn from_code(code: Int) -> OSError {
+    public fn from_code(code: Int) -> OSError {
         OSError {
             code: code,
             message: errno_to_message(code),

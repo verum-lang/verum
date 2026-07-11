@@ -1115,7 +1115,7 @@ public fn safe_read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
     let result = unsafe { read(fd.0, buf.as_mut_ptr() as &unsafe Byte, buf.len()) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1126,7 +1126,7 @@ public fn safe_read_raw(fd: FileDesc, buf: &unsafe Byte, count: Int) -> Result<I
     let result = unsafe { read(fd.0, buf, count) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1137,7 +1137,7 @@ public fn safe_write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
     let result = unsafe { write(fd.0, buf.as_ptr(), buf.len()) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1148,7 +1148,7 @@ public fn safe_write_raw(fd: FileDesc, buf: &Byte, count: Int) -> Result<Int, OS
     let result = unsafe { write(fd.0, buf, count) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1164,7 +1164,7 @@ public fn safe_pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int,
     let result = unsafe { pread(fd.0, buf.as_mut_ptr() as &unsafe Byte, buf.len(), offset) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1177,7 +1177,7 @@ public fn safe_pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: In
     let result = unsafe { pread(fd.0, buf, count, offset) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1191,7 +1191,7 @@ public fn safe_pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OS
     let result = unsafe { pwrite(fd.0, buf.as_ptr(), buf.len(), offset) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1203,7 +1203,7 @@ public fn safe_pwrite_raw(fd: FileDesc, buf: &Byte, count: Int, offset: Int) -> 
     let result = unsafe { pwrite(fd.0, buf, count, offset) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1214,7 +1214,7 @@ public fn safe_close(fd: FileDesc) -> Result<(), OSError> {
     let result = unsafe { close(fd.0) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1235,7 +1235,7 @@ public fn safe_mmap(
     // MAP_FAILED is (void *)-1 which is -1 as Int on 64-bit
     if raw_result == -1 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         let ptr: &unsafe Byte = transmute(raw_result);
         Result.Ok(ptr)
@@ -1254,7 +1254,7 @@ public fn safe_mmap_raw(
     let result = unsafe { mmap_ffi(addr, len, prot.to_unix_flags(), flags.to_unix_flags(), fd.0, offset) };
     if result == -1 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1267,7 +1267,7 @@ public fn safe_munmap(addr: Int, len: Int) -> Result<(), OSError> {
     let result = unsafe { munmap(addr, len) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1288,7 +1288,7 @@ public fn safe_madvise(addr: &unsafe Byte, len: Int, advice: Int) -> Result<(), 
     let result = unsafe { madvise(addr as Int, len, advice) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1340,12 +1340,12 @@ public fn safe_gettid() -> UInt64 {
 @vbc_direct_lowering
 public fn safe_getentropy(buf: &unsafe Byte, len: Int) -> Result<(), OSError> {
     if len > 256 {
-        return Result.Err(OSError { code: 5, message: "getentropy: max 256 bytes" });
+        return Result.Err(OSError.new(5, "getentropy: max 256 bytes"));
     }
     let result = unsafe { getentropy(buf, len) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1356,7 +1356,7 @@ public fn safe_kqueue() -> Result<FileDesc, OSError> {
     let result = unsafe { kqueue() };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(FileDesc(result))
     }
@@ -1369,7 +1369,7 @@ public fn safe_nanosleep(seconds: Int, nanoseconds: Int) -> Result<(), OSError> 
     let result = unsafe { nanosleep(&req, &mut rem) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1407,7 +1407,7 @@ public fn safe_clock_gettime(clock_id: Int) -> Result<DarwinTimespec, OSError> {
     let result = unsafe { clock_gettime(clock_id, &mut ts) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(ts)
     }
@@ -1429,7 +1429,7 @@ public fn safe_open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, 
     let result = unsafe { open(path, flags, mode) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(FileDesc(result))
     }
@@ -1452,7 +1452,7 @@ public fn safe_lseek(fd: FileDesc, offset: Int, whence: Int) -> Result<Int, OSEr
     let result = unsafe { lseek(fd.0, offset, whence) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1463,7 +1463,7 @@ public fn safe_fstat(fd: FileDesc, stat_buf: &mut DarwinStat) -> Result<(), OSEr
     let result = unsafe { fstat(fd.0, stat_buf as &unsafe DarwinStat) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1478,7 +1478,7 @@ public fn safe_full_fsync(fd: FileDesc) -> Result<(), OSError> {
     let result = unsafe { fcntl(fd.0, F_FULLFSYNC, 0) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1488,7 +1488,7 @@ public fn safe_fsync(fd: FileDesc) -> Result<(), OSError> {
     let result = unsafe { fsync(fd.0) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1499,7 +1499,7 @@ public fn safe_ftruncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
     let result = unsafe { ftruncate(fd.0, length) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1510,7 +1510,7 @@ public fn safe_dup(fd: FileDesc) -> Result<FileDesc, OSError> {
     let result = unsafe { dup(fd.0) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(FileDesc(result))
     }
@@ -1528,7 +1528,7 @@ public fn safe_stat(path: &[Byte], stat_buf: &mut DarwinStat) -> Result<(), OSEr
     let result = unsafe { stat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe DarwinStat) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1542,7 +1542,7 @@ public fn safe_lstat(path: &[Byte], stat_buf: &mut DarwinStat) -> Result<(), OSE
     let result = unsafe { lstat(path_buf.as_ptr() as &Byte, stat_buf as &unsafe DarwinStat) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1572,7 +1572,7 @@ public fn safe_access(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
     if code == 2 || code == 13 || code == 20 || code == 30 {
         Result.Ok(false)
     } else {
-        Result.Err(OSError { code: code, message: errno_to_message(code) })
+        Result.Err(OSError.new(code, errno_to_message(code)))
     }
 }
 
@@ -1584,7 +1584,7 @@ public fn safe_mkdir(path: &[Byte], mode: Int) -> Result<(), OSError> {
     let result = unsafe { mkdir(path_buf.as_ptr() as &Byte, mode) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1598,7 +1598,7 @@ public fn safe_rmdir(path: &[Byte]) -> Result<(), OSError> {
     let result = unsafe { rmdir(path_buf.as_ptr() as &Byte) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1612,7 +1612,7 @@ public fn safe_unlink(path: &[Byte]) -> Result<(), OSError> {
     let result = unsafe { unlink(path_buf.as_ptr() as &Byte) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1625,7 +1625,7 @@ public fn safe_unlink_raw(path: &Byte) -> Result<(), OSError> {
     let result = unsafe { unlink(path) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1638,7 +1638,7 @@ public fn safe_rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError>
     let result = unsafe { rename_ffi(old_p, new_p) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1651,7 +1651,7 @@ public fn safe_symlink(src: &[Byte], dst: &[Byte]) -> Result<(), OSError> {
     let result = unsafe { symlink_ffi(src_p, dst_p) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1665,7 +1665,7 @@ public fn safe_readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError>
     let result = unsafe { readlink(path_buf.as_ptr() as &Byte, buf.as_mut_ptr() as &unsafe Byte, buf.len()) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1682,7 +1682,7 @@ public fn safe_link(src: &[Byte], dst: &[Byte]) -> Result<(), OSError> {
     let result = unsafe { link(src_buf.as_ptr() as &Byte, dst_buf.as_ptr() as &Byte) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1696,7 +1696,7 @@ public fn safe_chmod(path: &[Byte], mode: Int) -> Result<(), OSError> {
     let result = unsafe { chmod(path_buf.as_ptr() as &Byte, mode) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1707,7 +1707,7 @@ public fn safe_getcwd(buf: &mut [Byte]) -> Result<Int, OSError> {
     let result = unsafe { getcwd(buf.as_mut_ptr() as &unsafe Byte, buf.len()) };
     if (result as Int) == 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         // Find the length of the null-terminated string
         let mut len = 0;
@@ -1726,7 +1726,7 @@ public fn safe_chdir(path: &[Byte]) -> Result<(), OSError> {
     let result = unsafe { chdir(path_buf.as_ptr() as &Byte) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1796,7 +1796,7 @@ public fn safe_setenv(name: &[Byte], value: &[Byte], overwrite: Bool) -> Result<
     };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1817,7 +1817,7 @@ public fn safe_unsetenv(name: &[Byte]) -> Result<(), OSError> {
     let result = unsafe { unsetenv(name_buf.as_ptr() as &Byte) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1882,7 +1882,7 @@ public fn safe_socket(domain: Int, sock_type: Int, protocol: Int) -> Result<File
     let result = raw_i32 as Int;
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(FileDesc(result))
     }
@@ -1893,7 +1893,7 @@ public fn safe_bind(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Result<(
     let result = unsafe { bind(fd.0, addr, addr_len) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1904,7 +1904,7 @@ public fn safe_listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
     let result = unsafe { listen(fd.0, backlog) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1918,7 +1918,7 @@ public fn safe_accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32
     };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         // accept returns C int (now declared Int32); FileDesc wraps Int.
         Result.Ok(FileDesc(result as Int))
@@ -1930,7 +1930,7 @@ public fn safe_connect(fd: FileDesc, addr: &unsafe Byte, addr_len: Int) -> Resul
     let result = unsafe { connect(fd.0, addr, addr_len) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -1941,7 +1941,7 @@ public fn safe_send(fd: FileDesc, buf: &[Byte], flags: Int) -> Result<Int, OSErr
     let result = unsafe { send(fd.0, buf.as_ptr(), buf.len(), flags) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1952,7 +1952,7 @@ public fn safe_recv(fd: FileDesc, buf: &mut [Byte], flags: Int) -> Result<Int, O
     let result = unsafe { recv(fd.0, buf.as_mut_ptr() as &unsafe Byte, buf.len(), flags) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -1971,7 +1971,7 @@ public fn safe_sendto(
     };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -2001,7 +2001,7 @@ public fn safe_recvfrom(
     };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
@@ -2018,7 +2018,7 @@ public fn safe_setsockopt(
     let result = unsafe { setsockopt(fd.0, level, optname, optval as &Byte, optlen) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -2047,7 +2047,7 @@ public fn safe_getsockopt(
     };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -2068,7 +2068,7 @@ public fn safe_shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
     let result = unsafe { shutdown(fd.0, how) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -2085,7 +2085,7 @@ public fn safe_getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut U
     };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -2099,7 +2099,7 @@ public fn safe_getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut U
     };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(())
     }
@@ -2110,7 +2110,7 @@ public fn safe_fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
     let result = unsafe { fcntl(fd.0, cmd, arg) };
     if result < 0 {
         let err = errno();
-        Result.Err(OSError { code: err, message: errno_to_message(err) })
+        Result.Err(OSError.new(err, errno_to_message(err)))
     } else {
         Result.Ok(result)
     }
