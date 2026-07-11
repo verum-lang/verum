@@ -212,6 +212,26 @@ impl CallStack {
         module.get_string(func.name).map(|s| s.to_string())
     }
 
+    /// Render the top-N frame function names (innermost first) — the
+    /// typed-error counterpart of a native backtrace, used by
+    /// error-enrichment paths so a Panic names its interpreter call
+    /// chain (FATREF-DISPATCH-ROUTE-1 diagnosis pattern).
+    pub fn frame_names(&self, module: &crate::module::VbcModule, max: usize) -> String {
+        self.frames
+            .iter()
+            .rev()
+            .take(max)
+            .map(|f| {
+                module
+                    .get_function(f.function)
+                    .and_then(|func| module.get_string(func.name))
+                    .unwrap_or("?")
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(" <- ")
+    }
+
     /// Returns a mutable reference to the current frame.
     pub fn current_mut(&mut self) -> Option<&mut CallFrame> {
         self.frames.last_mut()

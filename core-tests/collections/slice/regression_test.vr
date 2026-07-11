@@ -328,3 +328,61 @@ fn regression_fatref_slice_param_iter_matches_index() {
     let s = &xs[..];
     assert_eq(sum_param_slice(s), s[0] + s[1] + s[2]);
 }
+
+// =============================================================================
+// §G — #51: slice-representation unification + chained slice()
+// =============================================================================
+
+// REGRESSION (§G.1): `xs.as_slice()` was an IDENTITY intercept leaking
+// a raw List pointer into slice positions — `s.slice(1,5)` then hit the
+// silent `src` passthrough in slice_subslice and returned the WHOLE
+// slice (len 6, not 4). CLOSED: SLICE-REP-UNIFY-1 — as_slice routes
+// through THE canonical FatRef constructor (container_to_slice_fat_ref).
+@test
+fn regression_as_slice_then_slice_bounds() {
+    let xs: List<Int> = [10, 20, 30, 40, 50, 60];
+    let s: &[Int] = xs.as_slice();
+    let sub = s.slice(1, 5);
+    assert_eq(sub.len(), 4);
+    assert_eq(sub[0], 20);
+    let mut total = 0;
+    for x in sub { total += *x; }
+    assert_eq(total, 140);
+}
+
+// REGRESSION (§G.2): chained `sub1.slice(1,3)` — the FatRef receiver
+// of the SECOND call leaked into header-probing dispatchers (variant /
+// array / heap-string probe read FAT_REF_MARKER bits at
+// +OBJECT_HEADER_SIZE → SIGSEGV). CLOSED: FATREF-DISPATCH-ROUTE-1 —
+// header probes take ONLY regular pointers; FatRef receivers route
+// through the Slice-first static-prefix table.
+@test
+fn regression_chained_slice_of_slice() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6];
+    let s: &[Int] = xs.as_slice();
+    let sub1 = s.slice(1, 5);
+    let sub2 = sub1.slice(1, 3);
+    assert_eq(sub1.len(), 4);
+    assert_eq(sub2.len(), 2);
+    assert_eq(sub2[0], 3);
+    assert_eq(sub2[1], 4);
+}
+
+// REGRESSION (§G.3): the E400 class this task opened with —
+// `sub1.slice(..)` receiver misinfered as List<_> because VBC TypeRefs
+// have no slice form and the metadata rendered `slice() -> &[T]` as
+// bare "List". CLOSED: carried source-verbatim return names
+// (RETNAME-CARRY) preferred for '['-spellings + parse "[T]" +
+// declared-generic-name interning. The chain in §G.2 compiling at all
+// pins the typecheck leg; this pin adds the split_at surface which
+// shares the reserved-stride carry.
+@test
+fn regression_split_at_carries_stride() {
+    let xs: List<Int> = [7, 8, 9, 10];
+    let s: &[Int] = xs.as_slice();
+    let (lhs, rhs) = s.split_at(1);
+    assert_eq(lhs.len(), 1);
+    assert_eq(rhs.len(), 3);
+    assert_eq(lhs[0], 7);
+    assert_eq(rhs[0], 8);
+}

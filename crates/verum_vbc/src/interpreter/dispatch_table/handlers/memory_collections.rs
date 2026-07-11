@@ -282,9 +282,10 @@ pub(in super::super) fn handle_get_field(
     if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return Err(InterpreterError::Panic {
             message: format!(
-                "misaligned pointer {:p} for ObjectHeader (requires {}-byte alignment)",
+                "misaligned pointer {:p} for ObjectHeader (requires {}-byte alignment) — GetF in fn `{}` (FATREF-DISPATCH-ROUTE-1)",
                 ptr,
-                std::mem::align_of::<heap::ObjectHeader>()
+                std::mem::align_of::<heap::ObjectHeader>(),
+                state.call_stack.frame_names(&state.module, 6),
             ),
         });
     }

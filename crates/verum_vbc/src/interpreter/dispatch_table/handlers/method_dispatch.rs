@@ -2175,7 +2175,35 @@ pub(in super::super) fn handle_call_method(
             // instead of falling to the suffix scan.
             let classify_target: Value = fat_ref_single_referent(&dispatch_receiver)
                 .unwrap_or(dispatch_receiver);
-            let receiver_type: Option<String> = if classify_target.is_small_string()
+            let receiver_type: Option<String> = if classify_target.is_fat_ref() {
+                // FATREF-DISPATCH-ROUTE-1 (#51): a multi-element FatRef
+                // IS the slice runtime kind — classify it directly.
+                // Pre-fix it fell through every probe (marker bits are
+                // not an alignable header pointer), receiver_type
+                // stayed None, and the first-suffix-match scan below
+                // picked the alphabetically-earliest `.slice` body
+                // (`ArenaWireRow.slice`), whose field reads then
+                // dereferenced the marker.
+                //
+
+                // Builtin surface first: `len`/`is_empty` on a slice
+                // are FatRef-metadata reads (the stdlib declares them
+                // as intrinsics — there IS no `Slice.len` body to
+                // find; the suffix scan then picked `ArenaSlice.len`).
+                let fr = classify_target.as_fat_ref();
+                match bare_method_name.as_str() {
+                    "len" => {
+                        state.set_reg(dst, Value::from_i64(fr.len() as i64));
+                        return Ok(DispatchResult::Continue);
+                    }
+                    "is_empty" => {
+                        state.set_reg(dst, Value::from_bool(fr.len() == 0));
+                        return Ok(DispatchResult::Continue);
+                    }
+                    _ => {}
+                }
+                (!is_already_qualified).then(|| "Slice".to_string())
+            } else if classify_target.is_small_string()
                 || is_heap_string(&classify_target)
             {
                 (!is_already_qualified).then(|| "Text".to_string())
@@ -2221,6 +2249,26 @@ pub(in super::super) fn handle_call_method(
                         found_func_id = Some(func.id);
                         break;
                     }
+                }
+                // FATREF-DISPATCH-ROUTE-1 (#51): a slice receiver whose
+                // method has no `Slice.<m>` body must NOT fall to the
+                // first-suffix-match scan — that scan picks an arbitrary
+                // OTHER type's body (`ArenaSlice.len`) and its field
+                // reads dereference the FatRef marker. Loud typed error
+                // instead (never a guessed body).
+                if found_func_id.is_none()
+                    && ty_name == "Slice"
+                    && classify_target.is_fat_ref()
+                {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "method '{}' not found for slice receiver (&[T]) — no \
+                             `Slice.{}` body and no builtin intercept; the \
+                             ambiguous suffix scan is FORBIDDEN for slices \
+                             (FATREF-DISPATCH-ROUTE-1)",
+                            bare_method_name, bare_method_name
+                        ),
+                    });
                 }
             }
 
