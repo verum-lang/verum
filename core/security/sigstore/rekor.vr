@@ -79,7 +79,7 @@ mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount security.hash.sha256.{Sha256, digest};
 mount security.sigstore.types.{
     EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
-    LogEntry, SignedEntryTimestamp, InclusionProof, Digest,
+    LogEntry, SignedEntryTimestamp, RekorInclusionProof, Digest,
     entry_kind_from_text, entry_kind_to_text,
     REKOR_PUBLIC_URL,
 };
@@ -436,7 +436,7 @@ fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError
     })
 }
 
-fn parse_inclusion_proof(value: &JsonValue) -> Result<InclusionProof, RekorError> {
+fn parse_inclusion_proof(value: &JsonValue) -> Result<RekorInclusionProof, RekorError> {
     let obj = value.as_object()
         .ok_or_else(|| InvalidJson("inclusionProof not an object".to_text()))?;
     let log_index = obj.get("logIndex").and_then(|v| v.as_int())
@@ -457,7 +457,7 @@ fn parse_inclusion_proof(value: &JsonValue) -> Result<InclusionProof, RekorError
     }
     let checkpoint_b64 = obj.get("checkpoint").and_then(|v| v.as_string())
         .unwrap_or_else(|| "".to_text());
-    Result.Ok(InclusionProof {
+    Result.Ok(RekorInclusionProof {
         log_index, tree_size, root_hash, hashes_hex, checkpoint_b64,
     })
 }

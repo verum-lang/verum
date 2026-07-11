@@ -643,11 +643,11 @@ public type TlogEntry is {
     canonicalized_body_b64: Text,
     integrated_time: Rfc3339Time,
     /// Inclusion proof: tree size + index + audit hashes.
-    inclusion_proof: Maybe<InclusionProof>,
+    inclusion_proof: Maybe<SignedInclusionProof>,
 };
 
 @derive(Eq, Clone, Debug)
-public type InclusionProof is {
+public type SignedInclusionProof is {
     tree_size: Int,
     log_index: Int,
     /// Audit hashes (hex-encoded, root → leaf order).

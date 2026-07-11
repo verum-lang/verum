@@ -361,7 +361,7 @@ fn verify_tlog_entries(
 
 fn log_entry_from_provenance(p: &core.security.provenance.TlogEntry) -> LogEntry {
     let inclusion = p.inclusion_proof.as_ref().map(|ip| {
-        security.sigstore.types.InclusionProof {
+        security.sigstore.types.RekorInclusionProof {
             log_index:    ip.log_index,
             tree_size:    ip.tree_size,
             root_hash:    "".to_text(), // provenance form does not surface root_hash

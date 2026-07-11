@@ -298,11 +298,11 @@ public type LogEntry is {
     set:             SignedEntryTimestamp,
     /// Optional Merkle inclusion proof — present when explicitly
     /// requested via `?verification=inclusion`.
-    inclusion_proof: Maybe<InclusionProof>,
+    inclusion_proof: Maybe<RekorInclusionProof>,
 };
 
 @derive(Clone, Debug)
-public type InclusionProof is {
+public type RekorInclusionProof is {
     log_index:    Int,
     tree_size:    Int,
     /// Hex-encoded root hash at `tree_size`.
@@ -359,7 +359,7 @@ public type FulcioIdentity is {
 
 mount security.provenance.{
     DsseEnvelope, dsse_envelope_to_json, dsse_envelope_from_json,
-    InclusionProof as ProvenanceInclusionProof,
+    RekorInclusionProof as ProvenanceInclusionProof,
     TlogEntry as ProvenanceTlogEntry,
 };
 

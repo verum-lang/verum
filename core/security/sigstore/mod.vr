@@ -60,7 +60,7 @@ public module verify;
 // Re-exports — types
 public mount .types.{
     EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
-    LogEntry, SignedEntryTimestamp, InclusionProof, Digest,
+    LogEntry, SignedEntryTimestamp, RekorInclusionProof, Digest,
     FulcioCertResponse, FulcioIdentity, SigstoreBundle,
     SIGSTORE_BUNDLE_MEDIA_TYPE,
     REKOR_PUBLIC_URL, FULCIO_PUBLIC_URL, SIGSTORE_PUBLIC_OIDC_ISSUER,
