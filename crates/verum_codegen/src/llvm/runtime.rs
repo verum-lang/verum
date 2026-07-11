@@ -4199,13 +4199,34 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ft = void_type.fn_type(&[ptr_type.into()], false);
         let free_fn = super::error::get_or_declare_function(module, "verum_internal_free", ft);
 
-        // entry: null check
+        // entry: pointer-plausibility check (same contract as the
+        // runtime-type-switch guard). A Text object is ALWAYS a heap
+        // pointer; a small/unaligned value here is a register whose
+        // owned-text mark outlived a scalar reuse (task #22 leg 3:
+        // Ret-site frees called verum_text_free(1) — a Bool true —
+        // and the header load faulted at 0x1). Skipping the free for
+        // implausible values is exact: they can never be Text allocs.
         builder.position_at_end(entry);
-        let is_null = builder
-            .build_int_compare(verum_llvm::IntPredicate::EQ, text_i64, zero, "is_null")
+        let floor = i64_type.const_int(0x1_0000, false);
+        let below_floor = builder
+            .build_int_compare(verum_llvm::IntPredicate::ULT, text_i64, floor, "below_floor")
+            .or_llvm_err()?;
+        let align_bits = builder
+            .build_and(text_i64, i64_type.const_int(7, false), "align_bits")
+            .or_llvm_err()?;
+        let misaligned = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::NE,
+                align_bits,
+                zero,
+                "misaligned",
+            )
+            .or_llvm_err()?;
+        let implausible = builder
+            .build_or(below_floor, misaligned, "implausible")
             .or_llvm_err()?;
         builder
-            .build_conditional_branch(is_null, done, do_free)
+            .build_conditional_branch(implausible, done, do_free)
             .or_llvm_err()?;
 
         // do_free: load backing buffer ptr from header[0]
