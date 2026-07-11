@@ -1,0 +1,38 @@
+From 634b153311670a4440456b4ef0d6592e22ace21e Mon Sep 17 00:00:00 2001
+From: old8man <oldman@gst.st>
+Date: Sat, 11 Jul 2026 22:51:13 +0300
+Subject: [PATCH] [VERUM] AArch64TTI: shouldConsiderAddressTypePromotion takes
+ context from the value type
+
+The parent-chain route (I.getParent()->getParent()->getContext())
+null-derefs when CodeGenPrepare::optimizeExt consults TTI for an
+instruction transiently detached from a block (KERN_INVALID_ADDRESS
+at 0x0 inside codegen-prep, killing the whole compile). The type's
+context is identical for attached instructions and always valid.
+---
+ llvm/lib/Target/AArch64/AArch64TargetTransformInfo.cpp | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/llvm/lib/Target/AArch64/AArch64TargetTransformInfo.cpp b/llvm/lib/Target/AArch64/AArch64TargetTransformInfo.cpp
+index 193be62b2..792c38538 100644
+--- a/llvm/lib/Target/AArch64/AArch64TargetTransformInfo.cpp
++++ b/llvm/lib/Target/AArch64/AArch64TargetTransformInfo.cpp
+@@ -5061,8 +5061,13 @@ bool AArch64TTIImpl::shouldConsiderAddressTypePromotion(
+   AllowPromotionWithoutCommonHeader = false;
+   if (!isa<SExtInst>(&I))
+     return false;
+-  Type *ConsideredSExtType =
+-      Type::getInt64Ty(I.getParent()->getParent()->getContext());
++  // VERUM: take the context from the value's own type — the
++  // parent-chain route (I.getParent()->getParent()->getContext())
++  // null-derefs when CodeGenPrepare::optimizeExt consults TTI for an
++  // instruction that is (transiently) detached from a block
++  // (KERN_INVALID_ADDRESS at 0x0 inside codegen-prep). The type's
++  // context is identical for attached instructions and always valid.
++  Type *ConsideredSExtType = Type::getInt64Ty(I.getContext());
+   if (I.getType() != ConsideredSExtType)
+     return false;
+   // See if the sext is the one with the right type and used in at least one
+-- 
+2.50.1 (Apple Git-155)
+
