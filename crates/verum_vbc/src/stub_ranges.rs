@@ -13,6 +13,7 @@
 //! | 2 | `0xC0_0000` | stdlib variant-constructor stubs (task #16) |
 //! | 3 | `0x100_0000` | uniquely-named public free-fn stubs (task #47) |
 //! | 4 | `0x140_0000` | uniquely-named public module-const stubs (register A3-const) |
+//! | 5 | `0x180_0000` | mount-miss named stubs (call-site synthesized, qualified-name remap) |
 //!
 //! A stub id observed at any boundary (call dispatch, archive remap,
 //! global-ctor execution, metadata emission) means the PRODUCING
@@ -37,6 +38,12 @@ pub const STAGE2_BASE: u32 = u32::MAX - 0xC0_0000;
 pub const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
 /// Stage-4 base: uniquely-named public module-const stubs.
 pub const STAGE4_BASE: u32 = u32::MAX - 0x140_0000;
+/// Stage-5 base: mount-miss named stubs — an explicit braced-mount
+/// item whose target module hadn't compiled yet (and whose simple
+/// name is NOT globally unique, so stages 1-4 can't cover it) gets a
+/// call-site-synthesized stub bound to the mount's FULL qualified
+/// path; the archive name-remap chases that unambiguous spelling.
+pub const STAGE5_BASE: u32 = u32::MAX - 0x180_0000;
 
 #[inline]
 fn in_band(id: u32, base: u32) -> bool {
@@ -67,10 +74,16 @@ pub fn in_stage4(id: u32) -> bool {
     in_band(id, STAGE4_BASE)
 }
 
+/// Stage-5 band membership.
+#[inline]
+pub fn in_stage5(id: u32) -> bool {
+    in_band(id, STAGE5_BASE)
+}
+
 /// True when `id` lies in ANY pre-registration sentinel band.
 #[inline]
 pub fn is_stub_id(id: u32) -> bool {
-    in_stage1(id) || in_stage2(id) || in_stage3(id) || in_stage4(id)
+    in_stage1(id) || in_stage2(id) || in_stage3(id) || in_stage4(id) || in_stage5(id)
 }
 
 /// True for the bands whose stubs are resolved BY NAME at finalize /
@@ -78,7 +91,7 @@ pub fn is_stub_id(id: u32) -> bool {
 /// `emit_missing_stub_descriptors` → `ArchiveBodyRemap` name-chase).
 #[inline]
 pub fn is_name_resolved_stub_id(id: u32) -> bool {
-    in_stage3(id) || in_stage4(id)
+    in_stage3(id) || in_stage4(id) || in_stage5(id)
 }
 
 /// Which stage a stub id belongs to, if any.
@@ -92,6 +105,8 @@ pub fn stage_of(id: u32) -> Option<u8> {
         Some(3)
     } else if in_stage4(id) {
         Some(4)
+    } else if in_stage5(id) {
+        Some(5)
     } else {
         None
     }
@@ -105,6 +120,7 @@ pub fn stub_class(id: u32) -> Option<&'static str> {
         Some(2) => Some("stdlib variant constructor"),
         Some(3) => Some("uniquely-named public free fn"),
         Some(4) => Some("uniquely-named public module const"),
+        Some(5) => Some("mount-declared cross-module fn"),
         _ => None,
     }
 }
@@ -120,6 +136,7 @@ mod tests {
         assert!(STAGE1_BASE - STUB_RANGE_WIDTH > STAGE2_BASE);
         assert!(STAGE2_BASE - STUB_RANGE_WIDTH > STAGE3_BASE);
         assert!(STAGE3_BASE - STUB_RANGE_WIDTH > STAGE4_BASE);
+        assert!(STAGE4_BASE - STUB_RANGE_WIDTH > STAGE5_BASE);
     }
 
     #[test]
@@ -129,13 +146,14 @@ mod tests {
             (STAGE2_BASE, 2),
             (STAGE3_BASE, 3),
             (STAGE4_BASE, 4),
+            (STAGE5_BASE, 5),
         ] {
             assert_eq!(stage_of(base), Some(stage));
             assert_eq!(stage_of(base - STUB_RANGE_WIDTH), Some(stage));
             assert!(is_stub_id(base));
         }
         assert_eq!(stage_of(0), None);
-        assert_eq!(stage_of(STAGE4_BASE - STUB_RANGE_WIDTH - 1), None);
+        assert_eq!(stage_of(STAGE5_BASE - STUB_RANGE_WIDTH - 1), None);
     }
 
     #[test]
@@ -146,5 +164,6 @@ mod tests {
         assert_eq!(STAGE2_BASE, 0xFF3F_FFFF);
         assert_eq!(STAGE3_BASE, 0xFEFF_FFFF);
         assert_eq!(STAGE4_BASE, 0xFEBF_FFFF);
+        assert_eq!(STAGE5_BASE, 0xFE7F_FFFF);
     }
 }

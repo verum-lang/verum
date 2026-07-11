@@ -244,6 +244,20 @@ pub struct CodegenContext {
     /// pass can always synthesize the descriptor.
     pub stage3_stub_names: HashMap<u32, String>,
 
+    /// **Stage-5 pending mounts** — explicit braced-mount items whose
+    /// target couldn't be resolved at mount time (producing module not
+    /// compiled yet AND simple name not globally unique, so stages
+    /// 1-4 have no stub). Maps the local alias to the mount's FULL
+    /// qualified path. `compile_call`'s miss path consults this to
+    /// synthesize a stage-5 stub with the call site's arity, bound to
+    /// the qualified spelling the archive name-remap can chase
+    /// unambiguously.
+    pub pending_mount_aliases: HashMap<String, String>,
+
+    /// Descending allocation counter for stage-5 stub ids
+    /// (`stub_ranges::STAGE5_BASE - counter`).
+    pub stage5_stub_counter: u32,
+
     /// Dotted module path for functions currently being collected/compiled.
     ///
 
@@ -1358,6 +1372,8 @@ impl CodegenContext {
             canonical_index: HashMap::new(),
             prefer_existing_functions: false,
             stage3_stub_names: HashMap::new(),
+            pending_mount_aliases: HashMap::new(),
+            stage5_stub_counter: 0,
             current_source_module: None,
             stats: CodegenStats::default(),
             tier_context: TierContext::new(),

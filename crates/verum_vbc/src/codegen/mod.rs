@@ -8987,6 +8987,17 @@ impl VbcCodegen {
                 // Function not found - store for deferred resolution
                 // This handles intra-module imports where the constant/function
                 // from another file in the same module hasn't been registered yet
+                //
+                // **Stage-5 seed**: also record alias -> FULL qualified path in
+                // the codegen context. If the deferred pass ALSO misses (the
+                // producing module compiles later in the bake and the simple
+                // name is not globally unique, so no stage-1..4 stub exists),
+                // `compile_call`'s miss path synthesizes a stage-5 stub with
+                // the call site's arity bound to this qualified spelling — the
+                // archive name-remap then chases it unambiguously.
+                self.ctx
+                    .pending_mount_aliases
+                    .insert(alias_name.clone(), full_path.join("."));
                 self.pending_imports.push((full_path, alias_name));
                 Ok(())
             }

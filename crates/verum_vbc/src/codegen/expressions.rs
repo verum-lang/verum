@@ -5018,6 +5018,55 @@ impl VbcCodegen {
         // existing leaf-only fallback (preserving previous behaviour for
         // the genuinely-ambiguous case while letting unambiguous suffixes
         // resolve cleanly).
+        // **Stage-5 mount-miss synthesis (pre-check).** The user
+        // EXPLICITLY mounted this name but the producing module hadn't
+        // compiled when the mount resolved, and the simple name is not
+        // globally unique across the stdlib (stages 1-4 have no stub —
+        // the open_readonly/flags_default/access_name class, each
+        // declared 2+ times). Synthesize a stage-5 stub with THIS call
+        // site's arity, registered under the mount's full qualified
+        // path (the unambiguous spelling the archive name-remap
+        // chases) plus the local alias; the normal resolution chain
+        // below then finds it like any registration.
+        let stage5_pending: Option<String> = if self.ctx.lookup_function(&func_name).is_none() {
+            self.ctx.pending_mount_aliases.get(&func_name).cloned()
+        } else {
+            None
+        };
+        if let Some(qualified) = stage5_pending {
+            let stub_id = {
+                let c = self.ctx.stage5_stub_counter;
+                self.ctx.stage5_stub_counter += 1;
+                crate::module::FunctionId(crate::stub_ranges::STAGE5_BASE - c)
+            };
+            let info = FunctionInfo {
+                id: stub_id,
+                param_count: args.len(),
+                param_names: (0..args.len()).map(|i| format!("_arg{}", i)).collect(),
+                param_type_names: vec![],
+                is_async: false,
+                is_generator: false,
+                contexts: vec![],
+                return_type: None,
+                yield_type: None,
+                intrinsic_name: None,
+                variant_tag: None,
+                parent_type_name: None,
+                variant_payload_types: None,
+                is_partial_pattern: false,
+                takes_self_mut_ref: false,
+                return_type_name: None,
+                return_type_inner: None,
+                is_const: false,
+                is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
+            };
+            // Qualified spelling FIRST so stub-name preservation records
+            // the unambiguous form (canonical_name_better prefers dots).
+            self.ctx.register_function(qualified.clone(), info.clone());
+            self.ctx
+                .register_function_authoritative(func_name.clone(), info);
+        }
         let suffix_match_lookup = || -> Option<(String, FunctionInfo)> {
             if !func_name.contains("::") || is_qualified_module_path {
                 return None;

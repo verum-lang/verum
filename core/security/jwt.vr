@@ -303,6 +303,28 @@ public type JwtPayload is {
     signing_input: List<Byte>,
 };
 
+/// Decode ONLY the header of a compact JWT — no signature
+/// verification, no payload decode.
+///
+
+/// The standard OIDC key-selection step: peek at `alg` / `kid` to
+/// pick the verification key, then call `verify_compact` with it.
+/// NEVER treat the returned header as authenticated — nothing about
+/// the token is trusted until `verify_compact` succeeds.
+public fn decode_header_only(token: &Text) -> Result<JwtHeader, JwtError> {
+    let bytes = token.as_bytes();
+    // Same DoS cap as verify_compact: refuse to base64-decode
+    // attacker-sized inputs.
+    if bytes.len() > MAX_JWT_TOKEN_BYTES {
+        return Result.Err(JwtError.TokenTooLong);
+    }
+    let (h_end, _p_end) = find_two_dots(bytes)?;
+    let header_b64 = &bytes[..h_end];
+    let header_bytes = core.encoding.base64.decode_url(&Text.from_utf8_unchecked(header_b64))
+        .map_err(|_| JwtError.Base64Decode)?;
+    parse_header(header_bytes.as_slice())
+}
+
 public fn verify_compact(
     token: &Text,
     key:   &JwtKey,
