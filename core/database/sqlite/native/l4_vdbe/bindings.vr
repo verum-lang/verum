@@ -46,7 +46,7 @@ module core.database.sqlite.native.l4_vdbe.bindings;
 mount core.*;
 mount collections.{List, Map};
 mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull};
+mount core.database.sqlite.native.l4_vdbe.register.{Register, Register.RNull};
 
 // -----------------------------------------------------------------------------
 // Binding table
@@ -83,7 +83,7 @@ implement ParamBindings {
     public fn set_positional(&mut self, idx: Int, value: Register) {
         if idx < 1 { return; }
         while self.positional.len() < idx {
-            self.positional.push(RNull);
+            self.positional.push(Register.RNull);
         }
         self.positional[idx - 1] = value;
     }
@@ -97,13 +97,13 @@ implement ParamBindings {
     /// slot is unbound or out of range — matching SQLite's semantics
     /// that an unbound `?N` evaluates to NULL.
     public fn get_positional(&self, idx: Int) -> Register {
-        if idx < 1 || idx > self.positional.len() { return RNull; }
+        if idx < 1 || idx > self.positional.len() { return Register.RNull; }
         self.positional[idx - 1]
     }
 
     /// Read named slot `name`. Returns `RNull` when absent.
     public fn get_named(&self, name: &Text) -> Register {
-        if !self.named.contains_key(name.clone()) { return RNull; }
+        if !self.named.contains_key(name.clone()) { return Register.RNull; }
         self.named.get(name.clone())
     }
 

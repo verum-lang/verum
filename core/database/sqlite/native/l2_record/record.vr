@@ -89,7 +89,7 @@ public type RecordError is
 implement Display for RecordError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            ShortBuffer        => f.write_str("sqlite record buffer truncated"),
+            RecordError.ShortBuffer        => f.write_str("sqlite record buffer truncated"),
             ReservedCode(c)    => f.write_str(f"sqlite record reserved serial-type code {c}".as_str()),
             InvalidLength(g)   => f.write_str(f"sqlite record invalid length {g}".as_str()),
             Corrupt            => f.write_str("sqlite record header inconsistency"),
@@ -100,7 +100,7 @@ implement Display for RecordError {
 implement Debug for RecordError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            ShortBuffer        => f.write_str("ShortBuffer"),
+            RecordError.ShortBuffer        => f.write_str("ShortBuffer"),
             ReservedCode(c)    => f.write_str(f"ReservedCode({c})".as_str()),
             InvalidLength(g)   => f.write_str(f"InvalidLength({g})".as_str()),
             Corrupt            => f.write_str("Corrupt"),
@@ -111,7 +111,7 @@ implement Debug for RecordError {
 implement Eq for RecordError {
     fn eq(&self, other: &RecordError) -> Bool {
         match (self, other) {
-            (ShortBuffer,      ShortBuffer)      => true,
+            (RecordError.ShortBuffer,      RecordError.ShortBuffer)      => true,
             (ReservedCode(a),  ReservedCode(b))  => a == b,
             (InvalidLength(a), InvalidLength(b)) => a == b,
             (Corrupt,          Corrupt)          => true,
@@ -263,15 +263,15 @@ public fn decode_record_header(
     start: Int,
 ) -> Result<(List<SerialType>, Int), RecordError> {
     if start >= buf.len() {
-        return Result.Err(ShortBuffer);
+        return Result.Err(RecordError.ShortBuffer);
     }
     let (header_len, hlen_bytes) = match varint.decode(buf, start) {
         Result.Ok(r)  => r,
-        Result.Err(_) => { return Result.Err(ShortBuffer); }
+        Result.Err(_) => { return Result.Err(RecordError.ShortBuffer); }
     };
     let header_end = start + (header_len as Int);
     if header_end > buf.len() {
-        return Result.Err(ShortBuffer);
+        return Result.Err(RecordError.ShortBuffer);
     }
 
     let mut types: List<SerialType> = List.new();
@@ -279,7 +279,7 @@ public fn decode_record_header(
     while pos < header_end {
         let (code, n) = match varint.decode(buf, pos) {
             Result.Ok(r)  => r,
-            Result.Err(_) => { return Result.Err(ShortBuffer); }
+            Result.Err(_) => { return Result.Err(RecordError.ShortBuffer); }
         };
         // Reject overrun: a serial-type varint that crosses
         // `header_end` is a corruption signal — SQLite's

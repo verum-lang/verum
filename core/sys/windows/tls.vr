@@ -375,7 +375,7 @@ public fn set_context_slots(slots: WindowsContextSlots) -> Result<(), WindowsTls
             tcb.context_slots = slots;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(WindowsTlsError.NotInitialized),
     }
 }
 
@@ -449,7 +449,7 @@ public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError>
             slots.slots[slot].value = value;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(WindowsTlsError.NotInitialized),
     }
 }
 
@@ -483,7 +483,7 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), WindowsTlsError
             entry.value = value;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(WindowsTlsError.NotInitialized),
     }
 }
 
@@ -513,7 +513,7 @@ public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, WindowsTlsError> {
 
             Result.Ok(popped)
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(WindowsTlsError.NotInitialized),
     }
 }
 
@@ -574,6 +574,6 @@ public fn set_user_data(data: &unsafe Byte) -> Result<(), WindowsTlsError> {
             tcb.user_data = data;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(WindowsTlsError.NotInitialized),
     }
 }

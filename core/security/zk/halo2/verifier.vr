@@ -58,7 +58,7 @@ implement Display for VerifierError {
                 f.write_str(f"halo2.verifier: public-input arity expected={expected} got={got}".as_str()),
             MalformedProof(why)        => f.write_str(f"halo2.verifier: malformed proof ({why})".as_str()),
             MalformedPublicInput(idx)  => f.write_str(f"halo2.verifier: public input #{idx} malformed".as_str()),
-            VerificationFailed         => f.write_str("halo2.verifier: verification failed"),
+            VerifierError.VerificationFailed         => f.write_str("halo2.verifier: verification failed"),
             SrsMismatch                => f.write_str("halo2.verifier: SRS hash mismatch"),
             BackendError(why)          => f.write_str(f"halo2.verifier: backend ({why})".as_str()),
         }
@@ -84,7 +84,7 @@ public fn verify(
         vk, public_inputs, proof, srs
     ) {
         VerifyResult.Accepted              => Result.Ok(()),
-        VerifyResult.Rejected              => Result.Err(VerificationFailed),
+        VerifyResult.Rejected              => Result.Err(VerifierError.VerificationFailed),
         VerifyResult.PublicInputArity(e, g) => Result.Err(PublicInputArity { expected: e, got: g }),
         VerifyResult.MalformedProof(why)   => Result.Err(MalformedProof(why)),
         VerifyResult.MalformedInput(idx)   => Result.Err(MalformedPublicInput(idx)),
@@ -109,7 +109,7 @@ public fn verify_batch(
         vk, proofs_with_inputs, srs
     ) {
         VerifyResult.Accepted              => Result.Ok(()),
-        VerifyResult.Rejected              => Result.Err(VerificationFailed),
+        VerifyResult.Rejected              => Result.Err(VerifierError.VerificationFailed),
         VerifyResult.PublicInputArity(e, g) => Result.Err(PublicInputArity { expected: e, got: g }),
         VerifyResult.MalformedProof(why)   => Result.Err(MalformedProof(why)),
         VerifyResult.MalformedInput(idx)   => Result.Err(MalformedPublicInput(idx)),

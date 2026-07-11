@@ -79,7 +79,7 @@ public type SysTlsError is
 implement Display for SysTlsError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            NotInitialized              => f.write_str("Darwin TLS: not initialized"),
+            SysTlsError.NotInitialized              => f.write_str("Darwin TLS: not initialized"),
             AlreadyInitialized          => f.write_str("Darwin TLS: already initialized"),
             AllocationFailed { code }   => f.write_str(f"Darwin TLS: allocation failed (code {code})".as_str()),
             InvalidSlot { slot }        => f.write_str(f"Darwin TLS: invalid slot {slot}".as_str()),
@@ -94,7 +94,7 @@ implement Display for SysTlsError {
 implement Debug for SysTlsError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            NotInitialized              => f.write_str("NotInitialized"),
+            SysTlsError.NotInitialized              => f.write_str("NotInitialized"),
             AlreadyInitialized          => f.write_str("AlreadyInitialized"),
             AllocationFailed { code }   => f.write_str(f"AllocationFailed {{ code: {code} }}".as_str()),
             InvalidSlot { slot }        => f.write_str(f"InvalidSlot {{ slot: {slot} }}".as_str()),
@@ -109,7 +109,7 @@ implement Debug for SysTlsError {
 implement Eq for SysTlsError {
     fn eq(&self, other: &SysTlsError) -> Bool {
         match (self, other) {
-            (NotInitialized,             NotInitialized)             => true,
+            (SysTlsError.NotInitialized,             SysTlsError.NotInitialized)             => true,
             (AlreadyInitialized,         AlreadyInitialized)         => true,
             (AllocationFailed { code: a }, AllocationFailed { code: b }) => a == b,
             (InvalidSlot { slot: a },    InvalidSlot { slot: b })    => a == b,
@@ -128,7 +128,7 @@ public type DarwinTlsError is SysTlsError;
 implement SysTlsError {
     public fn message(&self) -> Text {
         match self {
-            NotInitialized => "TLS not initialized for this thread",
+            SysTlsError.NotInitialized => "TLS not initialized for this thread",
             AlreadyInitialized => "TLS already initialized for this thread",
             AllocationFailed { code } => f"Failed to allocate TLS memory (code={code})",
             InvalidSlot { slot } => f"Invalid context slot index: {slot}",
@@ -382,7 +382,7 @@ public fn set_context_slots(slots: DarwinContextSlots) -> Result<(), SysTlsError
             tcb.context_slots = slots;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(SysTlsError.NotInitialized),
     }
 }
 
@@ -456,7 +456,7 @@ public fn ctx_set(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
             slots.slots[slot].value = value;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(SysTlsError.NotInitialized),
     }
 }
 
@@ -490,7 +490,7 @@ public fn ctx_push(slot: Int, value: &unsafe Byte) -> Result<(), SysTlsError> {
             entry.value = value;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(SysTlsError.NotInitialized),
     }
 }
 
@@ -520,7 +520,7 @@ public fn ctx_pop(slot: Int) -> Result<&unsafe Byte, SysTlsError> {
 
             Result.Ok(popped)
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(SysTlsError.NotInitialized),
     }
 }
 
@@ -576,6 +576,6 @@ public fn set_user_data(data: &unsafe Byte) -> Result<(), SysTlsError> {
             tcb.user_data = data;
             Result.Ok(())
         }
-        Maybe.None => Result.Err(NotInitialized),
+        Maybe.None => Result.Err(SysTlsError.NotInitialized),
     }
 }

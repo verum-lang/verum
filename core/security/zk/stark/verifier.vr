@@ -75,7 +75,7 @@ implement Display for VerifierError {
                 f.write_str(f"stark.verifier: public-input arity expected={expected} got={got}".as_str()),
             MalformedProof(why)    => f.write_str(f"stark.verifier: malformed proof ({why})".as_str()),
             AirVkMismatch          => f.write_str("stark.verifier: AIR digest mismatch"),
-            VerificationFailed     => f.write_str("stark.verifier: verification failed"),
+            VerifierError.VerificationFailed     => f.write_str("stark.verifier: verification failed"),
             BackendError(why)      => f.write_str(f"stark.verifier: backend ({why})".as_str()),
         }
     }
@@ -102,7 +102,7 @@ public fn verify(
         vk, proof, public_inputs, params
     ) {
         VerifyResult.Accepted        => Result.Ok(()),
-        VerifyResult.Rejected        => Result.Err(VerificationFailed),
+        VerifyResult.Rejected        => Result.Err(VerifierError.VerificationFailed),
         VerifyResult.Malformed(why)  => Result.Err(MalformedProof(why)),
         VerifyResult.AirMismatch     => Result.Err(AirVkMismatch),
         VerifyResult.Backend(why)    => Result.Err(BackendError(why)),
@@ -125,7 +125,7 @@ public fn verify_batch(
         vk, proofs_with_inputs, params
     ) {
         VerifyResult.Accepted        => Result.Ok(()),
-        VerifyResult.Rejected        => Result.Err(VerificationFailed),
+        VerifyResult.Rejected        => Result.Err(VerifierError.VerificationFailed),
         VerifyResult.Malformed(why)  => Result.Err(MalformedProof(why)),
         VerifyResult.AirMismatch     => Result.Err(AirVkMismatch),
         VerifyResult.Backend(why)    => Result.Err(BackendError(why)),

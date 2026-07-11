@@ -102,7 +102,7 @@ implement DarwinIoDriverError {
             BrokenPipe => "Broken pipe",
             TimedOut => "Operation timed out",
             QueueFull => "Event queue is full",
-            Closed => "I/O driver is closed",
+            DarwinIoDriverError.Closed => "I/O driver is closed",
             Other { code, message } => f"Error {code}: {message}",
         }
     }
@@ -136,7 +136,7 @@ implement Debug for DarwinIoDriverError {
             BrokenPipe                       => f.write_str("BrokenPipe"),
             TimedOut                         => f.write_str("TimedOut"),
             QueueFull                        => f.write_str("QueueFull"),
-            Closed                           => f.write_str("Closed"),
+            DarwinIoDriverError.Closed                           => f.write_str("Closed"),
             Other { code, message }          => f.write_str(f"Other {{ code: {code}, message: {message} }}".as_str()),
         }
     }
@@ -156,7 +156,7 @@ implement Eq for DarwinIoDriverError {
             (BrokenPipe,                     BrokenPipe)                     => true,
             (TimedOut,                       TimedOut)                       => true,
             (QueueFull,                      QueueFull)                      => true,
-            (Closed,                         Closed)                         => true,
+            (DarwinIoDriverError.Closed,                         DarwinIoDriverError.Closed)                         => true,
             (Other { code: ca, message: ma }, Other { code: cb, message: mb }) => ca == cb && ma == mb,
             _ => false,
         }
@@ -417,7 +417,7 @@ implement KqueueDriver {
         token: DarwinIoToken,
     ) -> Result<(), DarwinIoDriverError> {
         if !self.open {
-            return Result.Err(Closed);
+            return Result.Err(DarwinIoDriverError.Closed);
         }
 
         if self.num_changes >= MAX_EVENTS {
@@ -480,7 +480,7 @@ implement KqueueDriver {
     /// Number of events ready
     public fn poll(&mut self, timeout_ms: Int) -> Result<Int, DarwinIoDriverError> {
         if !self.open {
-            return Result.Err(Closed);
+            return Result.Err(DarwinIoDriverError.Closed);
         }
 
         let timeout = if timeout_ms < 0 {
@@ -695,7 +695,7 @@ fn convert_error(err: DarwinIoDriverError) -> EngineIoError {
         BrokenPipe => IoError.BrokenPipe,
         TimedOut => IoError.TimedOut,
         QueueFull => IoError.SubmissionQueueFull,
-        Closed => IoError.Closed,
+        DarwinIoDriverError.Closed => IoError.Closed,
         Other { code, message } => IoError.Other(message),
     }
 }

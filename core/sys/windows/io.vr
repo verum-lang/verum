@@ -393,7 +393,7 @@ implement IocpDriver {
     /// After association, async I/O on the handle will complete via this IOCP.
     public fn associate(&mut self, file_handle: Handle, completion_key: Int) -> Result<(), WindowsIoDriverError> {
         if !self.open {
-            return Result.Err(Closed);
+            return Result.Err(WindowsIoDriverError.Closed);
         }
 
         let result = CreateIoCompletionPort(
@@ -425,7 +425,7 @@ implement IocpDriver {
         overlapped: &Overlapped,
     ) -> Result<(), WindowsIoDriverError> {
         if !self.open {
-            return Result.Err(Closed);
+            return Result.Err(WindowsIoDriverError.Closed);
         }
 
         let result = PostQueuedCompletionStatus(
@@ -465,7 +465,7 @@ implement IocpDriver {
     /// Number of completions ready
     public fn poll(&mut self, timeout_ms: UInt32) -> Result<Int, WindowsIoDriverError> {
         if !self.open {
-            return Result.Err(Closed);
+            return Result.Err(WindowsIoDriverError.Closed);
         }
 
         let mut num_entries: UInt32 = 0;
@@ -550,7 +550,7 @@ implement IocpDriver {
     /// Wait for a single completion with timeout.
     public fn wait_one(&mut self, timeout_ms: UInt32) -> Result<Maybe<WindowsIoCqe>, WindowsIoDriverError> {
         if !self.open {
-            return Result.Err(Closed);
+            return Result.Err(WindowsIoDriverError.Closed);
         }
 
         let mut bytes_transferred: UInt32 = 0;

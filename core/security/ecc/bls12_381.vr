@@ -252,9 +252,9 @@ implement Display for BlsError {
         match self {
             InvalidPoint(why)         => f.write_str(f"BLS12-381: invalid point ({why})".as_str()),
             InvalidScalar             => f.write_str("BLS12-381: scalar out of [0, r)"),
-            InvalidPublicKey          => f.write_str("BLS12-381: invalid public key"),
+            BlsError.InvalidPublicKey          => f.write_str("BLS12-381: invalid public key"),
             InvalidSignature(why)     => f.write_str(f"BLS12-381: invalid signature ({why})".as_str()),
-            VerificationFailed        => f.write_str("BLS12-381: signature verification failed"),
+            BlsError.VerificationFailed        => f.write_str("BLS12-381: signature verification failed"),
             AggregateMismatch(why)    => f.write_str(f"BLS12-381: aggregate mismatch ({why})".as_str()),
             ThresholdRebuildFailed(why) => f.write_str(f"BLS12-381: threshold rebuild ({why})".as_str()),
             BackendNotReady           => f.write_str("BLS12-381: backend intrinsic not ready"),
@@ -267,9 +267,9 @@ implement Debug for BlsError {
         match self {
             InvalidPoint(why)            => f.write_str(f"InvalidPoint({why})".as_str()),
             InvalidScalar                => f.write_str("InvalidScalar"),
-            InvalidPublicKey             => f.write_str("InvalidPublicKey"),
+            BlsError.InvalidPublicKey             => f.write_str("InvalidPublicKey"),
             InvalidSignature(why)        => f.write_str(f"InvalidSignature({why})".as_str()),
-            VerificationFailed           => f.write_str("VerificationFailed"),
+            BlsError.VerificationFailed           => f.write_str("VerificationFailed"),
             AggregateMismatch(why)       => f.write_str(f"AggregateMismatch({why})".as_str()),
             ThresholdRebuildFailed(why)  => f.write_str(f"ThresholdRebuildFailed({why})".as_str()),
             BackendNotReady              => f.write_str("BackendNotReady"),
@@ -591,7 +591,7 @@ implement BlsPublicKey {
     public fn validate(&self) -> Result<(), BlsError> {
         match @intrinsic("verum.crypto.bls12_381_pk_validate", self) {
             true  => Ok(()),
-            false => Err(InvalidPublicKey),
+            false => Err(BlsError.InvalidPublicKey),
         }
     }
 
@@ -603,7 +603,7 @@ implement BlsPublicKey {
         }
         match @intrinsic("verum.crypto.bls12_381_pop_verify", self, proof) {
             true  => Ok(()),
-            false => Err(VerificationFailed),
+            false => Err(BlsError.VerificationFailed),
         }
     }
 }
@@ -620,7 +620,7 @@ implement BlsSignature {
         }
         match @intrinsic("verum.crypto.bls12_381_verify", public_key, message, self) {
             true  => Ok(()),
-            false => Err(VerificationFailed),
+            false => Err(BlsError.VerificationFailed),
         }
     }
 }
@@ -694,7 +694,7 @@ public fn aggregate_verify(
         public_keys, messages, signature
     ) {
         true  => Ok(()),
-        false => Err(VerificationFailed),
+        false => Err(BlsError.VerificationFailed),
     }
 }
 
@@ -721,7 +721,7 @@ public fn fast_aggregate_verify(
         public_keys, message, signature
     ) {
         true  => Ok(()),
-        false => Err(VerificationFailed),
+        false => Err(BlsError.VerificationFailed),
     }
 }
 
