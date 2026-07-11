@@ -827,7 +827,7 @@ implement<D: meta USize{D > 0}, E: meta USize{E > 1}> MoeRouter<D, E> {
         match &self.strategy {
             RoutingStrategy.TopK { k } => {
                 // Top-k expert selection per token
-                let (top_weights, top_indices) = topk(&softmax(&logits, -1), *k, -1);
+                let (top_weights, top_indices) = topk(&softmax(&logits, -1), *k);
                 // Renormalize weights
                 let weights = div(&top_weights, &sum_axis(&top_weights, -1).unsqueeze(-1));
 
@@ -839,7 +839,7 @@ implement<D: meta USize{D > 0}, E: meta USize{E > 1}> MoeRouter<D, E> {
             RoutingStrategy.ExpertChoice { k } => {
                 // Each expert selects its top-k tokens
                 let expert_logits = logits.transpose(0, 1);  // [E, tokens]
-                let (_, token_indices) = topk(&expert_logits, *k, -1);  // [E, k]
+                let (_, token_indices) = topk(&expert_logits, *k);  // [E, k]
 
                 // Compute weights for selected tokens
                 let weights = softmax(&gather_nd(&logits, &token_indices), -1);

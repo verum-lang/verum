@@ -35,7 +35,7 @@ public fn misuse() -> Int      { 21 }
 public fn nolfs() -> Int       { 22 }
 public fn auth() -> Int        { 23 }
 public fn format() -> Int      { 24 }
-public fn range() -> Int       { 25 }
+public fn sqlite_range_code() -> Int { 25 }
 public fn notadb() -> Int      { 26 }
 public fn notice() -> Int      { 27 }
 public fn warning() -> Int     { 28 }
@@ -74,7 +74,7 @@ public fn errstr(rc: Int) -> Text {
     if primary == nolfs()      { return "large file support is disabled".clone(); }
     if primary == auth()       { return "authorization denied".clone(); }
     if primary == format()     { return "auxiliary database format error".clone(); }
-    if primary == range()      { return "column index out of range".clone(); }
+    if primary == sqlite_range_code()      { return "column index out of range".clone(); }
     if primary == notadb()     { return "file is not a database".clone(); }
     if primary == notice()     { return "notification message".clone(); }
     if primary == warning()    { return "warning message".clone(); }

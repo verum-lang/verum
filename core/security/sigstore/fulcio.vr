@@ -82,7 +82,6 @@ mount encoding.pem.{decode_all as pem_decode_all, PemBlock};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount security.ecc.ed25519.{
     Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
-    sign as ed25519_sign,
     public_key as ed25519_public_key,
 };
 mount security.ecc.p256.{P256, P256PrivateKey, P256PublicKey, P256Signature};
@@ -159,7 +158,7 @@ pub fn fulcio_proof_of_possession(k: &FulcioKey, oidc_sub: &Text) -> List<Byte> 
     let msg = oidc_sub.as_bytes();
     match k {
         FulcioKey.Ed25519(seed) => {
-            let sig = ed25519_sign(seed, msg);
+            let sig = core.security.ecc.ed25519.sign(seed, msg);
             let mut out: List<Byte> = List.with_capacity(64);
             let mut i: Int = 0;
             while i < 64 { out.push(sig[i]); i = i + 1; }

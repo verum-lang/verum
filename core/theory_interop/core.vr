@@ -483,12 +483,9 @@ public fn audit_theory(theory: &mut Theory) -> AuditResult {
     let dep_count = theory.dependencies.len();
 
     // Step 1: Propagate status and collect changes
-    let mut changes = List.new();
-    // Propagate from each claim to find inconsistencies
-    for claim in theory.statements.iter() {
-        let sub_changes = propagate_status(theory, &claim.id, claim.status);
-        changes.extend(sub_changes);
-    }
+    // propagate_status seeds its queue with every statement in
+    // dependency order, so one whole-theory pass collects all changes.
+    let changes = propagate_status(theory);
 
     // Step 2: Detect circular dependencies via DFS
     let mut circular = List.new();

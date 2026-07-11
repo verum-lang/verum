@@ -781,7 +781,7 @@ implement<E: Module<Text, DynTensor<Float>>> MemoryStore<E> {
         let similarities = matmul(&embed_norms, &query_norm.unsqueeze(-1)).squeeze(-1);
 
         // Top-k
-        let (values, indices) = topk(&similarities, k.min(self.contents.len()), -1);
+        let (values, indices) = topk(&similarities, k.min(self.contents.len()));
 
         indices.iter().enumerate().map(|(i, &idx)| {
             (self.contents[idx as USize].clone(), values.item_at(i))

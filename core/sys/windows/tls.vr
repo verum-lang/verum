@@ -230,7 +230,7 @@ public fn init_main_thread_tls() -> Result<&mut WindowsThreadControlBlock, Windo
     // Check if already initialized
     let existing = get_current_tcb_raw();
     if existing as Int != 0 {
-        return Result.Err(AlreadyInitialized);
+        return Result.Err(WindowsTlsError.AlreadyInitialized);
     }
 
     // Create TCB for main thread
