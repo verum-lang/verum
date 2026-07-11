@@ -3887,21 +3887,47 @@ impl VbcCodegen {
             op: UnOp::Deref,
             expr: ptr_expr,
         } = &inner.kind
-            && matches!(ptr_expr.kind, ExprKind::Path(_) | ExprKind::Field { .. })
         {
-            let ptr_reg = self
-                .compile_expr(ptr_expr)?
-                .or_internal("&*p: pointer operand has no value")?;
-            if self.ctx.is_raw_pointer(ptr_reg) {
-                // `&*p ≡ p` — `ptr_reg` already holds the heap-anchored
-                // pointer, which is the exact `&T` the surrounding code
-                // expects and which survives every frame boundary.
-                return Ok(Some(ptr_reg));
+            // Shape gate: Path/Field probe compile-then-check (idempotent
+            // recompile on fall-through). METHOD-CALL operands
+            // (`&*self.ptr.offset(i)` — the List.fmt_debug element loop,
+            // #48) must NOT be recompiled (double side effects), so they
+            // are admitted only when the STATIC return type names a raw
+            // pointer — then the single compile IS the fold result.
+            // Pre-fix the method-call shape fell to the generic path,
+            // which wrapped the ADDRESS in a register-ref: the element
+            // then rendered as the raw pointer-int
+            // (`f"{[1,2]:?}"` printed `[1305670058496]`).
+            let is_probe_shape =
+                matches!(ptr_expr.kind, ExprKind::Path(_) | ExprKind::Field { .. });
+            let is_static_raw_method = matches!(
+                ptr_expr.kind,
+                ExprKind::MethodCall { .. } | ExprKind::Call { .. }
+            ) && self
+                .infer_expr_type_name(ptr_expr)
+                .map(|t| {
+                    let t = t.trim();
+                    t.starts_with('*') || t.starts_with("&unsafe")
+                })
+                .unwrap_or(false);
+            if is_probe_shape || is_static_raw_method {
+                let ptr_reg = self
+                    .compile_expr(ptr_expr)?
+                    .or_internal("&*p: pointer operand has no value")?;
+                if self.ctx.is_raw_pointer(ptr_reg) || is_static_raw_method {
+                    // `&*p ≡ p` — `ptr_reg` already holds the heap-anchored
+                    // pointer, which is the exact `&T` the surrounding code
+                    // expects and which survives every frame boundary.
+                    if is_static_raw_method {
+                        self.ctx.mark_raw_pointer(ptr_reg);
+                    }
+                    return Ok(Some(ptr_reg));
+                }
+                // Not a raw pointer: drop this probe and fall through to the
+                // generic path, which recompiles the inner `Deref` from
+                // scratch (idempotent for the gated Path/Field operands).
+                self.ctx.free_temp(ptr_reg);
             }
-            // Not a raw pointer: drop this probe and fall through to the
-            // generic path, which recompiles the inner `Deref` from scratch
-            // (idempotent for the gated Path/Field operands).
-            self.ctx.free_temp(ptr_reg);
         }
 
         // `&arr[range]` / `&mut arr[range]` — slice-borrow.
@@ -5233,12 +5259,18 @@ impl VbcCodegen {
         let unit_decl_lookup: Option<(String, FunctionInfo)> = if !func_name.contains('.')
             && !func_name.contains("::")
         {
-            self.ctx
-                .unit_declared_fns
-                .get(&func_name)
-                .cloned()
-                .filter(|info| info.param_count == args.len() && is_free_fn(info))
-                .map(|info| (func_name.clone(), info))
+            if self.ctx.unit_declared_fns.contains(&func_name) {
+                // Live registration only — the user-phase decl registered
+                // LAST, so the bare key holds the unit's own fn.
+                self.ctx
+                    .functions
+                    .get(&func_name)
+                    .cloned()
+                    .filter(|info| info.param_count == args.len() && is_free_fn(info))
+                    .map(|info| (func_name.clone(), info))
+            } else {
+                None
+            }
         } else {
             None
         };

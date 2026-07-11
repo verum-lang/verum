@@ -171,12 +171,15 @@ pub struct CodegenContext {
     /// previously did `lookup_function(name)` and risked first-wins
     /// shadow should migrate to `lookup_function_in_scope(scope, name)`.
     pub scoped_functions: HashMap<(String, String), FunctionInfo>,
-    /// Free fns DECLARED by the unit being compiled (user-phase AST
-    /// declarations only; stdlib bake — `prefer_existing_functions` —
+    /// NAMES of free fns DECLARED by the unit being compiled (user-phase
+    /// AST declarations only; stdlib bake — `prefer_existing_functions` —
     /// never writes here). Bare-name call resolution consults this
     /// FIRST: the unit's own `fn take` must beat `core.base.memory.take`
-    /// in the type-aware overload scan (task #20).
-    pub unit_declared_fns: HashMap<String, FunctionInfo>,
+    /// in the type-aware overload scan (task #20). Stores names only —
+    /// FunctionInfo snapshots go stale when ids are renumbered after
+    /// declaration (a cached clone produced `Call 536870934` → "Function
+    /// not found"); the lookup reads the LIVE registration instead.
+    pub unit_declared_fns: std::collections::HashSet<String>,
 
     /// **ARCH-P2 stage 1 — content-addressed canonical function index**
     /// (dual keying, warn-on-divergence).  See
@@ -1340,7 +1343,7 @@ impl CodegenContext {
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
             scoped_functions: HashMap::new(),
-            unit_declared_fns: HashMap::new(),
+            unit_declared_fns: std::collections::HashSet::new(),
             canonical_index: HashMap::new(),
             prefer_existing_functions: false,
             stage3_stub_names: HashMap::new(),

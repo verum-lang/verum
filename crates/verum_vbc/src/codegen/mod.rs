@@ -7908,6 +7908,12 @@ impl VbcCodegen {
             }
         }
 
+        // task #20: user-phase declarations claim unit-level precedence
+        // for bare-name call resolution (stdlib bake is excluded via
+        // prefer_existing_functions).
+        if !self.ctx.prefer_existing_functions && !name.contains('.') && !name.contains("::") {
+            self.ctx.unit_declared_fns.insert(name.clone());
+        }
         self.ctx.register_function(name.clone(), info.clone());
 
         // Also register under the function's fully-qualified module path, so
