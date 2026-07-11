@@ -8,7 +8,7 @@ mount super.block.Block;
 mount super.paragraph.{Line, TextSpan};
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;
-mount super.super.layout.constraint.{Constraint, Layout, Direction};
+mount super.super.layout.constraint.{LayoutConstraint, Layout, Direction};
 mount super.super.style.style.Style;
 
 // =============================================================================
@@ -162,7 +162,7 @@ public type Table is {
     rows: List<TableRow>,
     header: Maybe<TableRow>,
     footer: Maybe<TableRow>,
-    widths: List<Constraint>,
+    widths: List<LayoutConstraint>,
     column_spacing: Int,
     block: Maybe<Block>,
     style: Style,
@@ -172,7 +172,7 @@ public type Table is {
 };
 
 implement Table {
-    public fn new(rows: List<TableRow>, widths: List<Constraint>) -> Table {
+    public fn new(rows: List<TableRow>, widths: List<LayoutConstraint>) -> Table {
         Table {
             rows: rows,
             header: Maybe.None,

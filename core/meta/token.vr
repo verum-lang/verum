@@ -299,7 +299,7 @@ implement TokenStream {
 
     /// Wrap in delimiter group
     public fn wrap(self, delimiter: Delimiter) -> Self {
-        Self.from_tree(TokenTree.Grouped(Group {
+        Self.from_tree(TokenTree.Grouped(TokenGroup {
             delimiter,
             tokens: self,
             span: self.span,
@@ -396,7 +396,7 @@ implement Display for TokenStream {
 }
 
 // =============================================================================
-// Group (forward declaration — full definition below)
+// TokenGroup (forward declaration — full definition below)
 // =============================================================================
 
 /// Delimiter type for groups (forward declaration)
@@ -412,7 +412,7 @@ public type Delimiter is
     | Invisible;
 
 /// Delimited group of tokens (forward declaration stub)
-public type Group is {
+public type TokenGroup is {
     delimiter: Delimiter,
     tokens: TokenStream,
     span: Span,
@@ -432,7 +432,7 @@ public type TokenTree is
     /// Single token (identifier, literal, punctuation)
     | Leaf(Token)
     /// Delimited group of tokens
-    | Grouped(Group);
+    | Grouped(TokenGroup);
 
 implement TokenTree {
     /// Get span of this tree
@@ -476,7 +476,7 @@ implement TokenTree {
     }
 
     /// Get as group if this is a group
-    public fn as_group(&self) -> Maybe<&Group> {
+    public fn as_group(&self) -> Maybe<&TokenGroup> {
         match self {
             Leaf(_) => Maybe.None,
             Grouped(g) => Maybe.Some(g),
@@ -630,10 +630,10 @@ public type TokenKind is
     | Eof;
 
 // =============================================================================
-// Group (full implementation — type and Delimiter declared above before TokenTree)
+// TokenGroup (full implementation — type and Delimiter declared above before TokenTree)
 // =============================================================================
 
-implement Group {
+implement TokenGroup {
     /// Create new group
     public fn new(delimiter: Delimiter, tokens: TokenStream) -> Self {
         Self {

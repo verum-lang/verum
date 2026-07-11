@@ -101,43 +101,43 @@ implement Arity {
 }
 
 // =============================================================================
-// Group — mutex / required / coreq sets of flags
+// ArgGroup — mutex / required / coreq sets of flags
 // =============================================================================
 
 /// Argument group — a named bag of flags with a relational constraint.
 /// The constraint is checked after parsing and surfaced as a `ParseError`
 /// rather than a panic.
-public type Group is {
-    /// Group identifier — used in error messages and `requires`/`conflicts_with`.
+public type ArgGroup is {
+    /// ArgGroup identifier — used in error messages and `requires`/`conflicts_with`.
     name: Text,
     /// Flag long-names that participate in this group.
     members: List<Text>,
-    /// Group kind (mutex / required / etc).
+    /// ArgGroup kind (mutex / required / etc).
     kind: GroupKind,
     /// Optional help line; rendered above the group in `--help`.
     help: Maybe<Text>,
 };
 
-/// Kind of relational constraint a `Group` enforces.
+/// Kind of relational constraint a `ArgGroup` enforces.
 public type GroupKind is
     | Exclusive                 // не более одного из членов одновременно
     | Required                  // ровно один обязателен
     | RequiredAll               // все обязательны вместе
     | OptionalAll;              // если хоть один задан — все обязательны
 
-implement Group {
+implement ArgGroup {
     /// Build an exclusive (mutex) group.
-    public fn exclusive(name: Text, members: List<Text>) -> Group {
-        Group { name: name, members: members, kind: GroupKind.Exclusive, help: Maybe.None }
+    public fn exclusive(name: Text, members: List<Text>) -> ArgGroup {
+        ArgGroup { name: name, members: members, kind: GroupKind.Exclusive, help: Maybe.None }
     }
 
     /// Build a "exactly one of" required group.
-    public fn one_required(name: Text, members: List<Text>) -> Group {
-        Group { name: name, members: members, kind: GroupKind.Required, help: Maybe.None }
+    public fn one_required(name: Text, members: List<Text>) -> ArgGroup {
+        ArgGroup { name: name, members: members, kind: GroupKind.Required, help: Maybe.None }
     }
 
     /// Attach explanatory help to this group.
-    public fn with_help(mut self, help: Text) -> Group {
+    public fn with_help(mut self, help: Text) -> ArgGroup {
         self.help = Maybe.Some(help);
         self
     }
@@ -477,7 +477,7 @@ public type CommandSpec is {
     args:        List<ArgSpec>,
     flags:       List<FlagSpec>,
     subcommands: List<CommandSpec>,
-    groups:      List<Group>,
+    groups:      List<ArgGroup>,
     examples:    List<Example>,
     aliases:     List<Text>,
     hidden:      Bool,
@@ -535,7 +535,7 @@ implement CommandSpec {
     }
 
     /// Append a group.
-    public fn add_group(mut self, g: Group) -> CommandSpec {
+    public fn add_group(mut self, g: ArgGroup) -> CommandSpec {
         self.groups.push(g);
         self
     }

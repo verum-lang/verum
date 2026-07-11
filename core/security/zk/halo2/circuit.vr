@@ -41,7 +41,7 @@ mount core.*;
 // Column types
 // =============================================================================
 
-public type ColumnType is
+public type CircuitColumnType is
     /// Witness — secret to prover.
     | Advice
     /// Public — verifier-side input (e.g., commitment hash, message).
@@ -54,14 +54,14 @@ public type ColumnType is
 
 /// A single column in the circuit's grid layout.
 public type Column is {
-    index: Int,             // 0-based, unique within `ColumnType`
-    kind:  ColumnType,
+    index: Int,             // 0-based, unique within `CircuitColumnType`
+    kind:  CircuitColumnType,
     /// Caller-defined annotation — surfaces in proof-failure traces.
     name:  Text,
 };
 
 implement Column {
-    public fn new(index: Int, kind: ColumnType, name: Text) -> Column {
+    public fn new(index: Int, kind: CircuitColumnType, name: Text) -> Column {
         Column { index, kind, name }
     }
 }
@@ -106,7 +106,7 @@ public type Cell is {
 // =============================================================================
 
 /// A polynomial expression over the circuit's columns. All gates and
-/// lookups are built on top of `Constraint`. The expression is purely
+/// lookups are built on top of `GateConstraint`. The expression is purely
 /// syntactic — no field arithmetic happens at construction; the prover
 /// evaluates it during proof generation.
 ///
@@ -120,41 +120,41 @@ public type Cell is {
 ///
 /// Halo2 imposes a maximum gate degree (3 by default in Halo2's
 /// reference impl); the prover detects degree overflow at config time.
-public type Constraint is
+public type GateConstraint is
     | Constant(Bytes32)              // 32-byte little-endian Fp constant
     | ColumnRef { column: Column, rotation: Int }
-    | Add(Box<Constraint>, Box<Constraint>)
-    | Sub(Box<Constraint>, Box<Constraint>)
-    | Mul(Box<Constraint>, Box<Constraint>)
-    | Scale(Bytes32, Box<Constraint>)
-    | Pow(Box<Constraint>, Int);
+    | Add(Box<GateConstraint>, Box<GateConstraint>)
+    | Sub(Box<GateConstraint>, Box<GateConstraint>)
+    | Mul(Box<GateConstraint>, Box<GateConstraint>)
+    | Scale(Bytes32, Box<GateConstraint>)
+    | Pow(Box<GateConstraint>, Int);
 
 /// Pre-canonical 32-byte LE field element. Validation against the
 /// scalar-field modulus happens at prover binding time, not here.
 type Bytes32 is [Byte; 32];
 
-implement Constraint {
-    public fn constant(c: Bytes32) -> Constraint { Constant(c) }
-    public fn column(col: Column) -> Constraint {
+implement GateConstraint {
+    public fn constant(c: Bytes32) -> GateConstraint { Constant(c) }
+    public fn column(col: Column) -> GateConstraint {
         ColumnRef { column: col, rotation: 0 }
     }
-    public fn column_at(col: Column, rotation: Int) -> Constraint {
+    public fn column_at(col: Column, rotation: Int) -> GateConstraint {
         ColumnRef { column: col, rotation }
     }
 
-    public fn add(self, rhs: Constraint) -> Constraint {
+    public fn add(self, rhs: GateConstraint) -> GateConstraint {
         Add(Box.new(self), Box.new(rhs))
     }
-    public fn sub(self, rhs: Constraint) -> Constraint {
+    public fn sub(self, rhs: GateConstraint) -> GateConstraint {
         Sub(Box.new(self), Box.new(rhs))
     }
-    public fn mul(self, rhs: Constraint) -> Constraint {
+    public fn mul(self, rhs: GateConstraint) -> GateConstraint {
         Mul(Box.new(self), Box.new(rhs))
     }
-    public fn scale(self, c: Bytes32) -> Constraint {
+    public fn scale(self, c: Bytes32) -> GateConstraint {
         Scale(c, Box.new(self))
     }
-    public fn pow(self, k: Int) -> Constraint {
+    public fn pow(self, k: Int) -> GateConstraint {
         Pow(Box.new(self), k)
     }
 }
@@ -170,11 +170,11 @@ implement Constraint {
 public type Gate is {
     name:        Text,
     selector:    Selector,
-    constraints: List<Constraint>,
+    constraints: List<GateConstraint>,
 };
 
 implement Gate {
-    public fn new(name: Text, selector: Selector, constraints: List<Constraint>) -> Gate {
+    public fn new(name: Text, selector: Selector, constraints: List<GateConstraint>) -> Gate {
         Gate { name, selector, constraints }
     }
 }
@@ -185,13 +185,13 @@ implement Gate {
 public type Lookup is {
     name:        Text,
     selector:    Selector,
-    inputs:      List<Constraint>,
-    table:       List<Column>,        // columns of ColumnType.Fixed
+    inputs:      List<GateConstraint>,
+    table:       List<Column>,        // columns of CircuitColumnType.Fixed
 };
 
 implement Lookup {
     public fn new(name: Text, selector: Selector,
-                  inputs: List<Constraint>, table: List<Column>) -> Lookup {
+                  inputs: List<GateConstraint>, table: List<Column>) -> Lookup {
         Lookup { name, selector, inputs, table }
     }
 }
@@ -247,25 +247,25 @@ implement ConfigureContext {
     }
 
     public fn alloc_advice(&mut self, name: Text) -> Column {
-        let c = Column.new(self.next_advice, ColumnType.Advice, name);
+        let c = Column.new(self.next_advice, CircuitColumnType.Advice, name);
         self.next_advice = self.next_advice + 1;
         c
     }
 
     public fn alloc_instance(&mut self, name: Text) -> Column {
-        let c = Column.new(self.next_instance, ColumnType.Instance, name);
+        let c = Column.new(self.next_instance, CircuitColumnType.Instance, name);
         self.next_instance = self.next_instance + 1;
         c
     }
 
     public fn alloc_fixed(&mut self, name: Text) -> Column {
-        let c = Column.new(self.next_fixed, ColumnType.Fixed, name);
+        let c = Column.new(self.next_fixed, CircuitColumnType.Fixed, name);
         self.next_fixed = self.next_fixed + 1;
         c
     }
 
     public fn alloc_selector(&mut self, name: Text) -> Selector {
-        let c = Column.new(self.next_selector, ColumnType.SelectorColumn, name);
+        let c = Column.new(self.next_selector, CircuitColumnType.SelectorColumn, name);
         self.next_selector = self.next_selector + 1;
         Selector { column: c }
     }
@@ -351,7 +351,7 @@ public fn range_constraint(
     cfg.add_lookup(Lookup.new(
         name,
         selector,
-        [Constraint.column(advice)],
+        [GateConstraint.column(advice)],
         table,
     ));
     Ok(())
@@ -365,16 +365,16 @@ public fn set_membership_constraint(
     name:       Text,
     selector:   Selector,
     advice:     Column,
-    table:      Column,    // ColumnType.Fixed pre-loaded with the set
+    table:      Column,    // CircuitColumnType.Fixed pre-loaded with the set
 ) -> Result<(), CircuitError> {
-    if table.kind != ColumnType.Fixed {
+    if table.kind != CircuitColumnType.Fixed {
         return Err(CircuitError.InvalidGateShape(
-            "set_membership: table must be ColumnType.Fixed".into()));
+            "set_membership: table must be CircuitColumnType.Fixed".into()));
     }
     cfg.add_lookup(Lookup.new(
         name,
         selector,
-        [Constraint.column(advice)],
+        [GateConstraint.column(advice)],
         [table],
     ));
     Ok(())

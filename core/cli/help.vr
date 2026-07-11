@@ -31,7 +31,7 @@ module help;
 mount core.{Maybe, Result, List, Text, Char, Int, Bool};
 mount core.text.builder.TextBuilder;
 mount core.cli.spec.{
-    CommandSpec, ArgSpec, FlagSpec, Group, Arity, ColorChoice, Example,
+    CommandSpec, ArgSpec, FlagSpec, ArgGroup, Arity, ColorChoice, Example,
 };
 
 // =============================================================================

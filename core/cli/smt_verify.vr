@@ -32,7 +32,7 @@
 // Reuses:
 //   * `core.cli.sat`              — propositional SAT solver
 //   * `core.cli.verify`           — `Severity` / `Finding` / `VerificationReport`
-//   * `core.cli.spec`             — `CommandSpec` / `Group` / `GroupKind`
+//   * `core.cli.spec`             — `CommandSpec` / `ArgGroup` / `GroupKind`
 //
 // All output funnels into the same `VerificationReport` shape so callers
 // can treat structural and SMT findings uniformly.
@@ -48,7 +48,7 @@
 module smt_verify;
 
 mount core.{Maybe, Result, List, Map, Set, Text, Int, Bool};
-mount core.cli.spec.{CommandSpec, FlagSpec, Group, GroupKind};
+mount core.cli.spec.{CommandSpec, FlagSpec, ArgGroup, GroupKind};
 mount core.cli.sat.{
     BoolFormula, SatResult, EvalResult,
     var, not_, and_, or_, lit_true, lit_false, imply_, at_most_one,
@@ -175,7 +175,7 @@ fn build_constraints(cmd: &CommandSpec) -> BoolFormula {
         i = i + 1;
     }
 
-    // 2) Group constraints.
+    // 2) ArgGroup constraints.
     let mut g: Int = 0;
     while g < cmd.groups.len() {
         let group = &cmd.groups[g];

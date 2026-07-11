@@ -39,7 +39,7 @@
 module meta.quote;
 
 mount core.{Text, List, Maybe};
-mount meta.token.{TokenStream, Token, TokenTree, TokenKind, Delimiter, Group};
+mount meta.token.{TokenStream, Token, TokenTree, TokenKind, Delimiter, TokenGroup};
 mount meta.span.{Span};
 mount meta.contexts.{ToTokens};
 
@@ -238,7 +238,7 @@ implement QuoteBuilder {
 
     /// Add group with delimiter
     public fn group(mut self, delimiter: Delimiter, inner: TokenStream) -> Self {
-        self.tokens.push(TokenTree.Grouped(Group {
+        self.tokens.push(TokenTree.Grouped(TokenGroup {
             delimiter,
             tokens: inner,
             span: self.span,
@@ -389,7 +389,7 @@ implement GroupBuilder {
 
     /// Close group and return to parent builder
     public fn close(mut self) -> QuoteBuilder {
-        let group = Group {
+        let group = TokenGroup {
             delimiter: self.delimiter,
             tokens: TokenStream.from_trees(self.tokens),
             span: self.parent.span,

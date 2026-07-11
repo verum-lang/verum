@@ -61,9 +61,9 @@ public fn join_cardinality_legal(
 // S3 — result shape consistency
 // -----------------------------------------------------------------------------
 
-public type ColumnType is CtInt | CtReal | CtText | CtBlob | CtAny | CtNull;
+public type DeclaredColumnType is CtInt | CtReal | CtText | CtBlob | CtAny | CtNull;
 
-public fn types_compatible(declared: &ColumnType, observed: &ColumnType) -> Bool {
+public fn types_compatible(declared: &DeclaredColumnType, observed: &DeclaredColumnType) -> Bool {
     match declared {
         CtAny => true,
         CtInt => match observed { CtInt | CtNull => true, _ => false },
@@ -74,7 +74,7 @@ public fn types_compatible(declared: &ColumnType, observed: &ColumnType) -> Bool
     }
 }
 
-public type VerifyRowShape is { columns: List<ColumnType> };
+public type VerifyRowShape is { columns: List<DeclaredColumnType> };
 
 public fn row_matches_schema(schema: &VerifyRowShape, observed: &VerifyRowShape) -> Bool {
     if schema.columns.len() != observed.columns.len() { return false; }

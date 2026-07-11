@@ -11,7 +11,7 @@
 // `mount core.cli.*;` a caller has access to:
 //
 
-//  * CommandSpec / ArgSpec / FlagSpec / Group / Arity — declarative model
+//  * CommandSpec / ArgSpec / FlagSpec / ArgGroup / Arity — declarative model
 //  * App<E> — runtime that parses argv and dispatches handlers
 //  * Builder API — `App.new(...).flag(...).arg(...).subcommand(...).build()`
 //  * FromArg / ValueEnum / ArgKind — typed argument protocols
@@ -83,7 +83,7 @@ public module prelude;
 // =============================================================================
 
 public mount .spec.{
-    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind,
+    CommandSpec, ArgSpec, FlagSpec, ArgGroup, GroupKind,
     Arity, CommandSettings, ColorChoice, ErrorFormat,
     TopicSeparator, InvocationStyle, InteractivePolicy,
     CompletionSource, Example, DeprecationNote,
