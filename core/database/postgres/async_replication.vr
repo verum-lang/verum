@@ -63,6 +63,7 @@
 module core.database.postgres.async_replication;
 
 mount core.*;
+mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
@@ -424,8 +425,8 @@ public async fn connect_replication_async(
     Result.Ok(AsyncPgReplicationConnection {
         cmd_tx: cmd_tx,
         status_tx: status_tx,
-        msg_rx: Shared.new(sync.mutex.Mutex.new(msg_rx)),
-        join: Shared.new(sync.mutex.Mutex.new(Maybe.Some(join))),
+        msg_rx: Shared.new(Mutex.new(msg_rx)),
+        join: Shared.new(Mutex.new(Maybe.Some(join))),
         rtt_estimate_us: rtt_estimate,
         rtt_samples: rtt_samples,
     })
