@@ -3295,19 +3295,17 @@ pub fn lower_instruction<'ctx>(
         Instruction::GetFieldNamed { dst, obj, name } => {
             match resolve_named_field_index(ctx, obj.0, *name) {
                 Some(fidx) => lower_get_field(ctx, *dst, *obj, fidx),
-                None => {
-                    ctx.emit_unimplemented_sub_op("GetFieldNamed", 0x03);
-                    Ok(())
-                }
+                // Phase 3: receiver type unknown at lowering time —
+                // closed-world type_id switch over the module's
+                // candidates (loud miss), replacing the warn+unset-dst
+                // hole that skipped functions from the native image.
+                None => lower_field_named_dynamic(ctx, *obj, *name, Some(*dst), None),
             }
         }
         Instruction::SetFieldNamed { obj, name, value } => {
             match resolve_named_field_index(ctx, obj.0, *name) {
                 Some(fidx) => lower_set_field(ctx, *obj, fidx, *value),
-                None => {
-                    ctx.emit_unimplemented_sub_op("SetFieldNamed", 0x04);
-                    Ok(())
-                }
+                None => lower_field_named_dynamic(ctx, *obj, *name, None, Some(*value)),
             }
         }
 
@@ -24251,6 +24249,235 @@ fn resolve_named_field_index(
         .iter()
         .position(|fd| vbc.strings.get(fd.name).is_some_and(|n| n == fname))
         .map(|i| i as u32)
+}
+
+
+/// FIELD-ACCESS-BYNAME-1 phase 3 (task #42): CLOSED-WORLD runtime
+/// dispatch for a by-name field access whose receiver type is unknown
+/// at lowering time.  The module type table IS the closed world — this
+/// partial-evaluates the Tier-0 helper `field_named_index` into native
+/// code: enumerate every module type with a field named `name`, load
+/// the receiver's object-header type_id, switch to the matching
+/// POSITIONAL slot.  An unmatched runtime type (or implausible-pointer
+/// receiver) takes a LOUD `verum_panic` naming the field — never a
+/// guessed slot, never a silent zero (the class this instruction
+/// retires read 40 bytes into a 16-byte BigInt).
+///
+
+/// `dst=Some` lowers a READ (loaded slot PHI-merged into dst);
+/// `value=Some` lowers a WRITE (store per case, no merge value).
+fn lower_field_named_dynamic<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    obj: Reg,
+    name_sid: u32,
+    dst: Option<Reg>,
+    value: Option<Reg>,
+) -> Result<()> {
+    let i64_type = ctx.types().i64_type();
+    let ptr_type = ctx.types().ptr_type();
+
+    // Field name + candidate (type_id, position) set from the module
+    // type table — FIRST descriptor per id wins, mirroring
+    // `VbcModule::get_type`.
+    let (fname, candidates): (String, Vec<(u32, u32)>) = {
+        let Some(vbc) = ctx.vbc_module() else {
+            ctx.emit_unimplemented_sub_op("GetFieldNamed(no-module)", 0x03);
+            if let Some(d) = dst {
+                ctx.set_register(d.0, i64_type.const_zero().into());
+            }
+            return Ok(());
+        };
+        let Some(fname) = vbc.strings.get(verum_vbc::types::StringId(name_sid)) else {
+            ctx.emit_unimplemented_sub_op("GetFieldNamed(no-name)", 0x03);
+            if let Some(d) = dst {
+                ctx.set_register(d.0, i64_type.const_zero().into());
+            }
+            return Ok(());
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut cands: Vec<(u32, u32)> = Vec::new();
+        for td in vbc.types.iter() {
+            if !seen.insert(td.id.0) {
+                continue; // get_type takes the FIRST descriptor per id
+            }
+            if let Some(pos) = td
+                .fields
+                .iter()
+                .position(|fd| vbc.strings.get(fd.name) == Some(fname))
+            {
+                cands.push((td.id.0, pos as u32));
+            }
+        }
+        (fname.to_string(), cands)
+    };
+
+    // Loud-panic emitter shared by the default arms.
+    let emit_panic = |ctx: &mut FunctionContext<'_, 'ctx>| -> Result<()> {
+        let void_type = ctx.llvm_context().void_type();
+        let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+        let panic_fn =
+            super::error::get_or_declare_function(ctx.get_module(), "verum_panic", fn_type);
+        let msg = ctx
+            .builder()
+            .build_global_string_ptr(
+                &format!(
+                    "field '{}' not found on receiver's runtime type (by-name closed-world \
+                     dispatch miss) — FIELD-ACCESS-BYNAME-1 / task #42",
+                    fname
+                ),
+                "byname_field_panic_msg",
+            )
+            .or_llvm_err()?;
+        ctx.builder()
+            .build_call(panic_fn, &[msg.as_pointer_value().into()], "")
+            .or_llvm_err()?;
+        Ok(())
+    };
+
+    if candidates.is_empty() {
+        // No module type carries this field — statically-known miss:
+        // the access can only ever panic at runtime. Emit it directly.
+        emit_panic(ctx)?;
+        if let Some(d) = dst {
+            ctx.set_register(d.0, i64_type.const_zero().into());
+        }
+        return Ok(());
+    }
+
+    // Receiver: deref tagged CBGR refs first (same pre-step as
+    // lower_get_field), then run the RTS pointer-plausibility guard
+    // (small scalars must not be dereferenced as headers).
+    let obj_val = ctx.get_register(obj.0)?;
+    let obj_val = deref_if_tagged(ctx, obj_val, "byname_base")?;
+    let recv_i64 = as_i64(ctx, obj_val, "byname_recv_i64")?;
+    let value_i64 = match value {
+        Some(v) => {
+            let raw = ctx.get_register(v.0)?;
+            Some(as_i64(ctx, raw, "byname_store_val")?)
+        }
+        None => None,
+    };
+
+    let current_fn = ctx.function();
+    let llvm_cx = ctx.llvm_context();
+    let load_bb = llvm_cx.append_basic_block(current_fn, "byname_hdr_load");
+    let panic_bb = llvm_cx.append_basic_block(current_fn, "byname_miss");
+    let merge_bb = llvm_cx.append_basic_block(current_fn, "byname_merge");
+
+    let heap_floor_val: u64 = if super::target_triple::target_is_darwin(&ctx.get_module()) {
+        0x1_0000_0000
+    } else {
+        0x1_0000
+    };
+    let heap_floor = i64_type.const_int(heap_floor_val, false);
+    let above_floor = ctx
+        .builder()
+        .build_int_compare(IntPredicate::UGE, recv_i64, heap_floor, "byname_above_floor")
+        .or_llvm_err()?;
+    let align_bits = ctx
+        .builder()
+        .build_and(recv_i64, i64_type.const_int(7, false), "byname_align_bits")
+        .or_llvm_err()?;
+    let aligned = ctx
+        .builder()
+        .build_int_compare(
+            IntPredicate::EQ,
+            align_bits,
+            i64_type.const_zero(),
+            "byname_aligned",
+        )
+        .or_llvm_err()?;
+    let plausible = ctx
+        .builder()
+        .build_and(above_floor, aligned, "byname_ptr_plausible")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(plausible, load_bb, panic_bb)
+        .or_llvm_err()?;
+
+    // Header type_id: first word at the object pointer (the exact read
+    // build_runtime_type_switch performs).
+    ctx.builder().position_at_end(load_bb);
+    let recv_ptr = ctx
+        .builder()
+        .build_int_to_ptr(recv_i64, ptr_type, "byname_recv_ptr")
+        .or_llvm_err()?;
+    let type_id_val = ctx
+        .builder()
+        .build_load(i64_type, recv_ptr, "byname_type_id")
+        .or_llvm_err()?
+        .into_int_value();
+
+    let mut cases = Vec::new();
+    let mut case_blocks = Vec::new();
+    for (tid, idx) in &candidates {
+        let bb = llvm_cx.append_basic_block(current_fn, &format!("byname_t{}", tid));
+        cases.push((i64_type.const_int(*tid as u64, false), bb));
+        case_blocks.push((bb, *idx));
+    }
+    ctx.builder()
+        .build_switch(type_id_val, panic_bb, &cases)
+        .or_llvm_err()?;
+
+    let mut incoming: Vec<(BasicValueEnum<'ctx>, _)> = Vec::new();
+    for (bb, idx) in &case_blocks {
+        ctx.builder().position_at_end(*bb);
+        let slot_addr = ctx
+            .builder()
+            .build_int_add(
+                recv_i64,
+                i64_type.const_int(
+                    RuntimeLowering::OBJECT_HEADER_SIZE + (*idx as u64) * 8,
+                    false,
+                ),
+                "byname_slot_addr",
+            )
+            .or_llvm_err()?;
+        let slot_ptr = ctx
+            .builder()
+            .build_int_to_ptr(slot_addr, ptr_type, "byname_slot_ptr")
+            .or_llvm_err()?;
+        match value_i64 {
+            Some(v) => {
+                ctx.builder().build_store(slot_ptr, v).or_llvm_err()?;
+            }
+            None => {
+                let loaded = ctx
+                    .builder()
+                    .build_load(i64_type, slot_ptr, "byname_field_val")
+                    .or_llvm_err()?;
+                incoming.push((loaded, *bb));
+            }
+        }
+        ctx.builder()
+            .build_unconditional_branch(merge_bb)
+            .or_llvm_err()?;
+    }
+
+    // Miss arm: LOUD panic (implausible receiver or unmatched runtime
+    // type id), then still merge with a parked zero so the IR stays
+    // well-formed (verum_panic diverges at runtime).
+    ctx.builder().position_at_end(panic_bb);
+    emit_panic(ctx)?;
+    ctx.builder()
+        .build_unconditional_branch(merge_bb)
+        .or_llvm_err()?;
+    if value_i64.is_none() {
+        incoming.push((i64_type.const_zero().into(), panic_bb));
+    }
+
+    ctx.builder().position_at_end(merge_bb);
+    if let Some(d) = dst {
+        let phi = ctx
+            .builder()
+            .build_phi(i64_type, "byname_result")
+            .or_llvm_err()?;
+        for (val, bb) in &incoming {
+            phi.add_incoming(&[(&(*val), *bb)]);
+        }
+        ctx.set_register(d.0, phi.as_basic_value());
+    }
+    Ok(())
 }
 
 fn lower_extended<'ctx>(
