@@ -833,6 +833,20 @@ impl<'s> CompilationPipeline<'s> {
                                     continue;
                                 }
                             }
+                            // Builtin nominal types have DEDICATED
+                            // TypeKind variants — `implement Text`
+                            // parses as Inherent(TypeKind::Text) and
+                            // never reaches the Path arm above, so
+                            // stage-1 registered ZERO Text.* stubs
+                            // (bakeAA trace: 694 stubs, none matching
+                            // "Text.") and every pre-`text`-module
+                            // consumer of Text.new / Text.from_bytes /
+                            // … lenient-stubbed (class-(a) root #1).
+                            verum_ast::ty::TypeKind::Text => "Text".to_string(),
+                            verum_ast::ty::TypeKind::Bool => "Bool".to_string(),
+                            verum_ast::ty::TypeKind::Int => "Int".to_string(),
+                            verum_ast::ty::TypeKind::Float => "Float".to_string(),
+                            verum_ast::ty::TypeKind::Char => "Char".to_string(),
                             _ => continue,
                         },
                         _ => continue,
