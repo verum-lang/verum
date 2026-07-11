@@ -1540,6 +1540,40 @@ fn generic_var_scope_intern(name: &str) -> Option<crate::ty::TypeVar> {
     })
 }
 
+thread_local! {
+    // SLICE-METHOD-TYPECHECK-E400 (#51): the descriptor's DECLARED
+    // generic-param names (impl-level + method-level), active while
+    // parsing that descriptor's signature strings. Carried verbatim
+    // return names (RETNAME-CARRY, e.g. "&[T]") spell generics by
+    // SOURCE NAME rather than the __generic_N placeholder — a bare
+    // "T" must intern to the scope TypeVar, not parse as Named{T}.
+    static DECLARED_GENERIC_NAMES: std::cell::RefCell<Option<std::collections::HashSet<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Whether `name` is a declared generic param of the descriptor whose
+/// signature is currently being parsed (see DECLARED_GENERIC_NAMES).
+fn is_declared_generic_name(name: &str) -> bool {
+    DECLARED_GENERIC_NAMES.with(|s| {
+        s.borrow()
+            .as_ref()
+            .is_some_and(|set| set.contains(name))
+    })
+}
+
+/// Run `f` with `names` registered as the active descriptor's declared
+/// generic-param names. Composes with `with_generic_var_scope_capture`
+/// (the interning map itself); nesting saves/restores.
+pub(crate) fn with_declared_generic_names<R>(
+    names: std::collections::HashSet<String>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let prev = DECLARED_GENERIC_NAMES.with(|s| s.borrow_mut().replace(names));
+    let out = f();
+    DECLARED_GENERIC_NAMES.with(|s| *s.borrow_mut() = prev);
+    out
+}
+
 /// Run `f` with a fresh generic-var interning scope so that repeated
 /// `__generic_N` placeholders parsed by [`parse_descriptor_type_string`] within
 /// it map to the SAME `TypeVar`.  Used by the metadata-driven function-scheme
@@ -1616,6 +1650,25 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
         return Type::Reference {
             inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
             mutable: false,
+        };
+    }
+    // SLICE-METHOD-TYPECHECK-E400 (#51): slice spelling "[T]" — the
+    // carried source-verbatim return names ("&[T]" via RETNAME-CARRY)
+    // reach this parser now that the metadata writer prefers them over
+    // the lossy TypeRef render (VBC TypeRefs have NO slice form, so
+    // `slice() -> &[T]` used to serialise as bare "List" and the
+    // chained receiver misinfered as List<_>).
+    if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        // "[T; N]" (array) — element is everything before the
+        // top-level ';'. Metadata keeps no length; Slice is the
+        // honest structural reading for method-signature purposes.
+        let elem_text = match inner.rfind(';') {
+            Some(semi) if !inner[..semi].contains('[') => inner[..semi].trim_end(),
+            _ => inner,
+        };
+        return Type::Slice {
+            element: Box::new(parse_descriptor_type_string(elem_text.trim())),
         };
     }
     // **Function-type spelling** (`fn(arg1, arg2, ...) -> ret`) — must
@@ -1740,6 +1793,15 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
         "Never" => return Type::Never,
         "Unit" => return Type::Unit,
         _ => {}
+    }
+    // #51: a bare name that IS a declared generic param of the
+    // descriptor being parsed (source-verbatim carried strings spell
+    // "T", not "__generic_0") interns to the scope's TypeVar so the
+    // param and return occurrences stay linked.
+    if is_declared_generic_name(trimmed) {
+        if let Some(tv) = generic_var_scope_intern(trimmed) {
+            return Type::Var(tv);
+        }
     }
     // Other named types → Type::Named.  Resolution flows
     // through the unifier's lookup against `ctx.type_defs`

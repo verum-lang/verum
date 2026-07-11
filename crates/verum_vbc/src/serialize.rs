@@ -385,6 +385,13 @@ impl Serializer {
                 encode_u32(name.0, &mut self.output);
                 self.serialize_type_ref(tref)?;
             }
+            // v7: per-impl protocol type-args as source-rendered
+            // string ids (see ProtocolImpl.protocol_args_text).
+            // Readers gate on header.version_minor >= 7.
+            encode_varint(proto_impl.protocol_args_text.len() as u64, &mut self.output);
+            for sid in &proto_impl.protocol_args_text {
+                encode_u32(sid.0, &mut self.output);
+            }
         }
 
         // Alias target (TypeKind::Alias only — encoded for every

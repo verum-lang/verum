@@ -4059,13 +4059,58 @@ impl ProtocolChecker {
             Type::Reference { .. } | Type::CheckedReference { .. } | Type::UnsafeReference { .. }
         );
 
+        // #51 oracle, entry leg: fires for the watched method BEFORE the
+        // registry probe so a miss (extract_type_info=None / absent key)
+        // is visible too.
+        if std::env::var("VERUM_TRACE_SLICE_LOOKUP").is_ok()
+            && method_name
+                == std::env::var("VERUM_SLICE_LOOKUP_METHOD")
+                    .as_deref()
+                    .unwrap_or("slice")
+        {
+            eprintln!(
+                "[slice-lookup:entry] ty={:?} extract={:?}",
+                ty,
+                self.extract_type_info(ty),
+            );
+        }
         let (type_name, type_args) = self.extract_type_info(ty)?;
 
         let key = (type_name.clone(), Text::from(method_name));
+        if std::env::var("VERUM_TRACE_SLICE_LOOKUP").is_ok()
+            && method_name
+                == std::env::var("VERUM_SLICE_LOOKUP_METHOD")
+                    .as_deref()
+                    .unwrap_or("slice")
+        {
+            eprintln!(
+                "[slice-lookup:key] key=({}, {}) registry_hit={}",
+                type_name,
+                method_name,
+                self.method_registry.contains_key(&key),
+            );
+        }
         if let Some(sig) = self.method_registry.get(&key) {
             let substitution = self.build_method_substitution(&type_args);
             let mut resolved_return_type =
                 self.apply_substitution_to_type(&sig.return_type, &substitution);
+            // SLICE-METHOD-TYPECHECK-E400 (#51) oracle: the chained
+            // `s.slice(a,b).slice(c,d)` receiver misinfers as List<_>.
+            // Dump the exact registry signature + substitution for the
+            // watched method so the wrong-return source is attributable
+            // (registry fill vs substitution vs post-adjustment).
+            if std::env::var("VERUM_TRACE_SLICE_LOOKUP").is_ok()
+                && method_name
+                    == std::env::var("VERUM_SLICE_LOOKUP_METHOD")
+                        .as_deref()
+                        .unwrap_or("slice")
+            {
+                eprintln!(
+                    "[slice-lookup] ty={:?} → key=({}, {}) type_args={:?} sig.return={:?} subst={:?} resolved={:?}",
+                    ty, type_name, method_name, type_args, sig.return_type, substitution,
+                    resolved_return_type,
+                );
+            }
 
             if is_reference {
                 resolved_return_type = self.adjust_return_for_reference_receiver(
@@ -8516,6 +8561,32 @@ impl ProtocolChecker {
         // Normalize types to Generic form for matching
         let return_type_normalized = self.normalize_variant_to_generic(return_type);
         let residual_type_normalized = self.normalize_variant_to_generic(residual_type);
+        if crate::ctor_trace_enabled() {
+            let names: Vec<String> = self
+                .impls
+                .iter()
+                .filter(|i| self.extract_protocol_name(&i.protocol).as_str() == "FromResidual")
+                .map(|i| {
+                    format!(
+                        "<{}> for {}",
+                        i.protocol_args
+                            .first()
+                            .map(|a| self.normalize_variant_to_generic(a).to_text().to_string())
+                            .unwrap_or_default(),
+                        self.normalize_variant_to_generic(&i.for_type).to_text()
+                    )
+                })
+                .collect();
+            eprintln!(
+                "[ctor-trace] can_convert_residual: {} impls ret={} residual={}",
+                names.len(),
+                return_type_normalized.to_text(),
+                residual_type_normalized.to_text()
+            );
+            for n in names.iter() {
+                eprintln!("[ctor-trace]   {}", n);
+            }
+        }
 
         // #[cfg(debug_assertions)]
         // eprintln!("[DEBUG can_convert_residual] return_type_normalized = {:?}", return_type_normalized);
@@ -8543,6 +8614,14 @@ impl ProtocolChecker {
             // Check if impl.for_type matches return_type
             let for_type_match =
                 self.try_match_type(&impl_for_type_normalized, &return_type_normalized);
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace] ccr-row impl_for={} arg0={:?} for_match={}",
+                    impl_for_type_normalized.to_text(),
+                    impl_.protocol_args.first().map(|a| self.normalize_variant_to_generic(a).to_text()),
+                    for_type_match.is_some()
+                );
+            }
             if for_type_match.is_none() {
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG can_convert_residual] for_type did not match");
@@ -8574,14 +8653,23 @@ impl ProtocolChecker {
                 // eprintln!("[DEBUG can_convert_residual] impl_residual_instantiated_normalized = {:?}", impl_residual_instantiated_normalized);
 
                 // Now check if the instantiated residual matches the actual residual
-                if self
+                let m1 = self
                     .try_match_type(
                         &impl_residual_instantiated_normalized,
                         &residual_type_normalized,
                     )
-                    .is_some()
-                    && self.where_clauses_satisfied_under(impl_, &for_type_subst)
-                {
+                    .is_some();
+                let w1 = m1 && self.where_clauses_satisfied_under(impl_, &for_type_subst);
+                if crate::ctor_trace_enabled() {
+                    eprintln!(
+                        "[ctor-trace] ccr-res inst={} vs {} match={} where_ok={}",
+                        impl_residual_instantiated_normalized.to_text(),
+                        residual_type_normalized.to_text(),
+                        m1,
+                        w1
+                    );
+                }
+                if m1 && w1 {
                     return true;
                 }
 
@@ -8671,6 +8759,64 @@ impl ProtocolChecker {
     /// registered with Generic types (e.g., Maybe<T>) while concrete types
     /// may be in Variant form (e.g., None | Some(Int)).
     fn normalize_variant_to_generic(&self, ty: &Type) -> Type {
+        let normalized = self.normalize_variant_to_generic_inner(ty);
+        Self::canonicalize_never(&normalized)
+    }
+
+    /// Canonicalize every `Named{path: ["Never"], args: []}` node to
+    /// the built-in `Type::Never`, recursively. The two spellings come
+    /// from different producers (structural descriptor parsing maps
+    /// "Never" → `Type::Never`; AST-driven impl registration keeps the
+    /// path form) and `try_match_type` is structural — `Maybe<!>` vs
+    /// `Maybe<Never>` failed to match, so `FromResidual<Maybe<Never>>
+    /// for Result` was unfindable and `m?` inside a Result-returning fn
+    /// died with E0203 (#47 tail). ONE canonical spelling at the ONE
+    /// normalization authority every protocol-matching site consults.
+    fn canonicalize_never(ty: &Type) -> Type {
+        match ty {
+            Type::Named { path, args } => {
+                let is_never = args.is_empty()
+                    && path.segments.len() == 1
+                    && matches!(
+                        path.segments.first(),
+                        Some(verum_ast::ty::PathSegment::Name(id)) if id.name.as_str() == "Never"
+                    );
+                if is_never {
+                    Type::Never
+                } else {
+                    Type::Named {
+                        path: path.clone(),
+                        args: args.iter().map(Self::canonicalize_never).collect(),
+                    }
+                }
+            }
+            Type::Generic { name, args } => {
+                if args.is_empty() && name.as_str() == "Never" {
+                    return Type::Never;
+                }
+                Type::Generic {
+                    name: name.clone(),
+                    args: args.iter().map(Self::canonicalize_never).collect(),
+                }
+            }
+            Type::Variant(variants) => Type::Variant(
+                variants
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::canonicalize_never(v)))
+                    .collect(),
+            ),
+            Type::Reference { inner, mutable } => Type::Reference {
+                inner: Box::new(Self::canonicalize_never(inner)),
+                mutable: *mutable,
+            },
+            Type::Tuple(items) => {
+                Type::Tuple(items.iter().map(Self::canonicalize_never).collect())
+            }
+            _ => ty.clone(),
+        }
+    }
+
+    fn normalize_variant_to_generic_inner(&self, ty: &Type) -> Type {
         match ty {
             Type::Variant(variants) => {
                 // Look up the type name from variant signature

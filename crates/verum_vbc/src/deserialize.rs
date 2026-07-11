@@ -880,10 +880,32 @@ impl<'a> Deserializer<'a> {
  } else {
  Vec::new()
  };
+ let protocol_args_text = if self
+ .header
+ .as_ref()
+ .map_or(false, |h| h.version_minor >= 7)
+ {
+ let n = decode_varint(self.data, &mut self.offset)? as usize;
+ if n > 64 {
+ return Err(VbcError::TableTooLarge {
+ field: "protocol_args_text",
+ count: n.min(u32::MAX as usize) as u32,
+ max: 64,
+ });
+ }
+ let mut v = Vec::with_capacity(n);
+ for _ in 0..n {
+ v.push(StringId(decode_u32(self.data, &mut self.offset)?));
+ }
+ v
+ } else {
+ Vec::new()
+ };
  protocols.push(ProtocolImpl {
  protocol,
  methods,
  associated_types,
+ protocol_args_text,
  });
  }
 

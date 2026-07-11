@@ -1440,6 +1440,25 @@ impl TypeChecker {
     /// dispatch tries to resolve a default method on the impl).
     /// Mirror of the eager loop in `load_stdlib_from_metadata` lines
     /// ~2278-2320, gated to a single target.
+    /// SINGLE authority for turning an [`ImplementationDescriptor`]'s
+    /// carried protocol type-args (source-rendered text, VBC v2.7
+    /// `protocol_args_text` carry) into unification-ready `Type`s.
+    /// Both stdlib impl loaders (the EAGER `load_stdlib_from_metadata`
+    /// loop and the LAZY `register_stdlib_impls_for_target`) MUST go
+    /// through this fn — a diverging literal in one path is exactly
+    /// how the eager loader shipped `protocol_args: List::new()` and
+    /// `FromResidual<Maybe<Never>> for Result` became unfindable
+    /// (#47 tail, E0203 on `m?` in a Result fn).
+    fn parse_impl_protocol_args(
+        impl_desc: &crate::core_metadata::ImplementationDescriptor,
+    ) -> verum_common::List<Type> {
+        impl_desc
+            .protocol_args
+            .iter()
+            .map(|s| crate::infer::helpers::parse_descriptor_type_string(s.as_str()))
+            .collect()
+    }
+
     pub(super) fn register_stdlib_impls_for_target(
         &mut self,
         type_name: &Text,
@@ -1561,11 +1580,7 @@ impl TypeChecker {
             // `ImplKind::Protocol.protocol_args` entry.  Re-parse
             // through the structural reader so the result is a
             // `Type` that round-trips through unification.
-            let protocol_args: List<Type> = impl_desc
-                .protocol_args
-                .iter()
-                .map(|s| crate::infer::helpers::parse_descriptor_type_string(s.as_str()))
-                .collect();
+            let protocol_args: List<Type> = Self::parse_impl_protocol_args(impl_desc);
 
             let protocol_impl = ProtocolImpl {
                 protocol: Self::text_to_path(&impl_desc.protocol),
@@ -1898,22 +1913,39 @@ impl TypeChecker {
             // `F` and a projection `F.Output` in the return share one TypeVar.
             // Capture the scope's placeholder→TypeVar map: the impl-generics
             // carry below matches `__generic_i` placeholders by index.
-            let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
-                crate::infer::helpers::with_generic_var_scope_capture(|| {
-                    let params: List<Type> = fn_desc
-                        .params
+            // #51: register the descriptor's DECLARED generic names
+            // (impl-level + method-level) so carried source-verbatim
+            // spellings ("&[T]") intern "T" to the scope TypeVar
+            // instead of parsing as Named{T}.
+            let declared_names: std::collections::HashSet<String> = fn_desc
+                .impl_generic_names
+                .iter()
+                .map(|n| n.as_str().to_string())
+                .chain(
+                    fn_desc
+                        .generic_params
                         .iter()
-                        .enumerate()
-                        .filter_map(|(i, p)| {
-                            if i == 0 && p.name.as_str() == "self" {
-                                None
-                            } else {
-                                Some(to_type(&p.ty))
-                            }
-                        })
-                        .collect();
-                    let return_ty = to_type(&fn_desc.return_type);
-                    (params, return_ty)
+                        .map(|gp| gp.name.as_str().to_string()),
+                )
+                .collect();
+            let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
+                crate::infer::helpers::with_declared_generic_names(declared_names, || {
+                    crate::infer::helpers::with_generic_var_scope_capture(|| {
+                        let params: List<Type> = fn_desc
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, p)| {
+                                if i == 0 && p.name.as_str() == "self" {
+                                    None
+                                } else {
+                                    Some(to_type(&p.ty))
+                                }
+                            })
+                            .collect();
+                        let return_ty = to_type(&fn_desc.return_type);
+                        (params, return_ty)
+                    })
                 });
             // Recursively collect referenced type names so the
             // lazy loader registers any types this method's
@@ -2031,6 +2063,16 @@ impl TypeChecker {
                                         impl_ordered.push((i, *tv));
                                     }
                                 }
+                            } else if let Some(i) = fn_desc
+                                .impl_generic_names
+                                .iter()
+                                .position(|n| n.as_str() == placeholder.as_str())
+                            {
+                                // #51: carried verbatim strings intern
+                                // by SOURCE NAME ("T"), not by the
+                                // __generic_i placeholder — match the
+                                // impl-level slot by name.
+                                impl_ordered.push((i, *tv));
                             }
                         }
                         impl_ordered.sort_by_key(|(i, _)| *i);
@@ -2670,7 +2712,7 @@ impl TypeChecker {
 
             let protocol_impl = ProtocolImpl {
                 protocol: Self::text_to_path(&impl_desc.protocol),
-                protocol_args: verum_common::List::new(),
+                protocol_args: Self::parse_impl_protocol_args(impl_desc),
                 // Args-ful shape (see the carry comment above) —
                 // `get_implementations`' base-key fallback matches
                 // both arg-less and args-ful query shapes.

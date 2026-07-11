@@ -991,6 +991,22 @@ pub struct ProtocolImpl {
     /// pair wholesale under `PRECOMPILE_SCHEMA_VERSION` v11.
     #[serde(default)]
     pub associated_types: Vec<(StringId, TypeRef)>,
+    /// Protocol type arguments as SOURCE-RENDERED text
+    /// (`implement<T, E: Default> FromResidual<Maybe<Never>> for
+    /// Result<T, E>` → `["Maybe<Never>"]`), one string per generic
+    /// arg, rendered by `verum_ast::pretty::format_type` — the SAME
+    /// renderer `precompile::scan_implementation_protocol_args` used,
+    /// so downstream text-consumers observe identical spellings.
+    ///
+    /// #47 tail — the scan keyed captures by (target, protocol) and
+    /// was FIRST-WINS, so the three sibling
+    /// `FromResidual<…> for Result` impls all reported
+    /// `["Result<Never, E>"]` and `m?` inside a Result-returning fn
+    /// failed E0203 (`FromResidual<Maybe<Never>>` unfindable).
+    /// Carrying per-IMPL args in the archive removes the collapse;
+    /// the scan remains a fallback for pre-carry archives only.
+    #[serde(default)]
+    pub protocol_args_text: Vec<StringId>,
 }
 
 // ============================================================================
@@ -1972,6 +1988,7 @@ mod tests {
             protocol: ProtocolId(100),
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
+            protocol_args_text: Vec::new(),
         });
         assert_eq!(td.protocols.len(), 1);
         assert_eq!(td.protocols[0].methods.len(), 3);
@@ -2120,6 +2137,7 @@ mod tests {
             protocol: ProtocolId(50),
             methods: vec![100, 101, 102],
             associated_types: Vec::new(),
+            protocol_args_text: Vec::new(),
         };
         assert_eq!(pi.protocol, ProtocolId(50));
         assert_eq!(pi.methods.len(), 3);
@@ -2131,6 +2149,7 @@ mod tests {
             protocol: ProtocolId(1),
             methods: vec![],
             associated_types: Vec::new(),
+            protocol_args_text: Vec::new(),
         };
         assert!(pi.methods.is_empty());
     }
@@ -2414,6 +2433,7 @@ mod tests {
             protocol: ProtocolId(50),
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
+            protocol_args_text: Vec::new(),
         };
 
         let json = serde_json::to_string(&pi).unwrap();

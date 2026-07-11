@@ -134,6 +134,7 @@ fn assoc_bindings_roundtrip_through_wire_format() {
         protocol: ProtocolId(7),
         methods: vec![1, 2],
         associated_types: vec![(name_sid, TypeRef::Generic(verum_vbc::types::TypeParamId(0)))],
+        protocol_args_text: Vec::new(),
     });
     m.types.push(td);
 

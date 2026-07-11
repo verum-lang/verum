@@ -53,7 +53,7 @@ pub const VERSION_MAJOR: u16 = 2;
 /// receivers; Instantiated → base-only, generic args dropped).  Gated on
 /// minor >= 6 in the deserializer; pre-6 data decodes as `None` and keeps
 /// the legacy derivation.
-pub const VERSION_MINOR: u16 = 6;
+pub const VERSION_MINOR: u16 = 7;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

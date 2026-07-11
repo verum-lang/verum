@@ -7462,6 +7462,41 @@ impl VbcCodegen {
                                     .collect()
                             };
 
+                            // Per-impl protocol type-args, source-rendered
+                            // (ProtocolImpl.protocol_args_text doc — #47
+                            // FromResidual sibling-impl collapse).
+                            let protocol_args_text: Vec<StringId> = {
+                                let mut v = Vec::new();
+                                if let verum_ast::decl::ImplKind::Protocol {
+                                    protocol_args, ..
+                                } = &impl_decl.kind
+                                {
+                                    for arg in protocol_args.iter() {
+                                        if let verum_ast::ty::GenericArg::Type(t) = arg {
+                                            let rendered =
+                                                verum_ast::pretty::format_type(t);
+                                            v.push(StringId(
+                                                self.ctx.intern_string_raw(
+                                                    rendered.as_str(),
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                }
+                                v
+                            };
+                            if std::env::var("VERUM_TRACE_IMPL_ATTACH").is_ok()
+                                && pn == "FromResidual"
+                            {
+                                let tid = self.type_name_to_id.get(ty_name.as_str()).copied();
+                                let has_desc = tid
+                                    .map(|t| self.types.iter().any(|d| d.id == t))
+                                    .unwrap_or(false);
+                                eprintln!(
+                                    "[impl-attach] proto={} ty={} tid={:?} has_desc={}",
+                                    pn, ty_name, tid.map(|t| t.0), has_desc
+                                );
+                            }
                             // Push protocol impl onto the concrete type's descriptor
                             if let Some(&concrete_type_id) =
                                 self.type_name_to_id.get(ty_name.as_str())
@@ -7472,6 +7507,7 @@ impl VbcCodegen {
                                             protocol: crate::types::ProtocolId(proto_type_id.0),
                                             methods: method_fn_ids,
                                             associated_types: assoc_bindings,
+                                            protocol_args_text,
                                         });
                                         break;
                                     }
@@ -11500,6 +11536,7 @@ impl VbcCodegen {
                                 // bindings — assoc types live on the
                                 // concrete `implement P for T` records.
                                 associated_types: Vec::new(),
+                                protocol_args_text: Vec::new(),
                             });
                         }
                     }
@@ -18078,6 +18115,16 @@ impl VbcCodegen {
                         *name = *mapped;
                     }
                 }
+                // Twin remap for the v2.7 protocol-arg text carry —
+                // same codegen-index → module-StringId discipline;
+                // an unmapped id here reads as "?" from the written
+                // module and the metadata renderer drops the args
+                // (#47 FromResidual tail).
+                for sid in pi.protocol_args_text.iter_mut() {
+                    if let Some(mapped) = string_id_map.get(sid.0 as usize) {
+                        *sid = *mapped;
+                    }
+                }
             }
             // Remap drop_fn from sparse ID to contiguous 0-based ID.
             //
@@ -19036,6 +19083,13 @@ impl VbcCodegen {
                     // (TypeParamIds are parent-type-local, unaffected by
                     // the protocol-id remap).
                     associated_types: pi.associated_types.clone(),
+                    // Source-rendered arg text must be re-interned into
+                    // the importing module's string table.
+                    protocol_args_text: pi
+                        .protocol_args_text
+                        .iter()
+                        .map(|sid| intern(self, *sid))
+                        .collect(),
                 }
             })
             .collect();

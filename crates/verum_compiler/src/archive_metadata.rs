@@ -696,10 +696,25 @@ fn register_module_metadata(
                 ty: Text::from(type_ref_to_text(&p.type_ref, &type_id_to_name)),
             })
             .collect();
-        let return_type = Text::from(type_ref_to_text(
-            &fn_desc.return_type,
-            &type_id_to_name,
-        ));
+        // SLICE-METHOD-TYPECHECK-E400 (#51): VBC TypeRefs have NO
+        // slice form — `slice() -> &[T]` degrades to bare "List"
+        // through the render, and the typechecker's metadata-loaded
+        // scheme then types chained-slice receivers as List<_>.
+        // RETNAME-CARRY (v2.6) holds the source-verbatim return name;
+        // prefer it EXACTLY for the lossy class (slice/array spellings
+        // containing '[') — broader verbatim use would leak `Self` /
+        // local aliases that the TypeRef render correctly normalises.
+        let carried_return = fn_desc
+            .return_type_name
+            .and_then(|sid| module.strings.get(sid))
+            .filter(|s| s.contains('['));
+        let return_type = match carried_return {
+            Some(verbatim) => Text::from(verbatim),
+            None => Text::from(type_ref_to_text(
+                &fn_desc.return_type,
+                &type_id_to_name,
+            )),
+        };
 
         // Task #21 — disambiguate aliased-TypeId types in param /
         // return rendering using the (just-resolved) parent_type as
@@ -1120,7 +1135,23 @@ fn collect_type_impls(
         // at infer.rs:2401 silently registered every impl under a
         // blank protocol name.
         let protocol_name = match type_id_to_name.get(&proto_impl.protocol.0) {
-            Some(s) => Text::from(s.as_str()),
+            // Canonicalize the bake-internal shadow-stub spelling
+            // (`shadowed$FromResidual$137` — a foreign protocol
+            // referenced by an impl before/without its declaring
+            // module in the compile unit) back to the protocol's
+            // real name. The metadata is the PUBLIC contract: the
+            // typechecker's FromResidual/Try/marker scans match on
+            // canonical names, so a shadow-spelled row is invisible
+            // (`Result?` inside a Maybe-returning fn kept failing
+            // E0203 because Maybe's two FromResidual rows carried
+            // the shadow name; #47 tail).
+            Some(s) => match s
+                .strip_prefix("shadowed$")
+                .and_then(|rest| rest.rsplit_once('$'))
+            {
+                Some((canon, _id)) => Text::from(canon),
+                None => Text::from(s.as_str()),
+            },
             None => continue,
         };
         // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — render the
@@ -1158,10 +1189,20 @@ fn collect_type_impls(
                         .and_then(|f| module.strings.get(f.name).map(Text::from))
                 })
                 .collect(),
-            // Task #23 — populated post-archive in
-            // `precompile::scan_implementation_protocol_args` via a
-            // source-walk; archive itself has no protocol-arg fidelity.
-            protocol_args: List::new(),
+            // Per-impl carry (ProtocolImpl.protocol_args_text, VBC
+            // v2.7): source-rendered protocol type-args straight from
+            // the archive record. The post-archive source-walk
+            // (`precompile::scan_implementation_protocol_args`)
+            // remains a FALLBACK for pre-carry archives only — its
+            // (target, protocol) first-wins key collapsed sibling
+            // impls (three `FromResidual<…> for Result` rows all
+            // claimed `Result<Never, E>`; `m?` in a Result fn then
+            // failed E0203).
+            protocol_args: proto_impl
+                .protocol_args_text
+                .iter()
+                .filter_map(|sid| module.strings.get(*sid).map(Text::from))
+                .collect(),
         };
         impls.push(descriptor);
     }
