@@ -296,10 +296,10 @@ fn encode_param_value(out: &mut List<Byte>, p: &StmtParam) {
 /// IEEE 754 double → 64-bit little-endian. Implementation defers
 /// to `core.math.float_bits_f64` if available; v1 uses an intrinsic
 /// helper.
-@intrinsic("float_to_bits_f64")
+@intrinsic("f64_to_bits")
 fn float_to_bits_double(x: Float64) -> Int64;
 
-@intrinsic("float_to_bits_f32")
+@intrinsic("f32_to_bits")
 fn float_to_bits_single(x: Float) -> Int;
 
 /// Build a COM_STMT_EXECUTE packet body. Layout per MySQL docs:

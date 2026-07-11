@@ -63,10 +63,10 @@ implement AtomicF64 {
 
 @inline
 fn f64_to_bits(v: Float) -> UInt64 {
-    @intrinsic("verum.float.f64_to_bits", v) as UInt64
+    @intrinsic("f64_to_bits", v) as UInt64
 }
 
 @inline
 fn bits_to_f64(b: UInt64) -> Float {
-    @intrinsic("verum.float.bits_to_f64", b) as Float
+    @intrinsic("f64_from_bits", b) as Float
 }

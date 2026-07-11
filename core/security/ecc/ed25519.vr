@@ -285,7 +285,13 @@ public fn verify(
 // =============================================================================
 
 fn fill_random(buf: &mut [Byte; 32]) {
-    let filled = @intrinsic("verum.rng.fill_secure", 32);
+    // Route through the canonical CSPRNG helper (random_u64-backed).
+    // The historical `verum.rng.fill_secure` intrinsic name was never
+    // registered — an unregistered name lowers to a silent nil.
+    let mut tmp: List<Byte> = List.with_capacity(32);
     let mut i = 0;
-    while i < 32 { buf[i] = filled[i]; i = i + 1; }
+    while i < 32 { tmp.push(0); i = i + 1; }
+    core.security.util.rng.fill_secure(&mut tmp);
+    i = 0;
+    while i < 32 { buf[i] = tmp[i]; i = i + 1; }
 }

@@ -177,8 +177,11 @@ public fn atan<T>(x: T) -> T { @intrinsic("atan", x) }
 /// Two-argument arc tangent (atan2(y, x))
 public fn atan2<T>(y: T, x: T) -> T { @intrinsic("atan2", y, x) }
 
-/// Sine and cosine simultaneously (more efficient)
-public fn sincos<T>(x: T) -> (T, T) { @intrinsic("sincos", x) }
+/// Sine and cosine of the same angle. Composed from the two
+/// registered intrinsics — the fused `sincos` form is not a
+/// registered Tier-0 intrinsic, and an unregistered name lowers to a
+/// silent nil.
+public fn sincos<T>(x: T) -> (T, T) { (@intrinsic("sin", x), @intrinsic("cos", x)) }
 
 // =============================================================================
 // SECTION 6: Hyperbolic Functions

@@ -114,7 +114,7 @@ public fn checked_abs(a: Int64) -> CheckedResult<Int64> {
 // Checked unsigned addition
 @inline(always)
 public fn checked_add_u(a: UInt64, b: UInt64) -> CheckedResult<UInt64> {
-    let (result, overflow) = @intrinsic("llvm.uadd.with.overflow.i64", a, b);
+    let (result, overflow) = @intrinsic("overflowing_add", a, b);
     if overflow {
         CheckedResult.Overflow
     } else {
@@ -125,7 +125,7 @@ public fn checked_add_u(a: UInt64, b: UInt64) -> CheckedResult<UInt64> {
 // Checked unsigned subtraction
 @inline(always)
 public fn checked_sub_u(a: UInt64, b: UInt64) -> CheckedResult<UInt64> {
-    let (result, overflow) = @intrinsic("llvm.usub.with.overflow.i64", a, b);
+    let (result, overflow) = @intrinsic("overflowing_sub", a, b);
     if overflow {
         CheckedResult.Overflow
     } else {
@@ -371,7 +371,7 @@ public fn widening_mul_u(a: UInt64, b: UInt64) -> (UInt64, UInt64) {
 // Add with carry: a + b + carry_in = result + carry_out
 @inline(always)
 public fn adc(a: UInt64, b: UInt64, carry_in: Bool) -> (UInt64, Bool) {
-    let (sum1, overflow1) = @intrinsic("llvm.uadd.with.overflow.i64", a, b);
+    let (sum1, overflow1) = @intrinsic("overflowing_add", a, b);
     let carry_val: UInt64 = if carry_in { 1 } else { 0 };
     let (sum2, overflow2) = @intrinsic("llvm.uadd.with.overflow.i64", sum1, carry_val);
     (sum2, overflow1 || overflow2)
@@ -380,7 +380,7 @@ public fn adc(a: UInt64, b: UInt64, carry_in: Bool) -> (UInt64, Bool) {
 // Subtract with borrow: a - b - borrow_in = result - borrow_out
 @inline(always)
 public fn sbb(a: UInt64, b: UInt64, borrow_in: Bool) -> (UInt64, Bool) {
-    let (diff1, borrow1) = @intrinsic("llvm.usub.with.overflow.i64", a, b);
+    let (diff1, borrow1) = @intrinsic("overflowing_sub", a, b);
     let borrow_val: UInt64 = if borrow_in { 1 } else { 0 };
     let (diff2, borrow2) = @intrinsic("llvm.usub.with.overflow.i64", diff1, borrow_val);
     (diff2, borrow1 || borrow2)
