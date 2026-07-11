@@ -986,18 +986,68 @@ pub(in super::super) fn handle_call_method(
         return Ok(DispatchResult::Continue);
     }
 
-    // NOTE(#41 poll-Debug class): an attempted primitive-receiver
-    // compiled-body resolution here (route bare `fmt_debug`/`fmt` on
-    // Int/Float/Bool receivers to the compiled `Int.fmt_debug` etc.
-    // before the suffix scan) was REVERTED: it exposed the
-    // Formatter/TextFormatter TWIN-TYPE corruption — DebugList.finish's
-    // baked `write_str` resolves to TextFormatter.write_str (2-field
-    // layout, reads `spec` at field 1) while the runtime object is the
-    // 1-field protocols.vr `Formatter` → OOB heap write → SIGBUS in the
-    // poll suite. The fundamental fix is the Formatter/TextFormatter
-    // MERGE (redundancy-elimination directive); until then the
-    // suffix-scan recursion fails soft (StackOverflow) instead of
-    // corrupting the heap.
+    // PRIMITIVE-RECEIVER FMT RESOLUTION (#41 poll-Debug class).
+    // Pinned rule (see the Unit-receiver intercept): a primitive's
+    // protocol surface must never fall through to the function-table
+    // suffix scan — the first `*.fmt_debug` there belongs to an
+    // arbitrary OTHER type (Poll.fmt_debug), and dispatching a shared
+    // generic body on an Int receiver recursed until StackOverflow
+    // (`f"{Poll.Ready(7):?}"`). Scope: ONLY the formatter-writing
+    // protocol surface (`fmt_debug` / `fmt` — self + &mut Formatter):
+    // it has NO builtin arm (it must WRITE into the stdlib Formatter),
+    // and broad primitive routing to compiled bodies regressed 123
+    // base/primitives tests (&self conventions / @intrinsic stubs).
+    // History: first enabled alongside the Formatter/TextFormatter
+    // twin merge (task #48) — pre-merge, routing into the compiled
+    // bodies exposed the twin-layout corruption (SIGBUS).
+    if matches!(bare_method_name.as_str(), "fmt_debug" | "fmt") {
+        let prim_type_name: Option<&'static str> = if dispatch_receiver.is_int() {
+            Some("Int")
+        } else if dispatch_receiver.is_float() {
+            Some("Float")
+        } else if dispatch_receiver.is_bool() {
+            Some("Bool")
+        } else if dispatch_receiver.is_unit() {
+            Some("Unit")
+        } else {
+            None
+        };
+        if let Some(prim) = prim_type_name {
+            let qualified = format!("{}.{}", prim, bare_method_name);
+            let resolved: Option<(crate::module::FunctionId, u16)> = state
+                .module
+                .find_function_by_name(&qualified)
+                .and_then(|fid| state.module.get_function(fid).map(|f| (fid, f)))
+                .filter(|(_, f)| {
+                    f.bytecode_length > 0
+                        && f.params.len() == args.count as usize + 1
+                })
+                .map(|(fid, f)| (fid, f.register_count));
+            if let Some((func_id, reg_count)) = resolved {
+                let return_pc = state.pc();
+                let caller_base = state.reg_base();
+                let new_base = state
+                    .call_stack
+                    .push_frame(func_id, reg_count, return_pc, dst)?;
+                if let Some(w) = call_witness_sidecar.take() {
+                    state.call_stack.set_generic_witnesses(w);
+                }
+                state.registers.push_frame(reg_count);
+                state.registers.set(new_base, Reg(0), dispatch_receiver);
+                for i in 0..args.count {
+                    let arg_value = state
+                        .registers
+                        .get(caller_base, Reg(args.start.0 + i as u16));
+                    state
+                        .registers
+                        .set(new_base, Reg(i as u16 + 1), arg_value);
+                }
+                state.set_pc(0);
+                state.record_call();
+                return Ok(DispatchResult::Continue);
+            }
+        }
+    }
 
     // Try built-in array/list methods (map, filter, fold, etc.)
     if dispatch_receiver.is_ptr()

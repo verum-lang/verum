@@ -10779,6 +10779,58 @@ impl VbcCodegen {
         match &type_decl.body {
             // Variant types: register each variant as a constructor
             TypeDeclBody::Variant(variants) => {
+                // ALIAS-DESCRIPTOR COMPLETION (task #48): the declaration
+                // pre-pass (`declared_alias_target_name`, scope-gated) may
+                // have decided this single-bare-variant decl is a
+                // transparent ALIAS (`type TextFormatter is Formatter;`).
+                // The map alone routed METHOD dispatch, but the emitted
+                // TypeDescriptor stayed a 1-variant MARKER — so the
+                // archive-import alias pass (TypeKind::Alias scan) never
+                // repopulated `type_aliases` for DOWNSTREAM compiles, and a
+                // user file calling `TextFormatter.with_spec(...)` looked
+                // up "TextFormatter.with_spec" instead of the target's
+                // "Formatter.with_spec". Emit a real Alias descriptor and
+                // skip variant processing so the wire, the map, and every
+                // downstream compile agree.
+                if let Some(target) = self.type_aliases.get(&type_name).cloned() {
+                    if variants.len() == 1 {
+                        let type_id = if let Some(&existing) =
+                            self.type_name_to_id.get(&type_name)
+                        {
+                            existing
+                        } else {
+                            let tid = self.alloc_user_type_id();
+                            self.type_name_to_id.insert(type_name.clone(), tid);
+                            tid
+                        };
+                        let name_id = StringId(self.intern_string(&type_name));
+                        let target_ref: crate::types::TypeRef = self
+                            .type_name_to_id
+                            .get(&target)
+                            .map(|tid| crate::types::TypeRef::Concrete(*tid))
+                            .unwrap_or(crate::types::TypeRef::Concrete(
+                                crate::types::TypeId(0),
+                            ));
+                        let type_desc = crate::types::TypeDescriptor {
+                            id: type_id,
+                            name: name_id,
+                            kind: crate::types::TypeKind::Alias,
+                            type_params: smallvec::SmallVec::new(),
+                            fields: smallvec::SmallVec::new(),
+                            variants: smallvec::SmallVec::new(),
+                            size: 0,
+                            alignment: 0,
+                            drop_fn: None,
+                            clone_fn: None,
+                            protocols: smallvec::SmallVec::new(),
+                            visibility: crate::types::Visibility::Public,
+                            alias_target: Some(target_ref),
+                            ..Default::default()
+                        };
+                        self.push_type_dedupe(type_desc);
+                        return Ok(());
+                    }
+                }
                 // Wholesale-replace semantics for user-defined types.
                 //
 

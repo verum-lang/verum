@@ -578,6 +578,7 @@ implement Default for FormatSpec {
     fn default() -> FormatSpec {
         FormatSpec.new()
     }
+}
 
 /// Formatter state for writing formatted output.
 ///
@@ -589,6 +590,144 @@ public type Formatter is {
     buffer: &mut Text,
     spec: FormatSpec,
 };
+
+/// Source-compat alias for the historical extended-formatter name
+/// (task #48 twin merge). Lives in the TARGET's own module so the
+/// archive alias-import pass resolves the target TypeId in-module.
+public type TextFormatter is Formatter;
+
+// =============================================================================
+// Numeric rendering helpers (moved with the write surface — task #48)
+// =============================================================================
+
+public fn int_to_string(value: Int, buf: &mut [Byte]) -> Int {
+    if buf.len() == 0 {
+        return 0;
+    }
+
+    if value == 0 {
+        buf[0] = '0' as Byte;
+        return 1;
+    }
+
+    let negative = value < 0;
+    // Two's-complement magnitude: `(~value as UInt64) + 1` is
+    // exact for every Int including Int.MIN (whose magnitude
+    // 2^63 fits in UInt64 but not in Int).
+    let mut mag: UInt64 = if negative {
+        (((!value) as UInt64) + 1_u64)
+    } else {
+        value as UInt64
+    };
+
+    // Write digits in reverse order.
+    let mut pos = 0;
+    while mag > 0_u64 && pos < buf.len() {
+        let digit = (mag % 10_u64) as Byte;
+        buf[pos] = '0' as Byte + digit;
+        mag = mag / 10_u64;
+        pos = pos + 1;
+    }
+
+    // Add sign if negative.
+    if negative && pos < buf.len() {
+        buf[pos] = '-' as Byte;
+        pos = pos + 1;
+    }
+
+    // Reverse the buffer in place.
+    let mut i = 0;
+    let mut j = pos - 1;
+    while i < j {
+        let tmp = buf[i];
+        buf[i] = buf[j];
+        buf[j] = tmp;
+        i = i + 1;
+        j = j - 1;
+    }
+
+    pos
+}
+
+
+/// Convert a float to string representation.
+/// Returns the number of bytes written to the buffer.
+public fn float_to_string(value: Float, buf: &mut [Byte], precision: Int) -> Int {
+    if buf.len() < 2 {
+        return 0;
+    }
+
+    let mut pos = 0;
+
+    // Handle special cases
+    if value.is_nan() {
+        if buf.len() >= 3 {
+            buf[0] = 'N' as Byte;
+            buf[1] = 'a' as Byte;
+            buf[2] = 'N' as Byte;
+            return 3;
+        }
+        return 0;
+    }
+
+    if value.is_infinite() {
+        let negative = value < 0.0;
+        if negative {
+            if buf.len() >= 4 {
+                buf[0] = '-' as Byte;
+                buf[1] = 'i' as Byte;
+                buf[2] = 'n' as Byte;
+                buf[3] = 'f' as Byte;
+                return 4;
+            }
+        } else {
+            if buf.len() >= 3 {
+                buf[0] = 'i' as Byte;
+                buf[1] = 'n' as Byte;
+                buf[2] = 'f' as Byte;
+                return 3;
+            }
+        }
+        return 0;
+    }
+
+    // Handle negative numbers
+    let negative = value < 0.0;
+    let val = if negative { -value } else { value };
+
+    if negative {
+        buf[pos] = '-' as Byte;
+        pos = pos + 1;
+    }
+
+    // Extract integer part
+    let int_part = val.floor() as Int;
+
+    // Write integer part
+    let int_len = int_to_string(int_part, &mut buf[pos..]);
+    pos = pos + int_len;
+
+    // Write decimal point and fractional part
+    if precision > 0 && pos < buf.len() {
+        buf[pos] = '.' as Byte;
+        pos = pos + 1;
+
+        // Extract fractional part
+        let mut frac = val - (int_part as Float);
+        let mut digits_written = 0;
+
+        while digits_written < precision && pos < buf.len() {
+            frac = frac * 10.0;
+            let digit = frac.floor() as Int;
+            buf[pos] = ('0' as Byte) + (digit as Byte);
+            frac = frac - (digit as Float);
+            pos = pos + 1;
+            digits_written = digits_written + 1;
+        }
+    }
+
+    pos
+}
 
 implement Formatter {
     /// Create a new Formatter writing into the given Text buffer,
@@ -608,6 +747,313 @@ implement Formatter {
             buffer: buffer,
             spec: spec,
         }
+    }
+
+
+    // Write with padding based on alignment.
+    fn write_padded(&mut self, s: &Text, padding: Int) -> Result<(), FormatError> {
+        let fill = self.spec.fill;
+
+        match self.spec.align {
+            Left => {
+                self.buffer.push_str(s);
+                for _ in range(0, padding) {
+                    self.buffer.push(fill);
+                }
+            }
+            Right => {
+                for _ in range(0, padding) {
+                    self.buffer.push(fill);
+                }
+                self.buffer.push_str(s);
+            }
+            Center => {
+                let left = padding / 2;
+                let right = padding - left;
+                for _ in range(0, left) {
+                    self.buffer.push(fill);
+                }
+                self.buffer.push_str(s);
+                for _ in range(0, right) {
+                    self.buffer.push(fill);
+                }
+            }
+        }
+        Result.Ok(())
+    }
+
+
+    // Write formatted bytes.
+    //
+    // Indexed iteration (`while i < n`) rather than `for b in bytes` —
+    // the `for x in &[T]` form on a slice value (e.g. one produced by
+    // `Text.as_bytes()`) trips an LLVM `SmallVectorBase.grow_pod`
+    // SIGSEGV in the slice-iter lowering (task #9 / task #11 share
+    // root).  Indexed access mirrors the canonical stdlib pattern
+    // (`utf8_validate` / `kmp_failure_table`) and is uniformly
+    // supported on both Tier-0 and Tier-1 paths.
+    public fn write_bytes(&mut self, bytes: &[Byte]) -> Result<(), FormatError> {
+        let n = bytes.len();
+        let mut i: Int = 0;
+        while i < n {
+            self.buffer.push(bytes[i] as Char);
+            i = i + 1;
+        }
+        Result.Ok(())
+    }
+
+
+    // =========================================================================
+    // Integer Formatting
+    // =========================================================================
+
+    // Format an integer.
+    public fn write_int(&mut self, n: Int) -> Result<(), FormatError> {
+        let ty = self.spec.format_type.unwrap_or('d');
+
+        match ty {
+            'b' => self.write_int_base(n, 2, false),
+            'o' => self.write_int_base(n, 8, false),
+            'x' => self.write_int_base(n, 16, false),
+            'X' => self.write_int_base(n, 16, true),
+            _ => self.write_int_decimal(n),
+        }
+    }
+
+
+    // Format integer as decimal.
+    fn write_int_decimal(&mut self, n: Int) -> Result<(), FormatError> {
+        let mut buf = [0_u8; 32];
+        let len = int_to_string(n, &mut buf);
+
+        let s = unsafe {
+            Text.from_utf8_unchecked(&buf[..len])
+        };
+
+        // Handle sign
+        let (sign_str, value_str) = if n < 0 {
+            ("-", s.slice(1, s.len()))
+        } else {
+            match self.spec.sign {
+                Plus => ("+", s),
+                Space => (" ", s),
+                Minus => ("", s),
+            }
+        };
+
+        self.write_with_sign(&sign_str, &value_str)
+    }
+
+
+    // Format integer in specified base.
+    //
+
+    // Correctly handles `Int.MIN`: magnitude is accumulated in
+    // `UInt64` (same idiom as `int_to_string` above) so the
+    // previous `if negative { -n }` overflow no longer silently
+    // emits "-" with no digits.
+    //
+
+    // Replaces the old `Text → List<Char> → Text` reverse-and-
+    // collect chain (~4× allocations + ~3× memcpy) with a
+    // 64-byte stack buffer + single `Text.push_str` of the
+    // assembled digit slice.
+    fn write_int_base(&mut self, n: Int, base: Int, uppercase: Bool) -> Result<(), FormatError> {
+        let negative = n < 0;
+
+        if n == 0 {
+            return self.write_str("0");
+        }
+
+        let digits = if uppercase {
+            "0123456789ABCDEF"
+        } else {
+            "0123456789abcdef"
+        };
+
+        // Two's-complement magnitude in unsigned 64-bit; exact
+        // for every Int including Int.MIN.
+        let mut mag: UInt64 = if negative {
+            (((!n) as UInt64) + 1_u64)
+        } else {
+            n as UInt64
+        };
+        let base_u: UInt64 = base as UInt64;
+
+        // Worst case: base=2 over 64-bit unsigned ⇒ 64 digits.
+        let mut buf: [Byte; 64] = [0; 64];
+        let mut i: Int = 63;
+        while mag > 0_u64 {
+            let digit = (mag % base_u) as Int;
+            buf[i] = digits.nth_char(digit).expect("write_int_base: digit < base ≤ digits.len() guaranteed by caller (currently bases 2..=16)") as Byte;
+            mag = mag / base_u;
+            i = i - 1;
+        }
+        let start = i + 1;
+        let res = Text.from_utf8_unchecked(&buf[start..64]);
+
+        // Add prefix for alternate form
+        let prefix = if self.spec.alternate {
+            match base {
+                2 => "0b",
+                8 => "0o",
+                16 => if uppercase { "0X" } else { "0x" },
+                _ => "",
+            }
+        } else {
+            ""
+        };
+
+        let sign = if negative { "-" } else {
+            match self.spec.sign {
+                Plus => "+",
+                Space => " ",
+                Minus => "",
+            }
+        };
+
+        // Combine: sign + prefix + number
+        let full = sign + prefix + &res;
+        self.write_str(&full)
+    }
+
+
+    // Write value with sign, handling zero padding.
+    fn write_with_sign(&mut self, sign: &Text, value: &Text) -> Result<(), FormatError> {
+        let total_len = sign.len() + value.len();
+
+        match self.spec.width {
+            Maybe.Some(w) if total_len < w => {
+                if self.spec.is_zero_padded() {
+                    // Sign, then zeros, then value
+                    self.buffer.push_str(sign);
+                    for _ in range(0, w - total_len) {
+                        self.buffer.push('0');
+                    }
+                    self.buffer.push_str(value);
+                    Result.Ok(())
+                } else {
+                    // Normal padding
+                    let full = sign.concat(value);
+                    self.write_padded(&full, w - total_len)
+                }
+            }
+            _ => {
+                self.buffer.push_str(sign);
+                self.buffer.push_str(value);
+                Result.Ok(())
+            }
+        }
+    }
+
+
+    // =========================================================================
+    // Float Formatting
+    // =========================================================================
+
+    // Format a float.
+    public fn write_float(&mut self, f: Float) -> Result<(), FormatError> {
+        let ty = self.spec.format_type.unwrap_or('g');
+        let precision = self.spec.precision.unwrap_or(6);
+
+        let mut buf = [0_u8; 64];
+        let len = float_to_string(f, &mut buf, precision);
+
+        let s = unsafe {
+            Text.from_utf8_unchecked(&buf[..len])
+        };
+
+        // Handle sign for positive numbers
+        let (sign, value) = if f < 0.0 || f.is_sign_negative() {
+            ("", s) // Already has '-'
+        } else {
+            match self.spec.sign {
+                Plus => ("+", s),
+                Space => (" ", s),
+                Minus => ("", s),
+            }
+        };
+
+        let full = sign + &value;
+        self.write_str(&full)
+    }
+
+
+    // =========================================================================
+    // Accessors
+    // =========================================================================
+
+    // Get current width specification.
+    public fn width(&self) -> Maybe<Int> {
+        self.spec.width
+    }
+
+
+    // Get current precision specification.
+    public fn precision(&self) -> Maybe<Int> {
+        self.spec.precision
+    }
+
+
+    // Get current alignment.
+    public fn align(&self) -> TextAlignment {
+        self.spec.align
+    }
+
+
+    // Get current fill character.
+    public fn fill(&self) -> Char {
+        self.spec.fill
+    }
+
+
+    // Check if alternate form is enabled.
+    public fn alternate(&self) -> Bool {
+        self.spec.alternate
+    }
+
+
+    // =========================================================================
+    // Basic Output
+    // =========================================================================
+
+    // Write a string to output.
+    public fn write_str(&mut self, s: &Text) -> Result<(), FormatError> {
+        // Apply width/precision if specified
+        let s = match self.spec.precision {
+            Maybe.Some(p) if s.char_count() > p => {
+                // Truncate to precision characters
+                let mut res: Text = "";
+                let mut count = 0;
+                for ch in s.chars() {
+                    if count >= p {
+                        break;
+                    }
+                    res.push(ch);
+                    count = count + 1;
+                }
+                res
+            }
+            _ => s.clone(),
+        };
+
+        match self.spec.width {
+            Maybe.Some(w) if s.char_count() < w => {
+                let padding = w - s.char_count();
+                self.write_padded(&s, padding)
+            }
+            _ => {
+                self.buffer.push_str(&s);
+                Result.Ok(())
+            }
+        }
+    }
+
+
+    // Write a single character.
+    public fn write_char(&mut self, c: Char) -> Result<(), FormatError> {
+        self.buffer.push(c);
+        Result.Ok(())
     }
 }
 

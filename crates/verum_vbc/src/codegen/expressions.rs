@@ -9027,6 +9027,16 @@ impl VbcCodegen {
         // installed for every top-level function.
         if let Some(mut parts) = self.try_flatten_module_path_resolved(receiver) {
             parts.push(method.name.to_string());
+            if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
+                eprintln!(
+                    "[tpcall] flat-path branch: parts={:?} alias0={}",
+                    parts,
+                    parts
+                        .first()
+                        .map(|f| self.resolve_type_alias(f))
+                        .unwrap_or_default(),
+                );
+            }
 
             // Try both :: separator (Rust-style) and . separator (Verum-style)
             let qualified_rust = parts.join("::");
@@ -9112,6 +9122,76 @@ impl VbcCodegen {
                         }
                         return self.compile_static_method_call(&func_info, args);
                     }
+                }
+            }
+
+            // TYPE-STATIC BY TYPEREF (#48): the user-compile codegen has no
+            // stdlib FunctionInfo entries, so `Alias.static(args)` /
+            // `Type.static(args)` can miss EVERY name lookup above even
+            // though the body exists in the linked archive at runtime —
+            // the legacy fallthrough then compiled a METHOD call whose
+            // receiver is the first argument (runtime: "with_spec not
+            // found on receiver Int, 3 args incl. self" against the
+            // arity-2 static). When the (alias-resolved) head names a
+            // KNOWN TYPE, emit `LoadT{Concrete(id)}` + `CallM(method)`:
+            // the interpreter's TypeRef-receiver arm statically resolves
+            // `{TypeName}.{method}` through the body-preferring name
+            // walker with NO self prepended.
+            if parts.len() == 2
+                // Variant constructors are Type-cased by the grammar
+                // (`Maybe.Some`, `Poll.Ready`); statics are lower_snake.
+                // The Uppercase shapes belong to the variant-ctor branch
+                // below — never intercept them here.
+                && method
+                    .name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_lowercase())
+                    .unwrap_or(false)
+            {
+                let head = self.resolve_type_alias(&parts[0]);
+                if let Some(&tid) = self.type_name_to_id.get(&head) {
+                    let recv = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadT {
+                        dst: recv,
+                        type_ref: crate::types::TypeRef::Concrete(tid),
+                    });
+                    let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
+                    for a in args.iter() {
+                        let r = self
+                            .compile_expr(a)?
+                            .or_internal("type-static call: arg has no value")?;
+                        arg_regs.push(r);
+                    }
+                    let args_start = if !arg_regs.is_empty() {
+                        let first = self.ctx.registers.alloc_fresh();
+                        for _ in 1..arg_regs.len() {
+                            self.ctx.registers.alloc_fresh();
+                        }
+                        for (i, &src) in arg_regs.iter().enumerate() {
+                            let dst = Reg(first.0 + i as u16);
+                            if src != dst {
+                                self.ctx.emit(Instruction::Mov { dst, src });
+                            }
+                        }
+                        first
+                    } else {
+                        Reg(0)
+                    };
+                    let method_id =
+                        self.ctx.intern_string_raw(method.name.as_str());
+                    let result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::CallM {
+                        dst: result,
+                        receiver: recv,
+                        method_id,
+                        args: crate::instruction::RegRange {
+                            start: args_start,
+                            count: args.len() as u8,
+                        },
+                    });
+                    self.ctx.free_temp(recv);
+                    return Ok(Some(result));
                 }
             }
 
