@@ -279,6 +279,7 @@ public module examples;
 // Number theory: Peano naturals, primes, divisibility, modular arithmetic,
 // GCD/LCM, Euler/Fermat/FTA theorem statements
 public module number_theory;
+public module coding;      // Binary block codes, Hamming(7,4), Fano syndromes
 
 // Multi-precision unsigned integers — RSA / DH / EC scalar arithmetic
 public module big_uint;

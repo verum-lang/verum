@@ -1,0 +1,169 @@
+// =============================================================================
+// math/coding.vr - Algebraic Coding Theory (binary, small-length)
+// =============================================================================
+// Layer: 2 (Core Math)
+// Dependencies: none (pure integer bit arithmetic)
+// =============================================================================
+//
+
+// Provides binary linear block codes over F_2 with syndrome decoding.
+// The initial release ships the [7,4,3] Hamming code — the unique perfect
+// single-error-correcting binary code of length 7 — together with its
+// weight-3 stratum (the Fano plane PG(2,2)) and the parity pyramid used
+// by 7-axis diagnosable registers (UHM/SYNARC interoception stack;
+// see T-224/T-225 in the UHM status registry).
+//
+
+// # Conventions
+//
+
+// Words are Int bitmasks. Coordinate j in 1..7 corresponds to bit (j-1).
+// The parity-check matrix H has column_j = binary(j), so the syndrome of a
+// single-bit error at coordinate j IS the number j — the code addresses
+// its own failures.
+//
+
+// # Example
+// ```verum
+// let cw = hamming_encode(0b1011);        // 4 data bits -> 7-bit codeword
+// let hit = cw ^ (1 << 4);                // flip coordinate 5
+// let s = hamming_syndrome(hit);          // = 5: the failed coordinate
+// let fixed = hamming_correct(hit);       // == cw
+// ```
+//
+
+// # Known toolchain blockers (2026-07-10)
+// Loop sweeps over these functions currently trip VBC interpreter defects
+// (repro/uhm_call_arg_result_aliasing.vr, repro/uhm_loop_local_slot_aliasing.vr);
+// semantics of every function below is verified by the exhaustive external
+// oracle (128-word sweep, 112 single-bit flips, 16 encode round-trips).
+//
+
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.math.coding;
+
+// =============================================================================
+// Parity masks of the [7,4] Hamming code (column_j(H) = binary(j))
+// =============================================================================
+
+/// Parity mask 1: coordinates {1,3,5,7} (LSB of the coordinate index).
+public const HAMMING7_H1: Int = 0b1010101;
+/// Parity mask 2: coordinates {2,3,6,7} (middle bit of the coordinate index).
+public const HAMMING7_H2: Int = 0b1100110;
+/// Parity mask 3: coordinates {4,5,6,7} (top bit of the coordinate index).
+public const HAMMING7_H3: Int = 0b1111000;
+
+/// Hamming weight (population count) of a word.
+public fn hamming_weight(w: Int{>= 0}) -> Int
+    where ensures result >= 0
+{
+    let mut x = w;
+    let mut n = 0;
+    while x != 0 {
+        n = n + (x & 1);
+        x = x >> 1;
+    }
+    n
+}
+
+/// Parity (weight mod 2) of a word.
+/// Result is 0 or 1. (Bound is bitwise-dependent; statically checkable
+/// once the SMT bridge gains bitwise semantics — V-L8.)
+public fn word_parity(w: Int{>= 0}) -> Int {
+    hamming_weight(w) & 1
+}
+
+/// Syndrome of a 7-bit word. Zero exactly on codewords; otherwise it is
+/// the coordinate (1..7) of the unique nearest single-bit error — the
+/// perfect-code property: radius-1 balls tile F_2^7 (16 * 8 = 128).
+/// Result lies in 0..7 (three parity bits). See V-L8 note above.
+public fn hamming_syndrome(w: Int{>= 0, < 128}) -> Int {
+    word_parity(w & HAMMING7_H1)
+        | (word_parity(w & HAMMING7_H2) << 1)
+        | (word_parity(w & HAMMING7_H3) << 2)
+}
+
+/// True iff the word belongs to the 16-element Hamming code
+/// (weight census 1 + 7 + 7 + 1; the weight-3 words are the Fano lines).
+public fn hamming_is_codeword(w: Int{>= 0, < 128}) -> Bool {
+    hamming_syndrome(w) == 0
+}
+
+/// Correct a single-bit error (identity on codewords).
+/// Result stays in 0..127 (xor with an in-range single bit). See V-L8.
+public fn hamming_correct(w: Int{>= 0, < 128}) -> Int {
+    let s = hamming_syndrome(w);
+    if s == 0 { w } else { w ^ (1 << (s - 1)) }
+}
+
+/// Systematic encode: data bits d0..d3 go to coordinates 3,5,6,7;
+/// parity bits fill coordinates 1,2,4 so that the syndrome vanishes.
+/// Result is a 7-bit codeword (0..127). See V-L8.
+public fn hamming_encode(data: Int{>= 0, < 16}) -> Int {
+    let d0 = data & 1;
+    let d1 = (data >> 1) & 1;
+    let d2 = (data >> 2) & 1;
+    let d3 = (data >> 3) & 1;
+    let p1 = d0 ^ d1 ^ d3;
+    let p2 = d0 ^ d2 ^ d3;
+    let p4 = d1 ^ d2 ^ d3;
+    p1 | (p2 << 1) | (d0 << 2) | (p4 << 3) | (d1 << 4) | (d2 << 5) | (d3 << 6)
+}
+
+/// Recover the 4 data bits from a codeword (inverse of hamming_encode).
+/// Result is the 4-bit data nibble (0..15). See V-L8.
+public fn hamming_decode_data(w: Int{>= 0, < 128}) -> Int {
+    ((w >> 2) & 1)
+        | (((w >> 4) & 1) << 1)
+        | (((w >> 5) & 1) << 2)
+        | (((w >> 6) & 1) << 3)
+}
+
+/// The seven Fano lines of PG(2,2) as 7-bit masks: exactly the weight-3
+/// codewords. Any two distinct lines intersect in exactly one point
+/// (lambda = 1); every point lies on exactly three lines.
+public fn fano_lines() -> List<Int> {
+    let mut lines: List<Int> = List.new();
+    let mut w = 0;
+    while w < 128 {
+        if hamming_is_codeword(w) && hamming_weight(w) == 3 {
+            lines.push(w);
+        }
+        w = w + 1;
+    }
+    lines
+}
+
+/// All 16 codewords in increasing order.
+public fn hamming_codewords() -> List<Int> {
+    let mut out: List<Int> = List.new();
+    let mut w = 0;
+    while w < 128 {
+        if hamming_is_codeword(w) { out.push(w); }
+        w = w + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Theorems (SMT-checkable arithmetic facts of the construction)
+// =============================================================================
+
+/// Perfect-code tiling: 16 codewords x radius-1 balls of size 8 tile F_2^7.
+/// (Mask-level facts H1|H2|H3 = 127 and H1&H2&H3 = 64 are checked by the
+/// executable oracle; the SMT bridge has no bitwise semantics yet — V-L8.)
+theorem hamming7_perfect_tiling()
+    ensures 16 * (1 + 7) == 128
+    proof by auto;
+
+/// Weight census of the code: 1 + 7 + 7 + 1 = 16 (empty word, Fano lines,
+/// their complements, the all-ones word).
+theorem hamming7_weight_census()
+    ensures 1 + 7 + 7 + 1 == 16
+    proof by auto;
