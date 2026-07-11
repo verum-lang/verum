@@ -281,8 +281,19 @@ fn write_core_metadata_alongside_archive(
         .context("bincode serialise CoreMetadata for sidecar emit")?;
 
     let sidecar = archive_path.with_extension("core_metadata");
-    std::fs::write(&sidecar, &bytes)
-        .with_context(|| format!("write metadata sidecar {}", sidecar.display()))?;
+    // Atomic publish — mirrors `verum_vbc::archive::write_archive_to_file`:
+    // concurrent bakes (parallel sessions; build.rs racing a manual
+    // precompiler run) target the same sidecar; a direct fs::write
+    // truncates in place and a concurrent embed step reads a torn
+    // file. Write a pid-suffixed sibling, then rename into place.
+    let tmp = sidecar.with_extension(format!("core_metadata.tmp{}", std::process::id()));
+    std::fs::write(&tmp, &bytes)
+        .with_context(|| format!("write metadata sidecar tmp {}", tmp.display()))?;
+    std::fs::rename(&tmp, &sidecar)
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+        .with_context(|| format!("publish metadata sidecar {}", sidecar.display()))?;
 
     if verbose {
         eprintln!(
@@ -1241,6 +1252,12 @@ fn scan_implementation_protocol_args(
             impl_desc.target_type.as_str().to_string(),
             impl_desc.protocol.as_str().to_string(),
         );
+        if !impl_desc.protocol_args.is_empty() {
+            // Archive-carried per-impl args (VBC v2.7) are
+            // authoritative — the (target, protocol) first-wins scan
+            // below collapses sibling impls (#47 FromResidual tail).
+            continue;
+        }
         if let Some(args) = found.get(&key) {
             let mut list: List<Text> = List::new();
             for a in args {

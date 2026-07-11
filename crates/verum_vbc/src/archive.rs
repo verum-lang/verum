@@ -1040,11 +1040,36 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
     })
 }
 
-/// Writes a VBC archive to a file
+/// Writes a VBC archive to a file.
+///
+/// Atomic publish: concurrent producers target the same
+/// `runtime.vbca` (parallel sessions; a `build.rs`-driven bake racing
+/// a manual `verum_stdlib_precompiler` run). A direct `File::create`
+/// truncates in place, so any concurrent reader — or the embed step
+/// of a concurrent build — observes a torn archive. Write to a
+/// pid-suffixed sibling and `rename()` into place: atomic within one
+/// filesystem, last-complete-writer wins, and no observer ever sees
+/// a partial file.
 pub fn write_archive_to_file(archive: &VbcArchive, path: impl AsRef<Path>) -> io::Result<()> {
-    let file = std::fs::File::create(path)?;
-    let writer = std::io::BufWriter::new(file);
-    write_archive(archive, writer)
+    let path = path.as_ref();
+    let pid_ext = match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => format!("{}.tmp{}", ext, std::process::id()),
+        None => format!("tmp{}", std::process::id()),
+    };
+    let tmp = path.with_extension(pid_ext);
+    let file = std::fs::File::create(&tmp)?;
+    let mut writer = std::io::BufWriter::new(file);
+    if let Err(e) = write_archive(archive, &mut writer)
+        .and_then(|_| writer.flush())
+        .and_then(|_| writer.get_ref().sync_all())
+    {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    drop(writer);
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 /// Reads a VBC archive from a file

@@ -9119,6 +9119,29 @@ impl VbcCodegen {
                 return self.compile_static_method_call(&func_info, args);
             }
 
+            // **#122 call-side mirror — `core.`-rooted canonical path.**
+            // Functions register under their source `module X.Y;`
+            // declaration, which omits the `core.` prefix
+            // (`core.sys.monotonic_time_ns()` registers as
+            // `sys.monotonic_time_ns`).  Mount resolution has carried
+            // this strip-retry since #122; the CALL path lacked it, so
+            // absolute `core.*` qualified calls in expression position
+            // lenient-skipped their enclosing fn with
+            // "undefined variable: core" (Spinner.stop/drop,
+            // typed_value_to_wire_text, enforce_foreign_key).
+            if parts.len() >= 2 && parts.first().map(|s| s.as_str()) == Some("core") {
+                let stripped = parts[1..].join(".");
+                if let Some(func_info) =
+                    self.ctx.lookup_qualified_function(&stripped).cloned()
+                    && func_info.param_count == args.len()
+                {
+                    if let Some(tag) = func_info.variant_tag {
+                        return self.compile_variant_constructor_with_tag(tag, args);
+                    }
+                    return self.compile_static_method_call(&func_info, args);
+                }
+            }
+
             // **Type-alias resolution** (closes a lenient-skip cluster).
             //
             // When `parts[0]` is a Verum type alias (`type IoError is
