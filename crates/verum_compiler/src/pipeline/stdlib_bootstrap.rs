@@ -784,6 +784,7 @@ impl<'s> CompilationPipeline<'s> {
                 name,
                 // Text + collection constructors
                 "Text" | "List" | "Map" | "Set" | "Deque" | "BTreeMap" | "BTreeSet"
+                | "BinaryHeap"
                 // Memory wrappers
                 | "Heap" | "Shared" | "Weak" | "Cow" | "Pin"
                 // Concurrency primitives

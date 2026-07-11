@@ -972,7 +972,7 @@ implement DefaultSupervision {
         DefaultSupervision {
             strategy,
             max_restarts: 3,
-            restart_window: Duration.seconds(60),
+            restart_window: Duration.from_secs(60),
         }
     }
 }

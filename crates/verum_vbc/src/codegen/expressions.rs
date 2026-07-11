@@ -7729,6 +7729,27 @@ impl VbcCodegen {
                         if let Some(recv) = receiver {
                             return self.compile_method_call(recv, method, args, None);
                         }
+                        // [diag] see VERUM_TRACE_UNDEF_FN in compile_call.
+                        if let Ok(filter) = std::env::var("VERUM_TRACE_UNDEF_FN")
+                            && qualified_name.contains(&filter)
+                        {
+                            let suffix = format!(".{}", method.name);
+                            let mut near: Vec<String> = self
+                                .ctx
+                                .functions
+                                .keys()
+                                .filter(|k| k.ends_with(&suffix) || k.as_str() == method.name.as_str())
+                                .take(8)
+                                .cloned()
+                                .collect();
+                            near.sort();
+                            eprintln!(
+                                "[undef-fn/ts] '{}' in {} — near: {:?}",
+                                qualified_name,
+                                self.ctx.current_function.as_deref().unwrap_or("<top>"),
+                                near
+                            );
+                        }
                         return Err(CodegenError::undefined_function(
                             qualified_name.to_string(),
                         ));
@@ -12026,6 +12047,28 @@ impl VbcCodegen {
             // confusing `method not found on receiver of runtime kind ...`
             // panic three layers down.
             if known_type {
+                // [diag] see VERUM_TRACE_UNDEF_FN in compile_call.
+                if let Ok(filter) = std::env::var("VERUM_TRACE_UNDEF_FN")
+                    && (type_name.contains(&filter) || method.name.contains(&filter))
+                {
+                    let suffix = format!(".{}", method.name);
+                    let mut near: Vec<String> = self
+                        .ctx
+                        .functions
+                        .keys()
+                        .filter(|k| k.ends_with(&suffix) || k.as_str() == method.name.as_str())
+                        .take(8)
+                        .cloned()
+                        .collect();
+                    near.sort();
+                    eprintln!(
+                        "[undef-fn/static] '{}.{}' in {} — near: {:?}",
+                        type_name,
+                        method.name,
+                        self.ctx.current_function.as_deref().unwrap_or("<top>"),
+                        near
+                    );
+                }
                 return Err(CodegenError::undefined_function(
                     format!("{}.{}", type_name, method.name),
                 ));

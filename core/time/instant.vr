@@ -122,6 +122,18 @@ implement Instant {
         Instant { nanos: nanos }
     }
 
+    /// Construct an Instant from a raw monotonic-nanosecond value.
+    ///
+
+    /// Primarily for virtual/test clocks (TestClock.as_instant) and
+    /// deserialization of previously-captured monotonic stamps. The
+    /// epoch is the same arbitrary monotonic origin `now()` uses, so
+    /// only values derived from this process's clock are meaningful.
+    @inline(always)
+    public fn from_nanos(nanos: Int) -> Instant {
+        Instant { nanos: nanos }
+    }
+
     /// Get the elapsed time since this instant.
     ///
 

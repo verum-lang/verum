@@ -45,7 +45,7 @@ mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.async.nursery.{Nursery};
 mount core.async.cancellation.{CancellationToken};
-mount core.async.channel.{Channel, Sender, Receiver};
+mount core.async.channel.{Channel, Sender, Receiver, unbounded_channel};
 mount core.base.memory.{Shared};
 mount core.net.addr.{SocketAddr};
 
@@ -184,7 +184,7 @@ implement ServerListener {
         let transport = core.net.quic.transport.abstraction.RealUdpTransport.bind(addr)
             .await.map_err(|e| ListenerError.Bind(e))?;
         let local = transport.local_addr();
-        let (tx, rx) = Channel.unbounded();
+        let (tx, rx) = unbounded_channel();
         Result.Ok(ServerListener {
             transport:       Heap(transport) as Heap<dyn UdpTransport>,
             local_addr:      local,
@@ -355,7 +355,7 @@ implement ServerListener {
 
         // Completion channel — pump signals here when handshake completes
         // or when the connection closes.
-        let (done_tx, done_rx) = Channel.unbounded();
+        let (done_tx, done_rx) = unbounded_channel();
 
         // Register in the DCID table.
         {

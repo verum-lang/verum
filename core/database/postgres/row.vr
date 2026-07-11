@@ -563,7 +563,7 @@ fn normalise_pg_timestamp(s: &Text) -> Text {
             out.push(b'0');
         }
     }
-    Text.from_bytes_lossy(out.as_slice())
+    Text.from_utf8_lossy(out.as_slice())
 }
 
 fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &str)

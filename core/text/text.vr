@@ -372,6 +372,33 @@ implement Text {
         Text.from_utf8(bytes)
     }
 
+    /// Create text from a NUL-terminated C string pointer.
+    ///
+
+    /// Walks the bytes at `ptr` until the first NUL (not included)
+    /// and decodes them lossily (invalid UTF-8 becomes U+FFFD).
+    /// The canonical FFI-boundary conversion: `strerror`-style
+    /// libSystem results (sys.darwin.mach service names, kqueue
+    /// error_string) reach Verum through this.
+    ///
+
+    /// SAFETY contract (caller): `ptr` must point at a live,
+    /// NUL-terminated buffer; the walk reads until the terminator.
+    public fn from_cstr(ptr: &unsafe Byte) -> Text {
+        let base: Int = ptr as Int;
+        let mut bytes: List<Byte> = [];
+        let mut i: Int = 0;
+        loop {
+            // Canonical raw byte read (Tier-0 handler + AOT lowering
+            // both wired) — see core.intrinsics.runtime.mem_raw.
+            let b: Int = @intrinsic("load_byte", base + i);
+            if b == 0 { break; }
+            bytes.push(b as Byte);
+            i = i + 1;
+        }
+        Text.from_utf8_lossy(bytes.as_slice())
+    }
+
     /// Create text from a byte slice, replacing any invalid UTF-8
     /// sequences with the Unicode replacement character (U+FFFD).
     /// Mirrors Rust's `String.from_utf8_lossy` semantics: well-formed
