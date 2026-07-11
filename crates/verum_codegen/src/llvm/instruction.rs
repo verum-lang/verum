@@ -13186,10 +13186,16 @@ fn lower_call_method<'ctx>(
                             .enumerate()
                             .map(|(i, arg)| -> Result<BasicMetadataValueEnum<'ctx>> {
                                 if i < pc {
-                                    let expected = target_fn
-                                        .get_nth_param(i as u32)
-                                        .or_internal(&format!("missing param {}", i))?
-                                        .get_type();
+                                    // count_params/get_nth_param can disagree
+                                    // for varargs-shaped declarations — pass
+                                    // the arg through instead of failing the
+                                    // whole function lowering (task #22 leg 2:
+                                    // 'missing param 1' aborted AOT once tuple
+                                    // hints routed typed receivers here).
+                                    let Some(param) = target_fn.get_nth_param(i as u32) else {
+                                        return Ok(*arg);
+                                    };
+                                    let expected = param.get_type();
                                     let arg_bv: BasicValueEnum =
                                         (*arg).try_into().unwrap_or(i64_type.const_zero().into());
                                     if arg_bv.is_int_value() && expected.is_pointer_type() {
@@ -28693,10 +28699,12 @@ fn build_runtime_type_switch<'ctx>(
             .enumerate()
             .map(|(i, arg)| -> Result<BasicMetadataValueEnum<'ctx>> {
                 if i < pc {
-                    let expected = target_fn
-                        .get_nth_param(i as u32)
-                        .or_internal(&format!("missing param {}", i))?
-                        .get_type();
+                    // Varargs-shaped declarations: count_params/get_nth_param
+                    // can disagree — pass through, don't abort the lowering.
+                    let Some(param) = target_fn.get_nth_param(i as u32) else {
+                        return Ok(*arg);
+                    };
+                    let expected = param.get_type();
                     let arg_bv: BasicValueEnum =
                         (*arg).try_into().unwrap_or(i64_type.const_zero().into());
                     if arg_bv.is_int_value() && expected.is_pointer_type() {
@@ -29716,7 +29724,10 @@ fn lower_set_element<'ctx>(
     // zext byte read.
     //
     // Marked-slice fast path (compile-time slice mark).
-    if is_slice {
+    // VERUM_SETE_LEGACY=1 restores the pre-parity direct i64 store for
+    // A/B attribution (build-13 broad-AOT-drop bisect).
+    let sete_legacy = std::env::var("VERUM_SETE_LEGACY").is_ok();
+    if is_slice && !sete_legacy {
         // SAFETY: GEP into the Pack/slice descriptor to read the backing
         // data pointer at offset 24 (past the 24-byte object header).
         let ptr_slot = unsafe {
@@ -29792,6 +29803,16 @@ fn lower_set_element<'ctx>(
     // stamped header TypeId (TUPLE 521 / BYTE_SLICE 528 — PACK-HEADER-
     // STAMP-1) and byte-store through the descriptor's data ptr;
     // everything else keeps the pre-existing direct i64-stride store.
+    if sete_legacy {
+        // Legacy direct i64-stride store (pre-AOT-SETE-SLICE-PARITY-1).
+        let elem_ptr = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i64_type, arr_ptr, &[index], "elem_ptr")
+                .or_llvm_err()?
+        };
+        ctx.builder().build_store(elem_ptr, val).or_llvm_err()?;
+        return Ok(());
+    }
     let i32_type = ctx.types().context().i32_type();
     let cur_bb = ctx
         .builder()
@@ -31227,6 +31248,56 @@ fn lower_tensor_extended<'ctx>(
     if operands.is_empty() {
         return Ok(());
     }
+
+    // AOT-TENSOREXT-ENVELOPE-1 (task #46): `TensorExtended { sub_op: 0xFF,
+    // operands: [ext_sub_op, dst, args…] }` is the interpreter's ext-op
+    // ENVELOPE for every intrinsic whose `TensorExtSubOpcode` value would
+    // collide with a `TensorSubOpcode` byte (regex_find/replace/captures =
+    // 0x0A-0x0C, random_u64 = 0x05, …) — see
+    // `interpreter/dispatch_table/handlers/tensor_extended.rs:42`.  The
+    // pre-fix lowering decoded the 0xFF marker as
+    // `TensorSubOpcode::BatchNorm` and compiled every enveloped intrinsic
+    // into a batch-norm runtime call — SILENT wrong values on Tier-1
+    // (`regex_find` answered None for present matches while `is_match`
+    // agreed, so callers None-destructured wrongly).  Until each ext op
+    // grows a real Tier-1 story (the regex trio is retired entirely by the
+    // pure-Verum engine — task #47), an enveloped op that reaches AOT
+    // lowers to a LOUD `verum_panic` naming the op — a diagnosable failure
+    // instead of a silent wrong answer (DYN-MISS-LOUD discipline).
+    if sub_op == 0xFF {
+        let ext_op = operands[0];
+        let void_type = ctx.llvm_context().void_type();
+        let ptr_ty = ctx.types().ptr_type();
+        let fn_type = void_type.fn_type(&[ptr_ty.into()], false);
+        let panic_fn = super::error::get_or_declare_function(
+            ctx.get_module(),
+            "verum_panic",
+            fn_type,
+        );
+        let msg = ctx
+            .builder()
+            .build_global_string_ptr(
+                &format!(
+                    "Tier-1 unimplemented ext-op intrinsic 0x{:02X} (TensorExtSubOpcode envelope) — \
+                     see AOT-TENSOREXT-ENVELOPE-1 / task #46",
+                    ext_op
+                ),
+                "tensor_ext_env_panic_msg",
+            )
+            .or_llvm_err()?;
+        ctx.builder()
+            .build_call(panic_fn, &[msg.as_pointer_value().into()], "")
+            .or_llvm_err()?;
+        // Keep IR well-formed: the panic does not return, but the block
+        // continues — park a zero in dst (operands[1] per the envelope).
+        if operands.len() > 1 {
+            let env_dst = op_reg(operands, 1);
+            let zero = ctx.types().i64_type().const_zero();
+            ctx.set_register(env_dst, zero.into());
+        }
+        return Ok(());
+    }
+
     let dst_reg = op_reg(operands, 0);
     let i64_ty = ctx.types().i64_type();
 
