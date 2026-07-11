@@ -46,7 +46,7 @@ mount core.async.channel.{
     SendError, TrySendError,
 };
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
-mount core.async.spawn.{spawn};
+mount core.async.task.{spawn};
 mount core.async.task.{TaskHandle};
 mount core.io.process.{Command, Child, Stdio};
 mount core.io.buffer.{BufReader};

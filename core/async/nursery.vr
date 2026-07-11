@@ -54,8 +54,8 @@ module nursery;
 
 mount time.Duration;
 mount text.Text;
-mount core.maybe.Maybe;
-mount core.result.{Result, Error};
+mount core.base.maybe.Maybe;
+mount core.base.result.{Result, Error};
 mount collections.List;
 mount sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount sync.Mutex;

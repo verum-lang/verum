@@ -15,14 +15,14 @@
 module core.base.result;
 
 // Import types from other core modules
-mount core.maybe.{Maybe, Some, None};
-mount core.ordering.{Ordering, Less, Equal, Greater};
-mount core.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
-mount core.protocols.{
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
+mount core.base.protocols.{
     Eq, Ord, PartialEq, Clone, Copy, Default, Debug, Display, Hash, Hasher, From, Into,
     Formatter, FormatError,
 };
-mount core.iterator.Iterator;
+mount core.base.iterator.Iterator;
 
 /// Result of an operation: either Ok(value) or Err(error).
 /// The fundamental way to handle recoverable errors in Verum.

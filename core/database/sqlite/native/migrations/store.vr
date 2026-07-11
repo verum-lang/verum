@@ -46,7 +46,7 @@ mount core.database.common.migrations.migration.{
 mount core.database.common.migrations.journal.{
     MigrationJournal, JournalEntry,
 };
-mount core.database.sqlite.native.connection.{SqliteConnection};
+mount core.database.sqlite.connection.{SqliteConnection};
 
 // =============================================================================
 // SqliteMigrationStore

@@ -71,7 +71,7 @@ module core.database.common.pool_supervisor;
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
-mount async.duration.Duration;
+mount core.time.duration.{Duration};
 mount runtime.supervisor.{
     ChildSpec, SupervisorRestartStrategy,
     Permanent, Transient, Temporary,

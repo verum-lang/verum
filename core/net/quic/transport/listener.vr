@@ -46,7 +46,7 @@ mount core.time.duration.{Duration};
 mount core.async.nursery.{Nursery};
 mount core.async.cancellation.{CancellationToken};
 mount core.async.channel.{Channel, Sender, Receiver};
-mount core.sync.shared.{Shared};
+mount core.base.memory.{Shared};
 mount core.net.addr.{SocketAddr};
 
 mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};

@@ -37,7 +37,7 @@ module interval;
 mount core.*;
 mount core.time.{Duration};
 mount core.time.instant.{Instant};
-mount core.time.mod.{Time};
+mount core.time.{Time};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 

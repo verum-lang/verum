@@ -13,9 +13,9 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.base.protocols;
-mount core.ordering.{Ordering, Less, Equal, Greater};
-mount core.maybe.{Maybe, Some, None};
-mount core.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
 mount core.intrinsics.conversion.int_to_bytes;
 
 // =============================================================================
@@ -451,75 +451,163 @@ implement Eq for FormatError {
 /// Format result alias - used by Display and Debug implementations.
 public type FmtResult is Result<Unit, FormatError>;
 
+// =============================================================================
+// Format spec types (moved from core/text/format.vr — task #48 twin
+// merge; they are pure base-layer types so the canonical Formatter can
+// carry `spec` without a base→text dependency)
+// =============================================================================
+
+// =============================================================================
+// TextAlignment
+// =============================================================================
+
+// Text alignment in formatted output.
+public type TextAlignment is
+    | Left      // Left-align (default)
+    | Center    // Center-align
+    | Right;    // Right-align
+
+implement Default for TextAlignment {
+    fn default() -> TextAlignment {
+        Left
+    }
+}
+
+// =============================================================================
+// Sign Handling
+// =============================================================================
+
+// Sign display mode for numeric formatting.
+public type Sign is
+    | Minus     // Only show '-' for negatives (default)
+    | Plus      // Show '+' for positives, '-' for negatives
+    | Space;    // Show ' ' for positives, '-' for negatives
+
+implement Default for Sign {
+    fn default() -> Sign {
+        Minus
+    }
+}
+
+// =============================================================================
+// Format Spec
+// =============================================================================
+
+// Formatting specification (parsed from format strings).
+public type FormatSpec is {
+    // Fill character for padding
+    fill: Char,
+    // TextAlignment mode
+    align: TextAlignment,
+    // Sign handling for numbers
+    sign: Sign,
+    // Minimum width
+    width: Maybe<Int>,
+    // Precision for floats/strings
+    precision: Maybe<Int>,
+    // Use alternate form (e.g., 0x for hex)
+    alternate: Bool,
+    // Type specifier (b=binary, o=octal, x=hex, X=HEX, e=exp, f=fixed)
+    format_type: Maybe<Char>,
+};
+
+implement FormatSpec {
+    // Create default format spec.
+    fn new() -> FormatSpec {
+        FormatSpec {
+            fill: ' ',
+            align: Left,
+            sign: Minus,
+            width: Maybe.None,
+            precision: Maybe.None,
+            alternate: false,
+            format_type: Maybe.None,
+        }
+    }
+
+    // Set width.
+    fn with_width(mut self, w: Int) -> FormatSpec {
+        self.width = Maybe.Some(w);
+        self
+    }
+
+    // Set precision.
+    fn with_precision(mut self, p: Int) -> FormatSpec {
+        self.precision = Maybe.Some(p);
+        self
+    }
+
+    // Set alignment.
+    fn with_align(mut self, a: TextAlignment) -> FormatSpec {
+        self.align = a;
+        self
+    }
+
+    // Set fill character.
+    fn with_fill(mut self, c: Char) -> FormatSpec {
+        self.fill = c;
+        self
+    }
+
+    // Enable alternate form.
+    fn alternate_form(mut self) -> FormatSpec {
+        self.alternate = true;
+        self
+    }
+
+    // Enable zero padding (sets fill='0' and align=Right).
+    fn zero_padded(mut self) -> FormatSpec {
+        self.fill = '0';
+        self.align = Right;
+        self
+    }
+
+    // Check if zero padding is enabled (fill='0' and right-aligned).
+    fn is_zero_padded(&self) -> Bool {
+        self.fill == '0' && self.align == Right
+    }
+
+    // Set type specifier.
+    fn with_type(mut self, t: Char) -> FormatSpec {
+        self.format_type = Maybe.Some(t);
+        self
+    }
+}
+
+implement Default for FormatSpec {
+    fn default() -> FormatSpec {
+        FormatSpec.new()
+    }
+
 /// Formatter state for writing formatted output.
+///
+/// SINGLE canonical formatter (task #48): carries the output buffer
+/// AND the active format spec. The writing methods' canonical bodies
+/// live in `core/text/format.vr`'s `implement Formatter` block;
+/// constructors live here beside the type.
 public type Formatter is {
     buffer: &mut Text,
+    spec: FormatSpec,
 };
 
 implement Formatter {
-    /// Create a new Formatter writing into the given Text buffer.
-    ///
-    /// Mirrors `TextFormatter.new` but lives on the protocol-side
-    /// `Formatter` type that's referenced by tests and external
-    /// stdlib consumers.  Without this constructor,
-    /// `Formatter.new(&mut buf)` callsites compile-fail under AOT
-    /// (Tier 1 strict resolution) and panic-stub at runtime under
-    /// the interpreter (Tier 0 lenient SKIP).  Task #139 cross-tier
-    /// conformance contract.
+    /// Create a new Formatter writing into the given Text buffer,
+    /// with the default format spec.
     public fn new(buffer: &mut Text) -> Formatter {
-        Formatter { buffer: buffer }
-    }
-
-    /// Write a string to the output.
-    public fn write_str(&mut self, s: &Text) -> Result<(), FormatError> {
-        self.buffer.push_str(s);
-        Result.Ok(())
-    }
-
-    /// Write a single character.
-    public fn write_char(&mut self, c: Char) -> Result<(), FormatError> {
-        self.buffer.push(c);
-        Result.Ok(())
-    }
-
-    /// Write an integer as its decimal representation.
-    ///
-
-    /// Correctly handles `Int.MIN`: `-Int.MIN` overflows back to
-    /// `Int.MIN` in two's-complement, so the naïve negate-and-
-    /// loop pattern silently produced "-" with no digits for the
-    /// most-negative value (same family as the panic.vr
-    /// `write_int_stderr` bug fixed in b274ab8b). We work in
-    /// unsigned magnitude (`UInt64`) so every `Int`'s absolute
-    /// value is representable.
-    public fn write_int(&mut self, n: Int) -> Result<(), FormatError> {
-        if n == 0 {
-            return self.write_str("0");
+        Formatter {
+            buffer: buffer,
+            spec: FormatSpec.new(),
         }
+    }
 
-        let mut mag: UInt64 = if n < 0 {
-            self.write_char('-')?;
-            // Two's-complement magnitude: `(~n as UInt64) + 1`
-            // is exact for every `Int` (Int.MIN's magnitude
-            // 2^63 fits in UInt64).
-            (((!n) as UInt64) + 1_u64)
-        } else {
-            n as UInt64
-        };
-
-        // Build digits in reverse (max 20 for 64-bit unsigned).
-        let mut buf: [Byte; 20] = [0; 20];
-        let mut i: Int = 19;
-
-        while mag > 0_u64 {
-            buf[i] = ('0' as Byte) + ((mag % 10_u64) as Byte);
-            mag = mag / 10_u64;
-            i = i - 1;
+    /// Create a Formatter with an explicit format spec (the f-string
+    /// machinery parses `{value:spec}` into a FormatSpec and builds
+    /// the formatter through this).
+    public fn with_spec(buffer: &mut Text, spec: FormatSpec) -> Formatter {
+        Formatter {
+            buffer: buffer,
+            spec: spec,
         }
-
-        let start = i + 1;
-        let digit_str = Text.from_utf8_unchecked(&buf[start..20]);
-        self.write_str(&digit_str)
     }
 }
 
@@ -962,7 +1050,7 @@ public type ToString is protocol {
 implement<T: Display> ToString for T {
     fn to_string(&self) -> Text {
         let mut buf = Text.new();
-        let mut f = Formatter { buffer: &mut buf };
+        let mut f = Formatter.new(&mut buf);
         let _ = self.fmt(&mut f);
         buf
     }

@@ -14,14 +14,14 @@
 )
 module core.base.maybe;
 mount core.base.coercion.{IntCoercible};
-mount core.ordering.{Ordering, Less, Equal, Greater};
-mount core.result.{Result, Ok, Err};
-mount core.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
-mount core.protocols.{
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
+mount core.base.protocols.{
     Eq, Ord, Clone, Copy, Default, Debug, Display, Hash, Hasher, From, Into,
     Formatter, FormatError, Deref,
 };
-mount core.iterator.Iterator;
+mount core.base.iterator.Iterator;
 
 /// Optional value: either None (absent) or Some(value).
 /// The fundamental way to represent the possible absence of a value.

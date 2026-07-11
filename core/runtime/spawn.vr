@@ -80,7 +80,7 @@ module runtime.spawn;
 
 mount core.{List, Map, Text, Maybe, Result, TypeId, Any};
 mount sync.{AtomicU64, MemoryOrdering};
-mount core.memory.null_ptr;
+mount core.intrinsics.memory.{null_ptr};
 mount sys.{monotonic_nanos};
 mount async.{Future, Task, JoinHandle};
 

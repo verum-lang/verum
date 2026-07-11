@@ -88,11 +88,11 @@
 module core.math.gpu;
 
 mount core.types.{USize, U8, U16, U32, U64, Int, Float, F64, Bool, Text};
-mount core.maybe.{Maybe, Some, None};
-mount core.list.List;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.{List};
 mount core.base.ops.Drop;
-mount core.protocols.{Ord, Eq};
-mount core.ordering.Ordering;
+mount core.base.protocols.{Ord, Eq};
+mount core.base.ordering.Ordering;
 mount core.base.coercion.{IntCoercible};
 
 // =============================================================================

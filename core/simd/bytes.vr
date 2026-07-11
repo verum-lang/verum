@@ -57,7 +57,7 @@
 )
 module core.simd.bytes;
 mount core.*;
-mount core.simd.mod.{Vec, Mask, Vec16b, Vec32b, Vec64b};
+mount core.simd.{Vec, Mask, Vec16b, Vec32b, Vec64b};
 
 // =============================================================================
 // SINGLE-BYTE SEARCH

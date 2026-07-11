@@ -34,7 +34,7 @@ module sys.linux.tls;
 // Spec: docs/architecture/new-arch-spec.md Section 2.2.A (TLS Bootstrap)
 // =============================================================================
 
-mount core.memory.null_ptr;
+mount core.intrinsics.memory.{null_ptr};
 mount sys.common.{OSError, MemProt, MapFlags};
 mount sys.linux.syscall.{
     syscall_raw, SYS_MMAP, SYS_MUNMAP,

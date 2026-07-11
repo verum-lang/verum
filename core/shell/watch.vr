@@ -34,7 +34,7 @@ mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.async.channel.{Sender, Receiver, bounded};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
-mount core.async.spawn.{spawn};
+mount core.async.task.{spawn};
 mount core.async.task.{TaskHandle};
 mount core.async.timer.{sleep};
 mount core.io.path.{Path, PathBuf};

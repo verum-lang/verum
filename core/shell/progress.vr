@@ -33,7 +33,7 @@ mount core.time.duration.{Duration};
 mount core.time.instant.{Instant};
 mount core.async.timer.{sleep};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
-mount core.async.spawn.{spawn};
+mount core.async.task.{spawn};
 mount core.async.task.{TaskHandle};
 
 // =============================================================================

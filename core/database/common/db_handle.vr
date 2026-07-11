@@ -67,7 +67,7 @@ module core.database.common.db_handle;
 
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
-mount async.duration.Duration;
+mount core.time.duration.{Duration};
 mount base.memory.Shared;
 mount core.database.common.error.{DbError};
 mount core.database.common.capability.{

@@ -34,7 +34,7 @@ mount core.base.protocols.{Display, Debug, Clone};
 mount core.async.task.{TaskHandle, JoinError};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancelReason};
 mount core.async.nursery.{Nursery, NurseryOptions, NurseryErrorBehavior, with_nursery};
-mount core.async.spawn.{spawn};
+mount core.async.task.{spawn};
 mount core.time.duration.{Duration};
 mount core.shell.context.{ShellContext};
 mount core.shell.exec.{sh, sh_check, sh_with_cancel};
