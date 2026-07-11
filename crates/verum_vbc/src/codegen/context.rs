@@ -171,6 +171,12 @@ pub struct CodegenContext {
     /// previously did `lookup_function(name)` and risked first-wins
     /// shadow should migrate to `lookup_function_in_scope(scope, name)`.
     pub scoped_functions: HashMap<(String, String), FunctionInfo>,
+    /// Free fns DECLARED by the unit being compiled (user-phase AST
+    /// declarations only; stdlib bake — `prefer_existing_functions` —
+    /// never writes here). Bare-name call resolution consults this
+    /// FIRST: the unit's own `fn take` must beat `core.base.memory.take`
+    /// in the type-aware overload scan (task #20).
+    pub unit_declared_fns: HashMap<String, FunctionInfo>,
 
     /// **ARCH-P2 stage 1 — content-addressed canonical function index**
     /// (dual keying, warn-on-divergence).  See
@@ -407,6 +413,18 @@ pub struct CodegenContext {
     /// T's index among the enclosing function's generics. Maintained in
     /// lockstep with `generic_type_params`; cleared per function.
     pub generic_type_params_ordered: Vec<String>,
+
+    /// Registers with a LIVE register-reference taken on them (#48
+    /// self-referential-slot corruption class). `emit_ref_instruction`
+    /// pins its `src` here; `free_temp` refuses to recycle a pinned
+    /// slot. Without the pin, the referent's temp could be freed and
+    /// the very next alloc reuse it — codegen then emitted
+    /// `Ref r13<-r10; Mov r10<-r13` (List.fmt_debug element loop),
+    /// storing a ref INTO its own referent slot: the interpreter's
+    /// ref-unwrap recursed to a stack-guard SIGBUS (pre-guard) or a
+    /// soft method-miss (post-guard). Cleared per function by
+    /// `begin_function`.
+    pub ref_pinned_regs: std::collections::HashSet<u16>,
 
     /// Const generic parameters in scope for the current function.
     ///
@@ -1322,6 +1340,7 @@ impl CodegenContext {
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
             scoped_functions: HashMap::new(),
+            unit_declared_fns: HashMap::new(),
             canonical_index: HashMap::new(),
             prefer_existing_functions: false,
             stage3_stub_names: HashMap::new(),
@@ -1342,6 +1361,7 @@ impl CodegenContext {
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
+            ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
             newtype_names: HashSet::new(),
             newtype_inner_type: HashMap::new(),
@@ -1369,6 +1389,7 @@ impl CodegenContext {
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
+            ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
             typed_array_vars: HashMap::new(),
             byte_array_vars: HashSet::new(),
@@ -2094,6 +2115,11 @@ impl CodegenContext {
     /// Also clears raw pointer tracking for the register to prevent stale
     /// FFI pointer marks from leaking to the next allocation of the same register.
     pub fn free_temp(&mut self, reg: Reg) {
+        // #48: a slot with a LIVE register-ref taken on it must never
+        // be recycled — see `ref_pinned_regs`.
+        if self.ref_pinned_regs.contains(&reg.0) {
+            return;
+        }
         self.raw_pointer_regs.remove(&reg);
         self.registers.free_temp(reg);
     }
@@ -2131,6 +2157,7 @@ impl CodegenContext {
         // Pillar 1: register-keyed — must not leak across functions (and
         // closures re-use low register indices for their own params).
         self.object_ref_param_regs.clear();
+        self.ref_pinned_regs.clear();
         // GENERIC PARAMS ARE NOT CLEARED HERE (#44-B contract repair).
         // compile_function documents (mod.rs ~14078): "For impl methods,
         // impl generics are PRE-SET by compile_item before calling this,

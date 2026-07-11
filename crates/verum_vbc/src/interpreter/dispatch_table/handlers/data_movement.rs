@@ -19,6 +19,28 @@ pub(in super::super) fn handle_mov(
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let value = state.get_reg(src);
+    // SELF-REF WRITE context (#48 forensics, opt-in): name the fn+pc
+    // that Movs a register-ref into its own referent slot (pairs with
+    // the registers.set trap that prints the native backtrace).
+    if std::env::var_os("VERUM_TRAP_SELFREF").is_some() && value.is_int() {
+        let encoded = value.as_i64();
+        if encoded < -1 {
+            let raw = -(encoded + 1);
+            let abs = ((raw & 0xFFFF_FFFF) as u32) & !0x8000_0000;
+            if abs == state.reg_base() + dst.0 as u32 && (raw >> 32) != 0 {
+                eprintln!(
+                    "[selfref-mov] fn={} pc={} dst=r{} src=r{}",
+                    state
+                        .call_stack
+                        .current_function_name(&state.module)
+                        .unwrap_or_default(),
+                    state.pc(),
+                    dst.0,
+                    src.0,
+                );
+            }
+        }
+    }
     state.set_reg(dst, value);
     Ok(DispatchResult::Continue)
 }

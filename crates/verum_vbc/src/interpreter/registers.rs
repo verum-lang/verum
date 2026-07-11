@@ -220,6 +220,31 @@ impl RegisterFile {
         if idx >= self.registers.len() {
             return; // Silently ignore out-of-bounds register writes from bad bytecode
         }
+        // SELF-REF WRITE TRAP (#48 corruption forensics, opt-in):
+        // catches the exact instruction that stores a CBGR register
+        // ref INTO the slot it points at — the self-referential-slot
+        // corruption that (pre-guard) recursed primitive dispatch to a
+        // process-killing SIGBUS. `VERUM_TRAP_SELFREF=1` prints the
+        // write site with a native backtrace and keeps running.
+        if std::env::var_os("VERUM_TRAP_SELFREF").is_some() && value.is_int() {
+            let encoded = value.as_i64();
+            if encoded < -1 {
+                let raw = -(encoded + 1);
+                let abs = ((raw & 0xFFFF_FFFF) as u32) & !0x8000_0000;
+                if abs as usize == idx && (raw >> 32) != 0 {
+                    eprintln!(
+                        "[selfref-trap] WRITE ref->abs{} INTO slot {} (base={} reg={}) bits=0x{:x}
+{}",
+                        abs,
+                        idx,
+                        base,
+                        reg.0,
+                        value.to_bits(),
+                        std::backtrace::Backtrace::force_capture()
+                    );
+                }
+            }
+        }
         self.registers[idx] = value;
     }
 

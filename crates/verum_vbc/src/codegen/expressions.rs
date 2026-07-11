@@ -5222,8 +5222,28 @@ impl VbcCodegen {
                 .first()
                 .is_none_or(|n| n != "self")
         };
-        let (resolved_name, func_info) = match module_qualified_lookup
-            .filter(|(_, info)| is_free_fn(info))
+        // CURRENT-UNIT-DECL-FIRST (task #20): a free fn DECLARED IN THE
+        // COMPILING UNIT wins the bare-name call outright — before the
+        // qualified type-aware overload scan can route `take(&v0)` to
+        // `core.base.memory.take` (whose mem::take semantics RETURN the
+        // argument's old contents — the probe printed the list itself).
+        // Only an EXACT scoped_functions hit counts (the (module, name)
+        // entry written when THIS unit's declaration registered); the
+        // in-scope helper's bare-key fallback must not jump the queue.
+        let unit_decl_lookup: Option<(String, FunctionInfo)> = if !func_name.contains('.')
+            && !func_name.contains("::")
+        {
+            self.ctx
+                .unit_declared_fns
+                .get(&func_name)
+                .cloned()
+                .filter(|info| info.param_count == args.len() && is_free_fn(info))
+                .map(|info| (func_name.clone(), info))
+        } else {
+            None
+        };
+        let (resolved_name, func_info) = match unit_decl_lookup
+            .or_else(|| module_qualified_lookup.filter(|(_, info)| is_free_fn(info)))
             // The pinned rule above applies to EVERY layer: the
             // type-aware overload scan walks qualified `.name` keys and
             // was returning impl INSTANCE methods for bare-name calls —
@@ -24398,6 +24418,10 @@ impl VbcCodegen {
     fn emit_ref_instruction(&mut self, dst: Reg, src: Reg, tier: CbgrTier, is_mut: bool) {
         // Record statistics
         self.ctx.record_ref_tier(tier);
+        // #48: the referent slot now has a live register-ref — pin it
+        // against temp recycling for the rest of this function (see
+        // ref_pinned_regs; the recycle emitted a ref INTO its own slot).
+        self.ctx.ref_pinned_regs.insert(src.0);
 
         match tier {
             CbgrTier::Tier0 => {
