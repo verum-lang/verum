@@ -136,7 +136,7 @@ public fn wal_scan(
 
     let header = match wal_header_parse(wal_bytes) {
         Result.Ok(h)  => h,
-        Result.Err(_) => { return Result.Err(BadMagic); }
+        Result.Err(_) => { return Result.Err(RecoveryError.BadMagic); }
     };
 
     // Seed the running checksum over the header's pre-checksum bytes
@@ -162,7 +162,7 @@ public fn wal_scan(
     // comparison and could allow an attacker to swap salts to bypass
     // the torn-tail invariant).
     if running.s1 != header.checksum_1 || running.s2 != header.checksum_2 {
-        return Result.Err(BadMagic);
+        return Result.Err(RecoveryError.BadMagic);
     }
 
     let frame_stride = WAL_FRAME_HEADER_SIZE + page_size;

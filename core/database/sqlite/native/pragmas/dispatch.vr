@@ -137,8 +137,8 @@ fn execute_read(cfg: &PragmaConfig, k: &PragmaKind) -> PragmaResult {
         // Stubs — rich rows follow as catalog evolves
         PIntegrityCheck    => single_text("ok".clone()),
         PQuickCheck        => single_text("ok".clone()),
-        PFreelistCount     => single_int0_i64,
-        PPageCount         => single_int0_i64,
+        PFreelistCount     => single_int(0 as Int64),
+        PPageCount         => single_int(0 as Int64),
         // Schema introspections — empty until SchemaCache binding lands
         PTableInfo | PTableXInfo | PIndexInfo | PIndexXInfo | PIndexList |
         PForeignKeyList | PForeignKeyCheck | PStats | PDatabaseList |

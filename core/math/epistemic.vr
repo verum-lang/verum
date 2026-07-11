@@ -104,13 +104,13 @@ implement EpistemicStatus {
     /// Returns Maybe.None for ranks outside [0, 6].
     public fn from_rank(r: Int) -> Maybe<EpistemicStatus> {
         match r {
-            0 => Maybe.Some(Retracted),
-            1 => Maybe.Some(Interpretation),
-            2 => Maybe.Some(Postulate),
-            3 => Maybe.Some(Hypothesis),
-            4 => Maybe.Some(Definition),
-            5 => Maybe.Some(Conditional),
-            6 => Maybe.Some(Theorem),
+            0 => Maybe.Some(EpistemicStatus.Retracted),
+            1 => Maybe.Some(EpistemicStatus.Interpretation),
+            2 => Maybe.Some(EpistemicStatus.Postulate),
+            3 => Maybe.Some(EpistemicStatus.Hypothesis),
+            4 => Maybe.Some(EpistemicStatus.Definition),
+            5 => Maybe.Some(EpistemicStatus.Conditional),
+            6 => Maybe.Some(EpistemicStatus.Theorem),
             _ => Maybe.None,
         }
     }

@@ -210,7 +210,7 @@ public fn materialize_page(
         let cell_off = pointers[i];
         let cell_size = compute_cell_size(bytes, cell_off, &hdr.kind, local_max);
         if cell_off + cell_size > bytes.len() {
-            return Result.Err(ShortBuffer);
+            return Result.Err(PageLayoutError.ShortBuffer);
         }
         let mut cell_bytes: List<Byte> = List.new();
         let mut k: Int = 0;

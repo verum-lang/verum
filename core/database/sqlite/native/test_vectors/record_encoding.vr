@@ -56,8 +56,8 @@ public fn serial_type_code(t: &RecordEncodingSerialType) -> Int {
         StReal       => 7,
         StZero       => 8,
         StOne        => 9,
-        StBlob(n)    => 12 + (2 * (*n)),
-        StText(n)    => 13 + (2 * (*n)),
+        RecordEncodingSerialType.StBlob(n)    => 12 + (2 * (*n)),
+        RecordEncodingSerialType.StText(n)    => 13 + (2 * (*n)),
     }
 }
 
@@ -90,22 +90,22 @@ public fn appendix_e2() -> List<RecordVector> {
 
     // 1_i8
     out.push(record_vec("int8_one".clone(),
-        types(&[StInt8]),
+        types(&[RecordEncodingSerialType.StInt8]),
         bytes(&[0x02, 0x01, 0x01])));
 
     // 256_i16 — 0x0100
     out.push(record_vec("int16_256".clone(),
-        types(&[StInt16]),
+        types(&[RecordEncodingSerialType.StInt16]),
         bytes(&[0x02, 0x02, 0x01, 0x00])));
 
     // (1 as Int8, 'AB') — text length 2
     out.push(record_vec("int_text".clone(),
-        types(&[StInt8, StText(2)]),
+        types(&[RecordEncodingSerialType.StInt8, RecordEncodingSerialType.StText(2)]),
         bytes(&[0x03, 0x01, 0x11, 0x01, 0x41, 0x42])));
 
     // (1, 0) — sentinel zero/one — encoded as serial-type 9 / 8.
     out.push(record_vec("one_zero".clone(),
-        types(&[StOne, StZero]),
+        types(&[RecordEncodingSerialType.StOne, RecordEncodingSerialType.StZero]),
         bytes(&[0x03, 0x09, 0x08])));
 
     // (Null, 'X') — text length 1
@@ -115,7 +115,7 @@ public fn appendix_e2() -> List<RecordVector> {
 
     // (BLOB[4]) — header 02 0x14, payload 4 bytes
     out.push(record_vec("blob4".clone(),
-        types(&[StBlob(4)]),
+        types(&[RecordEncodingSerialType.StBlob(4)]),
         bytes(&[0x02, 0x14, 0xDE, 0xAD, 0xBE, 0xEF])));
 
     out
@@ -134,18 +134,18 @@ fn types(arr: &List<RecordEncodingSerialType>) -> List<RecordEncodingSerialType>
 
 fn clone_st(t: &RecordEncodingSerialType) -> RecordEncodingSerialType {
     match t {
-        StNull       => StNull,
-        StInt8       => StInt8,
-        StInt16      => StInt16,
-        StInt24      => StInt24,
-        StInt32      => StInt32,
-        StInt48      => StInt48,
-        StInt64      => StInt64,
+        StNull       => RecordEncodingSerialType.StNull,
+        StInt8       => RecordEncodingSerialType.StInt8,
+        StInt16      => RecordEncodingSerialType.StInt16,
+        StInt24      => RecordEncodingSerialType.StInt24,
+        StInt32      => RecordEncodingSerialType.StInt32,
+        StInt48      => RecordEncodingSerialType.StInt48,
+        StInt64      => RecordEncodingSerialType.StInt64,
         StReal       => StReal,
-        StZero       => StZero,
-        StOne        => StOne,
-        StBlob(n)    => StBlob(*n),
-        StText(n)    => StText(*n),
+        StZero       => RecordEncodingSerialType.StZero,
+        StOne        => RecordEncodingSerialType.StOne,
+        RecordEncodingSerialType.StBlob(n)    => RecordEncodingSerialType.StBlob(*n),
+        RecordEncodingSerialType.StText(n)    => RecordEncodingSerialType.StText(*n),
     }
 }
 

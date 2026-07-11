@@ -70,9 +70,9 @@ public fn flags_numeric(f: &SyncFlagsPragma) -> Int {
 
 public fn from_numeric(n: Int) -> SyncFlagsPragma {
     let mode = if (n & SQLITE_SYNC_FULL) == SQLITE_SYNC_FULL {
-        SmFull
+        FsyncMode.SmFull
     } else {
-        SmNormal
+        FsyncMode.SmNormal
     };
     SyncFlagsPragma {
         mode: mode,

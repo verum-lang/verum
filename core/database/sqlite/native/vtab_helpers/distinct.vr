@@ -56,8 +56,8 @@ public fn hint_permits_skip(h: &DistinctHint) -> Bool {
 }
 
 public fn from_numeric(n: Int) -> DistinctHint {
-    if n == 3 { return DhOrdered; }
-    if n == 2 { return DhGrouping; }
-    if n == 1 { return DhRows; }
-    DhNone
+    if n == 3 { return DistinctHint.DhOrdered; }
+    if n == 2 { return DistinctHint.DhGrouping; }
+    if n == 1 { return DistinctHint.DhRows; }
+    DistinctHint.DhNone
 }

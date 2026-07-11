@@ -2110,6 +2110,41 @@ impl VbcCodegen {
         Ok(Some(dest))
     }
 
+    /// **#122 progressive-suffix (expression side).** For an absolute
+    /// `core.`-rooted path whose registration key omits leading
+    /// segments — module decls like `module sys;` register
+    /// `sys.monotonic_time_ns`, variant constructors register
+    /// `<Parent>.<Variant>` — find the LONGEST proper suffix of
+    /// `parts` that resolves to a registered exact key. Returns the
+    /// suffix as owned parts so callers can rewrite their path and
+    /// fall through the existing dispatch unchanged (variant
+    /// parent-naming, `__const_val_N` inlining, closure emission all
+    /// key off `parts`). Exact keys only — the anchored
+    /// `find_function_by_suffix` probes downstream stay the
+    /// ambiguity-safe fallback. Suffixes keep >= 2 segments so a lone
+    /// trailing name can never re-bind to an unrelated bare
+    /// registration.
+    fn resolve_core_rooted_suffix(&self, parts: &[String]) -> Option<Vec<String>> {
+        if parts.first().map(|s| s.as_str()) != Some("core") || parts.len() < 3 {
+            return None;
+        }
+        for k in 1..=parts.len() - 2 {
+            let sub = &parts[k..];
+            if self
+                .ctx
+                .lookup_qualified_function(&sub.join("."))
+                .is_some()
+                || self
+                    .ctx
+                    .lookup_qualified_function(&sub.join("::"))
+                    .is_some()
+            {
+                return Some(sub.to_vec());
+            }
+        }
+        None
+    }
+
     fn compile_qualified_path(&mut self, path: &Path) -> CodegenResult<Option<Reg>> {
         // Collect path segments into a qualified name
         let mut parts: Vec<String> = Vec::new();
@@ -2121,6 +2156,12 @@ impl VbcCodegen {
                 PathSegment::Cog => parts.push("cog".to_string()),
                 PathSegment::Relative => parts.push(".".to_string()),
             }
+        }
+
+        // #122 progressive-suffix: rewrite `core.`-rooted absolute
+        // paths to their registered form before any lookup below.
+        if let Some(sub) = self.resolve_core_rooted_suffix(&parts) {
+            parts = sub;
         }
 
         let qualified_name = parts.join("::");
@@ -9121,18 +9162,19 @@ impl VbcCodegen {
 
             // **#122 call-side mirror — `core.`-rooted canonical path.**
             // Functions register under their source `module X.Y;`
-            // declaration, which omits the `core.` prefix
-            // (`core.sys.monotonic_time_ns()` registers as
+            // declaration, which omits any number of leading path
+            // segments (`core.sys.monotonic_time_ns()` registers as
             // `sys.monotonic_time_ns`).  Mount resolution has carried
-            // this strip-retry since #122; the CALL path lacked it, so
+            // a strip-retry since #122; the CALL path lacked it, so
             // absolute `core.*` qualified calls in expression position
             // lenient-skipped their enclosing fn with
             // "undefined variable: core" (Spinner.stop/drop,
             // typed_value_to_wire_text, enforce_foreign_key).
-            if parts.len() >= 2 && parts.first().map(|s| s.as_str()) == Some("core") {
-                let stripped = parts[1..].join(".");
+            // Progressive-suffix helper shared with
+            // `compile_qualified_path` / `compile_field_access`.
+            if let Some(sub) = self.resolve_core_rooted_suffix(&parts) {
                 if let Some(func_info) =
-                    self.ctx.lookup_qualified_function(&stripped).cloned()
+                    self.ctx.lookup_qualified_function(&sub.join(".")).cloned()
                     && func_info.param_count == args.len()
                 {
                     if let Some(tag) = func_info.variant_tag {
@@ -17737,6 +17779,17 @@ impl VbcCodegen {
         // module's parent before lookup.
         if let Some(mut parts) = self.try_flatten_module_path_resolved(base) {
             parts.push(field.to_string());
+
+            // #122 progressive-suffix: rewrite `core.`-rooted absolute
+            // paths (`core.async.cancellation.CancelReason.Cancelled`)
+            // to their registered form (`CancelReason.Cancelled`)
+            // before the lookups below — the downstream dispatch
+            // (variant parent-naming from `parts[len-2]`,
+            // `__const_val_N` inlining, closure emission) then works
+            // off the true registered path unchanged.
+            if let Some(sub) = self.resolve_core_rooted_suffix(&parts) {
+                parts = sub;
+            }
 
             // Try both :: separator (Rust-style) and . separator (Verum-style)
             let qualified_rust = parts.join("::");

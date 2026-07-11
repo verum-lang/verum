@@ -402,7 +402,7 @@ public async fn check_certificate_status_via_crl<C: HttpClient>(
                 next_update: Maybe.None,
             });
         }
-        return Result.Err(NoUrlAvailable);
+        return Result.Err(CrlOperationError.NoUrlAvailable);
     }
 
     let mut failed: List<Text> = List.new();
@@ -415,7 +415,7 @@ public async fn check_certificate_status_via_crl<C: HttpClient>(
         }
         i = i + 1;
     }
-    Result.Err(AllUrlsFailed(failed))
+    Result.Err(CrlOperationError.AllUrlsFailed(failed))
 }
 
 async fn try_one_url<C: HttpClient>(
@@ -430,7 +430,7 @@ async fn try_one_url<C: HttpClient>(
 
     // Verify CRL issuer DN matches the cert issuer's subject DN.
     if !crl_issuer_matches(issuer, &crl) {
-        return Result.Err(SignatureFailed);
+        return Result.Err(CrlOperationError.SignatureFailed);
     }
 
     // Verify CRL signature against the issuer's public key.
@@ -441,7 +441,7 @@ async fn try_one_url<C: HttpClient>(
     let this_unix = core.security.x509.time.time_to_unix(&crl.this_update);
     let tol = opts.freshness_tolerance_s;
     if this_unix > now + tol {
-        return Result.Err(Stale { this_update: this_unix, now });
+        return Result.Err(CrlOperationError.Stale { this_update: this_unix, now });
     }
     let next_unix = match &crl.next_update {
         Maybe.Some(t) => Maybe.Some(core.security.x509.time.time_to_unix(t)),
@@ -449,7 +449,7 @@ async fn try_one_url<C: HttpClient>(
     };
     if let Maybe.Some(nu) = next_unix {
         if now > nu + tol {
-            return Result.Err(Expired { next_update: nu, now });
+            return Result.Err(CrlOperationError.Expired { next_update: nu, now });
         }
     }
 
