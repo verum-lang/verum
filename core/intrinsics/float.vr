@@ -235,16 +235,16 @@ public fn is_sign_positive<T>(x: T) -> Bool { @intrinsic("is_sign_positive", x) 
 // =============================================================================
 
 /// Float32 to bits
-public fn f32_to_bits(x: Float32) -> UInt32 { @intrinsic("bitcast", x) }
+public fn f32_to_bits(x: Float32) -> UInt32 { @intrinsic("f32_to_bits", x) }
 
 /// Float32 from bits
-public fn f32_from_bits(bits: UInt32) -> Float32 { @intrinsic("bitcast", bits) }
+public fn f32_from_bits(bits: UInt32) -> Float32 { @intrinsic("f32_from_bits", bits) }
 
 /// Float64 to bits
-public fn f64_to_bits(x: Float64) -> UInt64 { @intrinsic("bitcast", x) }
+public fn f64_to_bits(x: Float64) -> UInt64 { @intrinsic("f64_to_bits", x) }
 
 /// Float64 from bits
-public fn f64_from_bits(bits: UInt64) -> Float64 { @intrinsic("bitcast", bits) }
+public fn f64_from_bits(bits: UInt64) -> Float64 { @intrinsic("f64_from_bits", bits) }
 
 // =============================================================================
 // SECTION 9: Special Values
@@ -342,8 +342,8 @@ public fn expm1_f32(x: Float32) -> Float32 { @intrinsic("expm1", x) }
 public fn expm1_f64(x: Float64) -> Float64 { @intrinsic("expm1", x) }
 public fn log1p_f32(x: Float32) -> Float32 { @intrinsic("log1p", x) }
 public fn log1p_f64(x: Float64) -> Float64 { @intrinsic("log1p", x) }
-public fn sincos_f32(x: Float32) -> (Float32, Float32) { @intrinsic("sincos", x) }
-public fn sincos_f64(x: Float64) -> (Float64, Float64) { @intrinsic("sincos", x) }
+public fn sincos_f32(x: Float32) -> (Float32, Float32) { (@intrinsic("sin_f32", x), @intrinsic("cos_f32", x)) }
+public fn sincos_f64(x: Float64) -> (Float64, Float64) { (@intrinsic("sin_f64", x), @intrinsic("cos_f64", x)) }
 public fn is_inf_f32(x: Float32) -> Bool { @intrinsic("is_inf", x) }
 public fn is_inf_f64(x: Float64) -> Bool { @intrinsic("is_inf", x) }
 public fn is_finite_f32(x: Float32) -> Bool { @intrinsic("is_finite", x) }
