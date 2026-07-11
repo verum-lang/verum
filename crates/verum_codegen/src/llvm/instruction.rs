@@ -32897,8 +32897,12 @@ fn lower_tensor_extended<'ctx>(
             ctx.set_register(dst_reg, result.into());
         }
 
-        // Fallback for any unknown sub-opcode
+        // Fallback for any unknown sub-opcode. The const-zero result
+        // keeps lowering alive, but silence here was a miscompile
+        // class (every other Extended category reports) — record the
+        // unimplemented marker so the gap is visible in diagnostics.
         _ => {
+            ctx.emit_unimplemented_sub_op("TensorExtended", sub_op);
             let zero = i64_ty.const_zero();
             ctx.set_register(dst_reg, zero.into());
         }
@@ -33631,8 +33635,11 @@ fn lower_gpu_extended<'ctx>(
             )?;
         }
 
-        // Fallback for unknown sub-opcode
+        // Fallback for unknown sub-opcode. Same contract as
+        // TensorExtended: keep lowering alive with const-zero but
+        // report the gap — silent zeros were a miscompile class.
         _ => {
+            ctx.emit_unimplemented_sub_op("GpuExtended", sub_op);
             let zero = i64_ty.const_zero();
             ctx.set_register(dst_reg, zero.into());
         }
