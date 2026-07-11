@@ -18196,11 +18196,13 @@ fn lower_call_method<'ctx>(
                     let body_derefs_param0 = fd.instructions.as_ref().is_some_and(|instrs| {
                         for ins in instrs.iter().take(8) {
                             match ins {
-                                verum_vbc::Instruction::ChkRef { ref_reg }
-                                    if ref_reg.0 == 0 =>
-                                {
-                                    return true;
-                                }
+                                // ChkRef alone is NOT deref-through evidence:
+                                // record `&self` methods ChkRef(Reg0) then GetF
+                                // Reg0 DIRECTLY (the CBGR bound-check contract) —
+                                // spilling their heap-ptr receiver made GetF read
+                                // slot_addr+24 (mass constructor-test crashes).
+                                // Only an actual Deref(Reg0) proves the callee
+                                // reads THROUGH the receiver.
                                 verum_vbc::Instruction::Deref { ref_reg, .. }
                                     if ref_reg.0 == 0 =>
                                 {
