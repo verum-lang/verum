@@ -10767,6 +10767,28 @@ impl VbcCodegen {
         type_decl: &verum_ast::decl::TypeDecl,
     ) -> CodegenResult<()> {
         let type_name = type_decl.name.name.to_string();
+        // Record the ORDERED generic-parameter names — pattern-bind
+        // payload typing maps variant payload templates to param
+        // POSITIONS (see ctx.type_generic_params doc).
+        if !type_decl.generics.is_empty() {
+            let params: Vec<String> = type_decl
+                .generics
+                .iter()
+                .filter_map(|gp| match &gp.kind {
+                    verum_ast::ty::GenericParamKind::Type { name, .. }
+                    | verum_ast::ty::GenericParamKind::HigherKinded { name, .. }
+                    | verum_ast::ty::GenericParamKind::Const { name, .. } => {
+                        Some(name.name.to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if params.len() == type_decl.generics.len() {
+                self.ctx
+                    .type_generic_params
+                    .insert(type_name.clone(), params);
+            }
+        }
         if std::env::var("VERUM_TRACE_RTC").is_ok() && (type_name == "IoResult" || type_name == "IoError" || type_name == "Metadata") {
             eprintln!("[RTC] type_name={} body_kind={}", type_name, match &type_decl.body {
                 TypeDeclBody::Alias(_) => "Alias",

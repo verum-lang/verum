@@ -579,6 +579,21 @@ fn register_module(
             Some(s) => s.to_string(),
             None => continue,
         };
+        // Ordered generic-param names for pattern-bind payload
+        // typing (ctx.type_generic_params doc) — archive twin of
+        // the local `register_type_constructors` fill.
+        if !ty.type_params.is_empty() {
+            let params: Vec<String> = ty
+                .type_params
+                .iter()
+                .filter_map(|tp| lookup(tp.name).map(|s| s.to_string()))
+                .collect();
+            if params.len() == ty.type_params.len() {
+                ctx.type_generic_params
+                    .entry(parent_name.clone())
+                    .or_insert(params);
+            }
+        }
         for variant in &ty.variants {
             let vname = match lookup(variant.name) {
                 Some(s) => s.to_string(),
@@ -596,7 +611,8 @@ fn register_module(
                         .fields
                         .iter()
                         .map(|f| {
-                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                            type_ref_payload_template(ty, &f.type_ref, module)
+                                .unwrap_or_default()
                         })
                         .collect(),
                 ),
@@ -606,7 +622,8 @@ fn register_module(
                         .fields
                         .iter()
                         .map(|f| {
-                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                            type_ref_payload_template(ty, &f.type_ref, module)
+                                .unwrap_or_default()
                         })
                         .collect(),
                 ),
@@ -824,6 +841,28 @@ fn extract_closure_return_type_from_typeref(
         TypeRef::Reference { inner, .. } => extract_closure_return_type_from_typeref(inner, module),
         _ => None,
     }
+}
+
+/// Like [`type_ref_simple_name`], with the ENCLOSING type descriptor so
+/// `TypeRef::Generic(param_id)` renders the parent's declared param NAME
+/// (`ControlFlow<B, C>`'s `Continue(C)` payload renders "C", not "").
+/// Pattern-bind payload typing maps that template name to the param's
+/// POSITION to index the scrutinee's instantiated args (#47 runtime leg)
+/// — an empty template made the mapping impossible and the tag-as-index
+/// heuristic swapped payload types for order-crossed sum types.
+fn type_ref_payload_template(
+    enclosing: &verum_vbc::types::TypeDescriptor,
+    ty: &TypeRef,
+    module: &VbcModule,
+) -> Option<String> {
+    if let TypeRef::Generic(pid) = ty {
+        return enclosing
+            .type_params
+            .iter()
+            .find(|tp| tp.id == *pid)
+            .and_then(|tp| module.strings.get(tp.name).map(|s| s.to_string()));
+    }
+    type_ref_simple_name(ty, module)
 }
 
 fn type_ref_simple_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
@@ -3897,6 +3936,81 @@ mod tests {
 /// requires a `mount` declaration to bring the name in scope.  So
 /// the mount-only pre-scan covers practically every stdlib
 /// reference at sub-millisecond cost.
+/// Seed `wanted` with every nominal name a PATTERN references —
+/// variant tags (`Continue(v)`), their qualifier types
+/// (`ControlFlow.Continue`), record-pattern paths and nested
+/// sub-patterns. Match ARMS were the gap (#47 runtime leg): the
+/// expr-walker harvested scrutinee/guard/body but not the arm
+/// patterns, so a file that only MATCHES an archive sum type
+/// (`match r.branch() { Continue(v) => .. }`) never seeded
+/// `ControlFlow`/`Continue`; Pass 4 skipped the ctor registration
+/// and pattern-bind payload typing found no template → the
+/// tag-as-index fallback typed `v` with the WRONG generic arg.
+fn harvest_names_in_pattern(
+    pat: &verum_ast::pattern::Pattern,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use verum_ast::pattern::{PatternKind, VariantPatternData};
+    match &pat.kind {
+        PatternKind::Variant { path, data } => {
+            for seg in path.segments.iter() {
+                if let verum_ast::ty::PathSegment::Name(id) = seg {
+                    out.insert(id.name.to_string());
+                }
+            }
+            if path.segments.len() >= 2 {
+                let dotted: Vec<&str> = path
+                    .segments
+                    .iter()
+                    .filter_map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                out.insert(dotted.join("."));
+            }
+            if let verum_common::Maybe::Some(data) = data {
+                match data {
+                    VariantPatternData::Tuple(pats) => {
+                        for p in pats.iter() {
+                            harvest_names_in_pattern(p, out);
+                        }
+                    }
+                    VariantPatternData::Record { fields, .. } => {
+                        for f in fields.iter() {
+                            if let Some(ref p) = f.pattern {
+                                harvest_names_in_pattern(p, out);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        PatternKind::Record { path, fields, .. } => {
+            for seg in path.segments.iter() {
+                if let verum_ast::ty::PathSegment::Name(id) = seg {
+                    out.insert(id.name.to_string());
+                }
+            }
+            for f in fields.iter() {
+                if let Some(ref p) = f.pattern {
+                    harvest_names_in_pattern(p, out);
+                }
+            }
+        }
+        PatternKind::Tuple(pats) | PatternKind::Array(pats) | PatternKind::Or(pats) | PatternKind::And(pats) => {
+            for p in pats.iter() {
+                harvest_names_in_pattern(p, out);
+            }
+        }
+        PatternKind::Reference { inner, .. } | PatternKind::Paren(inner) => {
+            harvest_names_in_pattern(inner, out);
+        }
+        PatternKind::Guard { pattern, .. } => harvest_names_in_pattern(pattern, out),
+        _ => {}
+    }
+}
+
 fn collect_referenced_function_names(
     item: &verum_ast::Item,
     out: &mut std::collections::HashSet<String>,
@@ -4150,6 +4264,7 @@ fn harvest_names_in_expr(
         ExprKind::Match { expr, arms } => {
             harvest_names_in_expr(expr, out);
             for arm in arms.iter() {
+                harvest_names_in_pattern(&arm.pattern, out);
                 if let Maybe::Some(g) = &arm.guard {
                     harvest_names_in_expr(g, out);
                 }
@@ -5220,6 +5335,20 @@ fn register_module_filtered(
             continue;
         }
         let parent_name = parent_name_str.to_string();
+        // Ordered generic-param names for pattern-bind payload typing
+        // (ctx.type_generic_params doc) — lazy-walker twin of pass 4.
+        if !ty.type_params.is_empty() {
+            let params: Vec<String> = ty
+                .type_params
+                .iter()
+                .filter_map(|tp| lookup(tp.name).map(|s| s.to_string()))
+                .collect();
+            if params.len() == ty.type_params.len() {
+                ctx.type_generic_params
+                    .entry(parent_name.clone())
+                    .or_insert(params);
+            }
+        }
         for variant in &ty.variants {
             let vname = match lookup(variant.name) {
                 Some(s) => s.to_string(),
@@ -5244,7 +5373,8 @@ fn register_module_filtered(
                         .fields
                         .iter()
                         .map(|f| {
-                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                            type_ref_payload_template(ty, &f.type_ref, module)
+                                .unwrap_or_default()
                         })
                         .collect(),
                 ),
@@ -5254,7 +5384,8 @@ fn register_module_filtered(
                         .fields
                         .iter()
                         .map(|f| {
-                            type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
+                            type_ref_payload_template(ty, &f.type_ref, module)
+                                .unwrap_or_default()
                         })
                         .collect(),
                 ),

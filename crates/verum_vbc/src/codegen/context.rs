@@ -410,6 +410,17 @@ pub struct CodegenContext {
     /// type parameters as valid identifiers (not "undefined variables") when they
     /// appear in expressions like `@intrinsic("size_of", T)`.
     pub generic_type_params: HashSet<String>,
+    /// Parent-type name → its ORDERED generic-parameter names
+    /// (`ControlFlow` → ["B", "C"]). Carried fact for pattern-bind
+    /// payload typing: a variant's payload template (`Continue(C)`)
+    /// maps to the parent's param POSITION (`C` = #1), which indexes
+    /// the scrutinee's instantiated args. The previous
+    /// tag-as-arg-index heuristic silently swapped payload types for
+    /// any sum type whose variant order doesn't mirror its param
+    /// order (ControlFlow<B, C> is Continue(C) | Break(B)) — #47
+    /// runtime leg. Filled by BOTH type-registration paths (local
+    /// `register_type_constructors`, archive ctx loader pass 4).
+    pub type_generic_params: HashMap<String, Vec<String>>,
 
     /// Same params in DECLARATION ORDER (#44-B): `TypeRef::Generic(idx)`
     /// witnesses are positional, so `T.default()`-class emission needs
@@ -1364,6 +1375,7 @@ impl CodegenContext {
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
+            type_generic_params: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
             newtype_names: HashSet::new(),
@@ -1392,6 +1404,7 @@ impl CodegenContext {
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
+            type_generic_params: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
             typed_array_vars: HashMap::new(),
@@ -3429,6 +3442,15 @@ impl CodegenContext {
     /// When a simple variant name (e.g., "Done") is in the collision set and
     /// we know the expected parent type (from match scrutinee), try the
     /// qualified form "TypeName.VariantName" directly.
+    /// Position of `param` in `type_name`'s declared generic-parameter
+    /// list (`("ControlFlow", "C")` → `Some(1)`). See
+    /// [`Self::type_generic_params`].
+    pub fn generic_param_position(&self, type_name: &str, param: &str) -> Option<usize> {
+        self.type_generic_params
+            .get(type_name)
+            .and_then(|params| params.iter().position(|p| p == param))
+    }
+
     pub fn find_variant_by_type_and_name(
         &self,
         type_name: &str,

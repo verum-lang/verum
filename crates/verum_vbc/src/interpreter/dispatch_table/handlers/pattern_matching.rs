@@ -407,6 +407,9 @@ pub(in super::super) fn handle_get_variant_data(
     if variant.is_ptr() && !variant.is_nil() {
         let ptr_addr = variant.as_ptr::<u8>() as usize;
         if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
+            if std::env::var("VERUM_TRACE_GVD").is_ok() {
+                eprintln!("[gvd] INTERIOR-DEREF ptr={:#x} (in cbgr_mutable_ptrs)", ptr_addr);
+            }
             // SAFETY: heap-interior pointer tracked in
             // `cbgr_mutable_ptrs` points into a live heap object's
             // data area; reading 8 bytes yields the stored Value
@@ -424,6 +427,13 @@ pub(in super::super) fn handle_get_variant_data(
             unsafe {
                 let field_ptr = base_ptr.add(field_offset) as *const Value;
                 let value = std::ptr::read(field_ptr);
+                if std::env::var("VERUM_TRACE_GVD").is_ok() {
+                    eprintln!(
+                        "[gvd] read base={:#x} field={} off={} -> bits={:#x} (int? {})",
+                        base_ptr as usize, field, field_offset, value.to_bits(),
+                        value.is_int()
+                    );
+                }
                 state.set_reg(dst, value);
             }
         } else {

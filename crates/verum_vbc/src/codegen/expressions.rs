@@ -15839,6 +15839,27 @@ impl VbcCodegen {
                                                 let scrutinee_aware_info = self.ctx
                                                     .lookup_function(&format!("{}.{}", base, simple_variant))
                                                     .or_else(|| self.ctx.lookup_function(&format!("{}::{}", base, simple_variant)));
+                                                // #47 runtime leg — payload TEMPLATE → parent
+                                                // generic-param POSITION, the carried fact that
+                                                // replaces the tag-as-arg-index heuristic below.
+                                                // `ControlFlow<B, C> is Continue(C) | Break(B)`:
+                                                // Continue's template "C" is param #1 → the
+                                                // scrutinee's SECOND arg (Int), not args[tag=0]
+                                                // (which silently typed v as the B arg and routed
+                                                // f-string display through Result.fmt on an Int).
+                                                let by_param_position = |info: &crate::codegen::context::FunctionInfo| -> Option<String> {
+                                                    let tpl = info.variant_payload_types.as_ref()?.get(i)?.clone();
+                                                    let pos = self.ctx.generic_param_position(base, &tpl);
+                                                    if std::env::var("VERUM_TRACE_PAT").is_ok() {
+                                                        eprintln!(
+                                                            "[pat-pos] base='{}' tpl='{}' pos={:?} params={:?} inner={:?}",
+                                                            base, tpl, pos,
+                                                            self.ctx.type_generic_params.get(base),
+                                                            inner_types
+                                                        );
+                                                    }
+                                                    inner_types.get(pos?).cloned()
+                                                };
                                                 if let Some(tag) = type_table_tag
                                                     .filter(|_| scrutinee_aware_info.is_none())
                                                 {
@@ -15860,6 +15881,8 @@ impl VbcCodegen {
                                                         .and_then(|pt| pt.get(i).cloned())
                                                         .filter(|t| !is_generic_param(t));
                                                     if let Some(t) = declared {
+                                                        Some(t)
+                                                    } else if let Some(t) = by_param_position(info) {
                                                         Some(t)
                                                     } else {
                                                         // Infer from variant tag: tag 0 variants get first
@@ -34904,6 +34927,7 @@ impl VbcCodegen {
         parts: &verum_common::List<verum_common::Text>,
         exprs: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        eprintln!("[MARKER] compile_interpolated_string parts={} exprs={}", parts.len(), exprs.len());
         // Build string by concatenating parts and expressions
         let dest = self.ctx.alloc_temp();
 

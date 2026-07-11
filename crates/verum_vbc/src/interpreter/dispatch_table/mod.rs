@@ -1252,9 +1252,29 @@ pub fn dispatch_loop_table_with_entry_depth(
                     else if v.is_bool() { format!("bool({})", v.as_bool()) }
                     else { "other".to_string() }
                 };
+                // VERUM_TRACE_PC_DECODE=1 additionally prints the fully
+                // decoded instruction (operands included) — bytecode is
+                // re-decoded at this pc only when tracing, zero cost
+                // otherwise.
+                let decoded = if std::env::var("VERUM_TRACE_PC_DECODE").is_ok() {
+                    // Re-fetch the slice: `bytecode` above ends its borrow
+                    // before advance_pc; reusing it here would extend the
+                    // immutable borrow across the mutable calls (E0502).
+                    match state.current_bytecode() {
+                        Some(bc) => {
+                            let mut off = pc;
+                            crate::bytecode::decode_instruction(bc, &mut off)
+                                .map(|ins| format!(" | {:?}", ins))
+                                .unwrap_or_default()
+                        }
+                        None => String::new(),
+                    }
+                } else {
+                    String::new()
+                };
                 eprintln!(
-                    "[pc] {} pc={} op=0x{:02x} | r1={} r2={} r3={}",
-                    fname, pc, opcode_byte, cls(1), cls(2), cls(3)
+                    "[pc] {} pc={} op=0x{:02x} | r1={} r2={} r3={}{}",
+                    fname, pc, opcode_byte, cls(1), cls(2), cls(3), decoded
                 );
             }
         }
