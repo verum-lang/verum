@@ -16662,6 +16662,16 @@ impl<'ctx> PlatformIR<'ctx> {
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
+        // The name can be held by a same-name IMPOSTOR (a call site
+        // speculatively declared `verum_panic` 1-param): defining the
+        // canonical 2-param (msg, len) body into it dereferences a
+        // missing param and aborts the WHOLE module lowering
+        // ("missing param 1", task #22 — the 4th such site, found via
+        // the track_caller or_internal trace). Skip the definition;
+        // the mismatched declaration resolves at link time.
+        if func.count_params() < 2 {
+            return Ok(());
+        }
 
         let write_fn = self.get_or_declare_fn(
             module,

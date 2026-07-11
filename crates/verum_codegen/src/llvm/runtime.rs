@@ -2212,6 +2212,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
         if func.count_basic_blocks() == 0 {
             return Ok(());
         }
+        // The name can be held by a same-name IMPOSTOR (duplicate VBC
+        // descs / speculative declarations resolve first under the
+        // one-symbol-per-name rules): the canonical Map.get is
+        // (self, key) — patching a different-arity body dereferences
+        // missing params and aborted the WHOLE module lowering
+        // ("missing param 1", task #22). Skip the fixup for shapes
+        // that aren't the canonical signature.
+        if func.count_params() < 2 {
+            return Ok(());
+        }
 
         // Delete all existing basic blocks
         while let Some(bb) = func.get_first_basic_block() {

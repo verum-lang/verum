@@ -15645,7 +15645,7 @@ impl VbcCodegen {
                                     })
                             });
 
-                    qualified_lookup
+                    let resolved = qualified_lookup
                         // Try dot-separated form directly (e.g., "Val.Num")
                         .or_else(|| {
                             self.ctx
@@ -15669,7 +15669,14 @@ impl VbcCodegen {
                             self.ctx
                                 .find_variant_with_suffix(&suffix, expected_param_count)
                                 .and_then(|info| info.variant_payload_types.clone())
-                        })
+                        });
+                    if std::env::var("VERUM_TRACE_PAT").is_ok() {
+                        eprintln!(
+                            "[pat-trace] variant='{}' scrutinee={:?} -> payload_types={:?}",
+                            variant_name, self.ctx.match_scrutinee_type, resolved
+                        );
+                    }
+                    resolved
                 };
 
                 // Extract variant payload fields

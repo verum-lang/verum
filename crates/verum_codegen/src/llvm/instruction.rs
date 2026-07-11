@@ -3019,12 +3019,15 @@ pub fn lower_instruction<'ctx>(
                     let mut forward_args: Vec<BasicMetadataValueEnum> = Vec::new();
                     for i in 0..orig_param_count {
                         // Skip param 0 (env_ptr), forward params 1..N
-                        forward_args.push(
-                            trampoline
-                                .get_nth_param(i + 1)
-                                .or_internal(&format!("missing param {}", i + 1))?
-                                .into(),
-                        );
+                        // Trampoline/original arity can disagree when the
+                        // closure's fn-type came from a degraded signature —
+                        // degrade the single argument, not the whole module
+                        // lowering (task #22: 'missing param 1' aborted AOT
+                        // for files whose tuple hints re-routed dispatch).
+                        forward_args.push(match trampoline.get_nth_param(i + 1) {
+                            Some(p) => p.into(),
+                            None => i64_type.const_zero().into(),
+                        });
                     }
 
                     let call_result = ctx
@@ -3282,6 +3285,31 @@ pub fn lower_instruction<'ctx>(
             obj,
             field_idx,
         } => lower_get_field(ctx, *dst, *obj, *field_idx),
+
+        // FIELD-ACCESS-BYNAME-1 (colleagues' task #42) — typed forms.
+        // Same lowering-time resolution as the byte-form Extended arms:
+        // name string + receiver's static type → field position →
+        // delegate to the standard GetF/SetF lowering. Unresolvable
+        // receiver → loud diagnostic (pinned no-silent-stub rule);
+        // Tier-0 is the dynamic fallback.
+        Instruction::GetFieldNamed { dst, obj, name } => {
+            match resolve_named_field_index(ctx, obj.0, *name) {
+                Some(fidx) => lower_get_field(ctx, *dst, *obj, fidx),
+                None => {
+                    ctx.emit_unimplemented_sub_op("GetFieldNamed", 0x03);
+                    Ok(())
+                }
+            }
+        }
+        Instruction::SetFieldNamed { obj, name, value } => {
+            match resolve_named_field_index(ctx, obj.0, *name) {
+                Some(fidx) => lower_set_field(ctx, *obj, fidx, *value),
+                None => {
+                    ctx.emit_unimplemented_sub_op("SetFieldNamed", 0x04);
+                    Ok(())
+                }
+            }
+        }
 
         Instruction::SetF {
             obj,
@@ -24189,6 +24217,30 @@ fn lower_log_extended<'ctx>(
 ///  short/long reg-encoding) carrying the i64 exit code. Lowers
 ///  to `_exit(code)` + `unreachable` for byte-identical semantics
 ///  with the Tier-0 dispatcher (`std::process::exit`).
+/// FIELD-ACCESS-BYNAME-1: lowering-time resolution of a named field.
+/// The name StringId indexes THIS module's string table; the receiver's
+/// static type (obj map / PARAM-OBJ-TYPING) names the descriptor whose
+/// field list gives the position. None = receiver type unknown or the
+/// name misses the descriptor — callers emit the loud diagnostic.
+fn resolve_named_field_index(
+    ctx: &FunctionContext<'_, '_>,
+    obj_reg: u16,
+    name_sid: u32,
+) -> Option<u32> {
+    let vbc = ctx.vbc_module()?;
+    let fname = vbc.strings.get(verum_vbc::types::StringId(name_sid))?;
+    let base_ty = ctx.get_obj_register_type(obj_reg).map(|s| s.to_string())?;
+    let stripped = base_ty.split('<').next().unwrap_or(&base_ty).to_string();
+    let td = vbc
+        .types
+        .iter()
+        .find(|t| vbc.get_type_name(t.id).as_deref() == Some(stripped.as_str()))?;
+    td.fields
+        .iter()
+        .position(|fd| vbc.strings.get(fd.name).is_some_and(|n| n == fname))
+        .map(|i| i as u32)
+}
+
 fn lower_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
@@ -24205,6 +24257,100 @@ fn lower_extended<'ctx>(
             // #44-B Tier-0 sidecar (see the typed-variant arm in
             // lower_instruction) — no frame witness table at AOT.
             Ok(())
+        }
+        // FIELD-ACCESS-BYNAME-1 (task #42): runtime-resolved field
+        // access. At AOT the resolution happens at LOWERING time — the
+        // name StringId indexes THIS module's string table, and the
+        // receiver's static type (obj map, PARAM-OBJ-TYPING) names the
+        // descriptor whose field list gives the position. Resolved →
+        // delegate to the exact GetF/SetF lowering. Unresolvable
+        // receiver type → loud diagnostic (pinned rule: no silent
+        // stubs), the interpreter remains the dynamic fallback tier.
+        Some(ExtendedSubOpcode::GetFieldNamed) | Some(ExtendedSubOpcode::SetFieldNamed) => {
+            let is_get =
+                ExtendedSubOpcode::from_byte(sub_op) == Some(ExtendedSubOpcode::GetFieldNamed);
+            let mut idx = 0usize;
+            let mut read_reg = |idx: &mut usize| -> Option<u16> {
+                if *idx >= operands.len() {
+                    return None;
+                }
+                if operands[*idx] & 0x80 == 0 {
+                    let r = operands[*idx] as u16;
+                    *idx += 1;
+                    Some(r)
+                } else {
+                    if operands.len() < *idx + 2 {
+                        return None;
+                    }
+                    let r = (((operands[*idx] & 0x7F) as u16) << 8)
+                        | (operands[*idx + 1] as u16);
+                    *idx += 2;
+                    Some(r)
+                }
+            };
+            let decode_varint = |idx: &mut usize| -> Option<u64> {
+                let mut value: u64 = 0;
+                let mut shift: u32 = 0;
+                while *idx < operands.len() {
+                    let b = operands[*idx];
+                    *idx += 1;
+                    value |= ((b & 0x7F) as u64) << shift;
+                    if b & 0x80 == 0 {
+                        return Some(value);
+                    }
+                    shift += 7;
+                    if shift >= 64 {
+                        return None;
+                    }
+                }
+                None
+            };
+            // Stream shapes: GET = [dst][obj][name] / SET = [obj][name][value].
+            let (dst_reg, obj_reg, name_sid, value_reg) = if is_get {
+                let Some(d) = read_reg(&mut idx) else {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                };
+                let Some(o) = read_reg(&mut idx) else {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                };
+                let Some(n) = decode_varint(&mut idx) else {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                };
+                (Some(d), o, n as u32, None)
+            } else {
+                let Some(o) = read_reg(&mut idx) else {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                };
+                let Some(n) = decode_varint(&mut idx) else {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                };
+                let Some(v) = read_reg(&mut idx) else {
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    return Ok(());
+                };
+                (None, o, n as u32, Some(v))
+            };
+            // Resolve field index: name string + receiver's static type.
+            let resolved_idx: Option<u32> =
+                resolve_named_field_index(ctx, obj_reg, name_sid);
+            match (resolved_idx, dst_reg, value_reg) {
+                (Some(fidx), Some(d), None) => {
+                    lower_get_field(ctx, Reg(d), Reg(obj_reg), fidx)
+                }
+                (Some(fidx), None, Some(v)) => {
+                    lower_set_field(ctx, Reg(obj_reg), fidx, Reg(v))
+                }
+                _ => {
+                    // Receiver type unknown at lowering — loud, not silent.
+                    ctx.emit_unimplemented_sub_op("Extended", sub_op);
+                    Ok(())
+                }
+            }
         }
         Some(ExtendedSubOpcode::ProcessExit) => {
             if operands.is_empty() {
@@ -33260,6 +33406,14 @@ fn lower_gpu_extended<'ctx>(
 // ====================================================================
 
 fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
+    // Sticky VBC-authored type hints follow the value through Mov —
+    // the codegen hints the PRODUCING register (a GetF temp), while
+    // consumers (lower_ref is_heap_type, CallM receiver typing) see
+    // the post-Mov binding register (task #22 leg 2: the tuple-elem
+    // hint on reg3 never reached `&halves.0`'s Ref on reg5).
+    if let Some(hint) = ctx.sticky_type_hint(src.0).map(|s| s.to_string()) {
+        ctx.set_sticky_type_hint(dst.0, hint);
+    }
     let value = ctx.get_register(src.0)?;
     ctx.set_register(dst.0, value);
     // Ownership transfer for heap-owned text: MOV is a move, not a copy.

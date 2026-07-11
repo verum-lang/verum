@@ -299,8 +299,24 @@ pub trait OptionExt<T> {
 
 impl<T> OptionExt<T> for Option<T> {
     #[inline]
+    #[track_caller]
     fn or_internal(self, msg: &str) -> Result<T> {
-        self.ok_or_else(|| LlvmLoweringError::Internal(msg.into()))
+        // #[track_caller] resolves before the closure captures it.
+        let loc = std::panic::Location::caller();
+        self.ok_or_else(move || {
+            // VERUM_TRACE_INTERNAL_ERR=<substr>: name the CALLER
+            // (file:line) of a matching internal error. The error
+            // surfaces as a whole-module "Failed to lower VBC" with NO
+            // location ("missing param 1" had 90+ candidate sites);
+            // release-build backtraces are unsymbolized, track_caller
+            // is exact and free.
+            if let Ok(filter) = std::env::var("VERUM_TRACE_INTERNAL_ERR")
+                && msg.contains(&filter)
+            {
+                eprintln!("[internal-err] '{}' at {}:{}", msg, loc.file(), loc.line());
+            }
+            LlvmLoweringError::Internal(msg.into())
+        })
     }
 
     #[inline]
