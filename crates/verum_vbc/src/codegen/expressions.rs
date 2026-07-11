@@ -18646,6 +18646,13 @@ impl VbcCodegen {
         // at AOT, interp fine). The typechecker DOES know the element
         // type here — ship it through the sticky register_type_hints
         // channel so `is_heap_type` passes the pointer through.
+        if std::env::var_os("VERUM_TRACE_TUPHINT").is_some() {
+            eprintln!(
+                "[tuphint] idx={} base_ty={:?}",
+                index,
+                self.extract_expr_type_name(base)
+            );
+        }
         if let Some(tuple_ty) = self.extract_expr_type_name(base) {
             // Tuple types render as "(A, B)" — extract_inner_types only
             // parses the generic "<...>" form, so split the parenthesized
@@ -21822,9 +21829,16 @@ impl VbcCodegen {
                 None
             }
             // Index expression: tokens[i] → element type of the collection
-            ExprKind::Index { expr: base, .. } => {
+            ExprKind::Index { expr: base, index } => {
                 let base_type = self.extract_expr_type_name(base)?;
-                Self::extract_element_type(&base_type)
+                // RANGE-INDEX-SLICE-TYPE-1 (#40): range index = slice of
+                // the base's elements — see the infer_expr_type_name arm.
+                if matches!(index.kind, ExprKind::Range { .. }) {
+                    let elem = Self::extract_element_type(&base_type)?;
+                    Some(format!("&[{}]", elem))
+                } else {
+                    Self::extract_element_type(&base_type)
+                }
             }
             // Try (?) expression: unwrap Result<T, E> → T or Maybe<T> → T
             ExprKind::Try(inner) => {
@@ -22938,9 +22952,22 @@ impl VbcCodegen {
                 None
             }
             // Index expression: tokens[i] → element type of the collection
-            ExprKind::Index { expr: base, .. } => {
+            ExprKind::Index { expr: base, index } => {
                 let base_type = self.infer_expr_type_name(base)?;
-                Self::extract_element_type(&base_type)
+                // RANGE-INDEX-SLICE-TYPE-1 (#40): `xs[..]` / `xs[a..b]`
+                // yields a SLICE of the base's elements, NOT an element.
+                // Pre-fix this arm returned "Int" for `&xs[..]`, the
+                // for-in classifier saw a non-slice non-builtin name and
+                // desugared to the custom-iterator `CallM "next"` form —
+                // against a bare FatRef receiver (no cursor state) —
+                // which dereferenced the FAT_REF_MARKER bits (SIGSEGV).
+                // Mirrored in `extract_expr_type_name`.
+                if matches!(index.kind, ExprKind::Range { .. }) {
+                    let elem = Self::extract_element_type(&base_type)?;
+                    Some(format!("&[{}]", elem))
+                } else {
+                    Self::extract_element_type(&base_type)
+                }
             }
             // Try (?) expression: unwrap Result<T, E> → T or Maybe<T> → T
             ExprKind::Try(inner) => {
