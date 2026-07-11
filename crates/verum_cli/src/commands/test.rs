@@ -22,7 +22,9 @@
 //! # Options modelled on libtest / `cargo test`
 //!
 
-//! * `--filter STR` — substring match on test name
+//! * `--filter STR` — substring match on test name; a leading `^`
+//!   anchors at the name start (`--filter '^text/'` scopes to the
+//!   `text/` subtree without catching `context/`)
 //! * `--exact` — require full match (like libtest `--exact`)
 //! * `--skip PATTERN` — substring-exclude; repeatable
 //! * `--include-ignored` — run all, including `@ignore`
@@ -273,12 +275,20 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     let ignored_count = filtered.iter().filter(|t| t.ignored).count();
 
     if !quiet {
+        // Banner reports the EFFECTIVE worker count — `--test-threads 1`
+        // previously still printed `parallel=true`, which mis-attributed
+        // set-only crashes to parallelism during triage (task #40).
+        let effective_threads = if manifest.test.parallel {
+            opts.test_threads.unwrap_or_else(num_cpus::get).max(1)
+        } else {
+            1
+        };
         ui::output(&format!(
-            "running {} test{} (tier={}, parallel={})",
+            "running {} test{} (tier={}, threads={})",
             active.len(),
             if active.len() == 1 { "" } else { "s" },
             opts.tier.as_str(),
-            manifest.test.parallel,
+            effective_threads,
         ));
     }
 
@@ -577,7 +587,20 @@ fn matches_filter(name: &Text, filter: &Option<Text>, exact: bool) -> bool {
     match filter {
         None => true,
         Some(f) if exact => name.as_str() == f.as_str(),
-        Some(f) => name.as_str().contains(f.as_str()),
+        // FILTER-ANCHOR-1 (task #40): a leading `^` anchors the filter at
+        // the NAME START (prefix match).  Plain substring matching cannot
+        // scope a run to the `text/` subtree at all — `--filter text/`
+        // also matches every `co**ntext/**` test, and there is NO safe
+        // substring spelling for such tree pairs (`text/mod/unit` ⊂
+        // `context/mod/unit`).  A broken foreign suite pulled in this way
+        // aborts the whole run under panic=abort, which cost the
+        // 2026-07-10 text campaign four separate collisions.
+        // `--filter '^text/'` now does what the subtree-scoping doc
+        // always promised.
+        Some(f) => match f.as_str().strip_prefix('^') {
+            Some(prefix) => name.as_str().starts_with(prefix),
+            None => name.as_str().contains(f.as_str()),
+        },
     }
 }
 
@@ -1941,8 +1964,10 @@ struct Test {
 ///
 /// Qualification makes test names unique across directories (two
 /// `unit_test.vr` files in different folders no longer collapse to the
-/// same `unit_test::fn` name) and lets `--filter mem/` or
-/// `--filter mem/capability/` scope a run to a subtree. The function leaf
+/// same `unit_test::fn` name) and lets `--filter '^mem/'` or
+/// `--filter '^mem/capability/'` scope a run to a subtree (the `^`
+/// anchor is REQUIRED for true subtree scoping — bare `mem/` is a
+/// substring and also matches any `*mem/` elsewhere in the tree). The function leaf
 /// still follows the final `::`, so `--filter <fn>` and function
 /// resolution (which prefers `Test::fn_name`) are unaffected.
 fn module_qualified_prefix(file: &Path) -> String {
