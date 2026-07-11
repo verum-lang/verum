@@ -26698,7 +26698,18 @@ impl VbcCodegen {
         let intrinsic_info = match lookup_intrinsic(intrinsic_name) {
             Some(info) => info,
             None => {
-                // Intrinsic not found - load nil as fallback
+                // Intrinsic not found. The nil fallback keeps deliberate
+                // not-yet-implemented host subsystems (verum.tls.*,
+                // verum.k8s.*, …) compiling, but an unregistered name in
+                // a LIVE code path silently returns nil — the class that
+                // left checked_add_u destructuring a nil tuple. Warn at
+                // bake so the miss is visible instead of silent
+                // (tech-debt register C3).
+                tracing::warn!(
+                    "[intrinsic] unregistered @intrinsic(\"{}\") in {} — lowering to LoadNil (silent nil at runtime); register it or reroute to a registered name",
+                    intrinsic_name,
+                    self.ctx.current_function.as_deref().unwrap_or("<top-level>"),
+                );
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
                 return Ok(Some(dest));
             }
