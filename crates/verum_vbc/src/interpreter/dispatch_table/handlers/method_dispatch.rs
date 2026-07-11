@@ -2364,7 +2364,26 @@ pub(in super::super) fn handle_call_method(
                         let parent_compatible = if receiver_is_primitive {
                             // Non-pointer receiver: the method must
                             // either be free-fn-shaped (parent_type ==
-                            // None) or registered on a primitive type.
+                            // None) or registered on a primitive type
+                            // WHOSE NaN-BOX CLASS MATCHES THE RECEIVER'S
+                            // (DYN-MISS-LOUD-1 / task #43).  The pre-fix
+                            // gate accepted ANY primitive parent, so an
+                            // Int-boxed receiver executed
+                            // `Text.fmt_debug` (rendering quoted-empty)
+                            // and a Text receiver executed
+                            // `Byte.to_ascii_uppercase` (returning the
+                            // input unchanged) — wrong-type bodies
+                            // running on foreign receivers, silently.
+                            // Class groups follow the value model:
+                            // Int-box carries every integer width AND
+                            // Char (Char NaN-boxes as Int; width-punned
+                            // values legitimately cross integer parents);
+                            // Text / Float / Bool / Unit stand alone.
+                            // With the gate, an all-candidates reject
+                            // falls through to the existing rich
+                            // "method not found" panic — loud, not a
+                            // silent wrong answer.  Kill-switch for
+                            // triage sweeps: VERUM_SUFFIX_COMPAT_LEGACY=1.
                             match func.parent_type {
                                 None => true,
                                 Some(tid) => match state.module.get_type(tid) {
@@ -2374,16 +2393,50 @@ pub(in super::super) fn handle_call_method(
                                             .strings
                                             .get(td.name)
                                             .unwrap_or("");
-                                        matches!(
-                                            tname,
-                                            "Int" | "Bool" | "Float"
-                                                | "Float32" | "Float64"
-                                                | "Byte" | "Char" | "UInt8"
-                                                | "UInt16" | "UInt32"
-                                                | "UInt64" | "Int8" | "Int16"
-                                                | "Int32" | "Int64" | "Text"
-                                                | "Unit"
-                                        )
+                                        if std::env::var("VERUM_SUFFIX_COMPAT_LEGACY").is_ok() {
+                                            matches!(
+                                                tname,
+                                                "Int" | "Bool" | "Float"
+                                                    | "Float32" | "Float64"
+                                                    | "Byte" | "Char" | "UInt8"
+                                                    | "UInt16" | "UInt32"
+                                                    | "UInt64" | "Int8" | "Int16"
+                                                    | "Int32" | "Int64" | "Text"
+                                                    | "Unit"
+                                            )
+                                        } else if dispatch_receiver.is_small_string()
+                                            || is_heap_string(&dispatch_receiver)
+                                        {
+                                            tname == "Text"
+                                        } else if dispatch_receiver.is_int() {
+                                            matches!(
+                                                tname,
+                                                "Int" | "Byte" | "Char"
+                                                    | "UInt8" | "UInt16"
+                                                    | "UInt32" | "UInt64"
+                                                    | "Int8" | "Int16"
+                                                    | "Int32" | "Int64"
+                                            )
+                                        } else if dispatch_receiver.is_float() {
+                                            matches!(tname, "Float" | "Float32" | "Float64")
+                                        } else if dispatch_receiver.is_bool() {
+                                            tname == "Bool"
+                                        } else if dispatch_receiver.is_unit() {
+                                            tname == "Unit"
+                                        } else {
+                                            // Unclassifiable non-pointer shape —
+                                            // preserve the historic permissive set.
+                                            matches!(
+                                                tname,
+                                                "Int" | "Bool" | "Float"
+                                                    | "Float32" | "Float64"
+                                                    | "Byte" | "Char" | "UInt8"
+                                                    | "UInt16" | "UInt32"
+                                                    | "UInt64" | "Int8" | "Int16"
+                                                    | "Int32" | "Int64" | "Text"
+                                                    | "Unit"
+                                            )
+                                        }
                                     }
                                     None => true, // unregistered TypeId — preserve historic behaviour
                                 },
@@ -3780,6 +3833,16 @@ pub(super) fn dispatch_primitive_method(
         }
 
         let inner_val = state.registers.get_absolute(abs_index);
+        // SELF-REFERENTIAL REF GUARD (#48 residual): a corrupted slot
+        // holding a ref to ITSELF (observed on the DebugList path:
+        // receiver bits == slot bits) recursed this dispatcher until the
+        // native stack guard page (SIGBUS killing the whole poll suite).
+        // Fail soft to the name-walk fallback instead — the corruption
+        // upstream stays visible as a diagnosable method-miss, not a
+        // process death.
+        if inner_val.to_bits() == receiver.to_bits() {
+            return Ok(None);
+        }
         if inner_val.is_ptr() && !inner_val.is_nil() {
             // The inner value is a pointer - dispatch pointer methods on it
             return dispatch_primitive_method(state, &inner_val, method, args);

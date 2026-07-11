@@ -5224,7 +5224,13 @@ impl VbcCodegen {
         };
         let (resolved_name, func_info) = match module_qualified_lookup
             .filter(|(_, info)| is_free_fn(info))
-            .or_else(|| type_aware_lookup)
+            // The pinned rule above applies to EVERY layer: the
+            // type-aware overload scan walks qualified `.name` keys and
+            // was returning impl INSTANCE methods for bare-name calls —
+            // `take(&v0)` bound a stdlib `X.take(self)` (emitted as
+            // CallM) while the user's own free `fn take` sat unused on
+            // the bare key (task #20).
+            .or_else(|| type_aware_lookup.filter(|(_, info)| is_free_fn(info)))
             .or_else(|| {
                 self.ctx
                     .lookup_function_with_arity_in_scope(&func_name, args.len())
@@ -18582,6 +18588,63 @@ impl VbcCodegen {
             obj: base_reg,
             field_idx: index,
         });
+
+        // TUPLE-ELEM-HEAP-HINT (task #22 leg 2): tuples carry no VBC type
+        // descriptor, so the AOT lowering cannot recover the element's
+        // type from metadata — an untyped heap element (List/Map/Text/…)
+        // then takes `lower_ref`'s ref_prim SPILL when the user writes
+        // `&halves.0`, and the callee reads list fields through a stack
+        // slot address (probe_lref2: `zq_inner(&halves.0)` → 0/garbage
+        // at AOT, interp fine). The typechecker DOES know the element
+        // type here — ship it through the sticky register_type_hints
+        // channel so `is_heap_type` passes the pointer through.
+        if let Some(tuple_ty) = self.extract_expr_type_name(base) {
+            // Tuple types render as "(A, B)" — extract_inner_types only
+            // parses the generic "<...>" form, so split the parenthesized
+            // form at top-level commas ourselves.
+            let inner: Vec<String> = if tuple_ty.starts_with('(') && tuple_ty.ends_with(')') {
+                let body = &tuple_ty[1..tuple_ty.len() - 1];
+                let mut parts = Vec::new();
+                let mut depth = 0usize;
+                let mut cur = String::new();
+                for ch in body.chars() {
+                    match ch {
+                        '<' | '(' | '[' => {
+                            depth += 1;
+                            cur.push(ch);
+                        }
+                        '>' | ')' | ']' => {
+                            depth = depth.saturating_sub(1);
+                            cur.push(ch);
+                        }
+                        ',' if depth == 0 => {
+                            parts.push(cur.trim().to_string());
+                            cur.clear();
+                        }
+                        _ => cur.push(ch),
+                    }
+                }
+                if !cur.trim().is_empty() {
+                    parts.push(cur.trim().to_string());
+                }
+                parts
+            } else {
+                self.extract_inner_types(&tuple_ty)
+            };
+            if let Some(elem_ty) = inner.get(index as usize) {
+                let elem_base = elem_ty.split('<').next().unwrap_or(elem_ty);
+                let is_heap_shaped = !matches!(
+                    elem_base,
+                    "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
+                        | "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                        | "UInt128" | "USize" | "ISize" | "Byte" | "Bool"
+                        | "Char" | "Float" | "Float32" | "Float64" | "Unit"
+                );
+                if is_heap_shaped {
+                    self.ctx.add_register_type_hint(result.0, elem_ty.clone());
+                }
+            }
+        }
 
         self.ctx.free_temp(base_reg);
         Ok(Some(result))
