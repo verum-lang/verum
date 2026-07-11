@@ -95,6 +95,12 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
         // already converts the archive's `method_id` to a codegen-
         // local StringId; this pass should leave it alone.
         Instruction::CallM { .. } => {}
+        // FIELD-ACCESS-BYNAME-1: `name` is a STRING id (field name) —
+        // exactly the CallM.method_id lifecycle: rebased by
+        // `remap_archive_string_operands` / build_module, NOT by this
+        // pass. Explicit no-op arm so a future id-space here is a
+        // conscious decision, not catch-all drift.
+        Instruction::GetFieldNamed { .. } | Instruction::SetFieldNamed { .. } => {}
         // --- Type table index ---
         Instruction::New { type_id, .. }
         | Instruction::NewG { type_id, .. }

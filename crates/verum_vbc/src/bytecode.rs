@@ -2417,6 +2417,24 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(*field_count as u64, output);
         }
 
+        // FIELD-ACCESS-BYNAME-1 — runtime-resolved field access.
+        // Wire formats mirror the Tier-0 stream readers in
+        // `dispatch_table/handlers/extended.rs` exactly.
+        Instruction::GetFieldNamed { dst, obj, name } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::GetFieldNamed.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*obj, output);
+            encode_varint(*name as u64, output);
+        }
+        Instruction::SetFieldNamed { obj, name, value } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::SetFieldNamed.to_byte());
+            encode_reg(*obj, output);
+            encode_varint(*name as u64, output);
+            encode_reg(*value, output);
+        }
+
         Instruction::SetVariantData {
             variant,
             field,
@@ -4990,6 +5008,23 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         tag,
                         field_count,
                     })
+                }
+                // FIELD-ACCESS-BYNAME-1 — structural decode so the
+                // string-id remap boundaries (build_module,
+                // archive-load) and the Tier-1 lowering see the typed
+                // variant; `name` is a STRING id and must survive
+                // every string-table rebase.
+                Some(ExtendedSubOpcode::GetFieldNamed) => {
+                    let dst = decode_reg(data, offset)?;
+                    let obj = decode_reg(data, offset)?;
+                    let name = decode_varint(data, offset)? as u32;
+                    Ok(Instruction::GetFieldNamed { dst, obj, name })
+                }
+                Some(ExtendedSubOpcode::SetFieldNamed) => {
+                    let obj = decode_reg(data, offset)?;
+                    let name = decode_varint(data, offset)? as u32;
+                    let value = decode_reg(data, offset)?;
+                    Ok(Instruction::SetFieldNamed { obj, name, value })
                 }
                 // ProcessExit (0x10) carries one register operand (the
                 // i64 exit code), encoded with the standard short/long

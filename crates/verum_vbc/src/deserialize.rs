@@ -1702,7 +1702,11 @@ mod tests {
  let mut bytes = serialize_module(&module).unwrap();
  // Header layout: magic(4) + version_major u16(2) + version_minor u16(2) ...
  // Patch version_minor (LE u16 at offset 6) down to 1.
- assert_eq!(crate::format::VERSION_MINOR, 2, "test assumes current minor is 2");
+ // Writer must include the hints section (present since minor 2);
+ // do NOT pin the exact current minor — the gate under test is
+ // "patched minor<=1 skips the section", which holds for any
+ // writer version >= 2.
+ assert!(crate::format::VERSION_MINOR >= 2, "hints section requires minor >= 2");
  bytes[6] = 1;
  bytes[7] = 0;
  let loaded = deserialize_module(&bytes).unwrap();

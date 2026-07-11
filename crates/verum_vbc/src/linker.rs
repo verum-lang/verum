@@ -1340,6 +1340,7 @@ mod tests {
             intrinsic_name: None,
             is_const: false,
             register_type_hints: Vec::new(),
+            return_type_name: None,
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");

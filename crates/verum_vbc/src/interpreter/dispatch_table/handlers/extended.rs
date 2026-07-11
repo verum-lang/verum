@@ -149,6 +149,47 @@ pub(in super::super) fn handle_extended(
             state.pending_call_witness = Some(type_args.into_boxed_slice());
             Ok(DispatchResult::Continue)
         }
+        // FIELD-ACCESS-BYNAME-1 (task #42, phase 1): runtime-resolved
+        // field READ.  The receiver's RUNTIME TypeDescriptor is the
+        // authority; the field position is found by comparing field-name
+        // STRINGS (StringId numerics across tables are unrelated — the
+        // RETNAME-CARRY lesson).  A miss is a LOUD panic naming
+        // type+field — never a guessed slot (the codegen-side most-fields
+        // guess this instruction retires read 40 bytes into a 16-byte
+        // BigInt).  Stream operands: dst:reg, obj:reg, name:varint(StringId).
+        Some(ExtendedSubOpcode::GetFieldNamed) => {
+            let dst = read_reg(state)?;
+            let obj = read_reg(state)?;
+            let name_sid = read_varint(state)? as u32;
+            let obj_val = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(obj));
+            let (tid, base_ptr) = field_named_object(state, obj_val, "GetFieldNamed")?;
+            let idx = field_named_index(&state.module, tid, name_sid, "GetFieldNamed")?;
+            let value = unsafe {
+                *(base_ptr.add(
+                    super::super::super::heap::OBJECT_HEADER_SIZE + idx * 8,
+                ) as *const crate::value::Value)
+            };
+            state.set_reg(dst, value);
+            Ok(DispatchResult::Continue)
+        }
+        // FIELD-ACCESS-BYNAME-1: runtime-resolved field WRITE.
+        // Stream operands: obj:reg, name:varint(StringId), value:reg.
+        Some(ExtendedSubOpcode::SetFieldNamed) => {
+            let obj = read_reg(state)?;
+            let name_sid = read_varint(state)? as u32;
+            let value_reg = read_reg(state)?;
+            let obj_val = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(obj));
+            let (tid, base_ptr) = field_named_object(state, obj_val, "SetFieldNamed")?;
+            let idx = field_named_index(&state.module, tid, name_sid, "SetFieldNamed")?;
+            let value = state.get_reg(value_reg);
+            unsafe {
+                *(base_ptr.add(
+                    super::super::super::heap::OBJECT_HEADER_SIZE + idx * 8,
+                ) as *mut crate::value::Value) = value;
+            }
+            state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::MakeVariantTyped) => {
             // Wire format: `reg:dst + varint:type_id + varint:tag +
             // varint:field_count`.
@@ -435,6 +476,65 @@ pub(in super::super) fn handle_extended(
     }
 }
 
+/// FIELD-ACCESS-BYNAME-1 shared resolver: the object's header pointer and
+/// TypeId, with a loud typed error for every non-object shape.
+fn field_named_object(
+    state: &InterpreterState,
+    obj_val: crate::value::Value,
+    op: &str,
+) -> InterpreterResult<(crate::types::TypeId, *const u8)> {
+    if !obj_val.is_ptr() || obj_val.is_nil() {
+        return Err(InterpreterError::Panic {
+            message: format!(
+                "{}: receiver is not a heap object (kind={})",
+                op,
+                if obj_val.is_nil() { "nil" } else { "non-pointer" },
+            ),
+        });
+    }
+    let ptr = obj_val.as_ptr::<u8>();
+    let header = unsafe { super::super::super::heap::ObjectHeader::ref_or_stub(ptr) };
+    Ok((header.type_id, ptr))
+}
+
+/// FIELD-ACCESS-BYNAME-1 shared resolver: positional index of the field
+/// named by `name_sid` in `tid`'s descriptor.  STRING comparison only —
+/// numeric StringId equality across tables is meaningless.  Loud miss.
+fn field_named_index(
+    module: &crate::module::VbcModule,
+    tid: crate::types::TypeId,
+    name_sid: u32,
+    op: &str,
+) -> InterpreterResult<usize> {
+    let want = module
+        .strings
+        .get(crate::types::StringId(name_sid))
+        .unwrap_or("");
+    if want.is_empty() {
+        return Err(InterpreterError::Panic {
+            message: format!("{}: field-name StringId {} unresolvable", op, name_sid),
+        });
+    }
+    let td = module.get_type(tid).ok_or_else(|| InterpreterError::Panic {
+        message: format!(
+            "{}: no TypeDescriptor for runtime type_id={} (field '{}')",
+            op, tid.0, want
+        ),
+    })?;
+    for (idx, fd) in td.fields.iter().enumerate() {
+        if module.strings.get(fd.name) == Some(want) {
+            return Ok(idx);
+        }
+    }
+    let tname = module.strings.get(td.name).unwrap_or("?");
+    Err(InterpreterError::Panic {
+        message: format!(
+            "{}: type '{}' (id={}) has no field named '{}' — runtime by-name resolution is authoritative and refuses to guess",
+            op, tname, tid.0, want
+        ),
+    })
+}
+
 #[cfg(test)]
 mod make_variant_typed_validation_tests {
     use super::*;
@@ -591,5 +691,65 @@ mod make_variant_typed_validation_tests {
         let module = VbcModule::new("builtin_bypass".to_string());
         validate_make_variant_typed(&module, TypeId::INT, 999, 999).expect("builtin bypass");
         validate_make_variant_typed(&module, TypeId::BOOL, 0, 0).expect("builtin bypass");
+    }
+
+    #[test]
+    fn field_named_index_resolves_by_string_and_misses_loudly() {
+        use crate::types::{StringId, TypeDescriptor, TypeId, TypeKind};
+        let mut module = VbcModule::new("byname".to_string());
+        let tname = module.intern_string("BigIntLike");
+        let f_sign = module.intern_string("sign");
+        let f_digits = module.intern_string("digits");
+        let f_missing = module.intern_string("no_such_field");
+        let mk_field = |name: StringId, off: u32| crate::types::FieldDescriptor {
+            name,
+            type_ref: crate::types::TypeRef::Concrete(TypeId::BOOL),
+            offset: off,
+            visibility: crate::types::Visibility::Public,
+            refinement_src: StringId::EMPTY,
+            refinement_binding: StringId::EMPTY,
+        };
+        let td = TypeDescriptor {
+            id: TypeId(4000),
+            name: tname,
+            kind: TypeKind::Record,
+            type_params: smallvec::SmallVec::new(),
+            fields: smallvec::smallvec![mk_field(f_sign, 0), mk_field(f_digits, 8)],
+            variants: smallvec::SmallVec::new(),
+            size: 16,
+            alignment: 8,
+            drop_fn: None,
+            clone_fn: None,
+            protocols: smallvec::SmallVec::new(),
+            visibility: crate::types::Visibility::Public,
+            alias_target: None,
+            is_transparent_wrapper: false,
+        };
+        module.add_type(td);
+        // Runtime objects carry the descriptor's `id` field in their
+        // header (get_type matches on it), NOT add_type's positional
+        // return — mirror that here.
+        let tid = TypeId(4000);
+
+        // FIELD-ACCESS-BYNAME-1 core contract: resolution is POSITIONAL
+        // by STRING comparison against the runtime descriptor…
+        assert_eq!(
+            field_named_index(&module, tid, f_sign.0, "test").unwrap(),
+            0
+        );
+        assert_eq!(
+            field_named_index(&module, tid, f_digits.0, "test").unwrap(),
+            1
+        );
+        // …and a miss is a LOUD typed error naming type+field — never a
+        // guessed slot (the class this instruction retires guessed
+        // PgNumeric.digits@4 into a 2-field BigInt).
+        let err = field_named_index(&module, tid, f_missing.0, "test").unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("BigIntLike"), "message names the type: {}", msg);
+        assert!(msg.contains("no_such_field"), "message names the field: {}", msg);
+        // Unknown type id is equally loud.
+        let err2 = field_named_index(&module, TypeId(4999), f_sign.0, "test").unwrap_err();
+        assert!(format!("{:?}", err2).contains("4999"));
     }
 }

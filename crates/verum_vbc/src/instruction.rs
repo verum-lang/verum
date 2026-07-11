@@ -10771,6 +10771,18 @@ pub enum ExtendedSubOpcode {
     /// Compile + run a named entry (not `main`): host calls a script function.
     /// `[0x1F][0x57][reg:dst][reg:engine][reg:source][reg:fn_name]`.
     ScriptEngineCall = 0x57,
+    /// FIELD-ACCESS-BYNAME-1 (task #42): runtime-resolved field READ.
+    /// Stream operands: dst:reg, obj:reg, name:varint(StringId).
+    /// Resolves the field POSITION against the receiver's RUNTIME
+    /// TypeDescriptor by comparing field-name STRINGS — the sound
+    /// replacement for codegen's global most-fields index GUESS when
+    /// the static type is unknown (D2 read 40 bytes into a 16-byte
+    /// BigInt via a guessed index).  Emission lands in phase 2; a
+    /// resolution miss is a LOUD panic naming type+field.
+    GetFieldNamed = 0x03,
+    /// FIELD-ACCESS-BYNAME-1: runtime-resolved field WRITE.
+    /// Stream operands: obj:reg, name:varint(StringId), value:reg.
+    SetFieldNamed = 0x04,
     /// Named entry call with positional args from a list.
     /// `[0x1F][0x58][reg:dst][reg:engine][reg:source][reg:fn_name][reg:args]`.
     ScriptEngineCallArgs = 0x58,
@@ -10861,6 +10873,8 @@ impl ExtendedSubOpcode {
             0x55 => Some(Self::ScriptSetList),
             0x56 => Some(Self::ScriptSetMap),
             0x57 => Some(Self::ScriptEngineCall),
+            0x03 => Some(Self::GetFieldNamed),
+            0x04 => Some(Self::SetFieldNamed),
             0x58 => Some(Self::ScriptEngineCallArgs),
             0x59 => Some(Self::ScriptEngineLink2),
             0x5A => Some(Self::ScriptSessionCall),
@@ -10885,6 +10899,8 @@ impl ExtendedSubOpcode {
             Self::Reserved => "EXT_RESERVED",
             Self::MakeVariantTyped => "EXT_MAKE_VARIANT_TYPED",
             Self::SetCallWitness => "EXT_SET_CALL_WITNESS",
+            Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
+            Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
             Self::ScriptEngineNew => "EXT_SCRIPT_ENGINE_NEW",
             Self::ScriptEngineFree => "EXT_SCRIPT_ENGINE_FREE",
@@ -12591,6 +12607,39 @@ pub enum Instruction {
         tag: u32,
         /// Number of payload fields to allocate space for.
         field_count: u32,
+    },
+    /// `ExtendedSubOpcode::GetFieldNamed = 0x03` (FIELD-ACCESS-BYNAME-1).
+    /// Wire format: `[0x1F][0x03][reg:dst][reg:obj][varint:name]`.
+    ///
+
+    /// Runtime-resolved field READ: the receiver's RUNTIME
+    /// TypeDescriptor is the authority; the field position is found by
+    /// comparing field-name STRINGS against the module type table. A
+    /// miss is a LOUD typed error naming type+field — never a guessed
+    /// slot. Emitted ONLY where static resolution would otherwise
+    /// GUESS (position-disagreeing multi-candidate / global-intern
+    /// fallback). Tier-1 lowers this as a closed-world switch over the
+    /// module's candidate type-ids (same authority, partial-evaluated).
+    GetFieldNamed {
+        /// Destination register for field value.
+        dst: Reg,
+        /// Object register.
+        obj: Reg,
+        /// Field name as a STRING id (module string table — the
+        /// `CallM.method_id` precedent: NOT a func-id, NOT a field
+        /// index; remapped at every string-table boundary).
+        name: u32,
+    },
+    /// `ExtendedSubOpcode::SetFieldNamed = 0x04` (FIELD-ACCESS-BYNAME-1).
+    /// Wire format: `[0x1F][0x04][reg:obj][varint:name][reg:value]`.
+    /// Runtime-resolved field WRITE — see `GetFieldNamed`.
+    SetFieldNamed {
+        /// Object register.
+        obj: Reg,
+        /// Field name as a STRING id (see `GetFieldNamed::name`).
+        name: u32,
+        /// Value register to store.
+        value: Reg,
     },
     /// Set variant data field.
     SetVariantData {

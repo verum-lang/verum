@@ -3158,12 +3158,9 @@ impl VbcCodegen {
                     self.emit_field_refinement_assert(value_reg, bt, &field.name);
                 }
 
-                let field_idx = self.resolve_field_index(base_type.as_deref(), &field.name);
-                self.ctx.emit(Instruction::SetF {
-                    obj: base_reg,
-                    field_idx,
-                    value: value_reg,
-                });
+                let (field_idx, idx_guessed) =
+                    self.resolve_field_index_flagged(base_type.as_deref(), &field.name);
+                self.emit_field_write(base_reg, field_idx, value_reg, idx_guessed, &field.name);
 
                 self.ctx.free_temp(base_reg);
                 self.ctx.free_temp(value_reg);
@@ -3520,13 +3517,13 @@ impl VbcCodegen {
 
                 // Get current field value
                 let field_name = &field.name;
-                let field_idx = self.resolve_field_index(obj_type.as_deref(), field_name);
+                let (field_idx, idx_guessed) =
+                    self.resolve_field_index_flagged(obj_type.as_deref(), field_name);
                 let current_val = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::GetF {
-                    dst: current_val,
-                    obj: obj_reg,
-                    field_idx,
-                });
+                {
+                    let fname = field_name.clone();
+                    self.emit_field_read(current_val, obj_reg, field_idx, idx_guessed, &fname);
+                }
 
                 // Evaluate right side
                 let right_reg = self
@@ -3610,11 +3607,10 @@ impl VbcCodegen {
                 }
 
                 // Store back to field
-                self.ctx.emit(Instruction::SetF {
-                    obj: obj_reg,
-                    field_idx,
-                    value: result,
-                });
+                {
+                    let fname = field.name.clone();
+                    self.emit_field_write(obj_reg, field_idx, result, idx_guessed, &fname);
+                }
 
                 self.ctx.free_temp(current_val);
                 self.ctx.free_temp(right_reg);
@@ -18516,7 +18512,8 @@ impl VbcCodegen {
         let base_type = current_base_type;
 
         let result = self.ctx.alloc_temp();
-        let field_idx = self.resolve_field_index(base_type.as_deref(), field);
+        let (field_idx, idx_guessed) =
+            self.resolve_field_index_flagged(base_type.as_deref(), field);
 
         if std::env::var("VERUM_DEBUG_FA2").is_ok() {
             let fn_name = self.ctx.current_function.as_deref().unwrap_or("?");
@@ -18543,11 +18540,10 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        self.ctx.emit(Instruction::GetF {
-            dst: result,
-            obj: base_reg,
-            field_idx,
-        });
+        {
+            let fname = field.to_string();
+            self.emit_field_read(result, base_reg, field_idx, idx_guessed, &fname);
+        }
 
         // Raw-pointer-flag propagation through field access.
         //
@@ -24635,13 +24631,13 @@ impl VbcCodegen {
                 None
             }
         });
-        let field_idx = self.resolve_field_index(inner_type.as_deref(), field_name);
+        let (field_idx, idx_guessed) =
+            self.resolve_field_index_flagged(inner_type.as_deref(), field_name);
         let field_value = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::GetF {
-            dst: field_value,
-            obj: inner_reg,
-            field_idx,
-        });
+        {
+            let fname = field_name.to_string();
+            self.emit_field_read(field_value, inner_reg, field_idx, idx_guessed, &fname);
+        }
         self.ctx.free_temp(inner_reg);
 
         // Wrap result in Some. Routed through the typed-or-legacy

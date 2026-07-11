@@ -15632,7 +15632,23 @@ impl VbcCodegen {
     }
 
     fn resolve_field_index(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
-        let __idx = self.resolve_field_index_impl(type_name, field_name);
+        self.resolve_field_index_flagged(type_name, field_name).0
+    }
+
+    /// FIELD-ACCESS-BYNAME-1: like `resolve_field_index`, but also
+    /// reports whether the returned index is a semantic GUESS — a
+    /// position-DISAGREEING multi-candidate most-fields pick, or the
+    /// global-intern fallback. Field-ACCESS emission sites use the
+    /// flag to switch to runtime by-name instructions
+    /// (`GetFieldNamed`/`SetFieldNamed`) instead of baking a
+    /// potentially wrong offset. Record-LITERAL sites (which define
+    /// the layout they construct) keep the plain resolver.
+    fn resolve_field_index_flagged(
+        &mut self,
+        type_name: Option<&str>,
+        field_name: &str,
+    ) -> (u32, bool) {
+        let (__idx, __guessed) = self.resolve_field_index_impl(type_name, field_name);
         // INSTRUMENTATION (VERUM_TRACE_FIELDSHIFT): pinpoint the cross-module
         // field-index disagreement (CLASS-9 / D2). Logs the (type_name, field,
         // returned idx, fn, src_mod) for every resolution of a watched field.
@@ -15643,17 +15659,77 @@ impl VbcCodegen {
                 let layout = type_name
                     .and_then(|tn| self.type_field_layouts.get(tn).cloned());
                 eprintln!(
-                    "[FIELDSHIFT] resolve('{:?}', '{}') = {} | fn={} src_mod={:?} layout={:?}",
+                    "[FIELDSHIFT] resolve('{:?}', '{}') = {} (guessed={}) | fn={} src_mod={:?} layout={:?}",
                     type_name,
                     field_name,
                     __idx,
+                    __guessed,
                     self.ctx.current_function.as_deref().unwrap_or("?"),
                     self.ctx.current_source_module,
                     layout,
                 );
             }
         }
-        __idx
+        (__idx, __guessed)
+    }
+
+    /// FIELD-ACCESS-BYNAME-1 kill-switch: `VERUM_BYNAME_FIELDS_LEGACY=1`
+    /// restores the legacy positional guess at ACCESS sites (A/B
+    /// attribution on the shared tree; same pattern as
+    /// `VERUM_SETE_LEGACY`). Checked once per process.
+    fn byname_fields_legacy() -> bool {
+        static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *LEGACY.get_or_init(|| std::env::var("VERUM_BYNAME_FIELDS_LEGACY").is_ok())
+    }
+
+    /// FIELD-ACCESS-BYNAME-1: emit a field READ — positional `GetF`
+    /// when the index is trustworthy, runtime by-name `GetFieldNamed`
+    /// when static resolution GUESSED (position-disagreeing
+    /// multi-candidate / global-intern). The runtime TypeDescriptor
+    /// then resolves the position exactly; a miss is a loud typed
+    /// error instead of a wrong-offset read.
+    fn emit_field_read(
+        &mut self,
+        dst: Reg,
+        obj: Reg,
+        field_idx: u32,
+        guessed: bool,
+        field_name: &str,
+    ) {
+        if guessed && !Self::byname_fields_legacy() {
+            let name = self.intern_string(field_name);
+            self.ctx
+                .emit(Instruction::GetFieldNamed { dst, obj, name });
+        } else {
+            self.ctx.emit(Instruction::GetF {
+                dst,
+                obj,
+                field_idx,
+            });
+        }
+    }
+
+    /// FIELD-ACCESS-BYNAME-1: field WRITE counterpart of
+    /// `emit_field_read` — `SetF` vs runtime-resolved `SetFieldNamed`.
+    fn emit_field_write(
+        &mut self,
+        obj: Reg,
+        field_idx: u32,
+        value: Reg,
+        guessed: bool,
+        field_name: &str,
+    ) {
+        if guessed && !Self::byname_fields_legacy() {
+            let name = self.intern_string(field_name);
+            self.ctx
+                .emit(Instruction::SetFieldNamed { obj, name, value });
+        } else {
+            self.ctx.emit(Instruction::SetF {
+                obj,
+                field_idx,
+                value,
+            });
+        }
     }
 
     /// Whether `key` resolves (via descriptor or layout cache) to a
@@ -15723,7 +15799,7 @@ impl VbcCodegen {
         hit.cloned()
     }
 
-    fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
+    fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> (u32, bool) {
         if let Some(tn) = type_name {
             // META-GROUP-XMODULE-1: when the simple name is NOT an
             // authoritative record key (lost the cross-module
@@ -15829,7 +15905,7 @@ impl VbcCodegen {
                     if let Some(fname) = self.ctx.strings.get(fd.name.0 as usize)
                         && fname == field_name
                     {
-                        return idx as u32;
+                        return (idx as u32, false);
                     }
                 }
                 // Fallback ONLY when the descriptor's field-name strings
@@ -15844,7 +15920,7 @@ impl VbcCodegen {
                     if self.ctx.strings.get(fd.name.0 as usize).is_none()
                         && Some(fd.name.0) == field_id
                     {
-                        return idx as u32;
+                        return (idx as u32, false);
                     }
                 }
             }
@@ -15866,7 +15942,7 @@ impl VbcCodegen {
                     self.find_variant_in_type_descriptors(parent, variant)
                     && let Some(pos) = decl.iter().position(|f| f == field_name)
                 {
-                    return pos as u32;
+                    return (pos as u32, false);
                 }
             }
             // Try exact match first
@@ -15882,7 +15958,7 @@ impl VbcCodegen {
                         fields
                     );
                 }
-                return pos as u32;
+                return (pos as u32, false);
             }
             // Try with generic params stripped (e.g., "Slot<K, V>" → "Slot")
             if let Some(angle) = tn.find('<') {
@@ -15900,7 +15976,7 @@ impl VbcCodegen {
                             fields
                         );
                     }
-                    return pos as u32;
+                    return (pos as u32, false);
                 }
             }
             // Try stripping transparent wrappers (Heap<X> → X, Shared<X> → X, &X → X)
@@ -15920,7 +15996,7 @@ impl VbcCodegen {
                             fields
                         );
                     }
-                    return pos as u32;
+                    return (pos as u32, false);
                 }
                 // Try with generic params stripped on the unwrapped type
                 if let Some(angle) = unwrapped.find('<') {
@@ -15938,7 +16014,7 @@ impl VbcCodegen {
                                 fields
                             );
                         }
-                        return pos as u32;
+                        return (pos as u32, false);
                     }
                 }
             }
@@ -15977,7 +16053,7 @@ impl VbcCodegen {
                             pos
                         );
                     }
-                    return pos as u32;
+                    return (pos as u32, false);
                 }
             }
 
@@ -16017,7 +16093,7 @@ impl VbcCodegen {
                         pos
                     );
                 }
-                return pos as u32;
+                return (pos as u32, false);
             }
             if candidates.len() > 1 {
                 // **Task #8 fix 2026-05-24** — scope-aware tie-break.
@@ -16043,7 +16119,7 @@ impl VbcCodegen {
                                     c.1
                                 );
                             }
-                            return c.1 as u32;
+                            return (c.1 as u32, false);
                         }
                     }
                 }
@@ -16058,7 +16134,7 @@ impl VbcCodegen {
                             candidates.len()
                         );
                     }
-                    return first_pos as u32;
+                    return (first_pos as u32, false);
                 }
                 // Ambiguous — pick the candidate with the most fields
                 // (main data structs tend to have more fields than iterators)
@@ -16101,7 +16177,7 @@ impl VbcCodegen {
                         );
                     }
                 }
-                return best.1 as u32;
+                return (best.1 as u32, true);
             }
             if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
                 tracing::debug!(
@@ -16155,7 +16231,9 @@ impl VbcCodegen {
                 );
             }
         }
-        idx
+        // FIELD-ACCESS-BYNAME-1: the global-intern index is
+        // self-consistent but NOT positional — a semantic GUESS.
+        (idx, true)
     }
 
     /// Returns the number of declared fields for a record type.
@@ -18177,6 +18255,19 @@ impl VbcCodegen {
                             *method_id = mapped.0;
                         }
                     }
+                    // FIELD-ACCESS-BYNAME-1: `name` is a STRING id
+                    // (field name) — same codegen-index → module
+                    // StringId rebase as CallM.method_id. Without
+                    // this, the runtime resolves the codegen-local
+                    // index against the final string table and the
+                    // by-name lookup misses (or hits an arbitrary
+                    // string) — the RETNAME-CARRY lesson.
+                    Instruction::GetFieldNamed { name, .. }
+                    | Instruction::SetFieldNamed { name, .. } => {
+                        if let Some(mapped) = string_id_map.get(*name as usize) {
+                            *name = mapped.0;
+                        }
+                    }
                     // Remap protocol_id in CmpG from codegen string index to module StringId.
                     // protocol_id encodes (codegen_string_index + 1), with 0 meaning no protocol.
                     Instruction::CmpG { protocol_id, .. }
@@ -20145,6 +20236,13 @@ impl VbcCodegen {
             Instruction::CallM { method_id, .. } => {
                 let new_id = intern_archive(self, *method_id);
                 *method_id = new_id;
+            }
+            // FIELD-ACCESS-BYNAME-1: field-name string rides the same
+            // archive→codegen intern rebase as CallM.method_id.
+            Instruction::GetFieldNamed { name, .. }
+            | Instruction::SetFieldNamed { name, .. } => {
+                let new_id = intern_archive(self, *name);
+                *name = new_id;
             }
             Instruction::Panic { message_id } => {
                 let new_id = intern_archive(self, *message_id);
