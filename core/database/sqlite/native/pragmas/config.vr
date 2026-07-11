@@ -50,12 +50,12 @@ public fn journal_mode_name(m: &PragmaJournalMode) -> Text {
 
 public fn journal_mode_from_text(s: &Text) -> Maybe<PragmaJournalMode> {
     let lo = ascii_lower(s);
-    if lo == "delete".clone()   { return Maybe.Some(JmDelete); }
-    if lo == "truncate".clone() { return Maybe.Some(JmTruncate); }
-    if lo == "persist".clone()  { return Maybe.Some(JmPersist); }
-    if lo == "memory".clone()   { return Maybe.Some(JmMemory); }
-    if lo == "wal".clone()      { return Maybe.Some(JmWal); }
-    if lo == "off".clone()      { return Maybe.Some(JmOff); }
+    if lo == "delete".clone()   { return Maybe.Some(PragmaJournalMode.JmDelete); }
+    if lo == "truncate".clone() { return Maybe.Some(PragmaJournalMode.JmTruncate); }
+    if lo == "persist".clone()  { return Maybe.Some(PragmaJournalMode.JmPersist); }
+    if lo == "memory".clone()   { return Maybe.Some(PragmaJournalMode.JmMemory); }
+    if lo == "wal".clone()      { return Maybe.Some(PragmaJournalMode.JmWal); }
+    if lo == "off".clone()      { return Maybe.Some(PragmaJournalMode.JmOff); }
     Maybe.None
 }
 
@@ -152,7 +152,7 @@ public fn pragma_config_default() -> PragmaConfig {
     PragmaConfig {
         cache_size_pages: -2000,           // -2000 = ~2 MiB by SQLite convention
         page_size: 4096,
-        journal_mode: JmDelete,
+        journal_mode: PragmaJournalMode.JmDelete,
         synchronous: SyncFull,
         foreign_keys: false,
         recursive_triggers: false,

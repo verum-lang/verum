@@ -37,11 +37,11 @@ public fn mode_text(m: &JournalMode) -> Text {
 public fn parse_mode(text: &Text) -> Maybe<JournalMode> {
     let lower = lower(text);
     if lower == "delete".clone()    { return Maybe.Some(JournalMode.JmDelete); }
-    if lower == "truncate".clone()  { return Maybe.Some(JmTruncate); }
-    if lower == "persist".clone()   { return Maybe.Some(JmPersist); }
-    if lower == "memory".clone()    { return Maybe.Some(JmMemory); }
-    if lower == "wal".clone()       { return Maybe.Some(JmWal); }
-    if lower == "off".clone()       { return Maybe.Some(JmOff); }
+    if lower == "truncate".clone()  { return Maybe.Some(JournalMode.JmTruncate); }
+    if lower == "persist".clone()   { return Maybe.Some(JournalMode.JmPersist); }
+    if lower == "memory".clone()    { return Maybe.Some(JournalMode.JmMemory); }
+    if lower == "wal".clone()       { return Maybe.Some(JournalMode.JmWal); }
+    if lower == "off".clone()       { return Maybe.Some(JournalMode.JmOff); }
     Maybe.None
 }
 

@@ -36495,14 +36495,233 @@ impl FreeVarAnalyzer {
                 }
             }
 
+            // ================================================================
+            // Blind-spot sweep (register A3(b) close-out): every remaining
+            // expression-bearing ExprKind. Each variant that fell into the
+            // conservative `_ => {}` silently DROPPED free variables — a
+            // var referenced only inside that construct within a closure /
+            // async block was never captured and the enclosing fn
+            // lenient-stubbed at runtime with "undefined variable: <v>"
+            // (first witnesses: `mem_limit` used only inside `select {}`
+            // arms in shell/stream.vr; the f-string class above).
+            // Scoping discipline mirrors the Match arm: bind pattern vars,
+            // visit, unbind.
+            // ================================================================
+            ExprKind::Select { arms, .. } => {
+                for arm in arms.iter() {
+                    if let verum_common::Maybe::Some(ref fut) = arm.future {
+                        self.visit_expr(fut);
+                    }
+                    let pattern_bindings = match arm.pattern {
+                        verum_common::Maybe::Some(ref p) => self.extract_pattern_bindings(p),
+                        verum_common::Maybe::None => Vec::new(),
+                    };
+                    for binding in &pattern_bindings {
+                        self.bound.insert(binding.clone());
+                    }
+                    if let verum_common::Maybe::Some(ref guard) = arm.guard {
+                        self.visit_expr(guard);
+                    }
+                    self.visit_expr(&arm.body);
+                    for binding in pattern_bindings {
+                        self.bound.remove(&binding);
+                    }
+                }
+            }
+            ExprKind::Spawn { expr, .. } => self.visit_expr(expr),
+            ExprKind::ForAwait {
+                pattern,
+                async_iterable,
+                body,
+                ..
+            } => {
+                self.visit_expr(async_iterable);
+                let pattern_bindings = self.extract_pattern_bindings(pattern);
+                for binding in &pattern_bindings {
+                    self.bound.insert(binding.clone());
+                }
+                self.visit_block(body);
+                for binding in pattern_bindings {
+                    self.bound.remove(&binding);
+                }
+            }
+            ExprKind::Nursery { body, on_cancel, .. } => {
+                self.visit_block(body);
+                if let verum_common::Maybe::Some(b) = on_cancel {
+                    self.visit_block(b);
+                }
+            }
+            ExprKind::Throw(e)
+            | ExprKind::TryBlock(e)
+            | ExprKind::Typeof(e)
+            | ExprKind::Yield(e) => self.visit_expr(e),
+            ExprKind::TryFinally {
+                try_block,
+                finally_block,
+            } => {
+                self.visit_expr(try_block);
+                self.visit_expr(finally_block);
+            }
+            ExprKind::TryRecover { try_block, recover }
+            | ExprKind::TryRecoverFinally {
+                try_block, recover, ..
+            } => {
+                self.visit_expr(try_block);
+                match recover {
+                    verum_ast::expr::RecoverBody::MatchArms { arms, .. } => {
+                        for arm in arms.iter() {
+                            let pattern_bindings =
+                                self.extract_pattern_bindings(&arm.pattern);
+                            for binding in &pattern_bindings {
+                                self.bound.insert(binding.clone());
+                            }
+                            if let Some(ref guard) = arm.guard {
+                                self.visit_expr(guard);
+                            }
+                            self.visit_expr(&arm.body);
+                            for binding in pattern_bindings {
+                                self.bound.remove(&binding);
+                            }
+                        }
+                    }
+                    verum_ast::expr::RecoverBody::Closure { body, .. } => {
+                        // The closure param binds inside; conservative:
+                        // visit the body (param shadowing at worst adds
+                        // a capture of a same-named outer var).
+                        self.visit_expr(body);
+                    }
+                }
+                if let ExprKind::TryRecoverFinally { finally_block, .. } = &expr.kind {
+                    self.visit_expr(finally_block);
+                }
+            }
+            ExprKind::Is { expr: e, .. } => self.visit_expr(e),
+            ExprKind::DestructuringAssign { value, .. } => self.visit_expr(value),
+            ExprKind::MapLiteral { entries } => {
+                for (k, v) in entries.iter() {
+                    self.visit_expr(k);
+                    self.visit_expr(v);
+                }
+            }
+            ExprKind::SetLiteral { elements } => {
+                for e in elements.iter() {
+                    self.visit_expr(e);
+                }
+            }
+            ExprKind::TensorLiteral { data, .. } => self.visit_expr(data),
+            ExprKind::StreamLiteral(sl) => match &sl.kind {
+                verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
+                    for e in elements.iter() {
+                        self.visit_expr(e);
+                    }
+                }
+                verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
+                    self.visit_expr(start);
+                    if let verum_common::Maybe::Some(e) = end {
+                        self.visit_expr(e);
+                    }
+                }
+            },
+            ExprKind::Comprehension { expr: e, clauses }
+            | ExprKind::SetComprehension { expr: e, clauses }
+            | ExprKind::StreamComprehension { expr: e, clauses }
+            | ExprKind::GeneratorComprehension { expr: e, clauses } => {
+                let mut clause_bindings: Vec<String> = Vec::new();
+                for clause in clauses.iter() {
+                    self.visit_comprehension_clause(clause, &mut clause_bindings);
+                }
+                self.visit_expr(e);
+                for binding in clause_bindings {
+                    self.bound.remove(&binding);
+                }
+            }
+            ExprKind::MapComprehension {
+                key_expr,
+                value_expr,
+                clauses,
+            } => {
+                let mut clause_bindings: Vec<String> = Vec::new();
+                for clause in clauses.iter() {
+                    self.visit_comprehension_clause(clause, &mut clause_bindings);
+                }
+                self.visit_expr(key_expr);
+                self.visit_expr(value_expr);
+                for binding in clause_bindings {
+                    self.bound.remove(&binding);
+                }
+            }
+            ExprKind::Exists { bindings, body, .. }
+            | ExprKind::Forall { bindings, body, .. } => {
+                let mut bound_here: Vec<String> = Vec::new();
+                for qb in bindings.iter() {
+                    if let verum_common::Maybe::Some(ref d) = qb.domain {
+                        self.visit_expr(d);
+                    }
+                    let pattern_bindings = self.extract_pattern_bindings(&qb.pattern);
+                    for binding in pattern_bindings {
+                        self.bound.insert(binding.clone());
+                        bound_here.push(binding);
+                    }
+                }
+                self.visit_expr(body);
+                for binding in bound_here {
+                    self.bound.remove(&binding);
+                }
+            }
+            ExprKind::Meta(block) => self.visit_block(block),
+            ExprKind::CopatternBody { arms, .. } => {
+                for arm in arms.iter() {
+                    self.visit_expr(&arm.body);
+                }
+            }
+            ExprKind::UseContext { handler, body, .. } => {
+                self.visit_expr(handler);
+                self.visit_expr(body);
+            }
+            ExprKind::Attenuate { context, .. } => self.visit_expr(context),
+            ExprKind::NamedArg { value, .. } => self.visit_expr(value),
+            ExprKind::Lift { expr: e } => self.visit_expr(e),
+            ExprKind::StageEscape { expr: e, .. } => self.visit_expr(e),
+            ExprKind::MetaFunction { args, .. } => {
+                for a in args.iter() {
+                    self.visit_expr(a);
+                }
+            }
+            ExprKind::InlineAsm { operands, .. } => {
+                for op in operands.iter() {
+                    match &op.kind {
+                        verum_ast::expr::AsmOperandKind::In { expr: e, .. } => {
+                            self.visit_expr(e)
+                        }
+                        verum_ast::expr::AsmOperandKind::Out { place, .. } => {
+                            self.visit_expr(place)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Pure type-level / token-level constructs: no runtime
+            // expressions to visit. CalcBlock's calculation chain is
+            // a proof-layer construct (verified, not captured).
+            ExprKind::TypeExpr(_)
+            | ExprKind::TypeBound { .. }
+            | ExprKind::TypeProperty { .. }
+            | ExprKind::Inject { .. }
+            | ExprKind::Quote { .. }
+            | ExprKind::MacroCall { .. }
+            | ExprKind::CalcBlock(_) => {}
+
             // Note: Let bindings are statements (StmtKind::Let), not expressions
             // Pattern matching "let" in conditions is handled via ConditionKind::Let
 
-            // Wildcard patterns in expressions (match handling)
-            _ => {
-                // For any unhandled expression kinds, try to be conservative
-                // and not report any free variables
-            }
+            // NO catch-all — deliberately. Every ExprKind is matched
+            // explicitly, so adding a new expression kind to verum_ast
+            // FAILS THIS MATCH at compile time and forces a decision
+            // about its free-variable semantics. The historical
+            // conservative `_ => {}` silently dropped captures for 39
+            // variant kinds (f-strings, select, comprehensions, …) —
+            // whole stdlib fns lenient-stubbed at runtime. Exhaustive
+            // matching is the structural fix for that class.
         }
     }
 
@@ -36559,6 +36778,36 @@ impl FreeVarAnalyzer {
     }
 
     /// Visits a condition (if condition, while condition).
+    /// Visits one comprehension clause, accumulating pattern/let
+    /// bindings into `bound` (and `bound_out` for caller-side removal
+    /// after the element expression is visited). Iterator / condition
+    /// / initializer expressions are visited BEFORE their clause's
+    /// bindings take effect, mirroring evaluation order.
+    fn visit_comprehension_clause(
+        &mut self,
+        clause: &verum_ast::expr::ComprehensionClause,
+        bound_out: &mut Vec<String>,
+    ) {
+        use verum_ast::expr::ComprehensionClauseKind;
+        match &clause.kind {
+            ComprehensionClauseKind::For { pattern, iter } => {
+                self.visit_expr(iter);
+                for binding in self.extract_pattern_bindings(pattern) {
+                    self.bound.insert(binding.clone());
+                    bound_out.push(binding);
+                }
+            }
+            ComprehensionClauseKind::If(cond) => self.visit_expr(cond),
+            ComprehensionClauseKind::Let { pattern, value, .. } => {
+                self.visit_expr(value);
+                for binding in self.extract_pattern_bindings(pattern) {
+                    self.bound.insert(binding.clone());
+                    bound_out.push(binding);
+                }
+            }
+        }
+    }
+
     fn visit_condition(&mut self, condition: &verum_ast::IfCondition) {
         use verum_ast::ConditionKind;
 

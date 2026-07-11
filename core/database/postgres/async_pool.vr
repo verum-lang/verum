@@ -41,6 +41,8 @@ mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
 };
 mount core.database.postgres.config.PgConfig;
+mount core.database.postgres.wire.typed.TypedValue;
+mount core.database.common.types.{WireValue, WireFormat};
 mount core.database.postgres.async_connection.{
     AsyncPgConnection, connect,
 };
@@ -437,25 +439,27 @@ fn typed_value_to_wire_text(
     v: &core.database.postgres.wire.typed.TypedValue,
 ) -> core.database.common.types.WireValue {
     let bytes_opt: Maybe<List<Byte>> = match v {
-        core.database.postgres.wire.typed.TvNull => Maybe.None,
-        core.database.postgres.wire.typed.TvBool(b) =>
+        TypedValue.TvNull => Maybe.None,
+        TypedValue.TvBool(b) =>
             Maybe.Some(if *b { "t".as_bytes().to_list() } else { "f".as_bytes().to_list() }),
-        core.database.postgres.wire.typed.TvInt2(n) => Maybe.Some(format_int_text(*n as Int)),
-        core.database.postgres.wire.typed.TvInt4(n) => Maybe.Some(format_int_text(*n as Int)),
-        core.database.postgres.wire.typed.TvInt8(n) => Maybe.Some(format_int_text(*n as Int)),
-        core.database.postgres.wire.typed.TvText(s) => Maybe.Some(s.as_bytes().to_list()),
-        core.database.postgres.wire.typed.TvBytea(b) => Maybe.Some(format_bytea_hex_text(b)),
-        core.database.postgres.wire.typed.TvTimestamp(us) =>
+        TypedValue.TvInt2(n) => Maybe.Some(format_int_text(*n as Int)),
+        TypedValue.TvInt4(n) => Maybe.Some(format_int_text(*n as Int)),
+        TypedValue.TvInt8(n) => Maybe.Some(format_int_text(*n as Int)),
+        TypedValue.TvText(s) => Maybe.Some(s.as_bytes().to_list()),
+        TypedValue.TvBytea(b) => Maybe.Some(format_bytea_hex_text(b)),
+        TypedValue.TvTimestamp(us) =>
             Maybe.Some(format_pg_timestamp_text(*us, false)),
-        core.database.postgres.wire.typed.TvTimestamptz(us) =>
+        TypedValue.TvTimestamptz(us) =>
             Maybe.Some(format_pg_timestamp_text(*us, true)),
         _ => Maybe.None,
     };
     match bytes_opt {
-        Maybe.None => core.database.common.types.WvNull,
-        Maybe.Some(bs) => core.database.common.types.WvPresent {
+        Maybe.None => WireValue.WvNull,
+        Maybe.Some(bs) => WireValue.WvPresent {
             bytes: bs,
-            format: core.database.common.types.WfText,
+            // Canonical WireFormat variant is FmtText — the previous
+            // `WfText` referenced a nonexistent name.
+            format: WireFormat.FmtText,
         },
     }
 }

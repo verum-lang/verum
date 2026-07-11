@@ -60,7 +60,7 @@ public fn vfs_kind_name(kind: VfsKind) -> Text {
 /// Parse a VFS name back to a kind. Returns Maybe.None for unknown names.
 public fn vfs_kind_from_name(name: &Text) -> Maybe<VfsKind> {
     if name == &"memdb".clone() || name == &":memory:".clone() {
-        Maybe.Some(Memory)
+        Maybe.Some(VfsKind.Memory)
     } else if name == &"unix".clone() || name == &"posix".clone() {
         Maybe.Some(Posix)
     } else if name == &"win32".clone() {

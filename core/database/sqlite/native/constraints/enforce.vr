@@ -137,7 +137,7 @@ public fn enforce_foreign_key(
         Maybe.None    => spec.target_table.clone(),
     };
     let msg = build_msg("FOREIGN KEY constraint failed".clone(), table, &detail);
-    Maybe.Some(decision_for(&core.database.sqlite.native.constraints.conflict.OcAbort, msg))
+    Maybe.Some(decision_for(&OnConflict.OcAbort, msg))
 }
 
 // -----------------------------------------------------------------------------

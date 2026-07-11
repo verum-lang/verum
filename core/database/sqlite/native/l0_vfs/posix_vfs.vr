@@ -140,17 +140,17 @@ fn to_c_path(path: &Text) -> List<Byte> {
 
 fn to_vfs_err(e: OSError) -> VfsError {
     let kind = if e.would_block() {
-        LockConflict
+        VfsErrorKind.LockConflict
     } else if e.code == 2 {
-        NotFound   // ENOENT
+        VfsErrorKind.NotFound   // ENOENT
     } else if e.code == 13 {
-        PermissionDenied   // EACCES
+        VfsErrorKind.PermissionDenied   // EACCES
     } else if e.code == 17 {
-        AlreadyExists   // EEXIST
+        VfsErrorKind.AlreadyExists   // EEXIST
     } else if e.code == 28 {
-        DiskFull   // ENOSPC
+        VfsErrorKind.DiskFull   // ENOSPC
     } else {
-        IoError
+        VfsErrorKind.IoError
     };
     VfsError { kind: kind, message: e.message.clone() }
 }
@@ -488,7 +488,7 @@ implement VfsProtocol for PosixVfs {
             }
             Result.Err(e) => {
                 if e.code == 2 {   // ENOENT
-                    Result.Err(VfsError { kind: NotFound, message: e.message.clone() })
+                    Result.Err(VfsError { kind: VfsErrorKind.NotFound, message: e.message.clone() })
                 } else {
                     Result.Err(to_vfs_err(e))
                 }

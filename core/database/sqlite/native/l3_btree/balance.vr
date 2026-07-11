@@ -211,7 +211,7 @@ public fn plan_underflow(
     right_cell_count: Int,
 ) -> Result<BalanceDecision, BalanceError> {
     if page.cell_count >= ctx.min_cells_per_page {
-        return Result.Ok(NoChange);
+        return Result.Ok(BalanceDecision.NoChange);
     }
     if page.is_root {
         // Root with exactly one child — collapse.
@@ -219,7 +219,7 @@ public fn plan_underflow(
             return Result.Ok(ShrinkRoot(page.page_no, -1));
         }
         // Single cell is allowed for the root; no-op.
-        return Result.Ok(NoChange);
+        return Result.Ok(BalanceDecision.NoChange);
     }
 
     // Prefer rotating from a sibling that has slack.

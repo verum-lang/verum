@@ -256,7 +256,7 @@ implement Ecvrf {
                 Ok(o)
             }
             VrfVerifyResult.RejectMalformed(why) => Err(InvalidProof(why)),
-            VrfVerifyResult.RejectKey            => Err(InvalidPublicKey),
+            VrfVerifyResult.RejectKey            => Err(VrfError.InvalidPublicKey),
             VrfVerifyResult.BackendError        => Err(BackendNotReady),
         }
     }
