@@ -426,9 +426,9 @@ public type ShutdownKind is
 implement Read for UnixStream {
     fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = recv(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os);
+        let r = recv(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e));
         @cfg(target_os = "macos")
-        let r = sys_recv(self.fd, buf, 0).map_err(IoError.from_os);
+        let r = sys_recv(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         r
     }
 }
@@ -436,9 +436,9 @@ implement Read for UnixStream {
 implement Write for UnixStream {
     fn write(&mut self, buf: &[Byte]) -> Result<Int, IoError> {
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let r = send(self.fd, buf, MSG_NOSIGNAL).map_err(IoError.from_os);
+        let r = send(self.fd, buf, MSG_NOSIGNAL).map_err(|e| IoError.from_os(e));
         @cfg(target_os = "macos")
-        let r = sys_send(self.fd, buf, 0).map_err(IoError.from_os);
+        let r = sys_send(self.fd, buf, 0).map_err(|e| IoError.from_os(e));
         r
     }
 
