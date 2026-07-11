@@ -17,24 +17,24 @@ public type TempStorePolicy is
 
 public fn code(t: &TempStorePolicy) -> Int {
     match t {
-        TsDefault => 0,
-        TsFile    => 1,
-        TsMemory  => 2,
+        TempStorePolicy.TsDefault => 0,
+        TempStorePolicy.TsFile    => 1,
+        TempStorePolicy.TsMemory  => 2,
     }
 }
 
 public fn from_code(c: Int) -> Maybe<TempStorePolicy> {
-    if c == 0 { return Maybe.Some(TsDefault); }
-    if c == 1 { return Maybe.Some(TsFile); }
-    if c == 2 { return Maybe.Some(TsMemory); }
+    if c == 0 { return Maybe.Some(TempStorePolicy.TsDefault); }
+    if c == 1 { return Maybe.Some(TempStorePolicy.TsFile); }
+    if c == 2 { return Maybe.Some(TempStorePolicy.TsMemory); }
     Maybe.None
 }
 
 public fn store_name(t: &TempStorePolicy) -> Text {
     match t {
-        TsDefault => "DEFAULT".clone(),
-        TsFile    => "FILE".clone(),
-        TsMemory  => "MEMORY".clone(),
+        TempStorePolicy.TsDefault => "DEFAULT".clone(),
+        TempStorePolicy.TsFile    => "FILE".clone(),
+        TempStorePolicy.TsMemory  => "MEMORY".clone(),
     }
 }
 
@@ -58,13 +58,13 @@ public fn compile_time_name(d: &CompileTimeDefault) -> Text {
 // Resolve the effective store given compile-time default + pragma value.
 public fn resolve(pragma: &TempStorePolicy, compile_default: &CompileTimeDefault) -> TempStorePolicy {
     match pragma {
-        TsFile    => TsFile,
-        TsMemory  => TsMemory,
-        TsDefault => match compile_default {
-            CtdAlwaysFile      => TsFile,
-            CtdFilePreferred   => TsFile,
-            CtdMemoryPreferred => TsMemory,
-            CtdAlwaysMemory    => TsMemory,
+        TempStorePolicy.TsFile    => TempStorePolicy.TsFile,
+        TempStorePolicy.TsMemory  => TempStorePolicy.TsMemory,
+        TempStorePolicy.TsDefault => match compile_default {
+            CtdAlwaysFile      => TempStorePolicy.TsFile,
+            CtdFilePreferred   => TempStorePolicy.TsFile,
+            CtdMemoryPreferred => TempStorePolicy.TsMemory,
+            CtdAlwaysMemory    => TempStorePolicy.TsMemory,
         },
     }
 }

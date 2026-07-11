@@ -74,7 +74,7 @@ implement DarwinThreadError {
             CondInitFailed { code } => f"Failed to initialize condvar (code={code})",
             CondWaitFailed { code } => f"Failed to wait on condvar (code={code})",
             TlsInitFailed => "Failed to initialize TLS for new thread",
-            AlreadyJoined => "DarwinThread has already been joined",
+            DarwinThreadError.AlreadyJoined => "DarwinThread has already been joined",
             AlreadyDetached => "DarwinThread has already been detached",
         }
     }
@@ -97,7 +97,7 @@ implement Debug for DarwinThreadError {
             CondInitFailed { code }   => f.write_str(f"CondInitFailed {{ code: {code} }}".as_str()),
             CondWaitFailed { code }   => f.write_str(f"CondWaitFailed {{ code: {code} }}".as_str()),
             TlsInitFailed             => f.write_str("TlsInitFailed"),
-            AlreadyJoined             => f.write_str("AlreadyJoined"),
+            DarwinThreadError.AlreadyJoined             => f.write_str("AlreadyJoined"),
             AlreadyDetached           => f.write_str("AlreadyDetached"),
         }
     }
@@ -114,7 +114,7 @@ implement Eq for DarwinThreadError {
             (CondInitFailed { code: a },   CondInitFailed { code: b })   => a == b,
             (CondWaitFailed { code: a },   CondWaitFailed { code: b })   => a == b,
             (TlsInitFailed,                TlsInitFailed)                => true,
-            (AlreadyJoined,                AlreadyJoined)                => true,
+            (DarwinThreadError.AlreadyJoined,                DarwinThreadError.AlreadyJoined)                => true,
             (AlreadyDetached,              AlreadyDetached)              => true,
             _ => false,
         }
@@ -209,7 +209,7 @@ implement DarwinThread {
     /// Wait for thread to finish and get its return value.
     public fn join(&mut self) -> Result<&unsafe Byte, DarwinThreadError> {
         if self.finished {
-            return Result.Err(AlreadyJoined);
+            return Result.Err(DarwinThreadError.AlreadyJoined);
         }
 
         let mut retval: &unsafe Byte = 0 as &unsafe Byte;
