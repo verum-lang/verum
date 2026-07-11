@@ -45,7 +45,9 @@ public mount .tagged_literals.*;
 // ASCII case-fold (SQLite NOCASE collation); full Unicode via ICU cog.
 public module case_fold;
 
-// Regex
+// Regex — the Regex type delegates to the pure-Verum engine module
+// (regex_engine.vr, ONE implementation for both tiers — task #47).
+public module regex_engine;
 public mount .regex.Regex;
 
 // Character utilities

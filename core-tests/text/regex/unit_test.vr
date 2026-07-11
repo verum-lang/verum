@@ -306,6 +306,114 @@ fn test_captures_no_match_is_none() {
     }
 }
 
+
+// =============================================================================
+// Section 9: engine v2 — alternation + group quantifiers (pure-Verum engine)
+// =============================================================================
+// Pins the v2 surface added when regex moved onto the tier-agnostic
+// pure-Verum engine (core/text/regex_engine.vr, task #47): alternation at
+// top level and inside groups (leftmost-first), greedy quantifiers over
+// capture groups with last-repetition capture semantics, and loud parse
+// rejection of malformed patterns.
+
+@test
+fn test_v2_alternation_top_level() {
+    let r = Regex.new("cat|dog").unwrap();
+    assert(r.is_match("hotdog stand"));
+    assert(r.is_match("catalog"));
+    assert(!r.is_match("bird"));
+}
+
+@test
+fn test_v2_alternation_find_leftmost() {
+    let r = Regex.new("cat|dog").unwrap();
+    match r.find("the dog and the cat") {
+        Maybe.Some(m) => assert_eq(m, "dog"),
+        Maybe.None => panic("alternation must find"),
+    }
+}
+
+@test
+fn test_v2_grouped_alternation_anchored() {
+    let r = Regex.new("^(get|set|del)_").unwrap();
+    assert(r.is_match("set_value"));
+    assert(!r.is_match("reset_value"));
+}
+
+@test
+fn test_v2_grouped_alternation_captures() {
+    let r = Regex.new("(get|set|del)_(\\w+)").unwrap();
+    match r.captures("del_key now") {
+        Maybe.Some(cs) => {
+            assert_eq(cs.len(), 3);
+            assert_eq(cs[1], "del");
+            assert_eq(cs[2], "key");
+        }
+        Maybe.None => panic("grouped alternation must capture"),
+    }
+}
+
+@test
+fn test_v2_group_plus_greedy() {
+    let r = Regex.new("(ab)+").unwrap();
+    match r.find("zz abababq") {
+        Maybe.Some(m) => assert_eq(m, "ababab"),
+        Maybe.None => panic("(ab)+ must match"),
+    }
+}
+
+@test
+fn test_v2_group_bounds_anchored() {
+    let r = Regex.new("^(ab){2,3}$").unwrap();
+    assert(r.is_match("abab"));
+    assert(r.is_match("ababab"));
+    assert(!r.is_match("ab"));
+    assert(!r.is_match("abababab"));
+}
+
+@test
+fn test_v2_group_star_zero_reps() {
+    let r = Regex.new("(ha)*!").unwrap();
+    assert(r.is_match("!"));
+    assert(r.is_match("hahaha!"));
+}
+
+@test
+fn test_v2_group_rep_last_capture() {
+    let r = Regex.new("^(ab)+$").unwrap();
+    match r.captures("ababab") {
+        Maybe.Some(cs) => {
+            assert_eq(cs.len(), 2);
+            assert_eq(cs[1], "ab");
+        }
+        Maybe.None => panic("rep captures"),
+    }
+}
+
+@test
+fn test_v2_optional_group_empty_capture() {
+    let r = Regex.new("^a(b)?c$").unwrap();
+    match r.captures("ac") {
+        Maybe.Some(cs) => {
+            assert_eq(cs.len(), 2);
+            assert_eq(cs[1], "");
+        }
+        Maybe.None => panic("optional group must match"),
+    }
+}
+
+@test
+fn test_v2_zero_width_star_terminates() {
+    let r = Regex.new("(x?)*y").unwrap();
+    assert(r.is_match("yy"));
+}
+
+@test
+fn test_v2_malformed_patterns_rejected() {
+    assert(Regex.new("(unclosed") is Err);
+    assert(Regex.new("[unclosed") is Err);
+    assert(Regex.new("*dangling") is Err);
+}
 // =============================================================================
 // Entry point
 // =============================================================================

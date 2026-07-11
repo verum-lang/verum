@@ -14,15 +14,17 @@
 // # Runtime
 //
 
-// Each operation forwards to a Verum intrinsic backed by the `regex` 1.x
-// crate inside the VBC interpreter (and by the same engine after AOT
-// lowering). Pattern compilation happens **per call**: today we do not cache
-// the compiled DFA across calls. That is a deliberate v1 trade-off — the
-// `regex` crate's `is_match` of a small pre-validated pattern runs in single-
-// digit microseconds, and most callers reuse a small set of literal
-// patterns where the DFA cache inside the crate already absorbs the cost.
-// A v2 may introduce a per-Regex compiled handle once we surface a
-// fallible `Regex.compile` returning a runtime-side handle.
+// Every operation delegates to the PURE-VERUM engine in
+// `core/text/regex_engine.vr` (task #47 / AOT-REGEX-RUNTIME-1) — ONE
+// implementation compiled like any other stdlib code, identical on the
+// Tier-0 interpreter and Tier-1 AOT binaries. The previous intrinsic
+// forwarding (Rust `regex` crate inside the interpreter) had NO Tier-1
+// counterpart: standalone AOT binaries answered `is_match=false` where
+// the interpreter answered true, and the single-match intrinsics
+// mislowered through the 0xFF ext-opcode envelope into batch-norm calls.
+// Pattern compilation is still per call (the documented v1 trade-off);
+// `rx_parse` returns a plain `RxProg` value, so a future fallible
+// `Regex.compile` can cache the parsed program without engine changes.
 //
 
 // # Available operations
@@ -38,17 +40,23 @@
 //  * `captures` — capture groups of the first match
 //
 
-// The interpreter kernel (verum_vbc/src/interpreter/kernel/mod.rs) hosts the
-// dispatchers; the intrinsic registry (verum_vbc/src/intrinsics/registry.rs)
-// advertises them under the canonical lowercase names. The bulk variants
-// occupy `TensorSubOpcode` 0xE0..=0xE3; the single-match variants live in
-// `TensorExtSubOpcode` 0x0A..=0x0C because the regex-dedicated 0xE4 slot in
-// `TensorSubOpcode` was filled by tensor-creation ops before they landed.
+// Pattern surface (engine v2; malformed constructs are REJECTED at
+// parse, never mis-accepted): literals + escapes, `[...]`/`[^...]`
+// classes with ranges and in-class escapes, ASCII `\d \w \s` (+ negated
+// uppercase forms), `.`, greedy `* + ? {m} {m,} {m,n}` over any atom
+// INCLUDING capture groups, alternation `|` (top level and grouped,
+// leftmost-first), anchors `^ $`, positional capture groups with
+// last-repetition semantics. See core/text/regex_engine.vr.
 // =============================================================================
 
 module regex;
 
 mount core.*;
+mount .regex_engine.{
+    rxe_is_match, rxe_find, rxe_find_all,
+    rxe_replace, rxe_replace_all, rxe_split, rxe_captures,
+    rx_parse, RxProg,
+};
 
 // =============================================================================
 // Regex Type
@@ -93,48 +101,57 @@ implement Regex {
     /// Construct a `Regex` from a pattern string.
     ///
 
-    /// Returns `Result<Regex, RegexError>` for forward compatibility with a
-    /// future fallible compile; today every call is `Ok` because compilation
-    /// is deferred to match-time. Catches malformed patterns at compile-time
-    /// will land alongside the cached-handle migration.
+    /// Returns `Err(RegexError)` when the pattern fails to parse
+    /// (unclosed group/class, dangling quantifier, v2-only construct);
+    /// well-formed patterns always construct. Matching re-parses per
+    /// call (documented v1 trade-off) — a cached-handle `Regex.compile`
+    /// can layer on top of `rx_parse`'s plain-value `RxProg`.
     public fn new(pattern: Text) -> Result<Regex, RegexError> {
+        // Real structural validation — the pure-Verum engine's parser
+        // rejects malformed patterns (unclosed groups/classes, dangling
+        // quantifiers, v2-only constructs) instead of deferring every
+        // failure to match time.
+        let prog = rx_parse(&pattern);
+        if !prog.ok {
+            return Result.Err(RegexError { message: f"invalid pattern: {pattern}" });
+        }
         Result.Ok(Regex { pattern: pattern })
     }
 
     /// Test whether the pattern matches anywhere in the given text.
     public fn is_match(&self, text: Text) -> Bool {
-        regex_is_match(self.pattern, text)
+        rxe_is_match(&self.pattern, &text)
     }
 
     /// Find all non-overlapping matches of the pattern in the text.
     /// Returns an empty list if no match.
     public fn find_all(&self, text: Text) -> List<Text> {
-        regex_find_all(self.pattern, text)
+        rxe_find_all(&self.pattern, &text)
     }
 
     /// Replace all matches with the replacement string. Replacement supports
     /// `$N` (1-indexed) capture-group back-references — `regex` crate
     /// semantics.
     public fn replace_all(&self, text: Text, replacement: Text) -> Text {
-        regex_replace_all(self.pattern, text, replacement)
+        rxe_replace_all(&self.pattern, &text, &replacement)
     }
 
     /// Split the text by every match of the pattern.
     public fn split(&self, text: Text) -> List<Text> {
-        regex_split(self.pattern, text)
+        rxe_split(&self.pattern, &text)
     }
 
     /// Find the first match of the pattern in the text.
     /// Returns `Maybe.None` if no match.
     public fn find(&self, text: Text) -> Maybe<Text> {
-        regex_find(self.pattern, text)
+        rxe_find(&self.pattern, &text)
     }
 
     /// Replace the first match with the replacement string.
     /// Returns the input unchanged if no match. Supports `$N`
     /// capture-group back-references in `replacement`.
     public fn replace(&self, text: Text, replacement: Text) -> Text {
-        regex_replace(self.pattern, text, replacement)
+        rxe_replace(&self.pattern, &text, &replacement)
     }
 
     /// Run the pattern against `text` and return the ordered group
@@ -147,7 +164,7 @@ implement Regex {
     /// `Maybe<Text>` per group should re-check membership against
     /// the pattern's group count. Returns `Maybe.None` if no match.
     public fn captures(&self, text: Text) -> Maybe<List<Text>> {
-        regex_captures(self.pattern, text)
+        rxe_captures(&self.pattern, &text)
     }
 
     /// Returns the original pattern string.
@@ -157,29 +174,13 @@ implement Regex {
 }
 
 // =============================================================================
-// Intrinsic Declarations
+// Retired: intrinsic declarations
 // =============================================================================
-// These names match the registry entries in
-// verum_vbc/src/intrinsics/registry.rs, lowercase-with-underscores per the
-// canonical `@intrinsic("…")` convention used elsewhere in core/intrinsics/.
-
-@intrinsic("regex_is_match")
-public fn regex_is_match(pattern: Text, text: Text) -> Bool;
-
-@intrinsic("regex_find_all")
-public fn regex_find_all(pattern: Text, text: Text) -> List<Text>;
-
-@intrinsic("regex_replace_all")
-public fn regex_replace_all(pattern: Text, text: Text, replacement: Text) -> Text;
-
-@intrinsic("regex_split")
-public fn regex_split(pattern: Text, text: Text) -> List<Text>;
-
-@intrinsic("regex_find")
-public fn regex_find(pattern: Text, text: Text) -> Maybe<Text>;
-
-@intrinsic("regex_replace")
-public fn regex_replace(pattern: Text, text: Text, replacement: Text) -> Text;
-
-@intrinsic("regex_captures")
-public fn regex_captures(pattern: Text, text: Text) -> Maybe<List<Text>>;
+// The seven `@intrinsic("regex_*")` forward declarations that previously
+// lived here are GONE — they were the tier-divergence surface (Tier-0-only
+// Rust `regex` intercepts; no Tier-1 runtime). The engine that replaced
+// them is ordinary Verum code in `core/text/regex_engine.vr`; the
+// interpreter-side dispatchers and the TensorSubOpcode 0xE0-0xE3 /
+// TensorExtSubOpcode 0x0A-0x0C intrinsic slots remain in the crates only
+// for archive back-compat and can be reclaimed once no baked artifact
+// references them (tracked in task #47).
