@@ -573,6 +573,42 @@ pub(in super::super) fn handle_set_field(
     Ok(DispatchResult::Continue)
 }
 
+/// FATREF-ELEM-READ-1: THE FatRef slice element-read authority.
+/// `reserved` carries the element size — 0 = NaN-boxed `Value`,
+/// 1/2/4/8 = raw widths read little-endian and ZERO-extended (u8/u16/
+/// u32 semantics; a sign-extending reader corrupts `[UInt32; N]`
+/// lookup tables like CRC32 — Issue #2). Unknown sizes fall back to
+/// the Value shape. Callers: `GetE`'s FatRef branch and `IterNext`'s
+/// `ITER_TYPE_FATREF_SLICE` arm — index and iteration paths share this
+/// single dispatch so they CANNOT drift.
+///
+
+/// SAFETY contract: `idx` must be `< fat_ref.len()` (both callers
+/// bounds-check) and `fat_ref.ptr()` non-null (checked by callers).
+pub(in super::super) fn fat_ref_read_element(
+    fat_ref: &crate::value::FatRef,
+    idx: usize,
+) -> Value {
+    let base_ptr = fat_ref.ptr();
+    match fat_ref.reserved {
+        0 => unsafe { *(base_ptr as *const Value).add(idx) },
+        1 => Value::from_i64(unsafe { *base_ptr.add(idx) } as i64),
+        2 => {
+            let p = unsafe { base_ptr.add(idx * 2) as *const u16 };
+            Value::from_i64(unsafe { std::ptr::read_unaligned(p) } as i64)
+        }
+        4 => {
+            let p = unsafe { base_ptr.add(idx * 4) as *const u32 };
+            Value::from_i64(unsafe { std::ptr::read_unaligned(p) } as i64)
+        }
+        8 => {
+            let p = unsafe { base_ptr.add(idx * 8) as *const i64 };
+            Value::from_i64(unsafe { std::ptr::read_unaligned(p) })
+        }
+        _ => unsafe { *(base_ptr as *const Value).add(idx) },
+    }
+}
+
 /// GetE (0x64) - Get element: dst = arr[idx]
 pub(in super::super) fn handle_get_index(
     state: &mut InterpreterState,
@@ -585,6 +621,7 @@ pub(in super::super) fn handle_get_index(
 
     // Handle FatRef (slice) indexing first - FatRef also passes is_ptr() so check this before
     if arr_val.is_fat_ref() {
+        // (element read shared with IterNext via fat_ref_read_element)
         let fat_ref = arr_val.as_fat_ref();
         let raw_idx_val = state.get_reg(idx);
         let idx_val = raw_idx_val.as_i64() as usize;
@@ -607,62 +644,10 @@ pub(in super::super) fn handle_get_index(
             return Err(InterpreterError::NullPointer);
         }
 
-        // Check elem_size stored in reserved field:
-        // 0 = NaN-boxed Value (8 bytes), 1/2/4/8 = raw integer size
-        let elem_size = fat_ref.reserved;
-        // eprintln!("[DEBUG FatRef GetE] elem_size={}, idx={}", elem_size, idx_val);
-
-        let element = match elem_size {
-            0 => {
-                // NaN-boxed Values (LIST, generic arrays)
-                let element_ptr = unsafe { (base_ptr as *const Value).add(idx_val) };
-                unsafe { *element_ptr }
-            }
-            1 => {
-                // Raw bytes (u8)
-                let element_ptr = unsafe { base_ptr.add(idx_val) };
-                Value::from_i64(unsafe { *element_ptr } as i64)
-            }
-            2 => {
-                // Raw 2-byte element. Read as u16 and zero-extend to i64
-                // so that `[UInt16; N]` lookups preserve the unsigned
-                // interpretation (an i16 reader would sign-extend any
-                // element whose bit 15 is set). Callers that want a
-                // signed-16 value can truncate the i64 downstream.
-                let element_ptr = unsafe { base_ptr.add(idx_val * 2) as *const u16 };
-                Value::from_i64(unsafe { std::ptr::read_unaligned(element_ptr) } as i64)
-            }
-            4 => {
-                // Raw 4-byte element. Root fix for Issue #2: read as u32
-                // (not i32) so a value with bit 31 set — canonical case
-                // being a `[UInt32; 256]` lookup table like the CRC32
-                // per-byte table — is zero-extended into the i64 NaN-box
-                // slot instead of being sign-extended. The previous
-                // `i32 as i64` cast filled bits 32..63 with ones and the
-                // sign garbage then propagated through arithmetic shifts,
-                // corrupting every computation downstream.
-                //
-
-                // Callers that need signed-32 semantics can truncate with
-                // `as i32` at the use site; zero-extension is the
-                // invariant-preserving choice for raw byte-level work.
-                let element_ptr = unsafe { base_ptr.add(idx_val * 4) as *const u32 };
-                Value::from_i64(unsafe { std::ptr::read_unaligned(element_ptr) } as i64)
-            }
-            8 => {
-                // Raw i64 (typed arrays like [Int; N]). 8-byte values
-                // already occupy the whole Value slot — no extension
-                // needed either way.
-                let element_ptr = unsafe { base_ptr.add(idx_val * 8) as *const i64 };
-                Value::from_i64(unsafe { std::ptr::read_unaligned(element_ptr) })
-            }
-            _ => {
-                // Unknown elem_size, fall back to Value
-                let element_ptr = unsafe { (base_ptr as *const Value).add(idx_val) };
-                unsafe { *element_ptr }
-            }
-        };
-        // eprintln!("[DEBUG FatRef GetE] element={:?}", element);
+        // Element read via the ONE FatRef element authority (shared
+        // with IterNext's FATREF_SLICE arm — index and iteration paths
+        // cannot drift).
+        let element = fat_ref_read_element(&fat_ref, idx_val);
         state.set_reg(dst, element);
         return Ok(DispatchResult::Continue);
     }

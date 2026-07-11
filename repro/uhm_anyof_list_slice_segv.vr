@@ -1,0 +1,16 @@
+// #40/#48 family — any_of(&list[..]) SIGSEGV (interp).
+// Distilled from core-tests/text/mod/unit_test.vr::test_umbrella_any_of_matches:
+// a List<Char> full-range slice ref passed to any_of, then matches()
+// derefs a garbage payload pointer (observed fault addr 0xe00000000019,
+// object base 0xE000_0000_0001 — ref-shaped bits used as raw pointer).
+mount core.text.{any_of};
+
+fn main() {
+    let cs: List<Char> = ['a', 'b', 'c'];
+    let p = any_of(&cs[..]);
+    if p.matches('b') {
+        print("matches: yes");
+    } else {
+        print("matches: no");
+    }
+}

@@ -183,3 +183,22 @@ modules immediately benefit:
 * `core.collections.list` — would deprecate ~20 duplicate
   inherent methods that exist purely to give slice consumers a
   working escape hatch.
+
+## 7. FATREF-ITER-1 (2026-07-11, task #40)
+
+`for x in <FatRef slice>` (any `&list[..]` / `&list[a..b]` / slice
+param) SIGSEGV'd Tier-0: FatRef Values fail `is_ptr()`, IterInit
+classified them as the non-pointer ITER_TYPE_LIST default, and
+IterNext dereferenced the FAT_REF_MARKER payload bits (0xE000_…) as a
+List header.  Indexing (`s[i]`) and `len()` were fine — only the
+for-in leg was broken, which is why it hid until the text/mod umbrella
+called `any_of(&cs[..])` and took down the whole in-process test
+runner.
+
+Fix: ITER_TYPE_FATREF_SLICE (iterators.rs) + `fat_ref_read_element`
+extracted from GetE's FatRef branch as the ONE element-read authority
+shared by indexing and iteration (elem-size dispatch via
+`FatRef.reserved`: 0=Value, 1/2/4/8=raw zero-extended).  Pins:
+regression_test.vr §F.1–.3.  Tier-1 leg is subsumed by
+AOT-SLICE-ELEMSIZE-CARRY-1 (#48) — non-byte slices have no Tier-1
+representation yet.

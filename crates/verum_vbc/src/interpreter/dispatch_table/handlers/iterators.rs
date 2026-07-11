@@ -45,6 +45,17 @@ const ITER_TYPE_PROTOCOL: i64 = 6;
 /// ITER_TYPE_LIST fallback and its FatRef marker payload was read as
 /// a List header → SIGSEGV.
 const ITER_TYPE_BYTE_SLICE: i64 = 7;
+/// FATREF-ITER-1 (#40): iteration over a general FatRef slice —
+/// `for c in &list[..]`, `for x in slice_param`.  A FatRef Value's
+/// 48-bit payload is `FAT_REF_MARKER | table-index` (bits 47-45 set),
+/// NOT a heap pointer, and `is_ptr()` EXCLUDES FatRefs — so the
+/// legacy classifier fell through to "non-pointer → ITER_TYPE_LIST"
+/// and IterNext dereferenced the marker bits as a List header
+/// (SIGSEGV at 0xE000_0000_00xx).  Slot 0 keeps the ENCODED FatRef
+/// Value; each IterNext re-resolves it and reads the element through
+/// `fat_ref_read_element` — the same authority `GetE` uses, honoring
+/// the `reserved` elem-size dispatch (0=Value, 1/2/4/8=raw).
+const ITER_TYPE_FATREF_SLICE: i64 = 8;
 
 // ============================================================================
 // Iterator + Range Operations
@@ -145,7 +156,14 @@ pub(in super::super) fn handle_iter_new(
     // For non-builtin records, `protocol_next_fid` carries the resolved
     // `<Type>.next` FunctionId into blob slot 1 (see ITER_TYPE_PROTOCOL).
     let mut protocol_next_fid: Option<crate::module::FunctionId> = None;
-    let iter_type = if let Some(tag) = forced_iter_type {
+    let iter_type = if source.is_fat_ref() {
+        // FATREF-ITER-1 (#40): general slice iteration. FatRefs fail
+        // `is_ptr()` and previously fell to the non-pointer LIST
+        // default; IterNext then dereferenced the FAT_REF_MARKER
+        // payload bits as a List header → SIGSEGV. Keep the encoded
+        // Value in slot 0; IterNext resolves per step.
+        ITER_TYPE_FATREF_SLICE
+    } else if let Some(tag) = forced_iter_type {
         // Already-built iterator blob — use the blob's tag rather than
         // re-deriving from `source`'s (now unwrapped) header.
         tag
@@ -412,6 +430,41 @@ pub(in super::super) fn handle_iter_next(
         }
         state.set_reg(dst, Value::unit());
         state.set_reg(has_next_dst, Value::from_bool(false));
+        return Ok(DispatchResult::Continue);
+    }
+
+    // FATREF-ITER-1 (#40): FatRef slice iteration — MUST run before the
+    // `as_ptr` extraction below (a FatRef Value's payload is
+    // FAT_REF_MARKER|table-index, not a heap pointer). Element reads go
+    // through `fat_ref_read_element`, the same authority as `GetE`, so
+    // indexing and iteration honor the identical `reserved` elem-size
+    // dispatch.
+    if iter_type == ITER_TYPE_FATREF_SLICE {
+        if !source.is_fat_ref() {
+            return Err(InterpreterError::Panic {
+                message: format!(
+                    "IterNext: FATREF_SLICE iterator holds a non-FatRef source (bits {:#x})",
+                    source.to_bits()
+                ),
+            });
+        }
+        let fat_ref = source.as_fat_ref();
+        let len = fat_ref.len() as usize;
+        if current_idx >= len {
+            state.set_reg(dst, Value::unit());
+            state.set_reg(has_next_dst, Value::from_bool(false));
+            return Ok(DispatchResult::Continue);
+        }
+        if fat_ref.ptr().is_null() {
+            return Err(InterpreterError::NullPointer);
+        }
+        let element =
+            super::memory_collections::fat_ref_read_element(&fat_ref, current_idx);
+        unsafe {
+            *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
+        }
+        state.set_reg(dst, element);
+        state.set_reg(has_next_dst, Value::from_bool(true));
         return Ok(DispatchResult::Continue);
     }
 

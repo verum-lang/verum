@@ -277,3 +277,54 @@ fn pass_guard_slice_iter_basic_round_trip() {
     }
     assert_eq(total, 60);
 }
+
+// =============================================================================
+// §F — FATREF-ITER-1: for-in over a FatRef slice dereferenced marker bits
+// =============================================================================
+
+// REGRESSION (§F.1): `for x in &list[..]` SIGSEGV'd the interpreter —
+// a FatRef Value fails `is_ptr()`, so IterInit's classifier fell to the
+// non-pointer ITER_TYPE_LIST default and IterNext dereferenced the
+// FAT_REF_MARKER payload (0xE000_...) as a List header.  Fault surfaced
+// as text/mod umbrella `any_of(&cs[..])` killing the whole in-process
+// runner (task #40).  CLOSED: ITER_TYPE_FATREF_SLICE + the shared
+// GetE/IterNext element authority (fat_ref_read_element).
+@test
+fn regression_fatref_slice_for_in_full_range() {
+    let xs: List<Int> = [1, 2, 3];
+    let s = &xs[..];
+    let mut total = 0;
+    for x in s {
+        total += *x;
+    }
+    assert_eq(total, 6);
+}
+
+// REGRESSION (§F.2): partial range + Char elements (the any_of shape).
+@test
+fn regression_fatref_slice_for_in_partial_char() {
+    let cs: List<Char> = ['a', 'b', 'c'];
+    let s = &cs[0..2];
+    let mut hits = 0;
+    for c in s {
+        if *c == 'a' || *c == 'b' { hits += 1; }
+    }
+    assert_eq(hits, 2);
+}
+
+// REGRESSION (§F.3): for-in over a slice received as a fn parameter —
+// iteration and indexing must agree (shared element authority).
+fn sum_param_slice(s: &[Int]) -> Int {
+    let mut n = 0;
+    for x in s {
+        n += *x;
+    }
+    n
+}
+
+@test
+fn regression_fatref_slice_param_iter_matches_index() {
+    let xs: List<Int> = [10, 20, 30];
+    let s = &xs[..];
+    assert_eq(sum_param_slice(s), s[0] + s[1] + s[2]);
+}
