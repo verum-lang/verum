@@ -414,8 +414,10 @@ When adding new modules to this index, mark each with a status keyword:
 | status | meaning |
 |---|---|
 | **complete** | All public APIs covered by unit tests; algebraic laws pinned by property tests; cross-stdlib integration verified; audit findings landed or routed. |
+| **stable** | Suite fully green under `--interp` and the covered surface is trusted for use, but the coverage bar for **complete** (property laws + cross-stdlib integration + routed audit) is not fully met. Rows marked stable graduate to complete when those land. |
 | **partial** | Subset of the API surface covered. Reasons for partial coverage cited in the module's `audit.md`. |
 | **regression-only** | Module is gated by upstream defects and no public-API tests pass yet — only `@ignore`d regressions exist to lock the bug shapes. |
+| **undocumented** | (website-only status) Page content is a best-effort snapshot; the module has not been routed through this inventory yet. Not used in inventory rows. |
 
 For the website API reference (see `internal/website/`) we lift the same
 keyword onto each module page so consumers see at a glance whether the API
