@@ -7,7 +7,7 @@
 //     with `severity`, `name`, `is_enabled` methods
 //     and `Eq`, `Ord`, `Clone`, `Copy`, `Debug`, `Display` impls.
 //   * `ContextLogRecord` record (Display/Debug)
-//   * `Row` record (get, get_index, Display/Debug)
+//   * `QueryRow` record (get, get_index, Display/Debug)
 //   * `QueryResult` record (Display/Debug)
 //   * `AuthUser` record (has_role, Display/Debug)
 //
@@ -18,7 +18,7 @@
 // This file covers the DATA TYPES that back them.
 // =============================================================================
 
-mount core.context.standard.{ContextLogLevel, ContextLogRecord, Row, QueryResult, AuthUser};
+mount core.context.standard.{ContextLogLevel, ContextLogRecord, QueryRow, QueryResult, AuthUser};
 mount core.collections.list.List;
 mount core.base.maybe.{Maybe, Some, None};
 
@@ -277,10 +277,10 @@ fn test_auth_user_display_contains_name_and_id() {
 }
 
 // =============================================================================
-// Section 9: Row — get_index
+// Section 9: QueryRow — get_index
 // =============================================================================
 
-// SIGSEGV: calling archive-loaded `Row.get_index` (returns `Maybe<&Text>`
+// SIGSEGV: calling archive-loaded `QueryRow.get_index` (returns `Maybe<&Text>`
 // borrowed from `self.values[i].as_ref()`) and consuming the result crashes
 // the compiler during execution-compile. A byte-identical LOCALLY-defined
 // record works (see regression_test.vr repro) — this is the cross-module /
@@ -289,7 +289,7 @@ fn test_auth_user_display_contains_name_and_id() {
 // Pinned + @ignore'd until the codegen fix lands. audit.md §3.5.
 @test
 fn test_row_get_index_in_range() {
-    let r = Row {
+    let r = QueryRow {
         columns: ["name".clone(), "email".clone()],
         values: [Maybe.Some("alice".clone()), Maybe.Some("a@b".clone())],
     };
@@ -302,7 +302,7 @@ fn test_row_get_index_in_range() {
 
 @test
 fn test_row_get_index_out_of_range_returns_none() {
-    let r = Row {
+    let r = QueryRow {
         columns: ["name".clone()],
         values: [Maybe.Some("alice".clone())],
     };
@@ -315,7 +315,7 @@ fn test_row_get_index_out_of_range_returns_none() {
 
 @test
 fn test_row_get_index_negative_returns_none() {
-    let r = Row {
+    let r = QueryRow {
         columns: ["x".clone()],
         values: [Maybe.Some("y".clone())],
     };

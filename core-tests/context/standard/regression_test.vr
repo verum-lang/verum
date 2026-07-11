@@ -15,7 +15,7 @@
 // qualified dispatch returns the right answer DESPITE the collision.
 // =============================================================================
 
-mount core.context.standard.{ContextLogLevel, Row, QueryResult, AuthUser};
+mount core.context.standard.{ContextLogLevel, QueryRow, QueryResult, AuthUser};
 mount core.collections.list.List;
 mount core.base.maybe.{Maybe};
 
@@ -154,16 +154,16 @@ fn regression_auth_user_has_role_contains_dispatch() {
 }
 
 // =============================================================================
-// REGRESSION (archive-loaded `Row`, two facets — BOTH CLOSED, see audit §3.5):
+// REGRESSION (archive-loaded `QueryRow`, two facets — BOTH CLOSED, see audit §3.5):
 //
-// Facet #1: `Row.get_index(n)` / `Row.get(&name)` return `Maybe<&Text>`
+// Facet #1: `QueryRow.get_index(n)` / `QueryRow.get(&name)` return `Maybe<&Text>`
 // borrowed from `self.values[i].as_ref()`. Calling + consuming them used to
 // SIGSEGV the compiler at execution-compile. Closed by codegen between
 // 2026-06-01 and a1293ff52 (record-alloc / Self-literal / transparent-ref).
 //
-// Facet #2: reading `Row`'s OWN fields (`r.columns` / `r.values`) panicked
-// field-OOB. ROOT CAUSE: the bare name `Row` collides with the variant
-// `StepResult.Row(reg_start, n_cols)` (core.database.sqlite). The let binding
+// Facet #2: reading `QueryRow`'s OWN fields (`r.columns` / `r.values`) panicked
+// field-OOB. ROOT CAUSE: the bare name `QueryRow` collides with the variant
+// `StepResult.QueryRow(reg_start, n_cols)` (core.database.sqlite). The let binding
 // was typed `StepResult` (the variant's parent — matched by arg COUNT in
 // `find_variant_parent_type_by_args`), shifting every later `r.<field>` read
 // to a global field-intern index. CLOSED 2026-06-03: that resolver now
@@ -173,7 +173,7 @@ fn regression_auth_user_has_role_contains_dispatch() {
 
 @test
 fn regression_row_get_index_bounds_guarded() {
-    let r = Row {
+    let r = QueryRow {
         columns: ["c".clone()],
         values: [Maybe.Some("v".clone())],
     };
@@ -182,13 +182,13 @@ fn regression_row_get_index_bounds_guarded() {
     assert(r.get_index(-1) is Maybe.None);
 }
 
-// Facet #2 pin: a bare `Row { .. }` literal whose head collides with the
-// `StepResult.Row` variant must be typed as the RECORD, so direct field reads
+// Facet #2 pin: a bare `QueryRow { .. }` literal whose head collides with the
+// `StepResult.QueryRow` variant must be typed as the RECORD, so direct field reads
 // resolve to the record's own layout (columns@0, values@1) — not a global
 // field-intern index. Regresses the field-OOB panic if the collision returns.
 @test
 fn regression_row_direct_field_read_after_collision() {
-    let r = Row {
+    let r = QueryRow {
         columns: ["name".clone(), "email".clone()],
         values: [Maybe.Some("alice".clone())],
     };

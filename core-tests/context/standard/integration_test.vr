@@ -5,7 +5,7 @@
 // Cross-stdlib integration for ContextLogLevel + supporting data types.
 // =============================================================================
 
-mount core.context.standard.{ContextLogLevel, AuthUser, Row, QueryResult};
+mount core.context.standard.{ContextLogLevel, AuthUser, QueryRow, QueryResult};
 mount core.collections.list.List;
 mount core.base.maybe.{Maybe, Some, None};
 
@@ -100,16 +100,16 @@ fn integration_auth_user_role_check_decides_action() {
 }
 
 // =============================================================================
-// Section 4: Row + QueryResult composition
+// Section 4: QueryRow + QueryResult composition
 // =============================================================================
 
 @test
 fn integration_query_result_with_multiple_rows() {
-    let r1 = Row {
+    let r1 = QueryRow {
         columns: ["id".clone(), "name".clone()],
         values: [Maybe.Some("1".clone()), Maybe.Some("alice".clone())],
     };
-    let r2 = Row {
+    let r2 = QueryRow {
         columns: ["id".clone(), "name".clone()],
         values: [Maybe.Some("2".clone()), Maybe.Some("bob".clone())],
     };

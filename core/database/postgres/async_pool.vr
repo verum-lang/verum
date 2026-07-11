@@ -304,7 +304,7 @@ implement AsyncPgPoolGuard {
     // -------------------------------------------------------------------------
     //
     // Prepares the statement, executes with bound params, decodes
-    // rows into the `Row` façade for column-name-keyed access.
+    // rows into the `PgRow` façade for column-name-keyed access.
     //
     // Param encoding goes through `wire.typed.encode_params_for_bind`
     // which accepts `List<Maybe<TypedValue>>` and returns
@@ -315,17 +315,17 @@ implement AsyncPgPoolGuard {
     //   - go through `AsyncTypedDatabase` which adds compile-time
     //     param encoders for tuple shapes.
     //
-    // The `Row` façade wraps the per-row `(RowDescription, List<WireValue>)`
+    // The `PgRow` façade wraps the per-row `(RowDescription, List<WireValue>)`
     // pair returned by `execute_prepared_typed`.  All results in this
     // path use binary wire format (the prepared-statement default).
 
     /// Execute a parameterised query and stream every row.
-    /// Returns an empty `List<Row>` when no rows match.
+    /// Returns an empty `List<PgRow>` when no rows match.
     public async fn query(
         &self,
         sql:    &Text,
         params: List<Maybe<core.database.postgres.wire.typed.TypedValue>>,
-    ) -> Result<List<core.database.postgres.row.Row>, DbError> {
+    ) -> Result<List<core.database.postgres.row.PgRow>, DbError> {
         let conn = self.conn_ref();
         let stmt = conn.prepare(sql).await?;
         let result = conn.execute_prepared_typed(&stmt, params).await?;
@@ -334,12 +334,12 @@ implement AsyncPgPoolGuard {
             Maybe.Some(rd) => rd,
             Maybe.None     => return Result.Ok(List.new()),
         };
-        let mut out: List<core.database.postgres.row.Row> = List.with_capacity(result.rows.len());
+        let mut out: List<core.database.postgres.row.PgRow> = List.with_capacity(result.rows.len());
         let mut i: Int = 0;
         while i < result.rows.len() as Int {
             let typed_row = result.rows[i].clone();
             let wire_row  = typed_row_to_wire_values(&typed_row);
-            out.push(core.database.postgres.row.Row.new(row_desc.clone(), wire_row));
+            out.push(core.database.postgres.row.PgRow.new(row_desc.clone(), wire_row));
             i = i + 1;
         }
         Result.Ok(out)
@@ -352,7 +352,7 @@ implement AsyncPgPoolGuard {
         &self,
         sql:    &Text,
         params: List<Maybe<core.database.postgres.wire.typed.TypedValue>>,
-    ) -> Result<core.database.postgres.row.Row, DbError> {
+    ) -> Result<core.database.postgres.row.PgRow, DbError> {
         match self.query_one_opt(sql, params).await? {
             Maybe.Some(r) => Result.Ok(r),
             Maybe.None => {
@@ -374,7 +374,7 @@ implement AsyncPgPoolGuard {
         &self,
         sql:    &Text,
         params: List<Maybe<core.database.postgres.wire.typed.TypedValue>>,
-    ) -> Result<Maybe<core.database.postgres.row.Row>, DbError> {
+    ) -> Result<Maybe<core.database.postgres.row.PgRow>, DbError> {
         let conn = self.conn_ref();
         let stmt = conn.prepare(sql).await?;
         let result = conn.execute_prepared_typed(&stmt, params).await?;
@@ -387,7 +387,7 @@ implement AsyncPgPoolGuard {
             Maybe.None     => return Result.Ok(Maybe.None),
         };
         let wire_row = typed_row_to_wire_values(&result.rows[0]);
-        Result.Ok(Maybe.Some(core.database.postgres.row.Row.new(row_desc, wire_row)))
+        Result.Ok(Maybe.Some(core.database.postgres.row.PgRow.new(row_desc, wire_row)))
     }
 
     /// Execute a parameterised statement with no result rows
@@ -410,9 +410,9 @@ implement AsyncPgPoolGuard {
 //
 // `execute_prepared_typed` returns rows as `List<List<TypedValue>>`
 // where every cell is already in the post-decoded Verum-native form.
-// The `Row` façade reads bytes; we project each `TypedValue` back to
+// The `PgRow` façade reads bytes; we project each `TypedValue` back to
 // its canonical TEXT-format representation.  TEXT format is the
-// universal lingua franca — every getter on the Row façade has a
+// universal lingua franca — every getter on the PgRow façade has a
 // TEXT-decode branch — so this projection is faithful for every
 // column type the façade covers (bool / int{2,4,8} / text-family /
 // bytea / timestamp / timestamptz / text-array).  Unsupported types
@@ -465,7 +465,7 @@ fn format_int_text(n: Int) -> List<Byte> {
 
 fn format_bytea_hex_text(b: &List<Byte>) -> List<Byte> {
     // Emit `\x<hex>` form — the postgres `bytea_output=hex` default
-    // and what `Row.get_bytes` parses on the TEXT branch.
+    // and what `PgRow.get_bytes` parses on the TEXT branch.
     let mut out: List<Byte> = List.with_capacity(2 + b.len() * 2);
     out.push(b'\\');
     out.push(b'x');
@@ -486,7 +486,7 @@ fn hex_nibble_to_byte(n: Int) -> Byte {
 
 fn format_pg_timestamp_text(microseconds: Int, with_tz: Bool) -> List<Byte> {
     // Reproduce postgres' canonical TIMESTAMP[TZ] TEXT output
-    // (`YYYY-MM-DD HH:MM:SS.ffffff[+00]`) so `Row.get_timestamp`'s
+    // (`YYYY-MM-DD HH:MM:SS.ffffff[+00]`) so `PgRow.get_timestamp`'s
     // TEXT branch can parse it.  Inputs are microseconds since
     // 2000-01-01 00:00:00 (postgres epoch); we shift to Unix epoch
     // (1970-01-01) and delegate the calendar split to the time
@@ -496,7 +496,7 @@ fn format_pg_timestamp_text(microseconds: Int, with_tz: Bool) -> List<Byte> {
     let nanos        = (microseconds % 1_000_000) * 1_000;
     let formatted    = core.time.rfc3339.format_utc_with_nanos(unix_seconds, nanos);
     // RFC 3339 form is `YYYY-MM-DDTHH:MM:SS.fffZ`.  For non-tz
-    // timestamps the `Z` is meaningless but harmless — `Row`'s
+    // timestamps the `Z` is meaningless but harmless — `PgRow`'s
     // normaliser strips it.  We keep RFC 3339 and let the caller's
     // `parse_rfc3339` round-trip cleanly.
     let _ = with_tz;

@@ -15,7 +15,7 @@
 // (`row.get_text("col")`, `row.get_bool("active")`, …) without each caller
 // having to thread `RowDescription` lookups + per-OID decoders by hand.
 //
-// **Thin façade.**  `Row` borrows the underlying `RowDescription` and
+// **Thin façade.**  `PgRow` borrows the underlying `RowDescription` and
 // `List<WireValue>` slices; it never copies the bytes.  Each `get_*`
 // method walks the column list once (column counts are typically <30
 // for registry tables, so linear search is competitive with indexing
@@ -90,11 +90,11 @@ const PG_TYPE_VARCHAR_ARRAY: Int = 1015; // _varchar
 const PG_TYPE_BPCHAR_ARRAY:  Int = 1014; // _bpchar
 
 // =============================================================================
-// Row — façade over (RowDescription, &List<WireValue>)
+// PgRow — façade over (RowDescription, &List<WireValue>)
 // =============================================================================
 
 @derive(Clone, Debug)
-public type Row is {
+public type PgRow is {
     /// Borrowed reference into the result's RowDescription.  Cloned
     /// at row-construction time (cheap — RowDescription is a thin
     /// `List<ColumnDesc>` wrapper).
@@ -104,12 +104,12 @@ public type Row is {
     values: List<WireValue>,
 }
 
-implement Row {
-    /// Construct a Row from a wire-level `(RowDescription, values)`
+implement PgRow {
+    /// Construct a PgRow from a wire-level `(RowDescription, values)`
     /// pair.  Used internally by `Database.query*` methods on the
     /// adapter side.
-    public fn new(description: RowDescription, values: List<WireValue>) -> Row {
-        Row { description, values }
+    public fn new(description: RowDescription, values: List<WireValue>) -> PgRow {
+        PgRow { description, values }
     }
 
     /// Number of columns.

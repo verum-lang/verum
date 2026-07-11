@@ -25,7 +25,7 @@ module core.database.sqlite.native.soft_heap.engine;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.soft_heap.limit.{
-    Limit, limit_unset,
+    SoftHeapLimit, limit_unset,
 };
 mount core.database.sqlite.native.soft_heap.pressure.{
     PressureEvent, PeSoftThresholdCrossing, PeHardThresholdImminent,
@@ -62,8 +62,8 @@ public fn is_granted(o: &SoftHeapAllocOutcome) -> Bool {
 // -----------------------------------------------------------------------------
 
 public type SoftHeapEngine is {
-    soft: Limit,
-    hard: Limit,
+    soft: SoftHeapLimit,
+    hard: SoftHeapLimit,
 }
 
 public fn engine_new() -> SoftHeapEngine {

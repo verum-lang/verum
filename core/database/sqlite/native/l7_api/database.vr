@@ -57,7 +57,7 @@ mount core.database.sqlite.native.l6_session.{
     seed_cursors_from_connection, writeback_cursors_to_connection,
 };
 mount core.database.sqlite.native.l7_api.transaction.{
-    Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
+    SqliteTransaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
     tx_make,
 };
 
@@ -510,13 +510,13 @@ implement Database {
     }
 
     // -------------------------------------------------------------------------
-    // Transaction — affine handle API
+    // SqliteTransaction — affine handle API
     // -------------------------------------------------------------------------
     //
 
-    // Spec database.md §4.1+§5.5: `Transaction` is `affine` — the value
+    // Spec database.md §4.1+§5.5: `SqliteTransaction` is `affine` — the value
     // MUST be consumed by exactly one of `commit_tx` / `rollback_tx`.
-    // The compiler refuses to drop a Transaction out of scope, which
+    // The compiler refuses to drop a SqliteTransaction out of scope, which
     // makes "leaked transaction" (the most common production SQL bug)
     // lexically impossible.
     //
@@ -526,7 +526,7 @@ implement Database {
 
     /// Begin a deferred transaction (BEGIN). Returns the affine
     /// handle the caller MUST consume.
-    public fn begin_tx(&mut self) -> Result<Transaction, SqliteApiDbError> {
+    public fn begin_tx(&mut self) -> Result<SqliteTransaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmDeferred) {
             Result.Ok(_)  => Result.Ok(tx_make(depth, TkDeferred)),
@@ -535,7 +535,7 @@ implement Database {
     }
 
     /// Begin an IMMEDIATE transaction (RESERVED lock at start).
-    public fn begin_tx_immediate(&mut self) -> Result<Transaction, SqliteApiDbError> {
+    public fn begin_tx_immediate(&mut self) -> Result<SqliteTransaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmImmediate) {
             Result.Ok(_)  => Result.Ok(tx_make(depth, TkImmediate)),
@@ -544,7 +544,7 @@ implement Database {
     }
 
     /// Begin an EXCLUSIVE transaction.
-    public fn begin_tx_exclusive(&mut self) -> Result<Transaction, SqliteApiDbError> {
+    public fn begin_tx_exclusive(&mut self) -> Result<SqliteTransaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmExclusive) {
             Result.Ok(_)  => Result.Ok(tx_make(depth, TkExclusive)),
@@ -555,7 +555,7 @@ implement Database {
     /// Consume the transaction handle and COMMIT. Returns
     /// `DbMisuse(...)` if the connection's tx-depth no longer matches
     /// what `tx` recorded at begin time (savepoint left dangling).
-    public fn commit_tx(&mut self, tx: Transaction) -> Result<(), SqliteApiDbError> {
+    public fn commit_tx(&mut self, tx: SqliteTransaction) -> Result<(), SqliteApiDbError> {
         let started = tx.started_at_depth();
         let _ = tx;     // affine consume — no further use of `tx` is possible.
         let now = self.conn.tx_depth();
@@ -576,7 +576,7 @@ implement Database {
     /// Consume the transaction handle and ROLLBACK. Tolerant of stale
     /// depth — rollback is a recovery path, so we issue the ROLLBACK
     /// regardless.
-    public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), SqliteApiDbError> {
+    public fn rollback_tx(&mut self, tx: SqliteTransaction) -> Result<(), SqliteApiDbError> {
         let _ = tx;
         match self.conn.rollback_tx() {
             Result.Ok(_)  => Result.Ok(()),
@@ -590,7 +590,7 @@ implement Database {
     ///
 
     /// This is the recommended entry point for almost all transactional
-    /// code — the affine `Transaction` value is created and consumed
+    /// code — the affine `SqliteTransaction` value is created and consumed
     /// internally so the caller never has to thread it.
     public fn with_transaction<R>(
         &mut self,

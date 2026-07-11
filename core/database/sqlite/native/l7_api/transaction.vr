@@ -6,13 +6,13 @@
 module core.database.sqlite.native.l7_api.transaction;
 
 // =============================================================================
-// l7_api/transaction.vr — affine user-facing Transaction handle
+// l7_api/transaction.vr — affine user-facing SqliteTransaction handle
 // =============================================================================
 // Layer: 7 — public API.
 // Spec: database.md §4.1 + §5.5; sqlite-native.md §13.
 //
 
-// `Transaction` is the affine handle the user MUST consume by calling
+// `SqliteTransaction` is the affine handle the user MUST consume by calling
 // `Database.commit_tx(tx)` or `Database.rollback_tx(tx)`. Forgetting
 // to consume it is a *compile-time* error — the type system refuses to
 // drop an affine value out of scope, which makes "leaked transaction"
@@ -26,13 +26,13 @@ module core.database.sqlite.native.l7_api.transaction;
 //  so the call can dispatch back through the connection. Verum's
 //  present field-type surface allows owned values but not borrowed
 //  references in struct fields, so we use the dual form: methods on
-//  `Database` that *consume* a `Transaction` token. Identical
+//  `Database` that *consume* a `SqliteTransaction` token. Identical
 //  semantics, identical safety; the only API difference is
 //  `db.commit_tx(tx)` vs `tx.commit()`.
 //
 
 //  The `with_transaction` callback combinator wraps both halves so most
-//  user code never names a `Transaction` value at all — see
+//  user code never names a `SqliteTransaction` value at all — see
 //  `Database.with_transaction` in `database.vr`.
 //
 
@@ -50,7 +50,7 @@ module core.database.sqlite.native.l7_api.transaction;
 mount core.*;
 mount base.{Result, Ok, Err, Text};
 
-/// Transaction-isolation flavour that shapes the underlying BEGIN.
+/// SqliteTransaction-isolation flavour that shapes the underlying BEGIN.
 ///
 
 /// Mirrors SQLite's three flavours:
@@ -74,9 +74,9 @@ public type TxKind is TkDeferred | TkImmediate | TkExclusive;
 /// Affine semantics:
 ///  * Cannot be copied.
 ///  * Cannot be dropped without consumption — compile-time error.
-///  * `commit_tx` / `rollback_tx` take `Transaction` by value; the
+///  * `commit_tx` / `rollback_tx` take `SqliteTransaction` by value; the
 ///  compiler then has no live binding to use after the call.
-public type affine Transaction is {
+public type affine SqliteTransaction is {
     /// Tx-depth snapshot for outer-vs-savepoint sanity checking.
     started_at_depth: Int,
     /// Isolation flavour the BEGIN ran with. Surfaced for tracing and
@@ -86,11 +86,11 @@ public type affine Transaction is {
 
 /// Construct a fresh transaction handle. Internal — use
 /// `Database.begin_tx_*` from user code.
-public fn tx_make(started_at_depth: Int, kind: TxKind) -> Transaction {
-    Transaction { started_at_depth: started_at_depth, kind: kind }
+public fn tx_make(started_at_depth: Int, kind: TxKind) -> SqliteTransaction {
+    SqliteTransaction { started_at_depth: started_at_depth, kind: kind }
 }
 
-implement Transaction {
+implement SqliteTransaction {
     /// Tx-depth at the moment `begin_tx` was issued. Used by the
     /// commit/rollback pair to verify they're closing the *outermost*
     /// transaction (depth_now == started_at_depth + 1) rather than a

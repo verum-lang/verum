@@ -16,7 +16,7 @@
 //
 
 // Submodules:
-//  * `limit` — Limit (current + high-water-mark)
+//  * `limit` — SoftHeapLimit (current + high-water-mark)
 //  * `pressure` — PressureCallback protocol — caller registers a
 //  handler that receives memory pressure events
 //  * `engine` — SoftHeapEngine: enforces `try_allocate(bytes)` against both limits

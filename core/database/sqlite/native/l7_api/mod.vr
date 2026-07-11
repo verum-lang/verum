@@ -30,7 +30,7 @@ public mount .database.{
 };
 
 public mount .transaction.{
-    Transaction, TxKind,
+    SqliteTransaction, TxKind,
     TkDeferred, TkImmediate, TkExclusive,
 };
 

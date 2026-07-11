@@ -223,12 +223,12 @@ public context Logger {
 // =============================================================================
 
 /// A row of results from a database query.
-public type Row is {
+public type QueryRow is {
     columns: List<Text>,
     values: List<Maybe<Text>>,
 };
 
-implement Row {
+implement QueryRow {
     /// Get a column value by name.
     public fn get(&self, column: &Text) -> Maybe<&Text> {
         for i in 0..self.columns.len() {
@@ -251,7 +251,7 @@ implement Row {
 
 /// Database query result.
 public type QueryResult is {
-    rows: List<Row>,
+    rows: List<QueryRow>,
     rows_affected: Int,
 };
 
@@ -636,13 +636,13 @@ implement Display for ContextLogRecord {
     }
 }
 
-implement Debug for Row {
+implement Debug for QueryRow {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"Row {{ columns: {self.columns}, values: {self.values} }}")
+        f.write_str(f"QueryRow {{ columns: {self.columns}, values: {self.values} }}")
     }
 }
 
-implement Display for Row {
+implement Display for QueryRow {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         for i in 0..self.columns.len() {
             if i > 0 {

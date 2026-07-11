@@ -1,5 +1,5 @@
 // =============================================================================
-// progress/engine.vr — C-API facade over ProgressHandler
+// progress/engine.vr — C-API facade over ProgressConfig
 // =============================================================================
 // Spec: SQLite C API
 //
@@ -22,7 +22,7 @@ module core.database.sqlite.native.progress.engine;
 mount core.*;
 mount base.{Bool, Maybe};
 mount core.database.sqlite.native.progress.handler.{
-    ProgressHandler, ProgressDecision, PdContinue, PdInterrupt,
+    ProgressConfig, ProgressDecision, PdContinue, PdInterrupt,
     handler_is_enabled,
 };
 mount core.database.sqlite.native.progress.tick.{
@@ -30,7 +30,7 @@ mount core.database.sqlite.native.progress.tick.{
 };
 
 public type ProgressEngine is {
-    handler: Maybe<ProgressHandler>,
+    handler: Maybe<ProgressConfig>,
     acc: TickAccumulator,
 }
 
@@ -42,7 +42,7 @@ public fn new_engine() -> ProgressEngine {
 }
 
 implement ProgressEngine {
-    public fn install(&mut self, h: Maybe<ProgressHandler>) {
+    public fn install(&mut self, h: Maybe<ProgressConfig>) {
         self.handler = h;
     }
 

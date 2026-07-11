@@ -38,17 +38,17 @@ public fn decision_name(d: &ProgressDecision) -> Text {
     }
 }
 
-public type ProgressHandler is {
+public type ProgressConfig is {
     name: Text,
     /// VDBE consults the handler once every `interval_ops` opcodes.
     /// Non-positive disables the handler entirely.
     interval_ops: Int,
 }
 
-public fn new_handler(name: Text, interval_ops: Int) -> ProgressHandler {
-    ProgressHandler { name: name, interval_ops: interval_ops }
+public fn new_handler(name: Text, interval_ops: Int) -> ProgressConfig {
+    ProgressConfig { name: name, interval_ops: interval_ops }
 }
 
-public fn handler_is_enabled(h: &ProgressHandler) -> Bool {
+public fn handler_is_enabled(h: &ProgressConfig) -> Bool {
     h.interval_ops > 0
 }
