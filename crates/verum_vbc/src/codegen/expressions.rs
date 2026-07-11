@@ -15675,10 +15675,38 @@ impl VbcCodegen {
                                                 // payload type and downstream `+` dispatch routes to
                                                 // Text concat instead of Int Add.
                                                 let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
+                                                // The pattern name may itself be QUALIFIED
+                                                // (`Result.Err(e)` / `Result::Err(e)`): formatting
+                                                // `{base}.{variant_name}` then built the malformed
+                                                // key `Result.Result::Err`, every lookup missed,
+                                                // and the else-arm's POSITIONAL `inner_types[0]`
+                                                // typed the Err binding with the OK generic arg —
+                                                // `e: Int` — which armed the #109 Int-scrutinee
+                                                // guard and compiled every variant test in the
+                                                // nested `match e` to a matches-nothing `== 0`
+                                                // (PATTERN-BIND-QUALIFIED-KEY-1). Use the simple
+                                                // last segment for the qualified probes.
+                                                let simple_variant = variant_name
+                                                    .rsplit(|c| c == ':' || c == '.')
+                                                    .next()
+                                                    .unwrap_or(&variant_name);
+                                                // The type table is the authoritative tag source —
+                                                // consult it before the collision-prone fn table.
+                                                let type_table_tag: Option<u32> = self
+                                                    .ctx
+                                                    .find_variant_by_type_and_name(base, simple_variant);
                                                 let scrutinee_aware_info = self.ctx
-                                                    .lookup_function(&format!("{}.{}", base, variant_name))
-                                                    .or_else(|| self.ctx.lookup_function(&format!("{}::{}", base, variant_name)));
-                                                if let Some(info) = scrutinee_aware_info
+                                                    .lookup_function(&format!("{}.{}", base, simple_variant))
+                                                    .or_else(|| self.ctx.lookup_function(&format!("{}::{}", base, simple_variant)));
+                                                if let Some(tag) = type_table_tag
+                                                    .filter(|_| scrutinee_aware_info.is_none())
+                                                {
+                                                    // Fn-table lookups missed but the scrutinee's
+                                                    // own descriptor knows the variant: index the
+                                                    // parent's generic args by tag (Result.Err →
+                                                    // tag 1 → the E arg), never positionally.
+                                                    inner_types.get(tag as usize).cloned()
+                                                } else if let Some(info) = scrutinee_aware_info
                                                     .or_else(|| self.ctx.lookup_function_in_scope(&variant_name))
                                                 {
                                                     // Pick the declared payload type if it's concrete;
@@ -20379,20 +20407,28 @@ impl VbcCodegen {
         // scrutinee type, mirroring the discipline used by
         // `compile_pattern_bind`'s tuple arm.
         let inner_types = self.extract_inner_types(scrutinee_type);
+        // PATTERN-BIND-QUALIFIED-KEY-1: the pattern path may be qualified
+        // (`Result.Err(x)`) — qualify with the SIMPLE last segment or the
+        // probes build malformed `Result.Result::Err` keys and miss.
+        let simple_variant = variant_name
+            .rsplit(|c| c == ':' || c == '.')
+            .next()
+            .unwrap_or(&variant_name)
+            .to_string();
         let info = self
             .ctx
             .lookup_function_in_scope(&variant_name)
             .or_else(|| {
                 let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
                 self.ctx
-                    .lookup_function(&format!("{}::{}", base, variant_name))
+                    .lookup_function(&format!("{}::{}", base, simple_variant))
             })
             .or_else(|| {
                 // Simple-name lookup may have been purged by collision
                 // detection — fall back to qualified by scrutinee base.
                 let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
                 self.ctx
-                    .lookup_function(&format!("{}.{}", base, variant_name))
+                    .lookup_function(&format!("{}.{}", base, simple_variant))
             })?;
         let is_generic_param = |s: &str| -> bool {
             s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
