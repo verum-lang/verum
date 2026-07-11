@@ -65,6 +65,7 @@
 module core.database.postgres.async_pgoutput;
 
 mount core.*;
+mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
@@ -295,7 +296,7 @@ public async fn start_logical_pgoutput(
     repl.start_logical(opts, start_lsn).await?;
     Result.Ok(AsyncPgoutputConsumer {
         conn: repl,
-        cache: Shared.new(sync.mutex.Mutex.new(PgoRelationCache.new())),
+        cache: Shared.new(Mutex.new(PgoRelationCache.new())),
     })
 }
 

@@ -60,6 +60,7 @@
 module core.database.postgres.async_pgoutput_buffered;
 
 mount core.*;
+mount core.sync.mutex.{Mutex};
 mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
@@ -564,12 +565,12 @@ public fn buffered_with_caps_and_sink(
     let bcap = if byte_cap < 0 { 0 } else { byte_cap };
     AsyncPgoutputBufferedConsumer {
         inner: inner,
-        buffers: Shared.new(sync.mutex.Mutex.new(List.new())),
-        current_xid: Shared.new(sync.mutex.Mutex.new(Maybe.None)),
+        buffers: Shared.new(Mutex.new(List.new())),
+        current_xid: Shared.new(Mutex.new(Maybe.None)),
         row_cap: rcap,
         byte_cap: bcap,
         spill_sink: spill_sink,
-        dropped_xids: Shared.new(sync.mutex.Mutex.new(List.new())),
+        dropped_xids: Shared.new(Mutex.new(List.new())),
     }
 }
 
