@@ -4795,8 +4795,12 @@ implement AssociativeOperad for CommOperadConcrete {
 
 implement CommutativeOperad for CommOperadConcrete {
     fn commutativity_coherence(f: &Int, sigma: &Int) -> Bool {
-        // The action of any permutation σ on the unique operation is trivial.
-        self.act(f, sigma) == *f
+        // The action of any permutation σ on the unique operation is
+        // trivial. Receiver-less like every method in this impl
+        // family — dispatch the sibling static by qualified name (the
+        // previous `self.act(...)` referenced `self` from a
+        // signature with no self parameter and lenient-stubbed).
+        CommOperadConcrete.act(f, sigma) == *f
     }
 }
 

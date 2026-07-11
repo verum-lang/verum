@@ -1626,16 +1626,23 @@ implement GPUDevice {
 }
 
 implement ComputeDevice for GPUDevice {
+    // ComputeDevice methods are receiver-less protocol statics (call
+    // sites dispatch `ComputeDevice.device_type()` ambiently — see
+    // tensor.vr TensorHandle.allocate). The previous bodies read
+    // `self.device_id` from a signature with NO self parameter, so
+    // every method lenient-stubbed with "undefined variable: self".
+    // The GPU-side ambient answer is the registry's selected default
+    // device — the same source `default_device()` exposes.
     fn device_type() -> DeviceId {
-        self.device_id
+        get_registry().default_device
     }
 
     fn device() -> DeviceId {
-        self.device_id
+        get_registry().default_device
     }
 
     fn device_info() -> &DeviceInfo {
-        get_registry().get_device(self.device_id)
+        get_registry().get_device(get_registry().default_device)
             .expect("GPU device not found")
     }
 

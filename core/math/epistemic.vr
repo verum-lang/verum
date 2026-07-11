@@ -443,7 +443,7 @@ implement GrothendieckTopology<InfinityCategory> for EpistemicTopology {
 
     /// The concrete runtime resolves these handles; the logic here is the
     /// faithfulness predicate expressed in terms of the theory's claim ids.
-    fn is_covering(c: &Int, s: &Int) -> Bool {
+    fn is_covering(&self, c: &Int, s: &Int) -> Bool {
         // Decode the target claim id from the theory via runtime handle `c`.
         let target_ids: List<Text> = self.theory.statements.clone();
 

@@ -778,11 +778,17 @@ fn create_unix_socket() -> Result<FileDesc, UnixError> {
     @cfg(any(target_os = "linux", target_os = "windows"))
     let fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)
         .map_err(UnixError.from_os_error)?;
-    @cfg(target_os = "macos") {
-        let fd = sys_socket(AF_UNIX, SOCK_STREAM, 0).map_err(UnixError.from_os_error)?;
-        let _ = safe_set_nosigpipe(fd, true);
-        fd
-    }
+    // Bind the macOS branch to the SAME `fd` name via a cfg'd
+    // let-with-block-initializer — the previous bare `@cfg { let fd
+    // ... }` scoped fd INSIDE the block, so `Result.Ok(fd)` below saw
+    // no binding on Darwin and the whole fn lenient-stubbed
+    // ("undefined variable: fd").
+    @cfg(target_os = "macos")
+    let fd = {
+        let raw = sys_socket(AF_UNIX, SOCK_STREAM, 0).map_err(UnixError.from_os_error)?;
+        let _ = safe_set_nosigpipe(raw, true);
+        raw
+    };
     Result.Ok(fd)
 }
 
@@ -790,12 +796,14 @@ fn create_unix_socket_nonblocking() -> Result<FileDesc, UnixError> {
     @cfg(any(target_os = "linux", target_os = "windows"))
     let fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)
         .map_err(UnixError.from_os_error)?;
-    @cfg(target_os = "macos") {
-        let fd = sys_socket(AF_UNIX, SOCK_STREAM, 0).map_err(UnixError.from_os_error)?;
-        let _ = safe_set_nosigpipe(fd, true);
-        let _ = safe_set_nonblocking(fd, true).map_err(UnixError.from_os_error)?;
-        fd
-    }
+    // Same block-scoping fix as create_unix_socket above.
+    @cfg(target_os = "macos")
+    let fd = {
+        let raw = sys_socket(AF_UNIX, SOCK_STREAM, 0).map_err(UnixError.from_os_error)?;
+        let _ = safe_set_nosigpipe(raw, true);
+        let _ = safe_set_nonblocking(raw, true).map_err(UnixError.from_os_error)?;
+        raw
+    };
     Result.Ok(fd)
 }
 
@@ -898,7 +906,11 @@ implement UnixStream {
         // `core/sys/darwin/libsystem.vr` which routes through
         // libSystem.B.dylib — Apple-required boundary, NOT libc in
         // the glibc/musl sense.
-        match super.darwin.libsystem.safe_getsockopt(
+        // Absolute canonical path — the previous `super.darwin.…`
+        // resolved relative to `core.net` (→ `net.darwin.…`, which
+        // doesn't exist; libsystem lives under `core.sys.darwin`) and
+        // lenient-stubbed peer_cred.
+        match core.sys.darwin.libsystem.safe_getsockopt(
             FileDesc(self.fd), SOL_LOCAL, LOCAL_PEERCRED,
             &mut buf, &mut len,
         ) {
