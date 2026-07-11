@@ -14,7 +14,7 @@ module core.database.sqlite.native.status.stmt;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.status.kind.{
-    SqliteStatStmtKind, SsFullscanStep, SsSort, SsAutoindex, SsVmStep,
+    SqliteStatStmtKind, SqliteStatStmtKind.SsFullscanStep, SqliteStatStmtKind.SsSort, SqliteStatStmtKind.SsAutoindex, SqliteStatStmtKind.SsVmStep,
     SsReprepare, SsRun, SsFilterMiss, SsFilterHit,
 };
 mount core.database.sqlite.native.status.counter.{Counter, counter_zero};

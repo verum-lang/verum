@@ -65,7 +65,7 @@ mount core.text.numeric.bigint.{
 };
 mount core.text.numeric.decimal.{
     Decimal,
-    RoundingMode, HalfEven, HalfUp, HalfDown, Truncate,
+    RoundingMode, HalfEven, HalfUp, HalfDown, RoundingMode.Truncate,
 };
 
 // =============================================================================
@@ -275,7 +275,7 @@ implement BigDecimal {
                 else if round_digit > 5 { true }
                 else { sticky }
             }
-            Truncate => false,
+            RoundingMode.Truncate => false,
         };
 
         // Apply bump.  For negative kept values, "bump up in
@@ -301,7 +301,7 @@ implement BigDecimal {
 
     /// Integer quotient (truncated towards zero, scale=0).
     public fn div_trunc(&self, other: &BigDecimal) -> Result<BigDecimal, BigDecimalError> {
-        self.div(other, 0, Truncate)
+        self.div(other, 0, RoundingMode.Truncate)
     }
 
     // -------------------------------------------------------------------------

@@ -24,7 +24,7 @@ public type JournalMode is
 
 public fn mode_text(m: &JournalMode) -> Text {
     match m {
-        JmDelete    => "delete".clone(),
+        JournalMode.JmDelete    => "delete".clone(),
         JmTruncate  => "truncate".clone(),
         JmPersist   => "persist".clone(),
         JmMemory    => "memory".clone(),
@@ -36,7 +36,7 @@ public fn mode_text(m: &JournalMode) -> Text {
 /// Parse the SQLite spelling (case-insensitive) → JournalMode.
 public fn parse_mode(text: &Text) -> Maybe<JournalMode> {
     let lower = lower(text);
-    if lower == "delete".clone()    { return Maybe.Some(JmDelete); }
+    if lower == "delete".clone()    { return Maybe.Some(JournalMode.JmDelete); }
     if lower == "truncate".clone()  { return Maybe.Some(JmTruncate); }
     if lower == "persist".clone()   { return Maybe.Some(JmPersist); }
     if lower == "memory".clone()    { return Maybe.Some(JmMemory); }
@@ -58,4 +58,4 @@ fn lower(t: &Text) -> Text {
     out
 }
 
-public fn default_mode() -> JournalMode { JmDelete }
+public fn default_mode() -> JournalMode { JournalMode.JmDelete }

@@ -17,24 +17,24 @@ public type SecureMode is
 
 public fn mode_code(m: &SecureMode) -> Int {
     match m {
-        SmOff  => 0,
+        SecureMode.SmOff  => 0,
         SmOn   => 1,
-        SmFast => 2,
+        SecureMode.SmFast => 2,
     }
 }
 
 public fn from_code(c: Int) -> Maybe<SecureMode> {
-    if c == 0 { return Maybe.Some(SmOff); }
+    if c == 0 { return Maybe.Some(SecureMode.SmOff); }
     if c == 1 { return Maybe.Some(SmOn); }
-    if c == 2 { return Maybe.Some(SmFast); }
+    if c == 2 { return Maybe.Some(SecureMode.SmFast); }
     Maybe.None
 }
 
 public fn mode_name(m: &SecureMode) -> Text {
     match m {
-        SmOff  => "OFF".clone(),
+        SecureMode.SmOff  => "OFF".clone(),
         SmOn   => "ON".clone(),
-        SmFast => "FAST".clone(),
+        SecureMode.SmFast => "FAST".clone(),
     }
 }
 
@@ -43,19 +43,19 @@ public fn zeroes_full_page(m: &SecureMode) -> Bool {
 }
 
 public fn zeroes_tail_only(m: &SecureMode) -> Bool {
-    match m { SmFast => true, _ => false }
+    match m { SecureMode.SmFast => true, _ => false }
 }
 
 public fn leaves_residue(m: &SecureMode) -> Bool {
-    match m { SmOff => true, _ => false }
+    match m { SecureMode.SmOff => true, _ => false }
 }
 
-public fn default_mode() -> SecureMode { SmOff }
+public fn default_mode() -> SecureMode { SecureMode.SmOff }
 
 // FAST mode available only from SQLite 3.31+.
 public fn min_version_for(m: &SecureMode) -> Text {
     match m {
-        SmFast => "3.31.0".clone(),
+        SecureMode.SmFast => "3.31.0".clone(),
         _      => "3.0.0".clone(),
     }
 }

@@ -373,7 +373,7 @@ implement Decimal {
                     sticky
                 }
             }
-            Truncate => false,
+            RoundingMode.Truncate => false,
         };
 
         if bump_up {
@@ -402,7 +402,7 @@ implement Decimal {
     /// `self.div(other, 0, Truncate)` but skips the rounding
     /// branch for clarity.
     public fn div_trunc(&self, other: &Decimal) -> Result<Decimal, DecimalError> {
-        self.div(other, 0, Truncate)
+        self.div(other, 0, RoundingMode.Truncate)
     }
 
     // -------------------------------------------------------------------------

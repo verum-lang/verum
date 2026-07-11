@@ -164,7 +164,7 @@ public fn pragma_config_default() -> PragmaConfig {
         busy_timeout_ms: 0,
         case_sensitive_like: false,
         encoding: EncUtf8,
-        temp_store: TsDefault,
+        temp_store: LockingMode.TsDefault,
         secure_delete: false,
         writable_schema: false,
         query_only: false,

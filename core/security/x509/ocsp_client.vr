@@ -487,7 +487,7 @@ implement Display for OcspCheckError {
             NotYetActive { this_update, now } => f.write_str(f"ocsp: thisUpdate {this_update} in future (now={now})".as_str()),
             Expired { next_update, now }=> f.write_str(f"ocsp: nextUpdate {next_update} elapsed (now={now})".as_str()),
             SignatureFailed             => f.write_str("ocsp: response signature verification failed"),
-            UnknownStatus               => f.write_str("ocsp: responder returned 'unknown' status"),
+            OcspCheckError.UnknownStatus               => f.write_str("ocsp: responder returned 'unknown' status"),
         }
     }
 }
@@ -555,7 +555,7 @@ public async fn check_certificate_status<C: HttpClient>(
     // Step 7: interpret status.
     let final_status = match &single.cert_status {
         CertStatus.Unknown if opts.treat_unknown_as_good => CertStatus.Good,
-        CertStatus.Unknown => return Result.Err(UnknownStatus),
+        CertStatus.Unknown => return Result.Err(OcspCheckError.UnknownStatus),
         s => s.clone(),
     };
 

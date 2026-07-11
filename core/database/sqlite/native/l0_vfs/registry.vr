@@ -112,7 +112,7 @@ public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
     // Fast path — ":memory:" bare literal.
     if uri == &":memory:".clone() {
         return Result.Ok(VfsParsedUri {
-            kind: Memory,
+            kind: VfsKind.Memory,
             path: "".clone(),
             flags: flags_rwc(),
         });
@@ -140,7 +140,7 @@ public fn parse_uri(uri: &Text) -> Result<VfsParsedUri, VfsError> {
     // Figure out the backend.
     let mut kind = platform_default();
     if path_part == ":memory:".clone() || starts_with_bytes(&path_part, ":memory:") {
-        kind = Memory;
+        kind = VfsKind.Memory;
     }
 
     // Parse the query for `vfs=<name>` and `mode=<ro|rw|rwc>`.
@@ -213,8 +213,8 @@ public type VfsRegistry is {
 /// (`unix` / `win32`), and the aliases `:memory:` / `posix`.
 public fn default_registry() -> VfsRegistry {
     let mut entries: Map<Text, VfsKind> = Map.new();
-    let _ = entries.insert("memdb".clone(), Memory);
-    let _ = entries.insert(":memory:".clone(), Memory);
+    let _ = entries.insert("memdb".clone(), VfsKind.Memory);
+    let _ = entries.insert(":memory:".clone(), VfsKind.Memory);
     let _ = entries.insert("unix".clone(), Posix);
     let _ = entries.insert("posix".clone(), Posix);
     let _ = entries.insert("win32".clone(), Win32);
