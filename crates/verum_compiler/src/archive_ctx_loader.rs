@@ -2697,6 +2697,48 @@ fn compute_merge_keep_sets(
         for tid in wanted_tids {
             keep_type_surface!(idx, tid);
         }
+    }
+    // USER-CALLM seed (ARCHIVE-MERGE-MISSING-FN, task #24 leg 2): the
+    // user program's instance-method names arrive in `wanted` as BARE
+    // names (`unwrap_err`) and static-path calls as `Type.method`
+    // 2-segment keys. Neither matches an archive descriptor name
+    // exactly unless some OTHER kept archive body happens to call it —
+    // `Result.unwrap_err` had no archive-internal caller and was pruned
+    // (its siblings unwrap/expect survived only via stdlib panic-path
+    // Call edges), so the user's `.unwrap_err()` CallM degraded to
+    // const-zero at AOT. Mirror the BFS CallM edge rule for the USER
+    // call surface: bare keys keep every same-suffix candidate,
+    // 2-segment keys keep exact suffix2 matches — presence-only
+    // over-keep, dispatch precision stays the runtime's job.
+    // Bare-name fanout cap: ubiquitous method names (`len`, `push`,
+    // `to_text` — dozens of implementors) are already reachable through
+    // archive-internal Call/CallM edges wherever they matter, and
+    // keeping EVERY implementor for every user call site measurably
+    // destabilized the merge (dp AOT 51→28: slower per-test compiles +
+    // latent broken bodies pulled into every binary). Distinctive names
+    // (`unwrap_err` — the actual defect: no archive-internal caller at
+    // all) have few candidates and are kept in full.
+    const BARE_KEEP_FANOUT_CAP: usize = 8;
+    for name in wanted.iter() {
+        let dots = name.matches('.').count();
+        let locs: Option<&Vec<(usize, u32)>> = if dots == 0 {
+            methods_by_bare
+                .get(name.as_str())
+                .filter(|l| l.len() <= BARE_KEEP_FANOUT_CAP)
+        } else if dots == 1 {
+            methods_by_suffix2.get(name.as_str())
+        } else {
+            None
+        };
+        if let Some(locs) = locs {
+            let locs = locs.clone();
+            for (eidx, fid) in locs {
+                push_fn!(eidx, fid);
+            }
+        }
+    }
+    for (idx, (_entry_name, _module)) in decoded.iter().enumerate() {
+        let _ = idx;
         // CALLM-KEEP-CLOSURE-1 seed: PRIMITIVE-impl method surface is
         // unconditionally live.  Primitives (Int / Float / Bool / Char /
         // Text / Byte / sized ints) carry NO TypeDescriptor in
@@ -4039,6 +4081,19 @@ fn harvest_names_in_expr(
                     out.insert(format!("{}.{}", last, method.name));
                 }
             }
+            // INSTANCE-METHOD keep seed (ARCHIVE-MERGE-MISSING-FN /
+            // task #24 leg 2): `r.unwrap_err()` on a VARIABLE receiver
+            // harvested nothing, so an archive method with no archive-
+            // internal static caller (`Result.unwrap_err` — its
+            // siblings unwrap/expect survive only through OTHER stdlib
+            // bodies' Call edges) was pruned from the merge keep set;
+            // the AOT CallM then degraded to const-zero and `e = 0`
+            // matched `Empty` by the null path (historical stale-green
+            // in every error-path probe). Seed the BARE method name —
+            // the keep closure's CALLM rule already resolves bare keys
+            // to every same-suffix candidate ("presence-only over-keep;
+            // dispatch precision is the runtime's job").
+            out.insert(method.name.to_string());
             harvest_names_in_expr(receiver, out);
             for ga in type_args.iter() {
                 harvest_names_in_generic_arg(ga, out);
