@@ -284,6 +284,25 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
             {
                 return format_variant_for_print_depth(state, base_ptr, depth + 1);
             }
+            if std::env::var("VERUM_TRACE_LISTREPR").is_ok() {
+                let existing = state
+                    .module
+                    .types
+                    .iter()
+                    .find(|td| td.id == header.type_id)
+                    .map(|td| {
+                        format!(
+                            "kind={:?} name={:?} variants={}",
+                            td.kind,
+                            state.module.strings.get(td.name),
+                            td.variants.len()
+                        )
+                    });
+                eprintln!(
+                    "[fmt-gate] tid={} NOT Sum-gated; descriptor: {:?}",
+                    header.type_id.0, existing
+                );
+            }
 
             // Tuple: type_id == TUPLE (521)
             if header.type_id == crate::types::TypeId::TUPLE {

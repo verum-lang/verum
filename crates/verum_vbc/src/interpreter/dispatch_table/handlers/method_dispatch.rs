@@ -985,6 +985,37 @@ pub(in super::super) fn handle_call_method(
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
     }
+    // FATREF-DISPATCH-ROUTE-1 (#51): THE slice builtin surface —
+    // answered FIRST, before every resolve strategy. Baked bodies call
+    // the QUALIFIED intrinsic names (`Slice.is_empty` / `Slice.len`),
+    // which have descriptor stubs but no bytecode; any later strategy
+    // either finds an empty stub or coin-flips onto a foreign
+    // `.is_empty` body (ArenaSlice.is_empty reading the marker).
+    if dispatch_receiver.is_fat_ref() {
+        let bare = method_name.rsplit('.').next().unwrap_or(method_name.as_str());
+        match bare {
+            "len" => {
+                let fr = dispatch_receiver.as_fat_ref();
+                state.set_reg(dst, Value::from_i64(fr.len() as i64));
+                return Ok(DispatchResult::Continue);
+            }
+            "is_empty" => {
+                let fr = dispatch_receiver.as_fat_ref();
+                state.set_reg(dst, Value::from_bool(fr.len() == 0));
+                return Ok(DispatchResult::Continue);
+            }
+            _ => {}
+        }
+    }
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        let rk = if dispatch_receiver.is_int() { "int".to_string() }
+            else if dispatch_receiver.is_float() { "float".to_string() }
+            else if dispatch_receiver.is_ptr() {
+                let a = dispatch_receiver.as_ptr::<u8>() as usize;
+                format!("ptr({:#x} interior={})", a, state.cbgr_mutable_ptrs.contains(&a))
+            } else { "other".to_string() };
+        eprintln!("[callm-flow] A-post-primitive method={} recv={}", method_name, rk);
+    }
 
     // PRIMITIVE-RECEIVER FMT RESOLUTION (#41 poll-Debug class).
     // Pinned rule (see the Unit-receiver intercept): a primitive's
@@ -1049,6 +1080,9 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] B-pre-array method={}", method_name);
+    }
     // Try built-in array/list methods (map, filter, fold, etc.)
     if dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
@@ -1106,6 +1140,9 @@ pub(in super::super) fn handle_call_method(
     let prefer_user_compiled = method_name != bare_method_name
         && state.module.find_function_by_name(&method_name).is_some()
         && !force_intrinsic_variant_dispatch;
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] C-pre-variant-1 method={}", method_name);
+    }
     if !prefer_user_compiled
         && dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
@@ -1253,7 +1290,11 @@ pub(in super::super) fn handle_call_method(
     // Extract type name from receiver (supports both SmallString and heap-allocated strings)
     let receiver_type_name: Option<String> = if receiver.is_small_string() {
         Some(receiver.as_small_string().as_str().to_string())
-    } else if receiver.is_ptr() && !receiver.is_nil() {
+    } else if receiver.is_regular_ptr() && !receiver.is_nil() {
+        // FATREF-DISPATCH-ROUTE-1 (#51): regular-pointer contract — a
+        // FatRef/ThinRef marker passed the old `is_ptr` gate and this
+        // probe dereferenced marker bits at +OBJECT_HEADER_SIZE (the
+        // chained-slice `sub1.slice(..)` crash point).
         // Try reading as heap-allocated string: [ObjectHeader][len: u64][bytes...]
         let base_ptr = receiver.as_ptr::<u8>();
         if !base_ptr.is_null() {
@@ -1896,8 +1937,8 @@ pub(in super::super) fn handle_call_method(
                 const DRAIN_CAP: usize = 16_777_216;
                 loop {
                     let item = super::super::call_function_sync(state, next_fid, &[iter_val])?;
-                    if !item.is_ptr() || item.is_nil() {
-                        break; // nil-shaped next result: treat as exhausted
+                    if !item.is_regular_ptr() || item.is_nil() {
+                        break; // nil/non-heap-shaped next result: exhausted
                     }
                     let iptr = item.as_ptr::<u8>();
                     // SAFETY: next() returns a heap Maybe variant; tag read only.
@@ -1939,22 +1980,23 @@ pub(in super::super) fn handle_call_method(
     // `protocol Named`) don't collide — keying by method_id alone silently
     // pinned the first resolution to every later receiver of any type.
     // For non-pointer receivers (primitives, nil), the type_id slot is 0.
-    // DISPATCH-CACHE-KEY-RESOLVED-1 (#48 poll trio): the key MUST be
-    // derived from the RESOLVED receiver (`dispatch_receiver` — refs
-    // peeled), not the raw register value. A CBGR register-ref /
-    // ThinRef receiver is not a heap pointer, so the raw derivation
-    // returned slot 0 for EVERY by-ref receiver — the first dyn
-    // resolution poisoned the (method, 0) slot for all later types:
-    // `f"{polls:?}"` cached List.fmt_debug at slot 0 from the OUTER
-    // &List receiver, and the element's &Poll dispatch then executed
-    // List.fmt_debug on a Poll receiver ("List.get not found on
-    // Poll"). Non-pointer resolved receivers use the NaN-box kind as
-    // a synthetic non-colliding discriminator; genuinely
-    // unclassifiable receivers BYPASS the cache entirely (correctness
-    // over a cache hit).
+    // DISPATCH-CACHE-KEY-RESOLVED-1 (peer 653f946c4, kept through the
+    // #53 restore): the key MUST be derived from the RESOLVED receiver
+    // (`dispatch_receiver` — refs peeled), not the raw register value.
+    // A CBGR register-ref / ThinRef receiver is not a heap pointer, so
+    // the raw derivation returned slot 0 for EVERY by-ref receiver —
+    // the first dyn resolution poisoned the (method, 0) slot for all
+    // later types (`f"{polls:?}"` executed List.fmt_debug on a Poll).
+    // Non-pointer resolved receivers use the NaN-box kind as a
+    // synthetic non-colliding discriminator; genuinely unclassifiable
+    // receivers BYPASS the cache entirely (correctness over a hit).
+    // #53 hardening: FatRef markers are NOT header-probeable — route
+    // them to their own synthetic slot instead of the ptr probe.
     let receiver_type_id_for_cache: Option<u32> = {
         let r = &dispatch_receiver;
-        if r.is_ptr() && !r.is_nil() {
+        if r.is_fat_ref() {
+            Some(u32::MAX - 6)
+        } else if r.is_regular_ptr() && !r.is_nil() {
             let ptr = r.as_ptr::<u8>();
             if !ptr.is_null()
                 && (ptr as usize)
@@ -2079,7 +2121,73 @@ pub(in super::super) fn handle_call_method(
             let qualified = format!("{}.{}", ty, method_name);
             if let Some(id) = state.module.find_function_by_name(&qualified) {
                 found_func_id = Some(id);
+            } else {
+                // Module-qualified impl spelling ("core.x.Ty.method") —
+                // dotted-suffix pass so a real impl is never shadowed
+                // by the builtin fallback below.
+                let dotted = format!(".{}.{}", ty, method_name);
+                for func in &state.module.functions {
+                    let fname = state.module.strings.get(func.name).unwrap_or("");
+                    if fname.ends_with(&dotted) && func.bytecode_length > 0 {
+                        found_func_id = Some(func.id);
+                        break;
+                    }
+                }
             }
+        }
+        // DYN-FMT-BUILTIN-FALLBACK-1 (#48 local-sum leg): a dyn-protocol
+        // Debug/Display call whose receiver type has NO impl (typed
+        // lookup above exhausted exact AND dotted spellings) must NOT
+        // fall into the downstream first-suffix-match scan — that scan
+        // executes an arbitrary same-suffix body on a foreign receiver
+        // (a fn-LOCAL sum's `{l:?}` rendered as float-bit tuple garbage
+        // through someone else's fmt_debug). Route to the runtime
+        // formatter via the SAME string-return convention the
+        // primitive fmt intercepts use (dl8/`[7]` proves the calling
+        // machinery honours it end-to-end); descriptor-driven variant
+        // names render correctly ("LocalLeft(42)").
+        if found_func_id.is_none()
+            && matches!(method_name.as_str(), "fmt_debug" | "fmt")
+        {
+            let rendered =
+                super::debug::format_value_for_print(state, dispatch_receiver);
+            // Honour the fmt CONTRACT: write into the `&mut Formatter`
+            // argument via the baked `Formatter.write_str`
+            // (re-entrant `call_function_sync`), then return `Ok(())`
+            // — the caller reads the formatter's BUFFER, not the call
+            // result (a bare string-return rendered as empty).
+            let formatter_arg: Option<Value> = (args.count >= 1).then(|| {
+                state
+                    .registers
+                    .get(state.reg_base(), Reg(args.start.0))
+            });
+            let write_fid = state
+                .module
+                .find_function_by_name("Formatter.write_str")
+                .or_else(|| {
+                    let suffix = ".Formatter.write_str";
+                    state.module.functions.iter().find_map(|f| {
+                        let n = state.module.strings.get(f.name).unwrap_or("");
+                        (n.ends_with(suffix) && f.bytecode_length > 0)
+                            .then_some(f.id)
+                    })
+                });
+            if let (Some(farg), Some(wfid)) = (formatter_arg, write_fid) {
+                let svalue = alloc_string_value(state, &rendered)?;
+                let _ = super::super::call_function_sync(
+                    state,
+                    wfid,
+                    &[farg, svalue],
+                )?;
+                let ok = super::ffi_extended::make_result_ok_unit(state)?;
+                state.set_reg(dst, ok);
+                return Ok(DispatchResult::Continue);
+            }
+            // No formatter argument (to_string-like arrival shape) —
+            // the string-return convention the primitive arms use.
+            let sval = alloc_string_value(state, &rendered)?;
+            state.set_reg(dst, sval);
+            return Ok(DispatchResult::Continue);
         }
     }
 
@@ -2129,6 +2237,41 @@ pub(in super::super) fn handle_call_method(
         // correctness-preserving fast-path: when the coincidence
         // happens to land on the right receiver-type, take it; otherwise
         // fall through to the receiver-aware lookup below.
+        // SAME-NAME-PARENT-TIEBREAK-1 (task #50): a QUALIFIED call on a
+        // heap receiver resolves through the receiver's runtime TypeId
+        // FIRST. The stdlib carries same-named types (two `Rational`s),
+        // so "Rational.mul" is ambiguous by name — the name-only rule
+        // (body-over-stub, lowest id) picked the OTHER Rational's body
+        // (raw Int-field Mul over BigInt pointers → the #50 corruption).
+        if is_already_qualified
+            && dispatch_receiver.is_regular_ptr()
+            && !dispatch_receiver.is_nil()
+        {
+            let ptr = dispatch_receiver.as_ptr::<u8>();
+            if !ptr.is_null()
+                && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                // SAFETY: alignment verified; heap objects begin with a header.
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                if let Some(fid) = state
+                    .module
+                    .find_function_by_name_for_receiver(&method_name, Some(header.type_id))
+                {
+                    // Only a parent-MATCHED body short-circuits; the
+                    // fallback inside the helper equals the legacy
+                    // name-only rule, which the strategies below
+                    // already apply — avoid double-committing it here.
+                    if state
+                        .module
+                        .get_function(fid)
+                        .and_then(|f| f.parent_type)
+                        == Some(header.type_id)
+                    {
+                        found_func_id = Some(fid);
+                    }
+                }
+            }
+        }
         let func_id = FunctionId(method_id);
         if let Some(func) = state.module.get_function(func_id) {
             // Verify the function name actually ends with the expected method suffix
@@ -2185,7 +2328,35 @@ pub(in super::super) fn handle_call_method(
             // instead of falling to the suffix scan.
             let classify_target: Value = fat_ref_single_referent(&dispatch_receiver)
                 .unwrap_or(dispatch_receiver);
-            let receiver_type: Option<String> = if classify_target.is_small_string()
+            let receiver_type: Option<String> = if classify_target.is_fat_ref() {
+                // FATREF-DISPATCH-ROUTE-1 (#51): a multi-element FatRef
+                // IS the slice runtime kind — classify it directly.
+                // Pre-fix it fell through every probe (marker bits are
+                // not an alignable header pointer), receiver_type
+                // stayed None, and the first-suffix-match scan below
+                // picked the alphabetically-earliest `.slice` body
+                // (`ArenaWireRow.slice`), whose field reads then
+                // dereferenced the marker.
+                //
+
+                // Builtin surface first: `len`/`is_empty` on a slice
+                // are FatRef-metadata reads (the stdlib declares them
+                // as intrinsics — there IS no `Slice.len` body to
+                // find; the suffix scan then picked `ArenaSlice.len`).
+                let fr = classify_target.as_fat_ref();
+                match bare_method_name.as_str() {
+                    "len" => {
+                        state.set_reg(dst, Value::from_i64(fr.len() as i64));
+                        return Ok(DispatchResult::Continue);
+                    }
+                    "is_empty" => {
+                        state.set_reg(dst, Value::from_bool(fr.len() == 0));
+                        return Ok(DispatchResult::Continue);
+                    }
+                    _ => {}
+                }
+                (!is_already_qualified).then(|| "Slice".to_string())
+            } else if classify_target.is_small_string()
                 || is_heap_string(&classify_target)
             {
                 (!is_already_qualified).then(|| "Text".to_string())
@@ -2217,11 +2388,46 @@ pub(in super::super) fn handle_call_method(
             // (e.g., receiver is FlexItem → prefer "FlexItem.min" over any
             // other "*.min"). Only runs when we recovered a type name.
             if let Some(ref ty_name) = receiver_type {
+                // SAME-NAME-PARENT-TIEBREAK-1 (task #50), bare-call leg:
+                // the name-scan below is FIRST-MATCH over same-named
+                // bodies (two `Rational`s → `a.mul(&one)` landed on the
+                // raw-Int-field body). Resolve through the receiver's
+                // runtime TypeId first — the header is the authority
+                // the name cannot express.
+                if classify_target.is_regular_ptr() && !classify_target.is_nil() {
+                    let rptr = classify_target.as_ptr::<u8>();
+                    if !rptr.is_null()
+                        && (rptr as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        // SAFETY: alignment verified; heap objects
+                        // begin with an ObjectHeader.
+                        let rheader = unsafe { heap::ObjectHeader::ref_or_stub(rptr) };
+                        let bare_q = format!("{}.{}", ty_name, method_name);
+                        if let Some(fid) = state
+                            .module
+                            .find_function_by_name_for_receiver(
+                                &bare_q,
+                                Some(rheader.type_id),
+                            )
+                        {
+                            if state
+                                .module
+                                .get_function(fid)
+                                .and_then(|f| f.parent_type)
+                                == Some(rheader.type_id)
+                            {
+                                found_func_id = Some(fid);
+                            }
+                        }
+                    }
+                }
                 // Support both qualified registrations (e.g.,
                 // "core.term.layout.FlexItem.min") and bare ones
                 // ("FlexItem.min") — the prefix must end with the type name.
                 let dotted = format!(".{}.{}", ty_name, method_name);
                 let bare = format!("{}.{}", ty_name, method_name);
+                if found_func_id.is_none() {
                 for func in &state.module.functions {
                     let func_name = state.module.strings.get(func.name).unwrap_or("");
                     let type_match = func_name == bare || func_name.ends_with(&dotted);
@@ -2231,6 +2437,27 @@ pub(in super::super) fn handle_call_method(
                         found_func_id = Some(func.id);
                         break;
                     }
+                }
+                }
+                // FATREF-DISPATCH-ROUTE-1 (#51): a slice receiver whose
+                // method has no `Slice.<m>` body must NOT fall to the
+                // first-suffix-match scan — that scan picks an arbitrary
+                // OTHER type's body (`ArenaSlice.len`) and its field
+                // reads dereference the FatRef marker. Loud typed error
+                // instead (never a guessed body).
+                if found_func_id.is_none()
+                    && ty_name == "Slice"
+                    && classify_target.is_fat_ref()
+                {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "method '{}' not found for slice receiver (&[T]) — no \
+                             `Slice.{}` body and no builtin intercept; the \
+                             ambiguous suffix scan is FORBIDDEN for slices \
+                             (FATREF-DISPATCH-ROUTE-1)",
+                            bare_method_name, bare_method_name
+                        ),
+                    });
                 }
             }
 
@@ -2813,6 +3040,9 @@ pub(in super::super) fn handle_call_method(
     // — the variant layout is type-erased and the closure carries
     // the type-specific work — so it is sound to retry here as a
     // safety net before panicking.
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] D-pre-variant-2 method={}", method_name);
+    }
     if dispatch_receiver.is_ptr()
         && !dispatch_receiver.is_nil()
         && let Some(result) = dispatch_variant_method(
@@ -2897,7 +3127,12 @@ pub(in super::super) fn handle_call_method(
     // exist in the module — so we never override an explicit
     // qualified-name match.  Pinned in
     // `core-tests/collections/slice/regression_test.vr` §A.
-    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+    if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+        eprintln!("[callm-flow] F-safety-net method={}", method_name);
+    }
+    if (dispatch_receiver.is_regular_ptr() || dispatch_receiver.is_fat_ref())
+        && !dispatch_receiver.is_nil()
+    {
         let try_safety_net = if method_name.contains('.') {
             // Qualified — only fire when the qualified form doesn't
             // exist (otherwise prefer the exact qualified match).
@@ -2906,9 +3141,25 @@ pub(in super::super) fn handle_call_method(
             true
         };
         if try_safety_net {
-            let ptr = dispatch_receiver.as_ptr::<u8>();
-            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-            let recv_type_id = header.type_id;
+            // FATREF-DISPATCH-ROUTE-1 (#51): a FatRef receiver has NO
+            // heap header to probe (its payload is marker bits) — its
+            // runtime kind IS the slice, so route through the same
+            // Slice-first static-prefix table the LIST-kind bridge
+            // uses. `recv_type_id = LIST` engages exactly that branch
+            // below without touching memory.
+            let recv_type_id = if dispatch_receiver.is_fat_ref() {
+                if std::env::var("VERUM_TRACE_FATREF_ROUTE").is_ok() {
+                    eprintln!(
+                        "[fatref-route] method='{}' bare='{}' → Slice-first prefix table",
+                        method_name, bare_method_name
+                    );
+                }
+                crate::types::TypeId::LIST
+            } else {
+                let ptr = dispatch_receiver.as_ptr::<u8>();
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                header.type_id
+            };
             // Strategy 1: TypeId-aware exact qualified lookup.
             let mut found: Option<crate::module::FunctionId> = state
                 .module
@@ -3429,6 +3680,23 @@ fn func_id_parent_compatible_with_receiver(
         )
     {
         return false;
+    }
+    // FATREF-DISPATCH-ROUTE-1 (#51): a slice receiver (FatRef) is
+    // compatible ONLY with the Slice parent type — the func_id
+    // heuristic otherwise coin-flips onto whichever `.is_empty` /
+    // `.len` body occupies the colliding slot (ArenaSlice.is_empty,
+    // reading fields out of the marker payload).
+    if dispatch_receiver.is_fat_ref() {
+        return match func.parent_type {
+            Some(tid) => matches!(
+                state
+                    .module
+                    .get_type(tid)
+                    .and_then(|td| state.module.strings.get(td.name)),
+                Some("Slice")
+            ),
+            None => false,
+        };
     }
     if !dispatch_receiver.is_ptr() || dispatch_receiver.is_nil() {
         // Non-pointer receiver — accept parent-less or primitive-bound
@@ -9055,7 +9323,10 @@ pub(super) fn build_set_from_values(
 /// `make_some_value` / `make_none_value`): `[ObjectHeader][tag:u32]
 /// [field_count:u32][payload_0:Value…]` — tag 0 = None, tag 1 = Some.
 pub(super) fn unwrap_maybe_some(value: Value) -> Option<Value> {
-    if !value.is_ptr() || value.is_nil() {
+    // FATREF-DISPATCH-ROUTE-1 (#51): variant probes accept ONLY regular
+    // heap pointers — `is_ptr()` passes FatRef/ThinRef markers, and
+    // `variant_payload(marker, 0)` dereferences marker bits (+0x18).
+    if !value.is_regular_ptr() || value.is_nil() {
         return None;
     }
     let ptr = value.as_ptr::<u8>();
@@ -9177,6 +9448,14 @@ pub(super) fn dispatch_variant_method(
     args: &RegRange,
     method_full: &str,
 ) -> InterpreterResult<Option<Value>> {
+    // FATREF-DISPATCH-ROUTE-1 (#51): header-probing dispatchers accept
+    // ONLY regular heap pointers. A FatRef/ThinRef shares TAG_POINTER,
+    // so a bare `as_ptr()` here returned the FAT_REF_MARKER payload and
+    // `variant_header_pair` dereferenced marker bits (+0x18 fault on
+    // `sub1.slice(..)` — the chained-slice receiver).
+    if !receiver.is_regular_ptr() {
+        return Ok(None);
+    }
     let base_ptr = receiver.as_ptr::<u8>();
     if base_ptr.is_null() {
         return Ok(None);
@@ -9528,6 +9807,11 @@ pub(super) fn dispatch_array_method(
     method: &str,
     args: &RegRange,
 ) -> InterpreterResult<Option<Value>> {
+    // FATREF-DISPATCH-ROUTE-1 (#51): same regular-pointer contract as
+    // dispatch_variant_method — marker-carrying refs never probe headers.
+    if !receiver.is_regular_ptr() {
+        return Ok(None);
+    }
     let ptr = receiver.as_ptr::<u8>();
     // Safety: validate pointer alignment before dereferencing as ObjectHeader
     if ptr.is_null() || ((ptr as usize) & (std::mem::align_of::<heap::ObjectHeader>() - 1)) != 0 {
@@ -9601,6 +9885,16 @@ pub(super) fn dispatch_array_method(
     // call site passing a Verum-built buffer to a C-ABI syscall.
     // Closes RUNTIME-2 from `internal/diag/sqlite-real/FINDINGS.md`.
     if method == "as_slice" || method == "as_mut_slice" {
+        // SLICE-REP-UNIFY-1 (#51): the identity cast leaked raw LIST
+        // pointers into slice positions, forking the slice
+        // representation (`&xs[..]` → FatRef, `xs.as_slice()` → List
+        // ptr) — FatRef-only consumers (slice_subslice / split_at)
+        // then crashed or silently no-op'd. Route through THE
+        // canonical slice constructor; non-container receivers keep
+        // the historic identity (C-ABI buffer pass-through, RUNTIME-2).
+        if let Some(slice_val) = super::cbgr::container_to_slice_fat_ref(state, receiver) {
+            return Ok(Some(slice_val));
+        }
         return Ok(Some(receiver));
     }
 
