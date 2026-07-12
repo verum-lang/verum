@@ -14,7 +14,7 @@ async fn compute() -> Int {
         let y = 20;
         x + y
     };
-    await future
+    future.await
 }
 
 // Async closure
@@ -22,19 +22,19 @@ async fn with_closure() -> Int {
     let double = async |x: Int| -> Int {
         x * 2
     };
-    await double(21)
+    double(21).await
 }
 
 async fn main() {
     // Basic async function
-    let result = await fetch_data();
+    let result = fetch_data().await;
     print(f"Fetch result: {result}");
 
     // Async block
-    let computed = await compute();
+    let computed = compute().await;
     print(f"Computed: {computed}");
 
     // Async closure
-    let doubled = await with_closure();
+    let doubled = with_closure().await;
     print(f"Doubled: {doubled}");
 }
