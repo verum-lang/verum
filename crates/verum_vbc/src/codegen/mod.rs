@@ -484,6 +484,12 @@ pub struct VbcCodegen {
     /// Map from function name to FFI symbol ID (for FFI function call detection).
     ffi_function_map: std::collections::HashMap<String, FfiSymbolId>,
 
+    /// FFI symbol index → C-side dlsym name, when `@ffi_name` /
+    /// `@link_name` overrides the Verum extern fn name. `build_module`
+    /// prefers this over the fn name so the runtime resolves the real
+    /// C symbol (`recvfrom`, not `recvfrom_ffi`).
+    ffi_symbol_link_names: std::collections::HashMap<u32, String>,
+
     /// Map from library name to library ID (for deduplication).
     ffi_library_map: std::collections::HashMap<String, FfiLibraryId>,
 
@@ -1657,6 +1663,7 @@ impl VbcCodegen {
             ffi_libraries: Vec::new(),
             ffi_symbols: Vec::new(),
             ffi_function_map: std::collections::HashMap::new(),
+            ffi_symbol_link_names: std::collections::HashMap::new(),
             ffi_library_map: std::collections::HashMap::new(),
             ffi_callback_signatures: std::collections::HashMap::new(),
             ffi_contracts: std::collections::HashMap::new(),
@@ -10100,6 +10107,12 @@ impl VbcCodegen {
 
             // Track function name -> FFI symbol ID mapping
             self.ffi_function_map.insert(func_name.clone(), symbol_id);
+            // Honor `@ffi_name` / `@link_name`: the dlsym key is the C
+            // symbol, not the Verum extern fn name — extern-block fns
+            // are FunctionDecls carrying their per-fn attributes.
+            if let Some(c_name) = self.extract_ffi_symbol_name(&func.attributes) {
+                self.ffi_symbol_link_names.insert(symbol_id.0, c_name);
+            }
 
             // Register callback signature symbols for function pointer parameters.
             // This allows CreateCallback to find the correct signature when passing
@@ -10135,6 +10148,36 @@ impl VbcCodegen {
                     {
                         return Some(s.to_string());
                     }
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract the C-side symbol name from `@ffi_name("sym")` /
+    /// `@link_name("sym")` — the dlsym key when it differs from the
+    /// Verum extern fn name. Without this the fn name is used verbatim
+    /// as the symbol, so `@ffi_name("recvfrom") fn recvfrom_ffi(…)`
+    /// dlsym'd `recvfrom_ffi` (non-existent) — the runtime "symbol
+    /// 'recvfrom_ffi' not found" that blocked UDP recv. Fixes mmap /
+    /// recvfrom / rename / symlink / vm_allocate (every `_ffi`-suffixed
+    /// extern that carries an `@ffi_name`) in one place.
+    fn extract_ffi_symbol_name(
+        &self,
+        attributes: &verum_common::List<verum_ast::attr::Attribute>,
+    ) -> Option<String> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::literal::{LiteralKind, StringLit};
+
+        for attr in attributes.iter() {
+            if attr.name.as_str() == "ffi_name" || attr.name.as_str() == "link_name" {
+                if let verum_common::Maybe::Some(ref args) = attr.args
+                    && let Some(first_arg) = args.first()
+                    && let ExprKind::Literal(lit) = &first_arg.kind
+                    && let LiteralKind::Text(StringLit::Regular(s) | StringLit::MultiLine(s)) =
+                        &lit.kind
+                {
+                    return Some(s.to_string());
                 }
             }
         }
@@ -10488,6 +10531,11 @@ impl VbcCodegen {
 
         // Track function name -> FFI symbol ID mapping
         self.ffi_function_map.insert(func_name.clone(), symbol_id);
+        // Honor `@ffi_name` / `@link_name` for standalone `@ffi` externs
+        // too (same rationale as the boundary path).
+        if let Some(c_name) = self.extract_ffi_symbol_name(&func.attributes) {
+            self.ffi_symbol_link_names.insert(symbol_id.0, c_name);
+        }
 
         // Register callback signature symbols for function pointer parameters.
         // This allows CreateCallback to find the correct signature when passing
@@ -18835,12 +18883,17 @@ impl VbcCodegen {
             .map(|(name, id)| (id.0, name))
             .collect();
 
-        // Transfer all FFI symbols in order
+        // Transfer all FFI symbols in order. The dlsym key is the
+        // C-side symbol: prefer an `@ffi_name`/`@link_name` override
+        // (`ffi_symbol_link_names`) over the Verum extern fn name, so
+        // `@ffi_name("recvfrom") fn recvfrom_ffi` resolves `recvfrom`.
+        // Otherwise fall back to the fn name from the function map;
+        // synthetic callback signatures keep StringId(0).
         for (idx, symbol) in self.ffi_symbols.iter().enumerate() {
             let mut symbol_entry = symbol.clone();
-            // If this symbol has a name in the function map, intern it.
-            // Otherwise, leave name as StringId(0) (synthetic callback signatures).
-            if let Some(func_name) = id_to_name.get(&(idx as u32)) {
+            if let Some(c_name) = self.ffi_symbol_link_names.get(&(idx as u32)) {
+                symbol_entry.name = module.intern_string(c_name);
+            } else if let Some(func_name) = id_to_name.get(&(idx as u32)) {
                 symbol_entry.name = module.intern_string(func_name);
             }
             module.ffi_symbols.push(symbol_entry);
