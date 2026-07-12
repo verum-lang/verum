@@ -13045,7 +13045,10 @@ fn lower_call_method<'ctx>(
                 // Search by function name suffix instead of variant StringId,
                 // because StringIds from source modules aren't remapped during merge.
                 let method_suffix = format!(".{}", method_name);
+                let mut via_protocols = 0usize;
+                let mut via_name_probe = 0usize;
                 for type_desc in &vbc.types {
+                    let before = seen_dyn_tids.contains(&type_desc.id.0);
                     for proto_impl in &type_desc.protocols {
                         for &fn_id in &proto_impl.methods {
                             if fn_id == u32::MAX {
@@ -13059,12 +13062,54 @@ fn lower_call_method<'ctx>(
                                         if seen_dyn_tids.insert(type_desc.id.0) {
                                             dispatch_entries
                                                 .push((type_desc.id.0, fname.to_string()));
+                                            via_protocols += 1;
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    // Name-probe fallback: the protocols list is the primary
+                    // authority, but it is NOT always complete for a type — an
+                    // archive-loaded stdlib type can carry an empty protocols
+                    // vec or an unresolved (u32::MAX) method slot, which
+                    // silently dropped e.g. `Duration` (type_id 1300) from the
+                    // Debug dispatch switch → `f"{d:?}"` rendered empty at AOT
+                    // while every heap type registered before it worked. The
+                    // module itself is the ground truth: if it defines
+                    // `<TypeName>.<method>`, that type DOES implement the
+                    // protocol, so add it regardless of the protocols vec. This
+                    // is order-independent (all functions are forward-declared
+                    // in Phase 1 before any body — including this dispatcher —
+                    // is lowered).
+                    if !before && !seen_dyn_tids.contains(&type_desc.id.0) {
+                        let type_name = vbc.get_string(type_desc.name).unwrap_or("");
+                        if !type_name.is_empty() {
+                            // Try the qualified name as-is and its last dotted
+                            // segment (module functions are emitted with the
+                            // unqualified `Type.method` name).
+                            let short = type_name.rsplit('.').next().unwrap_or(type_name);
+                            for base in [type_name, short] {
+                                let cand = format!("{}{}", base, method_suffix);
+                                if ctx.get_module().get_function(&cand).is_some() {
+                                    if seen_dyn_tids.insert(type_desc.id.0) {
+                                        dispatch_entries.push((type_desc.id.0, cand));
+                                        via_name_probe += 1;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if std::env::var_os("VERUM_TRACE_DYN").is_some() {
+                    eprintln!(
+                        "[dyn-dispatch] method='{}' entries={} (protocols={}, name_probe={})",
+                        method_name,
+                        dispatch_entries.len(),
+                        via_protocols,
+                        via_name_probe
+                    );
                 }
 
                 if !dispatch_entries.is_empty() {
