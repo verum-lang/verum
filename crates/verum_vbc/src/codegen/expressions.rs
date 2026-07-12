@@ -20112,14 +20112,135 @@ impl VbcCodegen {
                     VbcCodegen::strip_generic_args(&resolved).to_string()
                 });
 
+            // #49 — same BASE is not same TYPE: `Result<Int, Inner>?`
+            // inside `fn -> Result<Int, Outer>` matched the Result→Result
+            // fast-path by base name alone and returned the inner result
+            // VERBATIM (tags coincide, payload is the WRONG error type —
+            // `e.where_msg` then reads OOB on the one-field Inner). The
+            // error ARGUMENT must agree too (alias-resolved, generic-
+            // stripped); unknown args preserve the fast-path (exactly
+            // today's behaviour — no regression surface).
+            let err_arg_of = |full: Option<&str>| -> Option<String> {
+                full.map(|t| self.extract_inner_types(t))
+                    .and_then(|args| args.get(1).cloned())
+                    .map(|a| {
+                        let stripped = VbcCodegen::strip_generic_args(a.trim()).to_string();
+                        self.resolve_type_alias(&stripped)
+                    })
+            };
+            let inner_err_arg: Option<String> = if is_result_type {
+                err_arg_of(type_name.as_deref())
+            } else {
+                None
+            };
+            let outer_err_arg: Option<String> =
+                err_arg_of(self.ctx.current_return_type_name.clone().as_deref());
+            let result_err_args_agree = match (&inner_err_arg, &outer_err_arg) {
+                (Some(a), Some(b)) => a == b,
+                _ => true,
+            };
+
             let same_type = match (&outer_base.as_deref(), is_maybe_type, is_result_type) {
                 (Some(o), true, _) => WKT::Maybe.matches(o),
-                (Some(o), _, true) => WKT::Result.matches(o),
+                (Some(o), _, true) => WKT::Result.matches(o) && result_err_args_agree,
                 _ => false,
             };
 
             if same_type {
                 self.ctx.emit(Instruction::Ret { value: inner_reg });
+            } else if is_result_type
+                && outer_base.as_deref().is_some_and(|o| WKT::Result.matches(o))
+                && let (Some(inner_err), Some(outer_err)) =
+                    (inner_err_arg.as_deref(), outer_err_arg.as_deref())
+            {
+                // Result→Result with DIFFERENT error types: the `?`
+                // contract is `Err(e) => return Err(From::from(e))`.
+                // Resolve the CONCRETE `<OuterErr>.from` overload by its
+                // carried parameter type (FunctionInfo.param_type_names —
+                // registration fact, not a name-dice pick among multiple
+                // `From<X> for OuterErr` impls).
+                let from_fid: Option<u32> = {
+                    let exact = self
+                        .ctx
+                        .lookup_function(&format!("{outer_err}.from"))
+                        .filter(|fi| {
+                            fi.param_count == 1
+                                && fi
+                                    .param_type_names
+                                    .first()
+                                    .map(|p| {
+                                        let pb = VbcCodegen::strip_generic_args(p.trim());
+                                        pb == inner_err
+                                    })
+                                    .unwrap_or(true)
+                        })
+                        .map(|fi| fi.id.0);
+                    exact.or_else(|| {
+                        // Param-typed scan across qualified overloads
+                        // (`Outer.from` may live under a dotted module
+                        // prefix): suffix walk constrained by the SAME
+                        // carried param fact — deterministic because the
+                        // param-type filter admits at most the impls the
+                        // typechecker already validated.
+                        let suffix = format!(".{outer_err}.from");
+                        self.ctx
+                            .functions
+                            .iter()
+                            .filter(|(name, _)| name.ends_with(&suffix))
+                            .filter_map(|(_, fi)| {
+                                (fi.param_count == 1
+                                    && fi
+                                        .param_type_names
+                                        .first()
+                                        .map(|pn| {
+                                            VbcCodegen::strip_generic_args(pn.trim())
+                                                == inner_err
+                                        })
+                                        .unwrap_or(false))
+                                .then_some(fi.id.0)
+                            })
+                            .min()
+                    })
+                };
+                if let Some(from_fid) = from_fid {
+                    // Err payload → From::from → Err(_) of the OUTER type.
+                    let err_payload = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::AsVar {
+                        dst: err_payload,
+                        value: inner_reg,
+                        tag: 0,
+                    });
+                    let converted = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Call {
+                        dst: converted,
+                        func_id: from_fid,
+                        args: crate::instruction::RegRange::new(err_payload, 1),
+                    });
+                    let err_tag = result_success_tag() ^ 1;
+                    // (contract: dst-first, Option<parent> last — the
+                    // typed-or-legacy variant emitter; see fn at 421)
+                    let out_variant = self.ctx.alloc_temp();
+                    self.emit_make_variant(out_variant, err_tag, 1, Some("Result"));
+                    self.ctx.emit(Instruction::SetVariantData {
+                        variant: out_variant,
+                        field: 0,
+                        value: converted,
+                    });
+                    self.ctx.emit(Instruction::Ret { value: out_variant });
+                    self.ctx.free_temp(err_payload);
+                    self.ctx.free_temp(converted);
+                    self.ctx.free_temp(out_variant);
+                } else {
+                    // No single carried-fact From target — fall through to
+                    // the from_residual machinery below via direct Ret
+                    // (today's behaviour), leaving a trace for the census.
+                    tracing::trace!(
+                        "compile_try: no param-typed {}.from({}) — direct Ret fallback",
+                        outer_err,
+                        inner_err,
+                    );
+                    self.ctx.emit(Instruction::Ret { value: inner_reg });
+                }
             } else {
                 // Cross-type: call `<OuterType>::from_residual(inner_reg)` then Ret.
                 // Look up the registered from_residual function for the outer type.
