@@ -7759,9 +7759,23 @@ impl VbcCodegen {
             ItemKind::Theorem(_)
             | ItemKind::Lemma(_)
             | ItemKind::Corollary(_)
-            | ItemKind::Axiom(_)
             | ItemKind::Tactic(_) => {
                 // Proofs are verified in the verification phase, not executed.
+            }
+            // **PROOF-IRRELEVANCE-ERASURE-1.** An axiom's TRUTH lives in
+            // the verification phase (SMT/kernel discharge) — but its
+            // NAME is legal in term position (`coherence: fn(a: A) ->
+            // transport_coherence_law(p, a)` in core/math/hott.vr), so
+            // a pure skip left every such call site "undefined
+            // function" and lenient-stubbed the enclosing fn. Erasure
+            // semantics: the runtime witness of a verified proposition
+            // is INERT — register the axiom as a callable returning
+            // the erased witness (`true` for Bool propositions, `nil`
+            // for dependent proof objects; a runtime projection of an
+            // erased proof panics loudly, which is the honest
+            // behaviour). Verification still owns the truth.
+            ItemKind::Axiom(ax) => {
+                self.register_axiom_witness(ax)?;
             }
             // Catch-all for any future item kinds
             #[allow(unreachable_patterns)]
@@ -15061,6 +15075,100 @@ impl VbcCodegen {
 
         let vbc_func = VbcFunction::new(descriptor, instructions);
 
+        self.push_function_dedup(vbc_func);
+        Ok(())
+    }
+
+    /// **PROOF-IRRELEVANCE-ERASURE-1** — registers an `axiom` as a
+    /// runtime-callable returning the erased witness of its
+    /// proposition. The verification phase (SMT/kernel) owns the
+    /// TRUTH; the runtime value is deliberately inert: `true` for
+    /// `-> Bool` propositions, `nil` for dependent proof objects
+    /// (`HottPath<...>` etc.). Consumers that store the witness in
+    /// coherence fields never legitimately project it at runtime —
+    /// if one does, the nil dereference panics loudly instead of the
+    /// pre-fix behaviour (call site "undefined function", whole
+    /// enclosing fn lenient-stubbed).
+    fn register_axiom_witness(
+        &mut self,
+        ax: &verum_ast::decl::AxiomDecl,
+    ) -> CodegenResult<()> {
+        let name = ax.name.name.to_string();
+        let param_count = ax.params.len();
+        let params_with_mutability: Vec<(String, bool)> = ax
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                self.extract_param_name_and_mutable(p)
+                    .unwrap_or_else(|| (format!("_arg{}", i), false))
+            })
+            .collect();
+        let return_type_name = match &ax.return_type {
+            verum_common::Maybe::Some(ty) => self.extract_type_name(ty),
+            verum_common::Maybe::None => None,
+        };
+
+        let id = FunctionId(self.next_func_id);
+        self.next_func_id = self.next_func_id.saturating_add(1);
+        let info = FunctionInfo {
+            id,
+            param_count,
+            param_names: params_with_mutability.iter().map(|(n, _)| n.clone()).collect(),
+            param_type_names: vec![],
+            is_async: false,
+            is_generator: false,
+            contexts: vec![],
+            return_type: None,
+            yield_type: None,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
+            return_type_name: return_type_name.clone(),
+            return_type_inner: None,
+            is_const: false,
+            is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
+        };
+        // Bare + module-qualified mirror keys come from
+        // register_function's own discipline.
+        self.ctx.register_function(name.clone(), info);
+
+        self.ctx.begin_function(&name, &params_with_mutability, None);
+        let dst = self.ctx.alloc_temp();
+        if return_type_name.as_deref() == Some("Bool") {
+            self.ctx.emit(Instruction::LoadTrue { dst });
+        } else {
+            self.ctx.emit(Instruction::LoadNil { dst });
+        }
+        self.ctx.emit(Instruction::Ret { value: dst });
+        let (instructions, register_count) = self.ctx.end_function();
+
+        let effective_module = self
+            .ctx
+            .current_source_module
+            .as_deref()
+            .unwrap_or(&self.config.module_name);
+        let descriptor_name = if !effective_module.is_empty()
+            && effective_module != "main"
+            && !name.contains('.')
+        {
+            format!("{}.{}", effective_module, name)
+        } else {
+            name.clone()
+        };
+        let name_id = StringId(self.intern_string(&descriptor_name));
+        let mut descriptor = FunctionDescriptor::new(name_id);
+        descriptor.id = id;
+        descriptor.register_count = register_count;
+        descriptor.locals_count = params_with_mutability.len() as u16;
+        if let Some(ref rt) = return_type_name {
+            descriptor.return_type_name = Some(StringId(self.intern_string(rt)));
+        }
+        let vbc_func = VbcFunction::new(descriptor, instructions);
         self.push_function_dedup(vbc_func);
         Ok(())
     }
