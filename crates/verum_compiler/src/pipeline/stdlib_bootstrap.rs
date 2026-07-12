@@ -606,6 +606,17 @@ impl<'s> CompilationPipeline<'s> {
                         && let Some(target) =
                             verum_vbc::codegen::VbcCodegen::detect_variant_form_alias(td, &scope)
                     {
+                        // [diag] name-level trace via the same
+                        // VERUM_TRACE_STUB=<substr> convention.
+                        if let Ok(filter) = std::env::var("VERUM_TRACE_STUB")
+                            && filter != "1"
+                            && td.name.name.as_str().contains(&filter)
+                        {
+                            eprintln!(
+                                "[stage-alias] '{}' -> '{}'",
+                                td.name.name, target
+                            );
+                        }
                         self.global_type_alias_registry
                             .entry(td.name.name.to_string())
                             .or_insert(target);
