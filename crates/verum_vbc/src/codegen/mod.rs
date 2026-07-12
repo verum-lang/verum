@@ -1190,6 +1190,47 @@ impl VbcCodegen {
     /// agrees with the typechecker: `type IoError is StreamError;` is an
     /// alias, not a one-variant enum. Genuine markers (`type Closed is
     /// Closed;`, or a name that is not a known type) return `None`.
+    /// **Standalone variant-form alias detector** (no `self`): the
+    /// scope-gated core of `declared_alias_target_name`, shared with
+    /// the stdlib bootstrap's global alias pre-registration (which
+    /// runs BEFORE any per-module codegen exists). `scope` is the
+    /// `locally_visible_type_names` oracle for the DECLARING module —
+    /// required here (the bootstrap always has the module's items;
+    /// the registry-fallback path stays in the method below for
+    /// oracle-less compiles).
+    pub fn detect_variant_form_alias(
+        type_decl: &verum_ast::decl::TypeDecl,
+        scope: &std::collections::HashSet<String>,
+    ) -> Option<String> {
+        use verum_ast::decl::TypeDeclBody;
+        let TypeDeclBody::Variant(variants) = &type_decl.body else {
+            return None;
+        };
+        if variants.len() != 1 {
+            return None;
+        }
+        let v = &variants[0];
+        if v.data.is_some()
+            || !v.generic_params.is_empty()
+            || v.where_clause.is_some()
+            || v.path_endpoints.is_some()
+            || !v.attributes.is_empty()
+        {
+            return None;
+        }
+        let target = v.name.name.as_str();
+        if target == type_decl.name.name.as_str() {
+            return None;
+        }
+        use verum_common::well_known_types::type_names;
+        let is_builtin = type_names::is_primitive_value_type(target)
+            || type_names::is_numeric_type(target);
+        if !is_builtin && !scope.contains(target) {
+            return None;
+        }
+        Some(target.to_string())
+    }
+
     fn declared_alias_target_name(
         &self,
         type_decl: &verum_ast::decl::TypeDecl,

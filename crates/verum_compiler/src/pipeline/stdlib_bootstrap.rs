@@ -583,6 +583,44 @@ impl<'s> CompilationPipeline<'s> {
         }
         self.pre_register_unique_public_consts(&all_parsed_modules)?;
 
+        // Phase 2.9 (ALIAS-INTRA-MODULE-ORDER-1 companion): globally
+        // pre-register variant-form type aliases (`type IoError is
+        // StreamError;`) from every module's AST BEFORE any per-module
+        // compile. The per-module alias pre-pass lives in
+        // `collect_all_declarations`, which the bootstrap path never
+        // calls — so io/mod.vr's IoError alias was never collected,
+        // never exported, and net's `IoError.from_os(e)` degraded to
+        // an instance CallM (bakeAI [static-alias] alias_hit=false).
+        // Scope oracle is the DECLARING module's merged item set;
+        // first-wins across modules mirrors the merge-back discipline.
+        {
+            let mut aliases_registered = 0usize;
+            for (_module_name, ast_modules) in &all_parsed_modules {
+                let merged: Vec<verum_ast::Item> = ast_modules
+                    .iter()
+                    .flat_map(|(_, m)| m.items.iter().cloned())
+                    .collect();
+                let scope = verum_ast::decl::locally_visible_type_names(&merged);
+                for item in &merged {
+                    if let verum_ast::ItemKind::Type(td) = &item.kind
+                        && let Some(target) =
+                            verum_vbc::codegen::VbcCodegen::detect_variant_form_alias(td, &scope)
+                    {
+                        self.global_type_alias_registry
+                            .entry(td.name.name.to_string())
+                            .or_insert(target);
+                        aliases_registered += 1;
+                    }
+                }
+            }
+            if std::env::var("VERUM_TRACE_STUB").is_ok() {
+                eprintln!(
+                    "[stage-alias] pre-registered {} variant-form type aliases",
+                    aliases_registered
+                );
+            }
+        }
+
         // ====================================================================
         // STEP 4: Compile each module to VBC
         // ====================================================================
