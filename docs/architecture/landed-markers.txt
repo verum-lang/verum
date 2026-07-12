@@ -37,9 +37,6 @@ crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs :: Phase 2.9
 crates/verum_vbc/src/codegen/mod.rs :: fn register_axiom_witness
 crates/verum_vbc/src/codegen/mod.rs :: PROOF-IRRELEVANCE-ERASURE-1
 
-# --- FFI byte-buffer marshalling (B1d, flag-gated) ---
-crates/verum_vbc/src/ffi/runtime.rs :: B1d byte-buffer marshalling
-
 # --- FFI symbol name resolution (B1c) ---
 crates/verum_vbc/src/codegen/mod.rs :: fn extract_ffi_symbol_name
 crates/verum_vbc/src/codegen/mod.rs :: ffi_symbol_link_names

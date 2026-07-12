@@ -758,10 +758,6 @@ impl FfiRuntime {
         // the AOT mirror lands.
         let ffi_pack = std::env::var("VERUM_FFI_PACK").is_ok();
         let ffi_trace = std::env::var("VERUM_TRACE_FFI_ARG").is_ok();
-        // Byte buffers kept alive until after the call.
-        let mut byte_arg_buffers: Vec<Vec<u8>> = Vec::new();
-        // (List backing ptr, byte_arg_buffers index, len) for &mut write-back.
-        let mut byte_buf_writebacks: Vec<(*mut u8, usize, usize)> = Vec::new();
         // Track which arguments are struct-by-value (we need to handle them specially for arg_ptrs)
         let mut struct_arg_indices: Vec<(usize, usize)> = Vec::new(); // (raw_args index, struct_buffer index)
         // Track struct pointer arguments for write-back: (layout_idx, obj_ptr, buffer_idx)
@@ -827,88 +823,42 @@ impl FfiRuntime {
                     None
                 };
 
-                // **B1d byte-buffer marshalling.** For a pointer param whose
-                // Verum value is a byte-buffer heap object, hand C contiguous
-                // bytes instead of the raw heap pointer.
-                let mut byte_buf_handled = false;
-                if ffi_pack
+                // **B1d — diagnostic only (VERUM_TRACE_FFI_ARG).** The
+                // value-inspection packing that lived here is FUNDAMENTALLY
+                // UNSAFE and was removed: a raw data pointer (`&sa[0]` — a
+                // `ByteArrayElementAddr` into the MIDDLE of a heap object)
+                // is indistinguishable from a heap-object header at the FFI
+                // boundary. A sockaddr starting `[16, 2, 0, 0]` reads back
+                // as `type_id = 0x00000210 = 528 = BYTE_SLICE`, so the
+                // packer mis-identified `dest_addr` as a byte-slice,
+                // byte_slice_payload'd the sockaddr bytes into a garbage
+                // pointer, and `sendto` returned EDESTADDRREQ(39). The
+                // correct fix is CTYPE-DRIVEN: FFI params must be typed
+                // `&[Byte]`/`&mut [Byte]` distinctly from raw `&unsafe
+                // Byte`, so the marshaller packs by SIGNATURE, never by
+                // guessing from the value's bytes (task #23).
+                if ffi_trace
                     && matches!(ctype, CTypeRuntime::Ptr | CTypeRuntime::ArrayPtr)
                     && arg.is_ptr()
                     && !arg.is_nil()
                     && !arg.is_boxed_int()
                 {
-                    use crate::interpreter::{
-                        OBJECT_HEADER_SIZE, ObjectHeader, byte_slice_payload,
-                    };
-                    use crate::types::TypeId;
-                    const LIST_LEN_OFFSET: usize = 24;
-                    const LIST_PTR_OFFSET: usize = 40;
+                    use crate::interpreter::ObjectHeader;
                     let base = arg.as_ptr::<u8>();
-                    // SAFETY: `arg` is a non-null, non-boxed-int pointer; every
-                    // such heap object begins with an ObjectHeader.
                     let tid = unsafe { ObjectHeader::try_type_id(base) };
-                    if ffi_trace {
-                        eprintln!(
-                            "[ffi-arg] i={} ctype={:?} type_id={:?} mut={}",
-                            i,
-                            ctype,
-                            tid,
-                            write_back_reg.is_some()
-                        );
-                    }
-                    match tid {
-                        // Already-packed contiguous byte storage: pass the
-                        // DATA pointer directly (zero-copy, read + write both
-                        // land on the same packed bytes).
-                        Some(TypeId::BYTE_SLICE) => {
-                            let (data, _len) = unsafe { byte_slice_payload(base) };
-                            raw_args.push(data as u64);
-                            byte_buf_handled = true;
-                        }
-                        Some(TypeId::U8) => {
-                            let data = unsafe { base.add(OBJECT_HEADER_SIZE) };
-                            raw_args.push(data as u64);
-                            byte_buf_handled = true;
-                        }
-                        // NaN-boxed Value-per-element buffer: pack low bytes
-                        // into a temp C buffer, and copy back for &mut.
-                        Some(TypeId::LIST) | Some(TypeId::BYTE_LIST) => {
-                            // SAFETY: LIST layout — len at +24, backing ptr at +40.
-                            let len =
-                                unsafe { *(base.add(LIST_LEN_OFFSET) as *const u64) } as usize;
-                            let backing =
-                                unsafe { *(base.add(LIST_PTR_OFFSET) as *const u64) } as *mut u8;
-                            if !backing.is_null() {
-                                let mut cbuf = vec![0u8; len.max(1)];
-                                for j in 0..len {
-                                    // Each element is a NaN-boxed Value (8 bytes).
-                                    let v = unsafe {
-                                        *(backing.add(j * 8) as *const Value)
-                                    };
-                                    cbuf[j] = (v.as_i64() & 0xff) as u8;
-                                }
-                                raw_args.push(cbuf.as_mut_ptr() as u64);
-                                if write_back_reg.is_some() {
-                                    byte_buf_writebacks.push((
-                                        backing,
-                                        byte_arg_buffers.len(),
-                                        len,
-                                    ));
-                                }
-                                byte_arg_buffers.push(cbuf);
-                                byte_buf_handled = true;
-                            }
-                        }
-                        _ => {}
-                    }
+                    eprintln!(
+                        "[ffi-arg] i={} ctype={:?} type_id={:?} mut={}",
+                        i,
+                        ctype,
+                        tid,
+                        write_back_reg.is_some()
+                    );
                 }
-
-                if !byte_buf_handled {
-                    let raw = self
-                        .marshaller
-                        .value_to_c_ref(*arg, *ctype, write_back_reg)?;
-                    raw_args.push(raw);
-                }
+                let _ = ffi_pack;
+                let raw = self
+                    .marshaller
+                    .value_to_c_ref(*arg, *ctype, write_back_reg)?;
+                raw_args.push(raw);
             }
         }
 
@@ -978,23 +928,6 @@ impl FfiRuntime {
                 let struct_buffer = &struct_arg_buffers[*buffer_idx];
                 // Use helper function to marshal C buffer back to Verum struct
                 unsafe { marshal_c_to_verum_struct(layout, struct_buffer, *obj_ptr) };
-            }
-        }
-
-        // **B1d byte-buffer write-back.** Copy each &mut byte buffer the
-        // C function may have written back into the Verum List's NaN-boxed
-        // backing (one `Value::from_i64(byte)` per element). OUT-params
-        // (getsockname/recvfrom sockaddr, recv data) surface here.
-        for (backing, buf_idx, len) in &byte_buf_writebacks {
-            let cbuf = &byte_arg_buffers[*buf_idx];
-            for j in 0..*len {
-                // SAFETY: `backing` addresses `len` 8-byte Value slots
-                // (the List's own backing allocation, still live); `cbuf`
-                // holds `len` bytes.
-                unsafe {
-                    *((*backing).add(j * 8) as *mut Value) =
-                        Value::from_i64(cbuf[j] as i64);
-                }
             }
         }
 
