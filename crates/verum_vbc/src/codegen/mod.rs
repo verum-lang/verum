@@ -3598,6 +3598,23 @@ impl VbcCodegen {
                 .entry(name.clone())
                 .or_insert_with(|| target.clone());
         }
+        // [diag] VERUM_TRACE_STUB=<substr>: seed visibility for the
+        // alias-import disconnect triage (B1 layer-2).
+        if let Ok(filter) = std::env::var("VERUM_TRACE_STUB")
+            && filter != "1"
+        {
+            let hit = self
+                .type_aliases
+                .iter()
+                .filter(|(k, _)| k.contains(&filter))
+                .map(|(k, v)| format!("{}→{}", k, v))
+                .collect::<Vec<_>>();
+            eprintln!(
+                "[alias-import] seeded {} total; matching: {:?}",
+                self.type_aliases.len(),
+                hit
+            );
+        }
     }
 
     /// Returns inferred variable-to-type-name mappings from the last compiled function.

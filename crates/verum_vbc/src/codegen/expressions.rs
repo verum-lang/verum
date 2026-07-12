@@ -9336,7 +9336,7 @@ impl VbcCodegen {
                     && first.contains(&filter)
                 {
                     eprintln!(
-                        "[static-alias] first='{}' resolved='{}' method='{}' args={} in {} — alias_hit={} q_lookup={:?}",
+                        "[static-alias] first='{}' resolved='{}' method='{}' args={} in {} — alias_hit={} q_lookup={:?} map_len={} map_has={:?}",
                         first,
                         resolved,
                         method.name,
@@ -9346,6 +9346,8 @@ impl VbcCodegen {
                         self.ctx
                             .lookup_qualified_function(&format!("{}.{}", resolved, method.name))
                             .map(|f| (f.id.0, f.param_count)),
+                        self.type_aliases.len(),
+                        self.type_aliases.get(first.as_str()),
                     );
                 }
                 if resolved != first {
@@ -20352,16 +20354,52 @@ impl VbcCodegen {
 
         self.ctx.try_recover_depth += 1;
 
-        // Compile the inner block
-        let inner_reg = self
-            .compile_expr(inner)?
-            .or_internal("try block has no value")?;
+        // Compile the inner block. A block whose tail is a statement
+        // (unit-typed: trailing `return`-in-arms match, bare loop, …)
+        // yields no register — the typechecker types it `Result<Unit,
+        // E>`, so materialize `()` instead of failing codegen with
+        // "try block has no value" (task #50: language_features
+        // test_async_* / cli async_basics died here).
+        let inner_reg = match self.compile_expr(inner)? {
+            Some(r) => r,
+            None => {
+                let unit = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadUnit { dst: unit });
+                unit
+            }
+        };
 
         self.ctx.try_recover_depth -= 1;
         self.ctx.emit(Instruction::TryEnd);
 
-        // Success path: wrap result in `Result::Ok(inner_reg)`.
-        self.emit_make_result_ok(result, inner_reg, "try-recover wrapping")?;
+        // Success path — MIRROR the typechecker's contract
+        // (`infer_try_block`): "if the block already returns a
+        // Try-compatible type, use it directly; otherwise wrap in
+        // Result::Ok". Pre-fix codegen ALWAYS wrapped, so the
+        // documented `try { … Result.Ok(v) }` style double-wrapped —
+        // `match result { Ok(v) => … }` bound v to the INNER
+        // `Ok(30)` and every value assertion failed
+        // (base/result/try_block_test ×15, task #50). Same
+        // alias-resolved WKT classification discipline as
+        // `compile_try`.
+        let block_is_try_type = self
+            .extract_expr_type_name(inner)
+            .as_deref()
+            .map(|n| {
+                let stripped = n.split('<').next().unwrap_or(n).trim();
+                let resolved = self.resolve_type_alias(stripped);
+                let base = VbcCodegen::strip_generic_args(&resolved);
+                WKT::Result.matches(base) || WKT::Maybe.matches(base)
+            })
+            .unwrap_or(false);
+        if block_is_try_type {
+            self.ctx.emit(Instruction::Mov {
+                dst: result,
+                src: inner_reg,
+            });
+        } else {
+            self.emit_make_result_ok(result, inner_reg, "try-recover wrapping")?;
+        }
         self.ctx.free_temp(inner_reg);
 
         // Jump past the error handler
