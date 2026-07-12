@@ -617,6 +617,22 @@ impl<'s> CompilationPipeline<'s> {
                                 td.name.name, target
                             );
                         }
+                        // MODULE-QUALIFIED key is authoritative — three
+                        // distinct stdlib `IoError` aliases exist (io →
+                        // StreamError, sys.io_engine → EngineIoError,
+                        // …); a flat bare key first-wins picks one
+                        // arbitrarily for EVERY consumer. The consumer-
+                        // side resolver disambiguates through its OWN
+                        // mount (`mounted_types`: IoError →
+                        // core.io.IoError → key "io.IoError"). Bare key
+                        // stays as the compat fallback (or_insert).
+                        self.global_type_alias_registry
+                            .entry(format!(
+                                "{}.{}",
+                                _module_name,
+                                td.name.name.as_str()
+                            ))
+                            .or_insert(target.clone());
                         self.global_type_alias_registry
                             .entry(td.name.name.to_string())
                             .or_insert(target);
