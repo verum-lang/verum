@@ -350,15 +350,15 @@ implement UdpSocket {
     /// print(f"Received {len} bytes from {src}");
     /// ```
     public fn recv_from(&self, buf: &mut [Byte]) -> Result<(Int, SocketAddr), IoError> {
-        let mut addr_buf = [0_u8; 128];
+        let mut addr_buf: [Byte; 128] = [0; 128];
         let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let n = recvfrom(self.fd, buf, 0, &mut addr_buf, &mut addr_len)
+        let n = recvfrom(self.fd, buf, 0, &mut addr_buf[..], &mut addr_len)
             .map_err(|e| IoError.from_os(e))?;
 
         @cfg(target_os = "macos")
-        let n = sys_recvfrom(self.fd, buf, 0, &mut addr_buf, &mut addr_len)
+        let n = sys_recvfrom(self.fd, buf, 0, &mut addr_buf[..], &mut addr_len)
             .map_err(|e| IoError.from_os(e))?;
 
         let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
@@ -511,15 +511,15 @@ implement UdpSocket {
     /// The data remains in the receive buffer for subsequent recv/recv_from.
     /// Useful for checking message size or type before full receive.
     public fn peek_from(&self, buf: &mut [Byte]) -> Result<(Int, SocketAddr), IoError> {
-        let mut addr_buf = [0_u8; 128];
+        let mut addr_buf: [Byte; 128] = [0; 128];
         let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let n = recvfrom(self.fd, buf, MSG_PEEK, &mut addr_buf, &mut addr_len)
+        let n = recvfrom(self.fd, buf, MSG_PEEK, &mut addr_buf[..], &mut addr_len)
             .map_err(|e| IoError.from_os(e))?;
 
         @cfg(target_os = "macos")
-        let n = sys_recvfrom(self.fd, buf, MSG_PEEK, &mut addr_buf, &mut addr_len)
+        let n = sys_recvfrom(self.fd, buf, MSG_PEEK, &mut addr_buf[..], &mut addr_len)
             .map_err(|e| IoError.from_os(e))?;
 
         let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
@@ -527,8 +527,27 @@ implement UdpSocket {
     }
 
     /// Get the local address this socket is bound to.
+    ///
+
+    /// Queries the kernel live via `getsockname`: a socket bound to port 0
+    /// is assigned an ephemeral port at bind time, so the addr requested at
+    /// construction is not authoritative. `[Byte; 128]` is the packed
+    /// (TypeId::U8) buffer whose `&mut` slice hands the kernel contiguous
+    /// ABI bytes (FFI-BYTE-BUFFER-STRIDE-1).
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
-        Result.Ok(self.local_addr)
+        let mut addr_buf: [Byte; 128] = [0; 128];
+        let mut addr_len: UInt32 = 128;
+
+        @cfg(any(target_os = "linux", target_os = "windows")) {
+            getsockname(self.fd, &mut addr_buf[..], &mut addr_len)
+                .map_err(|e| IoError.from_os(e))?;
+        }
+        @cfg(target_os = "macos") {
+            safe_getsockname(self.fd, &mut addr_buf[..], &mut addr_len)
+                .map_err(|e| IoError.from_os(e))?;
+        }
+
+        deserialize_socket_addr(&addr_buf[..addr_len as Int])
     }
 
     /// Get the peer address this socket is connected to.
@@ -875,14 +894,14 @@ implement UdpSocket {
         const EAGAIN: Int = 35;
 
         loop {
-            let mut addr_buf = [0_u8; 128];
+            let mut addr_buf: [Byte; 128] = [0; 128];
             let mut addr_len: UInt32 = 128;
 
             @cfg(any(target_os = "linux", target_os = "windows"))
-            let result = recvfrom(self.fd, buf, 0, &mut addr_buf, &mut addr_len);
+            let result = recvfrom(self.fd, buf, 0, &mut addr_buf[..], &mut addr_len);
 
             @cfg(target_os = "macos")
-            let result = sys_recvfrom(self.fd, buf, 0, &mut addr_buf, &mut addr_len);
+            let result = sys_recvfrom(self.fd, buf, 0, &mut addr_buf[..], &mut addr_len);
 
             match result {
                 Result.Ok(n) => {
@@ -1047,6 +1066,15 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
         return Result.Err(IoError.InvalidInput { reason: "Address buffer too small" });
     }
 
+    // BSD (macOS) `sockaddr_in` is `{ sin_len@0, sin_family@1, ... }`; Linux/
+    // Windows store the 16-bit `sin_family` at [0] (little-endian → low byte
+    // @0). `serialize_socket_addr` already writes the matching per-platform
+    // header, and the kernel returns the same shape from recvfrom/getsockname,
+    // so the family byte must be read from the platform's own offset — reading
+    // [0] on macOS yields `sin_len` (16), not `AF_INET`.
+    @cfg(target_os = "macos")
+    let family = buf[1] as Int;
+    @cfg(any(target_os = "linux", target_os = "windows"))
     let family = buf[0] as Int;
 
     if family == AF_INET {

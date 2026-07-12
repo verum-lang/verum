@@ -1993,9 +1993,16 @@ public fn safe_recvfrom(
     src_addr: &mut [Byte],
     addr_len: &mut UInt32
 ) -> Result<Int, OSError> {
-    let buf_ptr: &unsafe Byte = transmute(buf);
+    // FFI-BYTE-BUFFER-STRIDE-1: `.as_mut_ptr()` (Unslice) yields the packed
+    // data pointer for a reserved=1 byte slice (TypeId::U8 array / BYTE_LIST),
+    // exactly as `safe_getsockname`/`safe_getsockopt` do. A `transmute` of the
+    // FatRef VALUE handed the kernel the fat-ref struct bits, so recvfrom wrote
+    // the datagram into the descriptor rather than the buffer (recv silently
+    // returned 0 payload). Callers MUST pass PACKED buffers (`[Byte; N]`); a
+    // NaN-boxed `[0_u8; N]` List has reserved=0 and would deref 8-byte-strided.
     let buf_len = buf.len();
-    let src_ptr: &unsafe Byte = transmute(src_addr);
+    let buf_ptr = buf.as_mut_ptr() as &unsafe Byte;
+    let src_ptr = src_addr.as_mut_ptr() as &unsafe Byte;
     let result = unsafe {
         recvfrom_ffi(fd.0, buf_ptr, buf_len, flags, src_ptr, addr_len)
     };

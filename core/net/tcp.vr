@@ -634,7 +634,11 @@ implement TcpStream {
 
     /// Returns the local IP and port assigned to this socket by the kernel.
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
-        let mut addr_buf = [0_u8; 128];
+        // Packed `[Byte; 128]` (TypeId::U8): its `&mut` slice hands the kernel
+        // contiguous ABI bytes. A NaN-boxed `[0_u8; 128]` List (reserved=0) is
+        // 8-byte-strided, so getsockname would scatter the sockaddr across
+        // Value slots (FFI-BYTE-BUFFER-STRIDE-1).
+        let mut addr_buf: [Byte; 128] = [0; 128];
         // socklen_t is 4 bytes on every supported platform (UInt32 on
         // POSIX, Int32 on Win32) — using UInt32 here matches the kernel's
         // 4-byte write semantics; the typechecker absorbs the &mut UInt32
@@ -642,11 +646,11 @@ implement TcpStream {
         let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            getsockname(self.fd, &mut addr_buf, &mut addr_len)
+            getsockname(self.fd, &mut addr_buf[..], &mut addr_len)
                 .map_err(|e| IoError.from_os(e))?;
         }
         @cfg(target_os = "macos") {
-            safe_getsockname(self.fd, &mut addr_buf, &mut addr_len)
+            safe_getsockname(self.fd, &mut addr_buf[..], &mut addr_len)
                 .map_err(|e| IoError.from_os(e))?;
         }
 
@@ -1244,11 +1248,11 @@ implement TcpListener {
 
         // Linux: use accept4 with SOCK_CLOEXEC for atomic close-on-exec
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let client_fd = accept4(self.fd, &mut addr_buf, &mut addr_len, SOCK_CLOEXEC)
+        let client_fd = accept4(self.fd, &mut addr_buf[..], &mut addr_len, SOCK_CLOEXEC)
             .map_err(|e| IoError.from_os(e))?;
 
         @cfg(target_os = "macos")
-        let client_fd = sys_accept(self.fd, &mut addr_buf, &mut addr_len)
+        let client_fd = sys_accept(self.fd, &mut addr_buf[..], &mut addr_len)
             .map_err(|e| IoError.from_os(e))?;
 
         // macOS: set SO_NOSIGPIPE on accepted socket
@@ -1286,10 +1290,10 @@ implement TcpListener {
 
             // Try to accept immediately
             @cfg(any(target_os = "linux", target_os = "windows"))
-            let accept_result = accept4(self.fd, &mut addr_buf, &mut addr_len, SOCK_CLOEXEC | SOCK_NONBLOCK);
+            let accept_result = accept4(self.fd, &mut addr_buf[..], &mut addr_len, SOCK_CLOEXEC | SOCK_NONBLOCK);
 
             @cfg(target_os = "macos")
-            let accept_result = sys_accept(self.fd, &mut addr_buf, &mut addr_len);
+            let accept_result = sys_accept(self.fd, &mut addr_buf[..], &mut addr_len);
 
             match accept_result {
                 Result.Ok(client_fd) => {
@@ -1413,12 +1417,12 @@ implement<'a> Stream for AsyncIncoming<'a> {
         @cfg(any(target_os = "linux", target_os = "windows"))
         let accept_result = accept4(
             self.listener.fd,
-            &mut addr_buf, &mut addr_len,
+            &mut addr_buf[..], &mut addr_len,
             SOCK_CLOEXEC | SOCK_NONBLOCK,
         );
 
         @cfg(target_os = "macos")
-        let accept_result = sys_accept(self.listener.fd, &mut addr_buf, &mut addr_len);
+        let accept_result = sys_accept(self.listener.fd, &mut addr_buf[..], &mut addr_len);
 
         match accept_result {
             Result.Ok(client_fd) => {
@@ -1618,7 +1622,13 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
         return Result.Err(IoError.InvalidInput { reason: "Address buffer too small" });
     }
 
-    // First byte is address family (in native byte order)
+    // BSD (macOS) `sockaddr_in` is `{ sin_len@0, sin_family@1, ... }`; Linux/
+    // Windows store the 16-bit `sin_family` at [0] (little-endian → low byte
+    // @0). Read the family from the platform's own offset — reading [0] on
+    // macOS yields `sin_len` (16), not `AF_INET`.
+    @cfg(target_os = "macos")
+    let family = buf[1] as Int;
+    @cfg(any(target_os = "linux", target_os = "windows"))
     let family = buf[0] as Int;
 
     if family == AF_INET {
