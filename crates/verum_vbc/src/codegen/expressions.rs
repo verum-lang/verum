@@ -2028,6 +2028,21 @@ impl VbcCodegen {
                 }
 
                 // Not found - truly undefined
+                // [diag] VERUM_TRACE_UNDEF_VAR=<substr> — where and
+                // what scope state (uppercase-locals class triage:
+                // ssm.vr param B lost inside &[dt, B] array literal).
+                if let Ok(filter) = std::env::var("VERUM_TRACE_UNDEF_VAR")
+                    && !filter.is_empty()
+                    && name.contains(&filter)
+                {
+                    eprintln!(
+                        "[undef-var] '{}' in {} — var_reg_err, is_type_name={}, fn_registered={}",
+                        name,
+                        self.ctx.current_function.as_deref().unwrap_or("<top>"),
+                        is_type_name(&name),
+                        self.ctx.functions.contains_key(name.as_str()),
+                    );
+                }
                 Err(CodegenError::undefined_variable(name.clone()))
             }
 
