@@ -320,6 +320,7 @@ perf(crate): Optimize by X%
 | Context System | `docs/detailed/16-context-system.md` |
 | CBGR | `docs/detailed/cbgr-implementation.md` |
 | **Intrinsic Dispatch Contract** | `docs/architecture/intrinsic-dispatch-contract.md` — body `@intrinsic` vs table authority, LLVM-canonical alias requirements, `static mut` cell-backed address-of, CBGR-ref bound-check, three-tier reference dispatch. Pinned rules with regression-test references. |
+| **FFI Byte-Buffer Contract** | `docs/architecture/ffi-byte-buffer-contract.md` — how byte buffers cross the Verum↔C ABI: packed `[Byte;N]` (`TypeId::U8`) vs NaN-boxed `List`; reserved-stride `FatRef`; `.as_mut_ptr()` on a subslice param (never a raw array, never `transmute`); per-platform `sockaddr` layout. Root of the B1 net-stack cascade; the `&arr`-vs-`&arr[..]` coercion footgun (task #24). |
 | Cog Distribution | `docs/detailed/15-cog-distribution-architecture.md` |
 | Cog Management | `docs/detailed/15-cog-management.md` |
 | Roadmap | `docs/detailed/28-implementation-roadmap.md` |
