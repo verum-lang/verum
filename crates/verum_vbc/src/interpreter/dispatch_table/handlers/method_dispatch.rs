@@ -1007,6 +1007,53 @@ pub(in super::super) fn handle_call_method(
             _ => {}
         }
     }
+    // #48 phase-1.6: the same early surface for the BYTE_SLICE byte
+    // view (`Text.as_bytes()` — ARCH-P5 keeps it identity, NOT a
+    // FatRef). Without this, `bs.slice(1,3)` fell through the resolve
+    // strategies onto Text.slice by suffix (returned the TEXT "bc";
+    // iterating that sub-value then crashed), the exact coin-flip
+    // class the FatRef surface above retires. `len`/`is_empty` come
+    // for free; `slice` yields the canonical byte FatRef sub-view
+    // (reserved=1 — stride carried, mirroring Tier-1's cell elem).
+    if let Some((bs_ptr, bs_len)) = heap::value_as_byte_slice(&dispatch_receiver) {
+        let bare = method_name.rsplit('.').next().unwrap_or(method_name.as_str());
+        match bare {
+            "len" => {
+                state.set_reg(dst, Value::from_i64(bs_len as i64));
+                return Ok(DispatchResult::Continue);
+            }
+            "is_empty" => {
+                state.set_reg(dst, Value::from_bool(bs_len == 0));
+                return Ok(DispatchResult::Continue);
+            }
+            "slice" if args.count == 2 => {
+                let a = state.get_reg(args.start).as_i64();
+                let b = state
+                    .get_reg(crate::instruction::Reg(args.start.0 + 1))
+                    .as_i64();
+                if a < 0 || b < a || (b as u64) > bs_len {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "byte-slice slice({}, {}) out of bounds (len {})",
+                            a, b, bs_len
+                        ),
+                    });
+                }
+                let epoch = (state.cbgr_epoch & 0xFFFF) as u16;
+                let mut fr = crate::value::FatRef::slice(
+                    unsafe { bs_ptr.add(a as usize) },
+                    0,
+                    epoch,
+                    Capabilities::MUT_EXCLUSIVE,
+                    (b - a) as u64,
+                );
+                fr.reserved = 1;
+                state.set_reg(dst, Value::from_fat_ref(fr));
+                return Ok(DispatchResult::Continue);
+            }
+            _ => {}
+        }
+    }
     if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
         let rk = if dispatch_receiver.is_int() { "int".to_string() }
             else if dispatch_receiver.is_float() { "float".to_string() }
@@ -2117,6 +2164,17 @@ pub(in super::super) fn handle_call_method(
         } else {
             None
         };
+        if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
+            eprintln!(
+                "[dyn-recover] method={} concrete_type={:?} target_kind={}",
+                method_name,
+                concrete_type,
+                if classify_target.is_int() { "int" }
+                else if classify_target.is_ptr() { "ptr" }
+                else if classify_target.is_float() { "float" }
+                else { "other" }
+            );
+        }
         if let Some(ty) = concrete_type {
             let qualified = format!("{}.{}", ty, method_name);
             if let Some(id) = state.module.find_function_by_name(&qualified) {
@@ -2360,6 +2418,23 @@ pub(in super::super) fn handle_call_method(
                 || is_heap_string(&classify_target)
             {
                 (!is_already_qualified).then(|| "Text".to_string())
+            } else if classify_target.is_int() {
+                // PRIM-RECV-CLASSIFY-1 (#44-B): the legacy classifier
+                // knew Text/slice/heap-ptr but NOT the NaN-boxed
+                // primitives — an erased `v.hash(hasher)` on an Int
+                // payload left receiver_type=None and the
+                // first-suffix-match scan picked `Bool.hash`
+                // (alphabetically first `*.hash`), which writes a
+                // CONSTANT byte — Some(42) and Some(100) hashed
+                // identically (test_hash_some_different). Mirror the
+                // dyn-recovery classifier's primitive arms.
+                (!is_already_qualified).then(|| "Int".to_string())
+            } else if classify_target.is_float() {
+                (!is_already_qualified).then(|| "Float".to_string())
+            } else if classify_target.is_bool() {
+                (!is_already_qualified).then(|| "Bool".to_string())
+            } else if classify_target.is_unit() {
+                (!is_already_qualified).then(|| "Unit".to_string())
             } else if classify_target.is_ptr()
                 && !classify_target.is_nil()
                 && !is_already_qualified
@@ -3699,21 +3774,46 @@ fn func_id_parent_compatible_with_receiver(
         };
     }
     if !dispatch_receiver.is_ptr() || dispatch_receiver.is_nil() {
-        // Non-pointer receiver — accept parent-less or primitive-bound
-        // parents only.
+        // Non-pointer receiver — the receiver's OWN NaN-box kind
+        // constrains the acceptable parent FAMILY.
+        //
+        // PRIM-PARENT-EXACT-1 (#44-B): the previous rule accepted ANY
+        // primitive-bound parent for ANY non-pointer receiver — an
+        // Int payload's erased `v.hash(hasher)` rode the
+        // string-id-as-FunctionId numeric coincidence into
+        // `Bool.hash` (parent "Bool" ∈ the blanket primitive list),
+        // which writes ONE CONSTANT BYTE: `Maybe.Some(42)` and
+        // `Maybe.Some(100)` hashed IDENTICALLY
+        // (test_hash_some_different). Bool is checked BEFORE int —
+        // NaN-box bools also answer is_int-adjacent probes elsewhere.
+        let family: &[&str] = if dispatch_receiver.is_bool() {
+            &["Bool"]
+        } else if dispatch_receiver.is_int() {
+            &[
+                "Int", "Byte", "Char", "UInt8", "UInt16", "UInt32",
+                "UInt64", "Int8", "Int16", "Int32", "Int64", "USize",
+                "ISize",
+            ]
+        } else if dispatch_receiver.is_float() {
+            &["Float", "Float32", "Float64"]
+        } else if dispatch_receiver.is_small_string() {
+            &["Text"]
+        } else if dispatch_receiver.is_unit() {
+            &["Unit"]
+        } else {
+            // Unclassifiable non-pointer shape — preserve the historic
+            // permissive primitive set rather than over-tighten.
+            &[
+                "Int", "Bool", "Float", "Float32", "Float64", "Byte",
+                "Char", "UInt8", "UInt16", "UInt32", "UInt64", "Int8",
+                "Int16", "Int32", "Int64", "Text", "Unit",
+            ]
+        };
         return match func.parent_type {
             None => true,
             Some(tid) => match state.module.get_type(tid) {
                 Some(td) => match state.module.strings.get(td.name) {
-                    Some(name) => matches!(
-                        name,
-                        "Int" | "Bool" | "Float"
-                            | "Float32" | "Float64"
-                            | "Byte" | "Char" | "UInt8"
-                            | "UInt16" | "UInt32" | "UInt64"
-                            | "Int8" | "Int16" | "Int32" | "Int64"
-                            | "Text" | "Unit"
-                    ),
+                    Some(name) => family.contains(&name),
                     None => true,
                 },
                 None => true,

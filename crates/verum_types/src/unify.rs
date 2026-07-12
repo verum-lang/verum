@@ -58,6 +58,16 @@ pub struct Unifier {
     /// Used for stdlib-agnostic Generic<->Variant unification to properly map
     /// type arguments to their corresponding positions in the variant structure.
     original_variant_types: Map<Text, Type>,
+    /// PROTOCOL-PARAM-SUBSUMPTION-1 (#44-B): names registered as
+    /// PROTOCOLS — fed by every protocol-registration path (source
+    /// decls, metadata eager + lazy loaders). A concrete type in
+    /// FOUND position unifies with an EXPECTED type whose name is in
+    /// this set (`fn hash(&self, hasher: &mut Hasher)` receiving
+    /// `&mut DefaultHasher`), mirroring the DynProtocol arm's
+    /// documented trust discipline (impl registration is validated at
+    /// call sites by the protocol checker). Stdlib-agnostic: the set
+    /// carries whatever the program registered, никогда hardcode.
+    protocol_names: std::collections::HashSet<Text>,
     /// Type variable orders for each variant type.
     /// Key is the type name, value is the list of TypeVars in declaration order.
     /// For `type Validated<E, A>`, this stores [E_typevar, A_typevar].
@@ -214,6 +224,7 @@ impl Unifier {
             substitution: Substitution::new(),
             variant_type_names: Map::new(),
             original_variant_types: Map::new(),
+            protocol_names: std::collections::HashSet::new(),
             type_var_orders: Map::new(),
             type_aliases: Map::new(),
             type_alias_params: Map::new(),
@@ -307,6 +318,12 @@ impl Unifier {
     /// alias-aware lookup eliminates them entirely — the literal
     /// alias name is checked first, and only falls through to
     /// the resolved head when the direct lookup misses.
+    /// PROTOCOL-PARAM-SUBSUMPTION-1: mark `name` as a protocol so the
+    /// concrete→protocol unify arm can subsume (see the field doc).
+    pub fn register_protocol_name(&mut self, name: &str) {
+        self.protocol_names.insert(Text::from(name));
+    }
+
     pub fn resolve_aliased_head_text(&self, name: &str) -> Option<String> {
         self.resolve_aliased_head_name(name)
     }
@@ -2685,6 +2702,28 @@ impl Unifier {
             }
             (Pointer { .. }, Named { path, .. })
                 if matches!(path.last_segment_name(), "CString" | "CStr") =>
+            {
+                Ok(Substitution::new())
+            }
+
+            // PROTOCOL-PARAM-SUBSUMPTION-1 (#44-B): a CONCRETE found
+            // type unifies with an EXPECTED type whose name is a
+            // registered PROTOCOL (`hasher: &mut Hasher` receiving
+            // `&mut DefaultHasher` — reference arms recurse into this
+            // Named-level rule). Same trust as the DynProtocol arm
+            // (impl registration validated at call sites). Asymmetric
+            // by design: only the EXPECTED side being a protocol
+            // grants subsumption; protocol-vs-protocol falls through
+            // to exact matching.
+            (Named { path: p1, .. }, Named { path: p2, .. })
+                if self.protocol_names.contains(p2.last_segment_name())
+                    && !self.protocol_names.contains(p1.last_segment_name()) =>
+            {
+                Ok(Substitution::new())
+            }
+            (Generic { name: n1, .. }, Named { path: p2, .. })
+                if self.protocol_names.contains(p2.last_segment_name())
+                    && !self.protocol_names.contains(n1.as_str()) =>
             {
                 Ok(Substitution::new())
             }

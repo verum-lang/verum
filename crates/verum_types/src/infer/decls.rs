@@ -1898,6 +1898,7 @@ impl TypeChecker {
                     defining_crate: Maybe::None,
                     span: type_decl.span,
                 };
+                self.unifier.register_protocol_name(protocol.name.as_str());
                 let _ = self.protocol_checker.write().register_protocol(protocol);
 
                 // IMPORTANT: Register protocols correctly based on their context status.
@@ -3559,6 +3560,7 @@ impl TypeChecker {
                     defining_crate: Maybe::None,
                     span: type_decl.span,
                 };
+                self.unifier.register_protocol_name(protocol.name.as_str());
                 let _ = self.protocol_checker.write().register_protocol(protocol);
 
                 // Register as context or constraint protocol based on is_context flag
@@ -4729,6 +4731,7 @@ impl TypeChecker {
             defining_crate: verum_common::Maybe::None,
             span: proto_decl.span,
         };
+        self.unifier.register_protocol_name(protocol.name.as_str());
         let _ = self.protocol_checker.write().register_protocol(protocol);
 
         // Object safety enforcement for context protocols.

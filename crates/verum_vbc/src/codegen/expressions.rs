@@ -13971,6 +13971,24 @@ impl VbcCodegen {
                 let var_type = self.type_name_to_var_type(&t);
                 self.ctx.register_variable_type(&binder, var_type);
             }
+            // ITER-BINDER-IS-REF-1 (#44-B): `iter()`/`iter_mut()` yield
+            // Item = &T — the loop binder is a REFERENCE. Record the
+            // carried fact in `reference_bindings` (the marker
+            // TYPE-DEREF-4 consults) so `*m` inside the body lowers to
+            // the built-in reference deref, NOT the pointee type's
+            // `Deref` impl — `*m == *m` over `cases.iter()` on
+            // Maybe.None called `Maybe.deref()` and panicked
+            // ("called deref() on None"; law_eq_reflexive_on_maybe).
+            // `into_iter`/plain-container iteration binds by VALUE and
+            // stays unmarked.
+            if let verum_ast::ExprKind::MethodCall { method, .. } = &iter.kind
+                && matches!(method.name.as_str(), "iter" | "iter_mut")
+                && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            {
+                self.ctx
+                    .reference_bindings
+                    .insert(name.name.to_string());
+            }
         }
 
         // Compile body

@@ -1429,6 +1429,7 @@ impl TypeChecker {
             defining_crate: Maybe::None,
             span: Span::default(),
         };
+        self.unifier.register_protocol_name(protocol.name.as_str());
         let _ = self.protocol_checker.write().register_protocol(protocol);
     }
 
@@ -2629,6 +2630,8 @@ impl TypeChecker {
                 defining_crate: verum_common::Maybe::None,
                 span: Span::default(),
             };
+
+            self.unifier.register_protocol_name(protocol.name.as_str());
 
             let _ = self.protocol_checker.write().register_protocol(protocol);
         }

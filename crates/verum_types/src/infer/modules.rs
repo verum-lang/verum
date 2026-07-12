@@ -7142,6 +7142,8 @@ impl TypeChecker {
                         span: type_decl.span,
                     };
 
+                    self.unifier.register_protocol_name(protocol.name.as_str());
+
                     let _ = self.protocol_checker.write().register_protocol(protocol);
 
                     // Auto-register context protocols as injectable contexts.
