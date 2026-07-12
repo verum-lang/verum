@@ -1652,6 +1652,25 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
             mutable: false,
         };
     }
+    // #51: tuple spelling "(A, B, …)" — carried source-verbatim return
+    // names (`split_at() -> (&[T], &[T])`) reach this parser; without a
+    // tuple arm the whole spelling degraded to a non-tuple and every
+    // `let (l, r) = s.split_at(..)` failed "Expected tuple type for
+    // tuple pattern". Unit "()" is handled at the top of the fn.
+    if trimmed.starts_with('(') && trimmed.ends_with(')') && trimmed.len() > 2 {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        let parts = split_top_level_commas(inner);
+        // A single part with no top-level comma is a PARENTHESISED
+        // type, not a 1-tuple — parse the inner type transparently.
+        if parts.len() == 1 {
+            return parse_descriptor_type_string(parts[0].trim());
+        }
+        let elems: List<Type> = parts
+            .into_iter()
+            .map(|p| parse_descriptor_type_string(p.trim()))
+            .collect();
+        return Type::Tuple(elems);
+    }
     // SLICE-METHOD-TYPECHECK-E400 (#51): slice spelling "[T]" — the
     // carried source-verbatim return names ("&[T]" via RETNAME-CARRY)
     // reach this parser now that the metadata writer prefers them over

@@ -1056,6 +1056,42 @@ pub(in super::super) fn handle_cbgr_extended(
                 list_val
             };
 
+            // FATREF-INTERIOR-REF-1 (#51 unification tail): the slice
+            // representation is now uniformly a FatRef, so
+            // `&self.slice[i]` (SliceIter.next) arrives here with a
+            // FatRef base. Value-stride slices hand out the exact
+            // element address (same cbgr_mutable_ptrs contract as the
+            // LIST arm below); raw-stride slices cannot back a `&T`
+            // interior ref (Deref would read Value bits out of raw
+            // bytes) — loud typed error, never silent corruption.
+            if list_val.is_fat_ref() {
+                let fr = list_val.as_fat_ref();
+                let len = fr.len() as i64;
+                if index < 0 || index >= len {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: len as usize,
+                    });
+                }
+                if fr.reserved != 0 {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "interior reference into a raw-element slice \
+                             (stride {}) is not representable — index the \
+                             slice by value instead (FATREF-INTERIOR-REF-1 / \
+                             AOT-SLICE-ELEMSIZE-CARRY-1 #48)",
+                            fr.reserved
+                        ),
+                    });
+                }
+                let elem_ptr = unsafe {
+                    fr.ptr().add((index as usize) * std::mem::size_of::<Value>())
+                };
+                state.cbgr_mutable_ptrs.insert(elem_ptr as usize);
+                state.set_reg(dst, Value::from_ptr(elem_ptr));
+                return Ok(DispatchResult::Continue);
+            }
+
             let ptr = list_val.as_ptr::<u8>();
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);

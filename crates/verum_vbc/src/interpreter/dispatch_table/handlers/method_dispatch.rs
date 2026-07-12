@@ -985,6 +985,28 @@ pub(in super::super) fn handle_call_method(
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
     }
+    // FATREF-DISPATCH-ROUTE-1 (#51): THE slice builtin surface —
+    // answered FIRST, before every resolve strategy. Baked bodies call
+    // the QUALIFIED intrinsic names (`Slice.is_empty` / `Slice.len`),
+    // which have descriptor stubs but no bytecode; any later strategy
+    // either finds an empty stub or coin-flips onto a foreign
+    // `.is_empty` body (ArenaSlice.is_empty reading the marker).
+    if dispatch_receiver.is_fat_ref() {
+        let bare = method_name.rsplit('.').next().unwrap_or(method_name.as_str());
+        match bare {
+            "len" => {
+                let fr = dispatch_receiver.as_fat_ref();
+                state.set_reg(dst, Value::from_i64(fr.len() as i64));
+                return Ok(DispatchResult::Continue);
+            }
+            "is_empty" => {
+                let fr = dispatch_receiver.as_fat_ref();
+                state.set_reg(dst, Value::from_bool(fr.len() == 0));
+                return Ok(DispatchResult::Continue);
+            }
+            _ => {}
+        }
+    }
     if std::env::var("VERUM_TRACE_CALLM_FLOW").is_ok() {
         let rk = if dispatch_receiver.is_int() { "int".to_string() }
             else if dispatch_receiver.is_float() { "float".to_string() }
@@ -3489,6 +3511,23 @@ fn func_id_parent_compatible_with_receiver(
         )
     {
         return false;
+    }
+    // FATREF-DISPATCH-ROUTE-1 (#51): a slice receiver (FatRef) is
+    // compatible ONLY with the Slice parent type — the func_id
+    // heuristic otherwise coin-flips onto whichever `.is_empty` /
+    // `.len` body occupies the colliding slot (ArenaSlice.is_empty,
+    // reading fields out of the marker payload).
+    if dispatch_receiver.is_fat_ref() {
+        return match func.parent_type {
+            Some(tid) => matches!(
+                state
+                    .module
+                    .get_type(tid)
+                    .and_then(|td| state.module.strings.get(td.name)),
+                Some("Slice")
+            ),
+            None => false,
+        };
     }
     if !dispatch_receiver.is_ptr() || dispatch_receiver.is_nil() {
         // Non-pointer receiver — accept parent-less or primitive-bound
