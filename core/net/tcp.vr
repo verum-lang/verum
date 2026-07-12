@@ -367,16 +367,22 @@ implement TcpStream {
         @cfg(target_os = "macos")
         let _ = safe_set_nosigpipe(fd, true);
 
-        // Serialize address to sockaddr_in format
+        // Serialize + pack the sockaddr in-scope (FFI-BYTE-BUFFER-STRIDE-1):
+        // `&sa[0]` is contiguous ABI bytes; a NaN-boxed `List.as_ptr()`
+        // is 8-byte-strided.
         let addr_bytes = serialize_socket_addr(addr);
-        let addr_ptr = addr_bytes.as_ptr() as &unsafe Byte;
+        let addr_n = addr_bytes.len();
+        let mut sa: [Byte; 28] = [0; 28];
+        let mut pi = 0;
+        while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
+        let addr_ptr = &sa[0] as &unsafe Byte;
 
         // Connect to remote host
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let connect_result = connect(fd, addr_ptr, addr_bytes.len() as Int);
+        let connect_result = connect(fd, addr_ptr, addr_n as Int);
 
         @cfg(target_os = "macos")
-        let connect_result = sys_connect(fd, addr_ptr, addr_bytes.len() as Int);
+        let connect_result = sys_connect(fd, addr_ptr, addr_n as Int);
 
         match connect_result {
             Result.Ok(()) => {
@@ -438,9 +444,14 @@ implement TcpStream {
 
         // Step 3: bind(local). Forces the kernel to use the
         // requested source IP / port instead of picking its own.
+        // FFI-BYTE-BUFFER-STRIDE-1: pack in-scope (see connect above).
         let local_bytes = serialize_socket_addr(&local);
-        let local_ptr = local_bytes.as_ptr() as &unsafe Byte;
-        let bind_result = sys_bind(fd, local_ptr, local_bytes.len() as Int);
+        let local_n = local_bytes.len();
+        let mut local_sa: [Byte; 28] = [0; 28];
+        let mut lpi = 0;
+        while lpi < local_n { local_sa[lpi] = local_bytes[lpi]; lpi = lpi + 1; }
+        let local_ptr = &local_sa[0] as &unsafe Byte;
+        let bind_result = sys_bind(fd, local_ptr, local_n as Int);
         match bind_result {
             Result.Ok(())  => {}
             Result.Err(e) => {
@@ -452,13 +463,17 @@ implement TcpStream {
             }
         }
 
-        // Step 4: connect(peer).
+        // Step 4: connect(peer). FFI-BYTE-BUFFER-STRIDE-1: pack in-scope.
         let peer_bytes = serialize_socket_addr(&peer);
-        let peer_ptr = peer_bytes.as_ptr() as &unsafe Byte;
+        let peer_n = peer_bytes.len();
+        let mut peer_sa: [Byte; 28] = [0; 28];
+        let mut ppi = 0;
+        while ppi < peer_n { peer_sa[ppi] = peer_bytes[ppi]; ppi = ppi + 1; }
+        let peer_ptr = &peer_sa[0] as &unsafe Byte;
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let connect_result = connect(fd, peer_ptr, peer_bytes.len() as Int);
+        let connect_result = connect(fd, peer_ptr, peer_n as Int);
         @cfg(target_os = "macos")
-        let connect_result = sys_connect(fd, peer_ptr, peer_bytes.len() as Int);
+        let connect_result = sys_connect(fd, peer_ptr, peer_n as Int);
         match connect_result {
             Result.Ok(()) => {
                 Result.Ok(TcpStream {
@@ -523,15 +538,20 @@ implement TcpStream {
         @cfg(target_os = "macos")
         let _ = safe_set_nosigpipe(fd, true);
 
+        // FFI-BYTE-BUFFER-STRIDE-1: pack the sockaddr in-scope.
         let addr_bytes = serialize_socket_addr(addr);
-        let addr_ptr = addr_bytes.as_ptr() as &unsafe Byte;
+        let addr_n = addr_bytes.len();
+        let mut sa: [Byte; 28] = [0; 28];
+        let mut pi = 0;
+        while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
+        let addr_ptr = &sa[0] as &unsafe Byte;
 
         // Initiate non-blocking connect
         @cfg(any(target_os = "linux", target_os = "windows"))
-        let connect_result = connect(fd, addr_ptr, addr_bytes.len() as Int);
+        let connect_result = connect(fd, addr_ptr, addr_n as Int);
 
         @cfg(target_os = "macos")
-        let connect_result = sys_connect(fd, addr_ptr, addr_bytes.len() as Int);
+        let connect_result = sys_connect(fd, addr_ptr, addr_n as Int);
 
         // Platform-specific error codes for "in progress"
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -1497,14 +1517,13 @@ const SOCKADDR_IN6_SIZE: Int = 28;
 /// (truncates) and `sin_family=0=AF_UNSPEC`, so `bind` returns
 /// EINVAL/EAFNOSUPPORT. Discovered while bisecting AOT
 /// `TcpListener.bind("127.0.0.1:0")` failures (task #5).
-fn serialize_socket_addr(addr: &SocketAddr) -> Text {
-    // FFI-BYTE-BUFFER-STRIDE-1 fix — see the identical note in
-    // core/net/udp.vr: a PACKED heap byte buffer (Text/BYTE_SLICE) is
-    // the only Tier-0 form whose `.as_ptr()` addresses contiguous ABI
-    // bytes; a raw `List<Byte>` is NaN-boxed 8-byte-strided storage,
-    // so `bind`/`connect`/`sendto` read `sin_family = 0` →
-    // EAFNOSUPPORT(47). Call sites (`.as_ptr()`, `.len()`) unchanged.
-    let bytes: List<Byte> = match *addr {
+// Builds platform-native `sockaddr` byte VALUES as a `List<Byte>`.
+// Callers pack it into an in-scope `[Byte; 28]` before the FFI call
+// (FFI-BYTE-BUFFER-STRIDE-1) — a `List<Byte>.as_ptr()` is NaN-boxed
+// 8-byte-strided storage, not contiguous ABI bytes. Mirror of
+// core/net/udp.vr.serialize_socket_addr.
+fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
+    match *addr {
         SocketAddr.V4(v4) => {
             let mut buf = List.with_capacity(SOCKADDR_IN_SIZE);
 
@@ -1590,10 +1609,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> Text {
 
             buf
         }
-    };
-    // Materialize the NaN-boxed List<Byte> into a contiguous packed
-    // buffer (see the function-head note).
-    Text.from_utf8_unchecked(bytes.as_slice())
+    }
 }
 
 /// Deserialize a socket address from kernel sockaddr bytes.

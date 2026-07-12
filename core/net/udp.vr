@@ -307,17 +307,24 @@ implement UdpSocket {
         @cfg(target_os = "macos")
         let _ = safe_set_reuseaddr(fd, true);
 
-        // Bind to address
+        // Bind to address. Pack the NaN-boxed sockaddr VALUES into an
+        // in-scope contiguous `[Byte; 28]` (FFI-BYTE-BUFFER-STRIDE-1):
+        // `&sa[0]` is ABI-contiguous, `n` carries the true length past
+        // embedded NULs. A raw `List.as_ptr()` is 8-byte-strided.
         let addr_bytes = serialize_socket_addr(addr);
+        let addr_n = addr_bytes.len();
+        let mut sa: [Byte; 28] = [0; 28];
+        let mut pi = 0;
+        while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
 
         @cfg(any(target_os = "linux", target_os = "windows"))
-        if let Result.Err(e) = bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
+        if let Result.Err(e) = bind(fd, &sa[0] as &unsafe Byte, addr_n as Int) {
             let _ = close(fd);
             return Result.Err(IoError.from_os(e));
         }
 
         @cfg(target_os = "macos")
-        if let Result.Err(e) = sys_bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
+        if let Result.Err(e) = sys_bind(fd, &sa[0] as &unsafe Byte, addr_n as Int) {
             let _ = sys_close(fd);
             return Result.Err(IoError.from_os(e));
         }
@@ -371,14 +378,19 @@ implement UdpSocket {
     /// socket.send_to(b"hello", dest)?;
     /// ```
     public fn send_to(&self, buf: &[Byte], addr: SocketAddr) -> Result<Int, IoError> {
+        // FFI-BYTE-BUFFER-STRIDE-1: pack the sockaddr in-scope (see bind).
         let addr_bytes = serialize_socket_addr(&addr);
+        let addr_n = addr_bytes.len();
+        let mut sa: [Byte; 28] = [0; 28];
+        let mut pi = 0;
+        while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
-            sendto(self.fd, buf, 0, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int)
+            sendto(self.fd, buf, 0, &sa[0] as &unsafe Byte, addr_n as Int)
                 .map_err(|e| IoError.from_os(e))
         }
         @cfg(target_os = "macos") {
-            sys_sendto(self.fd, buf, 0, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int)
+            sys_sendto(self.fd, buf, 0, &sa[0] as &unsafe Byte, addr_n as Int)
                 .map_err(|e| IoError.from_os(e))
         }
     }
@@ -418,15 +430,20 @@ implement UdpSocket {
         let mut last_err: Maybe<IoError> = Maybe.None;
 
         for socket_addr in addrs {
+            // FFI-BYTE-BUFFER-STRIDE-1: pack the sockaddr in-scope (see bind).
             let addr_bytes = serialize_socket_addr(&socket_addr);
+            let addr_n = addr_bytes.len();
+            let mut sa: [Byte; 28] = [0; 28];
+            let mut pi = 0;
+            while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
 
             @cfg(any(target_os = "linux", target_os = "windows"))
-            let result = connect(self.fd, addr_bytes.as_ptr() as &unsafe Byte,
-                                 addr_bytes.len() as Int);
+            let result = connect(self.fd, &sa[0] as &unsafe Byte,
+                                 addr_n as Int);
 
             @cfg(target_os = "macos")
-            let result = sys_connect(self.fd, addr_bytes.as_ptr() as &unsafe Byte,
-                                     addr_bytes.len() as Int);
+            let result = sys_connect(self.fd, &sa[0] as &unsafe Byte,
+                                     addr_n as Int);
 
             match result {
                 Result.Ok(_) => {
@@ -896,18 +913,23 @@ implement UdpSocket {
         @cfg(target_os = "macos")
         const EAGAIN: Int = 35;
 
+        // FFI-BYTE-BUFFER-STRIDE-1: pack the sockaddr in-scope (see bind).
         let addr_bytes = serialize_socket_addr(&addr);
+        let addr_n = addr_bytes.len();
+        let mut sa: [Byte; 28] = [0; 28];
+        let mut pi = 0;
+        while pi < addr_n { sa[pi] = addr_bytes[pi]; pi = pi + 1; }
 
         loop {
             @cfg(any(target_os = "linux", target_os = "windows"))
             let result = sendto(self.fd, buf, 0,
-                                addr_bytes.as_ptr() as &unsafe Byte,
-                                addr_bytes.len() as Int);
+                                &sa[0] as &unsafe Byte,
+                                addr_n as Int);
 
             @cfg(target_os = "macos")
             let result = sys_sendto(self.fd, buf, 0,
-                                    addr_bytes.as_ptr() as &unsafe Byte,
-                                    addr_bytes.len() as Int);
+                                    &sa[0] as &unsafe Byte,
+                                    addr_n as Int);
 
             match result {
                 Result.Ok(n) => return Result.Ok(n),
@@ -932,16 +954,15 @@ implement UdpSocket {
 
 /// Mirror of `core/net/tcp.vr.serialize_socket_addr` — same
 /// BSD-vs-POSIX `sockaddr` header divergence (task #5).
-fn serialize_socket_addr(addr: &SocketAddr) -> Text {
-    // FFI-BYTE-BUFFER-STRIDE-1 fix: return a PACKED heap byte buffer
-    // (the Text / BYTE_SLICE representation) — the only Tier-0 form
-    // whose `.as_ptr()` addresses contiguous ABI bytes. A raw
-    // `List<Byte>` is NaN-boxed 8-byte-strided storage, so passing its
-    // `.as_ptr()` to `bind`/`sendto` made the kernel read
-    // `sin_family = 0` → EAFNOSUPPORT(47). `Text.as_ptr()` / `.len()`
-    // yield the packed pointer and byte length, so every call site
-    // (`… .as_ptr() as &unsafe Byte`, `… .len()`) is unchanged.
-    let bytes: List<Byte> = match *addr {
+// Builds the platform-native `sockaddr` byte VALUES as a `List<Byte>`.
+// Callers MUST NOT pass `.as_ptr()` to a syscall directly — a
+// `List<Byte>` is NaN-boxed 8-byte-strided storage (FFI-BYTE-BUFFER-
+// STRIDE-1). Copy it into an in-scope packed `[Byte; N]` via
+// `pack_sockaddr` before the FFI call; that array's `&buf[0]` is
+// contiguous ABI bytes and its explicit length carries embedded NULs
+// (which a `Text` would truncate at strlen). See `pack_sockaddr`.
+fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
+    match *addr {
         SocketAddr.V4(v4) => {
             let mut buf = List.with_capacity(16);
 
@@ -1017,10 +1038,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> Text {
 
             buf
         }
-    };
-    // Materialize the NaN-boxed List<Byte> into a contiguous packed
-    // buffer (see the function-head note).
-    Text.from_utf8_unchecked(bytes.as_slice())
+    }
 }
 
 /// Deserialize a socket address from kernel sockaddr bytes.
