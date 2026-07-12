@@ -10096,6 +10096,31 @@ impl VbcCodegen {
                 .as_deref()
                 .map(VbcCodegen::strip_generic_args)
                 .map(str::to_string);
+            if std::env::var("VERUM_TRACE_SLICE_ROUTE").is_ok() {
+                eprintln!(
+                    "[slice-route] .slice() receiver_type={:?}",
+                    receiver_type
+                );
+                let mut hits: Vec<&str> = self
+                    .ctx
+                    .functions
+                    .keys()
+                    .filter(|k| k.contains("as_bytes"))
+                    .map(|k| k.as_str())
+                    .collect();
+                hits.sort();
+                eprintln!(
+                    "[slice-route] fn-table as_bytes keys ({}): {:?}",
+                    hits.len(),
+                    &hits[..hits.len().min(12)]
+                );
+                if let Some(info) = self.ctx.functions.get("Text.as_bytes") {
+                    eprintln!(
+                        "[slice-route] Text.as_bytes RETNAME={:?}",
+                        info.return_type_name
+                    );
+                }
+            }
             let is_slice = receiver_type
                 .as_deref()
                 .map(|t| {
@@ -23464,12 +23489,29 @@ impl VbcCodegen {
                 }
                 // Try exact match first
                 let method_name = format!("{}.{}", receiver_type, method.name);
-                let exact_pair = self.ctx.lookup_function(&method_name).map(|info| {
-                    (
-                        info.return_type_name.clone(),
-                        info.return_type_inner.clone(),
-                    )
-                });
+                // QUALIFIED-KEY FALLBACK (#48 phase-1.6 root): stdlib
+                // registrations are module-qualified ("core.text.Text.
+                // as_bytes") and the bare "Text.as_bytes" mirror is a
+                // first-wins slot ANY other `as_bytes` can squat (the
+                // fn-table oracle showed the bare slot held a foreign
+                // as_bytes). Inference must resolve through the SAME
+                // qualified surface the call compiler uses — a segment-
+                // anchored suffix probe — or every intrinsic-wrapper
+                // return type ("&[Byte]") silently vanishes and the
+                // typed `.slice()` intercept never fires.
+                let exact_pair = self
+                    .ctx
+                    .lookup_function(&method_name)
+                    .or_else(|| {
+                        self.ctx
+                            .find_function_by_suffix(&format!(".{}", method_name))
+                    })
+                    .map(|info| {
+                        (
+                            info.return_type_name.clone(),
+                            info.return_type_inner.clone(),
+                        )
+                    });
                 if trace {
                     eprintln!("[infer-mcall] exact method_name={} pair={:?}", method_name, exact_pair);
                 }
@@ -23518,6 +23560,10 @@ impl VbcCodegen {
                     let stripped_ret = self
                         .ctx
                         .lookup_function(&method_name)
+                        .or_else(|| {
+                            self.ctx
+                                .find_function_by_suffix(&format!(".{}", method_name))
+                        })
                         .and_then(|info| info.return_type_name.clone());
                     if trace {
                         eprintln!("[infer-mcall] stripped method_name={} ret={:?}", method_name, stripped_ret);

@@ -13064,9 +13064,45 @@ fn lower_call_method<'ctx>(
                             if let Some(fn_desc) = vbc.get_function(FunctionId(fn_id)) {
                                 let fname = vbc.get_string(fn_desc.name).unwrap_or("");
                                 // Match "Circle.area" when method_name is "area"
-                                if fname.ends_with(&method_suffix) {
+                                // NAME-AUTHORITATIVE GUARD (TYPE-ID-COLLISION-6):
+                                // a type's protocol-method entry MUST name that
+                                // same type. The carried `proto_impl.methods`
+                                // FunctionIds are archive-local and are NOT
+                                // remapped on import (import_archive_type_...:
+                                // `methods: pi.methods.clone()`), so in a merged
+                                // module a type's method slot can resolve to a
+                                // DIFFERENT type's function (observed: Duration's
+                                // Debug slot resolved to AddrParseError.fmt_debug,
+                                // and its receiver's `{:?}` dispatched there).
+                                // fn_ids are merge-fragile; NAMES are stable — so
+                                // reject any entry whose function name's type
+                                // prefix disagrees with this descriptor's name and
+                                // let the by-name probe below install the correct
+                                // target. This makes dispatch name-authoritative.
+                                let name_matches = {
+                                    let tn = vbc.get_string(type_desc.name).unwrap_or("");
+                                    let tn_short = tn.rsplit('.').next().unwrap_or(tn);
+                                    let expect = fname.len() >= method_suffix.len()
+                                        && fname.ends_with(&method_suffix);
+                                    expect && {
+                                        let prefix = &fname[..fname.len() - method_suffix.len()];
+                                        let prefix_short =
+                                            prefix.rsplit('.').next().unwrap_or(prefix);
+                                        !tn.is_empty()
+                                            && (prefix == tn || prefix_short == tn_short)
+                                    }
+                                };
+                                if fname.ends_with(&method_suffix) && name_matches {
                                     if let Some(llvm_fn) = ctx.get_module().get_function(fname) {
                                         if seen_dyn_tids.insert(type_desc.id.0) {
+                                            if type_desc.id.0 == 1300
+                                                && std::env::var_os("VERUM_TRACE_TYPEID").is_some()
+                                            {
+                                                eprintln!(
+                                                    "[dyn-1300] method='{}' PROTO -> {}",
+                                                    method_name, fname
+                                                );
+                                            }
                                             dispatch_entries
                                                 .push((type_desc.id.0, fname.to_string()));
                                             via_protocols += 1;
@@ -13100,6 +13136,14 @@ fn lower_call_method<'ctx>(
                                 let cand = format!("{}{}", base, method_suffix);
                                 if ctx.get_module().get_function(&cand).is_some() {
                                     if seen_dyn_tids.insert(type_desc.id.0) {
+                                        if type_desc.id.0 == 1300
+                                            && std::env::var_os("VERUM_TRACE_TYPEID").is_some()
+                                        {
+                                            eprintln!(
+                                                "[dyn-1300] method='{}' PROBE -> {}",
+                                                method_name, cand
+                                            );
+                                        }
                                         dispatch_entries.push((type_desc.id.0, cand));
                                         via_name_probe += 1;
                                     }
@@ -22196,28 +22240,29 @@ fn lower_cbgr_extended<'ctx>(
             let end_raw = ctx.get_register(op_reg(operands, 3))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
-            // Load base from fat ref. Same variance as SliceGet.
             let src_ptr = as_ptr(ctx, src, "sub_src_ptr")?;
-            let base_int = ctx
-                .builder()
-                .build_load(i64_ty, src_ptr, "base_int")
-                .or_llvm_err()?;
             // Defensive: start/end can arrive as PointerValue (heap-tagged
             // Int from a variant payload) — same shape as the SliceGet
             // fix (4f649325). Route through `as_i64` so both Pointer and
             // Int forms work.
             let start = as_i64(ctx, start_raw, "sub_start")?;
             let end = as_i64(ctx, end_raw, "sub_end")?;
-            // #48: carry the source stride into both the offset and the
-            // sub-slice cell (was hardcoded * 8).
-            let sub_elem = emit_slice_elem_load(ctx, src_ptr)?;
+            // #48 phase-1.6: the SOURCE is any of the three container
+            // shapes — canonical cell, stamped Pack (bs = Text.as_bytes
+            // → BYTE_SLICE: the pre-fix cell-assuming reads took word0
+            // as data and header bytes @16 as elem → garbage sub-view /
+            // crash), or an unstamped List (as_slice identity). ONE
+            // classifier yields (data, len, elem); the sub-view is
+            // ALWAYS emitted as a canonical cell.
+            let (sub_data, _sub_len, sub_elem) =
+                emit_container_view(ctx, src_ptr, "sub")?;
             let offset = ctx
                 .builder()
                 .build_int_mul(start, sub_elem, "sub_off")
                 .or_llvm_err()?;
             let new_base = ctx
                 .builder()
-                .build_int_add(base_int.into_int_value(), offset, "sub_base")
+                .build_int_add(sub_data, offset, "sub_base")
                 .or_llvm_err()?;
             // Compute new len = end - start
             let new_len = ctx
@@ -22254,39 +22299,16 @@ fn lower_cbgr_extended<'ctx>(
             // either PointerValue or i64 (NaN-boxed), so route through
             // `as_ptr`.
             let src_ptr = as_ptr(ctx, src, "split_src_ptr")?;
-            let base_int = ctx
-                .builder()
-                .build_load(i64_ty, src_ptr, "base_int")
-                .or_llvm_err()?;
-            // SAFETY: GEP into the source fat reference {base_ptr, len} to read the total length at field 1 (offset 8)
-            let len_ptr = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i64_ty,
-                        src.into_pointer_value(),
-                        &[i64_ty.const_int(1, false)],
-                        "len_ptr",
-                    )
-                    .or_llvm_err()?
-            };
-            let total_len = ctx
-                .builder()
-                .build_load(i64_ty, len_ptr, "total_len")
-                .or_llvm_err()?;
             let mid_val = mid.into_int_value();
 
-            // #48: carry the source stride into BOTH halves; the
-            // second-half offset walks by that stride (was * 8).
-            let split_elem = emit_slice_elem_load(ctx, src_ptr)?;
+            // #48 phase-1.6: classify the source {cell|pack|list} — ONE
+            // authority (mirror of SliceSubslice above); both halves are
+            // emitted as canonical cells carrying the source stride.
+            let (base_int, total_len, split_elem) =
+                emit_container_view(ctx, src_ptr, "split")?;
 
             // First half: [base, mid)
-            let fr1 = emit_slice_fatref_alloc(
-                ctx,
-                base_int.into_int_value(),
-                mid_val,
-                split_elem,
-                "split1",
-            )?;
+            let fr1 = emit_slice_fatref_alloc(ctx, base_int, mid_val, split_elem, "split1")?;
             ctx.set_register(dst1, fr1.into());
 
             // Second half: [base + mid*elem, total_len - mid)
@@ -22296,11 +22318,11 @@ fn lower_cbgr_extended<'ctx>(
                 .or_llvm_err()?;
             let new_base = ctx
                 .builder()
-                .build_int_add(base_int.into_int_value(), offset, "split2_base")
+                .build_int_add(base_int, offset, "split2_base")
                 .or_llvm_err()?;
             let new_len = ctx
                 .builder()
-                .build_int_sub(total_len.into_int_value(), mid_val, "split2_len")
+                .build_int_sub(total_len, mid_val, "split2_len")
                 .or_llvm_err()?;
             let fr2 = emit_slice_fatref_alloc(ctx, new_base, new_len, split_elem, "split2")?;
             ctx.set_register(dst2, fr2.into());
