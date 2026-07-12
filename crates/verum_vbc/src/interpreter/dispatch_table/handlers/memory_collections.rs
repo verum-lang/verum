@@ -653,6 +653,35 @@ pub(in super::super) fn fat_ref_read_element(
     }
 }
 
+/// Write-side twin of `fat_ref_read_element` — ONE authority for every
+/// stride-honouring store through a FatRef slice (#53 char_extended
+/// leg; SET_E-FATREF's shape). `reserved` semantics identical to the
+/// read side: 0 = NaN-boxed Value slot, 1/2/4/8 = raw truncating store.
+pub(in super::super) fn fat_ref_write_element(
+    fat_ref: &crate::value::FatRef,
+    idx: usize,
+    value: Value,
+) {
+    let base_ptr = fat_ref.ptr();
+    match fat_ref.reserved {
+        0 => unsafe { *(base_ptr as *mut Value).add(idx) = value },
+        1 => unsafe { *base_ptr.add(idx) = value.as_i64() as u8 },
+        2 => {
+            let p = unsafe { base_ptr.add(idx * 2) as *mut u16 };
+            unsafe { std::ptr::write_unaligned(p, value.as_i64() as u16) }
+        }
+        4 => {
+            let p = unsafe { base_ptr.add(idx * 4) as *mut u32 };
+            unsafe { std::ptr::write_unaligned(p, value.as_i64() as u32) }
+        }
+        8 => {
+            let p = unsafe { base_ptr.add(idx * 8) as *mut i64 };
+            unsafe { std::ptr::write_unaligned(p, value.as_i64()) }
+        }
+        _ => unsafe { *(base_ptr as *mut Value).add(idx) = value },
+    }
+}
+
 /// GetE (0x64) - Get element: dst = arr[idx]
 pub(in super::super) fn handle_get_index(
     state: &mut InterpreterState,

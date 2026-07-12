@@ -337,7 +337,22 @@ pub(in super::super) fn handle_char_extended(
             let buf_val =
                 super::cbgr_helpers::resolve_arg_value(state, buf_val_raw);
 
-            if buf_val.is_ptr() && !buf_val.is_nil() {
+            if buf_val.is_fat_ref() {
+                // #53 IS-REGULAR-PTR-CONTRACT leg: the encode scratch is
+                // a `&mut [Byte]` SLICE — a FatRef marker passed the old
+                // `is_ptr` gate and the header probe below dereferenced
+                // marker bits (the text/-mix SIGSEGV in this handler).
+                // Stride-honouring store through the ONE write authority.
+                let fr = buf_val.as_fat_ref();
+                let cap = fr.len() as usize;
+                for (i, b) in tmp.iter().enumerate().take(n_bytes.min(cap)) {
+                    super::memory_collections::fat_ref_write_element(
+                        &fr,
+                        i,
+                        Value::from_i64(*b as i64),
+                    );
+                }
+            } else if buf_val.is_regular_ptr() && !buf_val.is_nil() {
                 let buf_ptr = buf_val.as_ptr::<u8>();
                 let header = unsafe {
                     super::super::super::heap::ObjectHeader::ref_or_stub(buf_ptr)
@@ -440,7 +455,7 @@ pub(in super::super) fn handle_char_extended(
             } else if bytes_val.is_fat_ref() {
                 let fr = bytes_val.as_fat_ref();
                 (fr.ptr() as *const u8, fr.len())
-            } else if bytes_val.is_ptr() && !bytes_val.is_nil() {
+            } else if bytes_val.is_regular_ptr() && !bytes_val.is_nil() {
                 let base = bytes_val.as_ptr::<u8>();
                 if base.is_null() {
                     state.set_reg(dst, Value::from_char('\u{FFFD}'));
