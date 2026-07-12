@@ -932,8 +932,16 @@ implement UdpSocket {
 
 /// Mirror of `core/net/tcp.vr.serialize_socket_addr` — same
 /// BSD-vs-POSIX `sockaddr` header divergence (task #5).
-fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
-    match *addr {
+fn serialize_socket_addr(addr: &SocketAddr) -> Text {
+    // FFI-BYTE-BUFFER-STRIDE-1 fix: return a PACKED heap byte buffer
+    // (the Text / BYTE_SLICE representation) — the only Tier-0 form
+    // whose `.as_ptr()` addresses contiguous ABI bytes. A raw
+    // `List<Byte>` is NaN-boxed 8-byte-strided storage, so passing its
+    // `.as_ptr()` to `bind`/`sendto` made the kernel read
+    // `sin_family = 0` → EAFNOSUPPORT(47). `Text.as_ptr()` / `.len()`
+    // yield the packed pointer and byte length, so every call site
+    // (`… .as_ptr() as &unsafe Byte`, `… .len()`) is unchanged.
+    let bytes: List<Byte> = match *addr {
         SocketAddr.V4(v4) => {
             let mut buf = List.with_capacity(16);
 
@@ -1009,7 +1017,10 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
 
             buf
         }
-    }
+    };
+    // Materialize the NaN-boxed List<Byte> into a contiguous packed
+    // buffer (see the function-head note).
+    Text.from_utf8_unchecked(bytes.as_slice())
 }
 
 /// Deserialize a socket address from kernel sockaddr bytes.
