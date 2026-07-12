@@ -38,11 +38,11 @@
 // # Example - Echo Server
 // ```verum
 // let socket = UdpSocket.bind("127.0.0.1:8080")?;
-// let mut buf = [0_u8; 1500];
+// let mut buf: [Byte; 1500] = [0; 1500];
 //
 
 // loop {
-//  let (len, src) = socket.recv_from(&mut buf)?;
+//  let (len, src) = socket.recv_from(&mut buf[..])?;
 //  socket.send_to(&buf[..len], src)?;
 // }
 // ```
@@ -54,9 +54,9 @@
 // socket.join_multicast_v4(&Ipv4Addr.new(239, 0, 0, 1), &Ipv4Addr.any())?;
 //
 
-// let mut buf = [0_u8; 1500];
+// let mut buf: [Byte; 1500] = [0; 1500];
 // loop {
-//  let (len, src) = socket.recv_from(&mut buf)?;
+//  let (len, src) = socket.recv_from(&mut buf[..])?;
 //  print(f"Received {len} bytes from {src}");
 // }
 // ```
@@ -345,8 +345,8 @@ implement UdpSocket {
 
     /// # Example
     /// ```verum
-    /// let mut buf = [0_u8; 1500];
-    /// let (len, src) = socket.recv_from(&mut buf)?;
+    /// let mut buf: [Byte; 1500] = [0; 1500];
+    /// let (len, src) = socket.recv_from(&mut buf[..])?;
     /// print(f"Received {len} bytes from {src}");
     /// ```
     public fn recv_from(&self, buf: &mut [Byte]) -> Result<(Int, SocketAddr), IoError> {
