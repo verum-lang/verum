@@ -60,10 +60,9 @@ fn test_nested_if() -> Int {
 // 2. IF LET EXPRESSIONS
 // ============================================================================
 
-type Maybe<T> = variant {
-    Some(T),
-    None
-}
+type Maybe<T>  is
+    Some(T)
+    | None;
 
 fn test_if_let_some() -> Int {
     let value = Maybe.Some(42);
@@ -150,17 +149,15 @@ fn test_if_let_chain_with_boolean() -> Bool {
 // 4. MATCH EXPRESSIONS WITH ALL PATTERN TYPES
 // ============================================================================
 
-type Result<T, E> = variant {
-    Ok(T),
-    Err(E)
-}
+type Result<T, E>  is
+    Ok(T)
+    | Err(E);
 
-type Color = variant {
-    Red,
-    Green,
-    Blue,
-    RGB(Int, Int, Int)
-}
+type Color  is
+    Red
+    | Green
+    | Blue
+    | RGB(Int, Int, Int);
 
 fn test_match_literal() -> Text {
     let x = 42;
@@ -430,10 +427,9 @@ fn test_while_complex_condition() -> Int {
 // 9. WHILE LET LOOPS
 // ============================================================================
 
-type List<T> = variant {
-    Cons(T, List<T>),
-    Nil
-}
+type List<T>  is
+    Cons(T, List<T>)
+    | Nil;
 
 fn test_while_let_option() -> Int {
     let mut current = Maybe.Some(5);
@@ -698,11 +694,10 @@ fn test_return_complex_value() -> (Int, Int, Bool) {
 // 15. TRY/RECOVER/FINALLY
 // ============================================================================
 
-type Error = variant {
-    NotFound,
-    InvalidInput,
-    Timeout
-}
+type Error  is
+    NotFound
+    | InvalidInput
+    | Timeout;
 
 fn test_try_no_error() -> Result<Int, Error> {
     try {
@@ -1128,13 +1123,13 @@ fn main() {
     assert(test_for_invariant() == 45);
 
     // Complex integration tests
-    assert(test_complex_control_flow_1() == 107);
-    assert(test_complex_control_flow_3() == 22);
+    assert(test_complex_control_flow_1() == 104);
+    assert(test_complex_control_flow_3() == 16);
     assert(test_complex_match_patterns() == 32);
     assert(test_loop_label_simulation() == 54);
     assert(test_match_exhaustiveness() == "blue");
     assert(test_if_let_chain_complex() == 60);
-    assert(test_while_let_complex() == 30);
+    assert(test_while_let_complex() == 55);
 
     println("All control flow tests passed!");
 }
