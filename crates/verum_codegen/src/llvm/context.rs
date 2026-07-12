@@ -2246,6 +2246,20 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                                 )
                                 .expect("ptrtoint should not fail");
                             let _ = self.builder.build_store(existing_ptr, v_i64);
+                            // INVARIANT: alloca_register_types must reflect the
+                            // type of the LAST value stored — get_register picks
+                            // the load type from it. When a register previously
+                            // held a float (its slot is `alloca double`) is reused
+                            // for a pointer, we just stored i64 bits; without this
+                            // update the tracked type stays `double`, so the next
+                            // read emits `load double` and reinterprets the pointer
+                            // bits as a float — corrupting e.g. a struct-literal
+                            // base pointer so the field store lands nowhere
+                            // (Duration.from_secs_f64 → nanos 0 at AOT; every other
+                            // store branch already updates the type, only this one
+                            // did not).
+                            self.alloca_register_types
+                                .insert(reg, BasicTypeEnum::IntType(i64_ty));
                         }
                         return;
                     }
