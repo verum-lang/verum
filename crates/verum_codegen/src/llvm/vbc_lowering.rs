@@ -4122,11 +4122,52 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             if f.count_basic_blocks() > 0 {
                 let name = f.get_name().to_string_lossy().to_string();
                 if SKIP_PATTERNS.iter().any(|p| name.contains(p)) {
-                    removed.push(name);
-                    // SAFETY: Deleting an LLVM function that was determined to be dead (unused after linking); module integrity is maintained
-                    unsafe {
-                        f.delete();
+                    removed.push(name.clone());
+                    // AOT-LIST-BASELINE-ICE (#52) root: `f.delete()`
+                    // (LLVMDeleteFunction → User::dropAllReferences)
+                    // while OTHER stdlib bodies still hold call USES of
+                    // `f` is undefined behaviour — a layout-sensitive
+                    // out-of-bounds read confirmed under Guard Malloc.
+                    // It fired for months as the "flaky parallel
+                    // codegen SIGSEGV" (#21 class: never reproduced
+                    // under lldb because the layout shifted).
+                    //
+
+                    // The sound replacement per the loud-failure
+                    // doctrine: KEEP the function (uses stay valid,
+                    // the verifier stays green, the linker resolves)
+                    // and swap its invalid body for a diagnosable
+                    // `verum_panic + unreachable`.
+                    for bb in f.get_basic_blocks() {
+                        // SAFETY: removing every block of a function we
+                        // exclusively rewrite below; iteration is over a
+                        // pre-collected Vec, not the live list.
+                        let _ = unsafe { bb.delete() };
                     }
+                    let entry = self.context.append_basic_block(f, "invalid_body_stub");
+                    let builder = self.context.create_builder();
+                    builder.position_at_end(entry);
+                    let ptr_ty = self.context.ptr_type(AddressSpace::default());
+                    let void_ty = self.context.void_type();
+                    let panic_fn = self.module.get_function("verum_panic").unwrap_or_else(|| {
+                        self.module.add_function(
+                            "verum_panic",
+                            void_ty.fn_type(&[ptr_ty.into()], false),
+                            None,
+                        )
+                    });
+                    if let Ok(msg) = builder.build_global_string_ptr(
+                        &format!(
+                            "stdlib fn `{}` had invalid IR and was stubbed at AOT \
+                             (Entry-API CBGR class) — task #52 / defect-class §23",
+                            name
+                        ),
+                        "invalid_body_msg",
+                    ) {
+                        let _ = builder
+                            .build_call(panic_fn, &[msg.as_pointer_value().into()], "");
+                    }
+                    let _ = builder.build_unreachable();
                 }
             }
             func = next;
