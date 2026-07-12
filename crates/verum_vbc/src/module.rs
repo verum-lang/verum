@@ -589,6 +589,72 @@ impl VbcModule {
     /// `find_function_by_suffix`) and keeps the dispatcher's `prefer_user_compiled`
     /// guard sound regardless of whether stdlib symbols are registered with
     /// short or fully-qualified module paths.
+    /// SAME-NAME-PARENT-TIEBREAK-1 (task #50): resolve a qualified
+    /// method name PREFERRING the candidate whose `parent_type` matches
+    /// the receiver's runtime TypeId. The stdlib carries same-named
+    /// types (115 duplicate public names — e.g. TWO `Rational`s), so
+    /// "Rational.mul" is ambiguous by NAME: the plain resolver's
+    /// body-over-stub + lowest-id rule picked the OTHER Rational's
+    /// body (raw Int-field Mul over BigInt pointers). The receiver's
+    /// header TypeId is the ground truth the name cannot express.
+    /// Falls back to the canonical name-only rule when no candidate
+    /// matches the receiver (or no receiver id is available).
+    pub fn find_function_by_name_for_receiver(
+        &self,
+        name: &str,
+        receiver_tid: Option<crate::types::TypeId>,
+    ) -> Option<FunctionId> {
+        if let Some(tid) = receiver_tid {
+            if std::env::var("VERUM_TRACE_TIEBREAK").is_ok() {
+                for (idx, d) in self.functions.iter().enumerate() {
+                    if self.get_string(d.name) == Some(name) {
+                        eprintln!(
+                            "[tiebreak] '{}' cand idx={} parent={:?} bodied={} (recv_tid={})",
+                            name, idx, d.parent_type,
+                            d.bytecode_length > 0
+                                || d.instructions.as_ref().map(|i| !i.is_empty()).unwrap_or(false),
+                            tid.0,
+                        );
+                    }
+                }
+            }
+            let has_body = |desc: &crate::module::FunctionDescriptor| -> bool {
+                desc.bytecode_length > 0
+                    || desc
+                        .instructions
+                        .as_ref()
+                        .map(|i| !i.is_empty())
+                        .unwrap_or(false)
+            };
+            let mut best: Option<(bool, u32)> = None;
+            for (idx, desc) in self.functions.iter().enumerate() {
+                if desc.parent_type != Some(tid) {
+                    continue;
+                }
+                if let Some(fname) = self.get_string(desc.name)
+                    && fname == name
+                {
+                    let bodied = has_body(desc);
+                    let better = match best {
+                        None => true,
+                        Some((b_bodied, b_idx)) => {
+                            (bodied && !b_bodied) || (bodied == b_bodied && (idx as u32) < b_idx)
+                        }
+                    };
+                    if better {
+                        best = Some((bodied, idx as u32));
+                    }
+                }
+            }
+            if let Some((bodied, idx)) = best {
+                if bodied {
+                    return Some(FunctionId(idx));
+                }
+            }
+        }
+        self.find_function_by_name(name)
+    }
+
     pub fn find_function_by_name(&self, name: &str) -> Option<FunctionId> {
         // ARCH-P2 step 0b (dispatch tie-break determinism): among
         // SAME-NAMED entries the winner used to be "lowest id" — an

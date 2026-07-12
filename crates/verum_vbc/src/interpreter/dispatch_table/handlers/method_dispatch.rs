@@ -2141,6 +2141,41 @@ pub(in super::super) fn handle_call_method(
         // correctness-preserving fast-path: when the coincidence
         // happens to land on the right receiver-type, take it; otherwise
         // fall through to the receiver-aware lookup below.
+        // SAME-NAME-PARENT-TIEBREAK-1 (task #50): a QUALIFIED call on a
+        // heap receiver resolves through the receiver's runtime TypeId
+        // FIRST. The stdlib carries same-named types (two `Rational`s),
+        // so "Rational.mul" is ambiguous by name — the name-only rule
+        // (body-over-stub, lowest id) picked the OTHER Rational's body
+        // (raw Int-field Mul over BigInt pointers → the #50 corruption).
+        if is_already_qualified
+            && dispatch_receiver.is_regular_ptr()
+            && !dispatch_receiver.is_nil()
+        {
+            let ptr = dispatch_receiver.as_ptr::<u8>();
+            if !ptr.is_null()
+                && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                // SAFETY: alignment verified; heap objects begin with a header.
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                if let Some(fid) = state
+                    .module
+                    .find_function_by_name_for_receiver(&method_name, Some(header.type_id))
+                {
+                    // Only a parent-MATCHED body short-circuits; the
+                    // fallback inside the helper equals the legacy
+                    // name-only rule, which the strategies below
+                    // already apply — avoid double-committing it here.
+                    if state
+                        .module
+                        .get_function(fid)
+                        .and_then(|f| f.parent_type)
+                        == Some(header.type_id)
+                    {
+                        found_func_id = Some(fid);
+                    }
+                }
+            }
+        }
         let func_id = FunctionId(method_id);
         if let Some(func) = state.module.get_function(func_id) {
             // Verify the function name actually ends with the expected method suffix
@@ -2257,11 +2292,46 @@ pub(in super::super) fn handle_call_method(
             // (e.g., receiver is FlexItem → prefer "FlexItem.min" over any
             // other "*.min"). Only runs when we recovered a type name.
             if let Some(ref ty_name) = receiver_type {
+                // SAME-NAME-PARENT-TIEBREAK-1 (task #50), bare-call leg:
+                // the name-scan below is FIRST-MATCH over same-named
+                // bodies (two `Rational`s → `a.mul(&one)` landed on the
+                // raw-Int-field body). Resolve through the receiver's
+                // runtime TypeId first — the header is the authority
+                // the name cannot express.
+                if classify_target.is_regular_ptr() && !classify_target.is_nil() {
+                    let rptr = classify_target.as_ptr::<u8>();
+                    if !rptr.is_null()
+                        && (rptr as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        // SAFETY: alignment verified; heap objects
+                        // begin with an ObjectHeader.
+                        let rheader = unsafe { heap::ObjectHeader::ref_or_stub(rptr) };
+                        let bare_q = format!("{}.{}", ty_name, method_name);
+                        if let Some(fid) = state
+                            .module
+                            .find_function_by_name_for_receiver(
+                                &bare_q,
+                                Some(rheader.type_id),
+                            )
+                        {
+                            if state
+                                .module
+                                .get_function(fid)
+                                .and_then(|f| f.parent_type)
+                                == Some(rheader.type_id)
+                            {
+                                found_func_id = Some(fid);
+                            }
+                        }
+                    }
+                }
                 // Support both qualified registrations (e.g.,
                 // "core.term.layout.FlexItem.min") and bare ones
                 // ("FlexItem.min") — the prefix must end with the type name.
                 let dotted = format!(".{}.{}", ty_name, method_name);
                 let bare = format!("{}.{}", ty_name, method_name);
+                if found_func_id.is_none() {
                 for func in &state.module.functions {
                     let func_name = state.module.strings.get(func.name).unwrap_or("");
                     let type_match = func_name == bare || func_name.ends_with(&dotted);
@@ -2271,6 +2341,7 @@ pub(in super::super) fn handle_call_method(
                         found_func_id = Some(func.id);
                         break;
                     }
+                }
                 }
                 // FATREF-DISPATCH-ROUTE-1 (#51): a slice receiver whose
                 // method has no `Slice.<m>` body must NOT fall to the

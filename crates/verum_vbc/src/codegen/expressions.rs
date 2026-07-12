@@ -11518,6 +11518,15 @@ impl VbcCodegen {
             || effective_method_name.starts_with("uint64$")
             || !effective_method_name.contains('.')
             || type_prefix_intercepted_by_runtime(&effective_method_name)
+            // SAME-NAME-PARENT-TIEBREAK-1 (task #50): devirt is legal
+            // ONLY when the name resolves to a single real body — for
+            // duplicate-named stdlib types (two `Rational.mul`s) a
+            // static pick guesses; CallM's runtime resolver tiebreaks
+            // by the receiver's header TypeId.
+            || self
+                .ctx
+                .ambiguous_function_names
+                .contains(effective_method_name.as_str())
         {
             None
         } else {

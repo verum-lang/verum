@@ -155,6 +155,14 @@ pub struct CodegenContext {
 
     /// Function registry for lookups.
     pub functions: HashMap<String, FunctionInfo>,
+    /// SAME-NAME-PARENT-TIEBREAK-1 (task #50): qualified names that
+    /// resolved to MORE THAN ONE distinct real body during
+    /// registration (the stdlib carries same-named types — two
+    /// `Rational`s → two bodied `Rational.mul`s). Devirtualization is
+    /// FORBIDDEN for these: a compile-time pick has no receiver
+    /// TypeId, so it guesses; the CallM runtime resolver tiebreaks by
+    /// the receiver's header TypeId instead.
+    pub ambiguous_function_names: std::collections::HashSet<String>,
 
     /// **Scope-aware function index** (#17/#39 foundation, additive).
     ///
@@ -1367,6 +1375,7 @@ impl CodegenContext {
             bytes: Vec::new(),
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
+            ambiguous_function_names: std::collections::HashSet::new(),
             scoped_functions: HashMap::new(),
             unit_declared_fns: std::collections::HashSet::new(),
             canonical_index: HashMap::new(),
@@ -2500,6 +2509,23 @@ impl CodegenContext {
             // `name#arity`, which the arity-aware lookup probes first
             // anyway. The richer/real-over-stub promotions below stay
             // (they only fire on equal-arity or stub shapes).
+            // SAME-NAME-PARENT-TIEBREAK-1: two DISTINCT real bodies
+            // claiming one name (same arity — a genuine same-signature
+            // duplicate, not an overload) poison compile-time
+            // devirtualization for that name.
+            if !new_is_stub_shape
+                && !existing_is_stub_shape
+                && info.id != existing.id
+                && info.param_count == existing.param_count
+            {
+                if std::env::var("VERUM_TRACE_TIEBREAK").is_ok() {
+                    eprintln!(
+                        "[ambig-mark] '{}' ids {}/{} arity {}",
+                        name, existing.id.0, info.id.0, info.param_count
+                    );
+                }
+                self.ambiguous_function_names.insert(name.clone());
+            }
             if !new_is_stub_shape
                 && !existing_is_stub_shape
                 && info.param_count != existing.param_count
@@ -2620,6 +2646,37 @@ impl CodegenContext {
                     }
                 })
                 .or_insert_with(|| name.clone());
+        }
+        if std::env::var("VERUM_TRACE_TIEBREAK").is_ok() && name.ends_with("Rational.mul") {
+            eprintln!(
+                "[reg-tail] '{}' id={} prefer_existing={} (fresh-name path)",
+                name, info.id.0, self.prefer_existing_functions
+            );
+        }
+        // SAME-NAME-PARENT-TIEBREAK-1 (task #50), bare-suffix leg: two
+        // module-qualified registrations with DIFFERENT full names can
+        // still collide on the `Type.method` suffix (core.math.Rational
+        // vs core.text.numeric.Rational). Only the FIRST gets the bare
+        // mirror, so the direct-collision detector above never sees the
+        // second — detect the suffix collision here and poison
+        // devirtualization for the bare spelling.
+        if name.contains('.') {
+            let mut it = name.rsplitn(3, '.');
+            if let (Some(m), Some(t)) = (it.next(), it.next()) {
+                let bare2 = format!("{}.{}", t, m);
+                if bare2 != name
+                    && let Some(prev) = self.functions.get(&bare2)
+                    && prev.id != info.id
+                {
+                    if std::env::var("VERUM_TRACE_TIEBREAK").is_ok() {
+                        eprintln!(
+                            "[ambig-mark] '{}' via suffix of '{}' (ids {}/{})",
+                            bare2, name, prev.id.0, info.id.0
+                        );
+                    }
+                    self.ambiguous_function_names.insert(bare2);
+                }
+            }
         }
         if self.prefer_existing_functions {
             self.functions.entry(name).or_insert(info);
