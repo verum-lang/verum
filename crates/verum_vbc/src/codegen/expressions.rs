@@ -2431,6 +2431,90 @@ impl VbcCodegen {
                         .insert(format!("__r{}", dest.0), type_name.clone());
                     return Ok(Some(dest));
                 }
+
+                // ORD-OPERATOR-VIA-CMP-1 (#44): no dedicated `<Ty>.lt`
+                // operator method — route ordering through the type's
+                // Ord impl, the canonical semantics the typechecker
+                // validated: `a < b` ≡ `a.cmp(&b) == Less`. Pre-fix the
+                // fall-through emitted a RAW CmpI on two heap variants
+                // — a POINTER comparison whose result is allocation-
+                // order dice (`Maybe.None < Maybe.Some(42)` flapped
+                // per process; the whole "erased-T Ord band" in
+                // base/maybe + base/result was this). The Ordering
+                // needle's tag comes from the descriptor authority
+                // (find_variant_by_type_and_name), never a hardcoded
+                // layout.
+                if matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge) {
+                    // Function keys are generic-stripped ("Maybe.cmp",
+                    // never "Maybe<Int>.cmp").
+                    let base_ty = VbcCodegen::strip_generic_args(&type_name);
+                    let qualified_cmp = format!("{}.cmp", base_ty);
+                    if self.ctx.lookup_function(&qualified_cmp).is_some() {
+                        let (needle, negate) = match op {
+                            BinOp::Lt => ("Less", false),
+                            BinOp::Le => ("Greater", true),
+                            BinOp::Gt => ("Greater", false),
+                            _ => ("Less", true),
+                        };
+                        if let Some(tag) = self
+                            .ctx
+                            .find_variant_by_type_and_name("Ordering", needle)
+                        {
+                            let arg_ref = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::Ref {
+                                dst: arg_ref,
+                                src: right_reg,
+                            });
+                            let ord_res = self.ctx.alloc_temp();
+                            let method_id = self.intern_string(&qualified_cmp);
+                            self.ctx.emit(Instruction::CallM {
+                                dst: ord_res,
+                                receiver: left_reg,
+                                method_id,
+                                args: crate::instruction::RegRange {
+                                    start: arg_ref,
+                                    count: 1,
+                                },
+                            });
+                            let needle_reg = self.ctx.alloc_temp();
+                            self.emit_make_variant(
+                                needle_reg,
+                                tag,
+                                0,
+                                Some("Ordering"),
+                            );
+                            if negate {
+                                let tmp = self.ctx.alloc_temp();
+                                self.ctx.emit(Instruction::CmpG {
+                                    eq: true,
+                                    dst: tmp,
+                                    a: ord_res,
+                                    b: needle_reg,
+                                    protocol_id: 0,
+                                });
+                                self.ctx.emit(Instruction::Not {
+                                    dst: dest,
+                                    src: tmp,
+                                });
+                                self.ctx.free_temp(tmp);
+                            } else {
+                                self.ctx.emit(Instruction::CmpG {
+                                    eq: true,
+                                    dst: dest,
+                                    a: ord_res,
+                                    b: needle_reg,
+                                    protocol_id: 0,
+                                });
+                            }
+                            self.ctx.free_temp(arg_ref);
+                            self.ctx.free_temp(ord_res);
+                            self.ctx.free_temp(needle_reg);
+                            self.ctx.free_temp(left_reg);
+                            self.ctx.free_temp(right_reg);
+                            return Ok(Some(dest));
+                        }
+                    }
+                }
             }
         }
 
@@ -10014,7 +10098,22 @@ impl VbcCodegen {
                 .map(str::to_string);
             let is_slice = receiver_type
                 .as_deref()
-                .map(|t| t.starts_with('['))
+                .map(|t| {
+                    // Reference transparency (#48 phase-1.6): the carried
+                    // type is frequently the REFERENCE spelling ("&[Byte]"
+                    // from Text.as_bytes' RETNAME, "&mut [T]" from
+                    // as_mut_slice) — strip it exactly like the descriptor
+                    // parser does. Pre-fix `bs.slice(1,3)` fell through to
+                    // CallM, suffix-matched Text.slice and returned a TEXT
+                    // (observed: sub == "bc", then iteration crashed).
+                    let t = t.trim();
+                    let t = t
+                        .strip_prefix("&mut ")
+                        .or_else(|| t.strip_prefix('&'))
+                        .unwrap_or(t)
+                        .trim_start();
+                    t.starts_with('[')
+                })
                 .unwrap_or(false);
             if is_slice {
                 let start_reg = self
