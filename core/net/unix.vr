@@ -653,7 +653,7 @@ implement UnixListener {
 
         match r {
             Result.Ok(client_fd) => {
-                let peer = deserialize_unix_path(&addr_buf[..addr_len as Int]);
+                let peer = deserialize_unix_path(&addr_buf[..(addr_len as Int)]);
                 Result.Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer))
             }
             Result.Err(e) => Result.Err(UnixError.from_os_error(e)),
@@ -677,7 +677,7 @@ implement UnixListener {
                     @cfg(target_os = "macos")
                     let _ = safe_set_nonblocking(client_fd, true);
 
-                    let peer = deserialize_unix_path(&addr_buf[..addr_len as Int]);
+                    let peer = deserialize_unix_path(&addr_buf[..(addr_len as Int)]);
                     return Result.Ok((UnixStream { fd: client_fd, peer_path: peer.clone() }, peer));
                 }
                 Result.Err(e) if e.would_block() => {
@@ -748,7 +748,7 @@ implement<'a> Stream for UnixIncoming<'a> {
             Result.Ok(client_fd) => {
                 @cfg(target_os = "macos")
                 let _ = safe_set_nonblocking(client_fd, true);
-                let peer = deserialize_unix_path(&addr_buf[..addr_len as Int]);
+                let peer = deserialize_unix_path(&addr_buf[..(addr_len as Int)]);
                 Poll.Ready(Maybe.Some(Result.Ok(UnixStream { fd: client_fd, peer_path: peer })))
             }
             Result.Err(e) if e.would_block() => {

@@ -361,7 +361,7 @@ implement UdpSocket {
         let n = sys_recvfrom(self.fd, buf, 0, &mut addr_buf[..], &mut addr_len)
             .map_err(|e| IoError.from_os(e))?;
 
-        let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
+        let src_addr = deserialize_socket_addr(&addr_buf[..(addr_len as Int)])?;
         Result.Ok((n, src_addr))
     }
 
@@ -522,7 +522,7 @@ implement UdpSocket {
         let n = sys_recvfrom(self.fd, buf, MSG_PEEK, &mut addr_buf[..], &mut addr_len)
             .map_err(|e| IoError.from_os(e))?;
 
-        let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
+        let src_addr = deserialize_socket_addr(&addr_buf[..(addr_len as Int)])?;
         Result.Ok((n, src_addr))
     }
 
@@ -547,7 +547,7 @@ implement UdpSocket {
                 .map_err(|e| IoError.from_os(e))?;
         }
 
-        deserialize_socket_addr(&addr_buf[..addr_len as Int])
+        deserialize_socket_addr(&addr_buf[..(addr_len as Int)])
     }
 
     /// Get the peer address this socket is connected to.
@@ -905,7 +905,7 @@ implement UdpSocket {
 
             match result {
                 Result.Ok(n) => {
-                    let src_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
+                    let src_addr = deserialize_socket_addr(&addr_buf[..(addr_len as Int)])?;
                     return Result.Ok((n, src_addr));
                 }
                 Result.Err(e) if e.code == EAGAIN => {

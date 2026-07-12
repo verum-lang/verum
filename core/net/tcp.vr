@@ -654,7 +654,7 @@ implement TcpStream {
                 .map_err(|e| IoError.from_os(e))?;
         }
 
-        deserialize_socket_addr(&addr_buf[..addr_len as Int])
+        deserialize_socket_addr(&addr_buf[..(addr_len as Int)])
     }
 
     /// Shutdown the read, write, or both halves of this stream.
@@ -1259,7 +1259,7 @@ implement TcpListener {
         @cfg(target_os = "macos")
         let _ = safe_set_nosigpipe(client_fd, true);
 
-        let peer_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
+        let peer_addr = deserialize_socket_addr(&addr_buf[..(addr_len as Int)])?;
 
         Result.Ok((
             TcpStream { fd: client_fd, peer_addr: peer_addr },
@@ -1300,7 +1300,7 @@ implement TcpListener {
                     @cfg(target_os = "macos")
                     let _ = safe_set_nosigpipe(client_fd, true);
 
-                    let peer_addr = deserialize_socket_addr(&addr_buf[..addr_len as Int])?;
+                    let peer_addr = deserialize_socket_addr(&addr_buf[..(addr_len as Int)])?;
                     return Result.Ok((
                         TcpStream { fd: client_fd, peer_addr: peer_addr },
                         peer_addr
@@ -1429,7 +1429,7 @@ implement<'a> Stream for AsyncIncoming<'a> {
                 @cfg(target_os = "macos")
                 let _ = safe_set_nosigpipe(client_fd, true);
 
-                match deserialize_socket_addr(&addr_buf[..addr_len as Int]) {
+                match deserialize_socket_addr(&addr_buf[..(addr_len as Int)]) {
                     Result.Ok(peer) => Poll.Ready(Maybe.Some(Result.Ok(TcpStream { fd: client_fd, peer_addr: peer }))),
                     Result.Err(e) => Poll.Ready(Maybe.Some(Result.Err(e))),
                 }
