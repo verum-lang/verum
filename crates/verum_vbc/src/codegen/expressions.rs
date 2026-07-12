@@ -9301,6 +9301,27 @@ impl VbcCodegen {
             // when no alias replacement was needed.
             if let Some(first) = parts.first().cloned() {
                 let resolved = self.resolve_type_alias(&first);
+                // [diag] VERUM_TRACE_STATIC_ALIAS=<substr> — which fork
+                // the alias-static branch takes for a watched receiver
+                // (B1 layer-2 triage: IoError.from_os compiled as
+                // instance CallM despite arity-1 static candidates).
+                if let Ok(filter) = std::env::var("VERUM_TRACE_STATIC_ALIAS")
+                    && !filter.is_empty()
+                    && first.contains(&filter)
+                {
+                    eprintln!(
+                        "[static-alias] first='{}' resolved='{}' method='{}' args={} in {} — alias_hit={} q_lookup={:?}",
+                        first,
+                        resolved,
+                        method.name,
+                        args.len(),
+                        self.ctx.current_function.as_deref().unwrap_or("<top>"),
+                        resolved != first,
+                        self.ctx
+                            .lookup_qualified_function(&format!("{}.{}", resolved, method.name))
+                            .map(|f| (f.id.0, f.param_count)),
+                    );
+                }
                 if resolved != first {
                     let mut aliased = parts.clone();
                     aliased[0] = resolved;
