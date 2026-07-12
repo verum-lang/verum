@@ -13033,7 +13033,7 @@ fn lower_call_method<'ctx>(
         // Parse "dyn:Shape.area" → protocol_name="Shape", method="area"
         let dyn_rest = &method_name_str[4..]; // skip "dyn:"
         if let Some(dot_pos) = dyn_rest.rfind('.') {
-            let _protocol_name = &dyn_rest[..dot_pos];
+            let protocol_name = &dyn_rest[..dot_pos];
             let method_name = &dyn_rest[dot_pos + 1..];
 
             if let Some(vbc) = ctx.vbc_module() {
@@ -13082,27 +13082,27 @@ fn lower_call_method<'ctx>(
                                 let name_matches = {
                                     let tn = vbc.get_string(type_desc.name).unwrap_or("");
                                     let tn_short = tn.rsplit('.').next().unwrap_or(tn);
-                                    let expect = fname.len() >= method_suffix.len()
-                                        && fname.ends_with(&method_suffix);
-                                    expect && {
+                                    let pn_short =
+                                        protocol_name.rsplit('.').next().unwrap_or(protocol_name);
+                                    fname.ends_with(&method_suffix) && {
                                         let prefix = &fname[..fname.len() - method_suffix.len()];
                                         let prefix_short =
                                             prefix.rsplit('.').next().unwrap_or(prefix);
-                                        !tn.is_empty()
-                                            && (prefix == tn || prefix_short == tn_short)
+                                        // Accept when the function belongs to THIS
+                                        // type (concrete impl) OR is the protocol's
+                                        // own default method (`Protocol.method`) —
+                                        // reject only a foreign type's method that a
+                                        // mis-remapped fn_id smuggled in.
+                                        (!tn.is_empty()
+                                            && (prefix == tn || prefix_short == tn_short))
+                                            || (!protocol_name.is_empty()
+                                                && (prefix == protocol_name
+                                                    || prefix_short == pn_short))
                                     }
                                 };
                                 if fname.ends_with(&method_suffix) && name_matches {
                                     if let Some(llvm_fn) = ctx.get_module().get_function(fname) {
                                         if seen_dyn_tids.insert(type_desc.id.0) {
-                                            if type_desc.id.0 == 1300
-                                                && std::env::var_os("VERUM_TRACE_TYPEID").is_some()
-                                            {
-                                                eprintln!(
-                                                    "[dyn-1300] method='{}' PROTO -> {}",
-                                                    method_name, fname
-                                                );
-                                            }
                                             dispatch_entries
                                                 .push((type_desc.id.0, fname.to_string()));
                                             via_protocols += 1;
@@ -13136,14 +13136,6 @@ fn lower_call_method<'ctx>(
                                 let cand = format!("{}{}", base, method_suffix);
                                 if ctx.get_module().get_function(&cand).is_some() {
                                     if seen_dyn_tids.insert(type_desc.id.0) {
-                                        if type_desc.id.0 == 1300
-                                            && std::env::var_os("VERUM_TRACE_TYPEID").is_some()
-                                        {
-                                            eprintln!(
-                                                "[dyn-1300] method='{}' PROBE -> {}",
-                                                method_name, cand
-                                            );
-                                        }
                                         dispatch_entries.push((type_desc.id.0, cand));
                                         via_name_probe += 1;
                                     }
