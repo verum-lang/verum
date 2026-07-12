@@ -1009,6 +1009,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         &self,
         builder: &Builder<'ctx>,
         iter_ptr: PointerValue<'ctx>,
+        heap_floor: u64,
     ) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
@@ -1064,7 +1065,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_int_compare(
                 verum_llvm::IntPredicate::UGE,
                 word0,
-                i64_type.const_int(0x1_0000_0000, false),
+                i64_type.const_int(heap_floor, false),
                 "iter_cell_above",
             )
             .or_llvm_err()?;
@@ -1238,6 +1239,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         &self,
         builder: &Builder<'ctx>,
         iter_ptr: PointerValue<'ctx>,
+        heap_floor: u64,
     ) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
         let i8_type = self.context.i8_type();
         let i64_type = self.context.i64_type();
@@ -1297,7 +1299,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_int_compare(
                 verum_llvm::IntPredicate::UGE,
                 word0,
-                i64_type.const_int(0x1_0000_0000, false),
+                i64_type.const_int(heap_floor, false),
                 "slice_cell_above",
             )
             .or_llvm_err()?;

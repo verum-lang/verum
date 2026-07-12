@@ -206,6 +206,21 @@ pub fn triple_str_os_family(triple: &str) -> &'static str {
     }
 }
 
+/// Runtime heap floor for pointer-plausibility gates, by TARGET triple
+/// (never host cfg — HOST gates miscompile cross builds). Darwin user
+/// heaps live above 4 GiB, so small-magnitude 8-aligned scalars
+/// (1e9 = 0x3B9ACA00) must fail the gate there; elsewhere keep the
+/// conservative page floor. ONE authority for every word0/probe site
+/// (#48 canonical slice cell, dyn-dispatch guards, by-name header
+/// loads).
+pub fn heap_floor(module: &Module<'_>) -> u64 {
+    if target_is_darwin(module) {
+        0x1_0000_0000
+    } else {
+        0x1_0000
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Smoke tests live alongside the module that owns the LLVM

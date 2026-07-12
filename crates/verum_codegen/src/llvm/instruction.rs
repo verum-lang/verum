@@ -13136,11 +13136,7 @@ fn lower_call_method<'ctx>(
                     let dyn_guard_default_bb =
                         dyn_cx0.append_basic_block(dyn_fn0, "dyn_guard_default");
                     let dyn_floor_val: u64 =
-                        if super::target_triple::target_is_darwin(&ctx.get_module()) {
-                            0x1_0000_0000
-                        } else {
-                            0x1_0000
-                        };
+                        super::target_triple::heap_floor(&ctx.get_module());
                     let dyn_floor = i64_type.const_int(dyn_floor_val, false);
                     let dyn_above = ctx
                         .builder()
@@ -21689,11 +21685,7 @@ fn lower_cbgr_extended<'ctx>(
             // Pointer-plausibility gate (RTS precedent): implausible →
             // legacy identity, never a header read.
             let heap_floor_val: u64 =
-                if super::target_triple::target_is_darwin(&ctx.get_module()) {
-                    0x1_0000_0000
-                } else {
-                    0x1_0000
-                };
+                super::target_triple::heap_floor(&ctx.get_module());
             let above = ctx
                 .builder()
                 .build_int_compare(
@@ -24777,11 +24769,7 @@ fn lower_field_named_dynamic<'ctx>(
     let panic_bb = llvm_cx.append_basic_block(current_fn, "byname_miss");
     let merge_bb = llvm_cx.append_basic_block(current_fn, "byname_merge");
 
-    let heap_floor_val: u64 = if super::target_triple::target_is_darwin(&ctx.get_module()) {
-        0x1_0000_0000
-    } else {
-        0x1_0000
-    };
+    let heap_floor_val: u64 = super::target_triple::heap_floor(&ctx.get_module());
     let heap_floor = i64_type.const_int(heap_floor_val, false);
     let above_floor = ctx
         .builder()
@@ -29397,11 +29385,7 @@ fn build_runtime_type_switch<'ctx>(
     // user heaps live above 4 GiB, so small-magnitude scalars
     // (1e9 = 0x3B9ACA00, 8-aligned!) must fail the gate there;
     // elsewhere keep the conservative page floor.
-    let heap_floor_val: u64 = if super::target_triple::target_is_darwin(&ctx.get_module()) {
-        0x1_0000_0000
-    } else {
-        0x1_0000
-    };
+    let heap_floor_val: u64 = super::target_triple::heap_floor(&ctx.get_module());
     let heap_floor = i64_type.const_int(heap_floor_val, false);
     let above_floor = ctx
         .builder()
@@ -31236,11 +31220,7 @@ fn emit_slice_cell_probe<'ctx>(
         .build_load(i64_ty, base_ptr, &format!("{}_w0", tag))
         .or_llvm_err()?
         .into_int_value();
-    let heap_floor_val: u64 = if super::target_triple::target_is_darwin(&ctx.get_module()) {
-        0x1_0000_0000
-    } else {
-        0x1_0000
-    };
+    let heap_floor_val: u64 = super::target_triple::heap_floor(&ctx.get_module());
     let above = ctx
         .builder()
         .build_int_compare(
@@ -36497,7 +36477,11 @@ fn lower_iter_next<'ctx>(
         ctx.set_register(dst.0, value.into());
         ctx.set_register(has_next.0, tag.into()); // tag: 1=Some (has more), 0=None (done)
     } else if ctx.is_slice_register(iter.0) {
-        let (value, has_more) = runtime.lower_iter_next_slice(ctx.builder(), iter_ptr)?;
+        let (value, has_more) = runtime.lower_iter_next_slice(
+            ctx.builder(),
+            iter_ptr,
+            super::target_triple::heap_floor(&ctx.get_module()),
+        )?;
         ctx.set_register(dst.0, value.into());
         ctx.set_register(has_next.0, has_more.into());
         // #48 ITER-SLICE-DEREF-1: slice iteration binds `x: &T`, and the
@@ -36685,7 +36669,11 @@ fn lower_iter_next<'ctx>(
             ctx.set_register(has_next.0, tag.into());
         }
     } else {
-        let (value, has_more) = runtime.lower_iter_next_list(ctx.builder(), iter_ptr)?;
+        let (value, has_more) = runtime.lower_iter_next_list(
+            ctx.builder(),
+            iter_ptr,
+            super::target_triple::heap_floor(&ctx.get_module()),
+        )?;
         ctx.set_register(dst.0, value.into());
         ctx.set_register(has_next.0, has_more.into());
     }
