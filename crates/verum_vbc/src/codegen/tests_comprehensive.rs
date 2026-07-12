@@ -2744,3 +2744,30 @@ mod cross_module_path_tests {
         assert_eq!(func.param_names, vec!["x", "y", "z"]);
     }
 }
+
+/// ALIAS-INTRA-MODULE-ORDER-1 / Phase 2.9: `type IoError is
+/// StreamError;` parses as TypeDeclBody::Alias (probe-verified) and
+/// the standalone detector must extract the target so the bootstrap's
+/// global alias pre-registration sees it — the bake-order hole that
+/// left net's `IoError.from_os(e)` dispatching as an instance CallM.
+#[test]
+fn detect_variant_form_alias_handles_alias_body() {
+    let src = r#"
+module io;
+public mount .protocols.StreamError;
+public type IoError is StreamError;
+"#;
+    let lexer = verum_lexer::Lexer::new(src, verum_ast::FileId::new(0));
+    let parser = verum_fast_parser::VerumParser::new();
+    let module = parser
+        .parse_module(lexer, verum_ast::FileId::new(0))
+        .expect("parse");
+    let scope = verum_ast::decl::locally_visible_type_names(module.items.as_slice());
+    let mut found = None;
+    for item in module.items.iter() {
+        if let verum_ast::ItemKind::Type(td) = &item.kind {
+            found = crate::codegen::VbcCodegen::detect_variant_form_alias(td, &scope);
+        }
+    }
+    assert_eq!(found.as_deref(), Some("StreamError"));
+}

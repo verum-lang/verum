@@ -1203,6 +1203,23 @@ impl VbcCodegen {
         scope: &std::collections::HashSet<String>,
     ) -> Option<String> {
         use verum_ast::decl::TypeDeclBody;
+        // Explicit Alias body (`type IoError is StreamError;` — the
+        // parser emits Alias for a known-type-shaped bare RHS; probe
+        // bakeAK/alias_probe.rs). Unambiguous — no marker ambiguity,
+        // no scope gate: extract the base name (generics stripped by
+        // the extractor's contract).
+        if let TypeDeclBody::Alias(target_ty) = &type_decl.body {
+            if let verum_ast::ty::TypeKind::Path(path) = &target_ty.kind
+                && let Some(seg) = path.segments.last()
+                && let verum_ast::ty::PathSegment::Name(id) = seg
+            {
+                let target = id.name.to_string();
+                if target != type_decl.name.name.as_str() {
+                    return Some(target);
+                }
+            }
+            return None;
+        }
         let TypeDeclBody::Variant(variants) = &type_decl.body else {
             return None;
         };
