@@ -3207,6 +3207,12 @@ impl VbcCodegen {
                     .compile_expr(base)?
                     .or_internal("field base has no value")?;
 
+                // FIELD-DEREF-CHASE-1: writes share the read-side Deref
+                // chase — `guard.permits = …` peels MutexGuard →
+                // SemaphoreInner before the field index resolves.
+                let (base_reg, base_type) =
+                    self.chase_deref_for_field(base_reg, base_type, &field.name);
+
                 // REFINE-FIELD-DYNAMIC-BYPASS-1: refined fields get a
                 // runtime Assert on the incoming value before the write
                 // (T1-F parity for fields; fail-open on key miss).
@@ -3570,6 +3576,11 @@ impl VbcCodegen {
                 let obj_reg = self
                     .compile_expr(obj)?
                     .or_internal("field access object has no value")?;
+
+                // FIELD-DEREF-CHASE-1: compound assignment reads AND
+                // writes through the same peeled receiver.
+                let (obj_reg, obj_type) =
+                    self.chase_deref_for_field(obj_reg, obj_type, &field.name);
 
                 // Get current field value
                 let field_name = &field.name;
@@ -17794,6 +17805,137 @@ impl VbcCodegen {
     /// - Variant constructor access: `TypeName.Variant`
     ///  If the base is a Path that looks like a type name (starts with uppercase)
     ///  and the field is also uppercase (variant name), treat as a variant constructor.
+
+    /// FIELD-DEREF-CHASE-1 — the ONE Deref-chase authority for field
+    /// access. Extracted verbatim from the task #15 READ-side fix so
+    /// field WRITES share it: pre-extraction `guard.permits = …`
+    /// (simple and compound assignment) resolved the field against the
+    /// WRAPPER type — positional reads returned the guard's own field
+    /// (a `&Mutex` pointer compared/decremented as an Int: the old
+    /// "AtomicInt.swap on Int" symptom), and the by-name write path
+    /// (FIELD-ACCESS-BYNAME-1) surfaced the same hole loudly as
+    /// "SetFieldNamed: type 'MutexGuard' has no field named 'permits'"
+    /// (async/semaphore try_acquire, task #41).
+    ///
+    /// Walks `.deref` impls (descriptor-authoritative "has field"
+    /// check, generic-param substitution on the Deref target, ≤4 hops)
+    /// and returns the peeled (register, static-type) pair against
+    /// which the field index resolves exactly.
+    fn chase_deref_for_field(
+        &mut self,
+        base_reg: Reg,
+        base_type: Option<String>,
+        field: &str,
+    ) -> (Reg, Option<String>) {
+        // **Deref-aware field access** (task #15 fix).
+        //
+        // When `base_type` is a Deref-implementing wrapper whose
+        // target type carries the named field but the wrapper itself
+        // does not (canonical case: `MutexGuard<T>` carries
+        // `mutex: &Mutex<T>`, but user code writes `guard.permits`
+        // expecting Deref → T → permits), emit a `CallM { method:
+        // "deref" }` chain to peel through wrappers before the
+        // terminal GetF.  Mirrors the same discipline that
+        // `compile_method_call`'s Heap<T>/Shared<T> Deref handling
+        // applies — Deref impls are first-class, so codegen must
+        // honour them at every receiver-shape site.
+        //
+        // The receiver-type's TypeDescriptor is the source of truth
+        // for "does this type carry that field directly?" — only when
+        // the descriptor's field-list lacks the named field do we
+        // chase the Deref chain.  Cap recursion at 4 hops (matches
+        // Rust's deref-coercion depth) so a maliciously nested Deref
+        // graph can't cause unbounded codegen recursion.
+        let mut current_reg = base_reg;
+        let mut current_base_type = base_type.clone();
+        let mut deref_hops = 0;
+        while deref_hops < 4 {
+            let Some(ref tn) = current_base_type else { break };
+            let stripped: &str = match tn.find('<') {
+                Some(i) => &tn[..i],
+                None => tn.as_str(),
+            };
+            // Does the type's descriptor have the named field directly?
+            let has_field = self.type_name_to_id.get(stripped).is_some_and(|&tid| {
+                self.types.iter().any(|t| {
+                    t.id == tid
+                        && t.fields.iter().any(|fd| {
+                            self.ctx
+                                .strings
+                                .get(fd.name.0 as usize)
+                                .is_some_and(|n| n == field)
+                        })
+                })
+            }) || self
+                .type_field_layouts
+                .get(stripped)
+                .is_some_and(|fields| fields.iter().any(|f| f == field));
+            if has_field {
+                break;
+            }
+            // No direct field; does the type implement Deref?
+            let deref_qualified = format!("{}.deref", stripped);
+            let Some(deref_info) = self.ctx.lookup_function(&deref_qualified).cloned() else {
+                break;
+            };
+            let Some(ref deref_target_name) = deref_info.return_type_name else {
+                break;
+            };
+            // The Deref target is `&T`; strip a leading `&`/`&checked`/`&unsafe`
+            // prefix and the surrounding generic-args-from-receiver-args
+            // substitution from Self.  Mirrors the resolution discipline used
+            // by `extract_expr_type_name`'s MethodCall arm so the chain stays
+            // in the concrete (non-generic-param) instantiation.
+            let target_raw = deref_target_name
+                .trim_start_matches("&unsafe ")
+                .trim_start_matches("&checked ")
+                .trim_start_matches('&')
+                .trim()
+                .to_string();
+            // **Generic-param substitution on the Deref target** (task #15).
+            // `MutexGuard<T>.deref` has return_type_name `T` (literal).
+            // To chase the chain through `MutexGuard<SemaphoreInner>` we
+            // must substitute the `T` with the receiver's instantiated
+            // type-arg `SemaphoreInner`.  Without this, the next loop
+            // iteration looks up the bare `T` and falls out — leaving
+            // `.permits` unresolved against MutexGuard itself.
+            let wrapper_params = self
+                .collection_type_params
+                .get(stripped)
+                .cloned()
+                .unwrap_or_default();
+            let wrapper_args = VbcCodegen::split_generic_args(tn);
+            let target_stripped = if !wrapper_params.is_empty() && !wrapper_args.is_empty() {
+                VbcCodegen::substitute_generic_params_in_type_name(
+                    &target_raw,
+                    &wrapper_params,
+                    &wrapper_args,
+                )
+            } else {
+                target_raw
+            };
+            // Emit CallM { method: "deref", receiver: current_reg }.
+            let derefed = self.ctx.alloc_temp();
+            let method_id = self.intern_string("deref");
+            self.ctx.emit(Instruction::CallM {
+                dst: derefed,
+                receiver: current_reg,
+                method_id,
+                args: crate::instruction::RegRange {
+                    start: current_reg,
+                    count: 0,
+                },
+            });
+            if current_reg != base_reg {
+                self.ctx.free_temp(current_reg);
+            }
+            current_reg = derefed;
+            current_base_type = Some(target_stripped);
+            deref_hops += 1;
+        }
+        (current_reg, current_base_type)
+    }
+
     fn compile_field_access(&mut self, base: &Expr, field: &str) -> CodegenResult<Option<Reg>> {
         if std::env::var("VERUM_DEBUG_FIELDS2").is_ok() {
             let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
@@ -18669,114 +18811,11 @@ impl VbcCodegen {
             .compile_expr(base)?
             .or_internal("field base has no value")?;
 
-        // **Deref-aware field access** (task #15 fix).
-        //
-        // When `base_type` is a Deref-implementing wrapper whose
-        // target type carries the named field but the wrapper itself
-        // does not (canonical case: `MutexGuard<T>` carries
-        // `mutex: &Mutex<T>`, but user code writes `guard.permits`
-        // expecting Deref → T → permits), emit a `CallM { method:
-        // "deref" }` chain to peel through wrappers before the
-        // terminal GetF.  Mirrors the same discipline that
-        // `compile_method_call`'s Heap<T>/Shared<T> Deref handling
-        // applies — Deref impls are first-class, so codegen must
-        // honour them at every receiver-shape site.
-        //
-        // The receiver-type's TypeDescriptor is the source of truth
-        // for "does this type carry that field directly?" — only when
-        // the descriptor's field-list lacks the named field do we
-        // chase the Deref chain.  Cap recursion at 4 hops (matches
-        // Rust's deref-coercion depth) so a maliciously nested Deref
-        // graph can't cause unbounded codegen recursion.
-        let mut current_reg = base_reg;
-        let mut current_base_type = base_type.clone();
-        let mut deref_hops = 0;
-        while deref_hops < 4 {
-            let Some(ref tn) = current_base_type else { break };
-            let stripped: &str = match tn.find('<') {
-                Some(i) => &tn[..i],
-                None => tn.as_str(),
-            };
-            // Does the type's descriptor have the named field directly?
-            let has_field = self.type_name_to_id.get(stripped).is_some_and(|&tid| {
-                self.types.iter().any(|t| {
-                    t.id == tid
-                        && t.fields.iter().any(|fd| {
-                            self.ctx
-                                .strings
-                                .get(fd.name.0 as usize)
-                                .is_some_and(|n| n == field)
-                        })
-                })
-            }) || self
-                .type_field_layouts
-                .get(stripped)
-                .is_some_and(|fields| fields.iter().any(|f| f == field));
-            if has_field {
-                break;
-            }
-            // No direct field; does the type implement Deref?
-            let deref_qualified = format!("{}.deref", stripped);
-            let Some(deref_info) = self.ctx.lookup_function(&deref_qualified).cloned() else {
-                break;
-            };
-            let Some(ref deref_target_name) = deref_info.return_type_name else {
-                break;
-            };
-            // The Deref target is `&T`; strip a leading `&`/`&checked`/`&unsafe`
-            // prefix and the surrounding generic-args-from-receiver-args
-            // substitution from Self.  Mirrors the resolution discipline used
-            // by `extract_expr_type_name`'s MethodCall arm so the chain stays
-            // in the concrete (non-generic-param) instantiation.
-            let target_raw = deref_target_name
-                .trim_start_matches("&unsafe ")
-                .trim_start_matches("&checked ")
-                .trim_start_matches('&')
-                .trim()
-                .to_string();
-            // **Generic-param substitution on the Deref target** (task #15).
-            // `MutexGuard<T>.deref` has return_type_name `T` (literal).
-            // To chase the chain through `MutexGuard<SemaphoreInner>` we
-            // must substitute the `T` with the receiver's instantiated
-            // type-arg `SemaphoreInner`.  Without this, the next loop
-            // iteration looks up the bare `T` and falls out — leaving
-            // `.permits` unresolved against MutexGuard itself.
-            let wrapper_params = self
-                .collection_type_params
-                .get(stripped)
-                .cloned()
-                .unwrap_or_default();
-            let wrapper_args = VbcCodegen::split_generic_args(tn);
-            let target_stripped = if !wrapper_params.is_empty() && !wrapper_args.is_empty() {
-                VbcCodegen::substitute_generic_params_in_type_name(
-                    &target_raw,
-                    &wrapper_params,
-                    &wrapper_args,
-                )
-            } else {
-                target_raw
-            };
-            // Emit CallM { method: "deref", receiver: current_reg }.
-            let derefed = self.ctx.alloc_temp();
-            let method_id = self.intern_string("deref");
-            self.ctx.emit(Instruction::CallM {
-                dst: derefed,
-                receiver: current_reg,
-                method_id,
-                args: crate::instruction::RegRange {
-                    start: current_reg,
-                    count: 0,
-                },
-            });
-            if current_reg != base_reg {
-                self.ctx.free_temp(current_reg);
-            }
-            current_reg = derefed;
-            current_base_type = Some(target_stripped);
-            deref_hops += 1;
-        }
-        let base_reg = current_reg;
-        let base_type = current_base_type;
+        // FIELD-DEREF-CHASE-1: shared Deref-chase (extracted from the
+        // task #15 read-side fix) — see `chase_deref_for_field`.
+        let (base_reg, base_type) =
+            self.chase_deref_for_field(base_reg, base_type.clone(), field);
+
 
         let result = self.ctx.alloc_temp();
         let (field_idx, idx_guessed) =
