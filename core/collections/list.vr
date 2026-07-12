@@ -3081,10 +3081,21 @@ implement<T: Eq> Eq for List<T> {
 implement<T: Debug> Debug for List<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         let mut list = f.debug_list();
-        // Explicit iteration to avoid associated type inference issues
+        // LAYOUT-AUTHORITY (#48): element access MUST go through the
+        // type's own surface (`get` → the runtime element reader) —
+        // the live runtime representation keeps `ptr` as the backing
+        // OBJECT base (elements at +OBJECT_HEADER_SIZE), so the old
+        // raw `unsafe { &*self.ptr.offset(i) }` read the backing
+        // header word and `f"{[7]:?}"` rendered a raw address.
+        // Manual pointer math over an implementation-owned layout is
+        // forbidden in stdlib bodies.
         for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            list.entry(item);
+            match self.get(i) {
+                Maybe.Some(v) => {
+                    list.entry(&v);
+                }
+                Maybe.None => {}
+            }
         }
         list.finish()
     }
@@ -3093,12 +3104,17 @@ implement<T: Debug> Debug for List<T> {
 implement<T: Display> Display for List<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("[")?;
+        // LAYOUT-AUTHORITY (#48): same rule as the Debug impl above.
         for i in range(0, self.len) {
             if i > 0 {
                 f.write_str(", ")?;
             }
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            item.fmt(f)?;
+            match self.get(i) {
+                Maybe.Some(v) => {
+                    v.fmt(f)?;
+                }
+                Maybe.None => {}
+            }
         }
         f.write_str("]")
     }

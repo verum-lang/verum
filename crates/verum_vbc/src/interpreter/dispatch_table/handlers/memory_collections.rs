@@ -109,6 +109,50 @@ pub(in super::super) fn handle_get_field(
         obj_val
     };
 
+    // TEMP ground-truth oracle (#48): VERUM_TRACE_LISTREPR=1 dumps the
+    // List object's field words and peeks the buffer candidates, so the
+    // element-representation question (NaN-boxed Values vs raw ints)
+    // is answered by evidence, not inference.
+    if std::env::var("VERUM_TRACE_LISTREPR").is_ok() && obj_val.is_ptr() && !obj_val.is_nil() {
+        let p = obj_val.as_ptr::<u8>();
+        if !p.is_null() {
+            let h = unsafe { heap::ObjectHeader::ref_or_stub(p) };
+            if h.type_id == TypeId::LIST {
+                unsafe {
+                    let d = p.add(heap::OBJECT_HEADER_SIZE) as *const u64;
+                    let f0 = *d;
+                    let f1 = *d.add(1);
+                    let f2 = *d.add(2);
+                    eprintln!(
+                        "[listrepr] GetF idx={} hsize={} f0={:#x} f1={:#x} f2={:#x}",
+                        field_idx, h.size, f0, f1, f2
+                    );
+                    // Decode each field THROUGH Value semantics — the
+                    // fields are NaN-boxed (evidence: 0x7ff9…=Int,
+                    // 0x7ff8…=ptr), so the buffer address must come from
+                    // Value::as_ptr, not from the raw bits.
+                    for (label, cand) in [(0u32, f0), (1u32, f1), (2u32, f2)] {
+                        let v = Value::from_bits(cand);
+                        if v.is_ptr() && !v.is_nil() {
+                            let b = v.as_ptr::<u64>();
+                            if !b.is_null() {
+                                eprintln!(
+                                    "[listrepr]   f{}=ptr {:p}: buf[0]={:#x} buf[1]={:#x}",
+                                    label,
+                                    b,
+                                    *b,
+                                    *b.add(1)
+                                );
+                            }
+                        } else if v.is_int() {
+                            eprintln!("[listrepr]   f{}=int {}", label, v.as_i64());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Handle SmallStr values: compiled stdlib Text methods (as_bytes, etc.) access
     // self.ptr (field 0), self.len (field 1), self.cap (field 2) via GetF.
     // SmallStr is the interpreter's inline NaN-boxed string representation (up to 6 bytes).
@@ -282,10 +326,9 @@ pub(in super::super) fn handle_get_field(
     if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return Err(InterpreterError::Panic {
             message: format!(
-                "misaligned pointer {:p} for ObjectHeader (requires {}-byte alignment) — GetF in fn `{}` (FATREF-DISPATCH-ROUTE-1)",
+                "misaligned pointer {:p} for ObjectHeader (requires {}-byte alignment)",
                 ptr,
-                std::mem::align_of::<heap::ObjectHeader>(),
-                state.call_stack.frame_names(&state.module, 6),
+                std::mem::align_of::<heap::ObjectHeader>()
             ),
         });
     }

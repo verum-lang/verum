@@ -218,7 +218,10 @@ fn integration_debug_poll_of_maybe() {
     let p: Poll<Maybe<Int>> = Poll.Ready(Maybe.Some(7));
     let s = f"{p:?}";
     assert(s.contains("Ready"));
-    assert(s.contains("Maybe.Some(7)"));
+    // Debug canon is the BARE variant form ("Some(7)") — pinned with
+    // rationale by base/maybe unit_test test_debug_some/test_debug_none
+    // (matches the impl, Ordering's Debug and Rust's {:?} convention).
+    assert(s.contains("Some(7)"));
 }
 
 // =============================================================================

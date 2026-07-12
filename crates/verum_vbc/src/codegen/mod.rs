@@ -7441,7 +7441,33 @@ impl VbcCodegen {
                                 })
                                 .unwrap_or_default();
 
-                            // Look up concrete FunctionIds for each method
+                            // Look up concrete FunctionIds for each method.
+                            //
+                            // IMPL-METHODS-UNION-1 (#48 poll trio): the
+                            // vtable order comes from the PROTOCOL
+                            // descriptor — but a FOREIGN protocol (e.g.
+                            // `Debug` declared in base/protocols.vr while
+                            // the impl lives in poll.vr) is only a
+                            // synthesized name STUB here, with an EMPTY
+                            // method list. The attach then recorded
+                            // `methods: []`, the runtime's
+                            // find_method_by_receiver_type had nothing to
+                            // scan, and dyn-protocol dispatch fell into
+                            // the caller's suffix dice (`{Poll:?}` routed
+                            // fmt_debug to List.fmt_debug on a Poll
+                            // receiver → "List.get not found on Poll").
+                            // UNION the impl block's OWN method names so
+                            // the carried fact survives regardless of
+                            // where the protocol type is declared.
+                            let method_names: Vec<String> = {
+                                let mut names = method_names;
+                                for m in implemented_methods.iter() {
+                                    if !names.iter().any(|n| n == m) {
+                                        names.push(m.clone());
+                                    }
+                                }
+                                names
+                            };
                             let method_fn_ids: Vec<u32> = method_names
                                 .iter()
                                 .map(|method_name| {
