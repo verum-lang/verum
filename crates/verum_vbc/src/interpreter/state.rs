@@ -556,6 +556,15 @@ pub struct InterpreterState {
     /// inside a loaded module never change.
     pub type_name_index: HashMap<String, crate::types::TypeId>,
 
+    /// **Protocol-name set** — the dual of `type_name_index` for
+    /// `TypeKind::Protocol` entries.  Lets the CallM dispatcher decide
+    /// "is this qualified token's qualifier a protocol?"
+    /// (PROTOCOL-QUALIFIED-IS-DYN-1) in O(1) instead of scanning
+    /// `module.types` on every dotted method token.  Same lifecycle as
+    /// `type_name_index`: built at `with_config`, extended at
+    /// `load_module`, never stale (modules are Arc-shared immutable).
+    pub protocol_name_index: std::collections::HashSet<String>,
+
     /// **String-constant singleton cache** (#93, parallels AOT
     /// `__rodata` Text globals from #92).
     ///
@@ -1315,6 +1324,34 @@ fn build_type_name_index(
         extend_type_name_index(&mut index, module);
     }
     index
+}
+
+/// Build the protocol-name set over every loaded module (the
+/// `TypeKind::Protocol` dual of `build_type_name_index`).
+fn build_protocol_name_index(
+    modules: &HashMap<String, Arc<VbcModule>>,
+) -> std::collections::HashSet<String> {
+    let mut index = std::collections::HashSet::new();
+    for module in modules.values() {
+        extend_protocol_name_index(&mut index, module);
+    }
+    index
+}
+
+/// In-place merge for `build_protocol_name_index` — used by initial
+/// construction and mid-run `load_module` alike.
+fn extend_protocol_name_index(
+    index: &mut std::collections::HashSet<String>,
+    module: &Arc<VbcModule>,
+) {
+    for ty in &module.types {
+        if !matches!(ty.kind, crate::types::TypeKind::Protocol) {
+            continue;
+        }
+        if let Some(name) = module.strings.get(ty.name) {
+            index.insert(name.to_string());
+        }
+    }
 }
 
 /// In-place merge for `build_type_name_index`.  Used by both the
@@ -2592,6 +2629,7 @@ impl InterpreterState {
         }
 
         let type_name_index = build_type_name_index(&modules);
+        let protocol_name_index = build_protocol_name_index(&modules);
         Self {
             module,
             modules,
@@ -2622,6 +2660,7 @@ impl InterpreterState {
             gpu_shared_mem_offset: 0,
             method_cache: HashMap::new(),
             type_name_index,
+            protocol_name_index,
             string_const_cache: Vec::new(),
             stdout_buffer: String::new(),
             exception_handlers: ExceptionHandlerStack::new(),
@@ -2721,6 +2760,7 @@ impl InterpreterState {
         // for the (rare) case where two loaded modules redeclare
         // the same type name.
         extend_type_name_index(&mut self.type_name_index, &module);
+        extend_protocol_name_index(&mut self.protocol_name_index, &module);
         self.modules.insert(module.name.clone(), module);
     }
 

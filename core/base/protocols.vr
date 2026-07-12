@@ -16,7 +16,6 @@ module core.base.protocols;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
-mount core.intrinsics.conversion.int_to_bytes;
 
 // =============================================================================
 // Partial Equality Protocol
@@ -177,8 +176,25 @@ public type Hasher is protocol {
     }
 
     /// Write an Int.
+    ///
+    /// Feeds the 8 little-endian bytes of `n` one at a time through
+    /// `write_byte` — the canonical byte-mixer chain.  This is
+    /// allocation-free and produces the exact byte sequence of
+    /// `n.to_le_bytes()`, so every arrival shape agrees on the hash:
+    /// the Tier-0 `DefaultHasher` intercept (`fxhash_bytes(state,
+    /// &n.to_le_bytes())`), this default body running under dyn
+    /// dispatch, and the Tier-1 AOT body.  The previous form
+    /// `self.write(int_to_bytes(n))` leaned on the fn-form
+    /// `@intrinsic("to_ne_bytes")`, whose VBC lowering is a raw i64
+    /// reinterpret (`Mov`) rather than a real `[Byte; 8]` container —
+    /// the write step then saw a non-slice value and silently hashed
+    /// nothing (state stayed 0; #44-B `test_hash_some_different`).
     fn write_int(&mut self, n: Int) {
-        self.write(int_to_bytes(n));
+        let mut i: Int = 0;
+        while i < 8 {
+            self.write_byte(((n >> (i * 8)) & 0xFF) as Byte);
+            i = i + 1;
+        }
     }
 
     /// Finalize && return the hash value.

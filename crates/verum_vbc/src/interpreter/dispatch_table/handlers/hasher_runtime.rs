@@ -63,6 +63,19 @@ pub(in super::super) fn try_intercept_default_hasher(
     // ThinRefs so we land on the heap-record Value.
     let self_raw = state.registers.get(caller_base, Reg(args_start_reg));
     let self_val = deref_self(state, self_raw);
+    if std::env::var("VERUM_TRACE_HASHER").is_ok() {
+        let k = |v: &Value| -> &'static str {
+            if is_cbgr_ref(v) { "cbgr-ref" }
+            else if v.is_thin_ref() { "thin-ref" }
+            else if v.is_ptr() { "ptr" }
+            else if v.is_int() { "int" }
+            else { "other" }
+        };
+        eprintln!(
+            "[hasher] method={} raw={} val={} arg_reg={} base={}",
+            method, k(&self_raw), k(&self_val), args_start_reg, caller_base
+        );
+    }
 
     // The DefaultHasher record is allocated as a single-field heap
     // object `[ObjectHeader][state: Value(i64)]`.  If we don't see a
@@ -128,6 +141,15 @@ pub(in super::super) fn try_intercept_default_hasher(
                 } else {
                     Vec::new()
                 }
+            } else if let Some(vals) = state.list_elements(bytes_val) {
+                // Plain `List<Byte>` / `[Byte; N]` record — Value-slot
+                // elements (e.g. `n.to_le_bytes()` output).  Without
+                // this arm a list-shaped argument silently hashed
+                // NOTHING (the exact silent-wrong class behind #44-B's
+                // untouched-state hashes).
+                vals.iter()
+                    .map(|v| if v.is_int() { (v.as_i64() & 0xFF) as u8 } else { 0 })
+                    .collect()
             } else {
                 Vec::new()
             };

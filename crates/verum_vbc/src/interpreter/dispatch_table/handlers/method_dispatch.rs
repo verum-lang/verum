@@ -1899,8 +1899,8 @@ pub(in super::super) fn handle_call_method(
     // `format_debug(&"hi")` to the wrong `*.fmt_debug` body (was:
     // emitted `<hi>` instead of `<"hi">` because Display.fmt for Text
     // was picked over Debug.fmt_debug for Text).
-    let was_dyn_dispatch = method_name.starts_with("dyn:");
-    let method_name = if method_name.starts_with("dyn:") || method_name.starts_with("ctx:") {
+    let mut was_dyn_dispatch = method_name.starts_with("dyn:");
+    let mut method_name = if method_name.starts_with("dyn:") || method_name.starts_with("ctx:") {
         let rest = &method_name[4..];
         if let Some(dot) = rest.rfind('.') {
             rest[dot + 1..].to_string()
@@ -1910,6 +1910,29 @@ pub(in super::super) fn handle_call_method(
     } else {
         method_name
     };
+    // PROTOCOL-QUALIFIED-IS-DYN-1 (#44-B): a qualified token whose
+    // qualifier names a PROTOCOL descriptor (`Hasher.write_int` from a
+    // `h: &mut Hasher` receiver) IS dyn dispatch by construction — the
+    // static type is the protocol, the runtime receiver is concrete.
+    // Pre-fix the qualified fast-path resolved the PROTOCOL DEFAULT
+    // body directly, bypassing the receiver's own override:
+    // `DefaultHasher.write_int` never ran; the default's
+    // `self.write(bytes)` chain mis-read its slice arg and the hasher
+    // state stayed 0 (test_hash_some_different, the wb44 isolate).
+    // Re-routing through the dyn discipline restores the canonical
+    // order: receiver override → protocol default → builtin fallback
+    // (find_method_by_receiver_type walks exactly that).
+    if !was_dyn_dispatch
+        && let Some(dot) = method_name.find('.')
+    {
+        let qualifier = &method_name[..dot];
+        if state.protocol_name_index.contains(qualifier) {
+            was_dyn_dispatch = true;
+            method_name = method_name[dot + 1..].to_string();
+        }
+    }
+    let was_dyn_dispatch = was_dyn_dispatch;
+    let method_name = method_name;
 
     // COLLECT-FROMITER-2 (runtime leg): the generic `collect` body
     // `C.from_iter(self)` miscompiles to an INSTANCE call of bare
