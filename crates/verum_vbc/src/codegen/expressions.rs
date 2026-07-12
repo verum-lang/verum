@@ -20186,6 +20186,20 @@ impl VbcCodegen {
                 (Some(o), _, true) => WKT::Result.matches(o) && result_err_args_agree,
                 _ => false,
             };
+            if std::env::var("VERUM_TRACE_PAT").is_ok() {
+                eprintln!(
+                    "[try-trace] fn={:?} inner_ty={:?} outer_rtn={:?} outer_base={:?} is_res={} is_maybe={} err_args=({:?},{:?}) same={}",
+                    self.ctx.current_function,
+                    type_name,
+                    self.ctx.current_return_type_name,
+                    outer_base,
+                    is_result_type,
+                    is_maybe_type,
+                    inner_err_arg,
+                    outer_err_arg,
+                    same_type
+                );
+            }
 
             if same_type {
                 self.ctx.emit(Instruction::Ret { value: inner_reg });
@@ -24357,31 +24371,16 @@ impl VbcCodegen {
 
         // Step 3b: Extract parameter types from AST for proper type tracking
         // This ensures Text/List/Map parameters in closures get correct TypeRef
+        // ONE rendering authority (`type_to_simple_name`) — the previous
+        // ad-hoc match knew only Text/Int/Float/Bool/Path and rendered
+        // every OTHER shape as "": a `|r: Result<Int, Text>|` param
+        // registered an EMPTY type name, so `r?` inside the closure
+        // classified as neither Result nor Maybe and fell into the
+        // from_residual name-dice (task #50, `Err("error")` → `Err(0)`).
         let param_type_names: Vec<Option<String>> = params
             .iter()
             .map(|p| {
-                p.ty.as_ref().map(|t| {
-                    // Extract the type name for register tracking (Text, List, Map, etc.)
-                    match &t.kind {
-                        // Primitive types have their own TypeKind variants
-                        verum_ast::TypeKind::Text => "Text".to_string(),
-                        verum_ast::TypeKind::Int => "Int".to_string(),
-                        verum_ast::TypeKind::Float => "Float".to_string(),
-                        verum_ast::TypeKind::Bool => "Bool".to_string(),
-                        // Named types (List, Map, Set, etc.) use Path
-                        verum_ast::TypeKind::Path(path) => {
-                            if let Some(seg) = path.segments.last() {
-                                match seg {
-                                    verum_ast::PathSegment::Name(ident) => ident.name.to_string(),
-                                    _ => String::new(),
-                                }
-                            } else {
-                                String::new()
-                            }
-                        }
-                        _ => String::new(),
-                    }
-                })
+                p.ty.as_ref().map(|t| self.type_to_simple_name(t)).filter(|n| !n.is_empty())
             })
             .collect();
 
@@ -24581,6 +24580,27 @@ impl VbcCodegen {
         // exceeds object data size"). Hints were claimed span-exactly in
         // `compile_closure`; explicit AST annotations and complex
         // (destructuring) patterns are left to their existing paths.
+        // CLOSURE-PARAM-TYPE-PARITY-1 (task #50): explicitly-annotated
+        // closure params (`|r: Result<Int, Text>| …`) never landed in
+        // `variable_type_names` — only the descriptor TypeRef was
+        // recorded. Every type-driven lowering inside the body then
+        // saw the param as untyped: `r?` classified as neither
+        // Result nor Maybe, missed the same-type fast-path, and fell
+        // into the from_residual name-dice (`Err("error")` came back
+        // as `Err(0)` through a foreign impl's `E.default()`). Mirror
+        // the fn-param discipline for the closure's own annotations.
+        for (i, tn) in param_type_names.iter().enumerate() {
+            let Some(type_name) = tn else { continue };
+            if complex_patterns.iter().any(|(idx, _)| *idx == i) {
+                continue;
+            }
+            let Some(pname) = params.get(i) else { continue };
+            self.ctx
+                .variable_type_names
+                .insert(pname.clone(), type_name.clone());
+            let var_type = self.type_name_to_var_type(type_name);
+            self.ctx.register_variable_type(pname, var_type);
+        }
         if let Some(hints) = elem_hints {
             for (i, hint) in hints.iter().enumerate() {
                 let Some(elem_ty) = hint else { continue };
