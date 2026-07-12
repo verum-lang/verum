@@ -1228,16 +1228,33 @@ impl VbcCodegen {
                 // accumulates types beyond this module; require the
                 // target to be locally visible (own decl / braced or
                 // leaf mount) unless it is a language builtin.
+                //
+                // **ALIAS-INTRA-MODULE-ORDER-1 (B1 layer-2 root).**
+                // Local visibility IS the alias evidence — do NOT also
+                // require `type_name_to_id`. The pre-pass walks the
+                // module's items in file order (mod.vr FIRST), so
+                // `type IoError is StreamError;` in io/mod.vr was
+                // evaluated before sibling io/protocols.vr registered
+                // StreamError: the extra `known` check dropped the
+                // alias, no module ever exported IoError→StreamError,
+                // and net's `IoError.from_os(e)` (alias_hit=false in
+                // the bakeAI [static-alias] trace) degraded to an
+                // instance CallM that panicked at runtime. When no
+                // alias_scope oracle is available (non-bootstrap
+                // compiles), the registry check remains the gate.
                 if !is_builtin {
-                    if let Some(scope) = &self.alias_scope {
-                        if !scope.contains(target) {
-                            return None;
+                    match &self.alias_scope {
+                        Some(scope) => {
+                            if !scope.contains(target) {
+                                return None;
+                            }
+                        }
+                        None => {
+                            if !self.type_name_to_id.contains_key(target) {
+                                return None;
+                            }
                         }
                     }
-                }
-                let known = self.type_name_to_id.contains_key(target) || is_builtin;
-                if !known {
-                    return None;
                 }
                 Some(target.to_string())
             }
