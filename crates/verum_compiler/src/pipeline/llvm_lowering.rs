@@ -253,6 +253,11 @@ impl<'s> CompilationPipeline<'s> {
             // selection to Less: SelectionDAG replaces the buggy path;
             // the IR-level pass pipeline is governed separately, so
             // -O0 semantics are unchanged.
+            // NB: the later "RegAllocGreedy crashes at >= O1" theory was a
+            // misattribution — the real fault was the malformed
+            // `verum_string_join` loop PHI (fixed in runtime.rs); the greedy
+            // allocator is crash-free on valid IR at every level. So keep the
+            // normal mapping (only the GlobalISel-avoiding 0/1 clamp remains).
             0 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Less,
             1 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Less,
             2 => verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,

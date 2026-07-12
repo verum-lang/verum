@@ -8428,6 +8428,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
         let result_buf = self.emit_checked_malloc(&builder, module, alloc_size, "result_buf")?;
 
+        // `emit_checked_malloc` emits an OOM branch and leaves the builder in
+        // its `result_buf_ok` continuation block — so THAT block, not
+        // `alloc_bb`, is the real predecessor that falls into the copy loop.
+        // Capture the live insertion block instead of hardcoding a label, so
+        // the entry PHI edges below name the actual predecessor and stay
+        // correct no matter how many blocks the malloc helper interposes.
+        // (Hardcoding `alloc_bb` produced a malformed module — LLVM verifier:
+        // "PHI node entries do not match predecessors" — which then crashed
+        // codegen.)
+        let copy_preheader_bb = builder
+            .get_insert_block()
+            .or_internal("verum_string_join: no insert block after checked malloc")?;
+
         // Second pass: copy elements with separators
         let copy_loop_bb = self.context.append_basic_block(func, "copy_loop_head");
         let copy_body_bb = self.context.append_basic_block(func, "copy_body");
@@ -8442,8 +8455,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.position_at_end(copy_loop_bb);
         let cp_i = builder.build_phi(i64_type, "cp_i").or_llvm_err()?;
         let cp_pos = builder.build_phi(i64_type, "cp_pos").or_llvm_err()?;
-        cp_i.add_incoming(&[(&i64_type.const_zero(), alloc_bb)]);
-        cp_pos.add_incoming(&[(&i64_type.const_zero(), alloc_bb)]);
+        cp_i.add_incoming(&[(&i64_type.const_zero(), copy_preheader_bb)]);
+        cp_pos.add_incoming(&[(&i64_type.const_zero(), copy_preheader_bb)]);
         let cp_i_val = cp_i.as_basic_value().into_int_value();
         let cp_pos_val = cp_pos.as_basic_value().into_int_value();
         let cp_cond = builder

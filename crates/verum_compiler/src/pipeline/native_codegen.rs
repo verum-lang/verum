@@ -866,6 +866,17 @@ impl<'s> CompilationPipeline<'s> {
         // ptrtoint/inttoptr patterns in the code emitter.
         // Our pass pipeline (SROA+mem2reg+DSE+ADCE) already provides
         // the critical optimizations; the TargetMachine just needs O2.
+        // The earlier "RegAllocGreedy/SplitEditor::finish null-deref at
+        // >= O1" theory (task #21) was a MISATTRIBUTION: it reproduced only
+        // on a STRUCTURALLY INVALID module — `verum_string_join` emitted a
+        // loop-header PHI whose entry edge named `alloc` while the real
+        // predecessor was the `result_buf_ok` block that `emit_checked_malloc`
+        // interposes (fixed in runtime.rs). LLVM's PHI-elimination then fed
+        // inconsistent CFG state to the allocator and null-derefed inside
+        // region splitting at high opt levels. On VALID IR the fork's
+        // RegAllocGreedy emits cleanly at O1/O2/O3 (verified standalone via
+        // `llc -O2/-O3` on the PHI-corrected dump). So the emitter needs no
+        // opt-level pin — restore the normal cap-at-O2 policy below.
         let llvm_opt_level = match opt_level {
             // GLOBALISEL-NULLMMO-1 (see llvm_lowering.rs): never select
             // machine code through GlobalISel — clamp 0 to Less so

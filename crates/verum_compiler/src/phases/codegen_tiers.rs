@@ -339,6 +339,11 @@ impl CodegenTiersPhase {
             .map_err(|e| anyhow::anyhow!("Invalid target triple: {}", e))?;
 
         // Convert optimization level
+        // The task-#21 "greedy allocator crashes at >= O1" theory was a
+        // misattribution — it reproduced only on the malformed
+        // `verum_string_join` PHI (fixed in runtime.rs). On valid IR the
+        // machine emitter is crash-free at every level, so restore normal
+        // opt mapping.
         let opt_level = match self.aot_config.opt_level {
             // GLOBALISEL-NULLMMO-1 (see llvm_lowering.rs): SelectionDAG
             // only — GlobalISel's RegBankSelect null-MMO crash at O0.
