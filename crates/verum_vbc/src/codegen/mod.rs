@@ -1334,19 +1334,40 @@ impl VbcCodegen {
         if self.local_concrete_types.contains(type_name) {
             return type_name.to_string();
         }
-        let mut current = type_name.to_string();
-        let mut iterations = 0;
-        const MAX_ITERATIONS: usize = 10; // Prevent infinite loops
-
-        while iterations < MAX_ITERATIONS {
-            if let Some(target) = self.type_aliases.get(&current) {
-                current = target.clone();
-                iterations += 1;
-            } else {
-                break;
+        // **MOUNT-PROVENANCE ALIAS RESOLUTION (B1 layer-2).** Three
+        // distinct stdlib aliases share the bare name `IoError` (io →
+        // StreamError, sys.io_engine → EngineIoError, …): the flat
+        // bare-key walk both picked an arbitrary winner AND cycled
+        // (IoError→EngineIoError→IoError — an even cycle returned the
+        // INPUT after MAX_ITERATIONS; bakeAN map_has witness). When
+        // THIS module explicitly mounted the name, the mount path
+        // names the intended owner — consult the module-qualified
+        // alias key first (`core.io.IoError` → key "io.IoError").
+        if let Some(mount_path) = self.ctx.mounted_types.get(type_name) {
+            let qualified = mount_path
+                .strip_prefix("core.")
+                .unwrap_or(mount_path.as_str());
+            if let Some(target) = self.type_aliases.get(qualified) {
+                return target.clone();
+            }
+            if let Some(target) = self.type_aliases.get(mount_path.as_str()) {
+                return target.clone();
             }
         }
-
+        // Cycle-safe bare-key walk: visited-set instead of a fixed
+        // iteration budget — on a cycle, return the LAST name reached
+        // before the repeat (one hop for a 2-cycle: the declared
+        // target), never the input by parity accident.
+        let mut current = type_name.to_string();
+        let mut visited: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        visited.insert(current.clone());
+        while let Some(target) = self.type_aliases.get(&current) {
+            if !visited.insert(target.clone()) {
+                break;
+            }
+            current = target.clone();
+        }
         current
     }
 

@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax
+.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -26,6 +26,9 @@ test: ## Run every unit + integration test in release mode
 
 build: ## Build every crate in release mode
 	cargo build --workspace --release
+
+check-markers: ## Gate: landed-markers fence (docs/architecture/landed-markers.txt)
+	python3 vcs/scripts/check_landed_markers.py
 
 check-vr-syntax: ## Gate: no Rust-style `::` in .vr sources (grammar/verum.ebnf uses `.`)
 	python3 vcs/scripts/check_no_double_colon.py --check

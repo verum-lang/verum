@@ -1,0 +1,57 @@
+# Landed-markers manifest — structural regression fence.
+#
+# Each non-comment line:  <repo-relative-path> :: <literal substring>
+# `vcs/scripts/check_landed_markers.py` asserts every substring is
+# present in its file. A missing marker means a LANDED fix was
+# reverted/clobbered (the 2026-07-12 multi-session incident erased
+# 237 committed lines via a botched staged merge — this fence makes
+# that class of silent regression fail loudly in seconds).
+#
+# Add a line when landing a load-bearing mechanism; never delete a
+# line without removing the mechanism ON PURPOSE (say so in the
+# commit message).
+
+# --- stub-range architecture (stages 1-5) ---
+crates/verum_vbc/src/stub_ranges.rs :: pub const STAGE5_BASE
+crates/verum_vbc/src/stub_ranges.rs :: pub fn is_name_resolved_stub_id
+crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs :: fn pre_register_unique_public_consts
+crates/verum_vbc/src/codegen/context.rs :: pub pending_mount_aliases
+crates/verum_vbc/src/codegen/expressions.rs :: Stage-5 mount-miss synthesis
+
+# --- capture analyzer exhaustiveness ---
+crates/verum_vbc/src/codegen/expressions.rs :: ExprKind::InterpolatedString { exprs, .. }
+crates/verum_vbc/src/codegen/expressions.rs :: fn visit_comprehension_clause
+crates/verum_vbc/src/codegen/expressions.rs :: NO catch-all — deliberately
+
+# --- field/layout correctness ---
+crates/verum_vbc/src/codegen/mod.rs :: TUPLE-POSITIONAL-FIELD-1
+crates/verum_vbc/src/codegen/expressions.rs :: fn resolve_core_rooted_suffix
+
+# --- alias architecture (B1 layer-2) ---
+crates/verum_vbc/src/codegen/mod.rs :: pub fn detect_variant_form_alias
+crates/verum_vbc/src/codegen/tests_comprehensive.rs :: detect_variant_form_alias_handles_alias_body
+crates/verum_vbc/src/codegen/mod.rs :: MOUNT-PROVENANCE ALIAS RESOLUTION
+crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs :: Phase 2.9
+
+# --- proof erasure ---
+crates/verum_vbc/src/codegen/mod.rs :: fn register_axiom_witness
+crates/verum_vbc/src/codegen/mod.rs :: PROOF-IRRELEVANCE-ERASURE-1
+
+# --- silent-zero / diagnostics fences ---
+crates/verum_codegen/src/llvm/instruction.rs :: emit_unimplemented_sub_op("TensorExtended", sub_op)
+crates/verum_codegen/src/llvm/instruction.rs :: emit_unimplemented_sub_op("GpuExtended", sub_op)
+crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs :: VERUM_DUMP_FN
+
+# --- atomic artefact publish ---
+crates/verum_vbc/src/archive.rs :: Atomic publish
+crates/verum_compiler/src/precompile.rs :: publish metadata sidecar
+
+# --- stage-1 builtin-TypeKind visibility ---
+crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs :: TypeKind::Text => "Text".to_string()
+
+# --- Tier-0 futex routing (A11) ---
+core/sys/darwin/thread.vr :: @intrinsic("futex_wait", addr as &unsafe Byte, expected, t)
+core/sys/linux/thread.vr :: @intrinsic("futex_wait", addr as &unsafe Byte, expected, t)
+
+# --- test-preflight ignore stripper (#21) ---
+crates/verum_cli/src/commands/test.rs :: TEST-PREFLIGHT-IGNORE-2
