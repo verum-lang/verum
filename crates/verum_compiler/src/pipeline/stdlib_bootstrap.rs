@@ -631,6 +631,33 @@ impl<'s> CompilationPipeline<'s> {
             )?;
             functions_compiled += funcs;
 
+            // [diag] VERUM_DUMP_FN=<substring>: print the disassembly
+            // of every just-compiled function whose header matches —
+            // the ONLY way to inspect the exact baked bytecode of a
+            // stdlib body (`--emit-vbc` covers user modules only).
+            // First consumer: B1 triage (baked safe_socket writes
+            // field idx 4 into an 8-byte type_id=0 object while the
+            // same source shape compiled user-side runs green).
+            if let Ok(filter) = std::env::var("VERUM_DUMP_FN")
+                && !filter.is_empty()
+            {
+                let dump = verum_vbc::disassemble::disassemble_module(&vbc_module);
+                let mut printing = false;
+                for line in dump.lines() {
+                    // Header shape: `; fn name(...) -> Ret  [id=..]`
+                    let is_fn_header = line.starts_with("; fn ");
+                    if is_fn_header {
+                        printing = line.contains(&filter);
+                        if printing {
+                            eprintln!("[dump-fn] module={}", module.name);
+                        }
+                    }
+                    if printing {
+                        eprintln!("{}", line);
+                    }
+                }
+            }
+
             module_times.insert(module.name.clone(), module_start.elapsed());
             self.compiled_stdlib_modules
                 .insert(module.name.clone(), vbc_module);
