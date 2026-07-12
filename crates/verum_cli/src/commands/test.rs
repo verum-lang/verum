@@ -2481,6 +2481,31 @@ fn emit_sarif(results: &[(Text, TestResult)], _active: &[&Test]) {
 mod tests {
     use super::*;
 
+    /// TEST-PREFLIGHT-IGNORE-2: attributes PRECEDING `@ignore`
+    /// (`@test` first is the dominant stdlib order) must be stripped
+    /// with the fn, or the preflight file dangles an item-less
+    /// attribute and fails to parse (E018).
+    #[test]
+    fn strip_ignored_peels_preceding_attributes() {
+        let src = "@test\nfn keep_me() {\n    assert(true);\n}\n\n@test\n@ignore\nfn drop_me() {\n    assert(false);\n}\n";
+        let out = strip_ignored_test_fns(src).expect("one fn stripped");
+        assert!(out.contains("fn keep_me"));
+        assert!(!out.contains("fn drop_me"));
+        // The dangling-@test hazard: no attribute may immediately
+        // precede the strip marker.
+        let marker_at = out.find("[preflight]").unwrap();
+        let before = &out[..marker_at];
+        let last_line = before
+            .trim_end_matches(|c| c == '\n' || c == '/' || c == ' ')
+            .rsplit('\n')
+            .next()
+            .unwrap_or("");
+        assert!(
+            !last_line.trim_start().starts_with('@'),
+            "dangling attribute before strip marker: {last_line:?}"
+        );
+    }
+
     #[test]
     fn filter_substring() {
         let f: Option<Text> = Some("foo".into());
@@ -2902,6 +2927,29 @@ fn strip_ignored_test_fns(src: &str) -> Option<String> {
                                             .find('\n')
                                             .map(|o| k + o + 1)
                                             .unwrap_or(bytes.len());
+                                        // Attributes PRECEDING the
+                                        // `@ignore` line (`@test`,
+                                        // `@cfg(...)`, ...) were already
+                                        // emitted — peel them off `out`,
+                                        // or the strip leaves a dangling
+                                        // `@test` with no item and the
+                                        // whole preflight file fails to
+                                        // PARSE (E018 at the marker
+                                        // comment; the sync/condvar
+                                        // suite's uniform 217ms
+                                        // compile-fail signature).
+                                        loop {
+                                            let trimmed_end = out.trim_end_matches('\n');
+                                            let Some(last_nl) = trimmed_end.rfind('\n') else {
+                                                break;
+                                            };
+                                            let last_line = trimmed_end[last_nl + 1..].trim_start();
+                                            if last_line.starts_with('@') {
+                                                out.truncate(last_nl + 1);
+                                            } else {
+                                                break;
+                                            }
+                                        }
                                         out.push_str(
                                             "// [preflight] @ignore'd test stripped\n",
                                         );

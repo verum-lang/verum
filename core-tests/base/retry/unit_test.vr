@@ -111,7 +111,7 @@ fn test_retry_immediate_succeeds_on_first_attempt() {
 
 @test
 fn test_retry_jittered_succeeds_on_first_attempt() {
-    let r: Result<Int, Text> = retry_jittered(2, 100, || { Result.Ok(11) });
+    let r: Result<Int, Text> = retry_jittered(2, 100, 1000, || { Result.Ok(11) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 11);
 }

@@ -15872,6 +15872,24 @@ impl VbcCodegen {
     }
 
     fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> (u32, bool) {
+        // **TUPLE-POSITIONAL-FIELD-1 (B1 root).** `_N` field names are
+        // positional BY CONSTRUCTION — the parser synthesizes them for
+        // tuple records and newtypes (`FileDesc(x)` ⇒ field `_0`).
+        // Their index is their name; no layout table needed. Pre-fix,
+        // when the owner's layout wasn't visible at the consumer's
+        // compile (cross-module bake order), `FileDesc._0` fell to the
+        // GLOBAL intern table (idx 4) and the baked ctor wrote field 4
+        // into a 1-slot allocation — the runtime
+        // "field write index 4 … exceeds object data size 8 type_id=0"
+        // panic in sys.darwin.libsystem.safe_socket that gated the
+        // whole net family (register B1; dump witness bakeAF).
+        if let Some(rest) = field_name.strip_prefix('_')
+            && !rest.is_empty()
+            && rest.bytes().all(|b| b.is_ascii_digit())
+            && let Ok(idx) = rest.parse::<u32>()
+        {
+            return (idx, false);
+        }
         if let Some(tn) = type_name {
             // META-GROUP-XMODULE-1: when the simple name is NOT an
             // authoritative record key (lost the cross-module

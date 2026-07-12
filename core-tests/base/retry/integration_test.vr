@@ -117,7 +117,7 @@ fn integration_retry_immediate_first_attempt_success() {
 
 @test
 fn integration_retry_jittered_first_attempt_success() {
-    let r: Result<Int, Text> = retry_jittered(3, 50, || { Result.Ok(7) });
+    let r: Result<Int, Text> = retry_jittered(3, 50, 500, || { Result.Ok(7) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 7);
 }
