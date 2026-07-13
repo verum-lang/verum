@@ -12604,6 +12604,124 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
+    // --- verum_text_from_stride(data: ptr, len: i64, elem: i64) -> i64 ---
+    // Build a Text from a byte slice whose backing may be PACKED (one byte per
+    // slot, elem==1 — e.g. `AsBytes` over a Text) OR BOXED (one NaN-boxed
+    // Value per element, elem==8 — e.g. `List<Byte>.as_slice()`). verum_text_alloc
+    // stores the passed pointer AS the Text backing (no copy), so pointing it at
+    // a boxed backing makes the Text read 8-byte Value slots as raw bytes
+    // (task #28: `from_utf8_unchecked(list.as_slice())` yielded only the first
+    // byte). Copy the LOW byte of each element (little-endian → the byte payload)
+    // at stride `elem` into a fresh packed buffer, then wrap it. Stride 1 makes
+    // the packed case a plain byte copy, so this is correct for both shapes.
+    if module.get_function("verum_text_from_stride").is_none() {
+        let i8_type = context.i8_type();
+        let fn_type = i64_type.fn_type(
+            &[ptr_type.into(), i64_type.into(), i64_type.into()],
+            false,
+        );
+        let func =
+            super::error::get_or_declare_function(module, "verum_text_from_stride", fn_type);
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+        let entry = context.append_basic_block(func, "entry");
+        let loop_head = context.append_basic_block(func, "loop_head");
+        let loop_body = context.append_basic_block(func, "loop_body");
+        let finish = context.append_basic_block(func, "finish");
+        let builder = context.create_builder();
+
+        builder.position_at_end(entry);
+        let data = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_pointer_value();
+        let len = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+        let elem = func
+            .get_nth_param(2)
+            .or_internal("missing param 2")?
+            .into_int_value();
+        // Fresh packed backing: len + 1 (NUL terminator).
+        let alloc_size = builder
+            .build_int_add(len, i64_type.const_int(1, false), "buf_size")
+            .or_llvm_err()?;
+        let buf = checked_malloc(context, &builder, module, alloc_size, "stride_buf")?;
+        // checked_malloc SPLITS `entry` (inserting an OOM-check) and leaves the
+        // builder in its success block — that block, not `entry`, is the real
+        // predecessor edge into loop_head. A PHI incoming from `entry` (which no
+        // longer branches here) is malformed IR that SIGSEGVs LLVM's loop
+        // analysis (see memory aot-crash-root-string-join-phi). Capture the live
+        // insert block as the loop preheader.
+        let preheader = builder
+            .get_insert_block()
+            .or_internal("verum_text_from_stride: no insert block after malloc")?;
+        builder.build_unconditional_branch(loop_head).or_llvm_err()?;
+
+        // for i in 0..len: buf[i] = *(i8*)(data + i*elem)
+        builder.position_at_end(loop_head);
+        let i_phi = builder.build_phi(i64_type, "i").or_llvm_err()?;
+        i_phi.add_incoming(&[(&i64_type.const_zero(), preheader)]);
+        let i_val = i_phi.as_basic_value().into_int_value();
+        let more = builder
+            .build_int_compare(verum_llvm::IntPredicate::SLT, i_val, len, "more")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(more, loop_body, finish)
+            .or_llvm_err()?;
+
+        builder.position_at_end(loop_body);
+        let src_off = builder
+            .build_int_mul(i_val, elem, "src_off")
+            .or_llvm_err()?;
+        // SAFETY: byte offset i*elem into the source slice backing.
+        let src_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i8_type, data, &[src_off], "src_ptr")
+                .or_llvm_err()?
+        };
+        let byte = builder
+            .build_load(i8_type, src_ptr, "src_byte")
+            .or_llvm_err()?
+            .into_int_value();
+        // SAFETY: packed destination, in-range index.
+        let dst_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i8_type, buf, &[i_val], "dst_ptr")
+                .or_llvm_err()?
+        };
+        builder.build_store(dst_ptr, byte).or_llvm_err()?;
+        let i_next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "i_next")
+            .or_llvm_err()?;
+        i_phi.add_incoming(&[(&i_next, loop_body)]);
+        builder.build_unconditional_branch(loop_head).or_llvm_err()?;
+
+        // finish: buf[len] = 0; return verum_text_alloc(buf, len, len)
+        builder.position_at_end(finish);
+        // SAFETY: NUL terminator slot at index len (allocated len+1).
+        let term_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i8_type, buf, &[len], "term_ptr")
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(term_ptr, i8_type.const_zero())
+            .or_llvm_err()?;
+        let alloc_ty =
+            i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
+        let text_alloc_fn =
+            super::error::get_or_declare_function(module, "verum_text_alloc", alloc_ty);
+        let text = builder
+            .build_call(text_alloc_fn, &[buf.into(), len.into(), len.into()], "stride_text")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("verum_text_alloc returned void")?
+            .into_int_value();
+        builder.build_return(Some(&text)).or_llvm_err()?;
+    }
+
     // --- verum_text_get_ptr(text_obj: i64) -> ptr ---
     // Extracts char* from Text object. Returns "" for null.
     //
