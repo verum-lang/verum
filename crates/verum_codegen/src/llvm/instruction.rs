@@ -18661,6 +18661,51 @@ fn lower_call_method<'ctx>(
             if let Some(ref ret_type) = resolved_return_type {
                 mark_register_from_return_type(ctx, dst.0, ret_type);
             }
+            // MAYBE-EXTRACT-OBJ-TYPE-1 (#29): a payload extractor
+            // (`Maybe/Result.unwrap` / `expect` …) returns the GENERIC
+            // payload `T`, so `resolved_return_type` is a type variable that
+            // `mark_register_from_return_type` cannot stamp — the result
+            // register is left untyped. When that payload is a RECORD, the
+            // value is a heap pointer, and a later `Ref` of it consults the
+            // heap-type marks to decide passthrough-vs-spill: unmarked → it
+            // SPILLS the pointer into a fresh slot and hands out `&slot`, so
+            // the callee's field read returns the pointer, not the field
+            // (diff_seconds(&parse().unwrap(), …) read a heap address). The
+            // receiver already carries its payload type — `Maybe<T>` via the
+            // MAYBE arm's `maybe_inner_type`, `Result<T,E>` via the generic
+            // Instantiated arm's `generic_type_args[0]` (the Ok type). Take
+            // whichever is present and propagate it to the extracted value,
+            // exactly as the AsVar handler does. Guarded to non-primitive,
+            // non-collection payloads: a `Maybe<Int>.unwrap()` yields an Int
+            // VALUE, and marking it obj would make Ref pass the scalar
+            // through as a pointer.
+            if ctx.get_obj_register_type(dst.0).is_none()
+                && matches!(
+                    bare_method,
+                    "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default"
+                )
+            {
+                // Maybe<T>: inner name; Result<T,E>: resolve args[0] to a name.
+                let payload_name = ctx
+                    .get_maybe_inner_type(receiver.0)
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        let arg0 = ctx
+                            .get_generic_type_args(receiver.0)
+                            .and_then(|a| a.first().cloned())?;
+                        let base_tid = match arg0 {
+                            TypeRef::Concrete(tid) => Some(tid),
+                            TypeRef::Instantiated { base, .. } => Some(base),
+                            _ => None,
+                        }?;
+                        ctx.vbc_module().and_then(|m| m.get_type_name(base_tid))
+                    });
+                if let Some(inner) = payload_name {
+                    if !is_primitive_type_name(&inner) && WKT::from_name(&inner).is_none() {
+                        ctx.set_obj_register_type(dst.0, inner);
+                    }
+                }
+            }
             // Name-based fallback for compiled .vr stdlib functions.
             // VBC may assign non-semantic TypeIds to compiled stdlib
             // types, so mark_register_from_return_type misses them.
@@ -21296,6 +21341,91 @@ fn lower_text_extended<'ctx>(
         }
     }
 }
+
+/// #48 — thin FunctionContext wrapper over the ONE cell authority
+/// (`slice_cell::CellEnv::probe`); see that module for the contract.
+fn emit_slice_cell_probe<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    base_ptr: PointerValue<'ctx>,
+    tag: &str,
+) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    env.probe(ctx.builder(), base_ptr, tag)
+}
+
+/// #48 — thin wrapper over `slice_cell::CellEnv::elem_width` +
+/// `elem_addr` for cell base pointers (word0 IS the data pointer).
+fn emit_slice_cell_elem_addr<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    base_ptr: PointerValue<'ctx>,
+    word0: IntValue<'ctx>,
+    index: IntValue<'ctx>,
+    tag: &str,
+) -> Result<(IntValue<'ctx>, PointerValue<'ctx>)> {
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    let elem = env.elem_width(ctx.builder(), base_ptr, tag)?;
+    let (_addr, eptr) = env.elem_addr(ctx.builder(), word0, elem, index, tag)?;
+    Ok((elem, eptr))
+}
+
+/// #48 — thin wrapper over `slice_cell::CellEnv::elem_load`.
+fn emit_slice_cell_elem_load<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    elem_w: IntValue<'ctx>,
+    elem_ptr: PointerValue<'ctx>,
+    tag: &str,
+) -> Result<IntValue<'ctx>> {
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    env.elem_load(ctx.builder(), elem_w, elem_ptr, tag)
+}
+
+/// #48 — thin wrapper over `slice_cell::CellEnv::elem_store`.
+fn emit_slice_cell_elem_store<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    elem_w: IntValue<'ctx>,
+    elem_ptr: PointerValue<'ctx>,
+    val_i64: IntValue<'ctx>,
+    tag: &str,
+) -> Result<()> {
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    env.elem_store(ctx.builder(), elem_w, elem_ptr, val_i64, tag)
+}
+
+/// #48 — thin wrapper over the ONE 3-arm classifier
+/// (`slice_cell::CellEnv::view`); see that module for the shape table.
+fn emit_container_view<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    base_ptr: PointerValue<'ctx>,
+    tag: &str,
+) -> Result<(IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>)> {
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    let v = env.view(
+        ctx.builder(),
+        base_ptr,
+        TypeId::TUPLE.0 as u64,
+        TypeId::BYTE_SLICE.0 as u64,
+        super::runtime::LIST_LEN_OFFSET,
+        super::runtime::LIST_PTR_OFFSET,
+        tag,
+    )?;
+    Ok((v.data, v.len, v.elem))
+}
+
 
 /// AOT-SLICE-ELEMSIZE-CARRY-1 (task #48): THE canonical Tier-1 slice
 /// form — a 24-byte heap cell `{data_ptr: i64, len: i64, elem: i64}`.
@@ -30551,233 +30681,31 @@ fn lower_get_element<'ctx>(
         return Ok(());
     }
 
-    // PACK-HEADER-STAMP-1: a slice that crossed a function boundary as
-    // a `&[Byte]` PARAM (or was read back from a record field) carries
-    // no compile-time slice mark — it lands here on the list/unmarked
-    // path and the Pack object itself was treated as the element
-    // array: `utf8_decode_char_len(self.bytes, pos)` inside
-    // `Chars.next` read the pack header/ptr words as "elements" and
-    // NULL-deref'd, killing every AOT text iterator
-    // (TEXT-AOT-CHARS-PUSH-1). `lower_pack` stamps TUPLE (521) into
-    // the zeroed object header, so branch on the stamp at runtime:
-    // pack → byte-stride read through the stored data ptr (@24);
-    // anything else → the pre-existing i64-stride read.
-    let i8_type = ctx.types().i8_type();
-    let i32_type = ctx.types().context().i32_type();
+    // #47/#48 unification: the unmarked tail is the SAME 3-arm
+    // classification as every marked consumer — {canonical cell |
+    // stamped Pack | unstamped List} through emit_container_view.
+    // The retired hand-rolled tail's legacy arm read elements from
+    // the RAW OBJECT BASE for unstamped lists (header words came back
+    // as "elements": prog.seqs[i][j] in the regex engine returned
+    // item 0 for every j — the anchor truth-table class), because the
+    // is_list fast path above only fires when the register carries a
+    // compile-time list mark that nested GET_E results don't have.
     let ptr_type = ctx.types().ptr_type();
-    let cur_bb = ctx
+    let (ug_data, _ug_len, ug_elem) = emit_container_view(ctx, arr_ptr, "geteu")?;
+    let ug_off = ctx
         .builder()
-        .get_insert_block()
-        .or_internal("lower_get_element: no insert block")?;
-    let func = cur_bb
-        .get_parent()
-        .or_internal("lower_get_element: block has no parent")?;
-    let llvm_ctx = ctx.llvm_context();
-    let bb_pack = llvm_ctx.append_basic_block(func, "gete_pack");
-    let bb_orig = llvm_ctx.append_basic_block(func, "gete_orig");
-    let bb_merge = llvm_ctx.append_basic_block(func, "gete_merge");
-    // #48 canonical slice cell {data@0, len@8, elem@16}: probe FIRST —
-    // a cell's word0 is a data POINTER, so the header-stamp reads
-    // below would misread it. Cell branch does the stride-honouring
-    // element read (mirror of interp fat_ref_read_element).
-    let bb_cell = llvm_ctx.append_basic_block(func, "gete_cell");
-    let bb_stamp = llvm_ctx.append_basic_block(func, "gete_stamp");
-    let (gete_is_cell, gete_w0) = emit_slice_cell_probe(ctx, arr_ptr, "gete")?;
-    ctx.builder()
-        .build_conditional_branch(gete_is_cell, bb_cell, bb_stamp)
+        .build_int_mul(index, ug_elem, "geteu_off")
         .or_llvm_err()?;
-
-    // bb_cell: element = load (data + idx*elem) with width switch.
-    ctx.builder().position_at_end(bb_cell);
-    let (cell_elem_w, cell_eptr) =
-        emit_slice_cell_elem_addr(ctx, arr_ptr, gete_w0, index, "gete")?;
-    let cw1 = llvm_ctx.append_basic_block(func, "gete_cw1");
-    let cw2 = llvm_ctx.append_basic_block(func, "gete_cw2");
-    let cw4 = llvm_ctx.append_basic_block(func, "gete_cw4");
-    let cw8 = llvm_ctx.append_basic_block(func, "gete_cw8");
-    let cmerge = llvm_ctx.append_basic_block(func, "gete_cmerge");
-    ctx.builder()
-        .build_switch(
-            cell_elem_w,
-            cw8,
-            &[
-                (i64_type.const_int(1, false), cw1),
-                (i64_type.const_int(2, false), cw2),
-                (i64_type.const_int(4, false), cw4),
-            ],
-        )
-        .or_llvm_err()?;
-    let mut cell_loads: Vec<(BasicValueEnum, _)> = Vec::new();
-    for (bb, bits) in [(cw1, 8u32), (cw2, 16), (cw4, 32)] {
-        ctx.builder().position_at_end(bb);
-        let ity = llvm_ctx.custom_width_int_type(bits);
-        let v = ctx
-            .builder()
-            .build_load(ity, cell_eptr, "gete_cw_v")
-            .or_llvm_err()?
-            .into_int_value();
-        let z = ctx
-            .builder()
-            .build_int_z_extend(v, i64_type, "gete_cw_z")
-            .or_llvm_err()?;
-        ctx.builder().build_unconditional_branch(cmerge).or_llvm_err()?;
-        cell_loads.push((z.into(), ctx.builder().get_insert_block().unwrap()));
-    }
-    ctx.builder().position_at_end(cw8);
-    let v8 = ctx
+    let ug_addr = ctx
         .builder()
-        .build_load(i64_type, cell_eptr, "gete_cw8_v")
+        .build_int_add(ug_data, ug_off, "geteu_addr")
         .or_llvm_err()?;
-    ctx.builder().build_unconditional_branch(cmerge).or_llvm_err()?;
-    cell_loads.push((v8, ctx.builder().get_insert_block().unwrap()));
-    ctx.builder().position_at_end(cmerge);
-    let cell_phi = ctx.builder().build_phi(i64_type, "gete_cell_val").or_llvm_err()?;
-    for (val, bb) in &cell_loads {
-        cell_phi.add_incoming(&[(&(*val), *bb)]);
-    }
-    let cell_elem_val = cell_phi.as_basic_value();
-    ctx.builder().build_unconditional_branch(bb_merge).or_llvm_err()?;
-    let bb_cell_end = ctx.builder().get_insert_block().unwrap();
-
-    // stamp path (pre-existing): header-stamp discrimination.
-    ctx.builder().position_at_end(bb_stamp);
-    let tid = ctx
+    let ug_eptr = ctx
         .builder()
-        .build_load(i32_type, arr_ptr, "gete_hdr_tid")
-        .or_llvm_err()?
-        .into_int_value();
-    // Slice Pack stamps: TUPLE (521) or BYTE_SLICE (528, ARCH-P5 —
-    // the AsBytes lowering's representation tag) — identical
-    // {ptr@24, len@32} layout, same byte-stride read.
-    let is_tuple_pack = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            tid,
-            i32_type.const_int(TypeId::TUPLE.0 as u64, false),
-            "gete_is_tuple_pack",
-        )
+        .build_int_to_ptr(ug_addr, ptr_type, "geteu_eptr")
         .or_llvm_err()?;
-    let is_byte_slice = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            tid,
-            i32_type.const_int(TypeId::BYTE_SLICE.0 as u64, false),
-            "gete_is_byte_slice",
-        )
-        .or_llvm_err()?;
-    let is_pack = ctx
-        .builder()
-        .build_or(is_tuple_pack, is_byte_slice, "gete_is_pack")
-        .or_llvm_err()?;
-    ctx.builder()
-        .build_conditional_branch(is_pack, bb_pack, bb_orig)
-        .or_llvm_err()?;
-
-    // bb_pack: byte-stride read through the Pack's data ptr (field 0 @24).
-    ctx.builder().position_at_end(bb_pack);
-    // SAFETY: GEP into the Pack object to read the backing data pointer at offset 24 (past the 24-byte header)
-    let pk_ptr_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                arr_ptr,
-                &[i64_type.const_int(24, false)],
-                "gete_pk_ptr_slot",
-            )
-            .or_llvm_err()?
-    };
-    let pk_data_int = ctx
-        .builder()
-        .build_load(i64_type, pk_ptr_slot, "gete_pk_data_int")
-        .or_llvm_err()?
-        .into_int_value();
-    let pk_data = ctx
-        .builder()
-        .build_int_to_ptr(pk_data_int, ptr_type, "gete_pk_data")
-        .or_llvm_err()?;
-    // SAFETY: GEP into the slice backing data to access a byte at the given index
-    let pk_byte_ptr = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(i8_type, pk_data, &[index], "gete_pk_byte_ptr")
-            .or_llvm_err()?
-    };
-    let pk_byte = ctx
-        .builder()
-        .build_load(i8_type, pk_byte_ptr, "gete_pk_byte")
-        .or_llvm_err()?
-        .into_int_value();
-    let pk_elem = ctx
-        .builder()
-        .build_int_z_extend(pk_byte, i64_type, "gete_pk_zext")
-        .or_llvm_err()?;
-    ctx.builder()
-        .build_unconditional_branch(bb_merge)
-        .or_llvm_err()?;
-
-    // bb_orig: the pre-existing i64-stride element read.
-    ctx.builder().position_at_end(bb_orig);
-    // GEP into the element array (elements are i64)
-    // SAFETY: GEP into list data array to access an element; the index is validated against the list length before access
-    let elem_ptr = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr")
-            .or_llvm_err()?
-    };
-    let orig_elem = ctx
-        .builder()
-        .build_load(i64_type, elem_ptr, "elem_load")
-        .or_llvm_err()?
-        .into_int_value();
-    ctx.builder()
-        .build_unconditional_branch(bb_merge)
-        .or_llvm_err()?;
-
-    // bb_merge: phi the element value.
-    ctx.builder().position_at_end(bb_merge);
-    let elem_phi = ctx
-        .builder()
-        .build_phi(i64_type, "gete_elem")
-        .or_llvm_err()?;
-    elem_phi.add_incoming(&[
-        (&pk_elem, bb_pack),
-        (&orig_elem, bb_orig),
-        (&cell_elem_val, bb_cell_end),
-    ]);
-    let element = elem_phi.as_basic_value();
-
-    ctx.set_register(dst.0, element);
-    // Save element pointer for Ref — enables references into heap-allocated
-    // backing arrays that survive function returns (unlike stack allocas).
-    // Re-emit the GEP in the merge block so the stored value dominates any
-    // later consumer blocks (bb_orig's copy would not).
-    if is_list {
-        // SAFETY: address computation only (no load); same bounds reasoning as the bb_orig GEP.
-        let elem_ptr_merge = unsafe {
-            ctx.builder()
-                .build_in_bounds_gep(i64_type, data_ptr, &[index], "elem_ptr_m")
-                .or_llvm_err()?
-        };
-        ctx.set_gete_element_ptr(dst.0, elem_ptr_merge);
-    }
-    // Propagate string tracking: if this list contains strings, mark the element
-    if ctx.is_string_list_register(arr.0) {
-        ctx.mark_text_register(dst.0);
-    }
-    // Propagate pass-through ref tracking: if this list contains Heap<T> values,
-    // mark the element so Deref passes through instead of loading through pointer.
-    if ctx.is_pass_through_ref_list(arr.0) {
-        ctx.mark_pass_through_ref(dst.0);
-    }
-    // Propagate element type from List<T> generic_type_args.
-    // E.g., for List<List<Int>>, the args are [Instantiated{LIST,[INT]}].
-    // The first arg is the element type — apply mark_register_from_return_type.
-    if let Some(type_args) = ctx.get_generic_type_args(arr.0).cloned() {
-        if let Some(elem_type) = type_args.first() {
-            mark_register_from_return_type(ctx, dst.0, elem_type);
-        }
-    }
+    let ug_val = emit_slice_cell_elem_load(ctx, ug_elem, ug_eptr, "geteu")?;
+    ctx.set_register(dst.0, ug_val.into());
     Ok(())
 }
 
@@ -30876,238 +30804,24 @@ fn lower_set_element<'ctx>(
         return Ok(());
     }
 
-    // Unmarked, non-list: runtime PACK-HEADER-STAMP branch — the exact
-    // mirror of `lower_get_element`'s.  A slice that crossed a function
-    // boundary as a `&[Byte]` param (or came back out of a record field)
-    // carries no compile-time mark; discriminate at runtime by the
-    // stamped header TypeId (TUPLE 521 / BYTE_SLICE 528 — PACK-HEADER-
-    // STAMP-1) and byte-store through the descriptor's data ptr;
-    // everything else keeps the pre-existing direct i64-stride store.
-    if sete_legacy {
-        // Legacy direct i64-stride store (pre-AOT-SETE-SLICE-PARITY-1).
-        let elem_ptr = unsafe {
-            ctx.builder()
-                .build_in_bounds_gep(i64_type, arr_ptr, &[index], "elem_ptr")
-                .or_llvm_err()?
-        };
-        ctx.builder().build_store(elem_ptr, val).or_llvm_err()?;
-        return Ok(());
-    }
-    let i32_type = ctx.types().context().i32_type();
-    let cur_bb = ctx
+    // #47/#48 unification (write twin of GET_E's unmarked tail): ONE
+    // 3-arm classification via emit_container_view; stride-honouring
+    // store. VERUM_SETE_LEGACY handled above.
+    let (us_data, _us_len, us_elem) = emit_container_view(ctx, arr_ptr, "seteu")?;
+    let us_off = ctx
         .builder()
-        .get_insert_block()
-        .or_internal("lower_set_element: no insert block")?;
-    let func = cur_bb
-        .get_parent()
-        .or_internal("lower_set_element: block has no parent")?;
-    let llvm_ctx = ctx.llvm_context();
-    let bb_pack = llvm_ctx.append_basic_block(func, "sete_pack");
-    let bb_orig = llvm_ctx.append_basic_block(func, "sete_orig");
-    let bb_merge = llvm_ctx.append_basic_block(func, "sete_merge");
-    // #48 cell arm FIRST (mirror of lower_get_element): a cell's word0 is
-    // a data POINTER — the i32 header-stamp read below would misread it.
-    let bb_scell = llvm_ctx.append_basic_block(func, "sete_cell");
-    let bb_stamp = llvm_ctx.append_basic_block(func, "sete_stamp");
-    let (sete_is_cell, sete_w0) = emit_slice_cell_probe(ctx, arr_ptr, "sete")?;
-    ctx.builder()
-        .build_conditional_branch(sete_is_cell, bb_scell, bb_stamp)
+        .build_int_mul(index, us_elem, "seteu_off")
         .or_llvm_err()?;
-
-    ctx.builder().position_at_end(bb_scell);
-    let (sc_elem_w, sc_eptr) =
-        emit_slice_cell_elem_addr(ctx, arr_ptr, sete_w0, index, "sete")?;
-    emit_slice_cell_elem_store(ctx, sc_elem_w, sc_eptr, val_i64, "sete")?;
-    ctx.builder()
-        .build_unconditional_branch(bb_merge)
-        .or_llvm_err()?;
-
-    ctx.builder().position_at_end(bb_stamp);
-    let tid = ctx
+    let us_addr = ctx
         .builder()
-        .build_load(i32_type, arr_ptr, "sete_hdr_tid")
-        .or_llvm_err()?
-        .into_int_value();
-    let is_tuple_pack = ctx
+        .build_int_add(us_data, us_off, "seteu_addr")
+        .or_llvm_err()?;
+    let us_eptr = ctx
         .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            tid,
-            i32_type.const_int(TypeId::TUPLE.0 as u64, false),
-            "sete_is_tuple_pack",
-        )
+        .build_int_to_ptr(us_addr, ptr_type, "seteu_eptr")
         .or_llvm_err()?;
-    let is_byte_slice = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            tid,
-            i32_type.const_int(TypeId::BYTE_SLICE.0 as u64, false),
-            "sete_is_byte_slice",
-        )
-        .or_llvm_err()?;
-    let is_pack = ctx
-        .builder()
-        .build_or(is_tuple_pack, is_byte_slice, "sete_is_pack")
-        .or_llvm_err()?;
-    ctx.builder()
-        .build_conditional_branch(is_pack, bb_pack, bb_orig)
-        .or_llvm_err()?;
-
-    // bb_pack: byte-stride store through the Pack's data ptr (field 0 @24).
-    ctx.builder().position_at_end(bb_pack);
-    // SAFETY: GEP into the Pack object to read the backing data pointer at offset 24.
-    let pk_ptr_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                arr_ptr,
-                &[i64_type.const_int(24, false)],
-                "sete_pk_ptr_slot",
-            )
-            .or_llvm_err()?
-    };
-    let pk_data_int = ctx
-        .builder()
-        .build_load(i64_type, pk_ptr_slot, "sete_pk_data_int")
-        .or_llvm_err()?
-        .into_int_value();
-    let pk_data = ctx
-        .builder()
-        .build_int_to_ptr(pk_data_int, ptr_type, "sete_pk_data")
-        .or_llvm_err()?;
-    let pk_byte_val = ctx
-        .builder()
-        .build_int_truncate(val_i64, i8_type, "sete_pk_byte_val")
-        .or_llvm_err()?;
-    // SAFETY: GEP into the slice backing data to store a byte at the given index.
-    let pk_byte_ptr = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(i8_type, pk_data, &[index], "sete_pk_byte_ptr")
-            .or_llvm_err()?
-    };
-    ctx.builder()
-        .build_store(pk_byte_ptr, pk_byte_val)
-        .or_llvm_err()?;
-    ctx.builder()
-        .build_unconditional_branch(bb_merge)
-        .or_llvm_err()?;
-
-    // bb_orig: the pre-existing direct i64-stride store.
-    ctx.builder().position_at_end(bb_orig);
-    // SAFETY: GEP into the element array; index validated upstream.
-    let elem_ptr = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(i64_type, arr_ptr, &[index], "elem_ptr")
-            .or_llvm_err()?
-    };
-    ctx.builder().build_store(elem_ptr, val).or_llvm_err()?;
-    ctx.builder()
-        .build_unconditional_branch(bb_merge)
-        .or_llvm_err()?;
-
-    ctx.builder().position_at_end(bb_merge);
+    emit_slice_cell_elem_store(ctx, us_elem, us_eptr, val_i64, "seteu")?;
     Ok(())
-}
-
-/// Lower Len instruction (get array length).
-///
-
-/// Arrays are represented as:
-/// - For static arrays: length is compile-time constant
-/// - For dynamic arrays: header contains length
-///
-
-/// For now, we support the common case of a header struct:
-/// { i64 len, [N x T] data }
-///
-
-/// `type_hint`: 0=unknown, 1=List, 2=Map, 3=Set, 4=Deque, 5=Text, 6=Channel, 7=Slice.
-/// When non-zero, type_hint takes priority over register tracking (which can be
-/// unreliable after function calls clear type marks).
-
-/// #48 — thin wrapper over `slice_cell::CellEnv::elem_width` +
-/// `elem_addr` for cell base pointers (word0 IS the data pointer).
-fn emit_slice_cell_elem_addr<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    base_ptr: PointerValue<'ctx>,
-    word0: IntValue<'ctx>,
-    index: IntValue<'ctx>,
-    tag: &str,
-) -> Result<(IntValue<'ctx>, PointerValue<'ctx>)> {
-    let env = super::slice_cell::CellEnv {
-        llvm: ctx.llvm_context(),
-        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
-    };
-    let elem = env.elem_width(ctx.builder(), base_ptr, tag)?;
-    let (_addr, eptr) = env.elem_addr(ctx.builder(), word0, elem, index, tag)?;
-    Ok((elem, eptr))
-}
-
-/// #48 — thin wrapper over the ONE 3-arm classifier
-/// (`slice_cell::CellEnv::view`); see that module for the shape table.
-fn emit_container_view<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    base_ptr: PointerValue<'ctx>,
-    tag: &str,
-) -> Result<(IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>)> {
-    let env = super::slice_cell::CellEnv {
-        llvm: ctx.llvm_context(),
-        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
-    };
-    let v = env.view(
-        ctx.builder(),
-        base_ptr,
-        TypeId::TUPLE.0 as u64,
-        TypeId::BYTE_SLICE.0 as u64,
-        super::runtime::LIST_LEN_OFFSET,
-        super::runtime::LIST_PTR_OFFSET,
-        tag,
-    )?;
-    Ok((v.data, v.len, v.elem))
-}
-
-/// #48 — thin wrapper over `slice_cell::CellEnv::elem_load`.
-fn emit_slice_cell_elem_load<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    elem_w: IntValue<'ctx>,
-    elem_ptr: PointerValue<'ctx>,
-    tag: &str,
-) -> Result<IntValue<'ctx>> {
-    let env = super::slice_cell::CellEnv {
-        llvm: ctx.llvm_context(),
-        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
-    };
-    env.elem_load(ctx.builder(), elem_w, elem_ptr, tag)
-}
-
-/// #48 — thin wrapper over `slice_cell::CellEnv::elem_store`.
-fn emit_slice_cell_elem_store<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    elem_w: IntValue<'ctx>,
-    elem_ptr: PointerValue<'ctx>,
-    val_i64: IntValue<'ctx>,
-    tag: &str,
-) -> Result<()> {
-    let env = super::slice_cell::CellEnv {
-        llvm: ctx.llvm_context(),
-        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
-    };
-    env.elem_store(ctx.builder(), elem_w, elem_ptr, val_i64, tag)
-}
-
-/// #48 — thin FunctionContext wrapper over the ONE cell authority
-/// (`slice_cell::CellEnv::probe`); see that module for the contract.
-fn emit_slice_cell_probe<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    base_ptr: PointerValue<'ctx>,
-    tag: &str,
-) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
-    let env = super::slice_cell::CellEnv {
-        llvm: ctx.llvm_context(),
-        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
-    };
-    env.probe(ctx.builder(), base_ptr, tag)
 }
 
 fn lower_len<'ctx>(
