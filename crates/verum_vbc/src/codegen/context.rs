@@ -2359,6 +2359,35 @@ impl CodegenContext {
                 self.functions.get(&name).map(|e| (e.id.0, e.param_count)),
             );
         }
+        // CTOR-BINDING-SHIELD-1 (#51): a bare (dotless) key whose
+        // existing binding is a VARIANT CONSTRUCTOR (variant_tag=Some)
+        // is a language-level name — `Continue(42)` compiles to a
+        // MakeVariant through it.  A tag-less FUNCTION alias arriving
+        // later (archive simple-alias sweeps, ghost stage-3 stubs —
+        // the postgres archive carries a phantom
+        // 'core.net.weft.dst.Continue' RetV descriptor whose bare
+        // alias clobbered ControlFlow's ctor and sent `Continue(42)`
+        // into KeyType.eq) must NOT replace it: the ctor stays, the
+        // late alias remains reachable through its qualified key.
+        // Deliberate rebinds go through
+        // `register_function_authoritative`, which this gate does not
+        // guard.  Shape-based (tag presence), not a name list — per
+        // the no-hardcoded-stdlib-knowledge rule.
+        if !name.contains('.')
+            && info.variant_tag.is_none()
+            && self
+                .functions
+                .get(&name)
+                .is_some_and(|existing| existing.variant_tag.is_some())
+        {
+            if std::env::var("VERUM_TRACE_FNREG").is_ok() {
+                eprintln!(
+                    "[fnreg] SHIELD kept ctor binding for bare '{}' (incoming id={} has no variant_tag)",
+                    name, info.id.0
+                );
+            }
+            return;
+        }
         // ARCH-P2 stage 1 — content-addressed canonical identity,
         // DUAL keying.  Purely additive parallel index: the bare /
         // `name#arity` / scoped tables below keep sole lookup
