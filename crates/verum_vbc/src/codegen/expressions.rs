@@ -6334,9 +6334,13 @@ impl VbcCodegen {
                 if let Some(concrete) = self.infer_expr_type_name(arg) {
                     let stripped = strip_ref(&concrete);
                     let base = stripped.split('<').next().unwrap_or(&stripped).trim();
-                    if base.is_empty()
-                        || verum_common::well_known_types::looks_like_type_param(base)
-                    {
+                    // Carried fact, not name shape: a 2-char PascalCase
+                    // CONCRETE type (`Pt`, `Id`, …) is a valid binding
+                    // source; only names that are BOUND type params of
+                    // the function being compiled are placeholders here
+                    // (#44-A: `show(p)` never seeded `show<Pt>` because
+                    // `looks_like_type_param("Pt")` mis-filtered it).
+                    if base.is_empty() || self.ctx.generic_type_params.contains(base) {
                         continue;
                     }
                     // Preserve the FULL instantiation (e.g. `ReadyFuture<Text>`
@@ -6424,7 +6428,11 @@ impl VbcCodegen {
                 base: base_id,
                 args,
             })
-        } else if verum_common::well_known_types::looks_like_type_param(name) {
+        } else if self.ctx.generic_type_params.contains(name) {
+            // Bound type param of the current function — not a concrete
+            // type name (carried fact; the shape heuristic mis-filtered
+            // 2-char concrete types like `Pt`).  An UNBOUND unknown name
+            // simply misses `type_name_to_id` below and returns None.
             None
         } else {
             self.type_name_to_id
@@ -35732,11 +35740,26 @@ impl VbcCodegen {
                 type_name, base
             );
         }
-        // Bare generic-param-shaped names (`T`, `U`, `E`) are never
-        // valid Display targets — they only exist as placeholders in
-        // generic bodies.  Routing through them would emit a Call to
-        // a literal-`T.fmt` ghost function.
-        if verum_common::well_known_types::looks_like_type_param(&base) {
+        // Bare generic-param names (`T`, `U`, `E`) are never valid
+        // Display targets — they only exist as placeholders in generic
+        // bodies.  Routing through them would emit a Call to a
+        // literal-`T.fmt` ghost function.  Decide by the CARRIED FACT
+        // (is this name a bound type param of the function being
+        // compiled — `ctx.generic_type_params` is populated per
+        // function), not by name shape: `looks_like_type_param`
+        // classified every 2-char PascalCase CONCRETE type (`Pt`,
+        // `Id`, `Db`, …) as a param and silently dropped its
+        // user-defined Display impl (#44-A isolate).  No shape
+        // fallback: an untracked param name simply misses every
+        // lookup below (no `T.fmt` entry, no `T` descriptor) and
+        // degrades to the same `ToString` path the old gate forced.
+        if self.ctx.generic_type_params.contains(base.as_str()) {
+            if trace {
+                eprintln!(
+                    "[display-dispatch] '{}' is a bound type param of the current function — fallback",
+                    base
+                );
+            }
             return Ok(false);
         }
         // Primitives have inline `ToString` handlers in the runtime

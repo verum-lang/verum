@@ -291,35 +291,21 @@ impl MonomorphizationResolver {
             return Ok(());
         }
 
-        // Step 2: Check persistent cache
-        if let Some(ref mut cache) = self.cache {
-            // Extract cache_dir first to avoid borrow conflicts
-            let cache_dir = cache.cache_dir().clone();
-            let metadata_path = cache_dir.join(format!("{:016x}.meta", request.hash));
-            let cache_file = cache_dir.join(format!("{:016x}.vbc", request.hash));
-
-            if let Some(cached_bytecode) = cache.get(request.hash) {
-                let bytecode_len = cached_bytecode.len() as u32;
-
-                // Validate cache
-                if let Ok(metadata) = CacheMetadata::load(&metadata_path) {
-                    if self.validate_cache(&metadata, request) {
-                        self.resolved.insert(
-                            request.hash,
-                            ResolvedSpecialization::Cached {
-                                cache_file,
-                                bytecode_offset: 0,
-                                bytecode_length: bytecode_len,
-                            },
-                        );
-                        self.stats.cache_hits += 1;
-                        return Ok(());
-                    } else {
-                        self.stats.cache_invalidations += 1;
-                    }
-                }
-            }
-        }
+        // Step 2 (persistent cache) is DISABLED on the read side:
+        // `ResolvedSpecialization::Cached` has NO consumer — the merger
+        // materialises only `StdlibPrecompiled` — so claiming a cache
+        // hit here SWALLOWED the instantiation entirely (not pending →
+        // never specialized; not routed → CallG kept dispatching the
+        // generic body).  With ~/.verum/cache/mono populated (write
+        // side below still runs), EVERY re-compile of the same
+        // instantiation set resolved to pending=0/routed={} and the
+        // whole mono pass became a no-op (#44-A: `specialized=0` with
+        // 50 ghost cache hits).  Re-enable ONLY together with a
+        // materialiser that decodes the cached body and remaps its
+        // module-relative string/type/function ids into the target
+        // module (portable-format work, tracked as tech-debt A-line).
+        // Fresh specialization below re-populates the cache, so the
+        // write side keeps producing artefacts for that future layer.
 
         // Step 3: Schedule for specialization
         self.resolved
