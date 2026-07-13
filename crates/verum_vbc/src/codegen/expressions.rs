@@ -8624,6 +8624,73 @@ impl VbcCodegen {
         }
 
         // ──────────────────────────────────────────────────────────
+        // TIER-COHERENCE-TOSTRING-1: `x.to_text()` / `x.to_string()` on a
+        // PRIMITIVE must yield the SAME Text the f-string ToString path does.
+        // The interpreter intercepts these (method_dispatch →
+        // format_value_for_print), but AOT had no equivalent: primitives
+        // define no concrete `to_text`/`to_string` (they rely on the blanket
+        // `implement<T: Display> ToString for T`), so the CallM found no
+        // concrete target and degraded to a const-zero stub — `(500).to_string()`
+        // rendered "0" under AOT while `f"{500}"` (ToString instruction) was
+        // correct. Route primitive receivers through the SAME conversion the
+        // interpolation path uses (Char→CharToStr, Float→verum_float_to_text —
+        // NOT ToString, whose i64 slot would print raw float bits — everything
+        // else→ToString) so both tiers agree. Non-primitives fall through to
+        // normal dispatch, keeping their Display / custom `to_string` impl.
+        if args.is_empty() && matches!(method.name.as_str(), "to_text" | "to_string") {
+            enum Conv {
+                Str,
+                Char,
+                Float,
+            }
+            let conv = match self.infer_expr_type_kind(receiver) {
+                Some(verum_ast::ty::TypeKind::Bool) | Some(verum_ast::ty::TypeKind::Int) => {
+                    Some(Conv::Str)
+                }
+                Some(verum_ast::ty::TypeKind::Char) => Some(Conv::Char),
+                Some(verum_ast::ty::TypeKind::Float) => Some(Conv::Float),
+                Some(verum_ast::ty::TypeKind::Path(ref p)) => {
+                    match p.as_ident().map(|i| i.name.as_str()) {
+                        Some(
+                            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "UInt"
+                            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128" | "Byte"
+                            | "Usize" | "Isize" | "Bool",
+                        ) => Some(Conv::Str),
+                        Some("Char") => Some(Conv::Char),
+                        Some("Float" | "Float32" | "Float64") => Some(Conv::Float),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some(conv) = conv {
+                let recv_reg = self
+                    .compile_expr(receiver)?
+                    .or_internal("to_text/to_string receiver has no value")?;
+                let dst = self.ctx.alloc_temp();
+                match conv {
+                    Conv::Char => self.ctx.emit(Instruction::CharToStr {
+                        dst,
+                        src: recv_reg,
+                    }),
+                    Conv::Float => {
+                        self.emit_intrinsic_library_call(
+                            "verum_float_to_text",
+                            &[recv_reg],
+                            dst,
+                        )?;
+                    }
+                    Conv::Str => self.ctx.emit(Instruction::ToString {
+                        dst,
+                        src: recv_reg,
+                    }),
+                }
+                self.ctx.free_temp(recv_reg);
+                return Ok(Some(dst));
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────
         // **Phase 0a — chained `<TypeName>.<Variant>.<method>()` materialisation.**
         //
         // When the receiver is `Field { Path(TypeName), Variant }` whose
