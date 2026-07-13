@@ -5224,6 +5224,21 @@ pub enum SystemSubOpcode {
     /// Initializes: All elements to init value (cast to element type)
     NewTypedArray = 0x4E,
 
+    /// Store one element into a typed (packed) array, UNBOXING the value.
+    ///
+    /// Format: `arr:reg, idx:reg, val:reg, elem_size:u8`
+    /// Writes `val.as_i64()` truncated to `elem_size` raw bytes at
+    /// `HEADER + idx*elem_size`. The typed-array analogue of
+    /// `ByteArrayStore` (which is the `elem_size == 1` case) — and the
+    /// twin of `NewTypedArray`'s raw fill. The prior path
+    /// (`TypedArrayElementAddr` + `DerefMutRaw`) stored the FULL 64-bit
+    /// NaN-boxed `Value` bits (deliberate, for `*ptr = Some(v)` pointer
+    /// round-trips, task #40), so a `[Int; N]` element read back as the
+    /// tag pattern (`0x7FF9…000A` for `10`) — silent garbage (TYPED-
+    /// ARRAY-REPR-1 #27). Raw store + the existing raw load
+    /// (`GetE`/`SliceGet reserved=elem_size` → `from_i64`) are coherent.
+    TypedArrayStore = 0x5E,
+
     /// Get raw address of a struct field.
     ///
 
@@ -6087,6 +6102,7 @@ impl SystemSubOpcode {
             0x4C => Some(Self::ByteArrayStore),
             0x4D => Some(Self::TypedArrayElementAddr),
             0x4E => Some(Self::NewTypedArray),
+            0x5E => Some(Self::TypedArrayStore),
             0x4F => Some(Self::StructFieldAddr),
             // Callback Support
             0x50 => Some(Self::CreateCallback),
@@ -6255,6 +6271,7 @@ impl SystemSubOpcode {
             Self::ByteArrayStore         => m!("FFI_BYTE_ARRAY_STORE",       MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::TypedArrayElementAddr  => m!("FFI_TYPED_ARRAY_ELEM_ADDR",  MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::NewTypedArray          => m!("FFI_NEW_TYPED_ARRAY",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::TypedArrayStore        => m!("FFI_TYPED_ARRAY_STORE",      MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::StructFieldAddr        => m!("FFI_STRUCT_FIELD_ADDR",      MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Callback Support (0x50-0x5F) =====

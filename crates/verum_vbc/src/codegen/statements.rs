@@ -781,43 +781,34 @@ impl VbcCodegen {
             if let Some(elements) = self.get_typed_array_literal_elements(expr) {
                 // Fill in the values using DerefMutRaw (fast path for all-literal arrays)
                 for (idx, elem_val) in elements.into_iter().enumerate() {
-                    // Get element address
                     let idx_reg = self.ctx.alloc_temp();
-                    let addr_reg = self.ctx.alloc_temp();
                     let val_reg = self.ctx.alloc_temp();
 
                     self.ctx.emit(Instruction::LoadI {
                         dst: idx_reg,
                         value: idx as i64,
                     });
-
-                    // TypedArrayElementAddr: addr = &arr[idx] with elem_size
-                    let addr_operands = vec![
-                        addr_reg.0 as u8,
-                        result.0 as u8,
-                        idx_reg.0 as u8,
-                        elem_size as u8,
-                    ];
-                    self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x4D, // TypedArrayElementAddr
-                        operands: addr_operands,
-                    });
-
-                    // Load value
                     self.ctx.emit(Instruction::LoadI {
                         dst: val_reg,
                         value: elem_val,
                     });
 
-                    // DerefMutRaw: *addr = val with elem_size
-                    let store_operands = vec![addr_reg.0 as u8, val_reg.0 as u8, elem_size as u8];
+                    // TypedArrayStore: arr[idx] = val, UNBOXED to raw elem_size
+                    // bytes (TYPED-ARRAY-REPR-1 #27). Replaces the old
+                    // TypedArrayElementAddr + DerefMutRaw, which stored the FULL
+                    // NaN-boxed Value bits so the raw load read back garbage.
+                    let store_operands = vec![
+                        result.0 as u8,
+                        idx_reg.0 as u8,
+                        val_reg.0 as u8,
+                        elem_size as u8,
+                    ];
                     self.ctx.emit(Instruction::FfiExtended {
-                        sub_op: 0x61, // DerefMutRaw
+                        sub_op: 0x5E, // TypedArrayStore
                         operands: store_operands,
                     });
 
                     self.ctx.free_temp(idx_reg);
-                    self.ctx.free_temp(addr_reg);
                     self.ctx.free_temp(val_reg);
                 }
             } else if let verum_ast::ExprKind::Array(verum_ast::ArrayExpr::List(elements)) =
@@ -827,35 +818,26 @@ impl VbcCodegen {
                 for (idx, elem_expr) in elements.iter().enumerate() {
                     if let Some(val_reg) = self.compile_expr(elem_expr)? {
                         let idx_reg = self.ctx.alloc_temp();
-                        let addr_reg = self.ctx.alloc_temp();
 
                         self.ctx.emit(Instruction::LoadI {
                             dst: idx_reg,
                             value: idx as i64,
                         });
 
-                        // TypedArrayElementAddr: addr = &arr[idx] with elem_size
-                        let addr_operands = vec![
-                            addr_reg.0 as u8,
+                        // TypedArrayStore: arr[idx] = val, UNBOXED (TYPED-ARRAY-
+                        // REPR-1 #27) — see the literal fast path above.
+                        let store_operands = vec![
                             result.0 as u8,
                             idx_reg.0 as u8,
+                            val_reg.0 as u8,
                             elem_size as u8,
                         ];
                         self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x4D, // TypedArrayElementAddr
-                            operands: addr_operands,
-                        });
-
-                        // DerefMutRaw: *addr = val with elem_size
-                        let store_operands =
-                            vec![addr_reg.0 as u8, val_reg.0 as u8, elem_size as u8];
-                        self.ctx.emit(Instruction::FfiExtended {
-                            sub_op: 0x61, // DerefMutRaw
+                            sub_op: 0x5E, // TypedArrayStore
                             operands: store_operands,
                         });
 
                         self.ctx.free_temp(idx_reg);
-                        self.ctx.free_temp(addr_reg);
                         self.ctx.free_temp(val_reg);
                     }
                 }

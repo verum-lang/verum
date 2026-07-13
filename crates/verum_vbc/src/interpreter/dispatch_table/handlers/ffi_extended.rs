@@ -775,6 +775,104 @@ pub(in super::super) fn handle_ffi_extended(
         }
 
         // ================================================================
+        // Typed Array Store (UNBOXING) — TYPED-ARRAY-REPR-1 (#27)
+        // ================================================================
+        Some(SystemSubOpcode::TypedArrayStore) => {
+            // Store one element into a packed typed array, UNBOXING the value.
+            // Format: arr:reg, idx:reg, val:reg, elem_size:u8
+            //
+            // The typed-array twin of `ByteArrayStore` (elem_size == 1) and of
+            // `NewTypedArray`'s raw fill: a `[Int; N]` element is a raw
+            // `elem_size` integer, NOT a NaN-boxed `Value`. The prior init /
+            // assignment path (`TypedArrayElementAddr` + `DerefMutRaw`) wrote
+            // the FULL 64-bit `Value` bits (deliberate for `*ptr = Some(v)`
+            // pointer round-trips, task #40), so the load — which reads the raw
+            // `elem_size` bytes (`GetE` / `SliceGet reserved=elem_size` →
+            // `from_i64`) — read back the NaN-box tag pattern as garbage
+            // (`a[0]` of `[10,…]` → `0x7FF9…000A`). Storing raw makes store and
+            // load coherent.
+            let arr_reg = read_reg(state)?;
+            let idx_reg = read_reg(state)?;
+            let val_reg = read_reg(state)?;
+            let elem_size = read_u8(state)? as usize;
+
+            let arr_ptr = state.get_reg(arr_reg).as_ptr::<u8>();
+            if arr_ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            let idx = state.get_reg(idx_reg).as_i64();
+            if idx < 0 {
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index: idx,
+                    length: 0,
+                });
+            }
+            // Extract the raw element payload WITHOUT assuming Int — an
+            // `as_i64()` alone panics ("Expected int") on a `[Float; N]`
+            // element or any pointer-tagged value, which is what crashed the
+            // stdlib bake's const-eval. Int → the unboxed i64; Float → the
+            // f64 bit-pattern (raw double, since non-NaN floats are stored
+            // untagged); everything else → the full 64-bit bits (matches
+            // DerefMutRaw's task-#40 pointer round-trip). The raw bytes are
+            // truncated to `elem_size` below, coherent with the raw load.
+            let val_value = state.get_reg(val_reg);
+            let val: u64 = if val_value.is_int() {
+                val_value.as_i64() as u64
+            } else if let Some(f) = val_value.try_as_f64() {
+                f.to_bits()
+            } else {
+                val_value.bits()
+            };
+
+            // Bounds check against `header.size` (BYTES). The borrow is scoped
+            // and dropped before the write.
+            let array_bytes = {
+                // SAFETY: `arr_ptr` is non-null (checked) and begins with an
+                // `ObjectHeader`; the borrow does not escape this block.
+                let header = unsafe {
+                    &*(arr_ptr as *const super::super::super::heap::ObjectHeader)
+                };
+                header.size as usize
+            };
+            let elem_stride = elem_size.max(1);
+            let offset = (idx as usize).checked_mul(elem_size).ok_or({
+                InterpreterError::IndexOutOfBounds {
+                    index: idx,
+                    length: array_bytes / elem_stride,
+                }
+            })?;
+            if offset.checked_add(elem_size).map_or(true, |end| end > array_bytes) {
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index: idx,
+                    length: array_bytes / elem_stride,
+                });
+            }
+            // SAFETY: `offset + elem_size <= array_bytes` (checked above), so
+            // the write stays within the live allocation. No outstanding
+            // references (the `header` borrow was dropped). `write_unaligned`
+            // is unnecessary — typed-array elements are naturally aligned at
+            // `HEADER + idx*elem_size` for power-of-two `elem_size`.
+            unsafe {
+                let data_ptr =
+                    arr_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE + offset);
+                match elem_size {
+                    1 => *data_ptr = val as u8,
+                    2 => *(data_ptr as *mut u16) = val as u16,
+                    4 => *(data_ptr as *mut u32) = val as u32,
+                    8 => *(data_ptr as *mut u64) = val,
+                    _ => {
+                        // Unknown width: write the low bytes little-endian.
+                        let bytes = val.to_le_bytes();
+                        for (i, b) in bytes.iter().enumerate().take(elem_size.min(8)) {
+                            *data_ptr.add(i) = *b;
+                        }
+                    }
+                }
+            }
+            Ok(DispatchResult::Continue)
+        }
+
+        // ================================================================
         // Static-Mut Backing Cell Address — Task #26 [E2] enabler.
         // ================================================================
         //
