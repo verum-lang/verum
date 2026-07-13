@@ -338,6 +338,10 @@ impl MonomorphizationResolver {
     /// 1. Compiler version compatibility
     /// 2. Type definition hash match
     /// 3. Function bytecode hash match
+    // Kept for the future cache MATERIALISER (see the disabled Step 2 in
+    // `resolve_one`): validation logic is correct and reusable once a
+    // consumer for `ResolvedSpecialization::Cached` exists.
+    #[allow(dead_code)]
     fn validate_cache(&self, metadata: &CacheMetadata, request: &InstantiationRequest) -> bool {
         // Check compiler version compatibility
         let current = Version::current();

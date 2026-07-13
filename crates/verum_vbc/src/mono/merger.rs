@@ -1022,6 +1022,21 @@ impl ModuleMerger {
             }
         }
 
+        // VBC-GENERIC-INSTANTIATION per-site routing: a generic with
+        // SEVERAL instantiations can't collapse to one id, but every
+        // `CallG` site CARRIES its static type args — route each site to
+        // the specialization whose (generic_fn, type_args) matches.  The
+        // single-instantiation id_remap override above stays as the
+        // blanket for plain `Call`/`NewClosure` references (they carry
+        // no type args) and for CallG sites whose dense arg vector kept
+        // `Generic(i)` placeholders (no exact match → generic body).
+        let mut site_route: HashMap<(u32, Vec<TypeRef>), u32> = HashMap::new();
+        for spec in &output.specializations {
+            if let Some(spec_id) = self.mapping.get_by_hash(spec.hash) {
+                site_route.insert((spec.generic_fn.0, spec.type_args.clone()), spec_id.0);
+            }
+        }
+
         // Process each function's bytecode
         for func in &output.functions {
             let start = func.bytecode_offset as usize;
@@ -1032,7 +1047,7 @@ impl ModuleMerger {
             }
 
             // Scan and fixup this function's bytecode
-            self.fixup_function_bytecode(&mut output.bytecode, start, end, &id_remap)?;
+            self.fixup_function_bytecode(&mut output.bytecode, start, end, &id_remap, &site_route)?;
         }
 
         // Update specialization entries with correct function IDs
@@ -1046,175 +1061,103 @@ impl ModuleMerger {
     }
 
     /// Fixes up function references in a single function's bytecode.
+    ///
+    /// ONE grammar authority: every instruction is decoded by the
+    /// canonical codec (`bytecode::decode_instruction`) — the previous
+    /// hand-rolled per-opcode walkers disagreed with the real wire on
+    /// FOUR encodings (RegRange is `start:reg + count:u8`, not
+    /// `count:u8 + regs`; CallG's type-arg count is a varint and its
+    /// type-refs use the canonical `encode_type_ref` layout, not
+    /// u16/u8 fields; TailCall carries NO dst register), so the scan
+    /// desynchronised inside every call-family instruction and could
+    /// clobber unrelated operand bytes that happened to match a remap
+    /// key.  `CallV.vtable_slot` and `CallC.cache_id` are NOT
+    /// FunctionIds — the old arms remapped those foreign id spaces
+    /// through the function map (silent corruption for any slot/cache
+    /// index numerically equal to a remapped id); they are now left
+    /// untouched.
     fn fixup_function_bytecode(
         &self,
         bytecode: &mut [u8],
         start: usize,
         end: usize,
         id_remap: &HashMap<u32, u32>,
+        site_route: &HashMap<(u32, Vec<TypeRef>), u32>,
     ) -> Result<(), MergeError> {
+        use crate::instruction::Instruction as I;
+        let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
         let mut pc = start;
 
         while pc < end {
-            let opcode_byte = bytecode[pc];
-            let opcode = Opcode::from_byte(opcode_byte);
-            pc += 1;
+            let instr_start = pc;
+            let mut probe = instr_start;
+            let Ok(instr) = crate::bytecode::decode_instruction(bytecode, &mut probe) else {
+                // Undecodable — stop the scan rather than risk
+                // clobbering unrelated bytes.
+                return Ok(());
+            };
+            if probe <= instr_start || probe > end {
+                return Ok(());
+            }
 
-            match opcode {
-                // CALL dst:reg func_id:varint arg_count:u8 [args:reg...]
-                Opcode::Call | Opcode::TailCall => {
-                    // Skip destination register
-                    pc = self.skip_register(bytecode, pc);
-
-                    // Read and rewrite function ID (varint)
-                    let (old_func_id, varint_len) = self.read_varint(bytecode, pc);
-                    if let Some(&new_func_id) = id_remap.get(&(old_func_id as u32)) {
-                        // Rewrite the varint in place
-                        self.write_varint_in_place(bytecode, pc, varint_len, new_func_id as u64);
-                    }
-                    pc += varint_len;
-
-                    // Skip arg_count and args
-                    if pc < end {
-                        let arg_count = bytecode[pc] as usize;
-                        pc += 1;
-                        for _ in 0..arg_count {
-                            pc = self.skip_register(bytecode, pc);
-                        }
-                    }
+            // (old_id, replacement, func_id-varint position)
+            let target: Option<(u32, Option<u32>, usize)> = match &instr {
+                // [opcode][dst:reg][func_id:varint]…
+                I::Call { func_id, .. } | I::NewClosure { func_id, .. } => {
+                    let dst_len = if bytecode[instr_start + 1] < 128 { 1 } else { 2 };
+                    Some((
+                        *func_id,
+                        id_remap.get(func_id).copied(),
+                        instr_start + 1 + dst_len,
+                    ))
                 }
-
-                // CALL_G dst:reg func_id:varint type_arg_count:u8 [type_args...] arg_count:u8 [args:reg...]
-                Opcode::CallG => {
-                    // Skip destination register
-                    pc = self.skip_register(bytecode, pc);
-
-                    // Read and rewrite function ID (varint)
-                    let (old_func_id, varint_len) = self.read_varint(bytecode, pc);
-                    if let Some(&new_func_id) = id_remap.get(&(old_func_id as u32)) {
-                        self.write_varint_in_place(bytecode, pc, varint_len, new_func_id as u64);
-                    }
-                    pc += varint_len;
-
-                    // Skip type args
-                    if pc < end {
-                        let type_arg_count = bytecode[pc] as usize;
-                        pc += 1;
-                        for _ in 0..type_arg_count {
-                            pc = self.skip_type_ref(bytecode, pc, end);
-                        }
-                    }
-
-                    // Skip arg_count and args
-                    if pc < end {
-                        let arg_count = bytecode[pc] as usize;
-                        pc += 1;
-                        for _ in 0..arg_count {
-                            pc = self.skip_register(bytecode, pc);
-                        }
-                    }
+                // [opcode][func_id:varint]… — no dst register.
+                I::TailCall { func_id, .. } => Some((
+                    *func_id,
+                    id_remap.get(func_id).copied(),
+                    instr_start + 1,
+                )),
+                // [opcode][dst:reg][func_id:varint][targs…]… — the site's
+                // static type args select the matching specialization.
+                I::CallG {
+                    func_id, type_args, ..
+                } => {
+                    let dst_len = if bytecode[instr_start + 1] < 128 { 1 } else { 2 };
+                    let routed = site_route
+                        .get(&(*func_id, type_args.clone()))
+                        .copied()
+                        .or_else(|| id_remap.get(func_id).copied());
+                    Some((*func_id, routed, instr_start + 1 + dst_len))
                 }
+                _ => None,
+            };
 
-                // CALL_V dst:reg receiver:reg method_id:varint arg_count:u8 [args:reg...]
-                Opcode::CallV => {
-                    // Skip destination register
-                    pc = self.skip_register(bytecode, pc);
-                    // Skip receiver register
-                    pc = self.skip_register(bytecode, pc);
-
-                    // Read and potentially rewrite method ID
-                    let (method_id, varint_len) = self.read_varint(bytecode, pc);
-                    if let Some(&new_method_id) = id_remap.get(&(method_id as u32)) {
-                        self.write_varint_in_place(bytecode, pc, varint_len, new_method_id as u64);
-                    }
-                    pc += varint_len;
-
-                    // Skip arg_count and args
-                    if pc < end {
-                        let arg_count = bytecode[pc] as usize;
-                        pc += 1;
-                        for _ in 0..arg_count {
-                            pc = self.skip_register(bytecode, pc);
-                        }
-                    }
-                }
-
-                // CALL_C dst:reg cache_slot:u32 func_id:varint arg_count:u8 [args:reg...]
-                Opcode::CallC => {
-                    // Skip destination register
-                    pc = self.skip_register(bytecode, pc);
-                    // Skip cache slot (4 bytes)
-                    pc += 4;
-
-                    // Read and rewrite function ID
-                    let (old_func_id, varint_len) = self.read_varint(bytecode, pc);
-                    if let Some(&new_func_id) = id_remap.get(&(old_func_id as u32)) {
-                        self.write_varint_in_place(bytecode, pc, varint_len, new_func_id as u64);
-                    }
-                    pc += varint_len;
-
-                    // Skip arg_count and args
-                    if pc < end {
-                        let arg_count = bytecode[pc] as usize;
-                        pc += 1;
-                        for _ in 0..arg_count {
-                            pc = self.skip_register(bytecode, pc);
-                        }
-                    }
-                }
-
-                // NEW_CLOSURE dst:reg func_id:varint capture_count:u8 [captures:reg...]
-                Opcode::NewClosure => {
-                    // Skip destination register
-                    pc = self.skip_register(bytecode, pc);
-
-                    // Read and rewrite function ID
-                    let (old_func_id, varint_len) = self.read_varint(bytecode, pc);
-                    if let Some(&new_func_id) = id_remap.get(&(old_func_id as u32)) {
-                        self.write_varint_in_place(bytecode, pc, varint_len, new_func_id as u64);
-                    }
-                    pc += varint_len;
-
-                    // Skip capture_count and captures
-                    if pc < end {
-                        let capture_count = bytecode[pc] as usize;
-                        pc += 1;
-                        for _ in 0..capture_count {
-                            pc = self.skip_register(bytecode, pc);
-                        }
-                    }
-                }
-
-                // All other opcodes carry no FunctionId to rewrite — advance
-                // past the whole instruction using the CANONICAL decoder.  The
-                // previous hand-rolled `skip_instruction_operands` fell back to
-                // `min(pc + 4, end)` ("estimate 4 bytes") for any opcode it
-                // didn't enumerate — a wrong guess that desynchronised the
-                // fixup scan, after which a later operand byte could be
-                // mis-read as a call opcode and have its "func_id" clobbered,
-                // silently corrupting the merged module.
-                _ => {
-                    let instr_start = pc - 1; // opcode byte (pc was advanced past it)
-                    let mut probe = instr_start;
-                    match crate::bytecode::decode_instruction(bytecode, &mut probe) {
-                        Ok(_) if probe > pc && probe <= end => pc = probe,
-                        // Undecodable / overruns the function — stop the scan
-                        // rather than risk clobbering unrelated bytes.
-                        _ => pc = end,
-                    }
+            if let Some((old_id, Some(new_id), fid_pos)) = target
+                && new_id != old_id
+            {
+                let (read_back, fid_len) = self.read_varint(bytecode, fid_pos);
+                debug_assert_eq!(
+                    read_back as u32, old_id,
+                    "fixup: func-id position drifted from the canonical wire"
+                );
+                // In-place rewrite must not change the instruction's byte
+                // length; a replacement id that needs MORE varint bytes
+                // stays on the generic body (correct, just unspecialized).
+                let fits = fid_len >= 10 || (new_id as u64) < (1u64 << (7 * fid_len as u32));
+                if fits {
+                    self.write_varint_in_place(bytecode, fid_pos, fid_len, new_id as u64);
+                } else if trace {
+                    eprintln!(
+                        "[mono-fixup] id {} -> {} needs more than {} varint bytes — site left generic",
+                        old_id, new_id, fid_len
+                    );
                 }
             }
+
+            pc = probe;
         }
 
         Ok(())
-    }
-
-    /// Skips a register operand and returns new pc.
-    fn skip_register(&self, bytecode: &[u8], pc: usize) -> usize {
-        if pc >= bytecode.len() {
-            return pc;
-        }
-        if bytecode[pc] < 128 { pc + 1 } else { pc + 2 }
     }
 
     /// Reads a varint and returns (value, length).
@@ -1275,78 +1218,6 @@ impl ModuleMerger {
         );
     }
 
-    /// Skips a TypeRef in bytecode.
-    fn skip_type_ref(&self, bytecode: &[u8], pc: usize, end: usize) -> usize {
-        if pc >= end {
-            return pc;
-        }
-
-        let tag = bytecode[pc];
-        let mut pos = pc + 1;
-
-        match tag {
-            0 => {
-                // Concrete: varint type_id
-                let (_, len) = self.read_varint(bytecode, pos);
-                pos += len;
-            }
-            1 => {
-                // Generic: u16 param_id
-                pos += 2;
-            }
-            2 => {
-                // Instantiated: varint base + u8 arg_count + args
-                let (_, len) = self.read_varint(bytecode, pos);
-                pos += len;
-                if pos < end {
-                    let arg_count = bytecode[pos] as usize;
-                    pos += 1;
-                    for _ in 0..arg_count {
-                        pos = self.skip_type_ref(bytecode, pos, end);
-                    }
-                }
-            }
-            3
-                // Function: u8 param_count + params + return_type
-                if pos < end => {
-                    let param_count = bytecode[pos] as usize;
-                    pos += 1;
-                    for _ in 0..param_count {
-                        pos = self.skip_type_ref(bytecode, pos, end);
-                    }
-                    pos = self.skip_type_ref(bytecode, pos, end);
-                }
-            4 => {
-                // Reference: inner + u8 mutability + u8 tier
-                pos = self.skip_type_ref(bytecode, pos, end);
-                pos += 2;
-            }
-            5
-                // Tuple: u8 elem_count + elems
-                if pos < end => {
-                    let elem_count = bytecode[pos] as usize;
-                    pos += 1;
-                    for _ in 0..elem_count {
-                        pos = self.skip_type_ref(bytecode, pos, end);
-                    }
-                }
-            6 => {
-                // Array: element + varint length
-                pos = self.skip_type_ref(bytecode, pos, end);
-                let (_, len) = self.read_varint(bytecode, pos);
-                pos += len;
-            }
-            7 => {
-                // Slice: element
-                pos = self.skip_type_ref(bytecode, pos, end);
-            }
-            _ => {
-                // Unknown - assume no additional data
-            }
-        }
-
-        pos
-    }
 
     /// Returns the function mapping.
     pub fn mapping(&self) -> &FunctionMapping {
