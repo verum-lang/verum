@@ -737,7 +737,7 @@ impl VbcCodegen {
 
         // Check if this is a typed array type (non-byte) - if so, use specialized typed array allocation
         // This enables memory intrinsics like memcpy to work correctly with [UInt64; N] arrays
-        if let Some((count, elem_size)) = self.detect_typed_array_type(ty)
+        if let Some((count, elem_size, is_float)) = self.detect_typed_array_type(ty)
             && let Some(expr) = value
         {
             // Check for repeat syntax [value; N] or list syntax [a, b, c, ...]
@@ -763,10 +763,24 @@ impl VbcCodegen {
 
             // Emit NewTypedArray instruction via FfiExtended
             // Format: dst:reg, count:reg, elem_size:u8, init:reg
+            //
+            // TYPED-ARRAY-FLOAT-1 (#28): a `[Float; N]` array carries the
+            // same byte width as `[Int; N]` (8) but must be stamped with the
+            // float-typed heap `TypeId` so the read path decodes via
+            // `from_f64`. Bit 0x80 of the elem_size byte marks float; the
+            // interpreter's `NewTypedArray` masks it back off for the stride.
+            // Only THIS operand is flagged — `mark_typed_array_var` and every
+            // `TypedArrayStore` keep the clean width (offset math stays correct
+            // and the store already unboxes floats via `to_bits`).
+            let elem_size_byte = if is_float {
+                (elem_size as u8) | 0x80
+            } else {
+                elem_size as u8
+            };
             let operands = vec![
                 result.0 as u8,
                 count_reg.0 as u8,
-                elem_size as u8,
+                elem_size_byte,
                 init_reg.0 as u8,
             ];
             self.ctx.emit(Instruction::FfiExtended {
@@ -1031,22 +1045,32 @@ impl VbcCodegen {
     }
 
     /// Detects if type annotation is a typed array [T; N] (non-byte).
-    /// Returns (count, element_size) if detected.
-    fn detect_typed_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<(usize, usize)> {
+    /// Returns (count, element_size, is_float) if detected.
+    ///
+    /// `is_float` distinguishes `[Float; N]` / `[Float32; N]` from the
+    /// integer widths of the same byte size (`[Int; N]` / `[Int32; N]`).
+    /// The two share a stride but NOT a decode: a float element's raw bytes
+    /// are the IEEE-754 bit pattern (which, for a normal double, is exactly
+    /// its own NaN-boxed `Value`), so the read path must re-box through
+    /// `from_f64`, not `from_i64` (TYPED-ARRAY-FLOAT-1, #28). The flag is
+    /// threaded to `NewTypedArray` so the packed array is stamped with the
+    /// float-typed heap `TypeId` (F64 / F32) and every access decodes
+    /// coherently.
+    fn detect_typed_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<(usize, usize, bool)> {
         use verum_ast::literal::LiteralKind;
         use verum_ast::ty::{PathSegment, TypeKind};
 
         let ty = ty?;
         if let TypeKind::Array { element, size } = &ty.kind {
-            // Determine element size from element type.
+            // Determine element size + float-ness from element type.
             // The fast parser produces primitive TypeKind variants (Int, Float, Bool, Char)
             // for built-in types, but TypeKind::Path for non-primitive types (Byte, UInt64, etc.).
-            let elem_size = match &element.kind {
+            let (elem_size, is_float): (Option<usize>, bool) = match &element.kind {
                 // Primitive TypeKind variants produced by the fast parser
-                TypeKind::Int => Some(8),
-                TypeKind::Float => Some(8),
-                TypeKind::Bool => Some(1),
-                TypeKind::Char => Some(4),
+                TypeKind::Int => (Some(8), false),
+                TypeKind::Float => (Some(8), true),
+                TypeKind::Bool => (Some(1), false),
+                TypeKind::Char => (Some(4), false),
 
                 // Path-based type names (non-primitive types)
                 TypeKind::Path(path) => {
@@ -1061,14 +1085,19 @@ impl VbcCodegen {
                         // codegen path via `detect_byte_array_type`,
                         // so they return None here. Compound types
                         // and unknown names also return None.
-                        verum_common::layout::primitive_size_by_name(name)
-                            .and_then(|sz| if sz == 1 { None } else { Some(sz as usize) })
+                        let sz = verum_common::layout::primitive_size_by_name(name)
+                            .and_then(|sz| if sz == 1 { None } else { Some(sz as usize) });
+                        let is_f = matches!(
+                            name,
+                            "Float" | "Float32" | "Float64" | "F32" | "F64" | "f32" | "f64"
+                        );
+                        (sz, is_f)
                     } else {
-                        None
+                        (None, false)
                     }
                 }
 
-                _ => None,
+                _ => (None, false),
             };
 
             if let Some(elem_size) = elem_size {
@@ -1082,7 +1111,7 @@ impl VbcCodegen {
                     && let verum_ast::ExprKind::Literal(lit) = &size_expr.kind
                     && let LiteralKind::Int(int_lit) = &lit.kind
                 {
-                    return Some((int_lit.value as usize, elem_size));
+                    return Some((int_lit.value as usize, elem_size, is_float));
                 }
             }
         }
