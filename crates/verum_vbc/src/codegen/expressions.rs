@@ -2350,12 +2350,40 @@ impl VbcCodegen {
         // `self.as_bytes()` then mis-handled small-string operands —
         // surfaced as a `false` return for two values whose bit
         // patterns are identical.
-        let left_type_name = self.extract_expr_type_name(left);
-        let right_type_name = self.extract_expr_type_name(right);
+        // #41 text/text AOT root: `extract_expr_type_name` is blind to
+        // method-call operands (`a.clone() + b.clone()` — its Path
+        // precondition never matches a MethodCall), so `+` on Texts
+        // whose operands are call results classified as INTEGER add —
+        // the interpreter's polymorphic AddI masked it, Tier-1 summed
+        // two POINTERS (`(a+b)+c` crashed at fault == ptrA+ptrB, the
+        // 95-failure text/text cluster). Fall back to the full
+        // inference (which resolves through the qualified-key surface)
+        // and normalise reference spellings before the name test —
+        // AOT Text is a headerless flat record, so the EMISSION is the
+        // only honest place to make `+` mean concat.
+        let left_type_name = self
+            .extract_expr_type_name(left)
+            .or_else(|| self.infer_expr_type_name(left));
+        let right_type_name = self
+            .extract_expr_type_name(right)
+            .or_else(|| self.infer_expr_type_name(right));
+        let names_text = |n: &Option<String>| {
+            n.as_deref()
+                .map(|t| {
+                    let t = t.trim();
+                    let t = t
+                        .strip_prefix("&mut ")
+                        .or_else(|| t.strip_prefix('&'))
+                        .unwrap_or(t)
+                        .trim_start();
+                    t == "Text"
+                })
+                .unwrap_or(false)
+        };
         let is_text = matches!(left_type, Some(verum_ast::ty::TypeKind::Text))
             || matches!(right_type, Some(verum_ast::ty::TypeKind::Text))
-            || left_type_name.as_deref() == Some("Text")
-            || right_type_name.as_deref() == Some("Text");
+            || names_text(&left_type_name)
+            || names_text(&right_type_name);
         // Check if both types are known primitives (Int, Bool, Char,
         // and any sized integer alias: Int8..Int128 / UInt8..UInt128 /
         // ISize / USize / Byte plus legacy / Rust-style spellings).
