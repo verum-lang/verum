@@ -4063,7 +4063,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // and the header load faulted at 0x1). Skipping the free for
         // implausible values is exact: they can never be Text allocs.
         builder.position_at_end(entry);
-        let floor = i64_type.const_int(0x1_0000, false);
+        // Use the ONE canonical heap-floor authority (#48) — target-aware:
+        // 0x1_0000_0000 on darwin, 0x1_0000 elsewhere — the SAME floor every
+        // pointer-plausibility gate uses. The old hardcoded 0x1_0000 was far
+        // below darwin's real malloc range, so a stale owned-text mark on a
+        // register later reused for a scalar (e.g. a Duration nanos / Bool /
+        // format temp with value 0x42000000) passed the check and the header
+        // load faulted (SIGSEGV in verum_text_free — task #26,
+        // `parse().unwrap()+parse().unwrap()` under format pressure). Real Text
+        // objects are always heap-allocated ABOVE this floor, so raising it is
+        // safe (never skips a genuine free) and coherent with the dispatch guards.
+        let floor = i64_type.const_int(super::target_triple::heap_floor(module), false);
         let below_floor = builder
             .build_int_compare(verum_llvm::IntPredicate::ULT, text_i64, floor, "below_floor")
             .or_llvm_err()?;
