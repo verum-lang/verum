@@ -478,7 +478,7 @@ pub(in super::super) fn handle_extended(
 
 /// FIELD-ACCESS-BYNAME-1 shared resolver: the object's header pointer and
 /// TypeId, with a loud typed error for every non-object shape.
-fn field_named_object(
+pub(in super::super) fn field_named_object(
     state: &InterpreterState,
     obj_val: crate::value::Value,
     op: &str,
@@ -500,7 +500,7 @@ fn field_named_object(
 /// FIELD-ACCESS-BYNAME-1 shared resolver: positional index of the field
 /// named by `name_sid` in `tid`'s descriptor.  STRING comparison only —
 /// numeric StringId equality across tables is meaningless.  Loud miss.
-fn field_named_index(
+pub(in super::super) fn field_named_index(
     module: &crate::module::VbcModule,
     tid: crate::types::TypeId,
     name_sid: u32,

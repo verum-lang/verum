@@ -8968,6 +8968,13 @@ pub enum CbgrSubOpcode {
     /// (#48: `f"{[7]:?}"` rendered `[45710041792]`).
     /// Format: `dst:reg, addr:reg`.
     RefRawAddr = 0x0D,
+    /// #42: interior reference to a record field resolved BY NAME at
+    /// runtime (TypeDescriptor position) — the `&obj.field` twin of
+    /// GetFieldNamed/SetFieldNamed for receivers whose static type the
+    /// codegen could not name (a positional RefField on a GUESSED index
+    /// is an interior pointer into the WRONG field: memory-unsafe).
+    /// Format: dst:reg, base:reg, name:varint(StringId).
+    RefFieldNamed = 0x0E,
 
     // ========================================================================
     // Capability Operations (0x10-0x1F)
@@ -9314,6 +9321,7 @@ impl CbgrSubOpcode {
             0x0B => Some(Self::RefListElement),
             0x0C => Some(Self::RefField),
             0x0D => Some(Self::RefRawAddr),
+            0x0E => Some(Self::RefFieldNamed),
             // Capability Operations
             0x10 => Some(Self::CapAttenuate),
             0x11 => Some(Self::CapTransfer),
@@ -9411,6 +9419,7 @@ impl CbgrSubOpcode {
             Self::RefListElement     => m!("CBGR_REF_LIST_ELEM",     SliceInteriorReferences, cref=true,  mcaps=false, val=false),
             Self::RefField           => m!("CBGR_REF_FIELD",         SliceInteriorReferences, cref=true,  mcaps=false, val=false),
             Self::RefRawAddr          => m!("CBGR_REF_RAW_ADDR",      SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefFieldNamed       => m!("CBGR_REF_FIELD_NAMED",   SliceInteriorReferences, cref=true,  mcaps=false, val=false),
 
             // ===== Capability Operations (0x10-0x1F) =====
             Self::CapAttenuate       => m!("CBGR_CAP_ATTENUATE",     CapabilityOperations,    cref=false, mcaps=true,  val=false),
@@ -17801,8 +17810,8 @@ mod tests {
         for_every_cbgr_sub_opcode(|op| {
             if op.creates_reference() { count += 1; }
         });
-        assert_eq!(count, 16,
-            "creates_reference count drift: expected 16 (RefField #121, RefRawAddr #48)");
+        assert_eq!(count, 17,
+            "creates_reference count drift: expected 17 (RefField #121, RefRawAddr #48, RefFieldNamed #42)");
         // Named regression assertions for the closed gaps:
         assert!(CbgrSubOpcode::SliceSubslice.creates_reference(),
             "SliceSubslice produces a new FatRef per its format docs");

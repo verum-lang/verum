@@ -984,7 +984,16 @@ pub(in super::super) fn handle_ffi_extended(
 
             // Accept both Pointer-tagged and Int-tagged values as raw addresses
             let val = state.get_reg(ptr_reg);
-            let ptr: *mut u8 = if val.is_ptr() {
+            // #54 IS-REGULAR-PTR sweep: a FatRef/ThinRef VALUE is a
+            // MARKER — `as_ptr()` on it hands back the marker payload
+            // (unmapped). Deref-raw on a reference deref's its REAL
+            // address (`fr.ptr()` / `tr.ptr`), exactly the raw-pointer
+            // semantics the opcode contract promises.
+            let ptr: *mut u8 = if val.is_fat_ref() {
+                val.as_fat_ref().ptr()
+            } else if val.is_thin_ref() {
+                val.as_thin_ref().ptr
+            } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else {
                 val.as_i64() as *mut u8
@@ -1054,7 +1063,16 @@ pub(in super::super) fn handle_ffi_extended(
             let size = read_u8(state)?;
 
             let val = state.get_reg(ptr_reg);
-            let ptr: *mut u8 = if val.is_ptr() {
+            // #54 IS-REGULAR-PTR sweep: a FatRef/ThinRef VALUE is a
+            // MARKER — `as_ptr()` on it hands back the marker payload
+            // (unmapped). Deref-raw on a reference deref's its REAL
+            // address (`fr.ptr()` / `tr.ptr`), exactly the raw-pointer
+            // semantics the opcode contract promises.
+            let ptr: *mut u8 = if val.is_fat_ref() {
+                val.as_fat_ref().ptr()
+            } else if val.is_thin_ref() {
+                val.as_thin_ref().ptr
+            } else if val.is_regular_ptr() {
                 val.as_ptr()
             } else {
                 val.as_i64() as *mut u8

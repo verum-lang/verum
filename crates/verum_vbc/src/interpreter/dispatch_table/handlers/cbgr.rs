@@ -1,5 +1,6 @@
 //! CBGR (Capability-Based Generational References) instruction handlers for VBC interpreter.
 
+use super::bytecode_io::read_u8;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::heap;
 use super::super::super::state::InterpreterState;
@@ -1357,6 +1358,49 @@ pub(in super::super) fn handle_cbgr_extended(
             Ok(DispatchResult::Continue)
         }
 
+        Some(CbgrSubOpcode::RefFieldNamed) => {
+            // #42: interior reference to a field resolved BY NAME at
+            // runtime — the `&obj.field` twin of GetFieldNamed /
+            // SetFieldNamed for receivers the codegen could not type
+            // (a positional RefField on a GUESSED index is an interior
+            // pointer into the WRONG field). Same resolver authorities
+            // as the by-name read/write doors (resolve_arg_value +
+            // field_named_object + field_named_index) so the three
+            // by-name doors can never drift; same interior product as
+            // RefField (bounds check + cbgr_mutable_ptrs registration).
+            // Format: dst:reg, base:reg, name:varint(StringId).
+            let dst = read_reg(state)?;
+            let base_reg = read_reg(state)?;
+            let name_sid = read_varint(state)? as u32;
+
+            let base_val =
+                super::cbgr_helpers::resolve_arg_value(state, state.get_reg(base_reg));
+            let (tid, base_ptr) =
+                super::extended::field_named_object(state, base_val, "RefFieldNamed")?;
+            let field_idx =
+                super::extended::field_named_index(&state.module, tid, name_sid, "RefFieldNamed")?;
+
+            // SAFETY: field_named_object verified a live header; the
+            // descriptor-resolved index is in-bounds for the declared
+            // layout, and the size gate below re-checks the concrete
+            // allocation.
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
+            let field_offset = field_idx * std::mem::size_of::<Value>();
+            if field_offset + std::mem::size_of::<Value>() > header.size as usize {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "RefFieldNamed: field {} (offset {}) exceeds object data size {}",
+                        field_idx, field_offset, header.size
+                    ),
+                });
+            }
+            let field_ptr =
+                unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) };
+            state.cbgr_mutable_ptrs.insert(field_ptr as usize);
+            state.set_reg(dst, Value::from_ptr(field_ptr as *mut u8));
+            Ok(DispatchResult::Continue)
+        }
+
         Some(CbgrSubOpcode::RefSliceRaw) => {
             // Create a FatRef directly from a raw pointer + length, with
             // elem_size=1 (byte slice). Used to lower the generic
@@ -1366,10 +1410,25 @@ pub(in super::super) fn handle_cbgr_extended(
             // allocates a typed BYTE_SLICE (528) object (ARCH-P5).
             //
 
-            // Format: dst:reg, ptr:reg, len:reg
+            // Format: dst:reg, ptr:reg, len:reg[, elem:byte]
+            // #48 phase-2: the optional 4th operand is the ELEMENT
+            // STRIDE the emitter derived from the ptr arg's spelling
+            // (`&unsafe Byte` → 1; `*const T`/Value backings → 8).
+            // Legacy 3-operand streams keep the historic byte
+            // semantics.
             let dst = read_reg(state)?;
             let ptr_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
+            // Fixed 4-operand format (emitter always writes the stride
+            // byte; the operand stream is self-describing so an optional
+            // read would desynchronise on legacy 3-operand streams —
+            // instead the PRECOMPILE_SCHEMA_VERSION bump forces a rebake).
+            let elem_raw = read_u8(state)?;
+            let elem: u8 = if matches!(elem_raw, 1 | 2 | 4 | 8) {
+                elem_raw
+            } else {
+                1
+            };
 
             let ptr_val = state.get_reg(ptr_reg);
             let len = state.get_reg(len_reg).as_i64() as u64;
@@ -1394,7 +1453,9 @@ pub(in super::super) fn handle_cbgr_extended(
                 Capabilities::MUT_EXCLUSIVE,
                 len,
             );
-            fat_ref.reserved = 1; // byte-sized elements
+            // reserved carries the stride (0 = NaN-boxed Value slots —
+            // the 8-byte case IS the Value-array case for raw parts).
+            fat_ref.reserved = if elem == 8 { 0 } else { elem as u32 };
 
             state.set_reg(dst, Value::from_fat_ref(fat_ref));
             Ok(DispatchResult::Continue)

@@ -3303,13 +3303,13 @@ pub fn lower_instruction<'ctx>(
                 // closed-world type_id switch over the module's
                 // candidates (loud miss), replacing the warn+unset-dst
                 // hole that skipped functions from the native image.
-                None => lower_field_named_dynamic(ctx, *obj, *name, Some(*dst), None),
+                None => lower_field_named_dynamic(ctx, *obj, *name, Some(*dst), None, false),
             }
         }
         Instruction::SetFieldNamed { obj, name, value } => {
             match resolve_named_field_index(ctx, obj.0, *name) {
                 Some(fidx) => lower_set_field(ctx, *obj, fidx, *value),
-                None => lower_field_named_dynamic(ctx, *obj, *name, None, Some(*value)),
+                None => lower_field_named_dynamic(ctx, *obj, *name, None, Some(*value), false),
             }
         }
 
@@ -21510,22 +21510,34 @@ fn lower_cbgr_extended<'ctx>(
             Ok(())
         }
         0x0A => {
-            // RefSliceRaw — build a slice Pack{ptr, len} with elem_size=1
-            // Matches the interpreter-side fix (commit 3ae67c5). AOT's slice
-            // representation is the standard Pack object used by Len/GetE, so
-            // we simply pack the raw pointer and length into it.
+            // RefSliceRaw — CANONICAL CELL {data@0, len@8, elem@16} from a
+            // raw pointer + length (#48 phase-2). The trailing operand is
+            // the ELEMENT STRIDE the VBC emitter derived from the ptr
+            // arg's spelling (`&unsafe Byte` → 1; `*const T` / Value
+            // backings → 8) — the hardcoded byte Pack it replaces byte-
+            // strided every `&[T]` raw-parts view (config.vr class).
+            // Operand decode is positional over the flat byte vector: the
+            // stride byte sits after the three (possibly wide) regs.
             if operands.len() < 3 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
             let ptr_reg = op_reg(operands, 1);
             let len_reg = op_reg(operands, 2);
+            let mut cursor = 0usize;
+            for _ in 0..3 {
+                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
+            }
+            let elem: u64 = match operands.get(cursor) {
+                Some(w @ (1 | 2 | 4 | 8)) => *w as u64,
+                _ => 1,
+            };
             let ptr_val = as_i64(ctx, ctx.get_register(ptr_reg)?, "ref_slice_raw_ptr")?;
             let len_val = as_i64(ctx, ctx.get_register(len_reg)?, "ref_slice_raw_len")?;
-            let runtime = RuntimeLowering::new(ctx.llvm_context());
-            let slice_ptr =
-                runtime.lower_pack(ctx.builder(), ctx.get_module(), &[ptr_val, len_val])?;
-            ctx.set_register(dst, slice_ptr.into());
+            let i64t = ctx.types().i64_type();
+            let elem_v = i64t.const_int(elem, false);
+            let fat = emit_slice_fatref_alloc(ctx, ptr_val, len_val, elem_v, "rawslice")?;
+            ctx.set_register(dst, fat.into());
             ctx.mark_slice_register(dst);
             Ok(())
         }
@@ -22346,6 +22358,49 @@ fn lower_cbgr_extended<'ctx>(
         // ====================================================================
         // Capability Operations (0x10-0x15)
         // ====================================================================
+        0x0E => {
+            // **RefFieldNamed** (#42) — interior pointer to a record
+            // field resolved BY NAME at runtime: the `&obj.field` twin
+            // of GetFieldNamed/SetFieldNamed, riding the SAME
+            // closed-world (type_id → position) switch so the three
+            // by-name doors share one dispatch authority. The phi
+            // carries the slot ADDRESS; DEREF-INTERIOR-1 pass-through
+            // applies exactly as for the positional interior refs.
+            // Format: `dst:reg, base:reg, name:varint(StringId)`.
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let base = op_reg(operands, 1);
+            let mut cursor = 0usize;
+            for _ in 0..2 {
+                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
+            }
+            let name_sid: u64 = {
+                let mut v: u64 = 0;
+                let mut shift: u32 = 0;
+                let mut i = cursor;
+                loop {
+                    if i >= operands.len() {
+                        return Ok(());
+                    }
+                    let byte = operands[i];
+                    v |= ((byte & 0x7F) as u64) << shift;
+                    i += 1;
+                    if byte & 0x80 == 0 {
+                        break;
+                    }
+                    shift += 7;
+                    if shift >= 64 {
+                        break;
+                    }
+                }
+                v
+            };
+            lower_field_named_dynamic(ctx, Reg(base), name_sid as u32, Some(Reg(dst)), None, true)?;
+            ctx.mark_interior_list_ref(dst);
+            Ok(())
+        }
         0x10 => {
             // CapAttenuate — create ref with reduced capabilities
             if operands.len() < 3 {
@@ -24710,6 +24765,10 @@ fn lower_field_named_dynamic<'ctx>(
     name_sid: u32,
     dst: Option<Reg>,
     value: Option<Reg>,
+    // #42 REF leg: when set, `dst` receives the field slot ADDRESS
+    // (interior pointer) instead of the loaded value — the by-name
+    // twin of the positional RefField arm.
+    addr_of: bool,
 ) -> Result<()> {
     let i64_type = ctx.types().i64_type();
     let ptr_type = ctx.types().ptr_type();
@@ -24874,6 +24933,9 @@ fn lower_field_named_dynamic<'ctx>(
         match value_i64 {
             Some(v) => {
                 ctx.builder().build_store(slot_ptr, v).or_llvm_err()?;
+            }
+            None if addr_of => {
+                incoming.push((slot_addr.into(), *bb));
             }
             None => {
                 let loaded = ctx
@@ -27655,6 +27717,47 @@ fn lower_ffi_extended<'ctx>(
             ctx.builder()
                 .build_store(elem_ptr, truncated)
                 .or_llvm_err()?;
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::TypedArrayStore) => {
+            // Tier-1 twin of the interpreter's TypedArrayStore (peer
+            // opcode, ffi_extended.rs): store one element into a PACKED
+            // typed array, unboxing the value — raw `elem_size` integer,
+            // never a NaN-boxed Value. Store/load coherence with the
+            // width-switched readers (GetE / SliceGet reserved=elem).
+            // Format: arr:reg, idx:reg, val:reg, elem_size:u8 — the
+            // stride byte sits after three (possibly wide) regs.
+            if operands.len() < 4 {
+                return Err(LlvmLoweringError::internal(
+                    "TypedArrayStore: insufficient operands",
+                ));
+            }
+            let arr_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "tas_base")?;
+            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tas_idx")?;
+            let value = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "tas_val")?;
+            let mut cursor = 0usize;
+            for _ in 0..3 {
+                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
+            }
+            let elem: u64 = match operands.get(cursor) {
+                Some(w @ (1 | 2 | 4 | 8)) => *w as u64,
+                _ => 8,
+            };
+            let i64_ty = ctx.types().i64_type();
+            let i8_ty = ctx.llvm_context().i8_type();
+            let off = ctx
+                .builder()
+                .build_int_mul(index, i64_ty.const_int(elem, false), "tas_off")
+                .or_llvm_err()?;
+            // SAFETY: GEP into the packed array at idx*elem; bounds are
+            // the caller's contract (mirrors ByteArrayStore).
+            let eptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, arr_ptr, &[off], "tas_ptr")
+                    .or_llvm_err()?
+            };
+            emit_slice_cell_elem_store(ctx, i64_ty.const_int(elem, false), eptr, value, "tas")?;
             Ok(())
         }
 

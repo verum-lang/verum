@@ -269,7 +269,7 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*data_ptr).as_i64() } as usize;
             let backing_v = unsafe { *data_ptr.add(2) };
-            if backing_v.is_ptr() && !backing_v.is_nil() {
+            if backing_v.is_regular_ptr() && !backing_v.is_nil() {
                 let backing = backing_v.as_ptr::<u8>();
                 if !backing.is_null() {
                     let backing_data =
@@ -288,7 +288,7 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*data_ptr).as_i64() } as usize;
             let backing_v = unsafe { *data_ptr.add(2) };
-            if backing_v.is_ptr() && !backing_v.is_nil() {
+            if backing_v.is_regular_ptr() && !backing_v.is_nil() {
                 let backing = backing_v.as_ptr::<u8>();
                 if !backing.is_null() && len > 0 {
                     let backing_data = unsafe { backing.add(heap::OBJECT_HEADER_SIZE) };
@@ -372,7 +372,7 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
             let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
             let n = bytes.len().min(cap);
             let backing_v = unsafe { *data_ptr.add(2) };
-            if backing_v.is_ptr() && !backing_v.is_nil() {
+            if backing_v.is_regular_ptr() && !backing_v.is_nil() {
                 let backing = backing_v.as_ptr::<u8>();
                 if !backing.is_null() {
                     let backing_data =
@@ -395,7 +395,7 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
             let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
             let n = bytes.len().min(cap);
             let backing_v = unsafe { *data_ptr.add(2) };
-            if backing_v.is_ptr() && !backing_v.is_nil() {
+            if backing_v.is_regular_ptr() && !backing_v.is_nil() {
                 let backing = backing_v.as_ptr::<u8>();
                 if !backing.is_null() && n > 0 {
                     let backing_data = unsafe { backing.add(heap::OBJECT_HEADER_SIZE) };

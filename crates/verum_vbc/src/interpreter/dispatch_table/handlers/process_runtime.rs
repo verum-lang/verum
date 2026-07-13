@@ -235,7 +235,7 @@ fn read_pair_list(state: &InterpreterState, v: Value) -> Option<Vec<(String, Str
     let mut out = Vec::with_capacity(len);
     for i in 0..len {
         let pair_v = unsafe { *backing_ptr.add(i) };
-        if !pair_v.is_ptr() || pair_v.is_nil() {
+        if !pair_v.is_regular_ptr() || pair_v.is_nil() {
             continue;
         }
         let pair_ptr = pair_v.as_ptr::<u8>();

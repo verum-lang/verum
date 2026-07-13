@@ -50,7 +50,10 @@ pub(in super::super) fn handle_as_var(
         }
     }
 
-    if variant.is_ptr() && !variant.is_nil() {
+    // #54: marker-tagged (FatRef/ThinRef) values are NOT payload-readable
+    // heap objects — reading at marker+offset SIGSEGVs; nil-result mirrors
+    // the null-pointer path.
+    if variant.is_regular_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
         if !base_ptr.is_null() {
             // Payload starts at OBJECT_HEADER_SIZE + 8 (after tag + padding)
@@ -351,7 +354,9 @@ pub(in super::super) fn handle_set_variant_data(
     let variant = state.get_reg(variant_reg);
     let value = state.get_reg(value_reg);
 
-    if variant.is_ptr() && !variant.is_nil() {
+    // #54: write twin of the read gate above — marker+offset stores are
+    // the exact char_extended SIGSEGV class; benign-skip mirrors nil.
+    if variant.is_regular_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
         if !base_ptr.is_null() {
             // Payload starts at OBJECT_HEADER_SIZE + 8 (after tag + padding)
