@@ -662,6 +662,13 @@ pub struct VbcCodegen {
     /// Used to emit correct type_id in New instructions for proper Drop dispatch.
     type_name_to_id: std::collections::HashMap<String, crate::types::TypeId>,
 
+    /// TypeIds claimed by ARCHIVE-imported descriptors
+    /// (`register_archive_type_qualified`).  Carried fact for
+    /// `claim_local_type_id`: a LOCAL `type X is …;` declaration whose
+    /// bare name is currently bound to one of these ids must NOT adopt
+    /// it — locals shadow imports (LOCAL-TYPE-SHADOW-1).
+    archive_claimed_type_ids: std::collections::HashSet<u32>,
+
     /// Archive-wide function-name → user-side FunctionId index (task #12).
     /// Populated by `archive_ctx_loader::record_archive_function_name`
     /// during archive load.  Used by Tier-2 cross-module Call resolution
@@ -1698,6 +1705,7 @@ impl VbcCodegen {
             // Pre-populated with all well-known type names and their aliases so that
             // ast_type_to_type_ref and type_ref_for_type_kind can do a single lookup
             // instead of hardcoded match arms.
+            archive_claimed_type_ids: std::collections::HashSet::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
@@ -4795,6 +4803,61 @@ impl VbcCodegen {
     /// codegen's user-side `next_type_id` counter, which is bumped
     /// past every observed archive id so subsequent
     /// `alloc_user_type_id` calls don't collide.
+    /// LOCAL-TYPE-SHADOW-1 — single authority for the TypeId a LOCAL
+    /// `type X is …;` declaration compiles under.
+    ///
+    /// Adoption of an existing `type_name_to_id` binding is correct in
+    /// exactly two cases: the Pass-1.5 PRE-ALLOCATION for this same
+    /// declaration, and a re-walk of our own earlier registration.
+    /// Both are LOCAL bindings.  When the bare name is currently bound
+    /// to an ARCHIVE-imported type (`archive_claimed_type_ids`), the
+    /// decl arms used to adopt the FOREIGN id and push this
+    /// declaration's descriptor under it — `push_type_dedupe` then
+    /// merged two DIFFERENT types into one identity.  Live failure:
+    /// a fn-local `type Data is { id, name }` adopted the archive's
+    /// `Data` id; the record ctor stamped objects with the foreign id
+    /// and `GetFieldNamed` (authoritative by-name, #42) refused —
+    /// "type 'Data' (id=1044) has no field named 'id'"
+    /// (base/ops test_continue_value_preserves_identity).
+    ///
+    /// Locals shadow imports (the variant-ctor override rule
+    /// generalised to type identity): allocate a fresh id and rebind
+    /// the bare name authoritatively; the import stays reachable via
+    /// its module-qualified key.  Kill-switch:
+    /// VERUM_DISABLE_LOCAL_TYPE_SHADOW=1 restores blind adoption.
+    fn claim_local_type_id(&mut self, type_name: &str) -> crate::types::TypeId {
+        if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+            eprintln!(
+                "[ctor-trace] claim_local_type_id '{}' existing={:?} archive_claimed={}",
+                type_name,
+                self.type_name_to_id.get(type_name).map(|t| t.0),
+                self.type_name_to_id
+                    .get(type_name)
+                    .map(|t| self.archive_claimed_type_ids.contains(&t.0))
+                    .unwrap_or(false)
+            );
+        }
+        if let Some(&existing) = self.type_name_to_id.get(type_name) {
+            let foreign = self.archive_claimed_type_ids.contains(&existing.0)
+                && std::env::var_os("VERUM_DISABLE_LOCAL_TYPE_SHADOW").is_none();
+            if !foreign {
+                return existing;
+            }
+            let tid = self.alloc_user_type_id();
+            self.type_name_to_id.insert(type_name.to_string(), tid);
+            if std::env::var("VERUM_TRACE_CTOR").is_ok() {
+                eprintln!(
+                    "[ctor-trace] LOCAL-TYPE-SHADOW '{}': archive id {} shadowed by fresh local id {}",
+                    type_name, existing.0, tid.0
+                );
+            }
+            return tid;
+        }
+        let tid = self.alloc_user_type_id();
+        self.type_name_to_id.insert(type_name.to_string(), tid);
+        tid
+    }
+
     pub fn register_archive_type(
         &mut self,
         ty: crate::types::TypeDescriptor,
@@ -4838,6 +4901,11 @@ impl VbcCodegen {
         {
             ty.id = self.alloc_user_type_id();
         }
+        // LOCAL-TYPE-SHADOW-1 carried fact: remember which ids are
+        // archive-owned so a later LOCAL declaration of the same bare
+        // name allocates its own identity instead of adopting (and
+        // colliding with) the import's.
+        self.archive_claimed_type_ids.insert(ty.id.0);
         // Bump next_type_id past this archive id so future user-type
         // allocations stay disjoint.
         let id_val = ty.id.0;
@@ -11366,13 +11434,7 @@ impl VbcCodegen {
                 // variant emission back to the legacy form. Now the
                 // descriptor IS pushed with kind=Sum + a complete
                 // variant table, so the typed path stays load-bearing.
-                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
-                    existing
-                } else {
-                    let tid = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name.clone(), tid);
-                    tid
-                };
+                let type_id = self.claim_local_type_id(&type_name);
                 // Capture generic parameters from the AST so the
                 // archive's TypeDescriptor preserves them.  Pre-fix
                 // `Maybe<T>` / `Result<T, E>` / etc. landed in VBC
@@ -11534,13 +11596,7 @@ impl VbcCodegen {
                 }
 
                 // Use pre-allocated TypeId from Pass 1.5, or allocate a new one
-                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
-                    existing
-                } else {
-                    let tid = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name.clone(), tid);
-                    tid
-                };
+                let type_id = self.claim_local_type_id(&type_name);
 
                 // Generic parameters are populated below by the
                 // bounds-and-defaults pass (search for "Also populate
@@ -11741,13 +11797,7 @@ impl VbcCodegen {
             // Protocol types: create TypeDescriptor with super-protocol and method metadata
             TypeDeclBody::Protocol(protocol_body) => {
                 // Use pre-allocated TypeId from Pass 1.5, or allocate a new one
-                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
-                    existing
-                } else {
-                    let tid = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name.clone(), tid);
-                    tid
-                };
+                let type_id = self.claim_local_type_id(&type_name);
 
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
@@ -11970,13 +12020,7 @@ impl VbcCodegen {
                 // when present (avoids id collision with the
                 // placeholder pre-pass).  Falls back to a fresh
                 // user-id otherwise.
-                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
-                    existing
-                } else {
-                    let tid = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name.clone(), tid);
-                    tid
-                };
+                let type_id = self.claim_local_type_id(&type_name);
                 let name_id = StringId(self.intern_string(&type_name));
                 // Build generic_param_map from type_decl.generics so
                 // alias targets reference T/E/etc. as
@@ -12048,13 +12092,7 @@ impl VbcCodegen {
                 // Allocate / reuse a TypeId so the descriptor below
                 // and any later cross-module reference share the same
                 // identity.  Same pattern as the Record / Sum arms.
-                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
-                    existing
-                } else {
-                    let tid = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name.clone(), tid);
-                    tid
-                };
+                let type_id = self.claim_local_type_id(&type_name);
 
                 // Generic-param map for the inner-type resolution —
                 // `type Wrap<T> is T;` writes a `Generic(0)` slot, and
@@ -12154,13 +12192,7 @@ impl VbcCodegen {
                 }
 
                 // Allocate / reuse a TypeId — same pattern as the Record arm.
-                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
-                    existing
-                } else {
-                    let tid = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name.clone(), tid);
-                    tid
-                };
+                let type_id = self.claim_local_type_id(&type_name);
 
                 // Generic-param map for inner type resolution — mirror
                 // of the Newtype arm above.
@@ -12401,13 +12433,7 @@ impl VbcCodegen {
                 // carrier at runtime, same transparent-wrapper policy
                 // as Newtype/single-element-Tuple.  See
                 // `TypeDescriptor::is_transparent_wrapper`.
-                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
-                    existing
-                } else {
-                    let tid = self.alloc_user_type_id();
-                    self.type_name_to_id.insert(type_name.clone(), tid);
-                    tid
-                };
+                let type_id = self.claim_local_type_id(&type_name);
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
@@ -19364,6 +19390,15 @@ impl VbcCodegen {
         if let Some(q) = qualified_key.clone() {
             self.type_name_to_id.entry(q).or_insert(new_id);
         }
+        // LOCAL-TYPE-SHADOW-1 carried fact — THIS is the path the lazy
+        // loader reaches most stdlib types through (see the
+        // REFINE-FIELD-DYNAMIC-BYPASS-1 note above), so the claim must
+        // be recorded here as well as in
+        // `register_archive_type_qualified`; without it a fn-local
+        // `type Data is {…}` adopted the prelude's `core.base.Data`
+        // id (archive_claimed=false → no shadow) and stamped its
+        // objects with the foreign identity.
+        self.archive_claimed_type_ids.insert(new_id.0);
         let new_name_id = crate::types::StringId(self.ctx.intern_string_raw(&name_str));
 
         // Type parameters
