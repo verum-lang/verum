@@ -11385,9 +11385,8 @@ fn lower_call<'ctx>(
     {
         let i64_type = ctx.types().i64_type();
         let ptr_type = ctx.types().ptr_type();
-        let module = ctx.get_module();
 
-        // The slice argument is a pointer to the Pack object.
+        // The slice argument is a pointer to a slice-shaped value.
         let slice_val = ctx.get_register(args.start.0)?;
         let slice_i64 = as_i64(ctx, slice_val, "futf8_slice_i64")?;
         let slice_ptr = ctx
@@ -11395,30 +11394,37 @@ fn lower_call<'ctx>(
             .build_int_to_ptr(slice_i64, ptr_type, "futf8_slice_ptr")
             .or_llvm_err()?;
 
-        // Pack layout: element 0 = data ptr (i64), element 1 = len (i64).
-        let runtime = RuntimeLowering::new(ctx.llvm_context());
-        let data_ptr_i64 = runtime.lower_unpack_element(ctx.builder(), slice_ptr, 0)?;
-        let len_i64 = runtime.lower_unpack_element(ctx.builder(), slice_ptr, 1)?;
+        // #48 canonical, representation-agnostic read of (data, len). The old
+        // code read the LEGACY Pack offsets (data@24, len@32) via
+        // lower_unpack_element, so a canonical slice cell {data@0, len@8}
+        // produced by `List<Byte>.as_slice()` mis-read len as 32 (not 2) —
+        // verum_text_alloc then copied out of bounds and returned a bogus Text
+        // whose handle later faulted in verum_internal_strlen (rfc3339/julian
+        // format class SIGSEGV, task #28). `emit_container_view` classifies
+        // cell / pack / list / obj and yields the correct (data, len).
+        let (data_ptr_i64, len_i64, elem_w) = emit_container_view(ctx, slice_ptr, "futf8")?;
         let data_ptr = ctx
             .builder()
             .build_int_to_ptr(data_ptr_i64, ptr_type, "futf8_data_ptr")
             .or_llvm_err()?;
 
-        // verum_text_alloc(ptr, len, cap) -> i64 Text handle. cap=0 → the
-        // constructor sizes the copy to `len` exactly.
-        let alloc_ty =
+        let module = ctx.get_module();
+
+        // verum_text_from_stride(data, len, elem) copies the LOW byte of each
+        // element at stride `elem` into a fresh packed buffer — correct for both
+        // a PACKED byte slice (elem==1, e.g. AsBytes over a Text) and a BOXED
+        // List<Byte> slice (elem==8, one NaN-boxed Value per element). Plain
+        // verum_text_alloc stores the pointer WITHOUT copying, so a boxed backing
+        // was read as raw bytes → only the first byte survived (task #28).
+        let stride_ty =
             i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let text_alloc_fn =
-            super::error::get_or_declare_function(module, "verum_text_alloc", alloc_ty);
+        let from_stride_fn =
+            super::error::get_or_declare_function(module, "verum_text_from_stride", stride_ty);
         let result = ctx
             .builder()
             .build_call(
-                text_alloc_fn,
-                &[
-                    data_ptr.into(),
-                    len_i64.into(),
-                    i64_type.const_zero().into(),
-                ],
+                from_stride_fn,
+                &[data_ptr.into(), len_i64.into(), elem_w.into()],
                 "futf8_text",
             )
             .or_llvm_err()?
@@ -24835,6 +24841,45 @@ fn lower_field_named_dynamic<'ctx>(
             return Ok(());
         };
         let Some(fname) = vbc.strings.get(verum_vbc::types::StringId(name_sid)) else {
+            if std::env::var("VERUM_TRACE_BYNAME").is_ok() {
+                eprintln!(
+                    "[byname-no-name] fn={} sid={} strings_len={} g0={:?} g1={:?} g2={:?} g8={:?} around={:?}/{:?}",
+                    ctx.function().get_name().to_str().unwrap_or("?"),
+                    name_sid,
+                    vbc.strings.len(),
+                    vbc.strings.get(verum_vbc::types::StringId(0)),
+                    vbc.strings.get(verum_vbc::types::StringId(1)),
+                    vbc.strings.get(verum_vbc::types::StringId(2)),
+                    vbc.strings.get(verum_vbc::types::StringId(8)),
+                    vbc.strings.get(verum_vbc::types::StringId(name_sid + 1)),
+                    vbc.strings.get(verum_vbc::types::StringId(name_sid + 2)),
+                );
+                static SCAN_ONCE: std::sync::Once = std::sync::Once::new();
+                SCAN_ONCE.call_once(|| {
+                    let mut shown = 0;
+                    for fd in vbc.functions.iter() {
+                        let Some(instrs) = fd.instructions.as_ref() else { continue };
+                        let bad = instrs.iter().any(|i| matches!(
+                            i,
+                            verum_vbc::instruction::Instruction::GetFieldNamed { name, .. }
+                            | verum_vbc::instruction::Instruction::SetFieldNamed { name, .. }
+                            if vbc.strings.get(verum_vbc::types::StringId(*name)).is_none()
+                        ));
+                        if bad {
+                            eprintln!(
+                                "[byname-prov] name_sid={} name={:?} bc_off={} bc_len={} n_instr={}",
+                                fd.name.0,
+                                vbc.strings.get(fd.name),
+                                fd.bytecode_offset,
+                                fd.bytecode_length,
+                                instrs.len(),
+                            );
+                            shown += 1;
+                            if shown >= 5 { break; }
+                        }
+                    }
+                });
+            }
             ctx.emit_unimplemented_sub_op("GetFieldNamed(no-name)", 0x03);
             if let Some(d) = dst {
                 ctx.set_register(d.0, i64_type.const_zero().into());

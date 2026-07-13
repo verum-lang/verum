@@ -662,6 +662,18 @@ pub struct VbcCodegen {
     /// Used to emit correct type_id in New instructions for proper Drop dispatch.
     type_name_to_id: std::collections::HashMap<String, crate::types::TypeId>,
 
+    /// SIBLING-IMPL-MATERIALIZATION-1 (#51): per-qualified-name count
+    /// of impl-block method registrations.  The FIRST `implement`
+    /// block's `<Type>.<method>` keeps the plain key (single-impl
+    /// behavior unchanged); every subsequent sibling impl of the SAME
+    /// (type, method) registers under `<Type>.<method>#impl<N>` so its
+    /// body, id and carried signature facts (param_type_names) survive
+    /// instead of collapsing onto one slot (the FromResidual
+    /// three-impl collapse: two of three bodies were never even
+    /// compiled — compile_function's name lookup bound every sibling
+    /// to the slot-winner's id and the dedupe kept one).
+    sibling_impl_counters: std::collections::HashMap<String, u32>,
+
     /// TypeIds claimed by ARCHIVE-imported descriptors
     /// (`register_archive_type_qualified`).  Carried fact for
     /// `claim_local_type_id`: a LOCAL `type X is …;` declaration whose
@@ -1706,6 +1718,7 @@ impl VbcCodegen {
             // ast_type_to_type_ref and type_ref_for_type_kind can do a single lookup
             // instead of hardcoded match arms.
             archive_claimed_type_ids: std::collections::HashSet::new(),
+            sibling_impl_counters: std::collections::HashMap::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
@@ -7567,6 +7580,64 @@ impl VbcCodegen {
                                 .iter()
                                 .map(|method_name| {
                                     let qualified = format!("{}.{}", ty_name, method_name);
+                                    // SIBLING-IMPL-MATERIALIZATION-1: when
+                                    // sibling impls exist for this
+                                    // (type, method), THIS impl block's
+                                    // ProtocolImpl must carry ITS OWN
+                                    // method's fid — content-match the
+                                    // registration by the impl item's
+                                    // extracted param-type names (the
+                                    // same vector register_impl_function
+                                    // stored), mirroring
+                                    // compile_function's self-pairing.
+                                    let own_decl_types: Option<Vec<String>> = impl_decl
+                                        .items
+                                        .iter()
+                                        .find_map(|item| {
+                                            if let verum_ast::decl::ImplItemKind::Function(f) =
+                                                &item.kind
+                                                && f.name.name.as_str() == method_name.as_str()
+                                            {
+                                                Some(
+                                                    f.params
+                                                        .iter()
+                                                        .filter_map(|p| {
+                                                            if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
+                                                                let n = Self::extract_type_name_from_ast(ty);
+                                                                let n = Self::substitute_self_in_type_name(&n, ty_name);
+                                                                if !n.is_empty() && n != "()" { Some(n) } else { None }
+                                                            } else {
+                                                                None
+                                                            }
+                                                        })
+                                                        .collect(),
+                                                )
+                                            } else {
+                                                None
+                                            }
+                                        });
+                                    if let Some(decl_types) = own_decl_types
+                                        && self
+                                            .ctx
+                                            .lookup_function(&format!("{}#impl2", qualified))
+                                            .is_some()
+                                    {
+                                        let mut key = qualified.clone();
+                                        let mut n = 1u32;
+                                        loop {
+                                            match self.ctx.lookup_function(&key) {
+                                                Some(cand) => {
+                                                    if cand.param_type_names == decl_types {
+                                                        return cand.id.0;
+                                                    }
+                                                }
+                                                None if n > 1 => break,
+                                                None => {}
+                                            }
+                                            n += 1;
+                                            key = format!("{}#impl{}", qualified, n);
+                                        }
+                                    }
                                     self.ctx
                                         .lookup_function(&qualified)
                                         .map(|fi| fi.id.0)
@@ -9799,7 +9870,26 @@ impl VbcCodegen {
                 param_closure_return_type_names,
         };
 
-        self.ctx.register_function(qualified_name, info);
+        // SIBLING-IMPL-MATERIALIZATION-1: sibling impls of the same
+        // (type, method) get an ordinal key so every body keeps its
+        // own id + signature facts.  Ordinal source = AST declaration
+        // order within the accumulated collect walk — deterministic
+        // (P2-safe).  Consumers self-pair by CONTENT
+        // (param_type_names match), never by replaying this counter.
+        let ordinal = {
+            let c = self
+                .sibling_impl_counters
+                .entry(qualified_name.clone())
+                .or_insert(0);
+            *c += 1;
+            *c
+        };
+        let registration_key = if ordinal == 1 {
+            qualified_name
+        } else {
+            format!("{}#impl{}", qualified_name, ordinal)
+        };
+        self.ctx.register_function(registration_key, info);
 
         Ok(())
     }
@@ -14303,7 +14393,7 @@ impl VbcCodegen {
         let base_name = func.name.name.to_string();
 
         // Build the lookup name - use qualified name for impl functions
-        let lookup_name = if let Some(type_name) = impl_type_name {
+        let mut lookup_name = if let Some(type_name) = impl_type_name {
             format!("{}.{}", type_name, base_name)
         } else {
             base_name.clone()
@@ -14355,6 +14445,70 @@ impl VbcCodegen {
                     CodegenError::internal(format!("function not registered: {}", lookup_name))
                 })?
                 .clone(),
+        };
+        // SIBLING-IMPL-MATERIALIZATION-1: when this decl is an
+        // impl-block method that has SIBLING impls (same type, same
+        // method name — `#impl<N>` ordinal keys exist), the plain-name
+        // lookup above may hand us a DIFFERENT sibling's registration
+        // (its id and facts).  Self-pair by CONTENT: this decl's own
+        // extracted param-type-name vector is exactly what
+        // register_impl_function stored, so an equality scan over the
+        // plain + ordinal candidates recovers OUR registration without
+        // replaying walk order.  No siblings → zero extra work.
+        let func_info = if let Some(type_name) = impl_type_name {
+            let qualified = format!("{}.{}", type_name, base_name);
+            if self.ctx.lookup_function(&format!("{}#impl2", qualified)).is_some() {
+                let decl_param_types: Vec<String> = func
+                    .params
+                    .iter()
+                    .filter_map(|p| {
+                        if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
+                            let name = Self::extract_type_name_from_ast(ty);
+                            let name = Self::substitute_self_in_type_name(&name, type_name);
+                            if !name.is_empty() && name != "()" {
+                                Some(name)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let mut chosen = func_info;
+                let mut key = qualified.clone();
+                let mut n = 1u32;
+                loop {
+                    if let Some(cand) = self.ctx.lookup_function(&key) {
+                        if cand.param_count == param_count
+                            && cand.param_type_names == decl_param_types
+                        {
+                            chosen = cand.clone();
+                            // The ordinal key becomes THIS body's
+                            // canonical name end-to-end (descriptor,
+                            // current_fn_lookup_name, archive entry) —
+                            // user-side loads then register the three
+                            // sibling bodies under DISTINCT keys and
+                            // the call-site resolver can pick by the
+                            // residual's base type.  Without this the
+                            // uniqueness existed only inside the bake
+                            // codegen's ctx and collapsed again at
+                            // archive load.
+                            lookup_name = key.clone();
+                            break;
+                        }
+                    } else if n > 1 {
+                        break;
+                    }
+                    n += 1;
+                    key = format!("{}#impl{}", qualified, n);
+                }
+                chosen
+            } else {
+                func_info
+            }
+        } else {
+            func_info
         };
 
         // IMPORTANT: Extract parameter names and mutability from the CURRENT function being compiled,
@@ -16045,7 +16199,36 @@ impl VbcCodegen {
     }
 
     fn resolve_field_index(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
-        self.resolve_field_index_flagged(type_name, field_name).0
+        let (idx, guessed) = self.resolve_field_index_flagged(type_name, field_name);
+        // #42 FLIP (2026-07-13): every ACCESS site routes through the
+        // flagged resolver + by-name doors; the remaining un-flagged
+        // callers are record-LITERAL / known-type sites where a GUESS
+        // cannot legitimately occur — two full census corpora
+        // (text-mix 1612 tests, collections 872) logged ZERO guessed
+        // emissions. A guess landing here is therefore a latent
+        // cross-type layout defect: refuse LOUDLY at compile time
+        // instead of baking a semantically baseless index (the
+        // D2/CAP-AUDIT memory-unsafety class this task retires).
+        // VERUM_FIELD_GUESS_LEGACY=1 restores the silent guess for
+        // A/B attribution during the transition window.
+        if guessed && std::env::var("VERUM_FIELD_GUESS_LEGACY").is_err() {
+            let fn_name = self
+                .ctx
+                .current_function
+                .as_deref()
+                .unwrap_or("?")
+                .to_string();
+            eprintln!(
+                "error[FIELD-GUESS-HARD-1]: field '{}' on type {:?} has no \
+                 authoritative layout at a positional emission site (fn `{}`) — \
+                 refusing to bake a guessed index. If this site is a genuine \
+                 unknown-type ACCESS it must use the flagged resolver + by-name \
+                 instructions; if the type is known, its descriptor is missing \
+                 from the layout registry (registration-order defect).",
+                field_name, type_name, fn_name
+            );
+        }
+        idx
     }
 
     /// FIELD-ACCESS-BYNAME-1: like `resolve_field_index`, but also
@@ -18715,6 +18898,29 @@ impl VbcCodegen {
                     | Instruction::SetFieldNamed { name, .. } => {
                         if let Some(mapped) = string_id_map.get(*name as usize) {
                             *name = mapped.0;
+                        } else if std::env::var("VERUM_TRACE_BYNAME").is_ok() {
+                            eprintln!(
+                                "[byname-encode-miss] sid={} map_len={}",
+                                *name,
+                                string_id_map.len()
+                            );
+                        }
+                    }
+                    // #42/#47: RefFieldNamed's varint string id gets the
+                    // same codegen-index → module StringId rebase.
+                    Instruction::CbgrExtended { sub_op, operands }
+                        if *sub_op
+                            == crate::instruction::CbgrSubOpcode::RefFieldNamed as u8 =>
+                    {
+                        if let Some(new_ops) =
+                            remap_ref_field_named_operands(operands, |sid| {
+                                string_id_map
+                                    .get(sid as usize)
+                                    .map(|m| m.0)
+                                    .unwrap_or(sid)
+                            })
+                        {
+                            *operands = new_ops;
                         }
                     }
                     // Remap protocol_id in CmpG from codegen string index to module StringId.
@@ -20698,7 +20904,18 @@ impl VbcCodegen {
             let text = match archive_module.strings.get(crate::types::StringId(archive_sid))
             {
                 Some(s) => s.to_string(),
-                None => return archive_sid,
+                None => {
+                    // #47 oracle: a silent passthrough here leaks a
+                    // foreign-scheme sid straight into the final module.
+                    if std::env::var("VERUM_TRACE_BYNAME").is_ok() {
+                        eprintln!(
+                            "[archive-intern-miss] sid={} archive_strings_len={}",
+                            archive_sid,
+                            archive_module.strings.len(),
+                        );
+                    }
+                    return archive_sid;
+                }
             };
             this.ctx.intern_string_raw(&text)
         };
@@ -20713,6 +20930,19 @@ impl VbcCodegen {
             | Instruction::SetFieldNamed { name, .. } => {
                 let new_id = intern_archive(self, *name);
                 *name = new_id;
+            }
+            // #42/#47 third by-name door: RefFieldNamed rides a raw
+            // CbgrExtended operand vector — its varint STRING id needs
+            // the same archive→codegen intern rebase or the raw id
+            // leaks into the final module (the 82-warn no-name class).
+            Instruction::CbgrExtended { sub_op, operands }
+                if *sub_op == crate::instruction::CbgrSubOpcode::RefFieldNamed as u8 =>
+            {
+                if let Some(new_ops) =
+                    remap_ref_field_named_operands(operands, |sid| intern_archive(self, sid))
+                {
+                    *operands = new_ops;
+                }
             }
             Instruction::Panic { message_id } => {
                 let new_id = intern_archive(self, *message_id);
@@ -20746,6 +20976,43 @@ impl VbcCodegen {
             _ => {}
         }
     }
+}
+
+
+/// #42/#47 — remap the varint STRING id inside a serialized
+/// `CbgrExtended{ sub_op: RefFieldNamed (0x0E) }` operand vector.
+/// Layout: `[reg:dst][reg:base][varint:name]` where regs are 1 byte
+/// (<0x80) or 2 bytes (0x80|hi, lo). Returns None when the vector is
+/// malformed (leave untouched — the interpreter will produce its loud
+/// typed error rather than us guessing).
+fn remap_ref_field_named_operands(
+    operands: &[u8],
+    mut map: impl FnMut(u32) -> u32,
+) -> Option<Vec<u8>> {
+    let mut cursor = 0usize;
+    for _ in 0..2 {
+        cursor += if *operands.get(cursor)? & 0x80 != 0 { 2 } else { 1 };
+    }
+    let mut sid: u64 = 0;
+    let mut shift = 0u32;
+    let mut i = cursor;
+    loop {
+        let b = *operands.get(i)?;
+        sid |= ((b & 0x7F) as u64) << shift;
+        i += 1;
+        if b & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
+        }
+    }
+    let new_sid = map(sid as u32) as u64;
+    let mut out = operands[..cursor].to_vec();
+    crate::encoding::encode_varint(new_sid, &mut out);
+    out.extend_from_slice(&operands[i..]);
+    Some(out)
 }
 
 /// Helper IdRemap implementation used by [`VbcCodegen::merge_archive_function_bodies`]
