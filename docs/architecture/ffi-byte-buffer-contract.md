@@ -117,21 +117,21 @@ the target's own offset — reading `[0]` on macOS yields `sin_len` (16), not
 
 ---
 
-## Open: SLICE-COERCE-ARR-1 (task #24) — the bare-`&arr` footgun
+## RESOLVED: SLICE-COERCE-ARR-1 (task #24, commit 02e838a10) — bare `&arr` now unsizes
 
-Rule 2 is currently a *footgun*, not a *coercion*: `recv_from(&mut buf)` with
-a bare `&mut buf` silently fails because a bare whole-array reference does
-NOT unsize to a `reserved=1` slice — only `&mut buf[..]` does. Empirical
-witness (`probe_slice_ptr.vr`, `write(2)`): `dump_ptr(&buf[..3])` prints,
-`recv_like(&mut buf)` fails, `recv_like(&mut buf[..])` prints.
+Rule 2's footgun is **fixed for byte arrays**: a bare `&arr` / `&mut arr` on a
+`[Byte; N]` variable now lowers (in `compile_unary`) to the SAME `RefSlice`
+(start 0, len = `Len(arr)`) as `&arr[..]` — a `reserved=1` packed `FatRef`, not
+a raw array-object pointer. `recv_from(&mut buf)` (bare) works. Rust unsizes
+`&[u8; N]` → `&[u8]` implicitly; Verum now matches for byte arrays. Verified:
+`recv_like(&mut buf)`/`dump(&buf)` print; stdlib `recv_from(&mut buf)` →
+`BARE_ROUNDTRIP_OK`; subslice forms + tcp `local_addr` unchanged.
 
-Rust unsizes `&[u8; N]` → `&[u8]` implicitly at the coercion site; Verum's
-call-argument lowering does not. **The fundamental fix** is codegen: when a
-call argument is `&arr` / `&mut arr` for an array-typed `arr` and the
-parameter is `&[T]` / `&mut [T]`, emit the `container_to_slice_fat_ref`
-slice construction (stride in `reserved`) instead of passing the raw
-array-object pointer. Until it lands, every FFI-buffer call site — stdlib
-*and* user — must spell the subslice `&buf[..]`.
+The gate is `get_typed_array_elem_size == Some(1)` (byte arrays) — the minimal
+non-regressive blast radius. A `&arr as &unsafe Byte` cast is unaffected (it
+parses `&(arr as …)`, inner Cast not Path). FOLLOW-UP: broadening the gate to
+`Some(_)` so typed `[T; N]` arrays also unsize is a clean coherence extension,
+pending a check that typed arrays are tracked and their `&arr[..]` is verified.
 
 A parallel coherence option: route `[0_u8; N]` (byte-literal `Repeat`)
 through `NewByteArray` so every byte buffer is packed regardless of
