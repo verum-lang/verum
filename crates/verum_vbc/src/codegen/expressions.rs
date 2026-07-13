@@ -4191,6 +4191,61 @@ impl VbcCodegen {
             return Ok(Some(dest));
         }
 
+        // SLICE-COERCE-ARR-1 (#24): `&arr` / `&mut arr` on a WHOLE byte-array
+        // variable unsizes to a slice — semantically `&arr[..]` — so it
+        // reaches an `&[Byte]` parameter (and its `.as_ptr()`/`.as_mut_ptr()`)
+        // as a `reserved=1` packed `FatRef`, NOT a raw array-object pointer.
+        //
+        // Without this, a bare `recv_from(&mut buf)` handed the callee the
+        // ObjectHeader base, so `buf.as_mut_ptr()` (Unslice) returned the
+        // header and the FFI OUT-write corrupted `header.size` (observed:
+        // "index <ptr> for list of length 16").  Rust auto-unsizes
+        // `&[u8; N]` → `&[u8]`; Verum's bare-`&arr` lowering did not.
+        //
+        // The emitted sequence is byte-identical to the `&arr[..]` RefSlice
+        // arm above (start 0, len = `Len(arr)`), which is the witness that
+        // this lowering is correct (probe: `&buf[..]` yields the packed data
+        // pointer, bare `&buf` did not).  Gated to byte arrays
+        // (`get_typed_array_elem_size == Some(1)`) so only genuine `[Byte; N]`
+        // buffers change; every other `&x` keeps its existing lowering.  A
+        // `&arr as &unsafe Byte` cast parses as `&(arr as …)` (inner is a
+        // Cast, not a Path), so raw-pointer casts are unaffected.
+        if matches!(op, UnOp::Ref | UnOp::RefMut)
+            && let ExprKind::Path(path) = &inner.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ident) = &path.segments[0]
+            && self.ctx.get_typed_array_elem_size(&ident.name) == Some(1)
+        {
+            let arr_reg = self
+                .compile_expr(inner)?
+                .or_internal("&arr: byte-array operand has no value")?;
+            let start_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadSmallI {
+                dst: start_reg,
+                value: 0,
+            });
+            let len_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Len {
+                dst: len_reg,
+                arr: arr_reg,
+                type_hint: 0,
+            });
+            let dest = self.ctx.alloc_temp();
+            let mut operands = Vec::<u8>::with_capacity(8);
+            Self::write_reg(&mut operands, dest.0);
+            Self::write_reg(&mut operands, arr_reg.0);
+            Self::write_reg(&mut operands, start_reg.0);
+            Self::write_reg(&mut operands, len_reg.0);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
+                operands,
+            });
+            self.ctx.free_temp(arr_reg);
+            self.ctx.free_temp(start_reg);
+            self.ctx.free_temp(len_reg);
+            return Ok(Some(dest));
+        }
+
         // `&mut arr[i]` / `&arr[i]`: the generic path (below) would
         // compile `arr[i]` to a register holding a *copy* of the
         // element value and then wrap it in a CBGR register-ref,
