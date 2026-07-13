@@ -24,7 +24,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::instruction::Opcode;
 use crate::module::{FunctionDescriptor, FunctionId, SpecializationEntry, VbcModule};
 use crate::types::{StringId, TypeId, TypeRef};
 
