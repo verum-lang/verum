@@ -1005,612 +1005,133 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Iterator layout: [tag=0: i64, iterable_ptr: i64, current_index: i64]
     /// Returns list[index], increments index. has_more = (index < len).
+    /// IterNext over any slice-shaped iterable — ONE implementation on
+    /// the slice_cell::CellEnv classifier ({canonical cell | stamped
+    /// Pack | unstamped List} → (data, len, elem)), stride-honouring
+    /// element read, exhausted-iteration safe pointer. The list and
+    /// slice entry points are thin aliases: the classifier makes the
+    /// compile-time distinction unnecessary at runtime (and the list
+    /// path gains honest elem handling for free).
+    fn iter_next_via_view(
+        &self,
+        builder: &Builder<'ctx>,
+        iter_ptr: PointerValue<'ctx>,
+        heap_floor: u64,
+        tag: &str,
+    ) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
+        let i64_type = self.context.i64_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+
+        // Iterator struct: [tag, iterable, index].
+        // SAFETY: fixed fields of the 24-byte iterator allocation.
+        let field1 = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    i64_type,
+                    iter_ptr,
+                    &[i64_type.const_int(1, false)],
+                    &format!("{}_iterable_slot", tag),
+                )
+                .or_llvm_err()?
+        };
+        let iterable_int = builder
+            .build_load(i64_type, field1, &format!("{}_iterable_int", tag))
+            .or_llvm_err()?
+            .into_int_value();
+        let iterable_ptr = builder
+            .build_int_to_ptr(iterable_int, ptr_type, &format!("{}_iterable", tag))
+            .or_llvm_err()?;
+        let index_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    i64_type,
+                    iter_ptr,
+                    &[i64_type.const_int(2, false)],
+                    &format!("{}_index_slot", tag),
+                )
+                .or_llvm_err()?
+        };
+        let index = builder
+            .build_load(i64_type, index_ptr, &format!("{}_index", tag))
+            .or_llvm_err()?
+            .into_int_value();
+
+        let env = super::slice_cell::CellEnv {
+            llvm: self.context,
+            heap_floor,
+        };
+        let view = env.view(
+            builder,
+            iterable_ptr,
+            verum_vbc::types::TypeId::TUPLE.0 as u64,
+            verum_vbc::types::TypeId::BYTE_SLICE.0 as u64,
+            LIST_LEN_OFFSET,
+            LIST_PTR_OFFSET,
+            tag,
+        )?;
+
+        let has_element = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::ULT,
+                index,
+                view.len,
+                &format!("{}_has_elem", tag),
+            )
+            .or_llvm_err()?;
+
+        // Exhausted-iteration guard: the width-switched load below runs
+        // unconditionally; on the final IterNext (index == len) a read
+        // past the backing can cross a page. Read from the iterator
+        // struct itself when there is no element — value discarded.
+        let (elem_addr, _eptr_raw) =
+            env.elem_addr(builder, view.data, view.elem, index, tag)?;
+        let iter_int = builder
+            .build_ptr_to_int(iter_ptr, i64_type, &format!("{}_iter_int", tag))
+            .or_llvm_err()?;
+        let safe_addr = builder
+            .build_select(has_element, elem_addr, iter_int, &format!("{}_safe", tag))
+            .or_llvm_err()?
+            .into_int_value();
+        let safe_ptr = builder
+            .build_int_to_ptr(safe_addr, ptr_type, &format!("{}_safe_ptr", tag))
+            .or_llvm_err()?;
+        let element = env.elem_load(builder, view.elem, safe_ptr, tag)?;
+
+        // Increment index.
+        let one = i64_type.const_int(1, false);
+        let new_index = builder
+            .build_int_add(index, one, &format!("{}_next_idx", tag))
+            .or_llvm_err()?;
+        builder.build_store(index_ptr, new_index).or_llvm_err()?;
+
+        // Unit when exhausted.
+        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
+        let value = builder
+            .build_select(has_element, element, unit_tag, &format!("{}_value", tag))
+            .or_llvm_err()?
+            .into_int_value();
+        let has_more = builder
+            .build_int_z_extend(has_element, i64_type, &format!("{}_more", tag))
+            .or_llvm_err()?;
+        Ok((value, has_more))
+    }
+
     pub fn lower_iter_next_list(
         &self,
         builder: &Builder<'ctx>,
         iter_ptr: PointerValue<'ctx>,
         heap_floor: u64,
     ) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
-        let i64_type = self.context.i64_type();
-        let i8_type = self.context.i8_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-
-        // Load iterable pointer (field at offset 1)
-        // SAFETY: GEP into the 24-byte iterator struct at field 1 (iterable pointer)
-        let field0_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    iter_ptr,
-                    &[i64_type.const_int(1, false)],
-                    "field0_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let iterable_as_int = builder
-            .build_load(i64_type, field0_ptr, "iterable_int")
-            .or_llvm_err()?
-            .into_int_value();
-        let iterable_ptr = builder
-            .build_int_to_ptr(iterable_as_int, ptr_type, "iterable_ptr")
-            .or_llvm_err()?;
-
-        // Load current index (field at offset 2)
-        // SAFETY: GEP into the 24-byte iterator struct at field 2 (current index)
-        let index_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    iter_ptr,
-                    &[i64_type.const_int(2, false)],
-                    "index_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let index = builder
-            .build_load(i64_type, index_ptr, "index")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // AOT-SLICE-ELEMSIZE-CARRY-1 (#48): the iterable may be THE
-        // canonical slice cell {data@0, len@8, elem@16} — its word0 is
-        // a plausible DATA pointer (an object's header word never is).
-        // Select len/data accordingly; the legacy object read below
-        // stays byte-identical for non-cell iterables.
-        let word0 = builder
-            .build_load(i64_type, iterable_ptr, "iter_w0")
-            .or_llvm_err()?
-            .into_int_value();
-        let cell_above = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::UGE,
-                word0,
-                i64_type.const_int(heap_floor, false),
-                "iter_cell_above",
-            )
-            .or_llvm_err()?;
-        let cell_align = builder
-            .build_and(word0, i64_type.const_int(7, false), "iter_cell_align")
-            .or_llvm_err()?;
-        let cell_aligned = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                cell_align,
-                i64_type.const_zero(),
-                "iter_cell_aligned",
-            )
-            .or_llvm_err()?;
-        let is_cell = builder
-            .build_and(cell_above, cell_aligned, "iter_is_cell")
-            .or_llvm_err()?;
-        // REAL branch, not select: the two shapes have different valid
-        // extents (the 24-byte cell has NO slot @32 — an unconditional
-        // object-len load reads past the allocation: the exact OOB
-        // class this task retires).
-        let cur_bb = builder
-            .get_insert_block()
-            .or_internal("iter_next_list: no insert block")?;
-        let func = cur_bb
-            .get_parent()
-            .or_internal("iter_next_list: no parent function")?;
-        let cell_bb = self.context.append_basic_block(func, "iter_cell");
-        let obj_bb = self.context.append_basic_block(func, "iter_obj");
-        let shape_merge = self.context.append_basic_block(func, "iter_shape_merge");
-        builder
-            .build_conditional_branch(is_cell, cell_bb, obj_bb)
-            .or_llvm_err()?;
-
-        builder.position_at_end(cell_bb);
-        let cell_len_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(1, false)],
-                    "iter_cell_len_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let cell_len = builder
-            .build_load(i64_type, cell_len_ptr, "iter_cell_len")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_unconditional_branch(shape_merge).or_llvm_err()?;
-
-        builder.position_at_end(obj_bb);
-        // Canonical List layout (verum_common::layout): {len@24, cap@32,
-        // ptr@40}. The pre-fix hardcoded slots (len@32=CAP, data@24=LEN)
-        // matched a layout that never existed — for a 4-element list the
-        // "data pointer" was the LEN VALUE 4 and the first element load
-        // faulted at address 0x4. Loaded ONLY on this branch; a 24-byte
-        // cell has no slots past 16 (OOB, the class this task retires).
-        let len_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(LIST_LEN_OFFSET, false)],
-                    "len_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let obj_len = builder
-            .build_load(i64_type, len_ptr, "len")
-            .or_llvm_err()?
-            .into_int_value();
-        let obj_data_ptr_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(LIST_PTR_OFFSET, false)],
-                    "obj_data_ptr_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let obj_data_int = builder
-            .build_load(i64_type, obj_data_ptr_ptr, "obj_data_int")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_unconditional_branch(shape_merge).or_llvm_err()?;
-
-        builder.position_at_end(shape_merge);
-        let len_phi = builder.build_phi(i64_type, "iter_len").or_llvm_err()?;
-        len_phi.add_incoming(&[(&cell_len, cell_bb), (&obj_len, obj_bb)]);
-        let len = len_phi.as_basic_value().into_int_value();
-        let data_phi = builder.build_phi(i64_type, "iter_data").or_llvm_err()?;
-        data_phi.add_incoming(&[(&word0, cell_bb), (&obj_data_int, obj_bb)]);
-        let data_from_shape = data_phi.as_basic_value().into_int_value();
-
-        // Check if index < len
-        let has_element = builder
-            .build_int_compare(verum_llvm::IntPredicate::ULT, index, len, "has_element")
-            .or_llvm_err()?;
-
-        // #48: data/len selected via the shape branch above (real
-        // branch, not select — the two shapes have different valid
-        // extents; see the OOB note at the branch).
-        let data_as_int = data_from_shape;
-        let data_ptr = builder
-            .build_int_to_ptr(data_as_int, ptr_type, "data_ptr")
-            .or_llvm_err()?;
-
-        // Use a safe pointer when no element (data_ptr may be null for empty lists)
-        // When has_element is false, use iter_ptr as a safe non-null pointer
-        let data_as_ptr_int = builder
-            .build_ptr_to_int(data_ptr, i64_type, "data_ptr_int")
-            .or_llvm_err()?;
-        let iter_as_int = builder
-            .build_ptr_to_int(iter_ptr, i64_type, "iter_ptr_int")
-            .or_llvm_err()?;
-        let safe_ptr_int = builder
-            .build_select(has_element, data_as_ptr_int, iter_as_int, "safe_ptr_int")
-            .or_llvm_err()?
-            .into_int_value();
-        let safe_data_ptr = builder
-            .build_int_to_ptr(safe_ptr_int, ptr_type, "safe_data_ptr")
-            .or_llvm_err()?;
-
-        // Get element at current index (safe: only dereferenced when has_element is true)
-        // SAFETY: GEP into the list object header to access the data pointer field at a fixed offset; the list pointer is non-null and valid
-        let elem_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(i64_type, safe_data_ptr, &[index], "elem_ptr")
-                .or_llvm_err()?
-        };
-        let element = builder
-            .build_load(i64_type, elem_ptr, "element")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // Increment index only when we have an element
-        let one = i64_type.const_int(1, false);
-        let next_idx = builder
-            .build_int_add(index, one, "next_idx")
-            .or_llvm_err()?;
-        let new_index = builder
-            .build_select(has_element, next_idx, index, "new_index")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_store(index_ptr, new_index).or_llvm_err()?;
-
-        // Return unit if no element
-        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
-        let value = builder
-            .build_select(has_element, element, unit_tag, "iter_value")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // Convert has_element (i1) to i64
-        let has_more = builder
-            .build_int_z_extend(has_element, i64_type, "has_more")
-            .or_llvm_err()?;
-
-        Ok((value, has_more))
+        self.iter_next_via_view(builder, iter_ptr, heap_floor, "iterl")
     }
 
-    /// Lower IterNext for a byte slice iterable (from Pack{ptr, len}).
-    ///
-
-    /// Slice layout (Pack object): [24-byte header][ptr: i64][len: i64]
-    /// Iterator layout: [tag=0: i64, iterable_ptr: i64, index: i64]
-    /// Elements are i8 bytes, zero-extended to i64.
     pub fn lower_iter_next_slice(
         &self,
         builder: &Builder<'ctx>,
         iter_ptr: PointerValue<'ctx>,
         heap_floor: u64,
     ) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
-        let i8_type = self.context.i8_type();
-        let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-
-        // Load iterable pointer (field at iter offset 1)
-        // SAFETY: GEP to access a struct field at a fixed offset; the struct was allocated with sufficient size for all fields
-        let field0_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    iter_ptr,
-                    &[i64_type.const_int(1, false)],
-                    "field0_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let iterable_as_int = builder
-            .build_load(i64_type, field0_ptr, "iterable_int")
-            .or_llvm_err()?
-            .into_int_value();
-        let iterable_ptr = builder
-            .build_int_to_ptr(iterable_as_int, ptr_type, "iterable_ptr")
-            .or_llvm_err()?;
-
-        // Load current index (field at iter offset 2)
-        // SAFETY: GEP into the iterator/range struct at a fixed field offset; the struct layout is known at compile time
-        let index_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    iter_ptr,
-                    &[i64_type.const_int(2, false)],
-                    "index_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let index = builder
-            .build_load(i64_type, index_ptr, "index")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // AOT-SLICE-ELEMSIZE-CARRY-1 (#48): the iterable is either THE
-        // canonical slice cell {data@0, len@8, elem@16} or the legacy
-        // header-stamped Pack {ptr@24, len@32, byte elements}.  The two
-        // shapes have different valid extents — a 24-byte cell has no
-        // slot @24/@32; the legacy loads there land in the NEIGHBOURING
-        // allocation (observed: data@24 read the backing array's first
-        // element 10 → `load i8 *0xa` EXC).  Discriminate with a REAL
-        // branch (never select) on the cell probe: a cell's word0 is a
-        // heap DATA pointer; a Pack's word0 is its ObjectHeader stamp.
-        let word0 = builder
-            .build_load(i64_type, iterable_ptr, "slice_w0")
-            .or_llvm_err()?
-            .into_int_value();
-        let cell_above = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::UGE,
-                word0,
-                i64_type.const_int(heap_floor, false),
-                "slice_cell_above",
-            )
-            .or_llvm_err()?;
-        let cell_align = builder
-            .build_and(word0, i64_type.const_int(7, false), "slice_cell_align")
-            .or_llvm_err()?;
-        let cell_aligned = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                cell_align,
-                i64_type.const_zero(),
-                "slice_cell_aligned",
-            )
-            .or_llvm_err()?;
-        let is_cell = builder
-            .build_and(cell_above, cell_aligned, "slice_is_cell")
-            .or_llvm_err()?;
-        let cur_bb = builder
-            .get_insert_block()
-            .or_internal("iter_next_slice: no insert block")?;
-        let func = cur_bb
-            .get_parent()
-            .or_internal("iter_next_slice: no parent function")?;
-        let cell_bb = self.context.append_basic_block(func, "snext_cell");
-        let pack_bb = self.context.append_basic_block(func, "snext_pack");
-        let shape_merge = self.context.append_basic_block(func, "snext_shape_merge");
-        builder
-            .build_conditional_branch(is_cell, cell_bb, pack_bb)
-            .or_llvm_err()?;
-
-        // cell: len@8, data=word0, elem@16 (self-normalising).
-        builder.position_at_end(cell_bb);
-        let cell_len_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(1, false)],
-                    "snext_cell_len_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let cell_len = builder
-            .build_load(i64_type, cell_len_ptr, "snext_cell_len")
-            .or_llvm_err()?
-            .into_int_value();
-        let cell_elem_ptr = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i64_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(2, false)],
-                    "snext_cell_elem_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let cell_elem_raw = builder
-            .build_load(i64_type, cell_elem_ptr, "snext_cell_elem_raw")
-            .or_llvm_err()?
-            .into_int_value();
-        let mut elem_dom = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                cell_elem_raw,
-                i64_type.const_int(1, false),
-                "snext_ce1",
-            )
-            .or_llvm_err()?;
-        for w in [2u64, 4, 8] {
-            let c = builder
-                .build_int_compare(
-                    verum_llvm::IntPredicate::EQ,
-                    cell_elem_raw,
-                    i64_type.const_int(w, false),
-                    "snext_cew",
-                )
-                .or_llvm_err()?;
-            elem_dom = builder.build_or(elem_dom, c, "snext_cedom").or_llvm_err()?;
-        }
-        let cell_elem = builder
-            .build_select(
-                elem_dom,
-                cell_elem_raw,
-                i64_type.const_int(8, false),
-                "snext_cell_elem",
-            )
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_unconditional_branch(shape_merge).or_llvm_err()?;
-
-        // obj: discriminate stamped Pack (TUPLE/BYTE_SLICE → {data@24,
-        // len@32}, byte elements) from an unstamped LIST (word0=0 —
-        // as_slice is an identity cast, so slice iterators frequently
-        // hold LIST objects): canonical {len@24, cap@32, ptr@40}
-        // (verum_common::layout), 8-byte Value elements. Mirror of
-        // instruction.rs emit_container_view (unify in slice_cell.rs,
-        // phase-1.5).
-        builder.position_at_end(pack_bb);
-        let i32_type = self.context.i32_type();
-        let tid = builder
-            .build_load(i32_type, iterable_ptr, "snext_tid")
-            .or_llvm_err()?
-            .into_int_value();
-        let is_tuple = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                tid,
-                i32_type.const_int(521, false),
-                "snext_is_tuple",
-            )
-            .or_llvm_err()?;
-        let is_bslice = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::EQ,
-                tid,
-                i32_type.const_int(528, false),
-                "snext_is_bslice",
-            )
-            .or_llvm_err()?;
-        let is_pack = builder
-            .build_or(is_tuple, is_bslice, "snext_is_pack")
-            .or_llvm_err()?;
-        let pk_bb = self.context.append_basic_block(func, "snext_pk");
-        let ls_bb = self.context.append_basic_block(func, "snext_ls");
-        builder
-            .build_conditional_branch(is_pack, pk_bb, ls_bb)
-            .or_llvm_err()?;
-
-        builder.position_at_end(pk_bb);
-        // SAFETY: GEP into the Pack descriptor at fixed offset 32 (len);
-        // this branch is only reached for stamped Pack heap objects.
-        let len_slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(32, false)],
-                    "slice_len_slot",
-                )
-                .or_llvm_err()?
-        };
-        let pack_len = builder
-            .build_load(i64_type, len_slot, "len")
-            .or_llvm_err()?
-            .into_int_value();
-        // SAFETY: GEP into the Pack descriptor at fixed offset 24 (data ptr).
-        let data_ptr_slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(24, false)],
-                    "slice_ptr_slot",
-                )
-                .or_llvm_err()?
-        };
-        let pack_data = builder
-            .build_load(i64_type, data_ptr_slot, "data_int")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_unconditional_branch(shape_merge).or_llvm_err()?;
-
-        builder.position_at_end(ls_bb);
-        // SAFETY: GEP to the List len slot (LIST_LEN_OFFSET=24).
-        let ls_len_slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(LIST_LEN_OFFSET, false)],
-                    "snext_ls_len_slot",
-                )
-                .or_llvm_err()?
-        };
-        let ls_len = builder
-            .build_load(i64_type, ls_len_slot, "snext_ls_len")
-            .or_llvm_err()?
-            .into_int_value();
-        // SAFETY: GEP to the List backing ptr slot (LIST_PTR_OFFSET=40).
-        let ls_data_slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    i8_type,
-                    iterable_ptr,
-                    &[i64_type.const_int(LIST_PTR_OFFSET, false)],
-                    "snext_ls_data_slot",
-                )
-                .or_llvm_err()?
-        };
-        let ls_data = builder
-            .build_load(i64_type, ls_data_slot, "snext_ls_data")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_unconditional_branch(shape_merge).or_llvm_err()?;
-
-        builder.position_at_end(shape_merge);
-        let len_phi = builder.build_phi(i64_type, "snext_len").or_llvm_err()?;
-        len_phi.add_incoming(&[(&cell_len, cell_bb), (&pack_len, pk_bb), (&ls_len, ls_bb)]);
-        let len = len_phi.as_basic_value().into_int_value();
-        let data_phi = builder.build_phi(i64_type, "snext_data").or_llvm_err()?;
-        data_phi.add_incoming(&[(&word0, cell_bb), (&pack_data, pk_bb), (&ls_data, ls_bb)]);
-        let data_as_int = data_phi.as_basic_value().into_int_value();
-        let elem_phi = builder.build_phi(i64_type, "snext_elem").or_llvm_err()?;
-        let one = i64_type.const_int(1, false);
-        let eight = i64_type.const_int(8, false);
-        elem_phi.add_incoming(&[(&cell_elem, cell_bb), (&one, pk_bb), (&eight, ls_bb)]);
-        let elem_w = elem_phi.as_basic_value().into_int_value();
-
-        // Check if index < len
-        let has_element = builder
-            .build_int_compare(verum_llvm::IntPredicate::ULT, index, len, "has_element")
-            .or_llvm_err()?;
-        let data_ptr = builder
-            .build_int_to_ptr(data_as_int, ptr_type, "data_ptr")
-            .or_llvm_err()?;
-
-        // Element read honours the carried stride: addr = data + idx*elem,
-        // width-switched load (1/2/4 zext; 8 direct) — mirror of the
-        // GET_E cell arm / interp fat_ref_read_element.
-        let elem_off = builder
-            .build_int_mul(index, elem_w, "snext_off")
-            .or_llvm_err()?;
-        // SAFETY: byte-GEP to the element address inside the slice backing;
-        // index is validated against len before the value is consumed.
-        let elem_addr_raw = unsafe {
-            builder
-                .build_in_bounds_gep(i8_type, data_ptr, &[elem_off], "snext_eptr_raw")
-                .or_llvm_err()?
-        };
-        // Exhausted-iteration guard (mirror of lower_iter_next_list's
-        // safe_ptr): the width-switched load below runs unconditionally,
-        // and on the final IterNext (index == len) an 8-byte read past
-        // the backing can cross a page. Read from the iterator struct
-        // itself when there is no element — the value is discarded.
-        let elem_addr_int = builder
-            .build_ptr_to_int(elem_addr_raw, i64_type, "snext_eptr_int")
-            .or_llvm_err()?;
-        let iter_addr_int = builder
-            .build_ptr_to_int(iter_ptr, i64_type, "snext_iter_int")
-            .or_llvm_err()?;
-        let safe_addr = builder
-            .build_select(has_element, elem_addr_int, iter_addr_int, "snext_safe_addr")
-            .or_llvm_err()?
-            .into_int_value();
-        let elem_ptr = builder
-            .build_int_to_ptr(safe_addr, ptr_type, "snext_eptr")
-            .or_llvm_err()?;
-        let ew1 = self.context.append_basic_block(func, "snext_w1");
-        let ew2 = self.context.append_basic_block(func, "snext_w2");
-        let ew4 = self.context.append_basic_block(func, "snext_w4");
-        let ew8 = self.context.append_basic_block(func, "snext_w8");
-        let emerge = self.context.append_basic_block(func, "snext_emerge");
-        builder
-            .build_switch(
-                elem_w,
-                ew8,
-                &[
-                    (i64_type.const_int(1, false), ew1),
-                    (i64_type.const_int(2, false), ew2),
-                    (i64_type.const_int(4, false), ew4),
-                ],
-            )
-            .or_llvm_err()?;
-        let mut elem_loads: Vec<(IntValue, _)> = Vec::new();
-        for (bb, bits) in [(ew1, 8u32), (ew2, 16), (ew4, 32)] {
-            builder.position_at_end(bb);
-            let ity = self.context.custom_width_int_type(bits);
-            let v = builder
-                .build_load(ity, elem_ptr, "snext_wv")
-                .or_llvm_err()?
-                .into_int_value();
-            let z = builder
-                .build_int_z_extend(v, i64_type, "snext_wz")
-                .or_llvm_err()?;
-            builder.build_unconditional_branch(emerge).or_llvm_err()?;
-            elem_loads.push((z, builder.get_insert_block().unwrap()));
-        }
-        builder.position_at_end(ew8);
-        let v8 = builder
-            .build_load(i64_type, elem_ptr, "snext_w8v")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_unconditional_branch(emerge).or_llvm_err()?;
-        elem_loads.push((v8, builder.get_insert_block().unwrap()));
-        builder.position_at_end(emerge);
-        let epihi = builder.build_phi(i64_type, "snext_elem_val").or_llvm_err()?;
-        for (val, bb) in &elem_loads {
-            epihi.add_incoming(&[(&(*val), *bb)]);
-        }
-        let element = epihi.as_basic_value().into_int_value();
-
-        // Increment index
-        let one = i64_type.const_int(1, false);
-        let new_index = builder
-            .build_int_add(index, one, "new_index")
-            .or_llvm_err()?;
-        builder.build_store(index_ptr, new_index).or_llvm_err()?;
-
-        // Return unit if no element
-        let unit_tag = i64_type.const_int(verum_vbc::value::nanbox::NAN_UNIT_HEADER, false);
-        let value = builder
-            .build_select(has_element, element, unit_tag, "iter_value")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // Convert has_element (i1) to i64
-        let has_more = builder
-            .build_int_z_extend(has_element, i64_type, "has_more")
-            .or_llvm_err()?;
-
-        Ok((value, has_more))
+        self.iter_next_via_view(builder, iter_ptr, heap_floor, "iters")
     }
 
     // =========================================================================
@@ -14223,6 +13744,219 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .build_int_add(j_final_val, i64_type.const_int(1, false), "store_idx")
             .or_llvm_err()?;
         // SAFETY: GEP to access the 'store_ptr' field at a fixed offset within a struct of known layout
+        let store_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, data, &[store_idx], "store_ptr")
+                .or_llvm_err()?
+        };
+        builder.build_store(store_ptr, key).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(outer_inc)
+            .or_llvm_err()?;
+
+        // Outer inc: i++
+        builder.position_at_end(outer_inc);
+        let i_next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "i_next")
+            .or_llvm_err()?;
+        i_phi.add_incoming(&[(&i_next, outer_inc)]);
+        builder
+            .build_unconditional_branch(outer_loop)
+            .or_llvm_err()?;
+
+        builder.position_at_end(ret_bb);
+        builder.build_return(None).or_llvm_err()?;
+    }
+
+    // --- verum_list_sort_ord(data: ptr, len: i64, cmp_fn: ptr, greater_tag: i64) -> void ---
+    // Insertion sort on an i64 backing array whose elements are HEAP HANDLES of
+    // an Ord type. Mirrors the interpreter's List.sort (method_dispatch.rs
+    // ~10464): the comparison is `cmp_fn(a, b)` — a `(i64,i64)->i64` returning
+    // an Ordering variant handle — and an element is "greater" when that
+    // handle's variant tag (i64 @ VARIANT_TAG_OFFSET) equals `greater_tag`
+    // (ordering_tag_for_std(Greater) == 2). The raw-i64 `verum_list_sort`
+    // compares heap POINTER ADDRESSES for object elements (→ no meaningful
+    // order); this helper is emitted instead whenever the element type has a
+    // resolvable `<Type>.cmp`, restoring Tier-0/Tier-1 coherence for
+    // `List<T>.sort()` over any non-primitive Ord `T`.
+    if module.get_function("verum_list_sort_ord").is_none() {
+        let i8_type = context.i8_type();
+        let fn_type = void_type.fn_type(
+            &[ptr_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()],
+            false,
+        );
+        let func = super::error::get_or_declare_function(module, "verum_list_sort_ord", fn_type);
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+        let entry = context.append_basic_block(func, "entry");
+        let outer_loop = context.append_basic_block(func, "outer_loop");
+        let inner_loop = context.append_basic_block(func, "inner_loop");
+        let inner_body = context.append_basic_block(func, "inner_body");
+        let inner_done = context.append_basic_block(func, "inner_done");
+        let outer_inc = context.append_basic_block(func, "outer_inc");
+        let ret_bb = context.append_basic_block(func, "ret");
+        let builder = context.create_builder();
+
+        builder.position_at_end(entry);
+        let data = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_pointer_value();
+        let len = func
+            .get_nth_param(1)
+            .or_internal("missing param 1")?
+            .into_int_value();
+        let cmp_fn_ptr = func
+            .get_nth_param(2)
+            .or_internal("missing param 2")?
+            .into_pointer_value();
+        let greater_tag = func
+            .get_nth_param(3)
+            .or_internal("missing param 3")?
+            .into_int_value();
+        // Signature of the element cmp: (self:i64, other:i64) -> Ordering handle:i64.
+        let cmp_fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        // if len <= 1, return
+        let skip = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::SLE,
+                len,
+                i64_type.const_int(1, false),
+                "skip",
+            )
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(skip, ret_bb, outer_loop)
+            .or_llvm_err()?;
+
+        // Outer loop: for i = 1..len
+        builder.position_at_end(outer_loop);
+        let i_phi = builder.build_phi(i64_type, "i").or_llvm_err()?;
+        i_phi.add_incoming(&[(&i64_type.const_int(1, false), entry)]);
+        let i_val = i_phi.as_basic_value().into_int_value();
+        let i_done = builder
+            .build_int_compare(verum_llvm::IntPredicate::SGE, i_val, len, "i_done")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(i_done, ret_bb, inner_loop)
+            .or_llvm_err()?;
+
+        // Load key = data[i]
+        builder.position_at_end(inner_loop);
+        // SAFETY: GEP into the i64 backing array at a validated in-range index.
+        let key_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, data, &[i_val], "key_ptr")
+                .or_llvm_err()?
+        };
+        let key = builder
+            .build_load(i64_type, key_ptr, "key")
+            .or_llvm_err()?
+            .into_int_value();
+        let j_init = builder
+            .build_int_sub(i_val, i64_type.const_int(1, false), "j_init")
+            .or_llvm_err()?;
+        builder
+            .build_unconditional_branch(inner_body)
+            .or_llvm_err()?;
+
+        // Inner loop: while j >= 0 && cmp(data[j], key) == Greater
+        builder.position_at_end(inner_body);
+        let j_phi = builder.build_phi(i64_type, "j").or_llvm_err()?;
+        j_phi.add_incoming(&[(&j_init, inner_loop)]);
+        let j_val = j_phi.as_basic_value().into_int_value();
+        let j_ge_0 = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::SGE,
+                j_val,
+                i64_type.const_zero(),
+                "j_ge_0",
+            )
+            .or_llvm_err()?;
+        let check_bb = context.append_basic_block(func, "check_val");
+        builder
+            .build_conditional_branch(j_ge_0, check_bb, inner_done)
+            .or_llvm_err()?;
+
+        builder.position_at_end(check_bb);
+        // SAFETY: in-bounds GEP into the i64 backing array at a validated index.
+        let dj_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, data, &[j_val], "dj_ptr")
+                .or_llvm_err()?
+        };
+        let dj_val = builder
+            .build_load(i64_type, dj_ptr, "dj_val")
+            .or_llvm_err()?
+            .into_int_value();
+        // ord = cmp_fn(data[j], key); is_greater = variant_tag(ord) == greater_tag
+        let ord_call = builder
+            .build_indirect_call(
+                cmp_fn_type,
+                cmp_fn_ptr,
+                &[dj_val.into(), key.into()],
+                "ord",
+            )
+            .or_llvm_err()?;
+        let ord = ord_call
+            .try_as_basic_value()
+            .basic()
+            .or_internal("cmp returned void")?
+            .into_int_value();
+        let ord_ptr = builder
+            .build_int_to_ptr(ord, ptr_type, "ord_ptr")
+            .or_llvm_err()?;
+        // SAFETY: read the Ordering variant tag (i64) at VARIANT_TAG_OFFSET.
+        let tag_ptr = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    ord_ptr,
+                    &[i64_type.const_int(verum_common::layout::VARIANT_TAG_OFFSET, false)],
+                    "ord_tag_ptr",
+                )
+                .or_llvm_err()?
+        };
+        let ord_tag = builder
+            .build_load(i64_type, tag_ptr, "ord_tag")
+            .or_llvm_err()?
+            .into_int_value();
+        let dj_gt_key = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, ord_tag, greater_tag, "dj_gt_key")
+            .or_llvm_err()?;
+        let shift_bb = context.append_basic_block(func, "shift");
+        builder
+            .build_conditional_branch(dj_gt_key, shift_bb, inner_done)
+            .or_llvm_err()?;
+
+        // Shift: data[j+1] = data[j]; j--
+        builder.position_at_end(shift_bb);
+        let j_plus_1 = builder
+            .build_int_add(j_val, i64_type.const_int(1, false), "j_plus_1")
+            .or_llvm_err()?;
+        // SAFETY: in-bounds GEP into the i64 backing array at a validated index.
+        let dst_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, data, &[j_plus_1], "dst_ptr")
+                .or_llvm_err()?
+        };
+        builder.build_store(dst_ptr, dj_val).or_llvm_err()?;
+        let j_next = builder
+            .build_int_sub(j_val, i64_type.const_int(1, false), "j_next")
+            .or_llvm_err()?;
+        j_phi.add_incoming(&[(&j_next, shift_bb)]);
+        builder
+            .build_unconditional_branch(inner_body)
+            .or_llvm_err()?;
+
+        // Inner done: data[j+1] = key
+        builder.position_at_end(inner_done);
+        let j_final = builder.build_phi(i64_type, "j_final").or_llvm_err()?;
+        j_final.add_incoming(&[(&j_val, inner_body), (&j_val, check_bb)]);
+        let j_final_val = j_final.as_basic_value().into_int_value();
+        let store_idx = builder
+            .build_int_add(j_final_val, i64_type.const_int(1, false), "store_idx")
+            .or_llvm_err()?;
+        // SAFETY: in-bounds GEP into the i64 backing array at a validated index.
         let store_ptr = unsafe {
             builder
                 .build_in_bounds_gep(i64_type, data, &[store_idx], "store_ptr")

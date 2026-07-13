@@ -14198,16 +14198,68 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_int_to_ptr(backing_i64, ptr_type, "backing_ptr")
                     .or_llvm_err()?;
-                // Sort via LLVM IR helper (emitted by define_list_ir_helpers)
+                // ORD-DISPATCH (TIER-COHERENCE-SORT-1): the raw `verum_list_sort`
+                // compares element i64s directly — correct for primitive-valued
+                // elements (Int/…) but for a HEAP element type (Duration, structs,
+                // Text…) that i64 is a POINTER, so it sorts by allocation address
+                // (→ no meaningful order; List<Duration>.sort() was a no-op at
+                // AOT while interp sorted correctly). Mirror the interpreter's
+                // List.sort (method_dispatch.rs ~10464): if the element type has a
+                // resolvable `<Type>.cmp` (Ord impl), sort THROUGH it via
+                // `verum_list_sort_ord`; primitives keep the raw fast path.
+                let elem_tid: Option<verum_vbc::types::TypeId> = ctx
+                    .get_generic_type_args(receiver.0)
+                    .and_then(|targs| targs.first())
+                    .and_then(|tref| match tref {
+                        verum_vbc::types::TypeRef::Concrete(t) => Some(*t),
+                        verum_vbc::types::TypeRef::Instantiated { base, .. } => Some(*base),
+                        _ => None,
+                    });
+                let elem_cmp = elem_tid
+                    .and_then(|tid| ctx.vbc_module().and_then(|m| m.get_type_name(tid)))
+                    .and_then(|name| ctx.get_module().get_function(&format!("{}.cmp", name)));
                 let module = ctx.get_module();
-                let fn_type = ctx
+                if let Some(cmp_fn) = elem_cmp {
+                    let cmp_ptr = cmp_fn.as_global_value().as_pointer_value();
+                    // ordering_tag_for_std(Greater) == 2 (see well_known_types).
+                    let greater_tag = i64_type.const_int(2, false);
+                    let fn_type = ctx.llvm_context().void_type().fn_type(
+                        &[
+                            ptr_type.into(),
+                            i64_type.into(),
+                            ptr_type.into(),
+                            i64_type.into(),
+                        ],
+                        false,
+                    );
+                    let sort_fn = super::error::get_or_declare_function(
+                        module,
+                        "verum_list_sort_ord",
+                        fn_type,
+                    );
+                    ctx.builder()
+                        .build_call(
+                            sort_fn,
+                            &[
+                                backing_ptr.into(),
+                                len.into(),
+                                cmp_ptr.into(),
+                                greater_tag.into(),
+                            ],
+                            "",
+                        )
+                        .or_llvm_err()?;
+                } else {
+                    let fn_type = ctx
                         .llvm_context()
                         .void_type()
                         .fn_type(&[ptr_type.into(), i64_type.into()], false);
-        let sort_fn = super::error::get_or_declare_function(module, "verum_list_sort", fn_type);
-                ctx.builder()
-                    .build_call(sort_fn, &[backing_ptr.into(), len.into()], "")
-                    .or_llvm_err()?;
+                    let sort_fn =
+                        super::error::get_or_declare_function(module, "verum_list_sort", fn_type);
+                    ctx.builder()
+                        .build_call(sort_fn, &[backing_ptr.into(), len.into()], "")
+                        .or_llvm_err()?;
+                }
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
@@ -21248,45 +21300,18 @@ fn emit_slice_fatref_alloc<'ctx>(
     Ok(fat)
 }
 
-/// Load the element stride from a canonical slice cell, SELF-NORMALISING:
-/// any value outside the domain {1, 2, 4, 8} (a legacy 16-byte producer's
-/// heap garbage at offset 16, or a zeroed cell) degrades to the historic
-/// Value-wide stride 8 — a not-yet-migrated producer can therefore never
-/// REGRESS a consumer below the legacy behaviour.
+/// #48 — self-normalising elem read (thin wrapper over
+/// `slice_cell::CellEnv::elem_width`); a not-yet-migrated producer's
+/// garbage at offset 16 degrades to the legacy Value stride 8.
 fn emit_slice_elem_load<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     fatref_ptr: PointerValue<'ctx>,
 ) -> Result<IntValue<'ctx>> {
-    let i64_ty = ctx.types().i64_type();
-    // SAFETY: reads field 2 of the canonical 24-byte slice cell.
-    let elem_ptr = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(i64_ty, fatref_ptr, &[i64_ty.const_int(2, false)], "sl_elem_p")
-            .or_llvm_err()?
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
     };
-    let raw = ctx
-        .builder()
-        .build_load(i64_ty, elem_ptr, "sl_elem_raw")
-        .or_llvm_err()?
-        .into_int_value();
-    // in-domain = (raw==1)|(raw==2)|(raw==4)|(raw==8)
-    let mut in_domain = ctx
-        .builder()
-        .build_int_compare(IntPredicate::EQ, raw, i64_ty.const_int(1, false), "e1")
-        .or_llvm_err()?;
-    for w in [2u64, 4, 8] {
-        let c = ctx
-            .builder()
-            .build_int_compare(IntPredicate::EQ, raw, i64_ty.const_int(w, false), "ew")
-            .or_llvm_err()?;
-        in_domain = ctx.builder().build_or(in_domain, c, "edom").or_llvm_err()?;
-    }
-    let elem = ctx
-        .builder()
-        .build_select(in_domain, raw, i64_ty.const_int(8, false), "sl_elem")
-        .or_llvm_err()?
-        .into_int_value();
-    Ok(elem)
+    env.elem_width(ctx.builder(), fatref_ptr, "sl")
 }
 
 /// Lower CbgrExtended instruction to LLVM IR.
@@ -30911,15 +30936,8 @@ fn lower_set_element<'ctx>(
 /// When non-zero, type_hint takes priority over register tracking (which can be
 /// unreliable after function calls clear type marks).
 
-/// AOT-SLICE-ELEMSIZE-CARRY-1 (#48): runtime discriminator for THE
-/// canonical slice cell `{data@0, len@8, elem@16}` versus a heap
-/// OBJECT (whose word0 is an ObjectHeader: type_id u32 + flags —
-/// numerically far below any userspace data pointer). One load and
-/// two compares: `word0 >= heap-floor && (word0 & 7) == 0` ⇒ cell.
-/// Returns (is_cell: IntValue<i1>, word0: IntValue<i64>).
-/// #48: element address inside a canonical slice cell — self-normalising
-/// elem width (@16, domain {1,2,4,8} else 8) and `data + index*elem`.
-/// ONE authority for GET_E / SET_E / iter cell arms.
+/// #48 — thin wrapper over `slice_cell::CellEnv::elem_width` +
+/// `elem_addr` for cell base pointers (word0 IS the data pointer).
 fn emit_slice_cell_elem_addr<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     base_ptr: PointerValue<'ctx>,
@@ -30927,375 +30945,53 @@ fn emit_slice_cell_elem_addr<'ctx>(
     index: IntValue<'ctx>,
     tag: &str,
 ) -> Result<(IntValue<'ctx>, PointerValue<'ctx>)> {
-    let i64_type = ctx.types().i64_type();
-    let i8_type = ctx.types().i8_type();
-    let ptr_type = ctx.types().ptr_type();
-    // SAFETY: GEP to the cell's elem-width slot at fixed offset 16 inside
-    // the 24-byte canonical slice cell.
-    let elem_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                base_ptr,
-                &[i64_type.const_int(16, false)],
-                &format!("{}_cell_elem_slot", tag),
-            )
-            .or_llvm_err()?
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
     };
-    let raw = ctx
-        .builder()
-        .build_load(i64_type, elem_slot, &format!("{}_cell_elem_raw", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    let mut dom = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            raw,
-            i64_type.const_int(1, false),
-            &format!("{}_ce1", tag),
-        )
-        .or_llvm_err()?;
-    for w in [2u64, 4, 8] {
-        let c = ctx
-            .builder()
-            .build_int_compare(
-                IntPredicate::EQ,
-                raw,
-                i64_type.const_int(w, false),
-                &format!("{}_cew", tag),
-            )
-            .or_llvm_err()?;
-        dom = ctx
-            .builder()
-            .build_or(dom, c, &format!("{}_cedom", tag))
-            .or_llvm_err()?;
-    }
-    let elem_w = ctx
-        .builder()
-        .build_select(
-            dom,
-            raw,
-            i64_type.const_int(8, false),
-            &format!("{}_cell_elem", tag),
-        )
-        .or_llvm_err()?
-        .into_int_value();
-    let off = ctx
-        .builder()
-        .build_int_mul(index, elem_w, &format!("{}_cell_off", tag))
-        .or_llvm_err()?;
-    let addr = ctx
-        .builder()
-        .build_int_add(word0, off, &format!("{}_cell_addr", tag))
-        .or_llvm_err()?;
-    let eptr = ctx
-        .builder()
-        .build_int_to_ptr(addr, ptr_type, &format!("{}_cell_eptr", tag))
-        .or_llvm_err()?;
-    Ok((elem_w, eptr))
+    let elem = env.elem_width(ctx.builder(), base_ptr, tag)?;
+    let (_addr, eptr) = env.elem_addr(ctx.builder(), word0, elem, index, tag)?;
+    Ok((elem, eptr))
 }
 
-/// #48: ONE runtime classifier for every slice-shaped consumer.
-/// Discriminates the three container shapes and yields (data, len,
-/// elem) as phi values:
-///   cell  — canonical 24B {data@0, len@8, elem@16 self-normalising};
-///   pack  — header-stamped Pack (TUPLE 521 / BYTE_SLICE 528):
-///           {data@24, len@32}, byte elements (elem=1);
-///   list  — unstamped List object (word0=0): canonical layout
-///           {len@24, cap@32, ptr@40} (verum_common::layout), 8-byte
-///           Value elements.
-/// REAL branches throughout — the shapes have different valid extents.
+/// #48 — thin wrapper over the ONE 3-arm classifier
+/// (`slice_cell::CellEnv::view`); see that module for the shape table.
 fn emit_container_view<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     base_ptr: PointerValue<'ctx>,
     tag: &str,
 ) -> Result<(IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>)> {
-    let i64_type = ctx.types().i64_type();
-    let i8_type = ctx.types().i8_type();
-    let i32_type = ctx.types().context().i32_type();
-    let llvm_ctx = ctx.llvm_context();
-    let cur_bb = ctx
-        .builder()
-        .get_insert_block()
-        .or_internal("container_view: no insert block")?;
-    let func = cur_bb
-        .get_parent()
-        .or_internal("container_view: block has no parent")?;
-    let bb_cell = llvm_ctx.append_basic_block(func, &format!("{}_cv_cell", tag));
-    let bb_obj = llvm_ctx.append_basic_block(func, &format!("{}_cv_obj", tag));
-    let bb_pack = llvm_ctx.append_basic_block(func, &format!("{}_cv_pack", tag));
-    let bb_list = llvm_ctx.append_basic_block(func, &format!("{}_cv_list", tag));
-    let bb_done = llvm_ctx.append_basic_block(func, &format!("{}_cv_done", tag));
-    let (is_cell, w0) = emit_slice_cell_probe(ctx, base_ptr, tag)?;
-    ctx.builder()
-        .build_conditional_branch(is_cell, bb_cell, bb_obj)
-        .or_llvm_err()?;
-
-    ctx.builder().position_at_end(bb_cell);
-    let cell_len_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                base_ptr,
-                &[i64_type.const_int(8, false)],
-                &format!("{}_cv_cell_len_slot", tag),
-            )
-            .or_llvm_err()?
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
     };
-    let cell_len = ctx
-        .builder()
-        .build_load(i64_type, cell_len_slot, &format!("{}_cv_cell_len", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    let cell_elem_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                base_ptr,
-                &[i64_type.const_int(16, false)],
-                &format!("{}_cv_cell_elem_slot", tag),
-            )
-            .or_llvm_err()?
-    };
-    let cell_elem_raw = ctx
-        .builder()
-        .build_load(i64_type, cell_elem_slot, &format!("{}_cv_cell_elem_raw", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    let mut dom = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            cell_elem_raw,
-            i64_type.const_int(1, false),
-            &format!("{}_cv_e1", tag),
-        )
-        .or_llvm_err()?;
-    for w in [2u64, 4, 8] {
-        let c = ctx
-            .builder()
-            .build_int_compare(
-                IntPredicate::EQ,
-                cell_elem_raw,
-                i64_type.const_int(w, false),
-                &format!("{}_cv_ew", tag),
-            )
-            .or_llvm_err()?;
-        dom = ctx
-            .builder()
-            .build_or(dom, c, &format!("{}_cv_edom", tag))
-            .or_llvm_err()?;
-    }
-    let cell_elem = ctx
-        .builder()
-        .build_select(
-            dom,
-            cell_elem_raw,
-            i64_type.const_int(8, false),
-            &format!("{}_cv_cell_elem", tag),
-        )
-        .or_llvm_err()?
-        .into_int_value();
-    ctx.builder().build_unconditional_branch(bb_done).or_llvm_err()?;
-
-    // obj: discriminate stamped Pack vs unstamped List by the header tid.
-    ctx.builder().position_at_end(bb_obj);
-    let tid = ctx
-        .builder()
-        .build_load(i32_type, base_ptr, &format!("{}_cv_tid", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    let is_tuple = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            tid,
-            i32_type.const_int(TypeId::TUPLE.0 as u64, false),
-            &format!("{}_cv_is_tuple", tag),
-        )
-        .or_llvm_err()?;
-    let is_bslice = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            tid,
-            i32_type.const_int(TypeId::BYTE_SLICE.0 as u64, false),
-            &format!("{}_cv_is_bslice", tag),
-        )
-        .or_llvm_err()?;
-    let is_pack = ctx
-        .builder()
-        .build_or(is_tuple, is_bslice, &format!("{}_cv_is_pack", tag))
-        .or_llvm_err()?;
-    ctx.builder()
-        .build_conditional_branch(is_pack, bb_pack, bb_list)
-        .or_llvm_err()?;
-
-    ctx.builder().position_at_end(bb_pack);
-    let pk_data_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                base_ptr,
-                &[i64_type.const_int(24, false)],
-                &format!("{}_cv_pk_data_slot", tag),
-            )
-            .or_llvm_err()?
-    };
-    let pk_data = ctx
-        .builder()
-        .build_load(i64_type, pk_data_slot, &format!("{}_cv_pk_data", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    let pk_len_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                base_ptr,
-                &[i64_type.const_int(32, false)],
-                &format!("{}_cv_pk_len_slot", tag),
-            )
-            .or_llvm_err()?
-    };
-    let pk_len = ctx
-        .builder()
-        .build_load(i64_type, pk_len_slot, &format!("{}_cv_pk_len", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    ctx.builder().build_unconditional_branch(bb_done).or_llvm_err()?;
-
-    ctx.builder().position_at_end(bb_list);
-    let ls_data_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                base_ptr,
-                &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
-                &format!("{}_cv_ls_data_slot", tag),
-            )
-            .or_llvm_err()?
-    };
-    let ls_data = ctx
-        .builder()
-        .build_load(i64_type, ls_data_slot, &format!("{}_cv_ls_data", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    let ls_len_slot = unsafe {
-        ctx.builder()
-            .build_in_bounds_gep(
-                i8_type,
-                base_ptr,
-                &[i64_type.const_int(super::runtime::LIST_LEN_OFFSET, false)],
-                &format!("{}_cv_ls_len_slot", tag),
-            )
-            .or_llvm_err()?
-    };
-    let ls_len = ctx
-        .builder()
-        .build_load(i64_type, ls_len_slot, &format!("{}_cv_ls_len", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    ctx.builder().build_unconditional_branch(bb_done).or_llvm_err()?;
-
-    ctx.builder().position_at_end(bb_done);
-    let data_phi = ctx
-        .builder()
-        .build_phi(i64_type, &format!("{}_cv_data", tag))
-        .or_llvm_err()?;
-    data_phi.add_incoming(&[(&w0, bb_cell), (&pk_data, bb_pack), (&ls_data, bb_list)]);
-    let len_phi = ctx
-        .builder()
-        .build_phi(i64_type, &format!("{}_cv_len", tag))
-        .or_llvm_err()?;
-    len_phi.add_incoming(&[(&cell_len, bb_cell), (&pk_len, bb_pack), (&ls_len, bb_list)]);
-    let one = i64_type.const_int(1, false);
-    let eight = i64_type.const_int(8, false);
-    let elem_phi = ctx
-        .builder()
-        .build_phi(i64_type, &format!("{}_cv_elem", tag))
-        .or_llvm_err()?;
-    elem_phi.add_incoming(&[(&cell_elem, bb_cell), (&one, bb_pack), (&eight, bb_list)]);
-    Ok((
-        data_phi.as_basic_value().into_int_value(),
-        len_phi.as_basic_value().into_int_value(),
-        elem_phi.as_basic_value().into_int_value(),
-    ))
+    let v = env.view(
+        ctx.builder(),
+        base_ptr,
+        TypeId::TUPLE.0 as u64,
+        TypeId::BYTE_SLICE.0 as u64,
+        super::runtime::LIST_LEN_OFFSET,
+        super::runtime::LIST_PTR_OFFSET,
+        tag,
+    )?;
+    Ok((v.data, v.len, v.elem))
 }
 
-/// #48: stride-honouring element LOAD through a cell element pointer —
-/// switch on elem width: 1/2/4 load + zext, 8 direct i64. Read-side
-/// mirror of `emit_slice_cell_elem_store`; ONE authority for every
-/// cell read (GET_E marked/unmarked arms).
+/// #48 — thin wrapper over `slice_cell::CellEnv::elem_load`.
 fn emit_slice_cell_elem_load<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     elem_w: IntValue<'ctx>,
     elem_ptr: PointerValue<'ctx>,
     tag: &str,
 ) -> Result<IntValue<'ctx>> {
-    let i64_type = ctx.types().i64_type();
-    let llvm_ctx = ctx.llvm_context();
-    let cur_bb = ctx
-        .builder()
-        .get_insert_block()
-        .or_internal("cell_elem_load: no insert block")?;
-    let func = cur_bb
-        .get_parent()
-        .or_internal("cell_elem_load: block has no parent")?;
-    let lw1 = llvm_ctx.append_basic_block(func, &format!("{}_lw1", tag));
-    let lw2 = llvm_ctx.append_basic_block(func, &format!("{}_lw2", tag));
-    let lw4 = llvm_ctx.append_basic_block(func, &format!("{}_lw4", tag));
-    let lw8 = llvm_ctx.append_basic_block(func, &format!("{}_lw8", tag));
-    let lmerge = llvm_ctx.append_basic_block(func, &format!("{}_lmerge", tag));
-    ctx.builder()
-        .build_switch(
-            elem_w,
-            lw8,
-            &[
-                (i64_type.const_int(1, false), lw1),
-                (i64_type.const_int(2, false), lw2),
-                (i64_type.const_int(4, false), lw4),
-            ],
-        )
-        .or_llvm_err()?;
-    let mut loads: Vec<(IntValue<'ctx>, _)> = Vec::new();
-    for (bb, bits) in [(lw1, 8u32), (lw2, 16), (lw4, 32)] {
-        ctx.builder().position_at_end(bb);
-        let ity = llvm_ctx.custom_width_int_type(bits);
-        let v = ctx
-            .builder()
-            .build_load(ity, elem_ptr, &format!("{}_lw_v", tag))
-            .or_llvm_err()?
-            .into_int_value();
-        let z = ctx
-            .builder()
-            .build_int_z_extend(v, i64_type, &format!("{}_lw_z", tag))
-            .or_llvm_err()?;
-        ctx.builder().build_unconditional_branch(lmerge).or_llvm_err()?;
-        loads.push((z, ctx.builder().get_insert_block().unwrap()));
-    }
-    ctx.builder().position_at_end(lw8);
-    let v8 = ctx
-        .builder()
-        .build_load(i64_type, elem_ptr, &format!("{}_lw8_v", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    ctx.builder().build_unconditional_branch(lmerge).or_llvm_err()?;
-    loads.push((v8, ctx.builder().get_insert_block().unwrap()));
-    ctx.builder().position_at_end(lmerge);
-    let phi = ctx
-        .builder()
-        .build_phi(i64_type, &format!("{}_lval", tag))
-        .or_llvm_err()?;
-    for (val, bb) in &loads {
-        phi.add_incoming(&[(&(*val), *bb)]);
-    }
-    Ok(phi.as_basic_value().into_int_value())
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    env.elem_load(ctx.builder(), elem_w, elem_ptr, tag)
 }
 
-/// #48: stride-honouring element STORE through a cell element pointer —
-/// switch on elem width, truncating for 1/2/4, direct i64 store for 8.
-/// Exact write-side mirror of the GET_E cell arm's zext read.
+/// #48 — thin wrapper over `slice_cell::CellEnv::elem_store`.
 fn emit_slice_cell_elem_store<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     elem_w: IntValue<'ctx>,
@@ -31303,87 +30999,25 @@ fn emit_slice_cell_elem_store<'ctx>(
     val_i64: IntValue<'ctx>,
     tag: &str,
 ) -> Result<()> {
-    let i64_type = ctx.types().i64_type();
-    let llvm_ctx = ctx.llvm_context();
-    let cur_bb = ctx
-        .builder()
-        .get_insert_block()
-        .or_internal("cell_elem_store: no insert block")?;
-    let func = cur_bb
-        .get_parent()
-        .or_internal("cell_elem_store: block has no parent")?;
-    let sw1 = llvm_ctx.append_basic_block(func, &format!("{}_sw1", tag));
-    let sw2 = llvm_ctx.append_basic_block(func, &format!("{}_sw2", tag));
-    let sw4 = llvm_ctx.append_basic_block(func, &format!("{}_sw4", tag));
-    let sw8 = llvm_ctx.append_basic_block(func, &format!("{}_sw8", tag));
-    let smerge = llvm_ctx.append_basic_block(func, &format!("{}_smerge", tag));
-    ctx.builder()
-        .build_switch(
-            elem_w,
-            sw8,
-            &[
-                (i64_type.const_int(1, false), sw1),
-                (i64_type.const_int(2, false), sw2),
-                (i64_type.const_int(4, false), sw4),
-            ],
-        )
-        .or_llvm_err()?;
-    for (bb, bits) in [(sw1, 8u32), (sw2, 16), (sw4, 32)] {
-        ctx.builder().position_at_end(bb);
-        let ity = llvm_ctx.custom_width_int_type(bits);
-        let t = ctx
-            .builder()
-            .build_int_truncate(val_i64, ity, &format!("{}_sw_t", tag))
-            .or_llvm_err()?;
-        ctx.builder().build_store(elem_ptr, t).or_llvm_err()?;
-        ctx.builder().build_unconditional_branch(smerge).or_llvm_err()?;
-    }
-    ctx.builder().position_at_end(sw8);
-    ctx.builder().build_store(elem_ptr, val_i64).or_llvm_err()?;
-    ctx.builder().build_unconditional_branch(smerge).or_llvm_err()?;
-    ctx.builder().position_at_end(smerge);
-    Ok(())
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    env.elem_store(ctx.builder(), elem_w, elem_ptr, val_i64, tag)
 }
 
+/// #48 — thin FunctionContext wrapper over the ONE cell authority
+/// (`slice_cell::CellEnv::probe`); see that module for the contract.
 fn emit_slice_cell_probe<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     base_ptr: PointerValue<'ctx>,
     tag: &str,
 ) -> Result<(IntValue<'ctx>, IntValue<'ctx>)> {
-    let i64_ty = ctx.types().i64_type();
-    let word0 = ctx
-        .builder()
-        .build_load(i64_ty, base_ptr, &format!("{}_w0", tag))
-        .or_llvm_err()?
-        .into_int_value();
-    let heap_floor_val: u64 = super::target_triple::heap_floor(&ctx.get_module());
-    let above = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::UGE,
-            word0,
-            i64_ty.const_int(heap_floor_val, false),
-            &format!("{}_above", tag),
-        )
-        .or_llvm_err()?;
-    let align_bits = ctx
-        .builder()
-        .build_and(word0, i64_ty.const_int(7, false), &format!("{}_align", tag))
-        .or_llvm_err()?;
-    let aligned = ctx
-        .builder()
-        .build_int_compare(
-            IntPredicate::EQ,
-            align_bits,
-            i64_ty.const_zero(),
-            &format!("{}_aligned", tag),
-        )
-        .or_llvm_err()?;
-    let is_cell = ctx
-        .builder()
-        .build_and(above, aligned, &format!("{}_is_cell", tag))
-        .or_llvm_err()?;
-    Ok((is_cell, word0))
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    env.probe(ctx.builder(), base_ptr, tag)
 }
 
 fn lower_len<'ctx>(
