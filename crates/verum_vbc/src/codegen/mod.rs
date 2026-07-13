@@ -7468,9 +7468,29 @@ impl VbcCodegen {
                             // where the protocol type is declared.
                             let method_names: Vec<String> = {
                                 let mut names = method_names;
-                                for m in implemented_methods.iter() {
-                                    if !names.iter().any(|n| n == m) {
-                                        names.push(m.clone());
+                                // DECLARATION order, not HashSet order:
+                                // iterating `implemented_methods` (a
+                                // HashSet) permuted the appended tail
+                                // per process run — ProtocolImpl.methods
+                                // is position-indexed by consumers
+                                // (`methods[0]` Display probe, vtable-
+                                // style dispatch), and the archive
+                                // serializes the Vec verbatim, so hash
+                                // order broke bake BYTE-IDENTITY (P2)
+                                // and flipped dispatch between bakes
+                                // (task #52: RedisCacheAdapter's 8
+                                // methods reshuffled per bake).  Walk
+                                // the impl block's ordered AST items —
+                                // the same source the HashSet was built
+                                // from — so the union is canonical.
+                                for item in impl_decl.items.iter() {
+                                    if let verum_ast::decl::ImplItemKind::Function(func) =
+                                        &item.kind
+                                    {
+                                        let m = func.name.name.as_str();
+                                        if !names.iter().any(|n| n == m) {
+                                            names.push(m.to_string());
+                                        }
                                     }
                                 }
                                 names
@@ -17433,9 +17453,20 @@ impl VbcCodegen {
             }
             id_to_entry
                 .entry(info.id.0)
-                .and_modify(|(existing_name, _)| {
+                .and_modify(|(existing_name, existing_info)| {
                     if Self::canonical_name_better(name, existing_name) {
+                        // Carry the WHOLE entry, not just the name: the
+                        // old arm swapped the name but kept whichever
+                        // FunctionInfo the HashMap walk met FIRST — its
+                        // param_names could be empty for one spelling
+                        // (`name#arity` mirror) and populated for
+                        // another, so the emitted stub's params flipped
+                        // between real names and `_argN` fallbacks per
+                        // process run (task #52: the ±`_argN` string-
+                        // table dice across bakes).  Canonical name ⇒
+                        // canonical info — one deterministic winner.
                         *existing_name = name.clone();
+                        *existing_info = info.clone();
                     }
                 })
                 .or_insert_with(|| (name.clone(), info.clone()));
@@ -17511,6 +17542,11 @@ impl VbcCodegen {
             }
             to_push.push((id, name.clone(), info.clone()));
         }
+        // ARCHIVE-SERIALIZE-DETERMINISM-1: id_to_entry is a HashMap —
+        // emitting in walk order leaked the per-process hasher seed
+        // into the string-table interning sequence (descriptor name +
+        // param names), shifting every later StringId across bakes.
+        to_push.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (id, name, info) in to_push {
             let name_id = StringId(self.ctx.intern_string_raw(&name));
@@ -17743,6 +17779,11 @@ impl VbcCodegen {
                 })
                 .or_insert_with(|| name.clone());
         }
+        // ARCHIVE-SERIALIZE-DETERMINISM-1: `referenced` is a HashSet;
+        // walking it directly leaked hasher-seed order into stub
+        // emission (function-table order + string-intern sequence).
+        let mut referenced: Vec<u32> = referenced.into_iter().collect();
+        referenced.sort_unstable();
         for id in referenced {
             if id >= SENTINEL_THRESHOLD {
                 continue;
