@@ -368,6 +368,9 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Default (absent) = 8 bytes.
     element_stride_registers: HashMap<u16, u64>,
 
+    /// #48 phase-2 staged generic-call witness (see set_pending_call_witness).
+    pub pending_call_witness: Option<Vec<verum_vbc::types::TypeRef>>,
+
     /// Registers that hold Heap<T> allocations requiring deallocation on return.
     /// Drop protocol: these registers are freed via verum_dealloc before Ret/RetV.
     /// The return value register is excluded (ownership transfers to caller).
@@ -775,6 +778,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             struct_register_sizes: HashMap::new(),
 
             element_stride_registers: HashMap::new(),
+            pending_call_witness: None,
             ctx_provide_depth: 0,
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
@@ -879,6 +883,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             struct_register_sizes: HashMap::new(),
 
             element_stride_registers: HashMap::new(),
+            pending_call_witness: None,
             ctx_provide_depth: 0,
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
@@ -1890,6 +1895,19 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Check if a register holds an inline struct pointer (no header).
     pub fn is_inline_struct_register(&self, reg: u16) -> bool {
         self.reg_types.is_inline_struct(reg)
+    }
+
+    /// #48 phase-2: the generic-call witness staged by the preceding
+    /// `SetCallWitness` (Tier-0 rides it on interpreter frames; Tier-1
+    /// mirrors it here). Consumed — take()n — at the single lower_call
+    /// entry so it can never leak across unrelated calls.
+    pub fn set_pending_call_witness(&mut self, args: Vec<verum_vbc::types::TypeRef>) {
+        self.pending_call_witness = Some(args);
+    }
+
+    /// Take (and clear) the staged call witness.
+    pub fn take_pending_call_witness(&mut self) -> Option<Vec<verum_vbc::types::TypeRef>> {
+        self.pending_call_witness.take()
     }
 
     /// Set the element stride (in bytes) for a pointer register.

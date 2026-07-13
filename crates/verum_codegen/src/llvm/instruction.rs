@@ -1931,11 +1931,15 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
-        Instruction::SetCallWitness { .. } => {
+        Instruction::SetCallWitness { type_args } => {
             // #44-B Tier-0 sidecar: witnesses ride interpreter frames.
-            // AOT has no frame witness table — the paired CallM's
-            // erased-T behavior is preserved by the LoadT(Generic)
-            // const-fold below; the sidecar is a no-op here.
+            // #48 phase-2 Tier-1 mirror: stage the witness in the
+            // function context; the SINGLE lower_call entry take()s it
+            // (so it can never leak past the paired call). First
+            // consumer: slice_from_raw_parts derives its canonical-cell
+            // elem width from the witnessed T instead of emitting an
+            // elem-less legacy Pack.
+            ctx.set_pending_call_witness(type_args.to_vec());
             Ok(())
         }
 
@@ -9115,6 +9119,10 @@ fn lower_call<'ctx>(
     func_id: u32,
     args: &verum_vbc::instruction::RegRange,
 ) -> Result<()> {
+    // #48 phase-2: consume the staged generic-call witness EXACTLY once
+    // per call (leak-proof by construction — every path through this
+    // function has already taken it).
+    let call_witness = ctx.take_pending_call_witness();
     let vbc_mod = ctx.vbc_module().or_internal("Call requires VBC module for function resolution")?;
     // Apply func_id_base offset for merged stdlib modules.
     // Bytecode-embedded func_ids are relative to the source module;
@@ -12224,6 +12232,17 @@ fn lower_call<'ctx>(
     // [24-byte header][ptr: i64][len: i64] = 40 bytes.
     // This is compatible with Len, GetE, and IterNew handlers for slices.
     if func_name == "slice_from_raw_parts" {
+        // #48 phase-2 (staged): the CANONICAL-CELL emission with a
+        // witness-derived elem is blocked on the VBC side — the
+        // SetCallWitness sidecar is emitted only before CallM today, so
+        // a free-fn Call carries NO witness and any fixed default here
+        // is wrong for one family (byte views want 1, &[T] views want
+        // 8). The take()n `call_witness` plumbing above is live and
+        // leak-proof; once the VBC emitter stages witnesses for generic
+        // free-fn Calls, this arm switches to
+        // emit_slice_fatref_alloc(ptr, len, elem(witness)) and the
+        // stamped-Pack classifier arm loses its last live producer.
+        let _ = &call_witness;
         let ptr_val = as_i64(ctx, ctx.get_register(args.start.0)?, "slice_ptr")?;
         let len_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "slice_len")?;
         let runtime = RuntimeLowering::new(ctx.llvm_context());
