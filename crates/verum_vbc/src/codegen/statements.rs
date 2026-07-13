@@ -197,7 +197,24 @@ impl VbcCodegen {
                             let saved_return_type = self.ctx.return_type.clone();
                             let saved_closure_ctx = self.ctx.save_closure_context();
 
-                            self.compile_function(func, None)?;
+                            // NESTED-LEXICAL-FIRST-1: mirror the collect
+                            // walk's scope so compile_function resolves
+                            // the `<parent>$<name>` mangled registration
+                            // (bare parent segment — registration used
+                            // the undotted fn name).
+                            let parent_scope = self
+                                .ctx
+                                .current_function
+                                .as_deref()
+                                .map(|p| p.rsplit('.').next().unwrap_or(p).to_string());
+                            if let Some(ref ps) = parent_scope {
+                                self.nested_function_scope.push(ps.clone());
+                            }
+                            let nested_result = self.compile_function(func, None);
+                            if parent_scope.is_some() {
+                                self.nested_function_scope.pop();
+                            }
+                            nested_result?;
 
                             // Restore parent function's compilation context.
                             self.ctx.current_function = saved_function;

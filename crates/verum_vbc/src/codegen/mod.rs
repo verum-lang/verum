@@ -14395,6 +14395,15 @@ impl VbcCodegen {
         // Build the lookup name - use qualified name for impl functions
         let mut lookup_name = if let Some(type_name) = impl_type_name {
             format!("{}.{}", type_name, base_name)
+        } else if !self.nested_function_scope.is_empty() {
+            // NESTED-LEXICAL-FIRST-1: a nested fn REGISTERED under the
+            // `<scope>$<name>` mangle (register_function's collect walk)
+            // must COMPILE against the same key — the bare lookup bound
+            // every same-named nested fn (two tests each declaring
+            // `fn produce_residual()`) to the one bare-slot winner: the
+            // first body was stamped with the second's id, the first id
+            // kept no body, and the surviving body was the WRONG one.
+            format!("{}${}", self.nested_function_scope.join("$"), base_name)
         } else {
             base_name.clone()
         };
@@ -14422,7 +14431,11 @@ impl VbcCodegen {
         // `<source_module>.<base_name>` first when we have a source
         // module and the lookup is for a bare top-level fn.
         let param_count = func.params.len();
-        let qualified_lookup = if impl_type_name.is_none() {
+        // Nested fns resolve ONLY through their mangled key — the
+        // module-qualified mirror ('test.produce_residual') collapses
+        // same-named nested fns from sibling parents onto one slot
+        // (NESTED-LEXICAL-FIRST-1).
+        let qualified_lookup = if impl_type_name.is_none() && self.nested_function_scope.is_empty() {
             self.ctx
                 .current_source_module
                 .as_deref()
