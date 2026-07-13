@@ -684,7 +684,16 @@ pub(in super::super) fn handle_ffi_extended(
             // Format: dst:reg, count:reg, elem_size:u8, init:reg
             let dst = read_reg(state)?;
             let count_reg = read_reg(state)?;
-            let elem_size = read_u8(state)? as usize;
+            // TYPED-ARRAY-FLOAT-1 (#28): bit 0x80 of the elem_size byte marks
+            // a floating-point element array. The low 7 bits are the raw byte
+            // stride (4 or 8); the flag routes the allocation to the float
+            // heap TypeId (F64 / F32) so `handle_get_index` / `handle_set_index`
+            // decode the raw IEEE-754 bytes through `from_f64` rather than
+            // `from_i64` (which re-boxes a double's bit pattern as a bogus
+            // integer — the `[Float; N]` → NaN symptom).
+            let elem_size_byte = read_u8(state)?;
+            let is_float = (elem_size_byte & 0x80) != 0;
+            let elem_size = (elem_size_byte & 0x7f) as usize;
             let init_reg = read_reg(state)?;
 
             let count_val = state.get_reg(count_reg).as_i64();
@@ -713,13 +722,26 @@ pub(in super::super) fn handle_ffi_extended(
                 });
             }
 
-            // Allocate array (using TypeId based on element size)
-            let type_id = match elem_size {
-                1 => TypeId::U8,
-                2 => TypeId::U16,
-                4 => TypeId::U32,
-                8 => TypeId::U64,
-                _ => TypeId::U8, // Default to byte array for unknown sizes
+            // Allocate array (using TypeId based on element size + float-ness).
+            // Float arrays reuse the scalar float TypeIds (F64 == FLOAT == 3,
+            // F32 == 13) exactly as integer arrays reuse the scalar int TypeIds
+            // (U8/U16/U32/U64). The heap free path is a raw buffer dealloc for
+            // every non-record type, so a float-typed packed array drops
+            // identically to an integer one.
+            let type_id = if is_float {
+                match elem_size {
+                    8 => TypeId::F64,
+                    4 => TypeId::F32,
+                    _ => TypeId::U8, // no narrower float width exists
+                }
+            } else {
+                match elem_size {
+                    1 => TypeId::U8,
+                    2 => TypeId::U16,
+                    4 => TypeId::U32,
+                    8 => TypeId::U64,
+                    _ => TypeId::U8, // Default to byte array for unknown sizes
+                }
             };
 
             // Allocate using heap.alloc which returns an Object

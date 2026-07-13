@@ -1080,7 +1080,7 @@ pub(in super::super) fn handle_get_index(
                 };
                 state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
             } else if header.type_id == TypeId::U64 {
-                // 64-bit typed array (Int64, UInt64, Float64)
+                // 64-bit integer typed array (Int64 / UInt64).
                 let element_count = header_size / 8;
                 if index < 0 || index as usize >= element_count {
                     return Err(InterpreterError::IndexOutOfBounds {
@@ -1092,6 +1092,40 @@ pub(in super::super) fn handle_get_index(
                     ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *const i64
                 };
                 state.set_reg(dst, Value::from_i64(unsafe { *data_ptr }));
+            } else if header.type_id == TypeId::F64 {
+                // 64-bit float array (TYPED-ARRAY-FLOAT-1, #28). The raw 8
+                // bytes are an IEEE-754 double bit pattern — decode through
+                // `from_f64` so the NaN-box round-trips the float value.
+                // `from_i64` (the U64 leg) would re-box the pattern as a
+                // bogus integer, the `[Float; N]` → NaN symptom.
+                let element_count = header_size / 8;
+                if index < 0 || index as usize >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: element_count,
+                    });
+                }
+                let data_ptr = unsafe {
+                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *const u64
+                };
+                state.set_reg(dst, Value::from_f64(f64::from_bits(unsafe { *data_ptr })));
+            } else if header.type_id == TypeId::F32 {
+                // 32-bit float array. Raw 4 bytes = IEEE-754 single; widen
+                // to a double for the NaN-boxed Float value.
+                let element_count = header_size / 4;
+                if index < 0 || index as usize >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index,
+                        length: element_count,
+                    });
+                }
+                let data_ptr = unsafe {
+                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *const u32
+                };
+                state.set_reg(
+                    dst,
+                    Value::from_f64(f32::from_bits(unsafe { *data_ptr }) as f64),
+                );
             } else if header.type_id == TypeId::LIST {
                 // List layout: [len: Value, cap: Value, backing_ptr: Value]
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -1385,6 +1419,39 @@ pub(in super::super) fn handle_set_index(
             let data_ptr =
                 unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *mut i64 };
             unsafe { *data_ptr = value.as_i64() };
+        } else if header.type_id == TypeId::F64 {
+            // 64-bit float array (TYPED-ARRAY-FLOAT-1, #28). Store the raw
+            // IEEE-754 double bit pattern (the mirror of `handle_get_index`'s
+            // `from_f64` read). `as_i64()` (the U64 leg) would truncate the
+            // float to an integer and lose the value entirely.
+            let element_count = header_size / 8;
+            if index < 0 || index as usize >= element_count {
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index,
+                    length: element_count,
+                });
+            }
+            let bits = value
+                .try_as_f64()
+                .map(|f| f.to_bits())
+                .unwrap_or_else(|| value.bits());
+            let data_ptr =
+                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *mut u64 };
+            unsafe { *data_ptr = bits };
+        } else if header.type_id == TypeId::F32 {
+            // 32-bit float array. Narrow the double to a single and store its
+            // 4-byte IEEE-754 pattern.
+            let element_count = header_size / 4;
+            if index < 0 || index as usize >= element_count {
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index,
+                    length: element_count,
+                });
+            }
+            let bits = (value.try_as_f64().unwrap_or(0.0) as f32).to_bits();
+            let data_ptr =
+                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *mut u32 };
+            unsafe { *data_ptr = bits };
         } else if header.type_id == TypeId::LIST {
             // List layout: [len: Value, cap: Value, backing_ptr: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
