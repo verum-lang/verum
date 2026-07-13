@@ -1714,7 +1714,25 @@ impl VbcCodegen {
                 // BLOCK_SIZE-class collisions resolve to the caller's
                 // own module's const rather than first-wins archive
                 // shadow.
-                let func_info_opt = expected_prefixed_info.or_else(|| self.ctx.lookup_function_in_scope(name).cloned()).or_else(|| {
+                // NESTED-LEXICAL-FIRST-1, fn-as-VALUE leg: a bare
+                // identifier taken as a function reference
+                // (`.and_then(f)`) must bind the LEXICAL nested `f`
+                // before any global slot — sibling tests each declaring
+                // `fn f(...)` collapse on the bare key exactly like the
+                // call-form leg.
+                let lexical_fnref: Option<crate::codegen::context::FunctionInfo> = self
+                    .ctx
+                    .current_function
+                    .as_deref()
+                    .or(self.current_fn_lookup_name.as_deref())
+                    .and_then(|parent| {
+                        let bare_parent = parent.rsplit('.').next().unwrap_or(parent);
+                        [parent, bare_parent]
+                            .iter()
+                            .map(|pp| format!("{}${}", pp, name))
+                            .find_map(|mangled| self.ctx.lookup_function(&mangled).cloned())
+                    });
+                let func_info_opt = lexical_fnref.or(expected_prefixed_info).or_else(|| self.ctx.lookup_function_in_scope(name).cloned()).or_else(|| {
                     let is_const_shaped = !name.is_empty()
                         && name.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
                         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
