@@ -3411,6 +3411,31 @@ pub fn lower_instruction<'ctx>(
                     ctx.set_generic_type_args(src, type_args.clone());
                     current = src;
                 }
+            } else if let Some(elem_tname) =
+                ctx.get_obj_register_type(val.0).map(|s| s.to_string())
+            {
+                // ELEM-TYPE-STAMP (TIER-COHERENCE-SORT-1 support): a heap
+                // OBJECT element (record/newtype like `Duration`) — stamp the
+                // list's element type so element-type consumers (notably
+                // `List<T>.sort()`, which needs `<T>.cmp`) can resolve T.
+                // Previously only nested list/map/float elements were stamped,
+                // so a literal `List<Duration>` carried NO element type and
+                // `.sort()` fell back to raw pointer comparison (a no-op).
+                let tid = ctx.vbc_module().and_then(|m| {
+                    m.types
+                        .iter()
+                        .find(|td| m.get_type_name(td.id).as_deref() == Some(elem_tname.as_str()))
+                        .map(|td| td.id)
+                });
+                if let Some(tid) = tid {
+                    let type_args = vec![TypeRef::Concrete(tid)];
+                    ctx.set_generic_type_args(list.0, type_args.clone());
+                    let mut current = list.0;
+                    while let Some(src) = ctx.get_refmut_source(current) {
+                        ctx.set_generic_type_args(src, type_args.clone());
+                        current = src;
+                    }
+                }
             }
             Ok(())
         }
