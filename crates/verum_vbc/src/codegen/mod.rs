@@ -16227,6 +16227,14 @@ impl VbcCodegen {
                  from the layout registry (registration-order defect).",
                 field_name, type_name, fn_name
             );
+            if std::env::var("VERUM_STRICT_FIELDS").is_ok() {
+                panic!(
+                    "FIELD-GUESS-HARD-1 (strict): guessed positional index for \
+                     field '{}' on {:?} — refusing to emit; see the diagnostic \
+                     above for the classification.",
+                    field_name, type_name
+                );
+            }
         }
         idx
     }
