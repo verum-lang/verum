@@ -24861,22 +24861,42 @@ fn lower_field_named_dynamic<'ctx>(
     // Loud-panic emitter shared by the default arms.
     let emit_panic = |ctx: &mut FunctionContext<'_, 'ctx>| -> Result<()> {
         let void_type = ctx.llvm_context().void_type();
-        let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+        let i64_type = ctx.llvm_context().i64_type();
+        let i32_type = ctx.llvm_context().i32_type();
+        // verum_panic's canonical ABI is 4-param `void(ptr msg, i64 len,
+        // ptr file, i32 line)` (emit_panic_ir); a 1-param declaration/call
+        // was a same-name impostor (task #22, the AOT panic-crash class).
+        let fn_type = void_type.fn_type(
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i32_type.into(),
+            ],
+            false,
+        );
         let panic_fn =
             super::error::get_or_declare_function(ctx.get_module(), "verum_panic", fn_type);
+        let panic_text = format!(
+            "field '{}' not found on receiver's runtime type (by-name closed-world \
+             dispatch miss) — FIELD-ACCESS-BYNAME-1 / task #42",
+            fname
+        );
         let msg = ctx
             .builder()
-            .build_global_string_ptr(
-                &format!(
-                    "field '{}' not found on receiver's runtime type (by-name closed-world \
-                     dispatch miss) — FIELD-ACCESS-BYNAME-1 / task #42",
-                    fname
-                ),
-                "byname_field_panic_msg",
-            )
+            .build_global_string_ptr(&panic_text, "byname_field_panic_msg")
             .or_llvm_err()?;
         ctx.builder()
-            .build_call(panic_fn, &[msg.as_pointer_value().into()], "")
+            .build_call(
+                panic_fn,
+                &[
+                    msg.as_pointer_value().into(),
+                    i64_type.const_int(panic_text.len() as u64, false).into(),
+                    ptr_type.const_null().into(),
+                    i32_type.const_int(0, false).into(),
+                ],
+                "",
+            )
             .or_llvm_err()?;
         Ok(())
     };
@@ -32438,25 +32458,40 @@ fn lower_tensor_extended<'ctx>(
         let ext_op = operands[0];
         let void_type = ctx.llvm_context().void_type();
         let ptr_ty = ctx.types().ptr_type();
-        let fn_type = void_type.fn_type(&[ptr_ty.into()], false);
+        let i64_ty = ctx.llvm_context().i64_type();
+        let i32_ty = ctx.llvm_context().i32_type();
+        // verum_panic's canonical ABI is 4-param `void(ptr,i64,ptr,i32)`
+        // (emit_panic_ir); a 1-param declaration/call was a same-name
+        // impostor (task #22, the AOT panic-crash class).
+        let fn_type = void_type.fn_type(
+            &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i32_ty.into()],
+            false,
+        );
         let panic_fn = super::error::get_or_declare_function(
             ctx.get_module(),
             "verum_panic",
             fn_type,
         );
+        let panic_text = format!(
+            "Tier-1 unimplemented ext-op intrinsic 0x{:02X} (TensorExtSubOpcode envelope) — \
+             see AOT-TENSOREXT-ENVELOPE-1 / task #46",
+            ext_op
+        );
         let msg = ctx
             .builder()
-            .build_global_string_ptr(
-                &format!(
-                    "Tier-1 unimplemented ext-op intrinsic 0x{:02X} (TensorExtSubOpcode envelope) — \
-                     see AOT-TENSOREXT-ENVELOPE-1 / task #46",
-                    ext_op
-                ),
-                "tensor_ext_env_panic_msg",
-            )
+            .build_global_string_ptr(&panic_text, "tensor_ext_env_panic_msg")
             .or_llvm_err()?;
         ctx.builder()
-            .build_call(panic_fn, &[msg.as_pointer_value().into()], "")
+            .build_call(
+                panic_fn,
+                &[
+                    msg.as_pointer_value().into(),
+                    i64_ty.const_int(panic_text.len() as u64, false).into(),
+                    ptr_ty.const_null().into(),
+                    i32_ty.const_int(0, false).into(),
+                ],
+                "",
+            )
             .or_llvm_err()?;
         // Keep IR well-formed: the panic does not return, but the block
         // continues — park a zero in dst (operands[1] per the envelope).

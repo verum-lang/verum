@@ -4149,23 +4149,47 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     builder.position_at_end(entry);
                     let ptr_ty = self.context.ptr_type(AddressSpace::default());
                     let void_ty = self.context.void_type();
+                    let i64_ty = self.context.i64_type();
+                    let i32_ty = self.context.i32_type();
+                    // verum_panic's canonical ABI is 4-param `void(ptr msg,
+                    // i64 len, ptr file, i32 line)` (defined in emit_panic_ir).
+                    // A 1-param `void(ptr)` declaration/call was a same-name
+                    // impostor (task #22) that mismatched every real call site
+                    // — the AOT panic-crash class. Declare and call the
+                    // canonical 4-param shape.
                     let panic_fn = self.module.get_function("verum_panic").unwrap_or_else(|| {
                         self.module.add_function(
                             "verum_panic",
-                            void_ty.fn_type(&[ptr_ty.into()], false),
+                            void_ty.fn_type(
+                                &[
+                                    ptr_ty.into(),
+                                    i64_ty.into(),
+                                    ptr_ty.into(),
+                                    i32_ty.into(),
+                                ],
+                                false,
+                            ),
                             None,
                         )
                     });
-                    if let Ok(msg) = builder.build_global_string_ptr(
-                        &format!(
-                            "stdlib fn `{}` had invalid IR and was stubbed at AOT \
-                             (Entry-API CBGR class) — task #52 / defect-class §23",
-                            name
-                        ),
-                        "invalid_body_msg",
-                    ) {
-                        let _ = builder
-                            .build_call(panic_fn, &[msg.as_pointer_value().into()], "");
+                    let panic_text = format!(
+                        "stdlib fn `{}` had invalid IR and was stubbed at AOT \
+                         (Entry-API CBGR class) — task #52 / defect-class §23",
+                        name
+                    );
+                    if let Ok(msg) =
+                        builder.build_global_string_ptr(&panic_text, "invalid_body_msg")
+                    {
+                        let _ = builder.build_call(
+                            panic_fn,
+                            &[
+                                msg.as_pointer_value().into(),
+                                i64_ty.const_int(panic_text.len() as u64, false).into(),
+                                ptr_ty.const_null().into(),
+                                i32_ty.const_int(0, false).into(),
+                            ],
+                            "",
+                        );
                     }
                     let _ = builder.build_unreachable();
                 }

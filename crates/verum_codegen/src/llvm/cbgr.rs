@@ -416,20 +416,48 @@ impl<'ctx> CbgrLowering<'ctx> {
             .build_conditional_branch(is_valid, valid_bb, invalid_bb)
             .or_llvm_err()?;
 
-        // Invalid path: call panic handler and unreachable
+        // Invalid path: call the panic handler and unreachable.
+        //
+        // verum_panic's CANONICAL ABI is 4-param `void(ptr msg, i64 len,
+        // ptr file, i32 line)` — the body is defined with exactly that shape
+        // in `emit_panic_ir`. A 1-param `void(ptr)` declaration here was a
+        // same-name IMPOSTOR (task #22 class): whichever site declares first
+        // wins, and a 1-param winner both (a) makes `emit_panic_ir` skip the
+        // body definition (`count_params() < 2`) and (b) leaves every 4-param
+        // call ABI-mismatched (the AOT panic-crash surfaced in #21/#26 as
+        // `verum_panic void(ptr)` vs `void(ptr,i64,ptr,i32)`). Declare and
+        // call the canonical 4-param shape so no impostor can win.
         builder.position_at_end(invalid_bb);
         let void_type = self.context.void_type();
-        let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+        let i64_type = self.context.i64_type();
+        let i32_type = self.context.i32_type();
+        let fn_type = void_type.fn_type(
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i32_type.into(),
+            ],
+            false,
+        );
         let panic_fn = super::error::get_or_declare_function(module, "verum_panic", fn_type);
-        // Build a constant panic message
+        // Constant panic message; `len` is its byte length so the body can
+        // write it without a strlen.
+        const CBGR_PANIC_MSG: &str = "CBGR: use-after-free detected (generation mismatch)";
         let panic_msg = builder
-            .build_global_string_ptr(
-                "CBGR: use-after-free detected (generation mismatch)",
-                "cbgr_panic_msg",
-            )
+            .build_global_string_ptr(CBGR_PANIC_MSG, "cbgr_panic_msg")
             .or_llvm_err()?;
         builder
-            .build_call(panic_fn, &[panic_msg.as_pointer_value().into()], "")
+            .build_call(
+                panic_fn,
+                &[
+                    panic_msg.as_pointer_value().into(),
+                    i64_type.const_int(CBGR_PANIC_MSG.len() as u64, false).into(),
+                    ptr_type.const_null().into(),
+                    i32_type.const_int(0, false).into(),
+                ],
+                "",
+            )
             .or_llvm_err()?;
         builder
             .build_unreachable()
