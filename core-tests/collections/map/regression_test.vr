@@ -103,3 +103,31 @@ fn regression_map_iter_via_stdlib_body() {
 }
 
 fn main() {}
+
+// =============================================================================
+// #55 REF-BINDING-COLLECTION-DISPATCH-1 — a collection reached through a
+// `ref mut` match binding is a TWO-layer reference (cbgr register-ref →
+// interior payload pointer → object). The dispatch boundary's historical
+// single-hop peel classified the interior pointer, missed the MAP header,
+// and routed `insert` into the baked body — which read slot zeros
+// ("Maybe.is_none not found on receiver Int", the 16-family base/ wave's
+// builder shape). Pinned by the 11-line repro that named the class.
+// =============================================================================
+
+type RefBindHolder is Obj(Map<Text, Int>) | NothingHere;
+
+@test
+fn regression_ref_mut_binding_map_insert_dispatches_builtin() {
+    let mut h = RefBindHolder.Obj(Map.new());
+    match h {
+        RefBindHolder.Obj(ref mut obj) => {
+            obj.insert("a".to_text(), 1);
+            obj.insert("b".to_text(), 2);
+            assert_eq(obj.len(), 2);
+            assert(obj.get(&"a".to_text()).is_some());
+        }
+        _ => {
+            assert(false);
+        }
+    }
+}

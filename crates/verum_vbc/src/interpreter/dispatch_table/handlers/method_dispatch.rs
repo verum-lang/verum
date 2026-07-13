@@ -520,20 +520,56 @@ pub(in super::super) fn handle_call_method(
     // `dispatch_receiver` to the inner Value when an unrecognised
     // method is called on a `Shared<T>` carrier — see the `_ => {}`
     // arm of the Shared TypeId match.
+    // Reference-shape peel (#55 class): the historical single-pass
+    // else-if chain, PLUS exactly one extra hop for the `ref mut`
+    // match-binding shape — a CBGR register-ref whose SLOT holds an
+    // interior payload pointer (cbgr-ref → interior-ptr → object).
+    // Only that pair gets the second hop: broader fixed-point peeling
+    // changes observable &mut write-back semantics (the monad
+    // left-identity regressions the first two drafts introduced).
     let mut dispatch_receiver = if is_cbgr_ref(&receiver) {
-        let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
-        state.registers.get_absolute(abs_index)
+        let slot_val = {
+            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            state.registers.get_absolute(abs_index)
+        };
+        if slot_val.is_ptr()
+            && !slot_val.is_nil()
+            && state
+                .cbgr_mutable_ptrs
+                .contains(&(slot_val.as_ptr::<u8>() as usize))
+        {
+            // The pair (cbgr-ref → interior slot): PEEK the referent —
+            // take the extra hop ONLY when it is a builtin collection,
+            // whose intercepts classify by header and would otherwise
+            // miss (the 16-family base/ wave's `obj.insert` shape).
+            // Anything else keeps the historical interior-ptr receiver:
+            // &mut write-back paths observe the slot pointer (the
+            // monad left-identity regressions of the broader drafts).
+            // SAFETY: tracked interior pointers address live Value slots.
+            let referent = unsafe { *(slot_val.as_ptr::<Value>()) };
+            let is_collection = referent.is_regular_ptr()
+                && !referent.is_nil()
+                && matches!(
+                    unsafe {
+                        heap::ObjectHeader::try_type_id(referent.as_ptr::<u8>())
+                    },
+                    Some(
+                        TypeId::MAP
+                            | TypeId::SET
+                            | TypeId::LIST
+                            | TypeId::BYTE_LIST
+                            | TypeId::DEQUE
+                            | TypeId::CHANNEL
+                    )
+                );
+            if is_collection { referent } else { slot_val }
+        } else {
+            slot_val
+        }
     } else if receiver.is_thin_ref() {
-        // ThinRef encodes `&value` for cross-frame argument passing.
-        // The path_ops_runtime intercept (and other heap-shape intercepts
-        // below) gate on `receiver.is_ptr()` — ThinRef and CBGR-ref both
-        // tag as non-ptr, so leaving the ThinRef intact would cause the
-        // intercept to fail open and the dispatch would fall through to
-        // a stub body returning Unit.  Unwrap into the pointed-to Value
-        // up-front so the rest of the dispatch chain operates on the
-        // raw heap pointer.
         let tr = receiver.as_thin_ref();
         if !tr.ptr.is_null() {
+            // SAFETY: non-null ThinRef points at a Value slot.
             unsafe { *(tr.ptr as *const Value) }
         } else {
             receiver
@@ -544,27 +580,8 @@ pub(in super::super) fn handle_call_method(
             .cbgr_mutable_ptrs
             .contains(&(receiver.as_ptr::<u8>() as usize))
     {
-        // **Task #24 — interior-field-ref auto-deref for method dispatch**.
-        //
-        // `RefField` (emitted by `&record.field`) stores a
-        // `Value::from_ptr(field_ptr)` and tracks `field_ptr` in
-        // `cbgr_mutable_ptrs`. The downstream dispatchers (`dispatch_array_method`,
-        // `dispatch_variant_method`) read `ObjectHeader` from `ptr` and
-        // treat the receiver as if `ptr` were the heap-object base.
-        // For an interior pointer the header read lands inside the
-        // *parent record's* header (or worse, mid-data) — every
-        // primitive-method dispatch on `&self.list_field` mis-routes:
-        // `(&self.nums).len()` reads `Holder`'s type_id instead of
-        // `List`'s, fails `is_array_dispatchable`, and falls through
-        // to "method not found".
-        //
-        // The deref here parallels the CBGR-register-ref and ThinRef
-        // arms above — same architectural rule: every reference shape
-        // that wraps a Value must be unwrapped at the method-dispatch
-        // boundary so the rest of the chain operates on the actual
-        // referent. Without this, `clone_nums(&self.nums)` calls work
-        // at the SetF boundary but fail INSIDE the callee when
-        // `src.len()` dispatches against the interior ptr.
+        // Task #24 interior-field-ref auto-deref (unchanged).
+        // SAFETY: tracked interior pointers address live Value slots.
         unsafe { *(receiver.as_ptr::<Value>()) }
     } else {
         receiver
