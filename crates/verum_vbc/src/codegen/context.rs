@@ -2052,11 +2052,21 @@ impl CodegenContext {
                     && !m.is_empty() && value.contains(m.as_str())
                 {
                     let bt = std::backtrace::Backtrace::force_capture().to_string();
-                    let frames: Vec<&str> = bt
+                    // Release builds: symbol names are stripped/inlined, the
+                    // `verum_` filter often matches NOTHING and the trace
+                    // degrades to a bare header.  Keep raw frames (addresses
+                    // symbolicate offline via atos/addr2line against the
+                    // binary) when the filtered view is empty.
+                    let filtered: Vec<&str> = bt
                         .lines()
                         .filter(|l| l.contains("verum_"))
                         .take(12)
                         .collect();
+                    let frames: Vec<&str> = if filtered.is_empty() {
+                        bt.lines().take(30).collect()
+                    } else {
+                        filtered
+                    };
                     eprintln!(
                         "[strdice] intern {:?} module={:?} strings_len={}\n{}",
                         value,
@@ -2439,8 +2449,38 @@ impl CodegenContext {
             && !name.contains('.')
             && !name.contains("::")
             && !name.contains('#')
+            // MIRROR-OWNERSHIP-1 (#51 ghost root): the mirror asserts
+            // "<scope> DECLARES <name>" — that is only true for ids this
+            // compile allocated for real local bodies.  Sentinel-band
+            // ids (FFI externs, newtype/variant ctors, stage-1..5
+            // stubs — everything ≥ u32::MAX/4) are dispatch-band
+            // registrations passing through while SOME module is in
+            // scope; gluing the scope onto them FABRICATES provenance.
+            // Live failure: dst.vr's stage-5 stub for bare `Continue`
+            // (a `?`-desugar ControlFlow ctor reference) got mirrored
+            // as 'core.net.weft.dst.Continue'; the accumulated ctx
+            // carried that key into the POSTGRES module's stub-emit,
+            // whose canonical name pick (most dots wins) stamped the
+            // phantom onto the archive descriptor — and its bare alias
+            // clobbered ControlFlow's ctor at every user-side load
+            // (pre-shield: `Continue(42)` dispatched to KeyType.eq).
+            && info.id.0 < u32::MAX / 4
         {
             let qualified = format!("{}.{}", scope, name);
+            // Same tracing contract as the funnel head: the mirror is a
+            // DIRECT insert (never routes back through
+            // register_function), so without this line a mirror-created
+            // key is invisible to VERUM_TRACE_FNREG — the exact blind
+            // spot that hid the 'core.net.weft.dst.Continue' ghost key
+            // (#51).
+            if let Ok(filter) = std::env::var("VERUM_TRACE_FNREG")
+                && qualified.contains(&filter)
+            {
+                eprintln!(
+                    "[fnreg-MIRROR] '{}' (scope='{}' bare='{}') id={} arity={}",
+                    qualified, scope, name, info.id.0, info.param_count
+                );
+            }
             self.functions
                 .entry(qualified)
                 .or_insert_with(|| info.clone());

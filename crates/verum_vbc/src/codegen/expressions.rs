@@ -4417,8 +4417,12 @@ impl VbcCodegen {
             } = &inner.kind
         {
             let receiver_type = self.infer_expr_type_name(receiver);
-            let field_idx =
-                self.resolve_field_index(receiver_type.as_deref(), &field.name);
+            // #42: flagged resolve — a GUESSED positional index under a
+            // `&`/`&mut` projection is an interior pointer into the
+            // WRONG field (memory-unsafe, the task's founding class);
+            // route through the runtime by-name door instead.
+            let (field_idx, ref_guessed) =
+                self.resolve_field_index_flagged(receiver_type.as_deref(), &field.name);
             let base_reg = self
                 .compile_expr(receiver)?
                 .or_internal("field-ref base has no value")?;
@@ -4427,11 +4431,20 @@ impl VbcCodegen {
             let mut operands = Vec::<u8>::with_capacity(6);
             Self::write_reg(&mut operands, dest.0);
             Self::write_reg(&mut operands, base_reg.0);
-            crate::encoding::encode_varint(field_idx as u64, &mut operands);
-            self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: crate::instruction::CbgrSubOpcode::RefField as u8,
-                operands,
-            });
+            if ref_guessed && !Self::byname_fields_legacy() {
+                let name = self.intern_string(&field.name);
+                crate::encoding::encode_varint(name as u64, &mut operands);
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: crate::instruction::CbgrSubOpcode::RefFieldNamed as u8,
+                    operands,
+                });
+            } else {
+                crate::encoding::encode_varint(field_idx as u64, &mut operands);
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: crate::instruction::CbgrSubOpcode::RefField as u8,
+                    operands,
+                });
+            }
 
             self.ctx.free_temp(base_reg);
             return Ok(Some(dest));
@@ -5193,8 +5206,27 @@ impl VbcCodegen {
         // path (the unambiguous spelling the archive name-remap
         // chases) plus the local alias; the normal resolution chain
         // below then finds it like any registration.
+        // STAGE5-CTOR-YIELD-1 (#51): stage-5 runs EARLY in the
+        // resolution ladder, so for a name that is resolvable as a
+        // VARIANT CONSTRUCTOR (`Continue(42)` — the `?`-desugar
+        // ControlFlow reference class) it would preempt the ctor path
+        // further down and bind the call to an empty RetV stub.  A
+        // constructor is a language-level meaning; a speculative
+        // mount-miss stub must yield to it.
+        // Order matters for compile throughput: the pending-alias map
+        // get is O(1) and almost always None — the variant scan (a
+        // type-table walk) runs ONLY for the rare name that actually
+        // has a pending mount alias.
         let stage5_pending: Option<String> = if self.ctx.lookup_function(&func_name).is_none() {
-            self.ctx.pending_mount_aliases.get(&func_name).cloned()
+            self.ctx
+                .pending_mount_aliases
+                .get(&func_name)
+                .cloned()
+                .filter(|_| {
+                    self.ctx
+                        .find_variant_by_suffix_and_args(&func_name, args.len())
+                        .is_none()
+                })
         } else {
             None
         };
@@ -10039,7 +10071,7 @@ impl VbcCodegen {
         // takes `&mut self` (decided below alongside the existing
         // RefMut emission) — for `&self` / value methods, no
         // mutation can have happened and the writeback is skipped.
-        let field_writeback_target: Option<(Reg, u32)> = match &receiver.kind {
+        let field_writeback_target: Option<(Reg, u32, bool, String)> = match &receiver.kind {
             ExprKind::Field { expr: base, field } => {
                 // Resolve the base's type to find the canonical field
                 // index.  Falls back to None when the type can't be
@@ -10047,7 +10079,10 @@ impl VbcCodegen {
                 // in which case the writeback is skipped and the
                 // existing value-semantics behaviour is preserved.
                 let base_type = self.infer_expr_type_name(base);
-                let field_idx = self.resolve_field_index(
+                // #42: flagged resolve — a GUESSED index must not bake a
+                // positional write-back (the CAP-AUDIT cross-type-slot
+                // class); the by-name write resolves exactly at runtime.
+                let (field_idx, guessed) = self.resolve_field_index_flagged(
                     base_type.as_deref(),
                     field.name.as_str(),
                 );
@@ -10059,7 +10094,7 @@ impl VbcCodegen {
                     let base_reg = self
                         .compile_expr(base)?
                         .or_internal("field-receiver base has no value")?;
-                    Some((base_reg, field_idx))
+                    Some((base_reg, field_idx, guessed, field.name.to_string()))
                 }
             }
             _ => None,
@@ -12030,14 +12065,10 @@ impl VbcCodegen {
         // could have mutated the temp).  For value-receiver methods
         // (`&self`, owned `self`) the writeback is skipped — they
         // can't have mutated the temp.
-        if let Some((base_reg, field_idx)) = field_writeback_target {
+        if let Some((base_reg, field_idx, wb_guessed, wb_field)) = field_writeback_target {
             let did_refmut = actual_receiver != receiver_reg;
             if did_refmut {
-                self.ctx.emit(Instruction::SetF {
-                    obj: base_reg,
-                    field_idx,
-                    value: receiver_reg,
-                });
+                self.emit_field_write(base_reg, field_idx, receiver_reg, wb_guessed, &wb_field);
             }
             self.ctx.free_temp(base_reg);
         }
@@ -27900,6 +27931,13 @@ impl VbcCodegen {
                 | "intrinsic_ptr_offset"
                 | "ptr_add"
                 | "ptr_sub"
+                // #48 phase-2: the slice producers obey the SAME probe-
+                // proven buffer-stride discipline — the stride of the
+                // memory BEHIND the pointer is 1 only for the genuine
+                // packed `&unsafe Byte` idiom; `*const T` / `&Byte` /
+                // List<Byte> backings are 8-byte NaN-boxed Value arrays.
+                | "slice_from_raw_parts"
+                | "slice_from_raw_parts_mut"
         );
         if !is_ptr_arith {
             return DEFAULT_STRIDE;
@@ -29161,7 +29199,7 @@ impl VbcCodegen {
                 // and the Len opcode all hit their FatRef fast paths and return
                 // the correct byte length / byte value.
                 if args.len() >= 2 {
-                    let mut operands = Vec::with_capacity(6);
+                    let mut operands = Vec::with_capacity(7);
                     let push_reg = |operands: &mut Vec<u8>, r: Reg| {
                         if r.is_short() {
                             operands.push(r.0 as u8);
@@ -29173,6 +29211,15 @@ impl VbcCodegen {
                     push_reg(&mut operands, dest);
                     push_reg(&mut operands, args[0]);
                     push_reg(&mut operands, args[1]);
+                    // #48 phase-2: 4th operand — ELEMENT STRIDE, derived
+                    // at the call site from the ptr arg's spelling (the
+                    // ptr_intrinsic_byte_stride discipline: `&unsafe
+                    // Byte` → 1, everything else → 8-byte Values). Both
+                    // tiers' RefSliceRaw handlers carry it into the
+                    // slice representation (FatRef.reserved / canonical
+                    // cell elem) — retiring the hardcoded elem=1 that
+                    // byte-strided every &[T] raw-parts view.
+                    operands.push(byte_width);
                     self.ctx.emit(Instruction::CbgrExtended {
                         sub_op: crate::instruction::CbgrSubOpcode::RefSliceRaw as u8,
                         operands,
