@@ -5146,6 +5146,37 @@ impl VbcCodegen {
         // imports. Architecturally honest semantics: a bare
         // unqualified call from inside module M means "the M-local
         // function of that name, if any; otherwise the imported one".
+        // NESTED-LEXICAL-FIRST-1 (#51): a bare call inside a function
+        // that declares a nested fn of that name must bind LEXICALLY —
+        // nested fns register under the `<parent>$<name>` mangled key.
+        // Two suite tests each declaring `fn produce_residual()` used
+        // to race on the module-qualified bare key: the loser's call
+        // dispatched into the winner's body (a Maybe residual fed into
+        // Result's same-E from_residual → its uninhabited-Ok
+        // `unreachable_unchecked` arm — `Unreachable { pc: 1 }`).
+        let lexical_scoped_lookup: Option<(String, FunctionInfo)> = {
+            let only_simple_segment = !func_name.contains("::") && !func_name.contains('.');
+            if only_simple_segment
+                && let Some(parent) = self.current_fn_lookup_name.as_deref()
+            {
+                // Nested fns mangle under the parent's BARE name
+                // (`nested_function_scope` holds undotted fn names),
+                // while `current_fn_lookup_name` may be
+                // module-qualified (`test.law_x`).  Probe both
+                // spellings.
+                let bare_parent = parent.rsplit('.').next().unwrap_or(parent);
+                [parent, bare_parent]
+                    .iter()
+                    .map(|pp| format!("{}${}", pp, func_name))
+                    .find_map(|mangled| {
+                        self.ctx
+                            .lookup_function_with_arity(&mangled, args.len())
+                            .map(|info| (mangled.clone(), info.clone()))
+                    })
+            } else {
+                None
+            }
+        };
         let module_qualified_lookup: Option<(String, FunctionInfo)> = {
             let only_simple_segment = !func_name.contains("::") && !func_name.contains('.');
             if !only_simple_segment {
@@ -5569,7 +5600,12 @@ impl VbcCodegen {
         } else {
             None
         };
-        let (resolved_name, func_info) = match unit_decl_lookup
+        let (resolved_name, func_info) = match lexical_scoped_lookup
+            .filter(|(_, info)| is_free_fn(info))
+            // Lexical scope outranks EVERYTHING: the call site sits
+            // inside the declaring function, so no import/module/global
+            // registration may capture it (NESTED-LEXICAL-FIRST-1).
+            .or(unit_decl_lookup)
             .or_else(|| module_qualified_lookup.filter(|(_, info)| is_free_fn(info)))
             // The pinned rule above applies to EVERY layer: the
             // type-aware overload scan walks qualified `.name` keys and
@@ -6243,6 +6279,34 @@ impl VbcCodegen {
                 UNRESOLVED_FN_ID
             } else {
                 func_info.id.0
+            };
+            // SIBLING-IMPL-DISAMBIG-1 (#51): a DIRECT qualified call to a
+            // multi-`implement` method (`Result.from_residual(x)`) must
+            // dispatch by the argument's base type, not by whichever
+            // sibling owns the plain name slot.  No `#impl2` sibling →
+            // single lookup miss, zero cost.
+            let final_func_id = if final_func_id != UNRESOLVED_FN_ID && !args.is_empty() {
+                let dotted = func_name.replace("::", ".");
+                let arg_base: Option<String> = args
+                    .first()
+                    .and_then(|a| self.infer_expr_type_name(a))
+                    .map(|t| {
+                        t.trim()
+                            .trim_start_matches("&mut ")
+                            .trim_start_matches('&')
+                            .split('<')
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string()
+                    })
+                    .filter(|b| !b.is_empty());
+                match self.resolve_sibling_impl_by_arg(&dotted, arg_base.as_deref()) {
+                    Some(better) => better.id.0,
+                    None => final_func_id,
+                }
+            } else {
+                final_func_id
             };
             // VBC-GENERIC-INSTANTIATION: if the callee is generic, record its
             // concrete instantiation (derived from the argument types) and emit
@@ -20603,12 +20667,24 @@ impl VbcCodegen {
                 // Cross-type: call `<OuterType>::from_residual(inner_reg)` then Ret.
                 // Look up the registered from_residual function for the outer type.
                 let outer_name = outer_base.as_deref().unwrap_or("");
-                let from_residual_id = [
-                    format!("{outer_name}::from_residual"),
-                    format!("{outer_name}.from_residual"),
-                ]
-                .iter()
-                .find_map(|key| self.ctx.lookup_function(key).map(|fi| fi.id.0));
+                // SIBLING-IMPL-DISAMBIG-1: the residual's BASE picks the
+                // impl (`?` on Maybe inside a Result fn needs the
+                // Maybe<Never> overload, not whichever sibling owns the
+                // plain slot).
+                let from_residual_id = self
+                    .resolve_sibling_impl_by_arg(
+                        &format!("{outer_name}.from_residual"),
+                        base_name,
+                    )
+                    .map(|fi| fi.id.0)
+                    .or_else(|| {
+                        [
+                            format!("{outer_name}::from_residual"),
+                            format!("{outer_name}.from_residual"),
+                        ]
+                        .iter()
+                        .find_map(|key| self.ctx.lookup_function(key).map(|fi| fi.id.0))
+                    });
 
                 let from_residual_ret = self.ctx.alloc_temp();
                 if let Some(fid) = from_residual_id {
@@ -20646,6 +20722,82 @@ impl VbcCodegen {
 
         self.ctx.free_temp(inner_reg);
         Ok(Some(result))
+    }
+
+    /// SIBLING-IMPL-DISAMBIG-1 (#51): pick the right sibling impl of a
+    /// multi-`implement` method by the RESIDUAL ARGUMENT's base type.
+    ///
+    /// `register_impl_function` materializes sibling impls of the same
+    /// `(type, method)` under `<q>`, `<q>#impl2`, `<q>#impl3`, … each
+    /// carrying its own `param_type_names` (FromResidual for `Result`:
+    /// `["Result<Never, E>"]` / `["Result<Never, F>"]` /
+    /// `["Maybe<Never>"]`).  A name-keyed lookup alone cannot know
+    /// which body a call site needs; the carried facts can:
+    ///
+    ///   1. candidates whose `param_type_names[0]` BASE equals the
+    ///      argument's base type win;
+    ///   2. among several same-base candidates (same-E vs
+    ///      `E: From<F>`) prefer the one whose param error-arg TEXT
+    ///      matches its return error-arg text — the identity impl
+    ///      (`?`'s cross-error conversion applies `From` explicitly at
+    ///      the call site — #49 — so identity is the correct
+    ///      post-conversion target).
+    ///
+    /// Returns None when no `#impl2` sibling exists (single-impl fast
+    /// path) or the argument base is unknown.
+    fn resolve_sibling_impl_by_arg(
+        &self,
+        qualified_dotted: &str,
+        arg_base: Option<&str>,
+    ) -> Option<FunctionInfo> {
+        let arg_base = arg_base?;
+        self.ctx
+            .lookup_function(&format!("{}#impl2", qualified_dotted))?;
+        fn base_of(t: &str) -> &str {
+            t.split('<').next().unwrap_or(t).trim()
+        }
+        fn err_arg_of(t: &str) -> Option<&str> {
+            let lt = t.find('<')?;
+            let gt = t.rfind('>')?;
+            if gt <= lt {
+                return None;
+            }
+            t[lt + 1..gt].rsplit(',').next().map(str::trim)
+        }
+        let mut same_base: Vec<FunctionInfo> = Vec::new();
+        let mut key = qualified_dotted.to_string();
+        let mut n = 1u32;
+        loop {
+            match self.ctx.lookup_function(&key) {
+                Some(cand) => {
+                    if cand
+                        .param_type_names
+                        .first()
+                        .map(|p| base_of(p) == arg_base)
+                        .unwrap_or(false)
+                    {
+                        same_base.push(cand.clone());
+                    }
+                }
+                None if n > 1 => break,
+                None => {}
+            }
+            n += 1;
+            key = format!("{}#impl{}", qualified_dotted, n);
+        }
+        match same_base.len() {
+            0 => None,
+            1 => same_base.into_iter().next(),
+            _ => same_base
+                .iter()
+                .find(|cand| {
+                    let p_err = cand.param_type_names.first().and_then(|p| err_arg_of(p));
+                    let r_err = cand.return_type_name.as_deref().and_then(err_arg_of);
+                    p_err.is_some() && p_err == r_err
+                })
+                .cloned()
+                .or_else(|| same_base.into_iter().next()),
+        }
     }
 
     /// Compiles a try block expression: try { expr } -> Result<T, E>
