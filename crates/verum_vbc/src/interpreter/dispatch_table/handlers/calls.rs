@@ -1938,8 +1938,15 @@ fn try_dispatch_intrinsic_by_name(
         "__pool_create_raw" => Ok(Some(Value::from_i64(1))),
         "__pool_destroy_raw" => Ok(Some(Value::from_i64(0))),
         "__pool_submit_raw" | "__pool_global_submit_raw" => {
-            // submit(pool, func, arg) / global_submit(func, arg)
-            let (func_idx, arg_idx) = if func_name == "__pool_submit_raw" {
+            // submit(pool, func, arg) / global_submit(func, arg).
+            // Compare the NORMALIZED name (the same key that selected
+            // this arm) — the raw `func_name` arrives module-qualified
+            // ("pool.__pool_submit_raw"), so an equality check against
+            // the bare spelling silently mis-shaped submit as
+            // global_submit: func_idx=0 read the POOL HANDLE (1) as the
+            // function id, and the eager call dialled FunctionId(1)
+            // (whose heap-object result then leaked out of join()).
+            let (func_idx, arg_idx) = if name == "__pool_submit_raw" {
                 (1, 2)
             } else {
                 (0, 1)
