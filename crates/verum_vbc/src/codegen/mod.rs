@@ -8792,7 +8792,16 @@ impl VbcCodegen {
         {
             let qualified_alias = format!("{}.{}", scope, alias_name);
             self.ctx
-                .register_function(qualified_alias, func_info.clone());
+                .register_function(qualified_alias.clone(), func_info.clone());
+            // The in-process registration above dies at the archive
+            // boundary (only descriptors + mount_aliases survive the
+            // bake).  Ride the Task-#11 alias channel so
+            // `replay_mount_aliases` re-registers the qualified key at
+            // user-side archive load — without this leg the consumer's
+            // `mount core.runtime.time.{monotonic_nanos}` probe misses
+            // again on every compile that loads the stdlib from the
+            // embedded archive (i.e. all of them).
+            self.mount_aliases_buffer.push((qualified_alias, fid));
         }
         self.ctx
             .register_function_authoritative(alias_name.to_string(), func_info);
