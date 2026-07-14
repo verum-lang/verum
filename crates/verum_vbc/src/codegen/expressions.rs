@@ -5149,6 +5149,74 @@ impl VbcCodegen {
             }
         }
 
+        // CTX-CALL-PATH-1: `Logger.log(msg)` inside a `using Logger`
+        // fn parses as a two-segment CALL path, not a MethodCall — the
+        // context branch in compile_method_call never sees it, so it
+        // fell through to static type-method resolution (LoadT on the
+        // context TYPE marker + CallM) and the PROVIDED VALUE was never
+        // consulted: every context test degraded to a silent no-op.
+        // Mirror the method-call discipline here: head segment ∈ the
+        // function's `using` set → CtxGet the value, CallM on it.
+        {
+            let head_and_method: Option<(String, String)> = {
+                let dotted = func_name.replace("::", ".");
+                let mut parts = dotted.splitn(2, '.');
+                match (parts.next(), parts.next()) {
+                    (Some(h), Some(m)) if !h.is_empty() && !m.is_empty() && !m.contains('.') => {
+                        Some((h.to_string(), m.to_string()))
+                    }
+                    _ => None,
+                }
+            };
+            if let Some((head, method)) = head_and_method
+                && self.ctx.is_required_context(&head)
+            {
+                let ctx_name = self.ctx.resolve_context_alias(&head);
+                let ctx_type_id = self.intern_string(&ctx_name);
+                let ctx_value_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CtxGet {
+                    dst: ctx_value_reg,
+                    ctx_type: ctx_type_id,
+                });
+                // Compile arguments into a contiguous block.
+                let mut arg_regs: Vec<Reg> = Vec::with_capacity(args.len());
+                for a in args.iter() {
+                    let r = self
+                        .compile_expr(a)?
+                        .or_internal("context call arg has no value")?;
+                    arg_regs.push(r);
+                }
+                let args_start = if !arg_regs.is_empty() {
+                    let first = self.ctx.registers.alloc_fresh();
+                    for _ in 1..arg_regs.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+                    for (i, &src) in arg_regs.iter().enumerate() {
+                        let dst = Reg(first.0 + i as u16);
+                        if src != dst {
+                            self.ctx.emit(Instruction::Mov { dst, src });
+                        }
+                    }
+                    first
+                } else {
+                    Reg(0)
+                };
+                let method_id = self.ctx.intern_string_raw(&method);
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CallM {
+                    dst: result,
+                    receiver: ctx_value_reg,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: args_start,
+                        count: args.len() as u8,
+                    },
+                });
+                self.ctx.free_temp(ctx_value_reg);
+                return Ok(Some(result));
+            }
+        }
+
         // Handle built-in functions
         if let Some(result) = self.try_compile_builtin(&func_name, args)? {
             return Ok(result);

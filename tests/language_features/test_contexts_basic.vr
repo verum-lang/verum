@@ -1,23 +1,32 @@
-// Define a simple context
+// Test basic context definition and usage.
+//
+// v5.1 canonical form (was pre-v5 `provide Logger = { fn log … }`):
+// a context is provided with a VALUE whose type carries an
+// `implement Logger for T` block — see
+// vcs/specs/L2-standard/contexts/runtime/context_method_call.vr.
+
 context Logger {
     fn log(message: Text);
 }
 
-// Function using context
+type ConsoleLogger is {
+    prefix: Text,
+};
+
+implement Logger for ConsoleLogger {
+    fn log(&self, message: Text) {
+        print(f"[LOG] {message}");
+    }
+}
+
 fn greet(name: Text) using Logger {
     Logger.log(f"Hello, {name}!");
 }
 
-// Main function with provide
 fn main() {
-    // Provide Logger implementation
-    provide Logger = {
-        fn log(message: Text) {
-            print(f"[LOG] {message}");
-        }
-    };
+    let logger = ConsoleLogger { prefix: "APP" };
+    provide Logger = logger;
 
-    // Test context usage
     greet("World");
 
     print(f"Context system test complete");

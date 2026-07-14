@@ -1,28 +1,37 @@
-// Test context system - working patterns
+// Test context working patterns: a provided context is reachable from
+// any `using`-annotated callee in the dynamic scope, interleaved with
+// plain (non-using) calls.  Modernized to the v5.1 provide-a-value
+// form (was pre-v5 `provide Logger = { fn log … }`).
 
-// Define context
 context Logger {
     fn log(message: Text);
 }
 
-// Function that doesn't directly access the context
-// Instead, we'll call it from a scope where Logger is provided
+type ConsoleLogger is {
+    prefix: Text,
+};
+
+implement Logger for ConsoleLogger {
+    fn log(&self, message: Text) {
+        print(f"[LOG] {message}");
+    }
+}
+
+fn log_line(message: Text) using Logger {
+    Logger.log(message);
+}
+
+// Function that doesn't touch the context at all.
 fn greet(name: Text) {
     print(f"Hello, {name}");
 }
 
 fn main() {
-    // Provide Logger implementation
-    provide Logger = {
-        fn log(message: Text) {
-            print(f"[LOG] {message}");
-        }
-    };
+    provide Logger = ConsoleLogger { prefix: "WRK" };
 
-    // Access Logger directly in the scope where it's provided
-    Logger.log("Starting application");
+    log_line("Starting application");
 
     greet("World");
 
-    Logger.log("Application complete");
+    log_line("Application complete");
 }

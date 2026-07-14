@@ -1,20 +1,26 @@
-// Test accessing context
+// Test accessing a context method from a `using`-annotated function.
+// Modernized to the v5.1 provide-a-value form.
 
 context Logger {
     fn log(message: Text);
 }
 
+type ConsoleLogger is {
+    prefix: Text,
+};
+
+implement Logger for ConsoleLogger {
+    fn log(&self, message: Text) {
+        print(f"[LOG] {message}");
+    }
+}
+
 fn greet(name: Text) using Logger {
-    // Try to call Logger.log - this is where the issue occurs
     Logger.log(f"Hello, {name}");
 }
 
 fn main() {
-    provide Logger = {
-        fn log(message: Text) {
-            print(f"[LOG] {message}");
-        }
-    };
+    provide Logger = ConsoleLogger { prefix: "ACC" };
 
     greet("World");
 }

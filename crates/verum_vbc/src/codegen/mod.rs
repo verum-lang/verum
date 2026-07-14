@@ -14453,7 +14453,24 @@ impl VbcCodegen {
             // `fn produce_residual()`) to the one bare-slot winner: the
             // first body was stamped with the second's id, the first id
             // kept no body, and the surviving body was the WRONG one.
-            format!("{}${}", self.nested_function_scope.join("$"), base_name)
+            //
+            // PREFERENCE, not a hard requirement: fns compiled with a
+            // parent scope but registered WITHOUT the mangle exist —
+            // `provide Logger = { fn log(…) {…} }` provide-block
+            // methods register through the context machinery, not the
+            // nested-collect walk. A hard mangled lookup broke every
+            // legacy context test with "function not registered:
+            // main$log"; miss falls back to the historic bare name.
+            let mangled = format!("{}${}", self.nested_function_scope.join("$"), base_name);
+            if self
+                .ctx
+                .lookup_function_with_arity(&mangled, func.params.len())
+                .is_some()
+            {
+                mangled
+            } else {
+                base_name.clone()
+            }
         } else {
             base_name.clone()
         };
@@ -14653,6 +14670,23 @@ impl VbcCodegen {
                 .unwrap_or_default();
             if ctx_type_name.is_empty() {
                 continue;
+            }
+            // CTX-REQUIRED-FROM-AST-1: the AST `using` clause is the
+            // DECLARATION-side truth for this body.  `func_info.contexts`
+            // (set above) is a registration-derived mirror that arrives
+            // EMPTY on several lookup paths — `Logger.log(…)` inside a
+            // `using Logger` fn then compiled as a static type-method
+            // call (LoadT + CallM on the context TYPE marker) instead of
+            // CtxGet + CallM, the provided value was never consulted,
+            // and every context test degraded to a silent no-op log
+            // (tests/language_features contexts family + the canonical
+            // vcs L2 context_method_call).  Union the AST names in.
+            self.ctx.required_contexts.insert(ctx_type_name.clone());
+            if std::env::var("VERUM_TRACE_CTX").is_ok() {
+                eprintln!(
+                    "[ctx-req] fn='{}' += '{}' (info_ctxs={:?})",
+                    base_name, ctx_type_name, func_info.contexts
+                );
             }
             if let verum_common::Maybe::Some(ref name_ident) = ctx.name {
                 self.ctx

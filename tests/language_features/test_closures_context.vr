@@ -1,24 +1,35 @@
-// Test context injection in closures
+// Test context reachability across closure calls: a closure invoked
+// inside the provided dynamic scope can call a `using`-annotated fn.
+// Modernized to the v5.1 provide-a-value form.
 
-// Simple context for testing
 context Logger {
     fn log(message: Text);
+}
+
+type ConsoleLogger is {
+    prefix: Text,
+};
+
+implement Logger for ConsoleLogger {
+    fn log(&self, message: Text) {
+        print(f"[LOG] {message}");
+    }
+}
+
+fn log_line(message: Text) using Logger {
+    Logger.log(message);
 }
 
 fn main() {
     print("=== Test 1: Closure with context ===");
 
-    // Provide context implementation
-    provide Logger = {
-        fn log(message: Text) {
-            print(f"[LOG] {message}");
-        }
+    provide Logger = ConsoleLogger { prefix: "CLS" };
+
+    let log_twice = |m: Text| {
+        log_line(m);
+        log_line(m);
     };
+    log_twice("from closure");
 
-    // Note: Context usage in closures syntax needs verification
-    // The parser supports: |params| using [Context] body
-    // But the full semantics may not be implemented yet
-
-    print("Context syntax in closures requires further testing");
-    print("Parser supports: |x: Int| using [Logger] -> Int { ... }");
+    print("Context reachable through closure calls");
 }
