@@ -313,6 +313,58 @@ pub unsafe fn byte_slice_payload(base: *const u8) -> (*mut u8, u64) {
 /// BYTE_SLICE consumer arms use — no site re-implements the header
 /// probe.
 #[inline]
+/// TYPED-ARRAY-ITER-1 — ONE authority for a packed typed array's
+/// element geometry and decode.
+///
+/// `NewTypedArray` allocates `[T; N]` as a RAW buffer stamped with the
+/// SCALAR TypeId (`U8`/`U16`/`U32`/`U64` for integers by stride,
+/// `F32`/`F64` for floats — see TYPED-ARRAY-FLOAT-1).  Every consumer
+/// that walks such a buffer (index reads, the iterator protocol) must
+/// agree on (stride, float-ness) and on the raw→Value decode; the
+/// iterator classifier previously had NO leg for these ids, fell to
+/// `ITER_TYPE_LIST`, read the raw payload as a `[len, cap, backing]`
+/// list header and dereferenced a garbage "backing pointer"
+/// (`Set.from([1, 2, 3])` → SIGSEGV in phase.interpret).
+pub fn typed_array_element_spec(tid: crate::types::TypeId) -> Option<(usize, bool)> {
+    use crate::types::TypeId;
+    match tid {
+        TypeId::U8 => Some((1, false)),
+        TypeId::U16 => Some((2, false)),
+        TypeId::U32 => Some((4, false)),
+        TypeId::U64 => Some((8, false)),
+        TypeId::F32 => Some((4, true)),
+        TypeId::F64 => Some((8, true)),
+        _ => None,
+    }
+}
+
+/// Decode one element of a packed typed array as a boxed `Value`.
+/// Mirrors `handle_get_index`'s per-width legs exactly: integer widths
+/// ≤32 zero-extend, 64-bit reads are signed (`[Int; N]`), floats round
+/// -trip their IEEE-754 bits through `from_f64`.
+///
+/// # Safety
+/// `data_ptr` must point at the buffer's DATA area (past the object
+/// header) with at least `(idx + 1) * stride` readable bytes, where
+/// `stride` matches `typed_array_element_spec(tid)`.
+pub unsafe fn typed_array_element(
+    tid: crate::types::TypeId,
+    data_ptr: *const u8,
+    idx: usize,
+) -> Option<Value> {
+    let (stride, is_float) = typed_array_element_spec(tid)?;
+    let at = unsafe { data_ptr.add(idx * stride) };
+    Some(match (stride, is_float) {
+        (1, false) => Value::from_i64(unsafe { *at } as i64),
+        (2, false) => Value::from_i64(unsafe { *(at as *const u16) } as i64),
+        (4, false) => Value::from_i64(unsafe { *(at as *const u32) } as i64),
+        (8, false) => Value::from_i64(unsafe { *(at as *const i64) }),
+        (4, true) => Value::from_f64(f32::from_bits(unsafe { *(at as *const u32) }) as f64),
+        (8, true) => Value::from_f64(f64::from_bits(unsafe { *(at as *const u64) })),
+        _ => return None,
+    })
+}
+
 pub fn value_as_byte_slice(v: &Value) -> Option<(*mut u8, u64)> {
     if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
         return None;

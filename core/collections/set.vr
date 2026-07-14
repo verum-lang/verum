@@ -54,9 +54,25 @@ implement<T: Hash + Eq> Set<T> {
     /// assert(s.contains(1));
     /// ```
     public fn from(values: [T; _]) -> Set<T> {
-        let mut s = Set { inner: Map.with_capacity(values.len()) };
-        for item in values {
-            s.insert(item);
+        // Mirror `List.from`'s canonical shape (list.vr): construct
+        // through `Set.with_capacity` — the Tier-0 static-constructor
+        // intercept builds the FLAT `[len, cap, entries, tombstones]`
+        // heap object every instance-method intercept expects.  The
+        // previous `Set { inner: Map.with_capacity(…) }` record
+        // literal produced a WRAPPER object whose slot 0 is the inner
+        // Map POINTER; the `insert` intercept then read that pointer
+        // as `len`, the out-of-object slot 1 as `cap`, and walked a
+        // garbage entries pointer (SIGSEGV — collections/set
+        // regression suite, `Set.from([1, 2, 3])`).  Index-based
+        // iteration for the same reason as `List.from`: `values.len()`
+        // / `values[i]` lower through the well-supported `[T; N]`
+        // runtime intercepts on both tiers.
+        let n = values.len();
+        let mut s = Set.with_capacity(n);
+        let mut i: Int = 0;
+        while i < n {
+            s.insert(values[i]);
+            i = i + 1;
         }
         s
     }

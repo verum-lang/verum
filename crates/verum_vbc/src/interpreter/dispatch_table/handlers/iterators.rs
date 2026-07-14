@@ -57,6 +57,15 @@ const ITER_TYPE_BYTE_SLICE: i64 = 7;
 /// the `reserved` elem-size dispatch (0=Value, 1/2/4/8=raw).
 const ITER_TYPE_FATREF_SLICE: i64 = 8;
 
+/// TYPED-ARRAY-ITER-1: packed `[T; N]` typed arrays (`NewTypedArray`'s
+/// raw buffers stamped with SCALAR TypeIds — U8/U16/U32/U64/F32/F64).
+/// Without this leg the classifier fell through to `ITER_TYPE_LIST`,
+/// read the raw element bytes as a `[len, cap, backing]` list header
+/// and dereferenced a garbage backing pointer (`for item in values`
+/// inside `Set.from([1, 2, 3])` → SIGSEGV).  Element geometry/decode
+/// authority: `heap::typed_array_element{_spec,}`.
+const ITER_TYPE_TYPED_ARRAY: i64 = 9;
+
 // ============================================================================
 // Iterator + Range Operations
 // ============================================================================
@@ -179,6 +188,13 @@ pub(in super::super) fn handle_iter_new(
                 TypeId::BYTE_LIST => ITER_TYPE_BYTE_LIST,
                 TypeId::BYTE_SLICE => ITER_TYPE_BYTE_SLICE,
                 TypeId::LIST => ITER_TYPE_LIST,
+                // Packed typed arrays — scalar-TypeId raw buffers.
+                TypeId::U8
+                | TypeId::U16
+                | TypeId::U32
+                | TypeId::U64
+                | TypeId::F32
+                | TypeId::F64 => ITER_TYPE_TYPED_ARRAY,
                 // Non-builtin heap object.  If its type is an Iterator
                 // record (resolvable 1-arg `<Type>.next` with a real
                 // body), iterate through the protocol — reading an
@@ -502,6 +518,44 @@ pub(in super::super) fn handle_iter_next(
                 *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
             }
 
+            state.set_reg(dst, element);
+            state.set_reg(has_next_dst, Value::from_bool(true));
+        }
+        ITER_TYPE_TYPED_ARRAY => {
+            // Packed typed array — element count derives from the
+            // header size and the scalar TypeId's stride; decode via
+            // the ONE authority shared with indexed reads.
+            // SAFETY: IterNew classified on the header TypeId, which
+            // proves the raw-buffer shape; bounds checked below.
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(source_ptr) };
+            let spec = heap::typed_array_element_spec(header.type_id);
+            let (stride, _is_float) = match spec {
+                Some(sf) => sf,
+                None => {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "IterNext: ITER_TYPE_TYPED_ARRAY over non-typed-array TypeId {}",
+                            header.type_id.0
+                        ),
+                    });
+                }
+            };
+            let count = header.size as usize / stride;
+            if current_idx >= count {
+                state.set_reg(dst, Value::unit());
+                state.set_reg(has_next_dst, Value::from_bool(false));
+                return Ok(DispatchResult::Continue);
+            }
+            let data_ptr = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            // SAFETY: bounds-checked against header.size/stride above.
+            let element = unsafe {
+                heap::typed_array_element(header.type_id, data_ptr, current_idx)
+            }
+            .expect("spec checked above");
+
+            unsafe {
+                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
+            }
             state.set_reg(dst, element);
             state.set_reg(has_next_dst, Value::from_bool(true));
         }

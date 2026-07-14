@@ -1725,6 +1725,49 @@ pub(in super::super) fn handle_call_method(
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
         }
+        // SET-FLAT-CTOR-1: `Set.with_capacity` / `Map.with_capacity`
+        // MUST build the FLAT `[len, cap, entries, tombstones]` object
+        // exactly like the `new` intercept above — the stdlib bodies
+        // construct a `{ inner: Map }` WRAPPER record whose slot 0 is
+        // a POINTER; every instance-method intercept then misreads it
+        // as `len` and walks garbage (`Set.from([1, 2, 3])` →
+        // `insert` SIGSEGV).  Same builtin-collection layout-authority
+        // rule as `new`: the runtime owns the representation.
+        let is_set = receiver_type_name.as_deref() == Some("Set");
+        let is_map = receiver_type_name.as_deref() == Some("Map");
+        if (is_set || is_map) && args.count == 1 {
+            let caller_base = state.reg_base();
+            let capacity_val = state.registers.get(caller_base, Reg(args.start.0));
+            let requested = capacity_val.as_i64().max(0) as usize;
+            // Robin-Hood probing divides by capacity; keep the same
+            // 16-slot bootstrap floor the `new` intercept uses.
+            let actual_cap = requested.max(16);
+            let type_id = if is_set { TypeId::SET } else { TypeId::MAP };
+            let obj = state
+                .heap
+                .alloc(type_id, 4 * std::mem::size_of::<Value>())?;
+            state.record_allocation();
+            let header_ptr =
+                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            let entries = state.heap.alloc_array(TypeId::UNIT, actual_cap * 2)?;
+            state.record_allocation();
+            let entries_ptr = entries.as_ptr() as *mut u8;
+            let entries_data =
+                unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            for i in 0..(actual_cap * 2) {
+                unsafe {
+                    *entries_data.add(i) = Value::unit();
+                }
+            }
+            unsafe {
+                *header_ptr = Value::from_i64(0); // len
+                *header_ptr.add(1) = Value::from_i64(actual_cap as i64); // cap
+                *header_ptr.add(2) = Value::from_ptr(entries_ptr); // entries
+                *header_ptr.add(3) = Value::from_i64(0); // tombstones
+            }
+            state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+            return Ok(DispatchResult::Continue);
+        }
     }
 
     // Handle Numeric protocol static methods (Float.zero(), Float.one(), Int.zero(), etc.)
