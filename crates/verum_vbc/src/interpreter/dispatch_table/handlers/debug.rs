@@ -252,6 +252,36 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
                 return format!("[{}]", parts.join(", "));
             }
 
+            // Packed typed arrays (`[Int; N]` / `[Float; N]` / `[Byte; N]`
+            // …): the header carries the SCALAR element TypeId and the
+            // payload is a raw UNBOXED buffer (#27 TypedArrayStore), so
+            // the record fallback below would read the slots as NaN-boxed
+            // Values — `[1, 2, 3]` printed as subnormal doubles
+            // (bits 1 → 4.94e-324).  Decode through the ONE
+            // geometry/codec authority shared with indexed reads and the
+            // ITER_TYPE_TYPED_ARRAY leg.
+            if let Some((stride, _is_float)) =
+                heap::typed_array_element_spec(header.type_id)
+            {
+                let len = header.size as usize / stride;
+                let data_ptr = unsafe { base_ptr.add(data_offset) };
+                let shown = len.min(256);
+                let mut parts = Vec::with_capacity(shown);
+                for i in 0..shown {
+                    // SAFETY: i < len = header.size/stride keeps the
+                    // read inside the allocation the header describes.
+                    if let Some(v) = unsafe {
+                        heap::typed_array_element(header.type_id, data_ptr, i)
+                    } {
+                        parts.push(format_value_for_print_depth(state, v, depth + 1));
+                    }
+                }
+                if len > shown {
+                    parts.push("...".to_string());
+                }
+                return format!("[{}]", parts.join(", "));
+            }
+
             // Map: type_id == MAP (513)
             if header.type_id == crate::types::TypeId::MAP {
                 return format_map_for_print_depth(state, base_ptr, depth + 1);
