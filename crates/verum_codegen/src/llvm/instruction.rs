@@ -4436,6 +4436,23 @@ pub fn lower_instruction<'ctx>(
                 } else {
                     ctx.set_register(dst.0, val);
                 }
+                // **TEXT-ARRAY-ITER-REF-1** (task #15): a pass-through
+                // Deref is value-IDENTITY — dst holds the exact same
+                // value as ref_reg, so it must carry the exact same
+                // type facts.  This leg previously copied the value and
+                // DROPPED every register mark: `for &m in
+                // text_list.iter()` slot-loads the Text element in
+                // IterNext (dst text-marked + pass-through), then the
+                // `&m` pattern's Deref stripped the marks — downstream
+                // `f"{m}"`/ToString int-formatted the Text POINTER
+                // (garbage "addresses at 32-byte stride"), and `&m`'s
+                // Ref saw a non-heap register and SPILLED the Text
+                // handle into a stack slot, so `is_transient_error(&m)`
+                // → Text.to_lowercase walked a slot address as flat
+                // Text → SIGBUS (signal 10).  Tier-0 keeps the boxed
+                // Value's type through its deref — this is the Tier-1
+                // mirror (rcv_law_transient_* / cfg_it_transient_*).
+                propagate_value_type_facts(ctx, *ref_reg, *dst);
                 return Ok(());
             }
 
@@ -34327,19 +34344,6 @@ fn lower_gpu_extended<'ctx>(
 // ====================================================================
 
 fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
-    // Sticky VBC-authored type hints follow the value through Mov —
-    // the codegen hints the PRODUCING register (a GetF temp), while
-    // consumers (lower_ref is_heap_type, CallM receiver typing) see
-    // the post-Mov binding register (task #22 leg 2: the tuple-elem
-    // hint on reg3 never reached `&halves.0`'s Ref on reg5).
-    match ctx.sticky_type_hint(src.0).map(|s| s.to_string()) {
-        Some(hint) => ctx.set_sticky_type_hint(dst.0, hint),
-        // Unhinted source OVERWRITES dst — a stale sticky (Priority-0
-        // in receiver typing) on a reused register mis-dispatched
-        // every later method call through it (dp AOT 53→9:
-        // `d.as_nanos()` read garbage through a wrong impl).
-        None => ctx.clear_sticky_type_hint(dst.0),
-    }
     let value = ctx.get_register(src.0)?;
     ctx.set_register(dst.0, value);
     // Ownership transfer for heap-owned text: MOV is a move, not a copy.
@@ -34353,6 +34357,63 @@ fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
     if src.0 != dst.0 && ctx.is_owned_text_register(src.0) {
         ctx.mark_owned_text_register(dst.0);
         ctx.unmark_owned_text_register(src.0);
+    }
+    propagate_value_type_facts(ctx, src, dst);
+    // Do NOT transfer text ownership through Mov. Ownership stays on
+    // the source register so that the *original* allocation site keeps
+    // the responsibility to free. The destination is an alias — it
+    // shares the pointer but is NOT the owner.
+    //
+
+    // Previous behaviour transferred ownership (unmark src, mark dst).
+    // That caused use-after-free when f-string interpolation did
+    //  Mov str_reg, user_var // ownership moved to temp
+    //  Concat dst, dst, str_reg // temp freed → user_var dangling
+    //
+
+    // With this change, Concat sees str_reg as non-owned and skips
+    // freeing. The original owner (e.g. the Concat/ToString that
+    // created the text) is freed either by a later Concat (if a==dst
+    // reuse) or at function return cleanup.
+    Ok(())
+}
+
+/// ONE authority for copying every value-describing register fact from
+/// `src` to `dst` — the type marks (text/list/map/…), obj-type name,
+/// generic type args, element stride, sticky hints, pass-through /
+/// interior-ref properties.  Shared by `lower_mov` (a Mov IS this plus
+/// the ownership transfer) and every value-identity lowering leg that
+/// hands the SAME value to a new register — notably `Deref` on a
+/// pass-through reference (TEXT-ARRAY-ITER-REF-1, task #15: `for &m in
+/// text_list.iter()` slot-loads the Text element in IterNext and marks
+/// it pass-through + text; the `&m` pattern's Deref then copied the
+/// value but DROPPED the facts, so `f"{m}"`/ToString printed the Text
+/// pointer as an Int and `&m`'s Ref spilled the Text handle into a
+/// stack slot — `is_transient_error(&m)` → Text.to_lowercase walked a
+/// slot address as flat Text → SIGBUS; Tier-0 was correct).
+///
+/// Deliberately EXCLUDED: owned-text OWNERSHIP (a lifecycle fact, not a
+/// value fact — moves only through Mov's dedicated transfer above).
+fn propagate_value_type_facts<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    src: Reg,
+    dst: Reg,
+) {
+    if src.0 == dst.0 {
+        return;
+    }
+    // Sticky VBC-authored type hints follow the value —
+    // the codegen hints the PRODUCING register (a GetF temp), while
+    // consumers (lower_ref is_heap_type, CallM receiver typing) see
+    // the post-Mov binding register (task #22 leg 2: the tuple-elem
+    // hint on reg3 never reached `&halves.0`'s Ref on reg5).
+    match ctx.sticky_type_hint(src.0).map(|s| s.to_string()) {
+        Some(hint) => ctx.set_sticky_type_hint(dst.0, hint),
+        // Unhinted source OVERWRITES dst — a stale sticky (Priority-0
+        // in receiver typing) on a reused register mis-dispatched
+        // every later method call through it (dp AOT 53→9:
+        // `d.as_nanos()` read garbage through a wrong impl).
+        None => ctx.clear_sticky_type_hint(dst.0),
     }
     // Propagate string/bool/float/list register tracking through copies
     if ctx.is_text_register(src.0) {
@@ -34486,23 +34547,6 @@ fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
     if let Some(type_args) = ctx.get_generic_type_args(src.0).cloned() {
         ctx.set_generic_type_args(dst.0, type_args);
     }
-    // Do NOT transfer text ownership through Mov. Ownership stays on
-    // the source register so that the *original* allocation site keeps
-    // the responsibility to free. The destination is an alias — it
-    // shares the pointer but is NOT the owner.
-    //
-
-    // Previous behaviour transferred ownership (unmark src, mark dst).
-    // That caused use-after-free when f-string interpolation did
-    //  Mov str_reg, user_var // ownership moved to temp
-    //  Concat dst, dst, str_reg // temp freed → user_var dangling
-    //
-
-    // With this change, Concat sees str_reg as non-owned and skips
-    // freeing. The original owner (e.g. the Concat/ToString that
-    // created the text) is freed either by a later Concat (if a==dst
-    // reuse) or at function return cleanup.
-    Ok(())
 }
 
 fn lower_load_const<'ctx>(
