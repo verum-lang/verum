@@ -104,6 +104,29 @@ pub fn is_name_resolved_stub_id(id: u32) -> bool {
     in_stage3(id) || in_stage4(id) || in_stage5(id)
 }
 
+/// XMOD call-id band membership — cross-module Call ids re-homed at
+/// archive emission (XMOD-CALL-ID-BAND-1, band
+/// `[XMOD_CALL_ID_BAND_BASE, XMOD_CALL_ID_BAND_BASE + 0x800_0000)`,
+/// see `codegen/mod.rs` emission pass) and resolved BY NAME at
+/// archive load (`ArchiveBodyRemap::map_function` Tier 0 via
+/// `external_function_names`).
+///
+/// Deliberately NOT part of [`is_stub_id`]: a band id inside EMITTED
+/// archive bytecode is the normal cross-module representation, not a
+/// pre-registration stub.  The predicate exists for the resolution
+/// boundary (STUB-STAGE-INSUITE-1): a band id whose exact-name
+/// lookups miss at load is eligible for the same ranked
+/// qualified-suffix chase as stage-5 stubs — its recorded name is a
+/// module-anchored qualified spelling by the same construction — and
+/// one that still survives to runtime dispatch is a load-time
+/// resolution defect (`FunctionNotFound(0x2000_00xx)`), never a
+/// legitimate call target.
+#[inline]
+pub fn in_xmod_call_band(id: u32) -> bool {
+    id >= crate::module::XMOD_CALL_ID_BAND_BASE
+        && id < crate::module::XMOD_CALL_ID_BAND_BASE + 0x800_0000
+}
+
 /// Which stage a stub id belongs to, if any.
 #[inline]
 pub fn stage_of(id: u32) -> Option<u8> {
@@ -164,6 +187,20 @@ mod tests {
         }
         assert_eq!(stage_of(0), None);
         assert_eq!(stage_of(STAGE5_BASE - STUB_RANGE_WIDTH - 1), None);
+    }
+
+    #[test]
+    fn xmod_band_is_disjoint_from_stub_stages() {
+        // The XMOD band lives far below every pre-registration stage
+        // band and never classifies as a stub id.
+        assert!(in_xmod_call_band(crate::module::XMOD_CALL_ID_BAND_BASE));
+        assert!(in_xmod_call_band(0x2000_0061)); // STUB-STAGE-INSUITE-1 live victim
+        assert!(!in_xmod_call_band(crate::module::XMOD_CALL_ID_BAND_BASE - 1));
+        assert!(!in_xmod_call_band(
+            crate::module::XMOD_CALL_ID_BAND_BASE + 0x800_0000
+        ));
+        assert!(!is_stub_id(crate::module::XMOD_CALL_ID_BAND_BASE));
+        assert!(!in_xmod_call_band(STAGE5_BASE - STUB_RANGE_WIDTH));
     }
 
     #[test]
