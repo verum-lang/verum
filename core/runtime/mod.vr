@@ -108,8 +108,14 @@ public module pool;
 /// Context bridge between runtime and context system
 public module ctx_bridge;
 
-/// Stack-based allocator for no-heap environments
-@cfg(any(runtime = "no_heap", runtime = "embedded"))
+/// Stack / arena / pool allocators.  PRIMARY use is no-heap and
+/// embedded targets (EmbeddedRuntime's allocator), but the module is
+/// deliberately NOT cfg-gated: the allocators are self-contained
+/// (fixed `[Byte; SIZE]` buffers, no OS dependency) and are equally
+/// useful on the full runtime for deterministic-latency scopes
+/// (request arenas, connection pools).  Gating them out also made the
+/// whole surface untestable under the default conformance profile —
+/// see core-tests/runtime/stack_alloc/audit.md §A.
 public module stack_alloc;
 
 /// Lock-free task queue for work-stealing scheduler
@@ -207,8 +213,8 @@ public mount core.intrinsics.{
     RecoveryError,
 };
 
-// Stack allocator (conditional)
-@cfg(any(runtime = "no_heap", runtime = "embedded"))
+// Stack / arena / pool allocators (always in scope — see the module
+// declaration above for why the historical cfg gate was removed)
 public mount .stack_alloc.{StackAllocator, ArenaAllocator};
 
 // Task queue for work-stealing (conditional)

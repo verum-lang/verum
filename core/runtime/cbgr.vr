@@ -10,9 +10,26 @@ module runtime.cbgr;
 // that no registry entry matched (calls resolved to nil).  It is now a
 // thin re-export of the canonical, wired declarations in
 // `core.intrinsics.runtime.cbgr` — one source of truth, both tiers.
+// The re-export list is the COHERENT runtime-facing CBGR read/probe
+// surface: allocation bridge (allocate/deallocate/realloc), epoch
+// reads + transitions, per-allocation generation read, and the
+// validity probes.  Names are the canonical intrinsic names — no
+// local renames (a `cbgr_generation`-style alias here is exactly the
+// duplicate-name drift this module was purged of).
 public mount core.intrinsics.runtime.cbgr.{
+    cbgr_validate,
+    cbgr_allocate,
+    cbgr_deallocate,
+    cbgr_realloc,
     cbgr_check,
+    cbgr_check_fat,
+    cbgr_check_write,
+    cbgr_validate_ref,
     cbgr_invalidate,
+    cbgr_get_epoch,
+    cbgr_current_epoch,
+    cbgr_epoch_begin,
+    cbgr_advance_epoch,
+    cbgr_new_generation,
+    cbgr_get_generation,
 };
-
-// Not re-exported (absent from the canonical module): cbgr_generation, cbgr_epoch
