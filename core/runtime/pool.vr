@@ -15,14 +15,14 @@
 //  let pool = ThreadPool.new(4); // 4 workers
 //  let h1 = pool.submit(compute, arg1); // Submit tasks
 //  let h2 = pool.submit(compute, arg2);
-//  let r1 = h1.await(); // Collect results
-//  let r2 = h2.await();
+//  let r1 = h1.join(); // Collect results
+//  let r2 = h2.join();
 //  pool.destroy();
 //
 
 //  // Or use the global pool:
 //  let h = ThreadPool.global_submit(compute, arg);
-//  let r = h.await();
+//  let r = h.join();
 //
 
 // =============================================================================
@@ -56,7 +56,7 @@ public type ThreadPool is {
 /// pool's handle table bounded under fire-and-forget submission.
 public type PoolTaskHandle is {
     handle: Int,
-    /// Tracks whether `await()` was called. Drop reads this so an
+    /// Tracks whether `join()` was called. Drop reads this so an
     /// awaited handle's drain is a no-op (the slot was already
     /// freed inside __pool_await_raw).
     awaited: Bool,
@@ -129,7 +129,14 @@ implement PoolTaskHandle {
     /// Block until the task completes and return its result. Marks
     /// the handle as awaited so the Drop impl knows the result has
     /// already been collected and the handle slot reused.
-    public fn await(&mut self) -> Int {
+    ///
+
+    /// Named `join` (not `await`): postfix `.await` is async-expression
+    /// syntax, so a method literally named `await` is UNCALLABLE —
+    /// `h.await()` typechecks as "await the non-future h, then call the
+    /// unit" and fails. The historical `await` name shipped uncalled
+    /// and untested for exactly that reason (POOL-AWAIT-NAME-1).
+    public fn join(&mut self) -> Int {
         let result = __pool_await_raw(self.handle);
         self.awaited = true;
         result

@@ -259,7 +259,13 @@ pub struct VbcModule {
     /// consumer: `crates/verum_compiler/src/archive_ctx_loader.rs::
     /// apply_lazy_with_types` (planned).
     #[serde(default)]
-    pub mount_aliases: Vec<(StringId, FunctionId)>,
+    /// (alias name, best-effort archive-local fid, RESOLVED TARGET
+    /// canonical key).  The target key is the load-time authority
+    /// (REEXPORT-QUALIFIED-KEY-1): archive fids are renumbered
+    /// per-entry at serialization, so an alias whose target lives in a
+    /// DIFFERENT entry (every cross-subtree re-export) is unmappable
+    /// by fid alone.
+    pub mount_aliases: Vec<(StringId, FunctionId, StringId)>,
 
     /// ARCHIVE-TYPE-GLUE-IDS-1: lazily-built `TypeId.0 → types-vec
     /// index` reverse cache for id-correct descriptor resolution on

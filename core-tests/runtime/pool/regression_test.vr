@@ -15,7 +15,7 @@ fn pool_identity(x: Int) -> Int { x }
 // REGRESSION: POOL-INTERP-STUB-1 (2026-07-14).  The Tier-0 handlers for
 // `__pool_submit_raw` / `__pool_await_raw` / `__pool_global_submit_raw`
 // returned constant 0 WITHOUT calling the submitted function —
-// `pool.submit(f, x).await()` was a silent constant-zero for every f/x,
+// `pool.submit(f, x).join()` was a silent constant-zero for every f/x,
 // while Tier-1 ran the real native pool (`verum_pool_*`).  Silent-wrong
 // + cross-tier divergence.  Fixed by eager synchronous execution via
 // `call_function_sync` + a slot-recycling result table
@@ -24,8 +24,8 @@ fn pool_identity(x: Int) -> Int { x }
 fn regression_pool_submit_await_returns_computed_value() {
     let pool = ThreadPool.new(2);
     let mut h = pool.submit(pool_double, 21);
-    let result = h.await();
-    assert_eq(result, 42, "submit(double, 21).await() must be 42 — 0 means the task never ran");
+    let result = h.join();
+    assert_eq(result, 42, "submit(double, 21).join() must be 42 — 0 means the task never ran");
 }
 
 @test
@@ -35,8 +35,8 @@ fn regression_pool_submit_await_not_constant_zero() {
     let pool = ThreadPool.new(2);
     let mut h1 = pool.submit(pool_double, 100);
     let mut h2 = pool.submit(pool_add_ten, 100);
-    let r1 = h1.await();
-    let r2 = h2.await();
+    let r1 = h1.join();
+    let r2 = h2.join();
     assert_eq(r1, 200);
     assert_eq(r2, 110);
     assert(r1 != r2, "distinct tasks collapsed to one value — stub regression");
@@ -49,8 +49,8 @@ fn regression_pool_await_order_independent_of_submit_order() {
     let pool = ThreadPool.new(2);
     let mut h1 = pool.submit(pool_identity, 111);
     let mut h2 = pool.submit(pool_identity, 222);
-    let r2 = h2.await();
-    let r1 = h1.await();
+    let r2 = h2.join();
+    let r1 = h1.join();
     assert_eq(r1, 111, "handle 1 must keep ITS result after handle 2 was drained");
     assert_eq(r2, 222);
 }
@@ -58,7 +58,7 @@ fn regression_pool_await_order_independent_of_submit_order() {
 @test
 fn regression_pool_global_submit_computes() {
     let mut h = ThreadPool.global_submit(pool_add_ten, 32);
-    assert_eq(h.await(), 42, "global_submit must run the task too");
+    assert_eq(h.join(), 42, "global_submit must run the task too");
 }
 
 @test
@@ -67,8 +67,8 @@ fn regression_pool_double_await_is_defensive_zero() {
     // defensive contract is 0, never a crash or a stale value replay.
     let pool = ThreadPool.new(1);
     let mut h = pool.submit(pool_identity, 7);
-    assert_eq(h.await(), 7);
-    assert_eq(h.await(), 0, "drained handle must read defensive 0");
+    assert_eq(h.join(), 7);
+    assert_eq(h.join(), 0, "drained handle must read defensive 0");
 }
 
 fn main() {

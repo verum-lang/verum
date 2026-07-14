@@ -20,25 +20,25 @@ fn sample_inputs() -> List<Int> {
     [0, 1, -1, 2, -2, 7, 100, -100, 4096, -4096, 1_000_000, -1_000_000]
 }
 
-// LAW: submit(identity, x).await() == x — the pool transports values
+// LAW: submit(identity, x).join() == x — the pool transports values
 // unchanged (no truncation, no sign loss, no NaN-box corruption).
 @test
 fn law_pool_identity_roundtrip_sampled() {
     let pool = ThreadPool.new(2);
     for x in sample_inputs().iter() {
         let mut h = pool.submit(law_identity, *x);
-        assert_eq(h.await(), *x, "identity round-trip through the pool must preserve the value");
+        assert_eq(h.join(), *x, "identity round-trip through the pool must preserve the value");
     }
 }
 
-// LAW: submit(f, x).await() == f(x) — pool execution agrees with
+// LAW: submit(f, x).join() == f(x) — pool execution agrees with
 // direct call for every sampled input.
 @test
 fn law_pool_agrees_with_direct_call_negate() {
     let pool = ThreadPool.new(2);
     for x in sample_inputs().iter() {
         let mut h = pool.submit(law_negate, *x);
-        assert_eq(h.await(), law_negate(*x), "pool result must equal direct call");
+        assert_eq(h.join(), law_negate(*x), "pool result must equal direct call");
     }
 }
 
@@ -47,7 +47,7 @@ fn law_pool_agrees_with_direct_call_square() {
     let pool = ThreadPool.new(2);
     for x in sample_inputs().iter() {
         let mut h = pool.submit(law_square, *x);
-        assert_eq(h.await(), law_square(*x), "pool result must equal direct call");
+        assert_eq(h.join(), law_square(*x), "pool result must equal direct call");
     }
 }
 
@@ -64,7 +64,7 @@ fn law_pool_batch_isolation() {
     }
     let mut j = 0;
     while j < 16 {
-        assert_eq(handles[j].await(), j * j, "batched handle observed a sibling's result");
+        assert_eq(handles[j].join(), j * j, "batched handle observed a sibling's result");
         j = j + 1;
     }
 }
@@ -76,7 +76,7 @@ fn law_pool_result_independent_of_worker_count() {
     let p4 = ThreadPool.new(4);
     let mut h1 = p1.submit(law_square, 12);
     let mut h4 = p4.submit(law_square, 12);
-    assert_eq(h1.await(), h4.await(), "worker count must not change computed values");
+    assert_eq(h1.join(), h4.join(), "worker count must not change computed values");
 }
 
 fn main() {

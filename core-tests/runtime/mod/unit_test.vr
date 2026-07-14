@@ -14,9 +14,16 @@
 //   * EXEC_ENV_SLOT / SUPERVISOR_SLOT / RECOVERY_SLOT constants
 // =============================================================================
 
+// `Runtime` is alias-mounted: the bare name collides with the
+// `VerifyStrategy.Runtime` VARIANT in static-call receiver position
+// (`Runtime.current_epoch()` resolved the variant, E400 "no method
+// named current_epoch found for type VerifyStrategy") — the mount
+// authority (MOUNT-TYPE-AUTHORITY-1) covers type ANNOTATIONS but not
+// the call-receiver leg yet.  Task #17/#39 family; audit §H.
 mount core.runtime.{
     is_initialized,
-    Runtime, Bencher, BenchmarkResult,
+    Runtime as RuntimeInfo,
+    Bencher, BenchmarkResult,
     EXEC_ENV_SLOT, SUPERVISOR_SLOT, RECOVERY_SLOT,
 };
 
@@ -64,24 +71,24 @@ fn test_is_initialized_false_without_init() {
 
 @test
 fn test_runtime_current_epoch_uninitialized_is_zero() {
-    assert_eq(Runtime.current_epoch(), 0 as UInt32);
+    assert_eq(RuntimeInfo.current_epoch(), 0 as UInt32);
 }
 
 @test
 fn test_runtime_memory_usage_uninitialized_is_zero() {
-    assert_eq(Runtime.memory_usage(), 0);
+    assert_eq(RuntimeInfo.memory_usage(), 0);
 }
 
 @test
 fn test_runtime_allocation_count_uninitialized_is_zero() {
-    assert_eq(Runtime.allocation_count(), 0);
+    assert_eq(RuntimeInfo.allocation_count(), 0);
 }
 
 @test
 fn test_runtime_advance_epoch_and_validate_all_callable() {
     // Documented no-ops on an uninitialized runtime — must not crash.
-    Runtime.advance_epoch();
-    Runtime.validate_all();
+    RuntimeInfo.advance_epoch();
+    RuntimeInfo.validate_all();
     assert(true);
 }
 

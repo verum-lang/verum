@@ -524,7 +524,11 @@ pub struct VbcCodegen {
 
     /// Pending import aliases to resolve after all declarations are collected.
     /// Maps (qualified_path, alias_name) pairs for deferred resolution.
-    pending_imports: Vec<(Vec<String>, String)>,
+    /// Deferred mounts: (full path, alias, OWNING module scope at
+    /// mount time — `current_source_module` is long gone when the
+    /// deferred pass runs, and REEXPORT-QUALIFIED-KEY-1 needs the
+    /// provenance to register `<module>.<alias>`).
+    pending_imports: Vec<(Vec<String>, String, Option<String>)>,
 
     /// Mount-rename alias buffer — Phase 2 of task #11 fundamental fix.
     /// Every `mount X.{NAME as ALIAS}` declaration in this module's
@@ -538,7 +542,7 @@ pub struct VbcCodegen {
     ///
     /// Carries `(alias_name, FunctionId)`.  Drained on every
     /// `finalize_module` so the buffer resets between modules.
-    mount_aliases_buffer: Vec<(String, FunctionId)>,
+    mount_aliases_buffer: Vec<(String, FunctionId, String)>,
     /// **FIELD-INTERN-FALLBACK visibility** — unique `(type, field)`
     /// pairs that resolved through the global field-name interner
     /// (the wrong-offset landmine class; defect-class-catalogue §40).
@@ -1792,6 +1796,7 @@ impl VbcCodegen {
                 m.insert("Maybe".to_string(), TypeId::MAYBE);
                 m.insert("Option".to_string(), TypeId::MAYBE);
                 m.insert("Result".to_string(), TypeId::RESULT);
+                m.insert("Ordering".to_string(), TypeId::ORDERING);
                 m.insert("Range".to_string(), TypeId::RANGE);
                 m.insert("Array".to_string(), TypeId::ARRAY);
                 m.insert("Tuple".to_string(), TypeId::TUPLE);
@@ -8784,6 +8789,7 @@ impl VbcCodegen {
         &mut self,
         alias_name: &str,
         func_name: &str,
+        resolved_key: &str,
         func_info: FunctionInfo,
     ) {
         let fid = func_info.id;
@@ -8797,17 +8803,66 @@ impl VbcCodegen {
             // boundary (only descriptors + mount_aliases survive the
             // bake).  Ride the Task-#11 alias channel so
             // `replay_mount_aliases` re-registers the qualified key at
-            // user-side archive load — without this leg the consumer's
-            // `mount core.runtime.time.{monotonic_nanos}` probe misses
-            // again on every compile that loads the stdlib from the
-            // embedded archive (i.e. all of them).
-            self.mount_aliases_buffer.push((qualified_alias, fid));
+            // user-side archive load.  The RESOLVED TARGET KEY travels
+            // with the entry: archive function ids are renumbered
+            // per-entry at serialization, so a fid pointing into a
+            // DIFFERENT entry (every cross-subtree re-export) is
+            // unmappable at load — the carried name is the authority,
+            // the fid a same-entry fast path.
+            self.mount_aliases_buffer.push((
+                qualified_alias,
+                fid,
+                resolved_key.to_string(),
+            ));
         }
         self.ctx
             .register_function_authoritative(alias_name.to_string(), func_info);
         if alias_name != func_name {
-            self.mount_aliases_buffer
-                .push((alias_name.to_string(), fid));
+            self.mount_aliases_buffer.push((
+                alias_name.to_string(),
+                fid,
+                resolved_key.to_string(),
+            ));
+        }
+    }
+
+    /// Deferred twin of [`bind_mounted_function`] — used by
+    /// `resolve_pending_imports`, where `current_source_module` has
+    /// already been restored to `None` and the owning module rides the
+    /// pending entry instead.  Registration is non-authoritative
+    /// (`register_function`) to preserve the deferred pass's historic
+    /// override semantics, but the REEXPORT-QUALIFIED-KEY-1 legs —
+    /// `<module>.<alias>` registration + the `mount_aliases` archive
+    /// carry — are identical.
+    fn bind_deferred_mounted_function(
+        &mut self,
+        alias_name: &str,
+        func_name: &str,
+        resolved_key: &str,
+        func_info: FunctionInfo,
+        owning_module: Option<&str>,
+    ) {
+        let fid = func_info.id;
+        if let Some(scope) = owning_module
+            && !scope.is_empty()
+        {
+            let qualified_alias = format!("{}.{}", scope, alias_name);
+            self.ctx
+                .register_function(qualified_alias.clone(), func_info.clone());
+            self.mount_aliases_buffer.push((
+                qualified_alias,
+                fid,
+                resolved_key.to_string(),
+            ));
+        }
+        self.ctx
+            .register_function(alias_name.to_string(), func_info);
+        if alias_name != func_name {
+            self.mount_aliases_buffer.push((
+                alias_name.to_string(),
+                fid,
+                resolved_key.to_string(),
+            ));
         }
     }
 
@@ -8970,13 +9025,13 @@ impl VbcCodegen {
 
                 // First try Verum-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
-                    self.bind_mounted_function(&alias_name, &func_name, func_info);
+                    self.bind_mounted_function(&alias_name, &func_name, &qualified_verum, func_info);
                     return Ok(());
                 }
 
                 // Try Rust-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_rust).cloned() {
-                    self.bind_mounted_function(&alias_name, &func_name, func_info);
+                    self.bind_mounted_function(&alias_name, &func_name, &qualified_rust, func_info);
                     return Ok(());
                 }
 
@@ -8989,7 +9044,7 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&simplified_qualified).cloned()
                     {
-                        self.bind_mounted_function(&alias_name, &func_name, func_info);
+                        self.bind_mounted_function(&alias_name, &func_name, &simplified_qualified, func_info);
                         return Ok(());
                     }
                 }
@@ -9010,7 +9065,7 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&stripped_qualified).cloned()
                     {
-                        self.bind_mounted_function(&alias_name, &func_name, func_info);
+                        self.bind_mounted_function(&alias_name, &func_name, &stripped_qualified, func_info);
                         return Ok(());
                     }
                 }
@@ -9061,7 +9116,7 @@ impl VbcCodegen {
                         if let Some(func_info) =
                             self.ctx.lookup_function(&qualified).cloned()
                         {
-                            self.bind_mounted_function(&alias_name, &func_name, func_info);
+                            self.bind_mounted_function(&alias_name, &func_name, &qualified, func_info);
                             return Ok(());
                         }
                     }
@@ -9080,14 +9135,14 @@ impl VbcCodegen {
                     }
                     let core_qualified = core_path.join(".");
                     if let Some(func_info) = self.ctx.lookup_function(&core_qualified).cloned() {
-                        self.bind_mounted_function(&alias_name, &func_name, func_info);
+                        self.bind_mounted_function(&alias_name, &func_name, &core_qualified, func_info);
                         return Ok(());
                     }
                     // Also try without the file component: core.sys.linux.futex_wait → core.sys.futex_wait
                     if core_path.len() >= 3 {
                         let simplified = format!("core.{}.{}", core_path[1], func_name);
                         if let Some(func_info) = self.ctx.lookup_function(&simplified).cloned() {
-                            self.bind_mounted_function(&alias_name, &func_name, func_info);
+                            self.bind_mounted_function(&alias_name, &func_name, &simplified, func_info);
                             return Ok(());
                         }
                     }
@@ -9199,7 +9254,8 @@ impl VbcCodegen {
                         if let Some(func_info) =
                             self.ctx.lookup_function(&hits[0]).cloned()
                         {
-                            self.bind_mounted_function(&alias_name, &func_name, func_info);
+                            let hit_key = hits[0].clone();
+                            self.bind_mounted_function(&alias_name, &func_name, &hit_key, func_info);
                             return Ok(());
                         }
                     }
@@ -9207,7 +9263,8 @@ impl VbcCodegen {
 
                 // Try just the function name (it might be already registered without qualification)
                 if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
-                    self.bind_mounted_function(&alias_name, &func_name, func_info);
+                    let bare_key = func_name.clone();
+                    self.bind_mounted_function(&alias_name, &func_name, &bare_key, func_info);
                     return Ok(());
                 }
 
@@ -9324,7 +9381,9 @@ impl VbcCodegen {
                 self.ctx
                     .pending_mount_aliases
                     .insert(alias_name.clone(), full_path.join("."));
-                self.pending_imports.push((full_path, alias_name));
+                let owning_module = self.ctx.current_source_module.clone();
+                self.pending_imports
+                    .push((full_path, alias_name, owning_module));
                 Ok(())
             }
             MountTreeKind::Glob(glob_path) => {
@@ -9449,7 +9508,7 @@ impl VbcCodegen {
         // Take ownership of pending imports to avoid borrow issues
         let pending = std::mem::take(&mut self.pending_imports);
 
-        for (full_path, alias_name) in pending {
+        for (full_path, alias_name, owning_module) in pending {
             if full_path.is_empty() {
                 continue;
             }
@@ -9482,12 +9541,13 @@ impl VbcCodegen {
             // First try Verum-style qualified name (e.g., sys.intrinsics.ORDERING_ACQUIRE)
             if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
                 if should_register(&self.ctx, &alias_name, &func_info) {
-                    let fid = func_info.id;
-                    let has_rename = alias_name != func_name;
-                    self.ctx.register_function(alias_name.clone(), func_info);
-                    if has_rename {
-                        self.mount_aliases_buffer.push((alias_name, fid));
-                    }
+                    self.bind_deferred_mounted_function(
+                        &alias_name,
+                        &func_name,
+                        &qualified_verum,
+                        func_info,
+                        owning_module.as_deref(),
+                    );
                 }
                 continue;
             }
@@ -9495,12 +9555,13 @@ impl VbcCodegen {
             // Try Rust-style qualified name (e.g., sys::intrinsics::ORDERING_ACQUIRE)
             if let Some(func_info) = self.ctx.lookup_function(&qualified_rust).cloned() {
                 if should_register(&self.ctx, &alias_name, &func_info) {
-                    let fid = func_info.id;
-                    let has_rename = alias_name != func_name;
-                    self.ctx.register_function(alias_name.clone(), func_info);
-                    if has_rename {
-                        self.mount_aliases_buffer.push((alias_name, fid));
-                    }
+                    self.bind_deferred_mounted_function(
+                        &alias_name,
+                        &func_name,
+                        &qualified_rust,
+                        func_info,
+                        owning_module.as_deref(),
+                    );
                 }
                 continue;
             }
@@ -9513,12 +9574,13 @@ impl VbcCodegen {
                 let simplified_qualified = format!("{}.{}", module_name, func_name);
                 if let Some(func_info) = self.ctx.lookup_function(&simplified_qualified).cloned() {
                     if should_register(&self.ctx, &alias_name, &func_info) {
-                        let fid = func_info.id;
-                        let has_rename = alias_name != func_name;
-                        self.ctx.register_function(alias_name.clone(), func_info);
-                        if has_rename {
-                            self.mount_aliases_buffer.push((alias_name, fid));
-                        }
+                        self.bind_deferred_mounted_function(
+                            &alias_name,
+                            &func_name,
+                            &simplified_qualified,
+                            func_info,
+                            owning_module.as_deref(),
+                        );
                     }
                     continue;
                 }
@@ -9538,12 +9600,13 @@ impl VbcCodegen {
                     self.ctx.lookup_function(&stripped_qualified).cloned()
                 {
                     if should_register(&self.ctx, &alias_name, &func_info) {
-                        let fid = func_info.id;
-                        let has_rename = alias_name != func_name;
-                        self.ctx.register_function(alias_name.clone(), func_info);
-                        if has_rename {
-                            self.mount_aliases_buffer.push((alias_name, fid));
-                        }
+                        self.bind_deferred_mounted_function(
+                            &alias_name,
+                            &func_name,
+                            &stripped_qualified,
+                            func_info,
+                            owning_module.as_deref(),
+                        );
                     }
                     continue;
                 }
@@ -9552,12 +9615,14 @@ impl VbcCodegen {
             // Try just the function name (e.g., ORDERING_ACQUIRE)
             if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
                 if should_register(&self.ctx, &alias_name, &func_info) {
-                    let fid = func_info.id;
-                    let has_rename = alias_name != func_name;
-                    self.ctx.register_function(alias_name.clone(), func_info);
-                    if has_rename {
-                        self.mount_aliases_buffer.push((alias_name, fid));
-                    }
+                    let bare_key = func_name.clone();
+                    self.bind_deferred_mounted_function(
+                        &alias_name,
+                        &func_name,
+                        &bare_key,
+                        func_info,
+                        owning_module.as_deref(),
+                    );
                 }
                 continue;
             }
@@ -19405,13 +19470,18 @@ impl VbcCodegen {
             let mut seen: std::collections::HashSet<(String, u32)> =
                 std::collections::HashSet::with_capacity(self.mount_aliases_buffer.len());
             let drained = std::mem::take(&mut self.mount_aliases_buffer);
-            let mut emitted: Vec<(StringId, FunctionId)> = Vec::with_capacity(drained.len());
-            for (alias_name, fid) in drained {
+            let mut emitted: Vec<(StringId, FunctionId, StringId)> =
+                Vec::with_capacity(drained.len());
+            for (alias_name, fid, target_key) in drained {
                 if !seen.insert((alias_name.clone(), fid.0)) {
                     continue;
                 }
                 let sid = module.intern_string(&alias_name);
-                emitted.push((sid, fid));
+                // REEXPORT-QUALIFIED-KEY-1: the resolved target key is
+                // the load-time authority — per-entry fid renumbering
+                // makes cross-entry fids unmappable at replay.
+                let target_sid = module.intern_string(&target_key);
+                emitted.push((sid, fid, target_sid));
             }
             tracing::debug!(
                 target: "verum_vbc::codegen::mount_aliases",

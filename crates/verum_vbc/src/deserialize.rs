@@ -60,7 +60,7 @@ struct ExtensionsData {
  /// Mirrors `VbcModule::mount_aliases`; populated only when the
  /// serializer wrote the optional trailing record at the end of the
  /// extensions region.
- mount_aliases: Vec<(StringId, FunctionId)>,
+ mount_aliases: Vec<(StringId, FunctionId, StringId)>,
 }
 
 /// Deserializes a VBC module from binary data.
@@ -1515,7 +1515,7 @@ impl<'a> Deserializer<'a> {
  /// - 0x80: external_function_names (cross-module Call name table)
  /// - For each present section: u32 length + bincode data
  /// - Trailing optional records (only present in new archives):
- ///   - mount_aliases: u32 length + bincode(Vec<(StringId, FunctionId)>)
+ ///   - mount_aliases: u32 length + bincode(Vec<(StringId, FunctionId, StringId)>) — v19: + resolved target key
  fn parse_extensions(&mut self, size: u32) -> VbcResult<ExtensionsData> {
  // Record the start of the extensions section so we can detect
  // trailing optional records added after the legacy `section_mask`
@@ -1793,8 +1793,10 @@ mod tests {
  let mut module = VbcModule::new("test_mount_aliases".to_string());
  let alias_a = module.intern_string("alias_a");
  let alias_b = module.intern_string("renamed_b");
- module.mount_aliases.push((alias_a, FunctionId(101)));
- module.mount_aliases.push((alias_b, FunctionId(202)));
+ let target_a = module.intern_string("core.x.a_target");
+        module.mount_aliases.push((alias_a, FunctionId(101), target_a));
+ let target_b = module.intern_string("core.y.b_target");
+        module.mount_aliases.push((alias_b, FunctionId(202), target_b));
 
  let bytes = serialize_module(&module).unwrap();
  let loaded = deserialize_module(&bytes).unwrap();
@@ -1802,6 +1804,8 @@ mod tests {
  assert_eq!(loaded.mount_aliases.len(), 2);
  assert_eq!(loaded.mount_aliases[0].1, FunctionId(101));
  assert_eq!(loaded.mount_aliases[1].1, FunctionId(202));
+        let tgt_a = loaded.get_string(loaded.mount_aliases[0].2);
+        assert_eq!(tgt_a, Some("core.x.a_target"));
  // Resolve the alias names through the loaded module's string
  // table to confirm the StringId payload survived re-interning.
  let name_a = loaded.get_string(loaded.mount_aliases[0].0);

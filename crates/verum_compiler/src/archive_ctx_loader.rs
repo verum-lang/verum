@@ -2381,27 +2381,50 @@ fn replay_mount_aliases(
     if module.mount_aliases.is_empty() {
         return;
     }
-    // Pre-resolve (alias_name, user_fid) pairs in a single read pass
-    // so the subsequent register loop can hold &mut codegen.ctx
-    // without aliasing the immutable module borrow.
-    let mut pairs: Vec<(String, verum_vbc::module::FunctionId)> =
-        Vec::with_capacity(module.mount_aliases.len());
-    for (alias_str_id, archive_fid) in module.mount_aliases.iter() {
+    // Pre-resolve (alias_name, fid?, target_key) triples in a single
+    // read pass so the subsequent register loop can hold &mut
+    // codegen.ctx without aliasing the immutable module borrow.
+    let mut pairs: Vec<(
+        String,
+        Option<verum_vbc::module::FunctionId>,
+        String,
+    )> = Vec::with_capacity(module.mount_aliases.len());
+    for (alias_str_id, archive_fid, target_str_id) in module.mount_aliases.iter() {
         let alias_name = match module.get_string(*alias_str_id) {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => continue,
         };
-        let Some(&user_fid) = func_id_remap.get(&archive_fid.0) else {
+        let target_key = module
+            .get_string(*target_str_id)
+            .unwrap_or("")
+            .to_string();
+        // The fid maps only when the target lives in THIS archive
+        // entry (fids are renumbered per-entry at serialization).  A
+        // miss is the NORMAL case for cross-subtree re-exports —
+        // resolution falls to the carried target key below
+        // (REEXPORT-QUALIFIED-KEY-1), never silently skips.
+        let user_fid = func_id_remap.get(&archive_fid.0).copied();
+        if user_fid.is_none() && target_key.is_empty() {
             continue;
-        };
-        pairs.push((alias_name, user_fid));
+        }
+        pairs.push((alias_name, user_fid, target_key));
     }
     if pairs.is_empty() {
         return;
     }
     let ctx = codegen.ctx_mut();
-    for (alias_name, user_fid) in pairs {
-        let info = match ctx.lookup_function_by_id(user_fid) {
+    for (alias_name, user_fid, target_key) in pairs {
+        let info = match user_fid
+            .and_then(|fid| ctx.lookup_function_by_id(fid))
+            .or_else(|| {
+                // Name-authoritative fallback: the target's canonical
+                // registry key, registered when ITS entry loaded.
+                if target_key.is_empty() {
+                    None
+                } else {
+                    ctx.lookup_function(&target_key)
+                }
+            }) {
             Some(info) => info.clone(),
             None => continue,
         };

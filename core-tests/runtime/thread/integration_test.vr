@@ -68,7 +68,10 @@ fn test_sleep_duration_lower_bound() {
 
 @test
 fn test_spawn_join_returns_value() {
-    let handle = Thread.spawn(task_forty_two);
+    // Explicit <Int>: inference of T from a bare-fn argument is the
+    // known VBC-GENERIC-INSTANTIATION gap (E400 "expected 'T', found
+    // 'Int'") — the explicit form is the supported spelling today.
+    let handle = Thread.spawn<Int>(task_forty_two);
     match handle.join() {
         Result.Ok(v) => assert_eq(v, 42, "joined thread must return its computed value"),
         Result.Err(_) => assert(false, "spawn/join of a trivial task must not error"),
@@ -77,8 +80,8 @@ fn test_spawn_join_returns_value() {
 
 @test
 fn test_spawn_two_threads_independent_results() {
-    let h1 = Thread.spawn(task_forty_two);
-    let h2 = Thread.spawn(task_compute);
+    let h1 = Thread.spawn<Int>(task_forty_two);
+    let h2 = Thread.spawn<Int>(task_compute);
     let r1 = h1.join();
     let r2 = h2.join();
     assert(r1.is_ok() && r2.is_ok(), "both joins must succeed");
@@ -87,7 +90,7 @@ fn test_spawn_two_threads_independent_results() {
 @test
 fn test_builder_spawn_with_name() {
     let b = ThreadBuilder.new().name("conformance-worker");
-    match b.spawn(task_forty_two) {
+    match b.spawn<Int>(task_forty_two) {
         Result.Ok(handle) => {
             match handle.join() {
                 Result.Ok(v) => assert_eq(v, 42),
