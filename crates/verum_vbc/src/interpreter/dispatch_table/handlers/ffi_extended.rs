@@ -1849,12 +1849,26 @@ pub(in super::super) fn handle_ffi_extended(
                             // plain-id / closure-object forms are
                             // handled for the non-callback shapes.
                             let func_val = args[2];
-                            let raw_bits =
-                                (func_val.to_bits() & crate::value::PAYLOAD_MASK) as usize;
-                            let trampoline_fn_id = state
-                                .ffi_runtime
-                                .as_ref()
-                                .and_then(|rt| rt.callback_fn_id_for_code_ptr(raw_bits));
+                            // `ffi_runtime` (and the trampoline registry)
+                            // only exists under the `ffi` feature — gate
+                            // the reverse-map probe so feature subsets
+                            // (`--features codegen` CI check) still
+                            // compile; without libffi there are no
+                            // trampoline pointers to resolve anyway.
+                            #[cfg(feature = "ffi")]
+                            let trampoline_fn_id = {
+                                let raw_bits = (func_val.to_bits()
+                                    & crate::value::PAYLOAD_MASK)
+                                    as usize;
+                                state
+                                    .ffi_runtime
+                                    .as_ref()
+                                    .and_then(|rt| {
+                                        rt.callback_fn_id_for_code_ptr(raw_bits)
+                                    })
+                            };
+                            #[cfg(not(feature = "ffi"))]
+                            let trampoline_fn_id: Option<u32> = None;
                             let ret = if let Some(fn_id) = trampoline_fn_id {
                                 super::super::call_function_sync(
                                     state,

@@ -21309,6 +21309,117 @@ struct ArchiveBodyRemap<'a> {
     archive_func_by_name: &'a std::collections::HashMap<String, crate::module::FunctionId>,
 }
 
+impl ArchiveBodyRemap<'_> {
+    /// QUALIFIED-CALL-FIRST-MATCH-1 chase tier — ranked qualified-
+    /// suffix resolution for NAME-RESOLVED STUB ids whose recorded
+    /// name is a dotted RELATIVE spelling.
+    ///
+    /// A stage-5 stub synthesized at a dotted call site records the
+    /// call's literal spelling (`darwin.time.monotonic_nanos`); the
+    /// producing module registers under its module-decl-rooted
+    /// absolute path (`sys.darwin.time.monotonic_nanos`).  Module
+    /// anchoring makes the absolute key a strict extension of the
+    /// relative spelling, so a `.`-prefixed suffix match resolves it
+    /// BY CONSTRUCTION.  The user-written segment count is the
+    /// ambiguity floor (we never match on fewer segments than the
+    /// call spelled), and ties rank exactly like the
+    /// `process_import_tree` re-export tie-break: fewest dots →
+    /// module-parent before type-parent → lexicographic — stable
+    /// across bakes.
+    ///
+    /// Bounded: runs ONLY for stub-range ids whose exact-name lookups
+    /// already missed (rare — forward-referenced dotted calls).
+    fn qualified_suffix_chase(&self, name: &str) -> Option<crate::module::FunctionId> {
+        if !name.contains('.') {
+            return None;
+        }
+        // Progressive head-strip (mirrors the compile-time resolver
+        // and `resolve_core_rooted_suffix`, #122): leading MODULE-
+        // shaped (lower-case) segments may be spelled in the stub name
+        // but absent from the registration key —
+        // `core.time.Time.sleep_ms` registers as `Time.sleep_ms`,
+        // `core.intrinsics.num_cpus` as `intrinsics.num_cpus`.
+        // EXACT-key probes only at stripped levels (a stripped
+        // spelling is less specific — it never enters the ranked
+        // suffix scan); at least 2 segments remain.
+        let segs: Vec<&str> = name.split('.').collect();
+        for k in 1..segs.len().saturating_sub(1) {
+            if !segs[k - 1]
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_lowercase())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            let stripped = segs[k..].join(".");
+            for index in [self.ctx_func_by_name, self.archive_func_by_name] {
+                if let Some(&fid) = index.get(&stripped)
+                    && !crate::stub_ranges::is_stub_id(fid.0)
+                {
+                    if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                        eprintln!(
+                            "[remap-fallback] qualified-head-strip '{}' → '{}' → user_fid={}",
+                            name, stripped, fid.0
+                        );
+                    }
+                    return Some(fid);
+                }
+            }
+        }
+        // Ranked suffix scan at the full spelling (`core.`-strip only —
+        // the floor stays at the user-written meaningful segments).
+        let target: &str = match name.strip_prefix("core.") {
+            Some(stripped) if stripped.contains('.') => stripped,
+            _ => name,
+        };
+        let suffix = format!(".{}", target);
+        let parent_is_module = |k: &str| -> bool {
+            let segs: Vec<&str> = k.split('.').collect();
+            segs.len() >= 2
+                && segs[segs.len() - 2]
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_lowercase())
+                    .unwrap_or(false)
+        };
+        let mut best: Option<(&str, crate::module::FunctionId)> = None;
+        for index in [self.ctx_func_by_name, self.archive_func_by_name] {
+            for (key, fid) in index.iter() {
+                if crate::stub_ranges::is_stub_id(fid.0) || !key.ends_with(&suffix) {
+                    continue;
+                }
+                let better = match best {
+                    None => true,
+                    Some((bk, _)) => {
+                        let (da, db) =
+                            (key.matches('.').count(), bk.matches('.').count());
+                        da < db
+                            || (da == db
+                                && parent_is_module(key)
+                                && !parent_is_module(bk))
+                            || (da == db
+                                && parent_is_module(key) == parent_is_module(bk)
+                                && key.as_str() < bk)
+                    }
+                };
+                if better {
+                    best = Some((key.as_str(), *fid));
+                }
+            }
+        }
+        best.map(|(key, fid)| {
+            if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                eprintln!(
+                    "[remap-fallback] qualified-suffix-chase '{}' → '{}' → user_fid={}",
+                    name, key, fid.0
+                );
+            }
+            fid
+        })
+    }
+}
+
 impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
     fn map_function(&self, src: crate::module::FunctionId) -> crate::module::FunctionId {
         // Canonical stub-id ranges (`crate::stub_ranges`, stages 1-4).
@@ -21368,6 +21479,14 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
                     }
                     return fid;
                 }
+            }
+            // QUALIFIED-CALL-FIRST-MATCH-1: a stage-5 stub's recorded
+            // dotted RELATIVE spelling resolves via the ranked
+            // qualified-suffix chase (see `qualified_suffix_chase`).
+            if crate::stub_ranges::is_name_resolved_stub_id(src.0)
+                && let Some(fid) = self.qualified_suffix_chase(name)
+            {
+                return fid;
             }
         }
         // Tier 1: per-module remap (archive function ids whose body
@@ -21429,6 +21548,14 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
                 } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                     eprintln!("[remap-fallback] tier2b REJECT-STUB archive_id={} → name={:?} → archive_fid={} (stub-range)", src.0, name, fid.0);
                 }
+            }
+            // QUALIFIED-CALL-FIRST-MATCH-1: stage-5 dotted-relative
+            // stub names resolve via the ranked qualified-suffix
+            // chase when both exact indices miss.
+            if crate::stub_ranges::is_name_resolved_stub_id(src.0)
+                && let Some(fid) = self.qualified_suffix_chase(name)
+            {
+                return fid;
             }
             if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                 eprintln!("[remap-fallback] tier2 MISS archive_id={} archive_name={:?} not in ctx_func_by_name OR archive_func_by_name", src.0, name);

@@ -43,6 +43,16 @@ pub const STAGE4_BASE: u32 = u32::MAX - 0x140_0000;
 /// name is NOT globally unique, so stages 1-4 can't cover it) gets a
 /// call-site-synthesized stub bound to the mount's FULL qualified
 /// path; the archive name-remap chases that unambiguous spelling.
+///
+/// QUALIFIED-CALL-FIRST-MATCH-1 extends the band to DOTTED CALL
+/// SITES: a module-shaped multi-segment call
+/// (`darwin.time.monotonic_nanos()`) that resolves nowhere at compile
+/// time gets a stage-5 stub bound to the call's dotted RELATIVE
+/// spelling; `ArchiveBodyRemap::map_function`'s ranked
+/// qualified-suffix chase resolves it (the absolute registration key
+/// always ends with `.<relative spelling>` by module-anchoring
+/// construction, and the user-written segment count is the ambiguity
+/// floor).
 pub const STAGE5_BASE: u32 = u32::MAX - 0x180_0000;
 
 #[inline]
@@ -120,7 +130,7 @@ pub fn stub_class(id: u32) -> Option<&'static str> {
         Some(2) => Some("stdlib variant constructor"),
         Some(3) => Some("uniquely-named public free fn"),
         Some(4) => Some("uniquely-named public module const"),
-        Some(5) => Some("mount-declared cross-module fn"),
+        Some(5) => Some("qualified cross-module fn (mount- or dotted-call-site declared)"),
         _ => None,
     }
 }

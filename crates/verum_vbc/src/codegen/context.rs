@@ -3391,6 +3391,209 @@ impl CodegenContext {
         None
     }
 
+    /// QUALIFIED-CALL-FIRST-MATCH-1 — module-scope-authoritative
+    /// resolution for a DOTTED (≥2-segment) call path.
+    ///
+    /// A call site that spells `darwin.time.monotonic_nanos()` inside
+    /// `module sys;` names an EXPLICIT cross-module target.  The legacy
+    /// resolution ladders bottomed out in a bare-LEAF lookup
+    /// (`lookup_function_in_scope("monotonic_nanos")`), which prefers
+    /// the CURRENT module's same-named function — the most-wrong
+    /// candidate (live failure: `core.sys.monotonic_time_ns` ↔
+    /// `core.sys.monotonic_nanos` mutual recursion → StackOverflow in
+    /// every Bencher/sleep test).
+    ///
+    /// Resolution order (all stages arity-filtered, deterministic):
+    ///  1. the literal spelling, both separators (`a.b.c` / `a::b::c`),
+    ///     with the `#arity` alt-key probed on arity mismatch;
+    ///  2. `module_aliases` head expansion (`mount X.Y.Z;` makes
+    ///     `Z.f()` reach `X.Y.Z.f`), plus its `core.`-stripped twin;
+    ///  3. `current_source_module`-anchored candidates, deepest anchor
+    ///     first (relative-path shadowing semantics), each probed
+    ///     verbatim AND `core.`-stripped (source files declare
+    ///     `module sys.darwin.time;` without the `core.` root while
+    ///     mod.vr scopes may carry it), plus a `core.`-PREFIXED probe
+    ///     of the literal spelling;
+    ///  4. ranked qualified-suffix scan: any key ending in
+    ///     `.<dotted>` — ranked by the `process_import_tree` re-export
+    ///     tie-break (fewest dots → module-parent before type-parent →
+    ///     lexicographic) so the pick is stable across bakes.
+    ///
+    /// The user-written segment count is the ambiguity FLOOR: stage 4
+    /// never matches on fewer segments than the call spelled, so this
+    /// can never degrade into the bare-leaf first-match disease it
+    /// replaces.
+    ///
+    /// Diagnostics: `VERUM_TRACE_QCALL=<substr>` (empty/`1` = all).
+    pub fn resolve_qualified_dotted_call(
+        &self,
+        parts: &[String],
+        arity: usize,
+    ) -> Option<(String, FunctionInfo)> {
+        if parts.len() < 2 {
+            return None;
+        }
+        let dotted = parts.join(".");
+        let trace = match std::env::var("VERUM_TRACE_QCALL") {
+            Ok(f) => f.is_empty() || f == "1" || dotted.contains(&f),
+            Err(_) => false,
+        };
+        let accepts = |info: &FunctionInfo| -> bool {
+            info.id.0 != u32::MAX && info.param_count == arity
+        };
+        // Exact-key probe with the `name#arity` alt-key fallback
+        // (mirrors `lookup_function_with_arity`'s discipline).
+        let probe = |key: &str, stage: &str| -> Option<(String, FunctionInfo)> {
+            if let Some(info) = self.functions.get(key)
+                && accepts(info)
+            {
+                if trace {
+                    eprintln!(
+                        "[qcall] '{}' (arity={}) -> '{}' via {} (id={})",
+                        dotted, arity, key, stage, info.id.0
+                    );
+                }
+                return Some((key.to_string(), info.clone()));
+            }
+            let alt = format!("{}#{}", key, arity);
+            if let Some(info) = self.functions.get(&alt)
+                && accepts(info)
+            {
+                if trace {
+                    eprintln!(
+                        "[qcall] '{}' (arity={}) -> '{}' via {}-alt (id={})",
+                        dotted, arity, key, stage, info.id.0
+                    );
+                }
+                return Some((key.to_string(), info.clone()));
+            }
+            None
+        };
+        // Stage 1: literal spelling — plus its `core.`-stripped twin
+        // (source files declare `module intrinsics.x;` etc. without
+        // the `core.` root, so an absolute `core.`-rooted call
+        // spelling maps onto a stripped registration key — the
+        // `core.intrinsics.num_cpus()` sys-delegator class).
+        if let Some(hit) = probe(&dotted, "exact") {
+            return Some(hit);
+        }
+        if let Some(hit) = probe(&parts.join("::"), "exact-colon") {
+            return Some(hit);
+        }
+        // Progressive head-strip (mirrors `resolve_core_rooted_suffix`,
+        // #122): leading MODULE-shaped (lower-case) segments may be
+        // spelled at the call site but absent from the registration
+        // key — `core.time.Time.sleep_ms()` registers as
+        // `Time.sleep_ms`, `core.intrinsics.num_cpus()` as
+        // `intrinsics.num_cpus`.  Exact-key probes only (a stripped
+        // spelling is less specific, so it may never enter the ranked
+        // suffix scan — the floor guarantee); at least 2 segments
+        // remain.
+        for k in 1..parts.len().saturating_sub(1) {
+            if !parts[k - 1]
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_lowercase())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            if let Some(hit) = probe(&parts[k..].join("."), "head-strip") {
+                return Some(hit);
+            }
+        }
+        // Stage 2: module-alias head expansion.
+        if let Some(full) = self.module_aliases.get(parts[0].as_str()) {
+            let mut expanded = full.clone();
+            expanded.extend(parts[1..].iter().cloned());
+            let exp = expanded.join(".");
+            if let Some(hit) = probe(&exp, "alias") {
+                return Some(hit);
+            }
+            if let Some(stripped) = exp.strip_prefix("core.")
+                && let Some(hit) = probe(stripped, "alias-core-strip")
+            {
+                return Some(hit);
+            }
+        }
+        // Stage 3: current-module-anchored candidates, deepest first.
+        if let Some(cur) = self.current_source_module.as_deref()
+            && !cur.is_empty()
+            && cur != "main"
+        {
+            let segs: Vec<&str> = cur.split('.').collect();
+            for depth in (1..=segs.len()).rev() {
+                let anchor = segs[..depth].join(".");
+                let candidate = format!("{}.{}", anchor, dotted);
+                if let Some(hit) = probe(&candidate, "anchored") {
+                    return Some(hit);
+                }
+                if let Some(stripped) = candidate.strip_prefix("core.")
+                    && let Some(hit) = probe(stripped, "anchored-core-strip")
+                {
+                    return Some(hit);
+                }
+            }
+        }
+        if let Some(hit) = probe(&format!("core.{}", dotted), "core-prefixed") {
+            return Some(hit);
+        }
+        // Stage 4: ranked qualified-suffix scan (floor = the user's
+        // written segment count; for `core.`-rooted spellings the
+        // stripped form keeps the floor at the meaningful segments).
+        // Tie-break mirrors the process_import_tree re-export ranking
+        // exactly.
+        let scan_target: &str = match dotted.strip_prefix("core.") {
+            Some(stripped) if stripped.contains('.') => stripped,
+            _ => dotted.as_str(),
+        };
+        let suffix = format!(".{}", scan_target);
+        let parent_is_module = |k: &str| -> bool {
+            let segs: Vec<&str> = k.split('.').collect();
+            segs.len() >= 2
+                && segs[segs.len() - 2]
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_lowercase())
+                    .unwrap_or(false)
+        };
+        let mut best: Option<(&String, &FunctionInfo)> = None;
+        for (key, info) in self.functions.iter() {
+            if !key.ends_with(suffix.as_str()) || !accepts(info) {
+                continue;
+            }
+            let better = match best {
+                None => true,
+                Some((bk, _)) => {
+                    let (da, db) = (key.matches('.').count(), bk.matches('.').count());
+                    da < db
+                        || (da == db
+                            && parent_is_module(key)
+                            && !parent_is_module(bk))
+                        || (da == db
+                            && parent_is_module(key) == parent_is_module(bk)
+                            && key.as_str() < bk.as_str())
+                }
+            };
+            if better {
+                best = Some((key, info));
+            }
+        }
+        if let Some((key, info)) = best {
+            if trace {
+                eprintln!(
+                    "[qcall] '{}' (arity={}) -> '{}' via suffix-rank (id={})",
+                    dotted, arity, key, info.id.0
+                );
+            }
+            return Some((key.clone(), info.clone()));
+        }
+        if trace {
+            eprintln!("[qcall] '{}' (arity={}) -> MISS", dotted, arity);
+        }
+        None
+    }
+
     /// Search for a function whose name ends with the given suffix.
     /// Used to find qualified variant names (e.g., "Option.None") when
     /// the simple name is not registered due to collision.
@@ -4621,6 +4824,107 @@ mod tests {
         assert!(ctx2
             .resolve_function_key("Widget.make", Some(1), Some("Widget"))
             .is_none());
+    }
+
+    /// QUALIFIED-CALL-FIRST-MATCH-1 — the monotonic mutual-recursion
+    /// repro: `darwin.time.monotonic_nanos()` inside `module sys;`
+    /// (scoped `core.sys`) must resolve to the qualified
+    /// `sys.darwin.time.monotonic_nanos`, NEVER to the current
+    /// module's own bare `monotonic_nanos`.
+    #[test]
+    fn resolve_qualified_dotted_call_never_binds_bare_leaf() {
+        let mut ctx = CodegenContext::new();
+        // Current module's own fn owns the bare + scoped slots (the
+        // pre-fix mis-bind target).
+        ctx.current_source_module = Some("core.sys".to_string());
+        ctx.register_function("monotonic_nanos".to_string(), plain_info(1363, 0));
+        // The real cross-module target, registered under its
+        // module-decl-rooted path (no `core.` prefix — source files
+        // declare `module sys.darwin.time;`).
+        ctx.register_function(
+            "sys.darwin.time.monotonic_nanos".to_string(),
+            plain_info(3306, 0),
+        );
+
+        let parts: Vec<String> = ["darwin", "time", "monotonic_nanos"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (key, info) = ctx
+            .resolve_qualified_dotted_call(&parts, 0)
+            .expect("anchored resolution must find the qualified target");
+        assert_eq!(key, "sys.darwin.time.monotonic_nanos");
+        assert_eq!(info.id.0, 3306);
+
+        // A dotted path that matches nothing must MISS (the call site
+        // then synthesizes a stage-5 stub) — never fall to the bare
+        // leaf.
+        let missing: Vec<String> = ["darwin", "time", "no_such_fn"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(ctx.resolve_qualified_dotted_call(&missing, 0).is_none());
+
+        // Arity floor: a 2-arg call cannot bind the 0-arg target.
+        assert!(ctx.resolve_qualified_dotted_call(&parts, 2).is_none());
+    }
+
+    /// QUALIFIED-CALL-FIRST-MATCH-1 — module-alias head expansion and
+    /// the deterministic suffix ranking (fewest dots → module-parent
+    /// before type-parent → lexicographic).
+    #[test]
+    fn resolve_qualified_dotted_call_alias_and_ranked_suffix() {
+        let mut ctx = CodegenContext::new();
+        // `mount core.sys.bitfield;` installs the module alias.
+        ctx.module_aliases.insert(
+            "bitfield".to_string(),
+            vec!["core".to_string(), "sys".to_string(), "bitfield".to_string()],
+        );
+        // Registration is `core.`-stripped (module decl `sys.bitfield;`).
+        ctx.register_function(
+            "sys.bitfield.test_bit".to_string(),
+            plain_info(42, 2),
+        );
+        let parts: Vec<String> = ["bitfield", "test_bit"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (key, info) = ctx
+            .resolve_qualified_dotted_call(&parts, 2)
+            .expect("alias expansion + core-strip must resolve");
+        assert_eq!(key, "sys.bitfield.test_bit");
+        assert_eq!(info.id.0, 42);
+
+        // Ranked suffix: two candidates end with `.time.nanos` — the
+        // shallower key wins deterministically.
+        let mut ctx2 = CodegenContext::new();
+        ctx2.register_function("zzz.deep.mod.time.nanos".to_string(), plain_info(7, 0));
+        ctx2.register_function("sys.time.nanos".to_string(), plain_info(8, 0));
+        let parts2: Vec<String> = ["time", "nanos"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (key2, info2) = ctx2.resolve_qualified_dotted_call(&parts2, 0).unwrap();
+        assert_eq!(key2, "sys.time.nanos");
+        assert_eq!(info2.id.0, 8);
+
+        // Progressive head-strip: `core.time.Time.sleep_ms(ms)` maps
+        // onto the canonical `Time.sleep_ms` impl-method key (leading
+        // lower-case module segments absent from the registration).
+        let mut ctx3 = CodegenContext::new();
+        ctx3.register_function("Time.sleep_ms".to_string(), plain_info(9, 1));
+        let parts3: Vec<String> = ["core", "time", "Time", "sleep_ms"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (key3, info3) = ctx3.resolve_qualified_dotted_call(&parts3, 1).unwrap();
+        assert_eq!(key3, "Time.sleep_ms");
+        assert_eq!(info3.id.0, 9);
+        // The strip stops at the first non-module (uppercase) segment:
+        // a bare `sleep_ms` free fn must NOT be reachable through it.
+        let mut ctx4 = CodegenContext::new();
+        ctx4.register_function("sleep_ms".to_string(), plain_info(10, 1));
+        assert!(ctx4.resolve_qualified_dotted_call(&parts3, 1).is_none());
     }
 
     /// Reproduces the `IoError` collision documented in the bug class

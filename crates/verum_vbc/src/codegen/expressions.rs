@@ -5475,6 +5475,31 @@ impl VbcCodegen {
             || func_name.starts_with("cog::")
             || func_name.starts_with(".::");
 
+        // QUALIFIED-CALL-FIRST-MATCH-1 — a multi-segment path whose
+        // head is MODULE-SHAPED (lower-case, not a local, not a
+        // thread-local, not a type) is an EXPLICIT cross-module
+        // reference, exactly like the `super`/`cog`/`.`-rooted forms:
+        // the last-segment bare-name fallback must NEVER fire for it
+        // (it prefers the CURRENT module's same-named fn — the
+        // most-wrong candidate; live failure: sys/mod.vr's
+        // `darwin.time.monotonic_nanos()` rebound to sys's own
+        // `monotonic_nanos` → mutual recursion → StackOverflow).
+        let module_shaped_qualified_call = is_qualified_module_path
+            || (func_name.contains("::")
+                && func_name
+                    .split("::")
+                    .next()
+                    .map(|head| {
+                        head.chars()
+                            .next()
+                            .map(|c| c.is_ascii_lowercase())
+                            .unwrap_or(false)
+                            && self.ctx.get_var_reg(head).is_err()
+                            && self.ctx.is_thread_local(head).is_none()
+                            && !is_type_name(head)
+                    })
+                    .unwrap_or(false));
+
         // Suffix-match resolution closure (between direct qualified lookup
         // and bare-name fallback). When the call site writes
         // `bitfield.test_bit(args)` (parsed to `func_name = "bitfield::test_bit"`)
@@ -5913,13 +5938,34 @@ impl VbcCodegen {
                 }
             })
             .or_else(suffix_match_lookup)
+            .or_else(|| {
+                // QUALIFIED-CALL-FIRST-MATCH-1 — module-scope-
+                // authoritative resolution for multi-segment paths:
+                // alias head expansion + current-module anchoring
+                // (verbatim / `core.`-stripped, deepest first) + the
+                // ranked qualified-suffix scan.  Deterministic; floor =
+                // the user's written segment count.
+                if !func_name.contains("::") {
+                    return None;
+                }
+                let parts: Vec<String> =
+                    func_name.split("::").map(str::to_string).collect();
+                self.ctx
+                    .resolve_qualified_dotted_call(&parts, args.len())
+                    .filter(|(_, info)| is_free_fn(info))
+            })
         {
             Some(result) => result,
             None => {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
                 // try just the simple function name "init_main_thread_tls". Functions are often
                 // registered with their simple names even when called with qualified paths.
-                let fallback_result = if is_qualified_module_path {
+                //
+                // QUALIFIED-CALL-FIRST-MATCH-1: module-shaped paths are
+                // explicit cross-module references — the leaf fallback
+                // is barred for them (same rule the rooted forms
+                // already had); they get a stage-5 stub below instead.
+                let fallback_result = if module_shaped_qualified_call {
                     None
                 } else if let Some(simple_name) = func_name.rsplit("::").next() {
                     if simple_name != func_name {
@@ -5952,6 +5998,33 @@ impl VbcCodegen {
                     if let Some(intrinsic_info) = lookup_intrinsic(&func_name) {
                         return self.compile_imported_intrinsic_call(&intrinsic_info, args);
                     }
+
+                    // QUALIFIED-CALL-FIRST-MATCH-1 (stub leg): a
+                    // module-shaped multi-segment call that resolved
+                    // nowhere is a forward reference (producing module
+                    // compiles later in bake order) — bind a stage-5
+                    // name-resolved stub to the dotted spelling; the
+                    // archive-load name chase patches it to the real
+                    // body, and a genuine miss raises the loud named
+                    // stage-5 panic instead of a silent wrong bind.
+                    // Forward references only exist across module
+                    // compile order — single-file `main` compiles keep
+                    // the compile-time UndefinedFunction diagnostic.
+                    let in_module_scope = self
+                        .ctx
+                        .current_source_module
+                        .as_deref()
+                        .map(|m| !m.is_empty() && m != "main")
+                        .unwrap_or(false);
+                    if module_shaped_qualified_call
+                        && func_name.contains("::")
+                        && in_module_scope
+                    {
+                        let dotted = func_name.replace("::", ".");
+                        let info =
+                            self.synthesize_qualified_call_stub(&dotted, args.len());
+                        (dotted, info)
+                    } else {
 
                     // Diagnostic: dump near-matches so stdlib-hygiene gaps
                     // and missing-import bugs surface at compile time
@@ -6028,6 +6101,7 @@ impl VbcCodegen {
                         CodegenErrorKind::UndefinedFunction(func_name.clone()),
                         func.span,
                     ));
+                    }
                 }
             }
         };
@@ -10172,6 +10246,27 @@ impl VbcCodegen {
                 }
             }
 
+            // QUALIFIED-CALL-FIRST-MATCH-1 — module-scope-authoritative
+            // resolution for the dotted path: module-alias head
+            // expansion, current-module anchoring (verbatim +
+            // `core.`-stripped, deepest anchor first) and the ranked
+            // qualified-suffix scan (deterministic tie-break, floor =
+            // the user's written segment count).  Runs BEFORE the
+            // bare-leaf fallback below so an explicit cross-module
+            // path can never rebind to a same-named function of the
+            // CURRENT module (the `darwin.time.monotonic_nanos()` →
+            // `core.sys.monotonic_nanos` mutual-recursion class).
+            if parts.len() >= 2
+                && let Some((_qkey, func_info)) = self
+                    .ctx
+                    .resolve_qualified_dotted_call(&parts, args.len())
+            {
+                if let Some(tag) = func_info.variant_tag {
+                    return self.compile_variant_constructor_with_tag(tag, args);
+                }
+                return self.compile_static_method_call(&func_info, args);
+            }
+
             // Try just the function name (it may have been imported).
             // Keep param_count check to avoid false positives with unqualified names.
             //
@@ -10194,6 +10289,29 @@ impl VbcCodegen {
             // `super`/`cog`/`.` and let the simple-name fallback fire
             // on a name that resolves to the wrong module.
             let is_qualified_module_path = self.path_was_rooted_module_path(receiver);
+            // QUALIFIED-CALL-FIRST-MATCH-1 — a MODULE-SHAPED head
+            // (lower-case, not a local, not a thread-local, not a
+            // type) makes the dotted path an EXPLICIT cross-module
+            // reference: the bare-leaf fallback below must NEVER fire
+            // for it.  Pre-fix, `darwin.time.monotonic_nanos()` inside
+            // `module sys;` bound the CURRENT module's own
+            // `monotonic_nanos` through `lookup_function_in_scope` —
+            // mutual recursion → StackOverflow (the Bencher /
+            // async-sleep / thread-sleep pinned failures).  Mirrors
+            // the `is_module_ns` classification computed below.
+            let head_is_module_shaped = parts
+                .first()
+                .map(|first| {
+                    first
+                        .chars()
+                        .next()
+                        .map(|c| c.is_ascii_lowercase())
+                        .unwrap_or(false)
+                        && self.ctx.get_var_reg(first).is_err()
+                        && self.ctx.is_thread_local(first).is_none()
+                        && !is_type_name(first)
+                })
+                .unwrap_or(false);
             // #17 migration #7: scope-aware probe — when a method
             // call's receiver looks like a value reference (not a
             // qualified-module path) AND a free fn matches the method
@@ -10202,6 +10320,7 @@ impl VbcCodegen {
             // / wraparound_count free fn vs EpochManager.current_epoch
             // method recursion).
             if !is_qualified_module_path
+                && !(head_is_module_shaped && parts.len() >= 2)
                 && let Some(func_info) = self.ctx.lookup_function_in_scope(&method.name).cloned()
                 && func_info.param_count == args.len()
             {
@@ -10382,6 +10501,45 @@ impl VbcCodegen {
                     }
                 }
                 if (is_module_ns || is_type_ns) && !receiver_is_known_value {
+                    // QUALIFIED-CALL-FIRST-MATCH-1 (stub leg): a
+                    // MODULE-namespace dotted call that resolved
+                    // nowhere is a forward reference (the producing
+                    // module compiles later in bake order) or a genuine
+                    // typo — either way, a silent LoadNil is the wrong
+                    // degrade.  Emit a stage-5 name-resolved stub bound
+                    // to the dotted spelling: the archive-load name
+                    // chase patches it to the real body once the
+                    // producing module exists; a genuine miss raises
+                    // the loud named stage-5 panic at dispatch.  Rooted
+                    // heads that FAILED super/cog translation keep the
+                    // literal keyword in parts[0] — their spelling is
+                    // meaningless for the chase, so they keep LoadNil.
+                    let head_is_rooted_keyword = parts
+                        .first()
+                        .map(|f| f == "super" || f == "cog" || f == ".")
+                        .unwrap_or(true);
+                    // Forward references only exist across module
+                    // compile order — single-file `main` compiles have
+                    // every decl collected up front, so an unresolved
+                    // dotted call there is a genuine miss and keeps
+                    // the legacy degrade (no stub that would defer the
+                    // diagnostic to runtime).
+                    let in_module_scope = self
+                        .ctx
+                        .current_source_module
+                        .as_deref()
+                        .map(|m| !m.is_empty() && m != "main")
+                        .unwrap_or(false);
+                    if is_module_ns
+                        && parts.len() >= 2
+                        && !head_is_rooted_keyword
+                        && in_module_scope
+                    {
+                        let dotted = parts.join(".");
+                        let info =
+                            self.synthesize_qualified_call_stub(&dotted, args.len());
+                        return self.compile_static_method_call(&info, args);
+                    }
                     if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
                         eprintln!(
                             "[tpcall] type-ns LoadNil stub: {}.{} in fn {} (generics_ordered={:?})",
@@ -13205,6 +13363,84 @@ impl VbcCodegen {
 
     /// This handles cases like `List::new()` or `List.new()` where the receiver
     /// is a type name, not a value.
+    /// QUALIFIED-CALL-FIRST-MATCH-1 (stub leg) — synthesize (or reuse)
+    /// a stage-5 name-resolved stub for a module-shaped dotted call
+    /// whose target module hasn't compiled yet (forward reference in
+    /// bake order: `core/sys/mod.vr` calls
+    /// `darwin.time.monotonic_nanos()` before `sys/darwin/time.vr`
+    /// registers).
+    ///
+    /// The stub is registered under the call's DOTTED RELATIVE
+    /// spelling (`darwin.time.monotonic_nanos`) — a key no real
+    /// registration ever claims (real fns register under their
+    /// module-decl-rooted absolute path), so the real body's later
+    /// qualified registration is never blocked.  Because module
+    /// anchoring makes the absolute key a strict extension of the
+    /// relative spelling (`sys.darwin.time.monotonic_nanos` ends with
+    /// `.darwin.time.monotonic_nanos`), the archive-load name chase
+    /// (`ArchiveBodyRemap::map_function`'s ranked suffix tier) resolves
+    /// the stub to the real body BY CONSTRUCTION — the user-written
+    /// segment count is the ambiguity floor.
+    ///
+    /// `register_function` records the id→name pair in
+    /// `stage3_stub_names` (the `is_name_resolved_stub_id` hook), so
+    /// `emit_stage3_stub_descriptors` emits the named descriptor that
+    /// the chase reads at archive load.  If the chase misses (genuine
+    /// typo), runtime dispatch raises the LOUD stage-5 lenient panic
+    /// naming the function — never a silent wrong-body bind.
+    fn synthesize_qualified_call_stub(
+        &mut self,
+        dotted: &str,
+        arity: usize,
+    ) -> FunctionInfo {
+        // Reuse an existing pending stub for the same spelling+arity so
+        // repeat call sites share one id (and one descriptor).
+        if let Some(existing) = self.ctx.lookup_function(dotted)
+            && crate::stub_ranges::in_stage5(existing.id.0)
+            && existing.param_count == arity
+        {
+            return existing.clone();
+        }
+        let stub_id = {
+            let c = self.ctx.stage5_stub_counter;
+            self.ctx.stage5_stub_counter += 1;
+            crate::module::FunctionId(crate::stub_ranges::STAGE5_BASE - c)
+        };
+        if std::env::var_os("VERUM_TRACE_QCALL").is_some() {
+            eprintln!(
+                "[qcall] stage-5 stub '{}' (arity={}) id={} in {}",
+                dotted,
+                arity,
+                stub_id.0,
+                self.ctx.current_function.as_deref().unwrap_or("<top>"),
+            );
+        }
+        let info = FunctionInfo {
+            id: stub_id,
+            param_count: arity,
+            param_names: (0..arity).map(|i| format!("_arg{}", i)).collect(),
+            param_type_names: vec![],
+            is_async: false,
+            is_generator: false,
+            contexts: vec![],
+            return_type: None,
+            yield_type: None,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
+            return_type_name: None,
+            return_type_inner: None,
+            is_const: false,
+            is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
+        };
+        self.ctx.register_function(dotted.to_string(), info.clone());
+        info
+    }
+
     fn compile_static_method_call(
         &mut self,
         func_info: &FunctionInfo,
