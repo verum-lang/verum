@@ -459,7 +459,21 @@ impl Interpreter {
         // pre-fix behavior crashed the entire test-runner; skipping
         // these ctors lets tests that DON'T touch the un-resolved
         // static still run.
-        let is_stub_id = |id: u32| -> bool { crate::stub_ranges::is_stub_id(id) };
+        // XMOD-band coverage: `is_stub_id` covers the u32::MAX-relative
+        // pre-registration stages, but a ctor id can ALSO be an
+        // unresolved XMOD-band (0x2000_00xx) name-resolved stub — the
+        // FN-LOCAL-STATIC-ONCE-1 hoist adds `__tls_init_<fn>$static$…`
+        // synthetics whose ids ride the same archive channels, and a
+        // merged-suite compile (STUB-STAGE-INSUITE-1) can leave one
+        // unresolved.  Executing it aborted every test in the file with
+        // `global_ctors: FunctionNotFound(0x2000_00xx)`.  Same lenient
+        // discipline as the stage bands: skip with a trace; a test that
+        // actually touches the static hits a clear null-deref naming it.
+        let is_stub_id = |id: u32| -> bool {
+            crate::stub_ranges::is_stub_id(id)
+                || (crate::stub_ranges::in_xmod_call_band(id)
+                    && self.state.module.get_function(FunctionId(id)).is_none())
+        };
         let mut ctors: Vec<(u32, FunctionId)> = self
             .state
             .module

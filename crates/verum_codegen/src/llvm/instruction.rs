@@ -4749,14 +4749,18 @@ pub fn lower_instruction<'ctx>(
                 if is_inline {
                     ctx.mark_inline_struct_register(dst.0);
                 }
-                // Propagate element stride and obj type through Deref
-                let stride = ctx.get_element_stride(ref_reg.0);
-                if stride != 8 {
-                    ctx.set_element_stride(dst.0, stride);
-                }
-                if let Some(tn) = ctx.get_obj_register_type(ref_reg.0).map(|s| s.to_string()) {
-                    ctx.set_obj_register_type(dst.0, tn);
-                }
+                // TEXT-ARRAY-ITER-REF-1 (leg 2): the value-type-ptr
+                // passthrough is a value-identity copy too — it must
+                // carry the FULL fact set through the ONE authority,
+                // not just stride+obj-type.  This leg is exactly where
+                // `for &m in <[Text;N]>.iter()` flows (the iter element
+                // is text-marked, so `is_text_register` classifies it
+                // here, NOT into the plain passthrough the first leg
+                // fixed): with only obj-type carried, the Text mark
+                // died and f"{m}" int-formatted the pointer while
+                // to_lowercase fell to the header switch → const 0 /
+                // SIGBUS.  Stride/obj-type are inside the authority.
+                propagate_value_type_facts(ctx, *ref_reg, *dst);
             } else if val.is_struct_value() {
                 // Proper CBGR ref struct — use the standard deref path
                 let ref_val = val.into_struct_value();
