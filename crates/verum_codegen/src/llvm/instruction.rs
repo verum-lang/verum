@@ -16566,11 +16566,22 @@ fn lower_call_method<'ctx>(
                     i64_type.const_int(0, false).into()
                 };
                 let addr_i64 = coerce_value(ctx, addr_val, i64_type.into(), "tcp_bind_addr")?;
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+                // HELPER-SIGNATURE-AUTHORITY-1: verum_tcp_listen is
+                // canonically (port, backlog) — emit_networking's body
+                // emitter reads BOTH params.  This arm's legacy 1-param
+                // declaration landed first in the module and the
+                // emitter's get_nth_param(1) aborted the WHOLE lowering
+                // ("missing param 1") once the qualified __tcp_listen_raw
+                // callers started being intercepted (the r12 AOT
+                // regression, 453/472).  Declare canonical; default
+                // backlog mirrors the intrinsic-key arm (10).
+                let fn_type =
+                    i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         let listen_fn = super::error::get_or_declare_function(module, "verum_tcp_listen", fn_type);
+                let backlog = i64_type.const_int(10, false);
                 let fd = ctx
                     .builder()
-                    .build_call(listen_fn, &[addr_i64.into()], "tcp_listen_fd")
+                    .build_call(listen_fn, &[addr_i64.into(), backlog.into()], "tcp_listen_fd")
                     .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
