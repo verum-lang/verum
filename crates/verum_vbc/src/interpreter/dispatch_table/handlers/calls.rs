@@ -2291,6 +2291,35 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(Value::from_i64(0)))
         }
 
+        // --- Context slot store authority (CTX-STORE-AUTHORITY-1) ---
+        //
+        // Backing for the user-callable `sys.common.ctx_get` /
+        // `ctx_set` / `ctx_clear` slot surface.  These route to the
+        // SAME `state.context_stack` the CtxProvide/CtxGet/CtxEnd
+        // opcodes use — ONE store authority per tier — with slot-flat
+        // semantics implemented in `ctx_runtime.rs` (overwrite-on-set,
+        // clear-empties-slot).  The tier oracle returns 1 so the .vr
+        // body selects this leg; under AOT the bodiless declaration
+        // default-returns 0 and the platform TLS bodies run instead.
+        "__ctx_store_tier0_raw" => Ok(Some(Value::from_i64(1))),
+        "__ctx_slot_get_raw" => {
+            let slot = get_i64_arg(state, 0);
+            let v = super::ctx_runtime::ctx_slot_get(&state.context_stack, slot);
+            Ok(Some(Value::from_i64(v)))
+        }
+        "__ctx_slot_set_raw" => {
+            let slot = get_i64_arg(state, 0);
+            let value = get_i64_arg(state, 1);
+            let depth = state.call_stack.depth();
+            super::ctx_runtime::ctx_slot_set(&mut state.context_stack, slot, value, depth);
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__ctx_slot_clear_raw" => {
+            let slot = get_i64_arg(state, 0);
+            super::ctx_runtime::ctx_slot_clear(&mut state.context_stack, slot);
+            Ok(Some(Value::from_i64(0)))
+        }
+
         // --- Defer Cleanup (V-LLSI, `core.sys.context_ops`) ---
         //
         // Maintains the (fn_id, arg) pair stack — depth tracking is

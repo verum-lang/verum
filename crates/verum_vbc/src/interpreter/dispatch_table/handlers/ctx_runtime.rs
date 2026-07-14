@@ -1,146 +1,190 @@
-//! High-level Rust intercepts for V-LLSI context system raw intrinsics
-//! (`__ctx_get_raw` / `__ctx_provide_raw` / `__ctx_end_raw`) and the
-//! defer-stack family (`__defer_push_raw` / `__defer_pop_raw` /
-//! `__defer_depth_raw` / `__defer_run_to_raw`).
+//! CTX-STORE-AUTHORITY-1 — slot-flat view over the ONE `ContextStack`.
 //!
-//! ## Why an intercept, not the intrinsic registry?
+//! `core/sys/common.vr` exposes the user-callable context-slot surface
+//! (`ctx_get` / `ctx_set` / `ctx_clear`).  Under the Tier-0 interpreter
+//! those functions delegate to the bodiless `@intrinsic` declarations
+//! `__ctx_slot_get_raw` / `__ctx_slot_set_raw` / `__ctx_slot_clear_raw`
+//! (plus the tier oracle `__ctx_store_tier0_raw`), which the by-name
+//! dispatch in `calls.rs::try_dispatch_intrinsic_by_name` routes to the
+//! helpers below.  The helpers operate on `state.context_stack` — the
+//! SAME store the `CtxProvide` / `CtxGet` / `CtxEnd` opcode handlers
+//! (`context.rs`, opcodes 0xB0-0xB2) use — so `provide`/`using` and the
+//! user-callable surface can never drift.
 //!
-//! These declarations live at `core/intrinsics/runtime/os.vr` and carry
-//! `@intrinsic("ctx_get")` / `@intrinsic("ctx_provide")` / etc.
-//! annotations.  The intrinsic registry has NO entry for these names,
-//! so `lookup_intrinsic("ctx_get")` returns `None` — and the codegen
-//! falls through to compile the function body.  Because the body is a
-//! forward declaration (no `{ ... }` block), the codegen emits a
-//! single `Return` opcode (bytecode_length = 1) so the function is
-//! callable but a no-op.
+//! Semantics are slot-flat, mirroring the Tier-1 platform TLS slot
+//! table (`core/sys/<os>/tls.vr`), where each slot holds exactly one
+//! value:
+//!   * set    — replace the topmost entry for the slot, else push one
+//!   * clear  — remove EVERY entry for the slot
+//!   * get    — topmost entry's value, or 0 when empty
 //!
-//! That defeats the `bytecode_length == 0` gate that
-//! `try_dispatch_intrinsic_by_name` keys off, so the intrinsic name
-//! arm in `calls.rs` never fires.  The intercept here mirrors the
-//! pattern used by `hasher_runtime` / `char_runtime` / `file_runtime`:
-//! fire BEFORE the `Call` opcode reaches the bytecode body.
+//! Key namespace: the slot id shares the u32 ctx_type namespace the
+//! opcodes use — intentionally.  At Tier-1 the AOT `CtxGet` lowering
+//! passes its ctx_type as the `env_ctx_get(slot_id)` argument (see
+//! `verum_codegen/src/llvm/instruction.rs::lower_ctx_get`), so "slot
+//! ids and ctx types are the same namespace" is the cross-tier
+//! contract.
 //!
-//! ## Architectural reuse
-//!
-//! All three context-stack operations route through the existing
-//! `state.context_stack: ContextStack` machinery that the opcode-level
-//! `CtxProvide`/`CtxGet`/`CtxEnd` (0xB0-0xB2) handlers also use.  No
-//! new storage; no duplication.  The defer stack uses the
-//! `state.defer_stack: Vec<(i64, i64)>` field added on the same line
-//! as `context_stack` so the structural invariant is "every V-LLSI
-//! scoped resource lives next to its peer on InterpreterState".
-//!
-//! ## What's NOT intercepted here
-//!
-//! `defer_execute` invocation — actually calling the registered
-//! `fn(Int) -> Int` cleanup callback — is deferred to Tier-1 AOT.
-//! The interpreter would need to synthesise an indirect dispatch
-//! across the call-frame machinery, which crosses the intercept's
-//! shape.  The stack-bookkeeping pieces (`__defer_push_raw` /
-//! `__defer_pop_raw` / `__defer_depth_raw` / `__defer_run_to_raw`)
-//! are all here so depth tracking is accurate; the callback chase
-//! happens via AOT.
+//! History: this module previously held `try_intercept_ctx_runtime`, a
+//! pre-gate intercept for the V-LLSI `__ctx_*_raw` / `__defer_*_raw`
+//! intrinsics.  That path was superseded by the widened
+//! `bytecode_length` gate + per-name match arms inside
+//! `try_dispatch_intrinsic_by_name` (see the `__ctx_get_raw` /
+//! `__defer_push_raw` arms in `calls.rs`), the module declaration was
+//! dropped, and the file was orphaned.  The duplicate intercept has
+//! been removed — `calls.rs` arms are the single dispatch authority;
+//! this module now carries only the slot-store semantics (pure
+//! functions, unit-tested below).
 
-use super::super::super::error::InterpreterResult;
-use super::super::super::state::InterpreterState;
-use crate::instruction::Reg;
+use super::super::super::state::ContextStack;
 use crate::value::Value;
 
-/// Match a (possibly-qualified) function name against an unqualified
-/// stem (`__ctx_get_raw`, `__defer_push_raw`, …).  Qualified shapes
-/// like `core.intrinsics.runtime.os.__ctx_get_raw` are accepted via
-/// the same trailing-segment rule the other runtime intercepts use.
+/// Number of context slots — MUST mirror `CONTEXT_SLOT_COUNT` in
+/// `core/sys/common.vr` (and the codegen constant-table entry
+/// `("CONTEXT_SLOT_COUNT", 256)` in `verum_vbc/src/codegen/mod.rs`).
+pub(in super::super) const CTX_SLOT_COUNT: i64 = 256;
+
+/// Validate a slot id and convert it to the u32 ctx_type key.
+/// Out-of-range slots (negative or >= CTX_SLOT_COUNT) yield `None`
+/// — defence in depth mirroring the `ctx_bridge.vr` guards.
 #[inline]
-fn name_ends_with(func_name: &str, stem: &str) -> bool {
-    func_name == stem
-        || func_name.ends_with(&format!(".{}", stem))
-        || func_name.ends_with(&format!("::{}", stem))
+fn slot_key(slot: i64) -> Option<u32> {
+    if (0..CTX_SLOT_COUNT).contains(&slot) {
+        Some(slot as u32)
+    } else {
+        None
+    }
 }
 
-/// Read the i64 value from the caller's frame at argument index
-/// `idx`.  Mirrors the helper closure inside
-/// `try_dispatch_intrinsic_by_name` in `calls.rs`.
-#[inline]
-fn get_i64_arg(state: &InterpreterState, args_start: u16, idx: u8, caller_base: u32) -> i64 {
-    state
-        .registers
-        .get(caller_base, Reg(args_start + u16::from(idx)))
-        .as_i64()
+/// Slot read: topmost value for the slot, or 0 when empty / out of range.
+pub(in super::super) fn ctx_slot_get(stack: &ContextStack, slot: i64) -> i64 {
+    match slot_key(slot) {
+        Some(key) => stack.get(key).map(|v| v.as_i64()).unwrap_or(0),
+        None => 0,
+    }
 }
 
-/// Intercept entry point for V-LLSI context-system raw intrinsics.
-///
-/// Returns `Ok(Some(...))` when the call was handled; `Ok(None)` when
-/// the function name did not match and the dispatcher should continue
-/// to the next intercept layer.
-pub(in super::super) fn try_intercept_ctx_runtime(
-    state: &mut InterpreterState,
-    func_name: &str,
-    args_start: u16,
-    args_count: u8,
-    caller_base: u32,
-) -> InterpreterResult<Option<Value>> {
-    // ---- Context system (`core.sys.context_ops` + V-LLSI) ----------
+/// Slot overwrite: replace the topmost entry for the slot, else push a
+/// new one at `stack_depth`.  Out-of-range slots are silently dropped.
+pub(in super::super) fn ctx_slot_set(
+    stack: &mut ContextStack,
+    slot: i64,
+    value: i64,
+    stack_depth: usize,
+) {
+    if let Some(key) = slot_key(slot) {
+        // Replace-topmost-else-push via the existing stack primitives —
+        // no parallel storage, no new ContextStack surface required.
+        stack.end_by_type(key);
+        stack.provide(key, Value::from_i64(value), stack_depth);
+    }
+}
 
-    if name_ends_with(func_name, "__ctx_get_raw") && args_count >= 1 {
-        let type_id = get_i64_arg(state, args_start, 0, caller_base);
-        let ctx_type = (type_id as u32) & 0x7fff_ffff;
-        let v = state
-            .context_stack
-            .get(ctx_type)
-            .map(|val| val.as_i64())
-            .unwrap_or(0);
-        return Ok(Some(Value::from_i64(v)));
+/// Slot clear: remove EVERY entry for the slot (flat-slot semantics —
+/// after clear the slot reads as empty regardless of provide nesting,
+/// matching the Tier-1 TLS `ctx_clear` which zeroes the slot outright).
+pub(in super::super) fn ctx_slot_clear(stack: &mut ContextStack, slot: i64) {
+    if let Some(key) = slot_key(slot) {
+        while stack.end_by_type(key) {}
+    }
+}
+
+// ============================================================================
+// Tests — CTX-STORE-AUTHORITY-1 slot-flat semantics (pure functions)
+// ============================================================================
+
+#[cfg(test)]
+mod ctx_slot_tests {
+    use super::*;
+
+    #[test]
+    fn get_on_empty_slot_returns_zero() {
+        let stack = ContextStack::new();
+        assert_eq!(ctx_slot_get(&stack, 8), 0);
     }
 
-    if name_ends_with(func_name, "__ctx_provide_raw") && args_count >= 2 {
-        let type_id = get_i64_arg(state, args_start, 0, caller_base);
-        let value = get_i64_arg(state, args_start, 1, caller_base);
-        let ctx_type = (type_id as u32) & 0x7fff_ffff;
-        let depth = state.call_stack.depth();
-        state
-            .context_stack
-            .provide(ctx_type, Value::from_i64(value), depth);
-        return Ok(Some(Value::from_i64(0)));
+    #[test]
+    fn set_get_round_trip() {
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 8, 0xBEEF, 1);
+        assert_eq!(ctx_slot_get(&stack, 8), 0xBEEF);
     }
 
-    if name_ends_with(func_name, "__ctx_end_raw") && args_count >= 1 {
-        let type_id = get_i64_arg(state, args_start, 0, caller_base);
-        let ctx_type = (type_id as u32) & 0x7fff_ffff;
-        state.context_stack.end_by_type(ctx_type);
-        return Ok(Some(Value::from_i64(0)));
+    #[test]
+    fn set_overwrites_keeping_single_entry() {
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 10, 100, 1);
+        ctx_slot_set(&mut stack, 10, 200, 2);
+        assert_eq!(ctx_slot_get(&stack, 10), 200);
+        // Flat-slot invariant: overwrite replaced, not stacked.
+        assert_eq!(stack.len(), 1);
     }
 
-    // ---- Defer stack (`core.sys.context_ops` RAII cleanup) ---------
-
-    if name_ends_with(func_name, "__defer_push_raw") && args_count >= 2 {
-        let fn_id = get_i64_arg(state, args_start, 0, caller_base);
-        let arg = get_i64_arg(state, args_start, 1, caller_base);
-        state.defer_stack.push((fn_id, arg));
-        return Ok(Some(Value::from_i64(0)));
+    #[test]
+    fn slots_are_isolated() {
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 11, 0xDEAD, 1);
+        ctx_slot_set(&mut stack, 12, 0xBEEF, 1);
+        assert_eq!(ctx_slot_get(&stack, 11), 0xDEAD);
+        assert_eq!(ctx_slot_get(&stack, 12), 0xBEEF);
     }
 
-    if name_ends_with(func_name, "__defer_pop_raw") {
-        state.defer_stack.pop();
-        return Ok(Some(Value::from_i64(0)));
+    #[test]
+    fn clear_empties_the_slot() {
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 9, 0xCAFE, 1);
+        ctx_slot_clear(&mut stack, 9);
+        assert_eq!(ctx_slot_get(&stack, 9), 0);
+        assert!(stack.is_empty());
     }
 
-    if name_ends_with(func_name, "__defer_depth_raw") {
-        return Ok(Some(Value::from_i64(state.defer_stack.len() as i64)));
+    #[test]
+    fn clear_removes_every_entry_for_the_slot() {
+        // Nested `provide` of the same key + user clear: flat-slot
+        // semantics say the slot reads empty afterwards (matching the
+        // Tier-1 TLS ctx_clear, which zeroes the slot outright).
+        let mut stack = ContextStack::new();
+        stack.provide(9, Value::from_i64(1), 1);
+        stack.provide(9, Value::from_i64(2), 2);
+        ctx_slot_clear(&mut stack, 9);
+        assert_eq!(ctx_slot_get(&stack, 9), 0);
+        assert!(stack.is_empty());
     }
 
-    if name_ends_with(func_name, "__defer_run_to_raw") && args_count >= 1 {
-        let target_depth = get_i64_arg(state, args_start, 0, caller_base);
-        let target = if target_depth < 0 {
-            0
-        } else {
-            target_depth as usize
-        };
-        while state.defer_stack.len() > target {
-            state.defer_stack.pop();
-        }
-        return Ok(Some(Value::from_i64(0)));
+    #[test]
+    fn out_of_range_slots_are_guarded() {
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, -5, 0xDEAD, 1);
+        ctx_slot_set(&mut stack, CTX_SLOT_COUNT, 0xDEAD, 1);
+        ctx_slot_set(&mut stack, 1_000_000, 0xDEAD, 1);
+        assert!(stack.is_empty());
+        assert_eq!(ctx_slot_get(&stack, -5), 0);
+        assert_eq!(ctx_slot_get(&stack, 1_000_000), 0);
+        // Clear on garbage must not panic.
+        ctx_slot_clear(&mut stack, -1);
+        ctx_slot_clear(&mut stack, 1_000_000);
     }
 
-    Ok(None)
+    #[test]
+    fn shares_store_with_opcode_provide() {
+        // ONE-authority pin: an entry pushed by the CtxProvide opcode
+        // path (ContextStack::provide) is visible to the user-callable
+        // slot surface, and vice versa — same key namespace, same store.
+        let mut stack = ContextStack::new();
+        stack.provide(42, Value::from_i64(7), 3);
+        assert_eq!(ctx_slot_get(&stack, 42), 7);
+
+        ctx_slot_set(&mut stack, 42, 9, 3);
+        assert_eq!(stack.get(42).map(|v| v.as_i64()), Some(9));
+        assert_eq!(stack.len(), 1);
+    }
+
+    #[test]
+    fn set_zero_reads_back_as_empty_sentinel() {
+        // The .vr surface treats 0 as "empty" (`if v == 0 { Maybe.None }`),
+        // mirroring the TLS table where entry.value == 0 means unset.
+        let mut stack = ContextStack::new();
+        ctx_slot_set(&mut stack, 8, 0, 1);
+        assert_eq!(ctx_slot_get(&stack, 8), 0);
+    }
 }

@@ -1420,6 +1420,52 @@ implement Eq for SysContextError {
 }
 
 // =============================================================================
+// Tier-0 Store-Authority Raw Intrinsics (CTX-STORE-AUTHORITY-1)
+// =============================================================================
+//
+// ONE store authority per tier.  The `provide` / `using` context system
+// executes through the CtxProvide/CtxGet/CtxEnd opcodes, which under the
+// Tier-0 interpreter read/write `InterpreterState::context_stack`.  The
+// user-callable slot surface below (`ctx_get` / `ctx_set` / `ctx_clear`)
+// MUST read/write that SAME store — not a parallel one.
+//
+// Mechanism: the declarations below are bodiless `@intrinsic` forward
+// declarations.  The VBC codegen leaves their bytecode empty
+// (bytecode_length == 0), so the Tier-0 interpreter intercepts calls by
+// name in `try_dispatch_intrinsic_by_name`
+// (crates/verum_vbc/src/interpreter/dispatch_table/handlers/calls.rs) and
+// routes them to `state.context_stack` — the exact store the opcodes use
+// (slot-flat semantics implemented in handlers/ctx_runtime.rs).
+//
+// Under Tier-1 AOT there is no interceptor: the empty declarations lower
+// to default-return-0 stubs (vbc_lowering.rs Phase 3.6 safety net), so
+// `__ctx_store_tier0_raw()` yields 0 and the functions below fall through
+// to the platform TLS bodies (`sys.<os>.tls.*`) — the real Tier-1 store
+// that the AOT `CtxGet`/`CtxProvide` opcodes also reach via the
+// `runtime.ctx_bridge.env_ctx_*` strategy-1 lowering.  Same key namespace
+// on both tiers: the opcode's ctx_type IS the slot id.
+
+/// Tier oracle for the context store. Tier-0 interpreter intercept
+/// returns 1; Tier-1 AOT executes the default-return stub → 0.
+@intrinsic("ctx_store_tier0")
+fn __ctx_store_tier0_raw() -> Int;
+
+/// Tier-0 slot read against the interpreter ContextStack.
+/// Returns the stored value, or 0 when the slot is empty.
+@intrinsic("ctx_slot_get")
+fn __ctx_slot_get_raw(slot: Int) -> Int;
+
+/// Tier-0 slot overwrite against the interpreter ContextStack
+/// (replaces the topmost entry for the slot, else pushes one).
+@intrinsic("ctx_slot_set")
+fn __ctx_slot_set_raw(slot: Int, value: Int) -> Int;
+
+/// Tier-0 slot clear against the interpreter ContextStack
+/// (removes every entry for the slot — flat-slot semantics).
+@intrinsic("ctx_slot_clear")
+fn __ctx_slot_clear_raw(slot: Int) -> Int;
+
+// =============================================================================
 // Cross-Platform Context API
 // =============================================================================
 
@@ -1447,17 +1493,39 @@ implement Eq for SysContextError {
 /// ```
 @inline
 public fn ctx_get(slot: UInt8) -> Maybe<&unsafe Byte> {
+    // Tier-0: the interpreter ContextStack is the ONE store authority
+    // (same store the CtxProvide/CtxGet opcodes use).  The Maybe is
+    // constructed HERE, in compiled Verum code — the caller always
+    // receives a genuine variant, never a raw nil.
+    if __ctx_store_tier0_raw() == 1 {
+        let v = __ctx_slot_get_raw(slot as Int);
+        if v == 0 {
+            return Maybe.None;
+        }
+        return Maybe.Some(unsafe { v as &unsafe Byte });
+    }
+
+    // Tier-1 AOT: platform TLS store (the real slot table).
+    //
+    // NB: each @cfg arm must `return` explicitly — an @cfg-attributed
+    // block is a STATEMENT, not the function's tail expression; the
+    // pre-fix bodies (`{ super.darwin.tls.ctx_get(slot) }`) discarded
+    // the platform Maybe and fell off the end returning raw nil, which
+    // then panicked on `.is_some()` (`<nil>` receiver).  That was the
+    // CTX-STORE-AUTHORITY-1 nil-Maybe leg.
     @cfg(target_os = "linux")
-    { super.linux.tls.ctx_get(slot) }
+    { return super.linux.tls.ctx_get(slot); }
 
     @cfg(target_os = "macos")
-    { super.darwin.tls.ctx_get(slot) }
+    { return super.darwin.tls.ctx_get(slot); }
 
     @cfg(target_os = "windows")
-    { super.windows.tls.ctx_get(slot) }
+    { return super.windows.tls.ctx_get(slot); }
 
     @cfg(runtime = "embedded")
-    { embedded_ctx_get(slot) }
+    { return embedded_ctx_get(slot); }
+
+    Maybe.None
 }
 
 /// Get a mutable value from a context slot.
@@ -1492,6 +1560,13 @@ public fn ctx_get_mut(slot: UInt8) -> Maybe<&unsafe Byte> {
 /// The value must remain valid for the lifetime of the context scope.
 @inline
 public fn ctx_set(slot: UInt8, value: &unsafe Byte) {
+    // Tier-0: write the interpreter ContextStack (ONE store authority).
+    if __ctx_store_tier0_raw() == 1 {
+        __ctx_slot_set_raw(slot as Int, value as Int);
+        return;
+    }
+
+    // Tier-1 AOT: platform TLS store.
     @cfg(target_os = "linux")
     { super.linux.tls.ctx_set(slot, value) }
 
@@ -1517,6 +1592,13 @@ public fn ctx_has(slot: UInt8) -> Bool {
 /// Clear a context slot.
 @inline
 public fn ctx_clear(slot: UInt8) {
+    // Tier-0: clear in the interpreter ContextStack (ONE store authority).
+    if __ctx_store_tier0_raw() == 1 {
+        __ctx_slot_clear_raw(slot as Int);
+        return;
+    }
+
+    // Tier-1 AOT: platform TLS store.
     @cfg(target_os = "linux")
     { super.linux.tls.ctx_clear(slot) }
 
@@ -1536,18 +1618,21 @@ public fn ctx_clear(slot: UInt8) {
 /// The new frame inherits from the current frame but allows overrides.
 /// Returns the previous frame for restoration.
 public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
+    // NB: explicit `return` in each @cfg arm — an @cfg-attributed block
+    // is a statement, not the tail expression (same nil-return defect
+    // class as ctx_get, see CTX-STORE-AUTHORITY-1).
     @cfg(target_os = "linux")
     {
         let current = super.linux.tls.get_context_slots();
         let new_frame = super.linux.tls.ctx_push(current);
         super.linux.tls.set_context_slots(&new_frame);
-        Result.Ok(current as &unsafe Byte)
+        return Result.Ok(current as &unsafe Byte);
     }
 
     @cfg(target_os = "macos")
     {
         // Darwin uses stack-based context with ctx_push/ctx_pop
-        super.darwin.tls.ctx_push_frame()
+        return super.darwin.tls.ctx_push_frame();
     }
 
     @cfg(target_os = "windows")
@@ -1555,11 +1640,13 @@ public fn ctx_push_frame() -> Result<&unsafe Byte, SysContextError> {
         let current = super.windows.tls.get_context_slots();
         let new_frame = super.windows.tls.ctx_push(current);
         super.windows.tls.set_context_slots(&new_frame);
-        Result.Ok(current as &unsafe Byte)
+        return Result.Ok(current as &unsafe Byte);
     }
 
     @cfg(runtime = "embedded")
-    { embedded_ctx_push_frame() }
+    { return embedded_ctx_push_frame(); }
+
+    Result.Err(SysContextError.TlsNotInitialized)
 }
 
 /// Pop a context frame (restore previous provide scope).

@@ -104,6 +104,11 @@ pub(super) mod char_runtime;
 // See `wrapper_runtime` doc comment (HEAP-INTORAW-1 /
 // SHARED-STRONGCOUNT-1).
 pub(super) mod wrapper_runtime;
+// CTX-STORE-AUTHORITY-1: slot-flat semantics over the ONE interpreter
+// ContextStack, backing the user-callable `sys.common.ctx_get/ctx_set/
+// ctx_clear` surface via the `__ctx_slot_*_raw` / `__ctx_store_tier0_raw`
+// match arms in `calls.rs::try_dispatch_intrinsic_by_name`.
+pub(super) mod ctx_runtime;
 
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).

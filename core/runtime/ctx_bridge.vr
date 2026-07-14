@@ -17,6 +17,14 @@
 //  CtxProvide opcode → instruction.rs → env_ctx_provide() → ctx_set() → TLS slot
 //  Spawn opcode → instruction.rs → fork_current_env() → shallow copy
 //
+// Store authority (CTX-STORE-AUTHORITY-1): `sys.common.ctx_*` is the ONE
+// per-tier store seam.  Under Tier-1 AOT it reaches the platform TLS slot
+// table; under the Tier-0 interpreter it reaches the interpreter's
+// ContextStack — the SAME store the CtxProvide/CtxGet opcodes use — via
+// the `__ctx_slot_*_raw` intrinsics in core/sys/common.vr.  These bridge
+// functions therefore round-trip identically on both tiers and must never
+// grow a parallel store.
+//
 
 // This eliminates hardcoded context logic from the compiler, routing all
 // context operations through compiled Verum code.
