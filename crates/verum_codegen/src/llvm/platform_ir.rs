@@ -509,158 +509,220 @@ impl<'ctx> PlatformIR<'ctx> {
     /// This replaces verum_platform.c with pure LLVM IR.
     pub fn emit_platform_functions(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         // Core OS primitives
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_core_declarations"); }
         self.emit_core_declarations(module)?;
 
         // verum_raw_open3 — thin wrapper for variadic open() on ARM64
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_raw_open3"); }
         self.emit_raw_open3(module)?;
 
         // Memory allocator (bump allocator with spinlock)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_allocator"); }
         self.emit_allocator(module)?;
 
         // Runtime globals and initialization
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_runtime_globals"); }
         self.emit_runtime_globals(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_runtime_bridge_getters"); }
         self.emit_runtime_bridge_getters(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_store_args"); }
         self.emit_store_args(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_get_argc"); }
         self.emit_get_argc(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_get_argv"); }
         self.emit_get_argv(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_runtime_init"); }
         self.emit_runtime_init(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_stack_frame_stubs"); }
         self.emit_stack_frame_stubs(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_tls_operations"); }
         self.emit_tls_operations(module)?;
 
         // Synchronization primitives (mutex, condvar)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_sync_primitives"); }
         self.emit_sync_primitives(module)?;
 
         // Entry point — LLVM IR main() wraps user's verum_main.
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_main_entry"); }
         self.emit_main_entry(module)?;
 
         // Windows PE entry point — mainCRTStartup → main() → ExitProcess().
         // Cross-compilation-correct: TARGET-triple dispatch.
         if target_is_windows(module) {
-            self.emit_windows_entry(module)?;
+            if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_windows_entry"); }
+        self.emit_windows_entry(module)?;
         }
 
         // Exception handling declarations (setjmp/longjmp)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_exception_handling"); }
         self.emit_exception_handling(module)?;
 
         // Threading (spawn/join via pthread)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_threading"); }
         self.emit_threading(module)?;
 
         // Channels (built on mutex/condvar)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_channels"); }
         self.emit_channels(module)?;
 
         // Panic handler
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_panic"); }
         self.emit_panic(module)?;
 
         // Context system
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_context_system_decls"); }
         self.emit_context_system_decls(module)?;
 
         // CBGR memory safety (stub implementations)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_cbgr_ir"); }
         self.emit_cbgr_ir(module)?;
 
         // Futex primitives (macOS __ulock / Linux futex)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_futex_ir"); }
         self.emit_futex_ir(module)?;
 
         // Args list construction (extern C)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_args_list_decl"); }
         self.emit_args_list_decl(module)?;
 
         // Defer cleanup
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_defer"); }
         self.emit_defer(module)?;
 
         // File I/O — full LLVM IR implementations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_file_io"); }
         self.emit_file_io(module)?;
 
         // TCP/UDP networking — full LLVM IR implementations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_networking"); }
         self.emit_networking(module)?;
 
         // Process management — full LLVM IR implementations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_process_io"); }
         self.emit_process_io(module)?;
 
         // Socket options — full LLVM IR implementations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_socket_options"); }
         self.emit_socket_options(module)?;
 
         // Channels — full LLVM IR implementations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_channels_ir"); }
         self.emit_channels_ir(module)?;
 
         // Nursery + WaitGroup — full LLVM IR implementations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_nursery_ir"); }
         self.emit_nursery_ir(module)?;
 
         // Select — spin-poll over channels
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_select_ir"); }
         self.emit_select_ir(module)?;
 
         // Generators (stackful coroutines)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_generators_ir"); }
         self.emit_generators_ir(module)?;
 
         // Threading — LLVM IR bodies (spawn/join/is_done)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_threading_ir"); }
         self.emit_threading_ir(module)?;
 
         // Process spawn — full LLVM IR (fork/exec/pipe/dup2)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_process_spawn_ir"); }
         self.emit_process_spawn_ir(module)?;
 
         // Exception/Defer — extern C declarations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_exception_defer_ir"); }
         self.emit_exception_defer_ir(module)?;
 
         // Context system declarations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_context_system_ir"); }
         self.emit_context_system_ir(module)?;
 
         // I/O Engine (kqueue on macOS)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_io_engine_ir"); }
         self.emit_io_engine_ir(module)?;
 
         // Thread Pool
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_pool_ir"); }
         self.emit_pool_ir(module)?;
 
         // Async I/O (submit + poll + syscall)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_async_io_ir"); }
         self.emit_async_io_ir(module)?;
 
         // I/O declarations
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_io_declarations"); }
         self.emit_io_declarations(module)?;
 
         // Time functions
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_time_functions"); }
         self.emit_time_functions(module)?;
 
         // Platform-specific declarations. TARGET-triple dispatch.
         if target_is_darwin(module) {
-            self.emit_macos_declarations(module)?;
+            if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_macos_declarations"); }
+        self.emit_macos_declarations(module)?;
         }
 
         // GROUP 1: TLS + get_or_create_context (full LLVM IR bodies)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_tls_and_context_ir"); }
         self.emit_tls_and_context_ir(module)?;
 
         // GROUP 2: Stack frames + panic (full LLVM IR bodies)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_stack_frame_ir"); }
         self.emit_stack_frame_ir(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_panic_ir"); }
         self.emit_panic_ir(module)?;
 
         // GROUP 3: Exception/Defer (full LLVM IR bodies)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_exception_ir"); }
         self.emit_exception_ir(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_defer_ir"); }
         self.emit_defer_ir(module)?;
 
         // GROUP 4: Context provide/pop (full LLVM IR bodies)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_context_provide_pop_ir"); }
         self.emit_context_provide_pop_ir(module)?;
 
         // GROUP 5: Text helpers + args list
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_create_args_list_ir"); }
         self.emit_create_args_list_ir(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_i64_to_str_ir"); }
         self.emit_i64_to_str_ir(module)?;
 
         // GROUP 6: Write helpers
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_write_helpers_ir"); }
         self.emit_write_helpers_ir(module)?;
 
         // GROUP 7: Generator sync primitives (gen_mtx_*, gen_cv_*)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_gen_sync_ir"); }
         self.emit_gen_sync_ir(module)?;
 
         // GROUP 8: Generator thread_entry + yield
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_gen_thread_entry_ir"); }
         self.emit_gen_thread_entry_ir(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_gen_yield_ir"); }
         self.emit_gen_yield_ir(module)?;
 
         // GROUP 9: Threading entry trampolines
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_thread_entry_darwin_ir"); }
         self.emit_thread_entry_darwin_ir(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_spawn_trampoline_ir"); }
         self.emit_spawn_trampoline_ir(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_thread_spawn_multi_ir"); }
         self.emit_thread_spawn_multi_ir(module)?;
 
         // GROUP 10: Mutex lock/unlock + condvar (enable real bodies)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_mutex_lock"); }
         self.emit_mutex_lock(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_mutex_unlock"); }
         self.emit_mutex_unlock(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_cond_signal"); }
         self.emit_cond_signal(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_cond_broadcast"); }
         self.emit_cond_broadcast(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_cond_wait_ir"); }
         self.emit_cond_wait_ir(module)?;
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_cond_timedwait_ir"); }
         self.emit_cond_timedwait_ir(module)?;
         Ok(())
     }
