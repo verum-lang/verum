@@ -12439,6 +12439,26 @@ impl VbcCodegen {
 
             // Unit type has no constructor arguments
             TypeDeclBody::Unit => {
+                // MOUNTED-UNIT-VALUE-1: unit types get a REAL
+                // TypeDescriptor (kind Unit) like every other type
+                // declaration.  Historically this arm registered ONLY
+                // the sentinel FunctionInfo below — which never
+                // survives the archive boundary — so a consumer module
+                // had NO record of the type at all and bare
+                // `NoopDriver` value references died UndefinedVariable
+                // while the DECLARING module compiled them fine.  The
+                // descriptor is what `populate_types_from_archive`
+                // ships to consumers; the bare-value fallback in
+                // compile_simple_path keys on `TypeKind::Unit`.
+                let type_id = self.claim_local_type_id(&type_name);
+                let type_desc = crate::types::TypeDescriptor {
+                    id: type_id,
+                    name: StringId(self.ctx.intern_string_raw(&type_name)),
+                    kind: crate::types::TypeKind::Unit,
+                    ..Default::default()
+                };
+                self.push_type_dedupe(type_desc);
+
                 let id = FunctionId(u32::MAX / 2);
 
                 let info = FunctionInfo {
@@ -20876,22 +20896,60 @@ impl VbcCodegen {
             // which leads with a function-pointer register. Mirrors the
             // `CreateCallback` func-id rewrite in `build_module`'s finalize.
             for instr in instructions.iter_mut() {
-                if let crate::instruction::Instruction::FfiExtended { sub_op, operands } = instr
-                    && matches!(*sub_op, 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17)
-                    && operands.len() >= 4
-                {
-                    let archive_sym_idx = u32::from_le_bytes([
-                        operands[0],
-                        operands[1],
-                        operands[2],
-                        operands[3],
-                    ]);
-                    if let Some(new_sym_idx) = self.import_archive_ffi_symbol(
-                        archive_module,
-                        archive_sym_idx,
-                        &mut ffi_sym_cache,
-                    ) {
-                        operands[0..4].copy_from_slice(&new_sym_idx.to_le_bytes());
+                if let crate::instruction::Instruction::FfiExtended { sub_op, operands } = instr {
+                    if matches!(*sub_op, 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17)
+                        && operands.len() >= 4
+                    {
+                        let archive_sym_idx = u32::from_le_bytes([
+                            operands[0],
+                            operands[1],
+                            operands[2],
+                            operands[3],
+                        ]);
+                        if let Some(new_sym_idx) = self.import_archive_ffi_symbol(
+                            archive_module,
+                            archive_sym_idx,
+                            &mut ffi_sym_cache,
+                        ) {
+                            operands[0..4].copy_from_slice(&new_sym_idx.to_le_bytes());
+                        }
+                    } else if *sub_op == 0x50 {
+                        // FFI-CREATECALLBACK-SIGIDX-1: `CreateCallback`
+                        // carries `dst:reg, fn_id:u32, signature_idx:u32`
+                        // — the signature_idx indexes the ARCHIVE's
+                        // ffi_symbols table too, but only the CallFfi*
+                        // family above was being rewritten.  A baked
+                        // `pthread_create(..., thread_entry, ...)` then
+                        // resolved its callback SIGNATURE against the
+                        // consumer's table and died at runtime with
+                        // `FFI symbol not found: FfiSymbolId(N)` before
+                        // the call itself was ever attempted.  (The
+                        // fn_id at offset +0 after the reg is remapped
+                        // by `bytecode_remap`; the trailing u32 was
+                        // not.)  Register width mirrors the encoder:
+                        // 1 byte below 0x80, 2 bytes otherwise.
+                        let fn_id_offset = if !operands.is_empty() && operands[0] & 0x80 != 0 {
+                            2
+                        } else {
+                            1
+                        };
+                        let sig_offset = fn_id_offset + 4;
+                        if operands.len() >= sig_offset + 4 {
+                            let archive_sig_idx = u32::from_le_bytes([
+                                operands[sig_offset],
+                                operands[sig_offset + 1],
+                                operands[sig_offset + 2],
+                                operands[sig_offset + 3],
+                            ]);
+                            if let Some(new_sig_idx) = self.import_archive_ffi_symbol(
+                                archive_module,
+                                archive_sig_idx,
+                                &mut ffi_sym_cache,
+                            ) {
+                                operands[sig_offset..sig_offset + 4]
+                                    .copy_from_slice(&new_sig_idx.to_le_bytes());
+                            }
+                        }
                     }
                 }
             }
