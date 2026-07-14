@@ -221,6 +221,17 @@ impl TypeId {
     /// mirroring `verum_text_get_ptr` semantics.
     pub const BYTE_SLICE: TypeId = TypeId(528);
 
+    /// Ordering — the canonical three-way comparison result
+    /// (Less | Equal | Greater, all Unit variants; canonical layout
+    /// pinned by `verum_common::well_known_types::ORDERING_VARIANT_LAYOUT`).
+    /// A FIXED id for the same reason Maybe/Result have one: `cmp`
+    /// implementations compile before `core/base/ordering.vr`'s
+    /// descriptor lands (Pass-1.5 speculative allocation), and the
+    /// legacy MakeVariant demotion left the heap header UNSTAMPED —
+    /// Tier-1's runtime-type-id dispatch (fmt_debug and every other
+    /// dyn switch) fell to the empty default for every Ordering value.
+    pub const ORDERING: TypeId = TypeId(529);
+
     /// First semantic type ID (for range checks).
     pub const FIRST_SEMANTIC: u32 = 512;
 

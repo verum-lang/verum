@@ -508,6 +508,16 @@ impl VbcCodegen {
             let canonical = match (name, tag, field_count) {
                 ("Maybe", 0, 0) | ("Maybe", 1, 1) => Some(crate::types::TypeId::MAYBE),
                 ("Result", 0, 1) | ("Result", 1, 1) => Some(crate::types::TypeId::RESULT),
+                // Ordering = Less(0) | Equal(1) | Greater(2), all Unit —
+                // canonical layout is ORDERING_VARIANT_LAYOUT. Same
+                // compile-order race as Maybe/Result: every stdlib `cmp`
+                // builds an Ordering before core/base/ordering.vr's
+                // descriptor lands, demoting to legacy MakeVariant whose
+                // UNSTAMPED header blinded Tier-1's runtime-type-id
+                // dispatch (empty `f"{ord:?}"` for every cmp result).
+                ("Ordering", 0, 0) | ("Ordering", 1, 0) | ("Ordering", 2, 0) => {
+                    Some(crate::types::TypeId::ORDERING)
+                }
                 _ => None,
             };
             if let Some(tid) = canonical {
@@ -2073,9 +2083,13 @@ impl VbcCodegen {
                         .is_none_or(|scope| scope.contains(name.as_str()))
                     && let Some(tid) = self.type_name_to_id.get(name.as_str()).copied()
                     && let Some(desc) = self.types.iter().find(|d| d.id == tid)
-                    && desc.kind == crate::types::TypeKind::Record
-                    && desc.fields.is_empty()
-                    && !desc.is_transparent_wrapper
+                    // `type X is ();` descriptors carry the dedicated
+                    // `TypeKind::Unit`; a fieldless non-transparent
+                    // Record is the equivalent empty-record form.
+                    && (desc.kind == crate::types::TypeKind::Unit
+                        || (desc.kind == crate::types::TypeKind::Record
+                            && desc.fields.is_empty()
+                            && !desc.is_transparent_wrapper))
                 {
                     let dest = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadUnit { dst: dest });
@@ -6452,6 +6466,15 @@ impl VbcCodegen {
             // disappearing the entire calling function from the
             // emitted binary.
             const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
+            if let Ok(m) = std::env::var("VERUM_TRACE_CALLRES")
+                && !m.is_empty() && func_name.contains(&m)
+            {
+                eprintln!(
+                    "[call-res] '{}' resolved='{}' id={} arity={} parent={:?}",
+                    func_name, resolved_name, func_info.id.0, func_info.param_count,
+                    func_info.parent_type_name
+                );
+            }
             let final_func_id = if func_info.id.0 == u32::MAX {
                 if std::env::var_os("VERUM_AOT_TRACE_BAD_CALL").is_some() {
                     eprintln!(
