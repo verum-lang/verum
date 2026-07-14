@@ -1841,27 +1841,42 @@ pub(in super::super) fn handle_ffi_extended(
                     match bare {
                         "pthread_create" if arg_count == 4 => {
                             // (thread_out, attr, start_routine, arg)
-                            // The start routine reaches us either as a
-                            // FuncRef, as a plain Int carrying the
-                            // function id, or as a zero-capture closure
-                            // object (NewClosure is how codegen passes
-                            // named fns to higher-order sites).
+                            // The start routine reaches us as a libffi
+                            // TRAMPOLINE pointer (CreateCallback runs
+                            // before this call) — resolve it back to
+                            // the Verum fn through the trampoline
+                            // registry's reverse map.  FuncRef /
+                            // plain-id / closure-object forms are
+                            // handled for the non-callback shapes.
                             let func_val = args[2];
-                            let ret = if func_val.is_ptr() && !func_val.is_nil() {
+                            let raw_bits =
+                                (func_val.to_bits() & crate::value::PAYLOAD_MASK) as usize;
+                            let trampoline_fn_id = state
+                                .ffi_runtime
+                                .as_ref()
+                                .and_then(|rt| rt.callback_fn_id_for_code_ptr(raw_bits));
+                            let ret = if let Some(fn_id) = trampoline_fn_id {
+                                super::super::call_function_sync(
+                                    state,
+                                    crate::module::FunctionId(fn_id),
+                                    &[args[3]],
+                                )?
+                            } else if func_val.is_func_ref() {
+                                super::super::call_function_sync(
+                                    state,
+                                    func_val.as_func_id(),
+                                    &[args[3]],
+                                )?
+                            } else if func_val.is_ptr() && !func_val.is_nil() {
                                 super::super::call_closure_sync(
                                     state,
                                     func_val,
                                     &[args[3]],
                                 )?
                             } else {
-                                let func_id = if func_val.is_func_ref() {
-                                    func_val.as_func_id()
-                                } else {
-                                    crate::module::FunctionId(func_val.as_i64() as u32)
-                                };
                                 super::super::call_function_sync(
                                     state,
-                                    func_id,
+                                    crate::module::FunctionId(func_val.as_i64() as u32),
                                     &[args[3]],
                                 )?
                             };

@@ -340,6 +340,22 @@ impl TrampolineRegistry {
     ///
 
     /// This pointer can be passed to C code as a function pointer.
+    /// Resolve the VBC function id behind a trampoline CODE POINTER.
+    ///
+
+    /// THREAD-EAGER-TIER0-1 consumer: a baked `pthread_create(...,
+    /// thread_entry, ...)` reaches the Tier-0 intercept carrying the
+    /// libffi trampoline pointer produced by `CreateCallback` — not a
+    /// FuncRef or closure object.  The eager path resolves it back to
+    /// the Verum function through this reverse map instead of
+    /// misreading executable memory as a closure header.
+    pub fn fn_id_for_code_ptr(&self, code_ptr: usize) -> Option<u32> {
+        let id = self.code_ptr_to_id.get(&code_ptr)?;
+        self.callbacks
+            .get(id)
+            .map(|cb| cb.context.function_id)
+    }
+
     pub fn get_code_ptr(&self, id: TrampolineId) -> Option<*const ()> {
         self.callbacks.get(&id).map(|cb| cb.code_ptr)
     }

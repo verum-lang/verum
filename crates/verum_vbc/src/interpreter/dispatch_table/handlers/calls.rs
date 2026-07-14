@@ -1946,6 +1946,17 @@ fn try_dispatch_intrinsic_by_name(
             };
             let func_val = get_arg(state, func_idx);
             let arg_val = get_arg(state, arg_idx);
+            if std::env::var_os("VERUM_TRACE_POOL").is_some() {
+                eprintln!(
+                    "[pool] submit func_val tag={:?} bits={:#x} is_ptr={} is_func_ref={} is_int={} arg tag={:?}",
+                    func_val.tag(),
+                    func_val.to_bits(),
+                    func_val.is_ptr(),
+                    func_val.is_func_ref(),
+                    func_val.is_int(),
+                    arg_val.tag(),
+                );
+            }
             // `func as Int` reaches us as a FuncRef, as a plain Int
             // holding the function id, or as a zero-capture closure
             // object (NewClosure is how codegen passes named fns to
@@ -1979,6 +1990,14 @@ fn try_dispatch_intrinsic_by_name(
                     )?
                 }
             };
+            if std::env::var_os("VERUM_TRACE_POOL").is_some() {
+                eprintln!(
+                    "[pool] submit result tag={:?} bits={:#x} as_int={}",
+                    result.tag(),
+                    result.to_bits(),
+                    result.as_integer_compatible(),
+                );
+            }
             // The task contract is fn(Int) -> Int; the callee's return
             // may arrive as a BOXED int (uniform-i64 register slots) —
             // normalize through the canonical unboxer, never raw bits.
