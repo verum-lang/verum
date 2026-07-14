@@ -1,0 +1,110 @@
+// =============================================================================
+// core-tests/runtime/stack_alloc/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for the bump allocator's accounting state machine.
+//
+// Sampling rationale: allocation sizes sweep the alignment-interesting
+// set {1, 7, 8, 9, 16, 63, 64} — byte-odd, word-boundary, and
+// word-crossing sizes — inside a 1 KiB buffer.  Laws quantify over the
+// sweep; the domain of interest (alignment interactions) is covered
+// exhaustively at word granularity.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.stack_alloc.{StackAllocator, StackSavepoint};
+mount mem.{Layout};
+
+fn sizes() -> List<Int> { [1, 7, 8, 9, 16, 63, 64] }
+
+// LAW: used() + remaining() == capacity() — conservation, at every
+// point of any allocation sequence.
+@test
+fn law_used_plus_remaining_is_capacity() {
+    let mut a = StackAllocator<1024>.new();
+    for s in sizes().iter() {
+        let _ = a.alloc(Layout.from_size_align(*s, 8));
+        assert_eq(a.used() + a.remaining(), a.capacity(),
+            "conservation broken after alloc");
+    }
+}
+
+// LAW: watermark is the running MAXIMUM of used() — never decreases,
+// always >= used().
+@test
+fn law_watermark_is_running_max() {
+    let mut a = StackAllocator<1024>.new();
+    let mut prev_watermark = 0;
+    for s in sizes().iter() {
+        let _ = a.alloc(Layout.from_size_align(*s, 8));
+        assert(a.watermark() >= a.used(), "watermark below used");
+        assert(a.watermark() >= prev_watermark, "watermark decreased");
+        prev_watermark = a.watermark();
+    }
+    a.reset();
+    assert_eq(a.watermark(), prev_watermark, "reset must keep the watermark");
+}
+
+// LAW: save/restore is idempotent — restoring the same savepoint twice
+// leaves the same state.
+@test
+fn law_restore_idempotent() {
+    let mut a = StackAllocator<1024>.new();
+    let _ = a.alloc(Layout.from_size_align(64, 8));
+    let sp = a.save();
+    let _ = a.alloc(Layout.from_size_align(128, 8));
+    a.restore(sp);
+    let used_once = a.used();
+    let count_once = a.alloc_count();
+    a.restore(sp);
+    assert_eq(a.used(), used_once, "second restore changed used()");
+    assert_eq(a.alloc_count(), count_once, "second restore changed alloc_count()");
+}
+
+// LAW: restore composes — nested savepoints rewind LIFO.
+@test
+fn law_nested_savepoints_lifo() {
+    let mut a = StackAllocator<1024>.new();
+    let sp0 = a.save();
+    let _ = a.alloc(Layout.from_size_align(32, 8));
+    let sp1 = a.save();
+    let _ = a.alloc(Layout.from_size_align(32, 8));
+    a.restore(sp1);
+    assert_eq(a.used(), 32, "inner restore rewinds to inner mark");
+    a.restore(sp0);
+    assert_eq(a.used(), 0, "outer restore rewinds to outer mark");
+}
+
+// LAW: alignment invariant — after any align-A allocation the region
+// start was A-aligned, observable as used() % A == size % A... probe
+// via the conservative check: an align-8 alloc from an odd top always
+// lands used() on top+pad+size where pad < 8.
+@test
+fn law_alignment_pad_bounded() {
+    for s in sizes().iter() {
+        let mut a = StackAllocator<1024>.new();
+        let _ = a.alloc(Layout.from_size_align(1, 1)); // used = 1 (odd top)
+        let before = a.used();
+        let r = a.alloc(Layout.from_size_align(*s, 8));
+        assert(r.is_ok());
+        let pad = a.used() - before - *s;
+        assert(pad >= 0, "negative padding");
+        assert(pad < 8, "padding must be < align");
+    }
+}
+
+// LAW: exhaustion is stable — after an OOM failure the allocator still
+// serves requests that DO fit.
+@test
+fn law_oom_recoverable() {
+    let mut a = StackAllocator<128>.new();
+    let _ = a.alloc(Layout.from_size_align(64, 8));
+    let too_big = a.alloc(Layout.from_size_align(128, 8));
+    assert(too_big.is_err());
+    let fits = a.alloc(Layout.from_size_align(32, 8));
+    assert(fits.is_ok(), "allocator must keep serving after an OOM");
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

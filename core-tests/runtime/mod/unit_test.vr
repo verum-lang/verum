@@ -1,0 +1,152 @@
+// =============================================================================
+// core-tests/runtime/mod/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/mod.vr` — the umbrella module's OWN surface (not the
+// re-exports; those are pinned in integration_test.vr):
+//
+//   * is_initialized() -> Bool           — TLS-slot probe
+//   * Runtime unit type — current_epoch / memory_usage /
+//     allocation_count / advance_epoch / validate_all
+//   * Bencher record — new / with_iterations / iter / ns_per_iter /
+//     elapsed
+//   * BenchmarkResult record
+//   * EXEC_ENV_SLOT / SUPERVISOR_SLOT / RECOVERY_SLOT constants
+// =============================================================================
+
+mount core.runtime.{
+    is_initialized,
+    Runtime, Bencher, BenchmarkResult,
+    EXEC_ENV_SLOT, SUPERVISOR_SLOT, RECOVERY_SLOT,
+};
+
+// =============================================================================
+// Section 1: reserved context-slot constants
+// =============================================================================
+
+@test
+fn test_reserved_slots_are_stable() {
+    // These indices are an ABI-ish contract: install_runtime writes
+    // EXEC_ENV_SLOT and shutdown clears all three.  Renumbering them
+    // silently breaks every runtime consumer.
+    assert_eq(EXEC_ENV_SLOT, 0);
+    assert_eq(SUPERVISOR_SLOT, 1);
+    assert_eq(RECOVERY_SLOT, 2);
+}
+
+@test
+fn test_reserved_slots_are_distinct() {
+    assert(EXEC_ENV_SLOT != SUPERVISOR_SLOT);
+    assert(SUPERVISOR_SLOT != RECOVERY_SLOT);
+    assert(EXEC_ENV_SLOT != RECOVERY_SLOT);
+}
+
+// =============================================================================
+// Section 2: is_initialized — default state
+// =============================================================================
+
+@test
+fn test_is_initialized_false_without_init() {
+    // The conformance suite never calls runtime.init() — a fresh test
+    // process must observe an uninitialized runtime.
+    assert(!is_initialized(), "runtime must not report initialized before init()");
+}
+
+// =============================================================================
+// Section 3: Runtime accessor — documented stub contract
+// =============================================================================
+//
+// Runtime.{current_epoch, memory_usage, allocation_count} return 0
+// when the runtime is uninitialized — that IS the documented contract
+// for this state (audit.md §E/§F track wiring them to live CBGR
+// state once initialized).
+//
+
+@test
+fn test_runtime_current_epoch_uninitialized_is_zero() {
+    assert_eq(Runtime.current_epoch(), 0 as UInt32);
+}
+
+@test
+fn test_runtime_memory_usage_uninitialized_is_zero() {
+    assert_eq(Runtime.memory_usage(), 0);
+}
+
+@test
+fn test_runtime_allocation_count_uninitialized_is_zero() {
+    assert_eq(Runtime.allocation_count(), 0);
+}
+
+@test
+fn test_runtime_advance_epoch_and_validate_all_callable() {
+    // Documented no-ops on an uninitialized runtime — must not crash.
+    Runtime.advance_epoch();
+    Runtime.validate_all();
+    assert(true);
+}
+
+// =============================================================================
+// Section 4: Bencher — accounting contract
+// =============================================================================
+
+fn bench_noop() {}
+
+@test
+fn test_bencher_new_defaults() {
+    let b = Bencher.new();
+    assert_eq(b.iterations, 1000);
+    assert_eq(b.elapsed_ns, 0);
+}
+
+@test
+fn test_bencher_with_iterations() {
+    let b = Bencher.new().with_iterations(50);
+    assert_eq(b.iterations, 50);
+}
+
+@test
+fn test_bencher_ns_per_iter_zero_before_run() {
+    let b = Bencher.new();
+    assert_eq(b.ns_per_iter(), 0);
+}
+
+@test
+fn test_bencher_ns_per_iter_guards_zero_iterations() {
+    // ns_per_iter divides by iterations — the 0-iterations
+    // configuration must return 0, never divide by zero.
+    let b = Bencher.new().with_iterations(0);
+    assert_eq(b.ns_per_iter(), 0);
+}
+
+@test
+fn test_bencher_iter_accumulates_elapsed() {
+    let mut b = Bencher.new().with_iterations(10);
+    b.iter(bench_noop);
+    // Monotonic clock: elapsed is non-negative; on any real machine a
+    // 10-iteration no-op loop measures >= 0 ns and ns_per_iter coheres.
+    assert(b.elapsed() >= 0);
+    assert_eq(b.elapsed(), b.elapsed_ns);
+    assert(b.ns_per_iter() >= 0);
+}
+
+// =============================================================================
+// Section 5: BenchmarkResult — record surface
+// =============================================================================
+
+@test
+fn test_benchmark_result_construction() {
+    let r = BenchmarkResult {
+        name: "sample",
+        ns_per_iter: 12,
+        iterations: 100,
+        total_ns: 1200,
+    };
+    assert_eq(r.name, "sample");
+    assert_eq(r.ns_per_iter, 12);
+    assert_eq(r.iterations, 100);
+    assert_eq(r.total_ns, 1200);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

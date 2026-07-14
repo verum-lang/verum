@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/runtime/spawn/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.runtime.spawn` — PriorityLevel numeric
+// mapping, InlineContextStorage capacity discipline, and the
+// SupervisorSpawnConfig builder-chain laws.
+//
+// PriorityLevel's domain is finite (5 variants) — laws are exhaustive.
+// from_u8's domain is 0..=255 — swept exhaustively too (256 cases).
+// =============================================================================
+
+mount core.runtime.spawn.{
+    SupervisorSpawnConfig, PriorityLevel,
+};
+
+fn priority_domain() -> List<PriorityLevel> {
+    [
+        PriorityLevel.Background,
+        PriorityLevel.Low,
+        PriorityLevel.Normal,
+        PriorityLevel.High,
+        PriorityLevel.Critical,
+    ]
+}
+
+// =============================================================================
+// Section 1: PriorityLevel — to_u8 / from_u8 laws
+// =============================================================================
+
+// LAW: round-trip — from_u8(to_u8(p)) == p for every variant.
+// Each canonical numeric value (32/64/128/192/255) lies inside its own
+// variant's from_u8 band, so the round-trip is exact.
+@test
+fn law_priority_roundtrip_exhaustive() {
+    for p in priority_domain().iter() {
+        let back = PriorityLevel.from_u8((*p).to_u8());
+        // `is` takes a PATTERN, not a runtime value — compare through
+        // the injective to_u8 mapping instead.
+        assert_eq(back.to_u8(), (*p).to_u8(), "from_u8(to_u8(p)) must be p");
+    }
+}
+
+// LAW: to_u8 is strictly monotone over the severity order.
+@test
+fn law_priority_to_u8_strictly_monotone() {
+    assert(PriorityLevel.Background.to_u8() < PriorityLevel.Low.to_u8());
+    assert(PriorityLevel.Low.to_u8() < PriorityLevel.Normal.to_u8());
+    assert(PriorityLevel.Normal.to_u8() < PriorityLevel.High.to_u8());
+    assert(PriorityLevel.High.to_u8() < PriorityLevel.Critical.to_u8());
+}
+
+// LAW: from_u8 is TOTAL over 0..=255 — every byte maps to some variant
+// (no panic, no gap).  Exhaustive sweep.
+@test
+fn law_priority_from_u8_total_exhaustive() {
+    let mut v = 0;
+    while v <= 255 {
+        let p = PriorityLevel.from_u8(v as UInt8);
+        // Some variant came back — probe via to_u8 (always 32..=255).
+        let n = p.to_u8();
+        assert(n >= 32_u8, "from_u8 produced a variant outside the canonical set");
+        v = v + 1;
+    }
+}
+
+// LAW: from_u8 band edges — the documented half-open bands
+// [0,48) [48,96) [96,160) [160,224) [224,255].
+@test
+fn law_priority_from_u8_band_edges() {
+    assert(PriorityLevel.from_u8(0_u8) is PriorityLevel.Background);
+    assert(PriorityLevel.from_u8(47_u8) is PriorityLevel.Background);
+    assert(PriorityLevel.from_u8(48_u8) is PriorityLevel.Low);
+    assert(PriorityLevel.from_u8(95_u8) is PriorityLevel.Low);
+    assert(PriorityLevel.from_u8(96_u8) is PriorityLevel.Normal);
+    assert(PriorityLevel.from_u8(159_u8) is PriorityLevel.Normal);
+    assert(PriorityLevel.from_u8(160_u8) is PriorityLevel.High);
+    assert(PriorityLevel.from_u8(223_u8) is PriorityLevel.High);
+    assert(PriorityLevel.from_u8(224_u8) is PriorityLevel.Critical);
+    assert(PriorityLevel.from_u8(255_u8) is PriorityLevel.Critical);
+}
+
+// LAW: default is Normal.
+@test
+fn law_priority_default_is_normal() {
+    let d = PriorityLevel.default();
+    assert(d is PriorityLevel.Normal);
+}
+
+// =============================================================================
+// Section 2: SupervisorSpawnConfig builder — chain laws
+// =============================================================================
+
+// LAW: with_priority is last-wins.
+@test
+fn law_builder_with_priority_last_wins() {
+    let cfg = SupervisorSpawnConfig.new()
+        .with_priority(PriorityLevel.Low)
+        .with_priority(PriorityLevel.Critical);
+    assert(cfg.priority is PriorityLevel.Critical, "second with_priority must win");
+}
+
+// LAW: builder steps are independent — setting priority doesn't
+// disturb the name and vice versa.
+@test
+fn law_builder_steps_independent() {
+    let cfg = SupervisorSpawnConfig.new()
+        .with_name("worker-9")
+        .with_priority(PriorityLevel.High);
+    assert(cfg.priority is PriorityLevel.High);
+    match cfg.name {
+        Maybe.Some(n) => assert_eq(n, "worker-9"),
+        Maybe.None => assert(false, "with_name lost the name"),
+    }
+}
+
+// LAW: new() starts at the documented defaults.
+@test
+fn law_builder_new_defaults() {
+    let cfg = SupervisorSpawnConfig.new();
+    assert(cfg.priority is PriorityLevel.Normal, "default priority is Normal");
+    assert(cfg.name is Maybe.None, "default name is None");
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

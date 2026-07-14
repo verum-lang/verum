@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/runtime/async_ops/integration_test.vr
+// =============================================================================
+//
+// LIVE surface of the async-ops intrinsic layer — the global-handle
+// getters and the sleep pair.  These intrinsics were migrated off the
+// removed LibraryCall strategy onto typed dispatch (see
+// crates/verum_vbc/CLAUDE.md — the historical 14-intrinsic backlog);
+// this file pins that they stay CALLABLE and behave per contract under
+// both tiers.  Task-spawn / poll flows need live futures — covered by
+// core-tests/async/.
+// =============================================================================
+
+mount core.runtime.async_ops.{
+    default_executor, global_allocator, default_io_driver,
+    shared_registry_global, middleware_chain_empty,
+    async_sleep_ms,
+    ExecutorHandle, AllocHandle, IODriverHandle,
+    SharedRegistryOpaque, MiddlewareChainOpaque,
+};
+mount sys.{monotonic_nanos};
+
+// =============================================================================
+// Section 1: global-handle getters — callable, typed, stable
+// =============================================================================
+
+@test
+fn test_default_executor_callable() {
+    let e: ExecutorHandle = default_executor();
+    let _ = e;
+    assert(true);
+}
+
+@test
+fn test_global_allocator_callable() {
+    let a: AllocHandle = global_allocator();
+    let _ = a;
+    assert(true);
+}
+
+@test
+fn test_default_io_driver_callable() {
+    let d: IODriverHandle = default_io_driver();
+    let _ = d;
+    assert(true);
+}
+
+@test
+fn test_shared_registry_global_callable() {
+    let r: SharedRegistryOpaque = shared_registry_global();
+    let _ = r;
+    assert(true);
+}
+
+@test
+fn test_middleware_chain_empty_callable() {
+    let m: MiddlewareChainOpaque = middleware_chain_empty();
+    let _ = m;
+    assert(true);
+}
+
+// =============================================================================
+// Section 2: async_sleep_ms — timing contract
+// =============================================================================
+
+@test
+fn test_async_sleep_zero_is_no_op() {
+    // Zero sleep must return promptly and not crash.
+    async_sleep_ms(0);
+    assert(true);
+}
+
+@test
+fn test_async_sleep_ms_lower_bound() {
+    let start = monotonic_nanos();
+    async_sleep_ms(5);
+    let elapsed = monotonic_nanos() - start;
+    assert(elapsed >= 5_000_000, "async_sleep_ms(5) returned before 5ms elapsed");
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
