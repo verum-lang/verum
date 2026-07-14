@@ -10665,7 +10665,15 @@ fn lower_call<'ctx>(
                         "__tcp_listen_raw" => ("verum_tcp_listen", "II", &[10]), // port, backlog
                         "__tcp_accept_raw" => ("verum_tcp_accept", "I", &[]),    // fd
                         "__tcp_send_raw" => ("verum_tcp_send_text", "II", &[]),  // fd, text_handle
-                        "__tcp_recv_raw" => ("verum_tcp_recv_text", "I", &[]),   // fd
+                        // HELPER-SIGNATURE-AUTHORITY-1: canonical
+                        // verum_tcp_recv_text is (fd, max_len) — the
+                        // legacy 1-slot shape pre-declared the helper
+                        // 1-param and emit_tcp_recv_text's 2-param body
+                        // aborted the whole lowering at
+                        // get_nth_param(1) (the r15 residue of the
+                        // 453/472 regression). Default max_len mirrors
+                        // the intrinsic-key arm (4096).
+                        "__tcp_recv_raw" => ("verum_tcp_recv_text", "II", &[4096]), // fd, max_len
                         "__tcp_close_raw" => ("verum_tcp_close", "I", &[]),      // fd
                         "__udp_bind_raw" => ("verum_udp_bind", "I", &[]),        // port
                         "__udp_send_raw" => ("verum_udp_send_text", "IIPI", &[]), // fd, text, host_ptr, port
