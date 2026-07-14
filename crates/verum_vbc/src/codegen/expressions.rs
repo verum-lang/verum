@@ -36346,6 +36346,45 @@ impl VbcCodegen {
         // function-table scan below for the supported lookup
         // shapes).
         let trace = std::env::var("VERUM_TRACE_DISPLAY_DISPATCH").is_ok();
+        // Packed fixed-size arrays (`[Int; 5]`) — TYPE HONESTY gate
+        // (XMOD-BAND-FREEZE-1 #54 leg): the name-based inference below
+        // reports them as 'List', but their runtime layout is a RAW
+        // unboxed buffer stamped with the scalar element TypeId, NOT
+        // the [len,cap,backing] List record — `List.fmt` would read
+        // garbage.  No `Display for [T; N]` exists in the stdlib
+        // (only `Debug for [T]`), so route straight to the builtin
+        // `ToString` path, whose typed-array formatter leg decodes
+        // through the heap geometry authority.
+        if matches!(
+            self.infer_expr_type_kind(expr),
+            Some(verum_ast::ty::TypeKind::Array { .. })
+        ) {
+            if trace {
+                eprintln!(
+                    "[display-dispatch] fixed-size array expr — builtin ToString (packed layout)"
+                );
+            }
+            return Ok(false);
+        }
+        // Same gate for VARIABLE references: the name-based inference
+        // below erases packedness (a `let vec: [Int; 5]` records a
+        // 'List'-normalised type name), but the packed-layout decision
+        // itself is a carried fact — `mark_typed_array_var` /
+        // `byte_array_vars` at the let-binding.  Consult that SAME
+        // authority instead of the name shape.
+        if let ExprKind::Path(path) = &expr.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ident) = &path.segments[0]
+            && self.ctx.get_typed_array_elem_size(&ident.name).is_some()
+        {
+            if trace {
+                eprintln!(
+                    "[display-dispatch] '{}' is a packed typed-array var — builtin ToString",
+                    ident.name
+                );
+            }
+            return Ok(false);
+        }
         // Step 1: infer the expression's static type.  Strip generic
         // args because the codegen registers Display impls under the
         // unparameterised base name (`Result.fmt`, not `Result<T,E>.fmt`).
@@ -36556,27 +36595,52 @@ impl VbcCodegen {
                         .as_ref()
                         .map(|n| n.as_str() == "Display" || n.ends_with(".Display"))
                         .unwrap_or(false);
-                    if is_display
-                        && let Some(&fid) = proto_impl.methods.first()
-                        && fid != u32::MAX
-                    {
+                    if is_display {
+                        // SIGNAL ONLY — `ProtocolImpl.methods` carries
+                        // ARCHIVE-LOCAL FunctionIds: the lazy type
+                        // importer runs before the owning module's
+                        // bodies merge, so no fn-remap can exist at
+                        // ingest (XMOD-BAND-FREEZE-1 #54).  Trusting
+                        // `methods[0]` froze core.collections' local
+                        // `List.fmt` id into user bytecode, where the
+                        // user-link table translated it into a FOREIGN
+                        // band id (`Function 5368710xx not found`).
+                        // The registry (name + parent + arity,
+                        // FUNC-REGISTRY-QUALIFICATION-1) is the id
+                        // authority — resolved after the probe; a
+                        // registry miss leaves `display_func_id`
+                        // empty and the emit path degrades to the
+                        // dynamic `CallM` shape (name-authoritative at
+                        // runtime, same discipline as dyn dispatch).
                         display_signal = true;
-                        display_func_id = Some(fid);
                         if trace {
                             let parent_name = name_opt
                                 .as_ref()
                                 .map(|s| s.as_str())
                                 .unwrap_or("?");
                             eprintln!(
-                                "[display-dispatch] type-descriptor probe matched parent='{}' protocol='{:?}' fmt_id={}",
-                                parent_name, proto_name, fid
+                                "[display-dispatch] type-descriptor probe matched parent='{}' protocol='{:?}' (id via registry)",
+                                parent_name, proto_name
                             );
                         }
                         break;
                     }
                 }
-                if display_func_id.is_some() {
+                if display_signal {
                     break;
+                }
+            }
+            if display_signal && display_func_id.is_none() {
+                display_func_id = self
+                    .ctx
+                    .resolve_function_key(&fmt_qualified, Some(2), Some(&base))
+                    .map(|(_, info)| info.id.0)
+                    .filter(|id| *id != u32::MAX);
+                if trace {
+                    eprintln!(
+                        "[display-dispatch] registry resolution for '{}' => {:?}",
+                        fmt_qualified, display_func_id
+                    );
                 }
             }
         }
