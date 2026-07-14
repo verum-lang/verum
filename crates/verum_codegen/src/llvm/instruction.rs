@@ -9319,30 +9319,48 @@ fn lower_call<'ctx>(
         },
     };
     let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
+    // AOT-INTRINSIC-QUALIFIED-NAME-1: descriptor names arrive
+    // MODULE-QUALIFIED from the bake ("core.runtime.pool.
+    // __pool_submit_raw"), while the `__*_raw` intercept keys below
+    // are BARE.  Tier-0 normalises exactly this at its per-name
+    // dispatch (calls.rs try_dispatch_intrinsic_by_name — bare last
+    // segment, `llvm.*` kept whole); `bare_name` mirrors it for the
+    // INTERCEPT COMPARISONS ONLY — `func_name` stays qualified for the
+    // fall-through real-call resolution and the `Channel.`/`BTreeMap.`
+    // prefix routing, which depend on the dotted shape.  Pre-fix, an
+    // intra-module call of a qualified-named `@intrinsic` stub (the
+    // XMOD path already rsplit its names) lowered the EMPTY body
+    // literally — `ThreadPool.submit`/`join` compiled to a call of a
+    // const-0 shell and the whole pool AOT surface was silent-wrong.
+    let bare_name: &str = if func_name.starts_with("llvm.") {
+        func_name
+    } else {
+        func_name.rsplit('.').next().unwrap_or(func_name)
+    };
 
     // Intercept low-level process C runtime bridge functions.
     // These are simple (Int, Text) → Int functions that the Verum
     // process.vr code calls. The high-level Result wrapping happens
     // in Verum, not here.
-    if func_name == "__process_spawn_raw"
-        || func_name == "__process_spawn_full_raw"
-        || func_name == "__process_exec_raw"
-        || func_name == "__process_wait_raw"
-        || func_name == "__process_kill_raw"
-        || func_name == "__fd_read_all_raw"
-        || func_name == "__fd_read_chunk_raw"
-        || func_name == "__fd_write_all_raw"
-        || func_name == "__fd_close_raw"
-        || func_name == "__fd_close_raw_buf"
-        || func_name == "__ptr_read_i64"
-        || func_name == "__ptr_free"
+    if bare_name == "__process_spawn_raw"
+        || bare_name == "__process_spawn_full_raw"
+        || bare_name == "__process_exec_raw"
+        || bare_name == "__process_wait_raw"
+        || bare_name == "__process_kill_raw"
+        || bare_name == "__fd_read_all_raw"
+        || bare_name == "__fd_read_chunk_raw"
+        || bare_name == "__fd_write_all_raw"
+        || bare_name == "__fd_close_raw"
+        || bare_name == "__fd_close_raw_buf"
+        || bare_name == "__ptr_read_i64"
+        || bare_name == "__ptr_free"
     {
         let i64_type = ctx.types().i64_type();
         let ptr_type = ctx.types().ptr_type();
         let void_type = ctx.types().void_type();
         let module = ctx.get_module();
 
-        match func_name {
+        match bare_name {
             "__process_spawn_raw" => {
                 // __process_spawn_raw(program: Text, args_list: Int,
                 //  capture_stdout: Int, capture_stderr: Int) -> Int
@@ -9505,130 +9523,130 @@ fn lower_call<'ctx>(
     // Intercept file I/O and args bridge functions.
     // These enable the bootstrap compiler (and user code) to read files
     // and access command-line arguments without depending on stdlib module bodies.
-    if func_name == "__file_read_to_string_raw"
-    || func_name == "__file_write_string_raw"
-    || func_name == "__args_count_raw"
-    || func_name == "__arg_raw"
-    || func_name == "__mutex_new_raw"
-    || func_name == "__mutex_lock_raw"
-    || func_name == "__mutex_unlock_raw"
-    || func_name == "__mutex_trylock_raw"
-    || func_name == "__cond_new_raw"
-    || func_name == "__cond_wait_raw"
-    || func_name == "__cond_timedwait_raw"
-    || func_name == "__cond_signal_raw"
-    || func_name == "__cond_broadcast_raw"
-    || func_name == "__gen_close_raw"
-    || func_name == "__io_engine_new_raw"
-    || func_name == "__io_engine_destroy_raw"
-    || func_name == "__io_submit_raw"
-    || func_name == "__io_poll_raw"
-    || func_name == "__io_remove_raw"
-    || func_name == "__io_modify_raw"
-    || func_name == "__pool_create_raw"
-    || func_name == "__pool_submit_raw"
-    || func_name == "__pool_await_raw"
-    || func_name == "__pool_destroy_raw"
-    || func_name == "__pool_global_submit_raw"
-    || func_name == "__socket_set_nonblocking_raw"
-    || func_name == "__socket_set_blocking_raw"
-    || func_name == "__socket_set_reuseaddr_raw"
-    || func_name == "__socket_set_nodelay_raw"
-    || func_name == "__socket_set_keepalive_raw"
-    || func_name == "__socket_get_error_raw"
-    || func_name == "__async_accept_raw"
-    || func_name == "__async_read_raw"
-    || func_name == "__async_write_raw"
+    if bare_name == "__file_read_to_string_raw"
+    || bare_name == "__file_write_string_raw"
+    || bare_name == "__args_count_raw"
+    || bare_name == "__arg_raw"
+    || bare_name == "__mutex_new_raw"
+    || bare_name == "__mutex_lock_raw"
+    || bare_name == "__mutex_unlock_raw"
+    || bare_name == "__mutex_trylock_raw"
+    || bare_name == "__cond_new_raw"
+    || bare_name == "__cond_wait_raw"
+    || bare_name == "__cond_timedwait_raw"
+    || bare_name == "__cond_signal_raw"
+    || bare_name == "__cond_broadcast_raw"
+    || bare_name == "__gen_close_raw"
+    || bare_name == "__io_engine_new_raw"
+    || bare_name == "__io_engine_destroy_raw"
+    || bare_name == "__io_submit_raw"
+    || bare_name == "__io_poll_raw"
+    || bare_name == "__io_remove_raw"
+    || bare_name == "__io_modify_raw"
+    || bare_name == "__pool_create_raw"
+    || bare_name == "__pool_submit_raw"
+    || bare_name == "__pool_await_raw"
+    || bare_name == "__pool_destroy_raw"
+    || bare_name == "__pool_global_submit_raw"
+    || bare_name == "__socket_set_nonblocking_raw"
+    || bare_name == "__socket_set_blocking_raw"
+    || bare_name == "__socket_set_reuseaddr_raw"
+    || bare_name == "__socket_set_nodelay_raw"
+    || bare_name == "__socket_set_keepalive_raw"
+    || bare_name == "__socket_get_error_raw"
+    || bare_name == "__async_accept_raw"
+    || bare_name == "__async_read_raw"
+    || bare_name == "__async_write_raw"
     // LLVM intrinsic math functions (zero libc)
     // Metal GPU intrinsics — only intercept if user hasn't defined their own
-    || (func_name == "__metal_get_device"
-    || func_name == "__metal_device_name"
-    || func_name == "__metal_max_memory"
-    || func_name == "__metal_max_threads_per_threadgroup"
-    || func_name == "__metal_gpu_core_count"
-    || func_name == "__metal_alloc"
-    || func_name == "__metal_alloc_with_data"
-    || func_name == "__metal_buffer_contents"
-    || func_name == "__metal_buffer_length"
-    || func_name == "__metal_free"
-    || func_name == "__metal_compile_shader"
-    || func_name == "__metal_get_pipeline"
-    || func_name == "__metal_dispatch_1d"
-    || func_name == "__metal_dispatch_2d"
-    || func_name == "__metal_dispatch_async"
-    || func_name == "__metal_wait"
-    || func_name == "__metal_execution_time_ns"
-    || func_name == "__metal_vector_add_f32"
-    || func_name == "__metal_sgemm"
-    || func_name == "__metal_benchmark")
+    || (bare_name == "__metal_get_device"
+    || bare_name == "__metal_device_name"
+    || bare_name == "__metal_max_memory"
+    || bare_name == "__metal_max_threads_per_threadgroup"
+    || bare_name == "__metal_gpu_core_count"
+    || bare_name == "__metal_alloc"
+    || bare_name == "__metal_alloc_with_data"
+    || bare_name == "__metal_buffer_contents"
+    || bare_name == "__metal_buffer_length"
+    || bare_name == "__metal_free"
+    || bare_name == "__metal_compile_shader"
+    || bare_name == "__metal_get_pipeline"
+    || bare_name == "__metal_dispatch_1d"
+    || bare_name == "__metal_dispatch_2d"
+    || bare_name == "__metal_dispatch_async"
+    || bare_name == "__metal_wait"
+    || bare_name == "__metal_execution_time_ns"
+    || bare_name == "__metal_vector_add_f32"
+    || bare_name == "__metal_sgemm"
+    || bare_name == "__metal_benchmark")
     && ctx.get_module().get_function(func_name).map_or(true, |f| f.count_basic_blocks() == 0)
     // LLVM intrinsic math functions (zero libc)
-    || func_name == "__llvm_sqrt"
-    || func_name == "__llvm_sin"
-    || func_name == "__llvm_cos"
-    || func_name == "__llvm_exp"
-    || func_name == "__llvm_log"
-    || func_name == "__llvm_pow"
-    || func_name == "__llvm_fabs"
-    || func_name == "__llvm_floor"
-    || func_name == "__llvm_ceil"
-    || func_name == "__llvm_round"
-    || func_name == "__llvm_copysign"
-    || func_name == "__llvm_fma"
-    || func_name == "__llvm_minnum"
-    || func_name == "__llvm_maxnum"
+    || bare_name == "__llvm_sqrt"
+    || bare_name == "__llvm_sin"
+    || bare_name == "__llvm_cos"
+    || bare_name == "__llvm_exp"
+    || bare_name == "__llvm_log"
+    || bare_name == "__llvm_pow"
+    || bare_name == "__llvm_fabs"
+    || bare_name == "__llvm_floor"
+    || bare_name == "__llvm_ceil"
+    || bare_name == "__llvm_round"
+    || bare_name == "__llvm_copysign"
+    || bare_name == "__llvm_fma"
+    || bare_name == "__llvm_minnum"
+    || bare_name == "__llvm_maxnum"
     // LLVM intrinsic memory operations (zero libc)
-    || func_name == "__llvm_memcpy"
-    || func_name == "__llvm_memset"
-    || func_name == "__llvm_memmove"
+    || bare_name == "__llvm_memcpy"
+    || bare_name == "__llvm_memset"
+    || bare_name == "__llvm_memmove"
     // Raw byte load/store
-    || func_name == "__load_byte"
-    || func_name == "__store_byte"
-    || func_name == "__load_i64"
-    || func_name == "__store_i64"
-    || func_name == "__load_i32"
-    || func_name == "__store_i32"
-    || func_name == "__file_open_raw"
-    || func_name == "__file_close_raw"
-    || func_name == "__file_size_raw"
-    || func_name == "__file_seek_raw"
-    || func_name == "__file_delete_raw"
-    || func_name == "__mkdir_raw"
-    || func_name == "__time_now_ms_raw"
-    || func_name == "__alloc_raw"
-    || func_name == "__alloc_zeroed_raw"
-    || func_name == "__dealloc_raw"
-    || func_name == "__tcp_connect_raw"
-    || func_name == "__tcp_listen_raw"
-    || func_name == "__tcp_accept_raw"
-    || func_name == "__tcp_send_raw"
-    || func_name == "__tcp_recv_raw"
-    || func_name == "__tcp_close_raw"
-    || func_name == "__udp_bind_raw"
-    || func_name == "__udp_send_raw"
-    || func_name == "__udp_recv_raw"
-    || func_name == "__udp_close_raw"
-    || func_name == "__ctx_get_raw"
-    || func_name == "__ctx_provide_raw"
-    || func_name == "__ctx_end_raw"
-    || func_name == "__defer_push_raw"
-    || func_name == "__defer_pop_raw"
-    || func_name == "__defer_run_to_raw"
-    || func_name == "__defer_depth_raw"
-    || func_name == "__waitgroup_new_raw"
-    || func_name == "__waitgroup_add_raw"
-    || func_name == "__waitgroup_done_raw"
-    || func_name == "__waitgroup_wait_raw"
-    || func_name == "__waitgroup_destroy_raw"
-    || func_name == "__time_monotonic_nanos_raw"
-    || func_name == "__time_sleep_nanos_raw"
+    || bare_name == "__load_byte"
+    || bare_name == "__store_byte"
+    || bare_name == "__load_i64"
+    || bare_name == "__store_i64"
+    || bare_name == "__load_i32"
+    || bare_name == "__store_i32"
+    || bare_name == "__file_open_raw"
+    || bare_name == "__file_close_raw"
+    || bare_name == "__file_size_raw"
+    || bare_name == "__file_seek_raw"
+    || bare_name == "__file_delete_raw"
+    || bare_name == "__mkdir_raw"
+    || bare_name == "__time_now_ms_raw"
+    || bare_name == "__alloc_raw"
+    || bare_name == "__alloc_zeroed_raw"
+    || bare_name == "__dealloc_raw"
+    || bare_name == "__tcp_connect_raw"
+    || bare_name == "__tcp_listen_raw"
+    || bare_name == "__tcp_accept_raw"
+    || bare_name == "__tcp_send_raw"
+    || bare_name == "__tcp_recv_raw"
+    || bare_name == "__tcp_close_raw"
+    || bare_name == "__udp_bind_raw"
+    || bare_name == "__udp_send_raw"
+    || bare_name == "__udp_recv_raw"
+    || bare_name == "__udp_close_raw"
+    || bare_name == "__ctx_get_raw"
+    || bare_name == "__ctx_provide_raw"
+    || bare_name == "__ctx_end_raw"
+    || bare_name == "__defer_push_raw"
+    || bare_name == "__defer_pop_raw"
+    || bare_name == "__defer_run_to_raw"
+    || bare_name == "__defer_depth_raw"
+    || bare_name == "__waitgroup_new_raw"
+    || bare_name == "__waitgroup_add_raw"
+    || bare_name == "__waitgroup_done_raw"
+    || bare_name == "__waitgroup_wait_raw"
+    || bare_name == "__waitgroup_destroy_raw"
+    || bare_name == "__time_monotonic_nanos_raw"
+    || bare_name == "__time_sleep_nanos_raw"
     || func_name == "ilog2"
     {
         let i64_type = ctx.types().i64_type();
         let ptr_type = ctx.types().ptr_type();
         let module = ctx.get_module();
 
-        match func_name {
+        match bare_name {
             "__file_read_to_string_raw" => {
                 // __file_read_to_string_raw(path: Text) -> Text
                 // Extract char* from Text path arg via verum_text_get_ptr
@@ -10107,14 +10125,14 @@ fn lower_call<'ctx>(
                         .into(),
                     );
                 }
-                let c_name = if func_name == "__metal_dispatch_1d" {
+                let c_name = if bare_name == "__metal_dispatch_1d" {
                     "verum_metal_dispatch_1d"
                 } else {
                     "verum_metal_dispatch_async"
                 };
                 let param_types: Vec<BasicMetadataTypeEnum> =
                     (0..5).map(|_| i64_type.into()).collect();
-                if func_name == "__metal_dispatch_1d" {
+                if bare_name == "__metal_dispatch_1d" {
                     let void_type = ctx.types().void_type();
                     let fn_type = void_type.fn_type(&param_types, false);
         let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
@@ -10558,7 +10576,7 @@ fn lower_call<'ctx>(
 
             "__alloc_raw" | "__alloc_zeroed_raw" => {
                 let size_val = ctx.get_register(args.start.0)?;
-                let c_name = if func_name == "__alloc_raw" {
+                let c_name = if bare_name == "__alloc_raw" {
                     "verum_alloc"
                 } else {
                     "verum_alloc_zeroed"
@@ -10625,7 +10643,7 @@ fn lower_call<'ctx>(
                 // 'P' = pointer (host string), 'I' = i64 (fd, port, len, ...).
                 // The string encodes the canonical parameter shape.
                 let (c_name, canonical_shape, default_padding): (&str, &str, &[i64]) =
-                    match func_name {
+                    match bare_name {
                         "__tcp_connect_raw" => ("verum_tcp_connect", "PI", &[]), // host_ptr, port
                         "__tcp_listen_raw" => ("verum_tcp_listen", "II", &[10]), // port, backlog
                         "__tcp_accept_raw" => ("verum_tcp_accept", "I", &[]),    // fd
@@ -10701,7 +10719,7 @@ fn lower_call<'ctx>(
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
                 ctx.set_register(dst.0, result);
                 // Mark text return types
-                if func_name == "__tcp_recv_raw" || func_name == "__udp_recv_raw" {
+                if bare_name == "__tcp_recv_raw" || bare_name == "__udp_recv_raw" {
                     ctx.mark_text_register(dst.0);
                 }
                 return Ok(());
@@ -11456,10 +11474,14 @@ fn lower_call<'ctx>(
     // present.  This means callers from `core/intrinsics/runtime/os.vr`
     // (which use `__file_open_raw` etc.) reach the same AOT helper
     // as callers that import the bare intrinsic directly.
-    let intrinsic_key: &str = if func_name.starts_with("__") && func_name.ends_with("_raw") {
-        &func_name[2..func_name.len() - 4]
+    // AOT-INTRINSIC-QUALIFIED-NAME-1: key off the BARE segment so a
+    // module-qualified `sys.time_ops.__time_now_ms_raw` reaches the
+    // same helper as the bare form (Tier-0's dispatch already
+    // normalises this way).
+    let intrinsic_key: &str = if bare_name.starts_with("__") && bare_name.ends_with("_raw") {
+        &bare_name[2..bare_name.len() - 4]
     } else {
-        func_name
+        bare_name
     };
 
     if intrinsic_key == "file_open"
