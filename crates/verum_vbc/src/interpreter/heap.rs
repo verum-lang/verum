@@ -365,6 +365,45 @@ pub unsafe fn typed_array_element(
     })
 }
 
+/// Write dual of [`typed_array_element`] — encode one boxed `Value`
+/// into a packed typed array slot.  Mirrors `handle_set_index`'s
+/// per-width legs exactly: integer widths truncate `as_i64`, floats
+/// store their IEEE-754 bit pattern (F64 falls back to the raw value
+/// bits when the slot receives an already-unboxed pattern, F32
+/// narrows through `as f32`).
+///
+/// # Safety
+/// Same contract as [`typed_array_element`], with WRITE access to the
+/// element range.
+pub unsafe fn typed_array_store_element(
+    tid: crate::types::TypeId,
+    data_ptr: *mut u8,
+    idx: usize,
+    value: Value,
+) -> Option<()> {
+    let (stride, is_float) = typed_array_element_spec(tid)?;
+    let at = unsafe { data_ptr.add(idx * stride) };
+    match (stride, is_float) {
+        (1, false) => unsafe { *at = value.as_i64() as u8 },
+        (2, false) => unsafe { *(at as *mut u16) = value.as_i64() as u16 },
+        (4, false) => unsafe { *(at as *mut i32) = value.as_i64() as i32 },
+        (8, false) => unsafe { *(at as *mut i64) = value.as_i64() },
+        (8, true) => {
+            let bits = value
+                .try_as_f64()
+                .map(|f| f.to_bits())
+                .unwrap_or_else(|| value.bits());
+            unsafe { *(at as *mut u64) = bits };
+        }
+        (4, true) => {
+            let bits = (value.try_as_f64().unwrap_or(0.0) as f32).to_bits();
+            unsafe { *(at as *mut u32) = bits };
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
 pub fn value_as_byte_slice(v: &Value) -> Option<(*mut u8, u64)> {
     if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
         return None;

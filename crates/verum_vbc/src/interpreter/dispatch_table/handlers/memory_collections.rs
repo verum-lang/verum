@@ -1023,109 +1023,29 @@ pub(in super::super) fn handle_get_index(
             // Non-range: index must be an integer
             let index = idx_val.as_i64();
 
-            if header.type_id == TypeId::U8 {
-                // Byte array - elements are raw bytes, 1 byte each
-                let element_count = header_size;
-
+            if let Some((stride, _is_float)) =
+                heap::typed_array_element_spec(header.type_id)
+            {
+                // TYPED-ARRAY-ITER-1 unification: the six per-width
+                // read legs collapsed onto the ONE element authority
+                // shared with the iterator protocol
+                // (`heap::typed_array_element{_spec,}`) — geometry and
+                // decode can no longer drift between indexed reads and
+                // iteration.
+                let element_count = header_size / stride;
                 if index < 0 || index as usize >= element_count {
                     return Err(InterpreterError::IndexOutOfBounds {
                         index,
                         length: element_count,
                     });
                 }
-
-                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + index as usize) };
-                let byte_value = unsafe { *data_ptr };
-                state.set_reg(dst, Value::from_i64(byte_value as i64));
-            } else if header.type_id == TypeId::U16 {
-                // 16-bit typed array
-                let element_count = header_size / 2;
-                if index < 0 || index as usize >= element_count {
-                    return Err(InterpreterError::IndexOutOfBounds {
-                        index,
-                        length: element_count,
-                    });
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+                // SAFETY: bounds-checked against header_size/stride above.
+                let element = unsafe {
+                    heap::typed_array_element(header.type_id, data_ptr, index as usize)
                 }
-                let data_ptr = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 2) as *const u16
-                };
-                state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
-            } else if header.type_id == TypeId::U32 {
-                // 32-bit typed array (UInt32 / Int32 / Float32 storage).
-                //
-
-                // Root fix for Issue #2 (third code path, after the FatRef
-                // branch above and `DerefRaw` in `ffi_extended.rs`): read as
-                // `*const u32` and zero-extend into the i64 NaN-box slot. The
-                // prior `i32 as i64` cast sign-extended any element whose
-                // bit 31 was set, which propagated 0xFFFFFFFF into the upper
-                // half of subsequent shift/XOR results — the canonical
-                // symptom being a `[UInt32; 256]` CRC32 table lookup
-                // returning a "negative" i64 representation of the same bits.
-                //
-
-                // Callers needing signed-32 semantics can truncate at the use
-                // site (`as i32`); zero-extension is the invariant-preserving
-                // default for unsigned raw storage, matching the policy used
-                // in `handle_get_index`'s FatRef branch and `DerefRaw`.
-                let element_count = header_size / 4;
-                if index < 0 || index as usize >= element_count {
-                    return Err(InterpreterError::IndexOutOfBounds {
-                        index,
-                        length: element_count,
-                    });
-                }
-                let data_ptr = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *const u32
-                };
-                state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
-            } else if header.type_id == TypeId::U64 {
-                // 64-bit integer typed array (Int64 / UInt64).
-                let element_count = header_size / 8;
-                if index < 0 || index as usize >= element_count {
-                    return Err(InterpreterError::IndexOutOfBounds {
-                        index,
-                        length: element_count,
-                    });
-                }
-                let data_ptr = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *const i64
-                };
-                state.set_reg(dst, Value::from_i64(unsafe { *data_ptr }));
-            } else if header.type_id == TypeId::F64 {
-                // 64-bit float array (TYPED-ARRAY-FLOAT-1, #28). The raw 8
-                // bytes are an IEEE-754 double bit pattern — decode through
-                // `from_f64` so the NaN-box round-trips the float value.
-                // `from_i64` (the U64 leg) would re-box the pattern as a
-                // bogus integer, the `[Float; N]` → NaN symptom.
-                let element_count = header_size / 8;
-                if index < 0 || index as usize >= element_count {
-                    return Err(InterpreterError::IndexOutOfBounds {
-                        index,
-                        length: element_count,
-                    });
-                }
-                let data_ptr = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *const u64
-                };
-                state.set_reg(dst, Value::from_f64(f64::from_bits(unsafe { *data_ptr })));
-            } else if header.type_id == TypeId::F32 {
-                // 32-bit float array. Raw 4 bytes = IEEE-754 single; widen
-                // to a double for the NaN-boxed Float value.
-                let element_count = header_size / 4;
-                if index < 0 || index as usize >= element_count {
-                    return Err(InterpreterError::IndexOutOfBounds {
-                        index,
-                        length: element_count,
-                    });
-                }
-                let data_ptr = unsafe {
-                    ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *const u32
-                };
-                state.set_reg(
-                    dst,
-                    Value::from_f64(f32::from_bits(unsafe { *data_ptr }) as f64),
-                );
+                .expect("spec matched above");
+                state.set_reg(dst, element);
             } else if header.type_id == TypeId::LIST {
                 // List layout: [len: Value, cap: Value, backing_ptr: Value]
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -1374,84 +1294,22 @@ pub(in super::super) fn handle_set_index(
         // Non-map: index must be an integer
         let index = state.get_reg(idx).as_i64();
 
-        if header.type_id == TypeId::U8 {
-            // Byte array - elements are raw bytes, 1 byte each
-            let element_count = header_size;
+        if let Some((stride, _is_float)) = heap::typed_array_element_spec(header.type_id) {
+            // TYPED-ARRAY-ITER-1 unification, write dual — see the
+            // read-side comment in `handle_get_index`.
+            let element_count = header_size / stride;
             if index < 0 || index as usize >= element_count {
                 return Err(InterpreterError::IndexOutOfBounds {
                     index,
                     length: element_count,
                 });
             }
-            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + index as usize) };
-            let byte_value = value.as_i64() as u8;
-            unsafe { *data_ptr = byte_value };
-        } else if header.type_id == TypeId::U16 {
-            let element_count = header_size / 2;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: element_count,
-                });
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) };
+            // SAFETY: bounds-checked against header_size/stride above.
+            unsafe {
+                heap::typed_array_store_element(header.type_id, data_ptr, index as usize, value)
             }
-            let data_ptr =
-                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 2) as *mut u16 };
-            unsafe { *data_ptr = value.as_i64() as u16 };
-        } else if header.type_id == TypeId::U32 {
-            let element_count = header_size / 4;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: element_count,
-                });
-            }
-            let data_ptr =
-                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *mut i32 };
-            unsafe { *data_ptr = value.as_i64() as i32 };
-        } else if header.type_id == TypeId::U64 {
-            let element_count = header_size / 8;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: element_count,
-                });
-            }
-            let data_ptr =
-                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *mut i64 };
-            unsafe { *data_ptr = value.as_i64() };
-        } else if header.type_id == TypeId::F64 {
-            // 64-bit float array (TYPED-ARRAY-FLOAT-1, #28). Store the raw
-            // IEEE-754 double bit pattern (the mirror of `handle_get_index`'s
-            // `from_f64` read). `as_i64()` (the U64 leg) would truncate the
-            // float to an integer and lose the value entirely.
-            let element_count = header_size / 8;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: element_count,
-                });
-            }
-            let bits = value
-                .try_as_f64()
-                .map(|f| f.to_bits())
-                .unwrap_or_else(|| value.bits());
-            let data_ptr =
-                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 8) as *mut u64 };
-            unsafe { *data_ptr = bits };
-        } else if header.type_id == TypeId::F32 {
-            // 32-bit float array. Narrow the double to a single and store its
-            // 4-byte IEEE-754 pattern.
-            let element_count = header_size / 4;
-            if index < 0 || index as usize >= element_count {
-                return Err(InterpreterError::IndexOutOfBounds {
-                    index,
-                    length: element_count,
-                });
-            }
-            let bits = (value.try_as_f64().unwrap_or(0.0) as f32).to_bits();
-            let data_ptr =
-                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *mut u32 };
-            unsafe { *data_ptr = bits };
+            .expect("spec matched above");
         } else if header.type_id == TypeId::LIST {
             // List layout: [len: Value, cap: Value, backing_ptr: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
