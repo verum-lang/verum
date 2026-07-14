@@ -1841,17 +1841,30 @@ pub(in super::super) fn handle_ffi_extended(
                     match bare {
                         "pthread_create" if arg_count == 4 => {
                             // (thread_out, attr, start_routine, arg)
+                            // The start routine reaches us either as a
+                            // FuncRef, as a plain Int carrying the
+                            // function id, or as a zero-capture closure
+                            // object (NewClosure is how codegen passes
+                            // named fns to higher-order sites).
                             let func_val = args[2];
-                            let func_id = if func_val.is_func_ref() {
-                                func_val.as_func_id()
+                            let ret = if func_val.is_ptr() && !func_val.is_nil() {
+                                super::super::call_closure_sync(
+                                    state,
+                                    func_val,
+                                    &[args[3]],
+                                )?
                             } else {
-                                crate::module::FunctionId(func_val.as_i64() as u32)
+                                let func_id = if func_val.is_func_ref() {
+                                    func_val.as_func_id()
+                                } else {
+                                    crate::module::FunctionId(func_val.as_i64() as u32)
+                                };
+                                super::super::call_function_sync(
+                                    state,
+                                    func_id,
+                                    &[args[3]],
+                                )?
                             };
-                            let ret = super::super::call_function_sync(
-                                state,
-                                func_id,
-                                &[args[3]],
-                            )?;
                             let handle = crate::interpreter::task_pool::thread_store(
                                 ret.to_bits() as i64,
                             );

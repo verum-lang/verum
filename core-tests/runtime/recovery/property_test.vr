@@ -190,6 +190,13 @@ fn rcv_law_jitter_full_of_zero_is_zero() {
     assert_eq(j.apply(0_u64), 0_u64);
 }
 
+@ignore  // DROP-GLUE-TYPEID-1 — scope-exit drop glue runs
+         // RwLockWriteGuard.drop against a Float local in this frame
+         // ("method 'RwLock.release_write' not found on receiver of
+         // runtime kind `Float`"); no RwLock exists in the tested path
+         // (random_u64 is AtomicU64-intrinsic based).  Archive type-id
+         // collision / drop_fn mis-stamp family (#27 lineage) — task
+         // filed; flips when name-authoritative drop dispatch lands.
 @test
 fn rcv_law_jitter_proportional_in_band() {
     // Proportional(20%) of 1000 ⇒ range=200 ⇒ result ∈ [800, 1200].

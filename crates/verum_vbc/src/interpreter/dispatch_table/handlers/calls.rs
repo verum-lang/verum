@@ -1946,16 +1946,21 @@ fn try_dispatch_intrinsic_by_name(
             };
             let func_val = get_arg(state, func_idx);
             let arg_val = get_arg(state, arg_idx);
-            // `func as Int` reaches us either still FuncRef-tagged or
-            // already collapsed to a plain Int holding the function id
-            // (the NaN-box payload is the id, so truncation is exact
-            // either way — but classify explicitly, never guess bits).
-            let func_id = if func_val.is_func_ref() {
-                func_val.as_func_id()
+            // `func as Int` reaches us as a FuncRef, as a plain Int
+            // holding the function id, or as a zero-capture closure
+            // object (NewClosure is how codegen passes named fns to
+            // higher-order sites) — classify explicitly, never guess
+            // bits.
+            let result = if func_val.is_ptr() && !func_val.is_nil() {
+                super::super::call_closure_sync(state, func_val, &[arg_val])?
             } else {
-                FunctionId(func_val.as_i64() as u32)
+                let func_id = if func_val.is_func_ref() {
+                    func_val.as_func_id()
+                } else {
+                    FunctionId(func_val.as_i64() as u32)
+                };
+                super::super::call_function_sync(state, func_id, &[arg_val])?
             };
-            let result = super::super::call_function_sync(state, func_id, &[arg_val])?;
             Ok(Some(Value::from_i64(
                 crate::interpreter::task_pool::store(result.as_i64()),
             )))

@@ -99,3 +99,36 @@ silently dropped.  Gated on `load_i64` intrinsic exercise under
 | §C per-state `active_count` cache | `crates/verum_vbc` + `core/runtime/ctx_bridge.vr` | 1 day |
 | §D parent-context partial-validity round-trip test | this folder | gated on safe-buffer harness |
 | AOT CtxGet/CtxProvide/CtxEnd cross-tier validation | `crates/verum_codegen/tests/` | 2 h |
+
+## 2026-07-14 session findings
+
+### §E — overflow-guard test SIGSEGV'd the WHOLE in-process runner (test bug + harness finding)
+
+The historical `test_env_install_parent_contexts_overflow_guard` passed
+`count = 1_000_000_000_000` believing it exceeded the source guard
+`count > (Int.MAX - 8) / 16`.  The threshold is ≈ 5.76e17 — the guard
+correctly did NOT fire, the copy loop ran, and the first
+`load_i64(0xDEADBEEF)` wild-load SIGSEGV'd the interpreter *process*:
+every suite scheduled after ctx_bridge was silently never run.  Two
+resolutions landed:
+
+1. Test fix: the count is now computed from the guard's own expression
+   (`(Int.MAX - 8) / 16 + 1`) — the guard fires, the call is a no-op.
+2. Harness finding escalated as **TEST-RUNNER-ISOLATION-1**: a wild
+   raw load in ANY test aborts the whole `--interp` run (single
+   process, `RawLoadI64` checks only `addr > 0`).  Options under
+   design: per-test subprocess quarantine, sigaction recovery
+   trampoline around the dispatch loop, or both.
+
+### §A refinement — root cause narrowed to CTX-STORE-AUTHORITY-1
+
+`env_ctx_set/get` dead round-trip is NOT an intrinsic-binding gap: the
+chain reaches `sys.darwin.tls.ctx_get/ctx_set`, which operate on the
+TCB-held `ContextSlots` — and `get_current_tcb()` returns `Maybe.None`
+under `--interp` (no TCB bootstrap), so sets error out silently and
+gets read `Maybe.None`.  Worse, in `env_active_slot_count` the
+`ctx_get(i)` result arrives as raw `<nil>` (not a `Maybe` variant) and
+`.is_some()` PANICS on the nil receiver — those two tests are pinned
+`@ignore` on this.  The fundamental fix is ONE store authority for the
+context system and the user-callable surface (task filed:
+CTX-STORE-AUTHORITY-1).
