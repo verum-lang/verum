@@ -1780,7 +1780,17 @@ pub(in super::super) fn handle_ffi_extended(
             }
 
             // Collect argument values
-            let args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
+            let mut args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
+
+            // FFI-WRITEBACK-THRU-REF-1 (#25): deref bare `&mut` OUT-param
+            // references for correct C input and register them for write-back
+            // so the store reaches the caller's origin variable.
+            super::cbgr_helpers::normalize_ffi_ref_args(
+                state,
+                &arg_regs,
+                &mut args,
+                &mut source_reg_map,
+            );
 
             // Permission gate. Closes the macOS / Windows hole
             // where FFI primitives (`_exit`, `open`, `connect`)
@@ -2081,9 +2091,24 @@ pub(in super::super) fn handle_ffi_extended(
                 // Write return value
                 state.set_reg(ret_reg, ret_value);
 
-                // Apply write-backs for mutable reference arguments
+                // Apply write-backs for mutable reference arguments.
+                //
+                // FFI-WRITEBACK-THRU-REF-1 (#25): the source register may hold
+                // a REFERENCE (a `&mut` OUT-param passed through a wrapper
+                // frame — `safe_getsockname(addr_len: &mut UInt32) {
+                // getsockname(…, addr_len) }`), not the origin scalar. Writing
+                // the returned value straight into that slot with `set_reg`
+                // would clobber the reference and drop the C OUT-param write
+                // one frame up. `write_through_ref` follows a CBGR reg-ref /
+                // interior ptr / ThinRef to the true origin storage; only when
+                // the slot is a plain local scalar (the same-frame `&mut x`
+                // case, where the source register already IS x) does it fall
+                // back to a direct register write.
                 for (reg_idx, new_val) in writebacks {
-                    state.set_reg(Reg(reg_idx), new_val);
+                    let slot_val = state.get_reg(Reg(reg_idx));
+                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val) {
+                        state.set_reg(Reg(reg_idx), new_val);
+                    }
                 }
 
                 // Apply array write-backs: copy C buffer data back to Verum arrays
@@ -2695,7 +2720,15 @@ pub(in super::super) fn handle_ffi_extended(
                 source_reg_map.insert(arg_idx, source_reg.0);
             }
 
-            let args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
+            let mut args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
+
+            // FFI-WRITEBACK-THRU-REF-1 (#25) — see the CallFfiC arm.
+            super::cbgr_helpers::normalize_ffi_ref_args(
+                state,
+                &arg_regs,
+                &mut args,
+                &mut source_reg_map,
+            );
 
             // Permission gate — see CallFfiC arm for the rationale.
             // Same boundary regardless of calling convention.
@@ -2788,8 +2821,13 @@ pub(in super::super) fn handle_ffi_extended(
 
                 state.set_reg(ret_reg, ret_value);
 
+                // FFI-WRITEBACK-THRU-REF-1 (#25): follow a `&mut` OUT-param
+                // reference to its origin — see the CallFfiC writeback loop.
                 for (reg_idx, new_val) in writebacks {
-                    state.set_reg(Reg(reg_idx), new_val);
+                    let slot_val = state.get_reg(Reg(reg_idx));
+                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val) {
+                        state.set_reg(Reg(reg_idx), new_val);
+                    }
                 }
 
                 for buf in state.ffi_array_buffers.drain(..) {
@@ -2919,7 +2957,15 @@ pub(in super::super) fn handle_ffi_extended(
                 source_reg_map.insert(arg_idx, source_reg.0);
             }
 
-            let args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
+            let mut args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
+
+            // FFI-WRITEBACK-THRU-REF-1 (#25) — see the CallFfiC arm.
+            super::cbgr_helpers::normalize_ffi_ref_args(
+                state,
+                &arg_regs,
+                &mut args,
+                &mut source_reg_map,
+            );
 
             // Permission gate — see CallFfiC arm for the rationale.
             // Same boundary regardless of calling convention.
@@ -2952,8 +2998,13 @@ pub(in super::super) fn handle_ffi_extended(
 
                 state.set_reg(ret_reg, ret_value);
 
+                // FFI-WRITEBACK-THRU-REF-1 (#25): follow a `&mut` OUT-param
+                // reference to its origin — see the CallFfiC writeback loop.
                 for (reg_idx, new_val) in writebacks {
-                    state.set_reg(Reg(reg_idx), new_val);
+                    let slot_val = state.get_reg(Reg(reg_idx));
+                    if !super::cbgr_helpers::write_through_ref(state, slot_val, new_val) {
+                        state.set_reg(Reg(reg_idx), new_val);
+                    }
                 }
 
                 for buf in state.ffi_array_buffers.drain(..) {

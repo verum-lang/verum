@@ -186,6 +186,109 @@ pub(super) fn resolve_arg_value(
     val
 }
 
+/// Write `value` through whatever reference shape `slot_val` holds, mutating
+/// the ORIGIN storage the reference points at. Write-side twin of
+/// [`resolve_arg_value`] — the same three reference shapes, resolved for a
+/// store instead of a load:
+///
+///   * **CBGR register-ref** → `Registers::set_absolute(abs_index, value)`.
+///     A CBGR ref encodes the ABSOLUTE origin register index and is copied
+///     verbatim across call frames, so a single resolution reaches the true
+///     origin no matter how many wrapper frames the `&mut` passed through
+///     (`safe_getsockname(addr_len: &mut UInt32) { getsockname(…, addr_len) }`
+///     — the ref in `addr_len`'s slot still points at the caller's variable).
+///   * **Heap-interior pointer** (tracked in `cbgr_mutable_ptrs`) → write the
+///     `Value` at the interior address (`&record.field` / `&xs[i]`).
+///   * **ThinRef** → write the `Value` at the ref's heap pointer.
+///
+/// Returns `true` if the value was written through a reference; `false` if
+/// `slot_val` is not a reference (the caller should then store into the local
+/// register directly — the same-frame `&mut local` case where the source
+/// register already IS the origin scalar slot).
+///
+/// FFI-WRITEBACK-THRU-REF-1 (#25): the previous write-back unconditionally
+/// did `set_reg(source_reg)`, which for a `&mut` OUT-param passed through a
+/// wrapper frame overwrote the REFERENCE in the wrapper's parameter slot with
+/// the returned scalar and never touched the caller's variable — so a C
+/// OUT-param (`socklen_t*`) write was silently dropped one frame up. Following
+/// the ref to its origin makes the C write land on the caller's storage.
+#[inline]
+// Only the `ffi`-gated FFI writeback loops call this; it is genuinely dead
+// (and correctly warns) in a build without the `ffi` feature.
+#[cfg_attr(not(feature = "ffi"), allow(dead_code))]
+pub(in super::super) fn write_through_ref(
+    state: &mut super::super::super::state::InterpreterState,
+    slot_val: Value,
+    value: Value,
+) -> bool {
+    if is_cbgr_ref(&slot_val) {
+        let (abs_index, _gen) = decode_cbgr_ref(slot_val.as_i64());
+        state.registers.set_absolute(abs_index, value);
+        return true;
+    }
+    if slot_val.is_ptr() && !slot_val.is_nil() {
+        let ptr_addr = slot_val.as_ptr::<u8>() as usize;
+        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
+            unsafe { *(ptr_addr as *mut Value) = value };
+            return true;
+        }
+    }
+    if slot_val.is_thin_ref() {
+        let thin_ref = slot_val.as_thin_ref();
+        if !thin_ref.ptr.is_null() {
+            unsafe { *(thin_ref.ptr as *mut Value) = value };
+            return true;
+        }
+    }
+    false
+}
+
+/// FFI-WRITEBACK-THRU-REF-1 (#25): normalize `&mut` scalar OUT-param args
+/// that arrive as bare mutable references — a wrapper's `&mut` parameter
+/// forwarded straight to an FFI call (`safe_getsockname(addr_len: &mut
+/// UInt32) { getsockname(…, addr_len) }`), as opposed to an explicit
+/// `&mut expr` the codegen already stripped and tagged in `source_reg_map`.
+///
+/// For each such argument this both:
+///   * **derefs** it to the referent scalar, so the value marshalled into
+///     the C call is the real number (128) — the raw CBGR-ref bits would
+///     otherwise marshal as a garbage `socklen_t` input; and
+///   * **registers** its source register in `source_reg_map`, so the
+///     post-call write-back fires and — via [`write_through_ref`] — lands
+///     the C store on the caller's origin variable one (or more) frames up.
+///
+/// Immutable references are deliberately left untouched: they are never
+/// write-back targets, and following one would corrupt the origin with the
+/// unmodified temp value. An explicit `&mut x` on a same-frame local is
+/// already reduced to a plain scalar by the codegen, so it does not match
+/// here and keeps its existing same-frame write-back path.
+pub(in super::super) fn normalize_ffi_ref_args(
+    state: &super::super::super::state::InterpreterState,
+    arg_regs: &[crate::instruction::Reg],
+    args: &mut [Value],
+    source_reg_map: &mut std::collections::HashMap<u8, u16>,
+) {
+    for (i, arg_reg) in arg_regs.iter().enumerate() {
+        if i >= args.len() {
+            break;
+        }
+        let v = args[i];
+        let is_mut_ref = if is_cbgr_ref(&v) {
+            is_cbgr_ref_mutable(v.as_i64())
+        } else if v.is_ptr() && !v.is_nil() {
+            state
+                .cbgr_mutable_ptrs
+                .contains(&(v.as_ptr::<u8>() as usize))
+        } else {
+            v.is_thin_ref()
+        };
+        if is_mut_ref {
+            args[i] = resolve_arg_value(state, v);
+            source_reg_map.entry(i as u8).or_insert(arg_reg.0);
+        }
+    }
+}
+
 /// Validates CBGR generation and epoch for a register-based reference.
 ///
 
