@@ -841,7 +841,15 @@ pub(in super::super) fn handle_ffi_extended(
             let val: u64 = if val_value.is_int() {
                 val_value.as_i64() as u64
             } else if let Some(f) = val_value.try_as_f64() {
-                f.to_bits()
+                // A 4-byte float slot ([Float32; N]) holds the IEEE-754 SINGLE
+                // bit pattern — narrow the double first (TYPED-ARRAY-FLOAT-1
+                // #28). Truncating the 64-bit double pattern to 32 bits would
+                // store the low half of its mantissa, not the f32 value.
+                if elem_size == 4 {
+                    (f as f32).to_bits() as u64
+                } else {
+                    f.to_bits()
+                }
             } else {
                 val_value.bits()
             };

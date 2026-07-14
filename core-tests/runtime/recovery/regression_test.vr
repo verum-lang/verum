@@ -1,0 +1,135 @@
+// =============================================================================
+// core-tests/runtime/recovery/regression_test.vr
+// =============================================================================
+//
+// FN-LOCAL-STATIC-ONCE-1 (task #16) — fn-local `static` once-init discipline.
+//
+// Defect: a `static` declared inside a fn body compiled to an accessor that
+// RE-RAN the initializer on every access.  Concrete damage in this module:
+// `core/runtime/recovery.vr:900`'s
+//
+//     fn random_u64() -> UInt64 {
+//         static SEED: AtomicU64 = AtomicU64.new(0x853c49e6748fea9b);
+//         ...
+//     }
+//
+// produced a FRESH atomic cell per access — the xorshift PRNG state never
+// persisted, so "jitter" was a deterministic constant (the in-band jitter
+// tests in property_test.vr pass by value-range only and never caught it).
+//
+// Fix: fn-local statics are hoisted at declaration-collection time to a
+// module-level synthetic cell `<fn>$static$<name>` wired through the SAME
+// `__tls_init_*` / global-ctor machinery as module-level `static mut`
+// (once-init at ctor time, both tiers).  Body accesses resolve scope-first
+// in `CodegenContext.is_thread_local` / `get_constant_type` /
+// `scoped_static_type_name` (crates/verum_vbc/src/codegen/).
+//
+// The counter-shaped tests below are LIVE: they declare their own fn-local
+// statics in THIS file, so they exercise the codegen fix directly (no bake
+// dependency).  The atomic-shaped tests mirror random_u64 exactly but ride
+// the baked `AtomicU64.load`/`.store` bodies, which are pinned @ignore
+// elsewhere in this directory under DROP-GLUE-TYPEID-1 — kept @ignore'd
+// here under the same class until that pin flips.
+//
+// Rust-crate twin pins: crates/verum_vbc/src/codegen/tests_execution.rs
+// `fn_local_static_once_tests` (counter advance, cross-fn cell isolation,
+// module-static shadowing, `__tls_init_<fn>$static$<name>` global-ctor
+// structural pin).
+// =============================================================================
+
+mount sync.{AtomicU64, MemoryOrdering};
+
+// -----------------------------------------------------------------------------
+// §A  Once-init: a fn-local static mut counter advances across calls
+// -----------------------------------------------------------------------------
+
+fn rgr_counter() -> Int {
+    static mut N: Int = 0;
+    unsafe { N = N + 1; N }
+}
+
+@test
+fn rgr_fn_local_static_counter_advances() {
+    // Broken once-init (per-call re-initialization) yields 1, 1, 1.
+    assert_eq(rgr_counter(), 1);
+    assert_eq(rgr_counter(), 2);
+    assert_eq(rgr_counter(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// §B  Cell identity: two fns each declaring `static mut N` must not alias
+// -----------------------------------------------------------------------------
+//
+// Pre-fix, both registered the BARE name "N" in the module-global slot
+// table and silently shared ONE cell (last __tls_init_N won the initial
+// value).  The `<fn>$static$<name>` mangling gives per-declaration cells.
+
+fn rgr_cell_a() -> Int {
+    static mut N: Int = 0;
+    unsafe { N = N + 1; N }
+}
+
+fn rgr_cell_b() -> Int {
+    static mut N: Int = 100;
+    unsafe { N = N + 10; N }
+}
+
+@test
+fn rgr_fn_local_statics_are_isolated_per_fn() {
+    assert_eq(rgr_cell_a(), 1);
+    assert_eq(rgr_cell_b(), 110);
+    assert_eq(rgr_cell_a(), 2);
+    assert_eq(rgr_cell_b(), 120);
+}
+
+// -----------------------------------------------------------------------------
+// §C  random_u64 shape: two consecutive fn-local-static counters advance
+// -----------------------------------------------------------------------------
+//
+// Exact structural mirror of recovery.vr's random_u64 (non-mut fn-local
+// static holding an interior-mutability cell, read + written per call).
+
+fn rgr_atomic_counter() -> UInt64 {
+    static C: AtomicU64 = AtomicU64.new(0);
+    let v = C.load(MemoryOrdering.Relaxed) + 1;
+    C.store(v, MemoryOrdering.Relaxed);
+    v
+}
+
+fn rgr_xorshift() -> UInt64 {
+    static SEED: AtomicU64 = AtomicU64.new(0x853c49e6748fea9b);
+    let mut x = SEED.load(MemoryOrdering.Relaxed);
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    SEED.store(x, MemoryOrdering.Relaxed);
+    x
+}
+
+@ignore  // DROP-GLUE-TYPEID-1 — baked AtomicU64.load/.store bodies carry a
+         // scope-exit DropRef on a raw-pointer local (see the pin in
+         // property_test.vr §D).  The FN-LOCAL-STATIC-ONCE-1 hoist itself
+         // is pinned live by §A/§B above and by the verum_vbc unit tests;
+         // FLIP this once the DROP-GLUE-TYPEID-1 pin flips.
+@test
+fn rgr_fn_local_static_atomic_counter_advances() {
+    // Broken once-init: every call re-created the cell → 1, 1, 1
+    // (and intra-call load-after-store even read 0 — two accesses,
+    // two distinct cells).
+    assert_eq(rgr_atomic_counter(), 1_u64);
+    assert_eq(rgr_atomic_counter(), 2_u64);
+    assert_eq(rgr_atomic_counter(), 3_u64);
+}
+
+@ignore  // DROP-GLUE-TYPEID-1 — same gate as above.
+@test
+fn rgr_fn_local_static_xorshift_state_persists() {
+    // With a persistent SEED cell, consecutive draws differ; with the
+    // broken per-access re-init, every draw restarts from the seed
+    // constant and a == b (the deterministic-jitter defect).
+    let a = rgr_xorshift();
+    let b = rgr_xorshift();
+    assert(a != b);
+    assert(a != 0_u64);
+    assert(b != 0_u64);
+}

@@ -21867,7 +21867,11 @@ impl VbcCodegen {
         // variables, function parameters, and ordinary const-statics
         // never enter `thread_local_vars`, so the lookup cleanly
         // disambiguates without a separate predicate.
-        let slot = match self.ctx.thread_local_vars.get(&name).copied() {
+        //
+        // FN-LOCAL-STATIC-ONCE-1: route through the scope-aware
+        // `is_thread_local` (not a raw map get) so `&STATIC` inside the
+        // declaring fn resolves the hoisted `<fn>$static$<name>` cell.
+        let slot = match self.ctx.is_thread_local(&name) {
             Some(slot) => slot,
             None => return Ok(None),
         };
@@ -22278,10 +22282,13 @@ impl VbcCodegen {
                             // downstream consumers (let-binding type propagation,
                             // method-receiver type extraction) treat the static
                             // identically to a pure `static`.
+                            // FN-LOCAL-STATIC-ONCE-1: scope-first probe
+                            // (`<fn>$static$<name>` hoisted cells) then
+                            // bare-name fallback — ONE authority.
                             if let Some(type_name) =
-                                self.static_mut_type_names.get(&*ident.name)
+                                self.scoped_static_type_name(&ident.name)
                             {
-                                return Some(type_name.clone());
+                                return Some(type_name);
                             }
                             // For uppercase names, check if this is a variant constructor
                             // and return the parent type name instead (e.g., Nothing → Maybe)
@@ -22604,7 +22611,11 @@ impl VbcCodegen {
                     // lowered to native IterNew against a Drain record —
                     // the hazard/reclaim SIGSEGV).  Resolve via the
                     // static's declared type and never fall through.
-                    if let Some(static_ty) = self.static_mut_type_names.get(&**name).cloned() {
+                    // FN-LOCAL-STATIC-ONCE-1: scope-first probe so a
+                    // hoisted fn-local static receiver (`SEED.load(...)`
+                    // inside its declaring fn) classifies by its
+                    // declared type too.
+                    if let Some(static_ty) = self.scoped_static_type_name(name) {
                         let base_type = VbcCodegen::strip_generic_args(&static_ty);
                         let qualified_method = format!("{}.{}", base_type, method.name);
                         if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
@@ -23629,7 +23640,9 @@ impl VbcCodegen {
                             // MUST surface the declared type for parity with
                             // pure `static NAME` (which the const-arm below
                             // already handles via `lookup_function_in_scope`).
-                            if let Some(n) = self.static_mut_type_names.get(&*ident.name).cloned() {
+                            // FN-LOCAL-STATIC-ONCE-1: scope-first probe
+                            // for hoisted `<fn>$static$<name>` cells.
+                            if let Some(n) = self.scoped_static_type_name(&ident.name) {
                                 return Some(n);
                             }
                             // Fall back to the function table for

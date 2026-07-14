@@ -1183,3 +1183,176 @@ mod try_operator_tag_tests {
         );
     }
 }
+
+// ============================================================================
+// FN-LOCAL-STATIC-ONCE-1 (task #16) — fn-local `static` hoist + once-init
+// ============================================================================
+//
+// A `static` declared inside a fn body is hoisted at declaration-collection
+// time to a module-level synthetic cell `<fn>$static$<name>` wired through
+// the same `__tls_init_*` / global-ctor machinery as module-level
+// `static mut`.  These tests compile REAL Verum source through the full
+// parse → VBC codegen → interpreter pipeline and pin:
+//
+//   1. once-init: the initializer runs exactly once (at ctor time), so a
+//      counter static advances 1, 2, 3 across calls instead of resetting;
+//   2. per-declaration cell identity: two fns each declaring `static mut N`
+//      get DISTINCT cells (pre-fix both registered the bare name "N" and
+//      silently shared one slot);
+//   3. scope-first shadowing: a fn-local static shadows a module-level
+//      static of the same name inside its declaring fn only;
+//   4. the hoist is structural: the module carries a
+//      `__tls_init_<fn>$static$<name>` synthetic registered as a global
+//      ctor (the same path Tier-1 AOT lowers to `@llvm.global_ctors`).
+
+mod fn_local_static_once_tests {
+    use super::*;
+    use crate::codegen::{CodegenConfig, VbcCodegen};
+
+    fn compile_source(source: &str) -> Arc<VbcModule> {
+        let file_id = verum_ast::FileId::new(0);
+        let lexer = verum_lexer::Lexer::new(source, file_id);
+        let parser = verum_fast_parser::VerumParser::new();
+        let ast = parser
+            .parse_module(lexer, file_id)
+            .unwrap_or_else(|e| panic!("parse failed: {:?}", e));
+        // Module name "main" mirrors the production single-file user run:
+        // any other name promotes descriptor names to `<module>.<fn>`
+        // qualified form and `find_function_by_name("main")` misses.
+        let config = CodegenConfig::new("main");
+        let mut codegen = VbcCodegen::with_config(config);
+        Arc::new(codegen.compile_module(&ast).expect("codegen failed"))
+    }
+
+    /// Runs global ctors (TLS inits) then the named function, mirroring
+    /// the production `run_main` sequencing.
+    fn run_named(module: Arc<VbcModule>, name: &str) -> Value {
+        let fid = module.find_function_by_name(name).unwrap_or_else(|| {
+            let names: Vec<&str> = module
+                .functions
+                .iter()
+                .filter_map(|d| module.get_string(d.name))
+                .collect();
+            panic!(
+                "function '{}' not found in module; functions present: {:?}",
+                name, names
+            )
+        });
+        let mut interp = Interpreter::new(module);
+        interp.run_global_ctors().expect("global ctors failed");
+        interp.execute_function(fid).expect("execution failed")
+    }
+
+    fn run_named_int(source: &str, name: &str) -> i64 {
+        let result = run_named(compile_source(source), name);
+        result
+            .try_as_i64()
+            .unwrap_or_else(|| panic!("expected Int result, got {:?}", result))
+    }
+
+    /// The task-#16 repro probe: a fn-local `static mut` counter must
+    /// advance 1, 2, 3 across consecutive calls.  Broken once-init
+    /// (per-call re-initialization) yields 1, 1, 1.
+    #[test]
+    fn fn_local_static_mut_counter_advances_across_calls() {
+        let source = r#"
+fn counter() -> Int {
+    static mut N: Int = 0;
+    unsafe { N = N + 1; N }
+}
+fn main() -> Int {
+    let a = counter();
+    let b = counter();
+    let c = counter();
+    a * 100 + b * 10 + c
+}
+"#;
+        assert_eq!(run_named_int(source, "main"), 123);
+    }
+
+    /// Two fns each declaring `static mut N` must get DISTINCT hoisted
+    /// cells.  Pre-fix both registered bare "N": one shared slot, and
+    /// the last `__tls_init_N` won the initial value (f: 101, g: 111,
+    /// f: 112 → 324 instead of 1 + 110 + 2 = 113).
+    #[test]
+    fn fn_local_statics_do_not_collide_across_fns() {
+        let source = r#"
+fn f() -> Int {
+    static mut N: Int = 0;
+    unsafe { N = N + 1; N }
+}
+fn g() -> Int {
+    static mut N: Int = 100;
+    unsafe { N = N + 10; N }
+}
+fn main() -> Int {
+    let a = f();
+    let b = g();
+    let c = f();
+    a + b + c
+}
+"#;
+        assert_eq!(run_named_int(source, "main"), 113);
+    }
+
+    /// A NON-mut fn-local static must also be once-init (ctor-time), not
+    /// a re-evaluated constant-function.  This is the recovery.vr:900
+    /// `static SEED: AtomicU64 = AtomicU64.new(...)` defect class in its
+    /// minimal form; the structural pin below covers the hoist itself.
+    #[test]
+    fn fn_local_plain_static_reads_hoisted_cell() {
+        let source = r#"
+fn base() -> Int {
+    static K: Int = 41;
+    K + 1
+}
+fn main() -> Int { base() }
+"#;
+        assert_eq!(run_named_int(source, "main"), 42);
+    }
+
+    /// Structural pin: the hoist emits a `__tls_init_<fn>$static$<name>`
+    /// synthetic function AND registers it in `module.global_ctors` —
+    /// the exact channel Tier-1 AOT lowers to `@llvm.global_ctors`, so
+    /// both tiers share ONE init authority.
+    #[test]
+    fn fn_local_static_hoist_registers_tls_init_global_ctor() {
+        let source = r#"
+fn counter() -> Int {
+    static mut N: Int = 0;
+    unsafe { N = N + 1; N }
+}
+fn main() -> Int { counter() }
+"#;
+        let module = compile_source(source);
+        let init_fid = module
+            .find_function_by_name("__tls_init_counter$static$N")
+            .expect("hoisted fn-local static must emit __tls_init_counter$static$N");
+        assert!(
+            module.global_ctors.iter().any(|(fid, _prio)| *fid == init_fid),
+            "__tls_init_counter$static$N must be registered as a global ctor; \
+             global_ctors = {:?}",
+            module.global_ctors,
+        );
+    }
+
+    /// Scope-first shadowing: inside `f`, `N` is the fn-local hoisted
+    /// cell; inside `main`, `N` is the module-level static.  The two
+    /// must never alias.
+    #[test]
+    fn fn_local_static_shadows_module_static_in_declaring_fn_only() {
+        let source = r#"
+static mut N: Int = 1000;
+fn f() -> Int {
+    static mut N: Int = 0;
+    unsafe { N = N + 1; N }
+}
+fn main() -> Int {
+    let a = f();
+    let b = f();
+    unsafe { a + b + N }
+}
+"#;
+        assert_eq!(run_named_int(source, "main"), 1003);
+    }
+}

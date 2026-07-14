@@ -1448,6 +1448,14 @@ pub(in super::super) fn handle_array_len(
         header_size / 4
     } else if header.type_id == TypeId::U64 {
         header_size / 8
+    } else if header.type_id == TypeId::F64 {
+        // 64-bit float array (TYPED-ARRAY-FLOAT-1, #28) — 8-byte elements.
+        // Explicit rather than relying on the `sizeof(Value)` fall-through.
+        header_size / 8
+    } else if header.type_id == TypeId::F32 {
+        // 32-bit float array — 4-byte elements (the fall-through would
+        // divide by sizeof(Value)=8 and report half the true length).
+        header_size / 4
     } else if header.type_id == TypeId::BYTE_SLICE {
         // BYTE_SLICE byte view (ARCH-P5): `{ptr: i64, len: i64}` raw
         // payload — len is slot 1.  `text.as_bytes().len()`.

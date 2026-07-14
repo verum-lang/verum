@@ -1457,7 +1457,42 @@ impl CodegenContext {
     }
 
     /// Check if a name refers to a `@thread_local` static variable.
+    ///
+    /// FN-LOCAL-STATIC-ONCE-1 (task #16): a `static` declared inside a
+    /// fn body is HOISTED to a module-level synthetic cell registered
+    /// under the mangled key `<fn>$static$<name>` (see the
+    /// `ItemKind::Static` arm in `collect_declarations`).  Resolution
+    /// here is scope-first: while compiling the enclosing fn's body
+    /// (`current_function` set), the mangled key is probed before the
+    /// bare name so the body reads/writes its own hoisted once-init
+    /// cell — and a fn-local static correctly shadows any module-level
+    /// static of the same name.  This is the ONE authority every
+    /// by-name TLS consult goes through (identifier read, assignment
+    /// TlsSet, compound-assign, `&STATIC` address-of, path-head
+    /// classification).
     pub fn is_thread_local(&self, name: &str) -> Option<u16> {
+        if self.thread_local_vars.is_empty() {
+            return None;
+        }
+        if !name.contains('$')
+            && let Some(cf) = self.current_function.as_deref()
+        {
+            // Full current-function key first (covers nested-fn
+            // mangles like `outer$inner`), then the bare last dot
+            // segment (covers `Type.method` / `module.fn` forms —
+            // collection pushed only the undotted fn name).
+            let mangled = format!("{}$static${}", cf, name);
+            if let Some(&slot) = self.thread_local_vars.get(&mangled) {
+                return Some(slot);
+            }
+            let bare = cf.rsplit('.').next().unwrap_or(cf);
+            if bare != cf {
+                let mangled = format!("{}$static${}", bare, name);
+                if let Some(&slot) = self.thread_local_vars.get(&mangled) {
+                    return Some(slot);
+                }
+            }
+        }
         self.thread_local_vars.get(name).copied()
     }
 
@@ -4200,7 +4235,28 @@ impl CodegenContext {
     ///
 
     /// Returns Unknown if the constant type is not registered.
+    ///
+    /// FN-LOCAL-STATIC-ONCE-1: mirrors `is_thread_local`'s scope-first
+    /// probe — a fn-local static's primitive discriminator is
+    /// registered under its hoisted `<fn>$static$<name>` key, so the
+    /// enclosing body's instruction selection must resolve through the
+    /// same mangling before falling back to the bare name.
     pub fn get_constant_type(&self, name: &str) -> VarTypeKind {
+        if !name.contains('$')
+            && let Some(cf) = self.current_function.as_deref()
+        {
+            let mangled = format!("{}$static${}", cf, name);
+            if let Some(&vt) = self.constant_types.get(&mangled) {
+                return vt;
+            }
+            let bare = cf.rsplit('.').next().unwrap_or(cf);
+            if bare != cf {
+                let mangled = format!("{}$static${}", bare, name);
+                if let Some(&vt) = self.constant_types.get(&mangled) {
+                    return vt;
+                }
+            }
+        }
         self.constant_types
             .get(name)
             .copied()

@@ -7901,7 +7901,73 @@ impl VbcCodegen {
                 // global" semantics the user expects.
                 let is_thread_local = item.attributes.iter().any(|a| a.is_named("thread_local"))
                     || static_decl.is_mut;
-                if is_thread_local {
+                // FN-LOCAL-STATIC-ONCE-1 (task #16): a `static` declared
+                // INSIDE a fn body (this arm is reached through
+                // `collect_nested_declarations_from_block`, which leaves
+                // the enclosing fn name(s) on `nested_function_scope`) is
+                // hoisted to a module-level synthetic static named
+                // `<fn>$static$<name>` and routed through the SAME
+                // `__tls_init_*` / global-ctor machinery as module-level
+                // `static mut` — UNCONDITIONALLY, mut or not.
+                //
+                // Pre-fix, a non-mut fn-local static fell into the
+                // constant-function else-branch below: every ACCESS
+                // re-ran the initializer (a fresh zero-arg call), so a
+                // `static SEED: AtomicU64 = AtomicU64.new(0x853c...)`
+                // inside `random_u64()` (core/runtime/recovery.vr:900)
+                // produced a NEW atomic cell per access — the xorshift
+                // state never persisted and "jitter" was a deterministic
+                // constant.  A mut fn-local static took the TLS branch
+                // but registered under its BARE name: two fns each
+                // declaring `static mut N` silently shared one slot
+                // (module-global last-wins), and it aliased any
+                // module-level static of the same name.
+                //
+                // The mangled hoist gives fn-local statics (a) once-init
+                // at ctor time — `__tls_init_<fn>$static$<name>` runs
+                // via `run_global_ctors` on Tier 0 and via the identical
+                // `module.global_ctors` → `@llvm.global_ctors` path on
+                // Tier 1 AOT, no extra work — and (b) per-declaration
+                // cell identity.  Body accesses resolve through the
+                // scope-first probe in `CodegenContext::is_thread_local`
+                // / `get_constant_type` and the scoped
+                // `static_mut_type_names` helper
+                // (`scoped_static_type_name`), so no AST rewrite is
+                // needed: the identifier keeps its source name and the
+                // ONE resolution authority maps it onto the hoisted
+                // cell.  Recursion/laziness is NOT provided (ctor-time
+                // init, matching module statics); thread-locality
+                // matches module-level `static mut` (same machinery).
+                if !self.nested_function_scope.is_empty() {
+                    let bare = static_decl.name.name.to_string();
+                    let mangled = format!(
+                        "{}$static${}",
+                        self.nested_function_scope.join("$"),
+                        bare
+                    );
+                    let slot = self.ctx.register_thread_local(&mangled);
+
+                    // Primitive discriminator for instruction selection
+                    // (scope-aware `get_constant_type` resolves it).
+                    let vt = self.type_kind_to_var_type(&static_decl.ty.kind);
+                    self.ctx.register_constant_type(&mangled, vt);
+
+                    // Declared type name for method dispatch / field
+                    // layout on record-typed statics (AtomicU64 & co.);
+                    // consulted via `scoped_static_type_name`.
+                    let declared_type_name =
+                        Self::extract_type_name_from_ast(&static_decl.ty);
+                    if !declared_type_name.is_empty() {
+                        self.static_mut_type_names
+                            .insert(mangled.clone(), declared_type_name);
+                    }
+
+                    // Queue the init expression: compile_pending_tls_inits
+                    // emits `__tls_init_<mangled>` and registers it in
+                    // static_init_functions → module.global_ctors.
+                    self.pending_tls_inits
+                        .push((mangled, static_decl.value.clone(), slot));
+                } else if is_thread_local {
                     // Assign a TLS slot for this variable
                     let name = static_decl.name.name.to_string();
                     let slot = self.ctx.register_thread_local(&name);
@@ -13086,6 +13152,36 @@ impl VbcCodegen {
         }
 
         Ok(())
+    }
+
+    /// Scope-aware `static_mut_type_names` lookup.
+    ///
+    /// FN-LOCAL-STATIC-ONCE-1 (task #16): fn-local statics are hoisted
+    /// to `<fn>$static$<name>` module cells, and their declared type is
+    /// recorded under the MANGLED key only (the bare name would collide
+    /// module-globally).  Every consult site that classifies a bare
+    /// source identifier as a static binding must therefore probe
+    /// scope-first — same discipline as
+    /// `CodegenContext::is_thread_local` — before the bare-name
+    /// (module-level static) fallback.  ONE authority; do not inline
+    /// `static_mut_type_names.get(<ident>)` at new sites.
+    pub(crate) fn scoped_static_type_name(&self, name: &str) -> Option<String> {
+        if !name.contains('$')
+            && let Some(cf) = self.ctx.current_function.as_deref()
+        {
+            let mangled = format!("{}$static${}", cf, name);
+            if let Some(t) = self.static_mut_type_names.get(&mangled) {
+                return Some(t.clone());
+            }
+            let bare = cf.rsplit('.').next().unwrap_or(cf);
+            if bare != cf {
+                let mangled = format!("{}$static${}", bare, name);
+                if let Some(t) = self.static_mut_type_names.get(&mangled) {
+                    return Some(t.clone());
+                }
+            }
+        }
+        self.static_mut_type_names.get(name).cloned()
     }
 
     /// Try to extract a compile-time integer value from a constant expression.

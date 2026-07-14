@@ -271,6 +271,20 @@ impl VbcCodegen {
                         self.ctx.return_type = saved_return_type;
                         self.ctx.restore_closure_context(saved_closure_ctx);
                     }
+                    verum_ast::ItemKind::Static(_) => {
+                        // FN-LOCAL-STATIC-ONCE-1 (task #16): a `static`
+                        // declared in a fn body was already HOISTED at
+                        // declaration-collection time to a module-level
+                        // synthetic cell `<fn>$static$<name>` wired
+                        // through the `__tls_init_*` / global-ctor
+                        // machinery (see the `ItemKind::Static` arm in
+                        // `collect_declarations`, mod.rs).  Nothing to
+                        // emit inline — the initializer must NOT run
+                        // here (that was the once-init defect: per-call
+                        // re-initialization).  Body accesses resolve via
+                        // the scope-first probe in
+                        // `CodegenContext::is_thread_local`.
+                    }
                     _ => {
                         self.compile_item(item)?;
                     }
@@ -871,6 +885,38 @@ impl VbcCodegen {
                         self.ctx.free_temp(idx_reg);
                         self.ctx.free_temp(val_reg);
                     }
+                }
+            } else if is_float
+                && let verum_ast::ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) =
+                    &expr.kind
+            {
+                // A `[floatv; N]` repeat: `get_typed_array_init_value` only
+                // recognizes integer literals, so `NewTypedArray` filled the
+                // slots with zero (a silent-wrong `[0.0; N]`). Compile the
+                // repeat value once and store it into every slot via
+                // `TypedArrayStore`, which unboxes the float to its IEEE-754
+                // bytes. Integer repeats keep the fast `NewTypedArray` fill
+                // (TYPED-ARRAY-FLOAT-1, #28).
+                if let Some(val_reg) = self.compile_expr(value)? {
+                    for idx in 0..count {
+                        let idx_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: idx_reg,
+                            value: idx as i64,
+                        });
+                        let store_operands = vec![
+                            result.0 as u8,
+                            idx_reg.0 as u8,
+                            val_reg.0 as u8,
+                            elem_size as u8,
+                        ];
+                        self.ctx.emit(Instruction::FfiExtended {
+                            sub_op: 0x5E, // TypedArrayStore
+                            operands: store_operands,
+                        });
+                        self.ctx.free_temp(idx_reg);
+                    }
+                    self.ctx.free_temp(val_reg);
                 }
             }
 
