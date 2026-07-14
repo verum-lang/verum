@@ -507,6 +507,18 @@ impl Interpreter {
                         &e,
                         crate::interpreter::error::InterpreterError::Panic { message }
                             if message.starts_with("[lenient] stage-")
+                    )
+                    // XMOD-band inner-call miss (STUB-STAGE-INSUITE-1):
+                    // the ctor's BODY called a 0x2000_00xx id whose name
+                    // chase missed at load — same blast radius as the
+                    // stage-stub panic (the static reads nil later, with
+                    // a clear message at the touching test), so the same
+                    // lenient skip applies.  Pre-fix this aborted EVERY
+                    // test in the file ("global_ctors: FunctionNotFound").
+                    || matches!(
+                        &e,
+                        crate::interpreter::error::InterpreterError::FunctionNotFound(fid)
+                            if crate::stub_ranges::in_xmod_call_band(fid.0)
                     );
                     if is_lenient_stub_panic {
                         let ctor_name = self
