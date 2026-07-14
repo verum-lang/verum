@@ -76,3 +76,29 @@ handle drops with a non-zero result.
 | §D debug-only Drop-on-unawaited diagnostic | `core/runtime/pool.vr` | 30 min |
 | Live submit + await round-trip test | `vcs/specs/L2-standard/runtime/pool/` | gated on §A |
 | Drop-on-leak test (create pool, drop without destroy, verify no leak) | this folder | gated on §A + leak detector |
+
+## 2026-07-14 — §A CLOSED AT THE ROOT (POOL-INTERP-STUB-1)
+
+The Tier-0 handlers for `__pool_submit_raw` / `__pool_await_raw` /
+`__pool_global_submit_raw` returned constant 0 WITHOUT ever calling
+the submitted function — `pool.submit(f, x).await()` was a silent
+constant-zero for every `f`/`x` while Tier-1 ran the real native
+worker pool (`verum_pool_*` in platform_ir).  Silent-wrong +
+cross-tier divergence, the worst defect class.
+
+Fix (commits 25aa5b2f2 + 9d73dc8ea): Tier-0 executes the submitted
+task EAGERLY on the interpreter thread via `call_function_sync` (the
+interpreter is single-threaded by design; results equal Tier-1 for
+any await-observing program — only interleaving differs, which the
+language does not promise).  Results park in a slot-recycling handle
+table (`crates/verum_vbc/src/interpreter/task_pool.rs`, 1-based
+handles, drained-handle reads are defensive 0).  The fn value is
+accepted in all three runtime representations (FuncRef / plain-Int id
+/ zero-capture closure object).  When worker_pool V1
+(dispatch-on-workers) lands, it swaps in behind the same handle table.
+
+Pinned by `regression_test.vr` (submit-await computes, not-constant,
+order-independence, global_submit, double-await defensive zero) and
+`property_test.vr` (identity round-trip over a boundary-heavy Int
+sample, pool ≡ direct call, batch isolation ×16, worker-count
+invariance).

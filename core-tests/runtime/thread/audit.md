@@ -96,3 +96,26 @@ on a debug build with frame pointers enabled.
 | §E Frame-pointer-aware `StackTrace.capture` | `core/runtime/thread.vr` | 1 day |
 | Display/Debug rendering tests for ThreadError | this folder | gated on Display protocol surface stability |
 | Live spawn + join + result-collection round-trip | `vcs/specs/L2-standard/runtime/thread/` | gated on spawn-binding under interp |
+
+## 2026-07-14 — live spawn/join enabled under Tier-0 (THREAD-EAGER-TIER0-1)
+
+`Thread.spawn` died `SpawnFailed` on EVERY spawn under `--interp`: the
+pthread_create FFI marshalling can never run a Verum `start_routine`
+on a foreign OS thread (the interpreter's `CURRENT_INTERPRETER`
+re-entry state is thread-local, so a real pthread callback lands in a
+thread with no interpreter).  Fix (commits 25aa5b2f2 + 9d73dc8ea): a
+CallFfiC intercept for `pthread_create` / `pthread_join` /
+`pthread_detach` / `pthread_threadid_np` runs the start routine
+EAGERLY on the interpreter thread (run-to-completion at the spawn
+point), parks the full NaN-boxed return value, and replays it at
+join via the same writeback map the real FFI path uses.  The stdlib
+thread stack (`runtime/thread.vr` wrapper → `Shared<Maybe<T>>` result
+cell → `sys.<os>.thread`) runs UNCHANGED on top.  Tier-0 semantics =
+sequential execution; observable join results equal Tier-1's native
+threads.  Linux Tier-0 reaches thread creation via the clone-syscall
+path — its eager twin is deferred until a Linux Tier-0 suite exists.
+
+New `integration_test.vr` pins: spawn/join value round-trip, two
+independent spawns, named builder spawn, sleep lower bounds
+(Duration + ms forms), current-thread surface (id stability,
+available_parallelism >= 1, yield_now returns).

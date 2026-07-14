@@ -113,3 +113,20 @@ explicit.  Recommend adding a `@requires_unsafe` annotation.
 | §D per-platform frame_push behavioural test | `vcs/specs/L2-standard/context/` | 1 h |
 | §E `@requires_unsafe` annotation on `tls_read_*` / `tls_write_*` | `core/runtime/tls.vr` | 15 min |
 | Cross-thread isolation test (slot set in T1, T2 sees default) | `vcs/specs/L2-standard/runtime/tls/` | gated on spawn under interp |
+
+## 2026-07-14 — §A CLOSED; frame-pop arity drift fixed in the SUITE
+
+§A (dead `verum.runtime.tls_slot_*` keys → default-zero stubs) closed
+at the root by RUNTIME-DUPLICATE-TREE-1: `core/runtime/tls.vr` is a
+thin re-export of the canonical wired declarations (opcodes 0x59-0x5D
+over the DEDICATED `user_tls_slots` store, SYNC-TLS-WIRING-1).  All
+historical `@ignore // §A` pins removed — the round-trip /
+isolation / overwrite tests now assert LIVE semantics through the
+`core.runtime.tls` mount path.
+
+Separate suite defect found while un-pinning: the frame tests invented
+a `tls_frame_pop(frame)` 1-arg signature; the canonical contract is a
+balanced-stack `tls_frame_pop()` (0-arg, pops the TOP frame).  The two
+arity errors failed the whole file at typecheck — every other test in
+the file reported as failed with them (file-granular compile).  Tests
+rewritten to the canonical contract.

@@ -73,3 +73,14 @@ to keep the user-side dispatch + runtime path aligned.
 | §C drift-pinning unit between dispatch handlers | `crates/verum_vbc/tests/` | 1 h |
 | char_encode_utf8 / char_escape_debug coverage | this folder | 1 h |
 | text_from_static / utf8_decode_char_len surface | this folder | gated on a safe synthetic-pointer harness |
+
+## 2026-07-14 — stub-era pins retired
+
+`core/runtime/text.vr` re-exports the canonical wired
+`core.intrinsics.runtime.text` declarations since
+RUNTIME-DUPLICATE-TREE-1 closed (deep semantic coverage:
+core-tests/intrinsics/runtime/text/, green both tiers).  All
+`@ignore // §A` pins and stale stub-era comments removed 2026-07-14 —
+this suite now asserts live parse/classify/case semantics through the
+`core.runtime.text` mount path; a regression back to stub-zero fails
+loudly here.
