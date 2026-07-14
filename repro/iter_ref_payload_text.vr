@@ -1,0 +1,27 @@
+// AOT-ITERDEREF-SLOT-1 carried-fact leg (#41 layer-2) — pinned repro.
+//
+// `ListIter.next()` declares `-> Maybe<&T>`; its `&*self.ptr` REFDEREF-folds
+// to the raw SLOT ADDRESS, so at Tier-1 the Some payload is one load away
+// from the element.  For stamped elements the Deref discriminator recovered;
+// Text is headerless-flat (unstampable), so `(*a).concat(b)` handed the slot
+// address (then, half-fixed, the DOUBLE-deref'd data-ptr) to Text.concat —
+// EXC_BAD_ACCESS with the fault address equal to string BYTES.
+//
+// The fix is a three-link chain, no runtime shape guessing:
+//   1. RETNAME renders nested refs verbatim (`Maybe<&T>`, not `Maybe<T>`)
+//      and survives the archive merge (descriptor sid re-intern);
+//   2. the custom-iter Maybe-unwrap arm load-throughs the payload slot
+//      when `next`'s carried return-type name declares a reference
+//      (tag==1-guarded branch/phi — the load must not run at exhaustion);
+//   3. dst is marked pass-through-ref so a later `*a` Deref is identity.
+//
+// Expected (both tiers): got=aa / got=abc / got=bca / got=bcbc, rc=0.
+fn main() {
+    let xs: List<Text> = ["a", "bc"];
+    for a in xs.iter() {
+        for b in xs.iter() {
+            let lhs = (*a).concat(b);
+            print(f"got={lhs}");
+        }
+    }
+}

@@ -13985,6 +13985,23 @@ impl VbcCodegen {
     /// For primitive types like `Int`, returns `Some("Int")`.
     /// Used to track return types for correct method dispatch on function results.
     fn extract_type_name(&self, ty: &verum_ast::ty::Type) -> Option<String> {
+        self.extract_type_name_at(ty, true)
+    }
+
+    /// RETNAME-CARRY-1 rendering authority.  `top` marks the outermost
+    /// position: a TOP-LEVEL reference return (`-> &T`) flattens to the
+    /// inner name — value-receiver dispatch semantics, the documented
+    /// contract every `return_type_name` consumer relies on.  A NESTED
+    /// reference (`-> Maybe<&T>`, `-> (Int, &mut T)`) keeps its `&` /
+    /// `&mut` spelling: erasing it there is not "honest-lossy", it is
+    /// corrupting — Tier-1 reads the carried name to learn that an
+    /// iterator protocol's Some payload is a SLOT ADDRESS (`&*self.ptr`
+    /// REFDEREF-folds to the raw slot), and a ref-blind render made the
+    /// slot indistinguishable from the element value (#41 layer-2,
+    /// AOT-ITERDEREF-SLOT-1).  Same rule as slices (`[T]`) and tuples
+    /// (`(A, B)`): structure that downstream consumers position on must
+    /// survive the render.
+    fn extract_type_name_at(&self, ty: &verum_ast::ty::Type, top: bool) -> Option<String> {
         use verum_ast::ty::{PathSegment, TypeKind};
 
         match &ty.kind {
@@ -14011,7 +14028,7 @@ impl VbcCodegen {
             }
             TypeKind::Generic { base, args } => {
                 // For generic types like Result<T, E>, extract the full type including args
-                let base_name = self.extract_type_name(base)?;
+                let base_name = self.extract_type_name_at(base, false)?;
                 if args.is_empty() {
                     Some(base_name)
                 } else {
@@ -14029,7 +14046,9 @@ impl VbcCodegen {
                     let mut arg_strs: Vec<String> = Vec::with_capacity(args.len());
                     for arg in args.iter() {
                         let rendered = match arg {
-                            verum_ast::ty::GenericArg::Type(ty) => self.extract_type_name(ty),
+                            verum_ast::ty::GenericArg::Type(ty) => {
+                                self.extract_type_name_at(ty, false)
+                            }
                             verum_ast::ty::GenericArg::Const(_) => None,
                             verum_ast::ty::GenericArg::Lifetime(_) => None,
                             verum_ast::ty::GenericArg::Binding(_) => None,
@@ -14053,7 +14072,7 @@ impl VbcCodegen {
                 }
                 let mut elems: Vec<String> = Vec::with_capacity(elements.len());
                 for e in elements.iter() {
-                    match self.extract_type_name(e) {
+                    match self.extract_type_name_at(e, false) {
                         Some(s) => elems.push(s),
                         None => return None,
                     }
@@ -14063,16 +14082,23 @@ impl VbcCodegen {
                 // splitters; `(T)` is unambiguous for our consumers.
                 Some(format!("({})", elems.join(", ")))
             }
-            TypeKind::Reference { inner, .. } => {
-                // For reference types, extract the inner type name
-                self.extract_type_name(inner)
+            TypeKind::Reference { mutable, inner } => {
+                let inner_name = self.extract_type_name_at(inner, false)?;
+                if top {
+                    // Top-level `-> &T` flattens (dispatch contract).
+                    Some(inner_name)
+                } else if *mutable {
+                    Some(format!("&mut {}", inner_name))
+                } else {
+                    Some(format!("&{}", inner_name))
+                }
             }
             TypeKind::Slice(inner) => {
                 // `&[T]` / `[T]` — return the bracketed form so downstream
                 // method-dispatch code (which checks `starts_with('[')` to
                 // route to the Slice.* implementation) sees a slice type.
                 let inner_name = self
-                    .extract_type_name(inner)
+                    .extract_type_name_at(inner, false)
                     .unwrap_or_else(|| "T".to_string());
                 Some(format!("[{}]", inner_name))
             }
@@ -20773,6 +20799,25 @@ impl VbcCodegen {
                     new_desc.parent_type = Some(crate::types::TypeId(codegen_parent));
                 }
             }
+            // RETNAME-CARRY-1 (merge leg) + #87 intrinsic marker: these
+            // two descriptor-level STRING facts arrive as ARCHIVE-pool
+            // ids, but finalize's `string_id_map` translation treats
+            // them as CODEGEN-pool indices.  An in-range stale id
+            // resolved to an unrelated string (`Chars.next` carrying
+            // "RenderCell"), an out-of-range one to `None`
+            // (`ListIter.next` carrying nothing) — either way the
+            // carried fact died at this boundary.  Re-intern from the
+            // archive pool exactly like name/params/hints above.
+            let rt_text = new_desc
+                .return_type_name
+                .and_then(|sid| archive_module.strings.get(sid).map(|s| s.to_string()));
+            new_desc.return_type_name =
+                rt_text.map(|t| StringId(self.ctx.intern_string_raw(&t)));
+            let in_text = new_desc
+                .intrinsic_name
+                .and_then(|sid| archive_module.strings.get(sid).map(|s| s.to_string()));
+            new_desc.intrinsic_name =
+                in_text.map(|t| StringId(self.ctx.intern_string_raw(&t)));
             // The codegen finalize re-encodes from `instructions` —
             // clear bytecode_offset / bytecode_length so finalize
             // doesn't try to use stale archive offsets.

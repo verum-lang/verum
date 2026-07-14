@@ -36253,11 +36253,122 @@ fn lower_iter_next<'ctx>(
                 .or_llvm_err()?
                 .into_int_value();
 
+            // AOT-ITERDEREF-SLOT-1, carried-fact leg (#41 layer-2): when
+            // the iterator protocol's `next` DECLARES a reference return
+            // (`-> Maybe<&T>`, the ListIter shape whose `&*self.ptr`
+            // REFDEREF-folds to the raw SLOT ADDRESS), the Some payload
+            // is a slot — load through it ONCE so dst carries the
+            // ELEMENT value, matching what the interpreter's deref of
+            // that slot yields. Value-yielding iterators (`-> Maybe<T>`)
+            // keep the payload as-is. The fact rides the function
+            // descriptor's carried return-type name (RETNAME) — no
+            // runtime shape guessing (Text is headerless flat; probes
+            // were rejected).
+            let next_yields_ref = ctx
+                .vbc_module()
+                .and_then(|m| {
+                    m.functions.iter().find(|f| {
+                        m.get_string(f.name).map(|n| n == next_name).unwrap_or(false)
+                    })
+                })
+                .and_then(|f| f.return_type_name)
+                .and_then(|sid| {
+                    ctx.vbc_module().and_then(|m| m.strings.get(sid).map(|s| s.to_string()))
+                })
+                .map(|rt| {
+                    let t = rt.trim();
+                    // "Maybe<&T>" / "&T" spellings both count.
+                    t.contains("<&") || t.starts_with('&')
+                })
+                .unwrap_or(false);
+            if std::env::var("VERUM_TRACE_ITERSLOT").is_ok() {
+                let resolved = ctx
+                    .vbc_module()
+                    .and_then(|m| {
+                        m.functions.iter().find(|f| {
+                            m.get_string(f.name).map(|n| n == next_name).unwrap_or(false)
+                        })
+                    })
+                    .and_then(|f| f.return_type_name)
+                    .and_then(|sid| {
+                        ctx.vbc_module()
+                            .and_then(|m| m.strings.get(sid).map(|s| s.to_string()))
+                    })
+                    .unwrap_or_else(|| "<none>".into());
+                eprintln!(
+                    "[iterslot] custom-iter next_name={} ret={} yields_ref={}",
+                    next_name, resolved, next_yields_ref
+                );
+            }
+            let payload_out = if next_yields_ref {
+                // Guard on tag==1: at exhaustion (None) the payload word
+                // is absent/garbage — the load must not execute (REAL
+                // branch, the recurring select-is-not-a-guard lesson).
+                let ptr_type = ctx.types().ptr_type();
+                let llvm_ctx = ctx.llvm_context();
+                let cur_bb = ctx
+                    .builder()
+                    .get_insert_block()
+                    .or_internal("iter slot-load: no insert block")?;
+                let func = cur_bb
+                    .get_parent()
+                    .or_internal("iter slot-load: no parent")?;
+                let some_bb = llvm_ctx.append_basic_block(func, "iter_slot_some");
+                let done_bb = llvm_ctx.append_basic_block(func, "iter_slot_done");
+                let is_some = ctx
+                    .builder()
+                    .build_int_compare(
+                        IntPredicate::EQ,
+                        tag,
+                        i64_type.const_int(1, false),
+                        "iter_tag_some",
+                    )
+                    .or_llvm_err()?;
+                ctx.builder()
+                    .build_conditional_branch(is_some, some_bb, done_bb)
+                    .or_llvm_err()?;
+                ctx.builder().position_at_end(some_bb);
+                let slot_ptr = ctx
+                    .builder()
+                    .build_int_to_ptr(payload, ptr_type, "iter_slot_ptr")
+                    .or_llvm_err()?;
+                let loaded = ctx
+                    .builder()
+                    .build_load(i64_type, slot_ptr, "iter_slot_val")
+                    .or_llvm_err()?
+                    .into_int_value();
+                ctx.builder()
+                    .build_unconditional_branch(done_bb)
+                    .or_llvm_err()?;
+                ctx.builder().position_at_end(done_bb);
+                let phi = ctx
+                    .builder()
+                    .build_phi(i64_type, "iter_slot_out")
+                    .or_llvm_err()?;
+                phi.add_incoming(&[(&loaded, some_bb), (&payload, cur_bb)]);
+                phi.as_basic_value().into_int_value()
+            } else {
+                payload
+            };
+
             // tag=1 means Some (has_next=true), tag=0 means None (done)
-            ctx.set_register(dst.0, payload.into());
+            ctx.set_register(dst.0, payload_out.into());
+            if next_yields_ref {
+                // The load-through above already peeled the slot: dst now
+                // holds the ELEMENT VALUE. A later `*a` Deref must be
+                // identity — without this mark the slot-vs-object
+                // discriminator re-derefs headerless values (Text has no
+                // stamp, so a Text VALUE is indistinguishable from a slot
+                // and its data-ptr word got loaded as the "element",
+                // faulting on string bytes used as an address).
+                ctx.mark_pass_through_ref(dst.0);
+            }
             ctx.set_register(has_next.0, tag.into());
         }
     } else {
+        if std::env::var("VERUM_TRACE_ITERSLOT").is_ok() {
+            eprintln!("[iterslot] list-fallback arm (iter r{})", iter.0);
+        }
         let (value, has_more) = runtime.lower_iter_next_list(
             ctx.builder(),
             iter_ptr,
