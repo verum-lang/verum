@@ -12618,6 +12618,9 @@ fn lower_call<'ctx>(
                 ctx.set_obj_register_type(dst.0, "BinaryHeap".to_string());
             }
         }
+        // Last resort: carried RETNAME → obj-type (user records/variants
+        // whose structural return type degraded to the PTR carrier).
+        mark_call_result_from_retname(ctx, dst.0, func_name);
     } else {
         // Void return — store unit
         let unit_type = ctx.types().context().struct_type(&[], false);
@@ -18830,6 +18833,9 @@ fn lower_call_method<'ctx>(
                     _ => {}
                 }
             }
+            // Last resort: carried RETNAME → obj-type (user records/variants
+            // whose structural return type degraded to the PTR carrier).
+            mark_call_result_from_retname(ctx, dst.0, &func_name);
         }
         // as_bytes() returns a slice {ptr, len} — mark for GetE/Len
         if bare_method == "as_bytes" {
@@ -31901,6 +31907,83 @@ fn store_ffi_void_value<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ret_reg: u16)
 
 /// This ensures that Call/CallM results are properly tracked for downstream
 /// instructions (GetE/SetE need list tracking, ToString needs float/string tracking, etc.).
+/// CALLM-RETNAME-OBJ-MARK-1 (#41): last-resort obj-type stamp for a call
+/// result from the carried verbatim return-type name.  The structural
+/// `descriptor.return_type` degrades to the PTR carrier for user types
+/// that were absent from `type_name_to_id` at their module's bake moment
+/// (RETNAME-CARRY-1's founding lossiness), so
+/// `mark_register_from_return_type` classifies nothing and the register
+/// stays unmarked — a later `Ref` of it then SPILLS the heap pointer
+/// into a stack slot and hands the SLOT ADDRESS to generic consumers
+/// (`f"{c:?}"` → `&c` → format_debug printed "" for every user
+/// record/variant result, e.g. `Text.cmp -> Ordering`).  Runs AFTER
+/// every smarter mechanism (structural mark, MAYBE-EXTRACT payload
+/// propagation, container name fallbacks) and only when they all
+/// declined, so it can never override a better fact.
+fn mark_call_result_from_retname<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: u16,
+    resolved_fn_name: &str,
+) {
+    if ctx.get_obj_register_type(dst).is_some()
+        || ctx.is_text_register(dst)
+        || ctx.is_string_register(dst)
+        || ctx.is_list_register(dst)
+        || ctx.is_slice_register(dst)
+        || ctx.is_map_register(dst)
+        || ctx.is_set_register(dst)
+        || ctx.is_float_register(dst)
+        || ctx.is_bool_register(dst)
+    {
+        return;
+    }
+    let found = ctx.vbc_module().and_then(|m| {
+        m.functions
+            .iter()
+            .find(|f| {
+                m.get_string(f.name)
+                    .map(|n| n == resolved_fn_name)
+                    .unwrap_or(false)
+            })
+            .map(|f| {
+                f.return_type_name
+                    .and_then(|sid| m.strings.get(sid).map(|s| s.to_string()))
+            })
+    });
+    if std::env::var("VERUM_TRACE_RETMARK").is_ok() {
+        eprintln!(
+            "[retmark] in={} fn={} dst=r{} found_fn={} retname={:?}",
+            ctx.function_name().as_str(),
+            resolved_fn_name,
+            dst,
+            found.is_some(),
+            found.as_ref().and_then(|o| o.as_deref())
+        );
+    }
+    let Some(Some(retname)) = found else {
+        return;
+    };
+    let base = retname.split('<').next().unwrap_or("").trim();
+    // Skip shapes that other authorities own: slices/tuples (structural
+    // marks), Maybe/Result (payload machinery), generics (single
+    // uppercase letter or Self — a name, not a type), primitives, WKT
+    // containers, and reference spellings that survived in nested form.
+    if base.is_empty()
+        || base.starts_with('[')
+        || base.starts_with('(')
+        || base.starts_with('&')
+        || base == "Self"
+        || base == "Maybe"
+        || base == "Result"
+        || (base.len() <= 2 && base.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()))
+        || is_primitive_type_name(base)
+        || WKT::from_name(base).is_some()
+    {
+        return;
+    }
+    ctx.set_obj_register_type(dst, base.to_string());
+}
+
 fn mark_register_from_return_type<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     reg: u16,
@@ -36525,6 +36608,17 @@ fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
             // fmt's STACK and every Display interpolation printed "".
             || ctx.is_ref_param_register(src.0);
 
+        if std::env::var("VERUM_TRACE_RETMARK").is_ok()
+            && matches!(ctx.function_name().as_str(), "main" | "verum_main")
+        {
+            eprintln!(
+                "[refmark] main Ref r{}<-r{} heap={} obj={:?}",
+                dst.0,
+                src.0,
+                is_heap_type,
+                ctx.get_obj_register_type(src.0)
+            );
+        }
         if !is_heap_type {
             // Check for GetE element pointer first — if this register was
             // loaded from a list backing array, use the heap pointer directly.
