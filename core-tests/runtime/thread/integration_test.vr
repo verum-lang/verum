@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/runtime/thread/integration_test.vr
+// =============================================================================
+//
+// LIVE thread semantics — spawn/join round-trips, the current-thread
+// surface, and the sleep contract against `core.time.Duration`.
+// The data-only ADT surface (ThreadId/ThreadError/ThreadBuilder
+// records) is pinned in unit_test.vr; this file exercises the parts
+// that actually touch the platform thread layer
+// (`sys.{linux,darwin,windows}.thread`).
+// =============================================================================
+
+mount core.runtime.thread.{Thread, ThreadBuilder, ThreadId, ThreadError};
+mount core.time.{Duration};
+mount sys.{monotonic_nanos};
+
+fn task_forty_two() -> Int { 42 }
+fn task_compute() -> Int { 6 * 7 }
+
+// =============================================================================
+// Section 1: current-thread surface — always live, no spawn needed
+// =============================================================================
+
+@test
+fn test_current_id_is_stable_within_thread() {
+    let a = Thread.current_id();
+    let b = Thread.current_id();
+    assert(a == b, "current_id must be stable across adjacent reads");
+}
+
+@test
+fn test_available_parallelism_at_least_one() {
+    let n = Thread.available_parallelism();
+    assert(n >= 1, "available_parallelism must be >= 1");
+}
+
+@test
+fn test_yield_now_returns() {
+    // yield_now must return to the caller (not deadlock / crash).
+    Thread.yield_now();
+    assert(true);
+}
+
+// =============================================================================
+// Section 2: sleep — lower-bound contract with core.time
+// =============================================================================
+
+@test
+fn test_sleep_ms_lower_bound() {
+    let start = monotonic_nanos();
+    Thread.sleep_ms(10);
+    let elapsed = monotonic_nanos() - start;
+    // Sleep may overshoot but must never return EARLY.
+    assert(elapsed >= 10_000_000, "sleep_ms(10) returned before 10ms elapsed");
+}
+
+@test
+fn test_sleep_duration_lower_bound() {
+    let start = monotonic_nanos();
+    Thread.sleep(Duration.from_millis(5));
+    let elapsed = monotonic_nanos() - start;
+    assert(elapsed >= 5_000_000, "sleep(5ms Duration) returned before 5ms elapsed");
+}
+
+// =============================================================================
+// Section 3: spawn / join — the load-bearing round-trip
+// =============================================================================
+
+@test
+fn test_spawn_join_returns_value() {
+    let handle = Thread.spawn(task_forty_two);
+    match handle.join() {
+        Result.Ok(v) => assert_eq(v, 42, "joined thread must return its computed value"),
+        Result.Err(_) => assert(false, "spawn/join of a trivial task must not error"),
+    }
+}
+
+@test
+fn test_spawn_two_threads_independent_results() {
+    let h1 = Thread.spawn(task_forty_two);
+    let h2 = Thread.spawn(task_compute);
+    let r1 = h1.join();
+    let r2 = h2.join();
+    assert(r1.is_ok() && r2.is_ok(), "both joins must succeed");
+}
+
+@test
+fn test_builder_spawn_with_name() {
+    let b = ThreadBuilder.new().name("conformance-worker");
+    match b.spawn(task_forty_two) {
+        Result.Ok(handle) => {
+            match handle.join() {
+                Result.Ok(v) => assert_eq(v, 42),
+                Result.Err(_) => assert(false, "named-thread join failed"),
+            }
+        },
+        Result.Err(_) => assert(false, "builder spawn failed"),
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

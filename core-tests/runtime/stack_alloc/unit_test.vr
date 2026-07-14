@@ -1,0 +1,263 @@
+// =============================================================================
+// core-tests/runtime/stack_alloc/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/stack_alloc.vr` (822 LOC) — stack (bump) + arena + pool
+// allocators.  Historically the module was `@cfg(any(runtime =
+// "no_heap", runtime = "embedded"))`-gated and therefore UNTESTABLE
+// under the default conformance profile (audit.md §A).  The gate was
+// removed 2026-07-14: the allocators are self-contained (fixed
+// `[Byte; SIZE]` buffers, no OS dependency) and equally useful on the
+// full runtime for deterministic-latency scopes.
+//
+// This suite pins the ACCOUNTING contract (capacity / used /
+// remaining / watermark / alloc_count), the savepoint machinery, and
+// the error surface.  Byte-level pointer semantics ride on the same
+// raw-pointer plumbing pinned at core-tests/intrinsics/runtime/mem_raw/.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.runtime.stack_alloc.{
+    StackAllocator, StackSavepoint,
+    ArenaAllocator, ArenaSavepoint,
+    PoolAllocator,
+    TinyStackAllocator,
+};
+mount mem.{Layout, AllocError};
+
+// =============================================================================
+// Section 1: StackAllocator — construction + static accounting
+// =============================================================================
+
+@test
+fn test_stack_new_is_empty() {
+    let a = StackAllocator<256>.new();
+    assert_eq(a.capacity(), 256);
+    assert_eq(a.used(), 0);
+    assert_eq(a.remaining(), 256);
+    assert_eq(a.watermark(), 0);
+    assert_eq(a.alloc_count(), 0);
+}
+
+@test
+fn test_stack_preset_alias_capacity() {
+    // `TinyStackAllocator` is `StackAllocator<1024>` — the alias must
+    // carry the const parameter through.
+    let a = TinyStackAllocator.new();
+    assert_eq(a.capacity(), 1024);
+}
+
+// =============================================================================
+// Section 2: StackAllocator.alloc — bump accounting
+// =============================================================================
+
+@test
+fn test_stack_alloc_bumps_used() {
+    let mut a = StackAllocator<256>.new();
+    let r = a.alloc(Layout.from_size_align(64, 8));
+    assert(r.is_ok(), "64-byte alloc in a 256-byte stack must succeed");
+    assert_eq(a.used(), 64);
+    assert_eq(a.remaining(), 192);
+    assert_eq(a.alloc_count(), 1);
+}
+
+@test
+fn test_stack_alloc_two_sequential() {
+    let mut a = StackAllocator<256>.new();
+    let _ = a.alloc(Layout.from_size_align(32, 8));
+    let _ = a.alloc(Layout.from_size_align(32, 8));
+    assert_eq(a.used(), 64);
+    assert_eq(a.alloc_count(), 2);
+}
+
+@test
+fn test_stack_alloc_respects_alignment() {
+    let mut a = StackAllocator<256>.new();
+    // 1 byte at align 1 leaves top == 1; the next align-8 alloc must
+    // round the bump pointer up to 8 before allocating.
+    let _ = a.alloc(Layout.from_size_align(1, 1));
+    assert_eq(a.used(), 1);
+    let _ = a.alloc(Layout.from_size_align(8, 8));
+    assert_eq(a.used(), 16, "align-8 alloc after 1 byte: 1 -> pad to 8 -> +8 = 16");
+}
+
+@test
+fn test_stack_alloc_exact_fit_succeeds() {
+    let mut a = StackAllocator<128>.new();
+    let r = a.alloc(Layout.from_size_align(128, 1));
+    assert(r.is_ok(), "exact-capacity alloc must succeed");
+    assert_eq(a.remaining(), 0);
+}
+
+@test
+fn test_stack_alloc_oom_returns_error_not_panic() {
+    let mut a = StackAllocator<64>.new();
+    let r = a.alloc(Layout.from_size_align(128, 8));
+    assert(r.is_err(), "over-capacity alloc must be Err, not panic");
+}
+
+@test
+fn test_stack_alloc_oom_does_not_mutate_state() {
+    let mut a = StackAllocator<64>.new();
+    let _ = a.alloc(Layout.from_size_align(32, 8));
+    let before_used = a.used();
+    let before_count = a.alloc_count();
+    let r = a.alloc(Layout.from_size_align(64, 8));  // 32 + 64 > 64 — must fail
+    assert(r.is_err());
+    assert_eq(a.used(), before_used, "failed alloc must not move the bump pointer");
+    assert_eq(a.alloc_count(), before_count, "failed alloc must not count");
+}
+
+// =============================================================================
+// Section 3: watermark — lifetime-maximum tracking
+// =============================================================================
+
+@test
+fn test_watermark_tracks_maximum() {
+    let mut a = StackAllocator<256>.new();
+    let _ = a.alloc(Layout.from_size_align(100, 1));
+    assert_eq(a.watermark(), 100);
+}
+
+@test
+fn test_watermark_survives_reset() {
+    let mut a = StackAllocator<256>.new();
+    let _ = a.alloc(Layout.from_size_align(100, 1));
+    a.reset();
+    assert_eq(a.used(), 0, "reset clears the bump pointer");
+    assert_eq(a.watermark(), 100, "reset keeps the lifetime watermark");
+}
+
+@test
+fn test_reset_all_clears_watermark() {
+    let mut a = StackAllocator<256>.new();
+    let _ = a.alloc(Layout.from_size_align(100, 1));
+    a.reset_all();
+    assert_eq(a.used(), 0);
+    assert_eq(a.watermark(), 0);
+    assert_eq(a.alloc_count(), 0);
+}
+
+// =============================================================================
+// Section 4: save / restore — savepoint rewind
+// =============================================================================
+
+@test
+fn test_savepoint_captures_position() {
+    let mut a = StackAllocator<256>.new();
+    let _ = a.alloc(Layout.from_size_align(32, 8));
+    let sp = a.save();
+    assert_eq(sp.top, 32);
+    assert_eq(sp.alloc_count, 1);
+}
+
+@test
+fn test_restore_rewinds_to_savepoint() {
+    let mut a = StackAllocator<256>.new();
+    let _ = a.alloc(Layout.from_size_align(32, 8));
+    let sp = a.save();
+    let _ = a.alloc(Layout.from_size_align(64, 8));
+    let _ = a.alloc(Layout.from_size_align(16, 8));
+    a.restore(sp);
+    assert_eq(a.used(), 32, "restore must rewind the bump pointer");
+    assert_eq(a.alloc_count(), 1, "restore must rewind the alloc count");
+}
+
+@test
+fn test_restore_then_realloc_reuses_space() {
+    let mut a = StackAllocator<128>.new();
+    let sp = a.save();
+    let _ = a.alloc(Layout.from_size_align(96, 8));
+    a.restore(sp);
+    // The 96 bytes are free again — a fresh 96-byte alloc must succeed.
+    let r = a.alloc(Layout.from_size_align(96, 8));
+    assert(r.is_ok(), "space freed by restore must be reusable");
+}
+
+// =============================================================================
+// Section 5: ArenaAllocator — chunked accounting
+// =============================================================================
+
+@test
+fn test_arena_new_accounting() {
+    let a = ArenaAllocator<1024, 4>.new();
+    assert_eq(a.capacity(), 4096);
+    assert_eq(a.used(), 0);
+}
+
+@test
+fn test_arena_alloc_accumulates() {
+    let mut a = ArenaAllocator<1024, 4>.new();
+    let r1 = a.alloc(Layout.from_size_align(100, 8));
+    assert(r1.is_ok());
+    let r2 = a.alloc(Layout.from_size_align(100, 8));
+    assert(r2.is_ok());
+    assert(a.used() >= 200, "arena must account both allocations");
+}
+
+@test
+fn test_arena_savepoint_restore() {
+    let mut a = ArenaAllocator<1024, 4>.new();
+    let _ = a.alloc(Layout.from_size_align(64, 8));
+    let sp = a.save();
+    let _ = a.alloc(Layout.from_size_align(64, 8));
+    a.restore(sp);
+    assert_eq(a.used(), 64, "restore must rewind arena accounting to the savepoint");
+}
+
+// =============================================================================
+// Section 6: PoolAllocator — fixed-block accounting
+// =============================================================================
+
+@test
+fn test_pool_new_accounting() {
+    let p = PoolAllocator<64, 8>.new();
+    assert_eq(p.block_size(), 64);
+    assert_eq(p.block_count(), 8);
+    assert_eq(p.allocated(), 0);
+    assert_eq(p.available(), 8);
+}
+
+@test
+fn test_pool_alloc_block_decrements_available() {
+    let mut p = PoolAllocator<64, 8>.new();
+    let r = p.alloc_block();
+    assert(r.is_ok(), "pool with free blocks must allocate");
+    assert_eq(p.allocated(), 1);
+    assert_eq(p.available(), 7);
+}
+
+@test
+fn test_pool_exhaustion_returns_error() {
+    let mut p = PoolAllocator<16, 2>.new();
+    let _ = p.alloc_block();
+    let _ = p.alloc_block();
+    let r = p.alloc_block();
+    assert(r.is_err(), "exhausted pool must return Err, not panic");
+    assert_eq(p.allocated(), 2);
+}
+
+@test
+fn test_pool_free_block_recycles() {
+    let mut p = PoolAllocator<16, 2>.new();
+    let b1 = p.alloc_block();
+    let _ = p.alloc_block();
+    match b1 {
+        Result.Ok(ptr) => {
+            p.free_block(ptr);
+            assert_eq(p.allocated(), 1);
+            // The freed block must be allocatable again.
+            let again = p.alloc_block();
+            assert(again.is_ok(), "freed block must be reusable");
+        },
+        Result.Err(_) => assert(false, "first alloc_block failed"),
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

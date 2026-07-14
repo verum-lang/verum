@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/runtime/pool/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.runtime.pool.ThreadPool`.
+//
+// Sampling rationale: the input domain is all of Int; we sweep a
+// boundary-heavy sample (0, ±1, extremes of the small-int range, and a
+// mid-range spread) — enough to catch value-dependent divergence
+// (sign handling, truncation) in the submit→await round-trip.
+// =============================================================================
+
+mount core.runtime.pool.{ThreadPool, PoolTaskHandle};
+
+fn law_identity(x: Int) -> Int { x }
+fn law_negate(x: Int) -> Int { 0 - x }
+fn law_square(x: Int) -> Int { x * x }
+
+fn sample_inputs() -> List<Int> {
+    [0, 1, -1, 2, -2, 7, 100, -100, 4096, -4096, 1_000_000, -1_000_000]
+}
+
+// LAW: submit(identity, x).await() == x — the pool transports values
+// unchanged (no truncation, no sign loss, no NaN-box corruption).
+@test
+fn law_pool_identity_roundtrip_sampled() {
+    let pool = ThreadPool.new(2);
+    for x in sample_inputs().iter() {
+        let mut h = pool.submit(law_identity, *x);
+        assert_eq(h.await(), *x, "identity round-trip through the pool must preserve the value");
+    }
+}
+
+// LAW: submit(f, x).await() == f(x) — pool execution agrees with
+// direct call for every sampled input.
+@test
+fn law_pool_agrees_with_direct_call_negate() {
+    let pool = ThreadPool.new(2);
+    for x in sample_inputs().iter() {
+        let mut h = pool.submit(law_negate, *x);
+        assert_eq(h.await(), law_negate(*x), "pool result must equal direct call");
+    }
+}
+
+@test
+fn law_pool_agrees_with_direct_call_square() {
+    let pool = ThreadPool.new(2);
+    for x in sample_inputs().iter() {
+        let mut h = pool.submit(law_square, *x);
+        assert_eq(h.await(), law_square(*x), "pool result must equal direct call");
+    }
+}
+
+// LAW: N in-flight handles keep N independent results — batch submit
+// then batch await; no handle may observe a sibling's value.
+@test
+fn law_pool_batch_isolation() {
+    let pool = ThreadPool.new(4);
+    let mut handles: List<PoolTaskHandle> = [];
+    let mut i = 0;
+    while i < 16 {
+        handles.push(pool.submit(law_square, i));
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < 16 {
+        let mut h = handles[j];
+        assert_eq(h.await(), j * j, "batched handle observed a sibling's result");
+        j = j + 1;
+    }
+}
+
+// LAW: worker count does not change RESULTS (only scheduling).
+@test
+fn law_pool_result_independent_of_worker_count() {
+    let p1 = ThreadPool.new(1);
+    let p4 = ThreadPool.new(4);
+    let mut h1 = p1.submit(law_square, 12);
+    let mut h4 = p4.submit(law_square, 12);
+    assert_eq(h1.await(), h4.await(), "worker count must not change computed values");
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

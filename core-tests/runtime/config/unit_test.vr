@@ -235,14 +235,18 @@ fn test_io_completion_error_construction() {
 // Section 4: NoopExecutor + NoopDriver — unit-type sentinels
 // =============================================================================
 
+// Unit types (`type X is ();`) construct with the BARE name — the
+// call form `NoopExecutor()` is "not a function" by the grammar.  The
+// stdlib itself uses the bare form (`&NoopExecutor` at
+// core/runtime/config.vr:635).
 @test
 fn test_noop_executor_construction() {
-    let _: NoopExecutor = NoopExecutor();
+    let _: NoopExecutor = NoopExecutor;
     assert(true);
 }
 
 @test
 fn test_noop_driver_construction() {
-    let _: NoopDriver = NoopDriver();
+    let _: NoopDriver = NoopDriver;
     assert(true);
 }

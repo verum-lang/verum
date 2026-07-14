@@ -21,7 +21,7 @@
 // =============================================================================
 
 mount core.runtime.recovery.{
-    RuntimeRetryConfig, RecoveryRetryPolicy, RetryPolicy,
+    RuntimeRetryConfig, RecoveryRetryPolicy,
     RetryPredicate, RecoveryBackoffStrategy, JitterConfig,
     RecoveryCircuitState, RecoveryCircuitBreakerConfig, ErrorPredicate,
     RuntimeRecoveryStrategy,
@@ -285,15 +285,21 @@ fn test_retry_policy_should_retry_zero_max_attempts_false() {
     assert(!p.should_retry());
 }
 
+// NAMING PIN: `RecoveryRetryPolicy` is the CANONICAL name — there is
+// deliberately NO bare `RetryPolicy` alias in core.runtime.recovery.
+// The bare name belongs to `core.database.common.retry.RetryPolicy`;
+// re-introducing it here would recreate the cross-module bare-name
+// collision class (task #17/#39, 115-dup-type-name debt).  This test
+// pins that the canonical name constructs and behaves.
 @test
-fn test_retry_policy_public_alias_resolves() {
+fn test_recovery_retry_policy_canonical_name() {
     let cfg = RuntimeRetryConfig {
         max_attempts: 1,
         backoff: RecoveryBackoffStrategy.None,
         jitter: JitterConfig.None,
         retry_on: RetryPredicate.AllErrors,
     };
-    let p: RetryPolicy = RecoveryRetryPolicy.new(cfg);
+    let p: RecoveryRetryPolicy = RecoveryRetryPolicy.new(cfg);
     let _ = p;
     assert(true);
 }

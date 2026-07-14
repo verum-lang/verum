@@ -228,11 +228,15 @@ fn test_env_install_parent_contexts_null_ptr_is_no_op() {
 @test
 fn test_env_install_parent_contexts_overflow_guard() {
     // count > (Int.MAX - 8) / 16 — the source guard at ctx_bridge.vr:106.
-    // We pick a value well above that threshold.  Note: we use a non-zero
-    // pointer to ensure the FIRST guard (slots_ptr == 0) doesn't trip
-    // before the overflow guard gets a chance to fire.  Source order:
-    // `count <= 0 || slots_ptr == 0` returns first; overflow check is
-    // the next branch.
-    env_install_parent_contexts(0xDEADBEEF, 1_000_000_000_000);
+    // The count MUST be computed from the same expression as the guard:
+    // the original hand-picked 1_000_000_000_000 was BELOW the ~5.76e17
+    // threshold, so the guard correctly did NOT fire and the loop
+    // dereferenced the bogus 0xDEADBEEF pointer — a wild `load_i64`
+    // that SIGSEGV'd the whole in-process test runner (see audit.md §C:
+    // one crashing test aborts every suite after it — no isolation).
+    // We use a non-zero pointer so the first guard (slots_ptr == 0)
+    // doesn't mask the overflow branch.
+    let above_threshold = (Int.MAX - 8) / 16 + 1;
+    env_install_parent_contexts(0xDEADBEEF, above_threshold);
     assert(true);
 }

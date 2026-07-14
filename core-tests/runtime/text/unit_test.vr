@@ -13,25 +13,17 @@
 //   * char_to_{uppercase,lowercase}
 //   * char_encode_utf8 / char_escape_debug / char_general_category
 //
-// **DEFECT CLASS §A — INTRINSIC STUBS NOT BOUND AT RUNTIME LAYER**
-// (surfaced 2026-05-27 — shared root with [[runtime/cbgr §A]] /
-// [[runtime/time §A]] / [[runtime/tls §A]])
-//
-// The `verum.runtime.text_*` and `verum.runtime.char_*` idents
-// forward-declared here are NOT registered in
-// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/`.  Probes
-// 2026-05-27:
-//   * `text_parse_int(&"42").is_some() == false` (expected true)
-//   * `char_is_alphabetic('a') == false` (expected true)
-// All assertion-content tests below `@ignore`'d until binding lands.
-//
-// The HIGHER-LEVEL user-facing surface (`Char.is_alphabetic` /
-// `Text.parse_int`) DOES work — it routes through a DIFFERENT dispatch
-// path in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/{char,text}_extended.rs`
-// keyed on the type-method shape, NOT on the free-fn intrinsic ident.
-// That's the same drift class as [[runtime/tls §B]]: two parallel APIs,
-// only one bound.  Surface-pinning tests (callable + return-type)
-// stay GREEN; semantic tests pin the FUTURE behaviour once §A closes.
+// **DEFECT CLASS §A — CLOSED** (RUNTIME-DUPLICATE-TREE-1, task #15):
+// the module used to forward-declare dead `verum.runtime.text_*` /
+// `verum.runtime.char_*` intrinsic keys that no registry entry matched
+// (every call resolved to the default-zero stub — parse always None,
+// every predicate false).  `core/runtime/text.vr` is now a thin
+// re-export of the canonical, WIRED declarations in
+// `core.intrinsics.runtime.text` (see the deep semantic suite at
+// core-tests/intrinsics/runtime/text/, green both tiers).  The
+// historical `@ignore // §A` pins were removed 2026-07-14; this suite
+// now asserts LIVE semantics through the `core.runtime.text` mount
+// path — a regression back to stub-zero fails loudly here.
 // =============================================================================
 
 mount core.runtime.text.{
@@ -49,20 +41,17 @@ mount core.runtime.text.{
 
 @test
 fn test_text_parse_int_callable() {
-    // Stub binding returns Maybe.None — pin callability surface only.
     let m = text_parse_int(&"42");
     let _ = m;
     assert(true);
 }
 
-@ignore  // §A — stub returns Maybe.None for valid input
 @test
 fn test_text_parse_int_decimal_positive() {
     let m = text_parse_int(&"42");
     assert(m is Some, "text_parse_int(\"42\") should be Some");
 }
 
-@ignore  // §A
 @test
 fn test_text_parse_int_decimal_zero() {
     let m = text_parse_int(&"0");
@@ -71,9 +60,6 @@ fn test_text_parse_int_decimal_zero() {
 
 @test
 fn test_text_parse_int_invalid_text_is_none() {
-    // Stub returns Maybe.None for everything; coincidentally matches the
-    // expected behaviour for invalid input.  Test passes today and
-    // continues to pass post-§A.
     let m = text_parse_int(&"not_a_number");
     assert(m is None, "text_parse_int garbage should be Maybe.None");
 }
@@ -95,7 +81,6 @@ fn test_text_parse_float_callable() {
     assert(true);
 }
 
-@ignore  // §A
 @test
 fn test_text_parse_float_decimal() {
     let m = text_parse_float(&"3.14");
@@ -141,17 +126,12 @@ fn test_int_to_text_negative_callable() {
 // Section 4: char_is_* predicates — ASCII canonical classifications
 // =============================================================================
 //
-// All @ignore'd on §A — stub returns false for every char.  Tests pin
-// the post-binding contract.
-//
 
-@ignore  // §A
 @test
 fn test_char_is_alphabetic_lowercase() {
     assert(char_is_alphabetic('a'), "'a' is alphabetic");
 }
 
-@ignore  // §A
 @test
 fn test_char_is_alphabetic_uppercase() {
     assert(char_is_alphabetic('Z'), "'Z' is alphabetic");
@@ -159,7 +139,6 @@ fn test_char_is_alphabetic_uppercase() {
 
 @test
 fn test_char_is_alphabetic_digit_is_false() {
-    // Stub returns false for everything; coincidentally matches contract.
     assert(!char_is_alphabetic('5'), "'5' is NOT alphabetic");
 }
 
@@ -168,7 +147,6 @@ fn test_char_is_alphabetic_space_is_false() {
     assert(!char_is_alphabetic(' '), "' ' is NOT alphabetic");
 }
 
-@ignore  // §A
 @test
 fn test_char_is_numeric_digit() {
     assert(char_is_numeric('0'), "'0' is numeric");
@@ -180,19 +158,16 @@ fn test_char_is_numeric_letter_is_false() {
     assert(!char_is_numeric('a'), "'a' is NOT numeric");
 }
 
-@ignore  // §A
 @test
 fn test_char_is_whitespace_space() {
     assert(char_is_whitespace(' '), "' ' is whitespace");
 }
 
-@ignore  // §A
 @test
 fn test_char_is_whitespace_tab() {
     assert(char_is_whitespace('\t'), "'\\t' is whitespace");
 }
 
-@ignore  // §A
 @test
 fn test_char_is_whitespace_newline() {
     assert(char_is_whitespace('\n'), "'\\n' is whitespace");
@@ -203,14 +178,12 @@ fn test_char_is_whitespace_letter_is_false() {
     assert(!char_is_whitespace('a'), "'a' is NOT whitespace");
 }
 
-@ignore  // §A
 @test
 fn test_char_is_uppercase_canonical() {
     assert(char_is_uppercase('A'), "'A' is uppercase");
     assert(!char_is_uppercase('a'), "'a' is NOT uppercase");
 }
 
-@ignore  // §A
 @test
 fn test_char_is_lowercase_canonical() {
     assert(char_is_lowercase('a'), "'a' is lowercase");
@@ -221,7 +194,6 @@ fn test_char_is_lowercase_canonical() {
 // Section 5: char case conversion
 // =============================================================================
 
-@ignore  // §A — char_to_uppercase('a') returns 'a' under stub binding
 @test
 fn test_char_to_uppercase_lowercase_input() {
     let c = char_to_uppercase('a');
@@ -230,13 +202,10 @@ fn test_char_to_uppercase_lowercase_input() {
 
 @test
 fn test_char_to_uppercase_uppercase_input_idempotent() {
-    // Idempotence on already-uppercase passes under both stub
-    // (identity) and live binding (also identity).
     let c = char_to_uppercase('A');
     assert(c == 'A', "uppercase(uppercase) is identity");
 }
 
-@ignore  // §A
 @test
 fn test_char_to_lowercase_uppercase_input() {
     let c = char_to_lowercase('A');
@@ -249,7 +218,6 @@ fn test_char_to_lowercase_lowercase_input_idempotent() {
     assert(c == 'a', "lowercase(lowercase) is identity");
 }
 
-@ignore  // §A — depends on case-fold binding
 @test
 fn test_char_case_inversion_law() {
     // upper(lower(c)) == c for already-uppercase ASCII; same for the
@@ -271,14 +239,12 @@ fn test_char_general_category_callable() {
 
 @test
 fn test_char_general_category_uppercase_letters_consistent() {
-    // 'A' and 'Z' are both Lu — same category code.  Passes under
-    // stub (both return default-zero) AND post-binding (both Lu).
+    // 'A' and 'Z' are both Lu — same category code.
     let a = char_general_category('A');
     let z = char_general_category('Z');
     assert(a == z, "'A' and 'Z' should share Lu category");
 }
 
-@ignore  // §A — both return default-zero under stub
 @test
 fn test_char_general_category_uppercase_neq_lowercase() {
     // 'A' (Lu) and 'a' (Ll) MUST have different categories.

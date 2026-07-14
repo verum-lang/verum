@@ -3,17 +3,23 @@
 Module: `core/runtime/stack_alloc.vr` (822 LOC) — stack-based + arena +
 pool allocators for no-heap / embedded targets.
 
-**`@cfg(any(runtime = "no_heap", runtime = "embedded"))`** — the module
-is mounted only under these two profiles.  On the default `runtime =
-"full"` profile (which the conformance suite runs against),
-`core.runtime.stack_alloc` is **not in scope**.
+**2026-07-14 — §A RESOLVED AT THE ROOT**: the module-level
+`@cfg(any(runtime = "no_heap", runtime = "embedded"))` gate in
+`core/runtime/mod.vr` was REMOVED (not split, as §A originally
+proposed).  Rationale: the allocators are self-contained (fixed
+`[Byte; SIZE]` buffers, `mem.{Alloc, Layout, AllocError}` +
+`sync.AtomicInt` only — no OS dependency), so gating them out of the
+full runtime was pure surface loss: it made the module untestable
+under the default conformance profile AND withheld
+deterministic-latency allocators (request arenas, connection pools)
+from hosted targets.  PRIMARY use remains no-heap/embedded
+(EmbeddedRuntime's allocator), now as the default-profile-visible
+general-purpose tool it always was.
 
-For this reason, the unit_test surface is intentionally minimal and
-defers most coverage to a future no-heap conformance suite at
-`core-tests/runtime-noheap/stack_alloc/`.
-
-Tests landed: 0 (data-only types are cfg-gated; mount fails on
-default profile).  Audit-only deliverable for this branch.
+Tests landed 2026-07-14: `unit_test.vr` — accounting contract
+(capacity/used/remaining/watermark/alloc_count), savepoint rewind,
+OOM error surface (no-panic + no-state-mutation), alignment law,
+pool block recycling.
 
 ## 1. Cross-stdlib usage
 
@@ -24,7 +30,7 @@ default profile).  Audit-only deliverable for this branch.
 | Real-time / safety-critical applications | use the type aliases `TinyStackAllocator` (1KB) / `SmallStackAllocator` (4KB) / `MediumStackAllocator` (16KB) / `LargeStackAllocator` (64KB) for known-bound stack scopes. |
 | Connection-pool patterns | use `ConnectionPoolArena` (1024-byte × 128 blocks) for pooled connection objects. |
 
-## 2. Surface (gated)
+## 2. Surface
 
 | Type | Const params | Purpose |
 |---|---|---|
@@ -46,19 +52,15 @@ default profile).  Audit-only deliverable for this branch.
 
 ## 4. Language-implementation gaps
 
-### §A — Module-level `@cfg(any(runtime = ...))` gates the whole surface
+### §A — CLOSED 2026-07-14 (cfg gate removed at `core/runtime/mod.vr`)
 
-A test file that tries to `mount core.runtime.stack_alloc.StackSavepoint`
-under the default `runtime = "full"` profile fails with a
-ModuleNotFound at compile time.  The cfg gate is correct (these
-allocators are meaningless under a full runtime with heap) but it
-means the conformance suite can't exercise the data-only ADT surface
-under the same conditions as the rest of `core-tests/runtime/`.
-
-Recommendation: split off the data-only types (StackSavepoint,
-ArenaSavepoint) into a non-cfg-gated `core/runtime/stack_alloc/types.vr`
-submodule that's always in scope.  The allocator implementations stay
-gated.
+Original finding: the module-level cfg gate made the whole surface
+untestable under the default profile.  Resolution went further than
+the proposed data-only split: the gate itself was removed, because the
+implementation has no platform dependency and the "meaningless under a
+full runtime" premise was wrong — deterministic-latency allocation is
+a hosted-target need too.  The no-heap/embedded profiles see exactly
+the same module.
 
 ### §B — `@cfg(no_instrumentation)` watermark/alloc_count gate
 
@@ -84,10 +86,8 @@ to avoid collision with a future `BLOCK_COUNT >= 2^64` configuration.
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| §A Split data-only types into non-cfg-gated submodule | `core/runtime/stack_alloc.vr` | 1 day |
 | §B Instrumentation cfg-gate | `core/runtime/stack_alloc.vr` | 30 min |
 | §C Refinement-typed const-generic parameters | `core/runtime/stack_alloc.vr` | gated on language feature |
 | §D Use UInt64.MAX as freelist end-marker | `core/runtime/stack_alloc.vr` | 15 min |
-| Full no-heap conformance suite | `core-tests/runtime-noheap/stack_alloc/` | 1 week (gated on §A) |
-| Live ScopedStack RAII drop test | future no-heap suite | gated |
-| Pool freelist round-trip test | future no-heap suite | gated |
+| Live ScopedStack RAII drop test | needs `&mut` field-holding record support validation | small |
+| Pool freelist round-trip byte-level test | `core-tests/runtime/stack_alloc/` | small (now ungated) |

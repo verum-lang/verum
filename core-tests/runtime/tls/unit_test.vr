@@ -8,8 +8,8 @@
 //   * tls_get_base() -> Int
 //   * tls_slot_get(slot) / tls_slot_set(slot, value) / tls_slot_clear(slot)
 //   * tls_slot_has(slot) -> Bool
-//   * tls_frame_push() -> Int / tls_frame_pop(frame)
-//   * tls_read_ptr(offset) / tls_write_ptr(offset, value)
+//   * tls_frame_push() -> *const Byte / tls_frame_pop()   [balanced pair]
+//   * tls_read_ptr<T>(offset) / tls_write_ptr<T>(offset, value)
 //   * tls_read_i32(offset) / tls_write_i32(offset, value)
 //   * tls_read_usize(offset) / tls_write_usize(offset, value)
 //
@@ -49,23 +49,16 @@ fn test_tls_get_base_callable() {
 // (typically 0..16) and below any plausible internal-use ceiling.  The
 // CONTEXT_SLOT_COUNT constant is checked in `core/sys/common.vr`.
 //
-// §A — DEFECT SURFACED 2026-05-27: the `verum.runtime.tls_slot_*` idents
-// are forward-declared at `core/runtime/tls.vr` but the VBC interpreter's
-// dispatch table has no registered handler (or routes through a different
-// ident name).  Probe at slot 200 with `tls_slot_set(200, 0xCAFE_F00D);
-// tls_slot_get(200)` yields a different value (likely 0, the
-// default-zero intrinsic-stub return).  Pinned `@ignore` until binding
-// lands — the live round-trip tests flip GREEN as soon as
-// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/` registers
-// the four `tls_slot_*` idents.  See `audit.md §A`.
-//
-// Note: the actual context-DI surface used by `core.sys.common.{ctx_get,
-// ctx_set}` is bound — those use a DIFFERENT intrinsic path (the
-// `ctx_set` ident binds to the per-state context_slots vector inside
-// the VBC interpreter, NOT through `tls_slot_set`).  This is the drift
-// surface §B audits: two parallel TLS-slot APIs, only one bound.
+// §A — CLOSED (RUNTIME-DUPLICATE-TREE-1 + SYNC-TLS-WIRING-1): the
+// module is now a thin re-export of the canonical, WIRED declarations
+// in `core.intrinsics.runtime.tls` (opcodes 0x59-0x5D over a DEDICATED
+// user_tls_slots store — the context system populates separate high
+// slots and cannot collide).  Deep semantic suite:
+// core-tests/intrinsics/runtime/tls/ (green both tiers).  The
+// historical `@ignore // §A` pins were removed 2026-07-14; the
+// round-trip tests below assert LIVE semantics through the
+// `core.runtime.tls` mount path.
 
-@ignore  // §A
 @test
 fn test_tls_slot_lifecycle_set_then_get_round_trips() {
     // The load-bearing round-trip: write a value, read it back, get
@@ -79,7 +72,6 @@ fn test_tls_slot_lifecycle_set_then_get_round_trips() {
     assert(v == 0xCAFE_F00D, "TLS slot round-trip dropped the value");
 }
 
-@ignore  // §A
 @test
 fn test_tls_slot_has_after_set_is_true() {
     let slot = 201;
@@ -92,9 +84,6 @@ fn test_tls_slot_has_after_set_is_true() {
 
 @test
 fn test_tls_slot_has_after_clear_is_false() {
-    // Without a prior set this test passes trivially under the stub
-    // binding (set is a no-op, so has() reads default-false).  Pin
-    // the contract — flips behaviour stays correct after binding.
     let slot = 202;
     tls_slot_set(slot, 42);
     tls_slot_clear(slot);
@@ -104,7 +93,6 @@ fn test_tls_slot_has_after_clear_is_false() {
 
 @test
 fn test_tls_slot_clear_is_idempotent() {
-    // Pure no-op composition — passes under both stub and live binding.
     let slot = 203;
     tls_slot_clear(slot);
     tls_slot_clear(slot);  // second clear is a no-op
@@ -112,7 +100,6 @@ fn test_tls_slot_clear_is_idempotent() {
     assert(!has, "double-clear should leave the slot empty");
 }
 
-@ignore  // §A — set is a no-op under stub, so v == 0 not 200
 @test
 fn test_tls_slot_overwrite_keeps_latest() {
     let slot = 204;
@@ -128,7 +115,6 @@ fn test_tls_slot_overwrite_keeps_latest() {
 // Section 3: Multi-slot isolation — slots don't interfere with each other
 // =============================================================================
 
-@ignore  // §A
 @test
 fn test_tls_slot_isolation_two_slots() {
     let s1 = 210;
@@ -145,7 +131,6 @@ fn test_tls_slot_isolation_two_slots() {
     assert(v2 == 0xBEEF, "slot 2 leaked into slot 1");
 }
 
-@ignore  // §A — has() reads default-false under stub binding, breaking the s2 assertion
 @test
 fn test_tls_slot_clear_does_not_affect_other_slots() {
     let s1 = 220;
@@ -175,22 +160,24 @@ fn test_tls_slot_clear_does_not_affect_other_slots() {
 
 @test
 fn test_tls_frame_push_pop_pair() {
-    // Push returns a token; pop with that token restores the previous
-    // frame.  The token may be 0 on platforms without frame stacks.
-    let frame = tls_frame_push();
-    tls_frame_pop(frame);
+    // Canonical contract: `tls_frame_push() -> *const Byte` returns a
+    // frame token for diagnostics; `tls_frame_pop()` takes NO argument
+    // and pops the TOP frame — a balanced-stack discipline, not a
+    // token-addressed restore.  (The original suite invented a
+    // `tls_frame_pop(frame)` signature — arity drift against
+    // core.intrinsics.runtime.tls, caught as E-arity at typecheck.)
+    let _frame = tls_frame_push();
+    tls_frame_pop();
     assert(true);
 }
 
 @test
 fn test_tls_frame_nested_push_pop_lifo() {
-    // Nested LIFO discipline — push A, push B, pop B, pop A.  If the
-    // runtime doesn't support nested frames it MUST treat the calls
-    // as no-ops (rather than crashing).
-    let a = tls_frame_push();
-    let b = tls_frame_push();
-    tls_frame_pop(b);
-    tls_frame_pop(a);
+    // Nested LIFO discipline — push A, push B, pop (B), pop (A).
+    let _a = tls_frame_push();
+    let _b = tls_frame_push();
+    tls_frame_pop();
+    tls_frame_pop();
     assert(true);
 }
 
