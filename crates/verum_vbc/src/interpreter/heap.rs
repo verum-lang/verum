@@ -667,6 +667,60 @@ impl ObjectHeader {
         !self.flags.contains(ObjectFlags::FREED)
     }
 
+    /// DROP-GLUE-TYPEID-1 (runtime leg): layout-plausibility gate for
+    /// drop-glue dispatch.  Returns true only when this header's `size`
+    /// field is consistent with an allocation the interpreter could
+    /// have produced FOR the given descriptor:
+    ///
+    /// * record (`New` / `NewG`): `size == max(fields, 1) * 8`
+    ///   (`handle_new` allocates exactly `field_count.max(1)` Value
+    ///   slots);
+    /// * sum type (`MakeVariantTyped`): `size == 8 + payload * 8` for
+    ///   SOME declared variant (`alloc_variant_into_with_type_id`
+    ///   allocates the 8-byte tag header plus the payload slots;
+    ///   payload is tuple `arity` or record `fields.len()`).
+    ///
+    /// Why this exists: `DropRef` classifies its operand only as
+    /// "regular pointer"; an INTERIOR pointer (`&obj.field as *const T`
+    /// in baked stdlib bytecode) or a stale/corrupt pointer passes that
+    /// test, and the bytes at the pointee then read as a fake header
+    /// whose garbage `type_id` word can coincide with a REAL descriptor
+    /// that carries a `drop_fn`.  The name-guard on the resolved
+    /// function ("must be `<T>.drop`") cannot catch this — the foreign
+    /// descriptor's drop IS a genuine drop.  The size cross-check is
+    /// the discriminating fact the garbage almost never satisfies
+    /// (observed live: `WindowsCondvar` dispatch against a fake header
+    /// with `size == 1`).  A gated-out genuine object merely falls
+    /// through to the builtin CBGR cleanup — strictly safer than
+    /// executing an arbitrary Drop body over foreign memory.
+    ///
+    /// Freed objects are never plausible drop targets.
+    pub fn layout_matches_descriptor(
+        &self,
+        desc: &crate::types::TypeDescriptor,
+    ) -> bool {
+        if !self.is_valid() {
+            return false;
+        }
+        let sz = self.size as usize;
+        let slot = std::mem::size_of::<crate::value::Value>();
+        if sz == 0 || sz % slot != 0 {
+            return false;
+        }
+        if !desc.variants.is_empty() {
+            desc.variants.iter().any(|v| {
+                let payload = if v.fields.is_empty() {
+                    v.arity as usize
+                } else {
+                    v.fields.len()
+                };
+                sz == 8 + payload * slot
+            })
+        } else {
+            sz == desc.fields.len().max(1) * slot
+        }
+    }
+
     /// Increments the reference count.
     pub fn incref(&mut self) {
         self.refcount = self.refcount.saturating_add(1);
@@ -1495,6 +1549,89 @@ mod tests {
     #[test]
     fn test_object_header_size() {
         assert_eq!(std::mem::size_of::<ObjectHeader>(), OBJECT_HEADER_SIZE);
+    }
+
+    /// DROP-GLUE-TYPEID-1 pins: `layout_matches_descriptor` accepts
+    /// exactly the sizes the interpreter allocators produce for the
+    /// descriptor and rejects everything else (the fake-header /
+    /// interior-pointer class that dispatched foreign Drop impls).
+    #[test]
+    fn drop_layout_gate_record_sizes() {
+        use crate::types::{FieldDescriptor, TypeDescriptor, TypeKind};
+        // 1-field record (RwLockWriteGuard / CriticalSection shape):
+        // handle_new allocates max(1,1)*8 = 8 data bytes.
+        let mut desc = TypeDescriptor {
+            kind: TypeKind::Record,
+            ..Default::default()
+        };
+        desc.fields.push(FieldDescriptor::default());
+        let ok = ObjectHeader::new(crate::types::TypeId(100), 1, 8);
+        assert!(ok.layout_matches_descriptor(&desc));
+        // The live WindowsCondvar failure: fake header claimed size=1.
+        let fake = ObjectHeader::new(crate::types::TypeId(100), 1, 1);
+        assert!(!fake.layout_matches_descriptor(&desc));
+        // Wrong slot count for the descriptor.
+        let wrong = ObjectHeader::new(crate::types::TypeId(100), 1, 24);
+        assert!(!wrong.layout_matches_descriptor(&desc));
+        // Zero size is never a real allocation (handle_new mins at 1 slot).
+        let zero = ObjectHeader::new(crate::types::TypeId(100), 1, 0);
+        assert!(!zero.layout_matches_descriptor(&desc));
+        // Freed objects are never plausible drop targets.
+        let mut freed = ObjectHeader::new(crate::types::TypeId(100), 1, 8);
+        freed.flags |= ObjectFlags::FREED;
+        assert!(!freed.layout_matches_descriptor(&desc));
+        // Zero-field record: handle_new still allocates one slot.
+        let unit_desc = TypeDescriptor {
+            kind: TypeKind::Record,
+            ..Default::default()
+        };
+        assert!(ObjectHeader::new(crate::types::TypeId(101), 1, 8)
+            .layout_matches_descriptor(&unit_desc));
+        assert!(!ObjectHeader::new(crate::types::TypeId(101), 1, 16)
+            .layout_matches_descriptor(&unit_desc));
+    }
+
+    #[test]
+    fn drop_layout_gate_variant_sizes() {
+        use crate::types::{
+            FieldDescriptor, TypeDescriptor, VariantDescriptor, VariantKind,
+        };
+        // Sum type with a unit variant (payload 0), a 2-tuple variant,
+        // and a 1-field record variant. alloc_variant_into_with_type_id
+        // allocates 8 (tag header) + payload*8.
+        let mut desc = TypeDescriptor::default();
+        desc.variants.push(VariantDescriptor {
+            tag: 0,
+            kind: VariantKind::Unit,
+            arity: 0,
+            ..Default::default()
+        });
+        desc.variants.push(VariantDescriptor {
+            tag: 1,
+            kind: VariantKind::Tuple,
+            arity: 2,
+            ..Default::default()
+        });
+        let mut rec_variant = VariantDescriptor {
+            tag: 2,
+            kind: VariantKind::Record,
+            arity: 0,
+            ..Default::default()
+        };
+        rec_variant.fields.push(FieldDescriptor::default());
+        desc.variants.push(rec_variant);
+
+        let tid = crate::types::TypeId(200);
+        // Unit variant: 8 + 0.
+        assert!(ObjectHeader::new(tid, 1, 8).layout_matches_descriptor(&desc));
+        // Tuple(2): 8 + 16.
+        assert!(ObjectHeader::new(tid, 1, 24).layout_matches_descriptor(&desc));
+        // Record{1}: 8 + 8 — same as unit+1 slot; covered by the 16 case.
+        assert!(ObjectHeader::new(tid, 1, 16).layout_matches_descriptor(&desc));
+        // No declared variant yields 5 slots.
+        assert!(!ObjectHeader::new(tid, 1, 40).layout_matches_descriptor(&desc));
+        // Non-slot-granular garbage.
+        assert!(!ObjectHeader::new(tid, 1, 13).layout_matches_descriptor(&desc));
     }
 
     /// Cross-tier drift contract: the Rust `#[repr(C)] ObjectHeader`

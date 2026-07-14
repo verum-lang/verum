@@ -662,6 +662,54 @@ pub(in super::super) fn handle_drop_ref(
                 None
             };
 
+            // DROP-GLUE-TYPEID-1 (runtime leg): layout-plausibility gate.
+            // `is_regular_ptr()` cannot distinguish a heap-object BASE
+            // pointer from an INTERIOR pointer (`&obj.field as *const T`
+            // locals in baked stdlib bytecode — `AtomicU64.load`'s `ptr`)
+            // or a stale pointer over reused memory.  For those, the
+            // "header" read above is pointee DATA: a garbage `type_id`
+            // word that can coincide with a real drop-carrying descriptor
+            // (observed live: `RwLockWriteGuard.drop` executing against
+            // Float bits → "method 'RwLock.release_write' not found on
+            // receiver of runtime kind `Float`"; `Weak.drop` →
+            // NullPointerAt; `WindowsCondvar.drop` → field-OOB on a fake
+            // header with size=1).  The resolved-name guard below cannot
+            // reject these — the foreign drop IS a genuine `.drop`.  The
+            // discriminating fact is the header's `size` word: a REAL
+            // allocation for the descriptor has an exact, enumerable size
+            // (`ObjectHeader::layout_matches_descriptor`); garbage almost
+            // never does.  Implausible → treat as no-descriptor and fall
+            // through to the builtin CBGR cleanup, which operates on raw
+            // bits.  The codegen twin fix stops emitting DropRef for
+            // raw-pointer bindings at the source; this gate protects
+            // bytecode baked BEFORE that fix and every other stale-pointer
+            // route into DropRef.
+            let type_desc_idx = type_desc_idx.filter(|idx| {
+                let plausible = state
+                    .module
+                    .types
+                    .get(*idx)
+                    .zip(unsafe { heap::ObjectHeader::try_from_ptr(header_ptr) })
+                    .map(|(desc, header)| header.layout_matches_descriptor(desc))
+                    .unwrap_or(false);
+                if !plausible && std::env::var("VERUM_TRACE_DROPFN").is_ok() {
+                    let tn = state
+                        .module
+                        .types
+                        .get(*idx)
+                        .and_then(|td| state.module.strings.get(td.name))
+                        .unwrap_or("?");
+                    let hdr_size = unsafe { heap::ObjectHeader::try_from_ptr(header_ptr) }
+                        .map(|h| h.size)
+                        .unwrap_or(u32::MAX);
+                    eprintln!(
+                        "[DROPFN] LAYOUT-REJECT type='{}' (id={}) header_size={} — implausible drop target, builtin cleanup",
+                        tn, type_id.0, hdr_size
+                    );
+                }
+                plausible
+            });
+
             // SYNTHESIS with main's independent TYPE-ID-COLLISION-3 fix
             // (net-conformance lineage): even a correctly-indexed
             // descriptor can carry a STALE drop_fn on the lazy run-path

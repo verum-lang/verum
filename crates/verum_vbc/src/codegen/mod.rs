@@ -16021,6 +16021,43 @@ impl VbcCodegen {
             if self.ctx.current_fn_escaping_vars.contains(name) {
                 continue;
             }
+            // DROP-GLUE-TYPEID-1 (codegen leg): raw-pointer bindings are
+            // NON-OWNING views — `let p = &self.value as *const UInt64`
+            // holds an INTERIOR address, not a heap-object base.  Emitting
+            // an ownership DropRef here makes the runtime read the pointee
+            // DATA as a fake ObjectHeader; whatever garbage lands in the
+            // type_id word selects an arbitrary descriptor and drop glue
+            // executes a FOREIGN Drop impl against it (live failures:
+            // `RwLockWriteGuard.drop` panicking "RwLock.release_write not
+            // found on receiver Float", `Weak.drop` NullPointerAt,
+            // `WindowsCondvar.drop` field-OOB — all from
+            // `AtomicU64.load`'s `ptr` local in core/sync/atomic.vr).
+            // Raw pointers carry no drop obligation and no CBGR slot, so
+            // the skip is semantics-preserving.  Two detection channels:
+            // the per-register marker `compile_cast` sets for
+            // `as *const/*mut/&unsafe`, and the declared-type prefix
+            // marker (the canonical raw-pointer name discipline from the
+            // FFI byte-buffer contract).
+            if self.ctx.is_raw_pointer(*var_reg) {
+                continue;
+            }
+            let is_raw_typed = self
+                .ctx
+                .variable_type_names
+                .get(name)
+                .map(|tn| {
+                    // Same prefix discipline as the field-type raw-pointer
+                    // check in expressions.rs (~19780, `ft_trimmed`):
+                    // no trailing-space requirement.
+                    let t = tn.trim_start();
+                    t.starts_with("*const")
+                        || t.starts_with("*mut")
+                        || t.starts_with("&unsafe")
+                })
+                .unwrap_or(false);
+            if is_raw_typed {
+                continue;
+            }
             self.ctx.emit(Instruction::DropRef { src: *var_reg });
         }
 

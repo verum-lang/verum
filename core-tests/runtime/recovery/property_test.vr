@@ -190,13 +190,21 @@ fn rcv_law_jitter_full_of_zero_is_zero() {
     assert_eq(j.apply(0_u64), 0_u64);
 }
 
-@ignore  // DROP-GLUE-TYPEID-1 — scope-exit drop glue runs
-         // RwLockWriteGuard.drop against a Float local in this frame
-         // ("method 'RwLock.release_write' not found on receiver of
-         // runtime kind `Float`"); no RwLock exists in the tested path
-         // (random_u64 is AtomicU64-intrinsic based).  Archive type-id
-         // collision / drop_fn mis-stamp family (#27 lineage) — task
-         // filed; flips when name-authoritative drop dispatch lands.
+@ignore  // DROP-GLUE-TYPEID-1 — ROOT-CAUSED (NOT a type-id collision):
+         // the baked `AtomicU64.load`/`.store` bodies carry a scope-exit
+         // `DropRef` on the RAW-POINTER local `ptr = &self.value as
+         // *const UInt64`; drop glue reads the pointee DATA as a fake
+         // ObjectHeader and the garbage type_id word dispatches a
+         // FOREIGN Drop impl (RwLockWriteGuard.drop → "RwLock.
+         // release_write not found on receiver Float"; Weak.drop →
+         // NullPointerAt; WindowsCondvar.drop → field-OOB, size=1).
+         // Fix in-tree: codegen skips DropRef for raw-pointer bindings
+         // (compile_block scope-exit, codegen/mod.rs) + runtime
+         // layout-plausibility gate (ObjectHeader::
+         // layout_matches_descriptor consulted by the DropRef handler,
+         // cbgr.rs).  FLIP this pin once a rebuilt binary validates
+         // `verum test --interp --filter rcv_law_jitter` green at
+         // default test-thread parallelism.
 @test
 fn rcv_law_jitter_proportional_in_band() {
     // Proportional(20%) of 1000 ⇒ range=200 ⇒ result ∈ [800, 1200].
