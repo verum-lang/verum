@@ -24125,31 +24125,22 @@ fn lower_char_extended<'ctx>(
                 let bytes_val = as_i64(ctx, ctx.get_register(bytes_reg)?, "bytes")?;
                 let idx_val = as_i64(ctx, ctx.get_register(idx_reg)?, "idx")?;
                 let ptr_type = ctx.types().ptr_type();
-                // If bytes_reg is a slice register, extract the backing pointer from
-                // the Pack header at offset 24, since the C function expects raw bytes.
+                // If bytes_reg is a slice register, resolve the backing data
+                // pointer through the CANONICAL container view (cell data@0 /
+                // stamped pack data@24 / unstamped list ptr@40) — the previous
+                // hardcoded @24 GEP was pack-only and read a cell's elem word
+                // as "data". Unmarked registers stay raw byte pointers (a
+                // blind runtime probe on raw text bytes is unsound — an
+                // 8-aligned ASCII prefix can pass the heap-floor test).
                 let bytes_ptr = if ctx.is_slice_register(bytes_reg) {
                     let pack_ptr = ctx
                         .builder()
                         .build_int_to_ptr(bytes_val, ptr_type, "pack_ptr")
                         .or_llvm_err()?;
-                    // SAFETY: GEP into the Pack/slice object to read the backing data pointer at offset 24 (past the 24-byte object header)
-                    let backing_slot = unsafe {
-                        ctx.builder()
-                            .build_in_bounds_gep(
-                                ctx.types().i8_type(),
-                                pack_ptr,
-                                &[i64_ty.const_int(24, false)],
-                                "backing_slot",
-                            )
-                            .or_llvm_err()?
-                    };
-                    let backing_int = ctx
-                        .builder()
-                        .build_load(i64_ty, backing_slot, "backing_int")
-                        .or_llvm_err()?
-                        .into_int_value();
+                    let (data, _len, _elem) =
+                        emit_container_view(ctx, pack_ptr, "utf8dec")?;
                     ctx.builder()
-                        .build_int_to_ptr(backing_int, ptr_type, "bytes_ptr")
+                        .build_int_to_ptr(data, ptr_type, "bytes_ptr")
                         .or_llvm_err()?
                 } else {
                     ctx.builder()
@@ -36087,6 +36078,50 @@ fn lower_iter_next<'ctx>(
             .get_custom_iter_type(iter.0)
             .map(|s| s.to_string())
             .unwrap_or_default();
+
+        // ITER-REF-PAYLOAD-DEREF-1 (#30): does this iterator yield
+        // REFERENCES? `List.iter() -> ListIter<T>` whose `next() ->
+        // Maybe<&T>` puts the element ADDRESS in the Some payload
+        // (`let item = &*self.ptr`). The baked method descriptor erases that
+        // to `Maybe<T0>` (associated type projection → bare generic), so the
+        // return type is NO signal. But verum_vbc records `type Item = &T`
+        // WITH the reference preserved on the type descriptor's Iterator
+        // ProtocolImpl.associated_types (mod.rs assoc-attach). Consult it: an
+        // IMMUTABLE `&T` Item means the payload is the element address, so
+        // load the slot value — matching Tier-0 reference transparency and
+        // the canonical value/slice iterator. Without this, `for n in
+        // ns.iter()` bound n to the raw slot address (arithmetic accumulated
+        // pointers; `List<Text>.iter()` handed parse an address-of-slot).
+        // `&mut T` (iter_mut) keeps its address for write-through — gate on
+        // Immutable so that path is untouched (verified: mutation persists).
+        let payload_is_ref = {
+            let bare_iter = type_name.rsplit('.').next().unwrap_or(type_name.as_str());
+            ctx.vbc_module()
+                .map(|m| {
+                    m.types.iter().any(|td| {
+                        let name_ok = m
+                            .get_type_name(td.id)
+                            .map(|n| n.rsplit('.').next().unwrap_or(n.as_str()) == bare_iter)
+                            .unwrap_or(false);
+                        name_ok
+                            && td.protocols.iter().any(|pi| {
+                                pi.associated_types.iter().any(|(sid, tref)| {
+                                    m.get_string(*sid) == Some("Item")
+                                        && matches!(
+                                            tref,
+                                            TypeRef::Reference {
+                                                mutability:
+                                                    verum_vbc::types::Mutability::Immutable,
+                                                ..
+                                            }
+                                        )
+                                })
+                            })
+                    })
+                })
+                .unwrap_or(false)
+        };
+
         let i64_type = ctx.types().i64_type();
         let module = ctx.get_module();
         let current_fn = ctx.function();
@@ -36277,8 +36312,15 @@ fn lower_iter_next<'ctx>(
                 })
                 .map(|rt| {
                     let t = rt.trim();
-                    // "Maybe<&T>" / "&T" spellings both count.
-                    t.contains("<&") || t.starts_with('&')
+                    // IMMUTABLE reference only. `Maybe<&T>` / `&T` count, but
+                    // `Maybe<&mut T>` (iter_mut) MUST NOT: its loop body writes
+                    // through the element (`*x = …`, VBC `DEREF_MUT`), so the
+                    // payload has to stay the element ADDRESS. Slot-loading a
+                    // `&mut T` hands the body a value and its store corrupts an
+                    // arbitrary address (ListIterMut crash). The `&mut` marker
+                    // rides the return-type-name string even though the erased
+                    // structural return type is `Maybe<T0>` for both.
+                    (t.contains("<&") || t.starts_with('&')) && !t.contains("&mut")
                 })
                 .unwrap_or(false);
             if std::env::var("VERUM_TRACE_ITERSLOT").is_ok() {
@@ -36300,7 +36342,12 @@ fn lower_iter_next<'ctx>(
                     next_name, resolved, next_yields_ref
                 );
             }
-            let payload_out = if next_yields_ref {
+            // The RETNAME string (`next_yields_ref`) loses the `&` for
+            // associated-type Items (`Maybe<Self.Item>` renders as `Maybe<T0>`),
+            // so it misses ListIter etc. `payload_is_ref` recovers the fact from
+            // the iterator type's `Item = &T` binding — OR them so either source
+            // triggers the slot-load.
+            let payload_out = if next_yields_ref || payload_is_ref {
                 // Guard on tag==1: at exhaustion (None) the payload word
                 // is absent/garbage — the load must not execute (REAL
                 // branch, the recurring select-is-not-a-guard lesson).
@@ -36353,7 +36400,7 @@ fn lower_iter_next<'ctx>(
 
             // tag=1 means Some (has_next=true), tag=0 means None (done)
             ctx.set_register(dst.0, payload_out.into());
-            if next_yields_ref {
+            if next_yields_ref || payload_is_ref {
                 // The load-through above already peeled the slot: dst now
                 // holds the ELEMENT VALUE. A later `*a` Deref must be
                 // identity — without this mark the slot-vs-object
