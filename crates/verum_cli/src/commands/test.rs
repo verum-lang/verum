@@ -365,7 +365,61 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     // in-process (main thread, no pool).
     let aot_child = std::env::var_os("VERUM_TEST_AOT_CHILD").is_some();
 
-    let results: Vec<(Text, TestResult)> = match &pool {
+    // TEST-RUNNER-ISOLATION-1: per-FILE process quarantine for the
+    // interp tier (see `run_interp_file_subprocess`).  Applied when
+    // the run spans MORE THAN ONE file — a single-file run has nothing
+    // downstream to protect, and it is also exactly the shape the
+    // child re-invocation produces (a second recursion terminator on
+    // top of the env marker).  JSON-family formats stay in-process:
+    // their consumers parse OUR stdout and the child protocol would
+    // double-emit events.
+    let interp_child = std::env::var_os("VERUM_TEST_INTERP_CHILD").is_some();
+    let interp_isolate = opts.tier == Tier::Interpret
+        && !interp_child
+        && !opts.differential
+        && std::env::var_os("VERUM_TEST_NO_ISOLATE").is_none()
+        && !matches!(
+            opts.format,
+            TestFormat::Json | TestFormat::Junit | TestFormat::Tap | TestFormat::Sarif
+        )
+        && {
+            let mut files: Vec<&Path> = active.iter().map(|t| t.file.as_path()).collect();
+            files.sort_unstable();
+            files.dedup();
+            files.len() > 1
+        };
+
+    let results: Vec<(Text, TestResult)> = if interp_isolate {
+        // Group by file, preserving discovery order; fan the file
+        // batches out on the pool when one exists.
+        let mut file_order: Vec<&Path> = Vec::new();
+        let mut by_file: std::collections::HashMap<&Path, Vec<&Test>> =
+            std::collections::HashMap::new();
+        for t in &active {
+            let entry = by_file.entry(t.file.as_path()).or_default();
+            if entry.is_empty() {
+                file_order.push(t.file.as_path());
+            }
+            entry.push(t);
+        }
+        let run_batch = |file: &&Path| -> Vec<(Text, TestResult)> {
+            let tests = &by_file[*file];
+            // The canonical `<prefix>::` namespace is the test name up
+            // to the last `::` — identical for every test in the file.
+            let prefix = tests[0]
+                .name
+                .rsplit_once("::")
+                .map(|(p, _)| p.to_string())
+                .unwrap_or_else(|| tests[0].name.to_string());
+            run_interp_file_subprocess(&prefix, tests)
+        };
+        let batches: Vec<Vec<(Text, TestResult)>> = match &pool {
+            Some(p) => p.install(|| file_order.par_iter().map(run_batch).collect()),
+            None => file_order.iter().map(run_batch).collect(),
+        };
+        batches.into_iter().flatten().collect()
+    } else {
+        match &pool {
         Some(p) => {
             // Parallel `--aot`: compile + run each test in its OWN process.
             //
@@ -408,6 +462,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
             .map(|t| (t.name.clone(), run_aot_subprocess(t)))
             .collect(),
         None => active.iter().map(|t| run_one(t)).collect(),
+        }
     };
 
     // Present each result in the chosen format
@@ -911,6 +966,172 @@ fn run_aot_subprocess(test: &Test) -> TestResult {
     }
 }
 
+/// TEST-RUNNER-ISOLATION-1 — run ONE test FILE's interp batch in a
+/// separate `verum` process.
+///
+/// The in-process interp suite runs every test in the ONE CLI process;
+/// a wild raw load in any test (`RawLoadI64` checks only `addr > 0`)
+/// SIGSEGVs the runner and every suite scheduled after it is silently
+/// never run — coverage loss disguised as a crash (concrete incident:
+/// the ctx_bridge overflow-guard test with a below-threshold count
+/// aborted the whole `^runtime/` sweep).  Process isolation is the
+/// only recovery that works for fatal signals; per-FILE granularity
+/// keeps the compile amortization (all of a file's tests share one
+/// child, one module compile) so the overhead is one process spawn per
+/// file, not per test.
+///
+/// The child re-invokes `verum test --interp --format json --filter
+/// ^<file-prefix>::` with `VERUM_TEST_INTERP_CHILD=1` (recursion
+/// terminator, mirroring `VERUM_TEST_AOT_CHILD`).  Per-test outcomes
+/// are read from the child's `{"event":"test",...}` stream; tests the
+/// child never reported (it died mid-batch) are marked failed with the
+/// child's exit/signal attribution — the REST OF THE SUITE CONTINUES.
+///
+/// Escape hatch: `VERUM_TEST_NO_ISOLATE=1` restores the historical
+/// single-process topology (useful for in-process debuggers).
+fn run_interp_file_subprocess(
+    prefix: &str,
+    expected: &[&Test],
+) -> Vec<(Text, TestResult)> {
+    let start = Instant::now();
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("verum"));
+    // Anchor the child's filter to this file's canonical `<prefix>::`
+    // name space. Escape regex metacharacters in the path-derived
+    // prefix so a literal '.' in a folder name can't cross-match.
+    let escaped: String = prefix
+        .chars()
+        .flat_map(|c| {
+            let needs = matches!(
+                c,
+                '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\'
+            );
+            if needs { vec!['\\', c] } else { vec![c] }
+        })
+        .collect();
+    let out = Command::new(&exe)
+        .arg("test")
+        .arg("--interp")
+        .arg("--format")
+        .arg("json")
+        .arg("--filter")
+        .arg(format!("^{}::", escaped))
+        .env("VERUM_TEST_INTERP_CHILD", "1")
+        .output();
+    let out = match out {
+        Ok(o) => o,
+        Err(e) => {
+            let err = format!("failed to spawn interp subprocess: {}", e);
+            return expected
+                .iter()
+                .map(|t| {
+                    (
+                        t.name.clone(),
+                        TestResult::CompileError {
+                            duration: start.elapsed(),
+                            error: err.clone(),
+                        },
+                    )
+                })
+                .collect();
+        }
+    };
+    // Parse the child's per-test JSON events.
+    let stdout_text = String::from_utf8_lossy(&out.stdout);
+    let mut reported: std::collections::HashMap<String, TestResult> =
+        std::collections::HashMap::new();
+    for line in stdout_text.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        if v.get("event").and_then(|e| e.as_str()) != Some("test") {
+            continue;
+        }
+        let Some(name) = v.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let duration = Duration::from_millis(
+            v.get("duration_ms").and_then(|d| d.as_u64()).unwrap_or(0),
+        );
+        let error = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("")
+            .to_string();
+        let result = match v.get("outcome").and_then(|o| o.as_str()) {
+            Some("ok") => TestResult::Pass {
+                duration,
+                stdout: String::new(),
+                stderr: String::new(),
+            },
+            Some("ignored") => continue, // parent counts ignored itself
+            Some("compile-error") => TestResult::CompileError { duration, error },
+            _ => TestResult::Fail {
+                duration,
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                error,
+            },
+        };
+        reported.insert(name.to_string(), result);
+    }
+    // Attribute the child's death to every unreported test.
+    let crash_note = if reported.len() < expected.iter().filter(|t| !t.ignored).count() {
+        let status = &out.status;
+        #[cfg(unix)]
+        let sig = {
+            use std::os::unix::process::ExitStatusExt;
+            status.signal()
+        };
+        #[cfg(not(unix))]
+        let sig: Option<i32> = None;
+        Some(match (sig, status.code()) {
+            (Some(s), _) => format!(
+                "interp batch runner killed by signal {} before this test ran \
+                 (TEST-RUNNER-ISOLATION-1 quarantine; see the sibling failures \
+                 in this file for the crashing test)",
+                s
+            ),
+            (None, Some(c)) => format!(
+                "interp batch runner exited {} before reporting this test \
+                 (TEST-RUNNER-ISOLATION-1 quarantine)",
+                c
+            ),
+            (None, None) => "interp batch runner vanished before reporting this test \
+                 (TEST-RUNNER-ISOLATION-1 quarantine)"
+                .to_string(),
+        })
+    } else {
+        None
+    };
+    expected
+        .iter()
+        .filter(|t| !t.ignored)
+        .map(|t| {
+            let result = reported.remove(t.name.as_str()).unwrap_or_else(|| {
+                TestResult::Fail {
+                    duration: start.elapsed(),
+                    stdout: String::new(),
+                    stderr: String::from_utf8_lossy(&out.stderr)
+                        .lines()
+                        .rev()
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    exit_code: out.status.code(),
+                    error: crash_note.clone().unwrap_or_else(|| {
+                        "interp batch runner reported no outcome for this test".to_string()
+                    }),
+                }
+            });
+            (t.name.clone(), result)
+        })
+        .collect()
+}
+
 fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
     if let Some(prop) = &test.property {
         // When the manifest disables property testing, we treat any
@@ -1411,6 +1632,51 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
 /// runner reads the binary's exit code, so success must be 0.
 /// Returns the merged file path on success, `None` (= use the
 /// original test file) if no manifest / no crate root / IO failure.
+/// IGNORED-FN-IN-MERGE-1 — drop `@ignore`-pinned test fns from a test
+/// source before it enters the AOT merged compile.
+///
+/// The interp runner honours `@ignore` per test, but the AOT path
+/// compiles the WHOLE merged file — an ignored test whose body pins a
+/// known COMPILE-TIME gap (that is often exactly why it is pinned)
+/// fails the file's typecheck and takes every live sibling test down
+/// with it (RUNTIME-AOT-LEG-1 groups 1: mod/unit 7 + thread 2, where
+/// pinned `RuntimeInfo.*` / `Thread.spawn<Int>` bodies E400'd the
+/// merge).
+///
+/// Line-level scanner: an `@ignore` attribute starts a skip region
+/// that swallows the following comment/attribute lines, the `fn`
+/// declaration, and its brace-balanced body.  Brace counting is
+/// naive about braces inside STRING literals — balanced f-string
+/// interpolations (`f"x={y}"`) cancel out, but a lone unmatched `{`
+/// in a plain string inside a pinned body would desync the scan; the
+/// conformance suites do not contain that shape.
+fn strip_ignored_tests(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut lines = source.lines().peekable();
+    while let Some(line) = lines.next() {
+        if line.trim_start().starts_with("@ignore") {
+            // Swallow up to the fn decl…
+            let mut depth: i64 = 0;
+            let mut seen_body = false;
+            for l in lines.by_ref() {
+                let opens = l.matches('{').count() as i64;
+                let closes = l.matches('}').count() as i64;
+                if opens > 0 {
+                    seen_body = true;
+                }
+                depth += opens - closes;
+                if seen_body && depth <= 0 {
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 fn synthesise_test_input_with_crate_root(
     test_file: &Path,
     target_dir: &Path,
@@ -1427,7 +1693,7 @@ fn synthesise_test_input_with_crate_root(
     let candidates = [cog_root.join("src/lib.vr"), cog_root.join("src/main.vr")];
     let root_path = candidates.iter().find(|p| p.is_file())?;
 
-    let test_source = std::fs::read_to_string(test_file).ok()?;
+    let test_source = strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?);
     let root_source = std::fs::read_to_string(root_path).ok()?;
 
     // Strip any leading `module …;` declaration from the crate root —
@@ -1532,7 +1798,7 @@ fn synthesise_test_main_only(
     test_fn_name: Option<&str>,
 ) -> Option<PathBuf> {
     let test_fn = test_fn_name?;
-    let test_source = std::fs::read_to_string(test_file).ok()?;
+    let test_source = strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?);
     let stem = test_file.file_stem()?.to_str()?;
     let merged_path = target_dir.join(format!(
         "test_{}.merged.vr",
@@ -2479,6 +2745,37 @@ fn emit_sarif(results: &[(Text, TestResult)], _active: &[&Test]) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn strip_ignored_tests_removes_pinned_fn_keeps_siblings() {
+        let src = "mount x.{Y};
+
+@ignore  // CLASS-1 — pinned
+         // continuation comment
+@test
+fn pinned_one() {
+    let s = f\"cap={1 + 1}\";
+    assert(true);
+}
+
+@test
+fn live_one() {
+    assert(true);
+}
+";
+        let out = super::strip_ignored_tests(src);
+        assert!(!out.contains("pinned_one"), "pinned fn must be stripped: {}", out);
+        assert!(out.contains("live_one"), "live sibling must survive: {}", out);
+        assert!(out.contains("mount x.{Y};"), "header must survive");
+    }
+
+    #[test]
+    fn strip_ignored_tests_noop_without_pins() {
+        let src = "@test
+fn a() { assert(true); }
+";
+        assert_eq!(super::strip_ignored_tests(src), src);
+    }
     use super::*;
 
     /// TEST-PREFLIGHT-IGNORE-2: attributes PRECEDING `@ignore`
