@@ -11491,14 +11491,19 @@ fn lower_call<'ctx>(
     // present.  This means callers from `core/intrinsics/runtime/os.vr`
     // (which use `__file_open_raw` etc.) reach the same AOT helper
     // as callers that import the bare intrinsic directly.
-    // AOT-INTRINSIC-QUALIFIED-NAME-1: key off the BARE segment so a
-    // module-qualified `sys.time_ops.__time_now_ms_raw` reaches the
-    // same helper as the bare form (Tier-0's dispatch already
-    // normalises this way).
+    // AOT-INTRINSIC-QUALIFIED-NAME-1: key off the BARE segment ONLY
+    // for the reserved `__*_raw` stub namespace, so a module-qualified
+    // `sys.time_ops.__time_now_ms_raw` reaches the same helper as the
+    // bare form (Tier-0's dispatch already normalises this way).
+    // Non-raw dotted names KEEP their full spelling: the ladder below
+    // holds generic bare words ("sleep", "file_read", "time_now") that
+    // would otherwise capture ordinary METHODS by their leaf segment —
+    // `Thread.sleep(duration)` intercepted as the raw ms-sleep is the
+    // silent-wrong shape this gate exists to prevent.
     let intrinsic_key: &str = if bare_name.starts_with("__") && bare_name.ends_with("_raw") {
         &bare_name[2..bare_name.len() - 4]
     } else {
-        bare_name
+        func_name
     };
 
     if intrinsic_key == "file_open"
