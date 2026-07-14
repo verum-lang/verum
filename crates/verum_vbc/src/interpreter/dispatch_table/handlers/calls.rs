@@ -1953,13 +1953,31 @@ fn try_dispatch_intrinsic_by_name(
             // bits.
             let result = if func_val.is_ptr() && !func_val.is_nil() {
                 super::super::call_closure_sync(state, func_val, &[arg_val])?
+            } else if func_val.is_func_ref() {
+                super::super::call_function_sync(
+                    state,
+                    func_val.as_func_id(),
+                    &[arg_val],
+                )?
             } else {
-                let func_id = if func_val.is_func_ref() {
-                    func_val.as_func_id()
+                // `func as Int` collapsed the closure POINTER into an
+                // Int payload — an address-magnitude value, NOT a
+                // function id.  Truncating it to u32 dialled a random
+                // function (whose heap-object result then leaked out of
+                // join() as raw pointer bits).  Re-tag address-sized
+                // values as the closure pointer they are; only
+                // small-magnitude ints are genuine function ids.
+                let raw = func_val.as_i64();
+                if raw > u32::MAX as i64 {
+                    let closure = Value::from_ptr(raw as *mut u8);
+                    super::super::call_closure_sync(state, closure, &[arg_val])?
                 } else {
-                    FunctionId(func_val.as_i64() as u32)
-                };
-                super::super::call_function_sync(state, func_id, &[arg_val])?
+                    super::super::call_function_sync(
+                        state,
+                        FunctionId(raw as u32),
+                        &[arg_val],
+                    )?
+                }
             };
             // The task contract is fn(Int) -> Int; the callee's return
             // may arrive as a BOXED int (uniform-i64 register slots) —
