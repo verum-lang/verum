@@ -8994,6 +8994,97 @@ impl VbcCodegen {
         }
 
         // ──────────────────────────────────────────────────────────
+        // CTX-SHADOWS-ALL-1 (#53): context receivers resolve FIRST.
+        // A name in this function's `using [...]` clause is a DI
+        // requirement satisfied by the caller — `Logger.log(msg)`
+        // must compile to CtxGet + dyn CallM on the PROVIDED VALUE.
+        // This check precedes EVERY static resolution rung below
+        // (pre-resolved targets, typed-receiver registry walk, module
+        // flat-path qualified lookups, TYPE-STATIC-BY-TYPEREF,
+        // variant ctors): a context declaration registers both a
+        // callable `Logger.log` FunctionInfo (the decl stub) and a
+        // Protocol-stub TypeDescriptor named `Logger`, so each of
+        // those rungs "successfully" resolves the name statically and
+        // hijacks the call — the provided value is never consulted
+        // (the #53 silent-no-op / wrong-body-spin class; the observed
+        // spin bound `Logger.log` to `core.intrinsics.float.log`).
+        // Placement here — not point-gates on each rung — is the
+        // invariant: rungs added below inherit it automatically.
+        if let ExprKind::Path(ref path) = receiver.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ref ctx_ident) = path.segments[0]
+            && self.ctx.is_required_context(&ctx_ident.name)
+        {
+            // Context method call: Logger.method(args) or db.method(args)
+            // Resolve alias (db → Database) then emit CtxGet + CallM.
+            let ctx_name = self.ctx.resolve_context_alias(&ctx_ident.name);
+            let ctx_type_id = self.intern_string(&ctx_name);
+
+            // Get the context value from the context stack
+            let ctx_value_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::CtxGet {
+                dst: ctx_value_reg,
+                ctx_type: ctx_type_id,
+            });
+
+            // Compile arguments into consecutive registers
+            let args_start = if !args.is_empty() {
+                let first = self.ctx.alloc_temp();
+                let first_val = self
+                    .compile_expr(&args[0])?
+                    .or_internal("context method arg has no value")?;
+                self.ctx.emit(Instruction::Mov {
+                    dst: first,
+                    src: first_val,
+                });
+                if first_val != first {
+                    self.ctx.free_temp(first_val);
+                }
+
+                for arg in args.iter().skip(1) {
+                    let arg_reg = self.ctx.alloc_temp();
+                    let arg_val = self
+                        .compile_expr(arg)?
+                        .or_internal("context method arg has no value")?;
+                    self.ctx.emit(Instruction::Mov {
+                        dst: arg_reg,
+                        src: arg_val,
+                    });
+                    if arg_val != arg_reg {
+                        self.ctx.free_temp(arg_val);
+                    }
+                }
+                first
+            } else {
+                Reg(0)
+            };
+
+            let result = self.ctx.alloc_temp();
+            // Context method calls use dyn: prefix for type_id dispatch.
+            // Context declarations create TypeDescriptors, enabling
+            // implement Protocol for Type to populate TypeDescriptor.protocols.
+            // The dyn: handler reads type_id from object header → correct dispatch.
+            let ctx_method_name = format!("dyn:{}.{}", ctx_name, method.name);
+            let method_id = self.intern_string(&ctx_method_name);
+
+            // Emit method call on the context value
+            self.ctx.emit(Instruction::CallM {
+                dst: result,
+                receiver: ctx_value_reg,
+                method_id,
+                args: crate::instruction::RegRange {
+                    start: args_start,
+                    count: args.len() as u8,
+                },
+            });
+
+            self.ctx.free_temp(ctx_value_reg);
+
+            return Ok(Some(result));
+        }
+
+
+        // ──────────────────────────────────────────────────────────
         // TIER-COHERENCE-TOSTRING-1: `x.to_text()` / `x.to_string()` on a
         // PRIMITIVE must yield the SAME Text the f-string ToString path does.
         // The interpreter intercepts these (method_dispatch →
@@ -9844,20 +9935,8 @@ impl VbcCodegen {
             let qualified_rust = parts.join("::");
             let qualified_verum = parts.join(".");
 
-            // CTX-SHADOWS-TYPE-1 (#53): a `using`-clause name shadows
-            // EVERY static resolution of `<Name>.<method>` — the
-            // context declaration registers `Logger.log` as a callable
-            // FunctionInfo, so the qualified lookups below would
-            // compile `Logger.log(msg)` into a DIRECT static Call and
-            // the provided value would never be consulted.  Skip the
-            // whole static chain; the context branch further down
-            // emits CtxGet + dyn CallM on the provided value.
-            let head_is_required_context =
-                parts.len() == 2 && self.ctx.is_required_context(&parts[0]);
-
             // Try Rust-style first - only use if argument count matches
-            if !head_is_required_context
-                && let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned()
+            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned()
                 && func_info.param_count == args.len()
             {
                 if let Some(tag) = func_info.variant_tag {
@@ -9867,11 +9946,10 @@ impl VbcCodegen {
             }
 
             // Try Verum-style - only use if argument count matches
-            if !head_is_required_context
-                && let Some(func_info) = self
-                    .ctx
-                    .lookup_qualified_function(&qualified_verum)
-                    .cloned()
+            if let Some(func_info) = self
+                .ctx
+                .lookup_qualified_function(&qualified_verum)
+                .cloned()
                 && func_info.param_count == args.len()
             {
                 if let Some(tag) = func_info.variant_tag {
@@ -10010,19 +10088,6 @@ impl VbcCodegen {
                     .next()
                     .map(|c| c.is_lowercase())
                     .unwrap_or(false)
-                // CTX-SHADOWS-TYPE-1 (#53): a name in this function's
-                // `using` clause is a CONTEXT receiver — dependency
-                // injection semantics shadow the same-named type
-                // declaration inside the body.  The context declaration
-                // registers a Protocol-stub TypeDescriptor, so `Logger`
-                // is always "a known type" here; pre-gate this branch
-                // hijacked `Logger.log(msg)` into a static TypeRef call
-                // (LoadT on the type marker), the provided VALUE was
-                // never consulted, and the bare-suffix walker then
-                // dispatched 'log' to `core.intrinsics.float.log`.
-                // Skipping hands the call to the context branch below
-                // (CtxGet + CallM on the provided value).
-                && !self.ctx.is_required_context(&parts[0])
             {
                 let head = self.resolve_type_alias(&parts[0]);
                 if let Some(&tid) = self.type_name_to_id.get(&head) {
@@ -10331,84 +10396,6 @@ impl VbcCodegen {
                     return Ok(Some(result));
                 }
             }
-        }
-
-        // Check if receiver is a context from `using [...]` clause.
-        // Context method calls like `Logger.log(msg)` should emit CtxGet to retrieve
-        // the context value, then call the method on it.
-        // This is checked BEFORE static method resolution to ensure context names
-        // take precedence over any similarly-named types.
-        if let ExprKind::Path(ref path) = receiver.kind
-            && path.segments.len() == 1
-            && let PathSegment::Name(ref ctx_ident) = path.segments[0]
-            && self.ctx.is_required_context(&ctx_ident.name)
-        {
-            // Context method call: Logger.method(args) or db.method(args)
-            // Resolve alias (db → Database) then emit CtxGet + CallM.
-            let ctx_name = self.ctx.resolve_context_alias(&ctx_ident.name);
-            let ctx_type_id = self.intern_string(&ctx_name);
-
-            // Get the context value from the context stack
-            let ctx_value_reg = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::CtxGet {
-                dst: ctx_value_reg,
-                ctx_type: ctx_type_id,
-            });
-
-            // Compile arguments into consecutive registers
-            let args_start = if !args.is_empty() {
-                let first = self.ctx.alloc_temp();
-                let first_val = self
-                    .compile_expr(&args[0])?
-                    .or_internal("context method arg has no value")?;
-                self.ctx.emit(Instruction::Mov {
-                    dst: first,
-                    src: first_val,
-                });
-                if first_val != first {
-                    self.ctx.free_temp(first_val);
-                }
-
-                for arg in args.iter().skip(1) {
-                    let arg_reg = self.ctx.alloc_temp();
-                    let arg_val = self
-                        .compile_expr(arg)?
-                        .or_internal("context method arg has no value")?;
-                    self.ctx.emit(Instruction::Mov {
-                        dst: arg_reg,
-                        src: arg_val,
-                    });
-                    if arg_val != arg_reg {
-                        self.ctx.free_temp(arg_val);
-                    }
-                }
-                first
-            } else {
-                Reg(0)
-            };
-
-            let result = self.ctx.alloc_temp();
-            // Context method calls use dyn: prefix for type_id dispatch.
-            // Context declarations create TypeDescriptors, enabling
-            // implement Protocol for Type to populate TypeDescriptor.protocols.
-            // The dyn: handler reads type_id from object header → correct dispatch.
-            let ctx_method_name = format!("dyn:{}.{}", ctx_name, method.name);
-            let method_id = self.intern_string(&ctx_method_name);
-
-            // Emit method call on the context value
-            self.ctx.emit(Instruction::CallM {
-                dst: result,
-                receiver: ctx_value_reg,
-                method_id,
-                args: crate::instruction::RegRange {
-                    start: args_start,
-                    count: args.len() as u8,
-                },
-            });
-
-            self.ctx.free_temp(ctx_value_reg);
-
-            return Ok(Some(result));
         }
 
         if let Some(result) = self.try_resolve_static_method(receiver, method, args)? {

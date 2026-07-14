@@ -2,10 +2,6 @@
 // Priority: Advanced
 // Expected output: Tensor creation and manipulation
 
-type Maybe<T> is
-    | Some(T)
-    | None;
-
 // ========== Basic Tensor Types ==========
 
 // 1D Tensor (Vector)
@@ -43,7 +39,7 @@ fn test_tensor_initialization() {
     print(f"Zeros: {zeros}");
 
     // Comprehension initialization
-    let squares = [for i in 0..5 yield i * i];
+    let squares = [i * i for i in 0..5];
     print(f"Squares: {squares}");
 }
 
@@ -70,13 +66,13 @@ fn test_tensor_arithmetic() {
     let b = [10, 20, 30, 40, 50];
 
     // Element-wise operations using comprehensions
-    let sum = [for i in 0..5 yield a[i] + b[i]];
+    let sum = [a[i] + b[i] for i in 0..5];
     print(f"Addition: {sum}");
 
-    let product = [for i in 0..5 yield a[i] * b[i]];
+    let product = [a[i] * b[i] for i in 0..5];
     print(f"Product: {product}");
 
-    let scaled = [for x in a yield x * 10];
+    let scaled = [x * 10 for x in a];
     print(f"Scaled: {scaled}");
 }
 
@@ -87,15 +83,11 @@ fn test_matrix_operations() {
     let m2 = [[5, 6], [7, 8]];
 
     // Matrix addition
-    let m_sum = [
-        for i in 0..2 yield [
-            for j in 0..2 yield m1[i][j] + m2[i][j]
-        ]
-    ];
+    let m_sum = [[m1[i][j] + m2[i][j] for j in 0..2] for i in 0..2];
     print(f"Matrix sum: {m_sum}");
 
     // Transpose
-    let transpose = [for j in 0..2 yield [for i in 0..2 yield m1[i][j]]];
+    let transpose = [[m1[i][j] for i in 0..2] for j in 0..2];
     print(f"Transpose: {transpose}");
 }
 
@@ -106,7 +98,7 @@ fn test_tensor_reshaping() {
 
     // Flatten
     let matrix = [[1, 2, 3], [4, 5, 6]];
-    let flat = [for row in matrix for x in row yield x];
+    let flat = [x for row in matrix for x in row];
     print(f"Flattened: {flat}");
 
     // Reshape 1D to 2D

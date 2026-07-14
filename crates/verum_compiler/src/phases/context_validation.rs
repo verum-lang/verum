@@ -1160,8 +1160,21 @@ impl ContextUsageValidator {
             return;
         }
 
-        // Check if context has been provided
-        if !self.is_context_provided(context_name) {
+        // Check if context has been provided.
+        //
+        // A context named in the function's `using [...]` clause is
+        // provided BY CONTRACT: `using` is the requirement half of the
+        // DI bargain — the caller (transitively, some `provide` up the
+        // call chain) pushes the context before this function runs, and
+        // the runtime `CtxGet` resolves against that stack.  Requiring a
+        // textual `provide` inside the SAME body would invert the
+        // dependency-injection semantics (the function would have to
+        // construct its own dependency).  Only an access to a context
+        // the body did NOT declare (allow_undefined mode, e.g. entry
+        // points) needs a preceding `provide` in this body.
+        if !self.declared_contexts.contains(context_name)
+            && !self.is_context_provided(context_name)
+        {
             self.errors.push(ContextValidationError {
                 message: format!(
                     "Context '{}' accessed in function '{}' before being provided",
@@ -1216,13 +1229,13 @@ impl Visitor for ContextUsageValidator {
                 }
             }
 
-            // Check if context is declared (if not allowing undefined)
-            if !self.allow_undefined && !self.declared_contexts.contains(&context_str) {
-                self.warnings.push(format!(
-                    "Context '{}' is provided but not declared in 'using' clause of function '{}'",
-                    context_str, self.function_name
-                ));
-            }
+            // NOTE: no "provided but not declared" diagnostic here.
+            // `provide X = v` is the SUPPLY side of the DI bargain — the
+            // provider introduces X for its callees and does not consume
+            // it, so its own `using` clause is irrelevant (requiring one
+            // would be circular: entry points like `main` are exactly
+            // the functions that provide without using).  The old
+            // warning fired on every canonical context program.
 
             // Mark context as provided in current scope
             self.add_provided_context(context_str);
@@ -2017,23 +2030,21 @@ mod tests {
     }
 
     #[test]
-    fn test_unprovided_context_detection() {
+    fn test_declared_context_provided_by_contract() {
         let mut declared = HashSet::new();
         declared.insert("Logger".to_string());
 
         let mut validator =
             ContextUsageValidator::new(Text::from("test_func"), declared, HashSet::new(), false);
 
-        // Check accessing declared but unprovided context
+        // Accessing a context declared in the `using` clause is valid
+        // WITHOUT a textual `provide` in the same body: `using` is the
+        // requirement contract and the caller provides (DI semantics).
         validator.check_context_access("Logger", verum_ast::Span::default());
-
-        // Should have one error for unprovided context
-        assert_eq!(validator.errors.len(), 1);
-        assert_eq!(
-            validator.errors[0].kind,
-            ContextErrorKind::UnprovidedContext
+        assert!(
+            validator.errors.is_empty(),
+            "declared context access must not require an intra-body provide"
         );
-        assert_eq!(validator.errors[0].context_name, "Logger");
     }
 
     #[test]

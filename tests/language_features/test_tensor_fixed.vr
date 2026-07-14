@@ -2,10 +2,6 @@
 // Priority: Advanced
 // Expected output: Tensor creation and manipulation
 
-type Maybe<T> is
-    | Some(T)
-    | None;
-
 // ========== Tensor Creation ==========
 
 fn test_tensor_literals() {
@@ -38,15 +34,15 @@ fn test_tensor_initialization() {
     print(f"Zeros: {zeros}");
 
     // Range initialization
-    let range = [for i in 0..10 yield i];
+    let range = [i for i in 0..10];
     print(f"Range: {range}");
 
     // Comprehension initialization
-    let squares = [for i in 0..5 yield i * i];
+    let squares = [i * i for i in 0..5];
     print(f"Squares: {squares}");
 
     // 2D initialization
-    let matrix2d = [for i in 0..3 yield [for j in 0..4 yield i * 4 + j]];
+    let matrix2d = [[i * 4 + j for j in 0..4] for i in 0..3];
     print(f"2D init: {matrix2d}");
 }
 
@@ -67,7 +63,7 @@ fn test_tensor_indexing() {
     let row = matrix[0];
     print(f"First row: {row}");
 
-    let col = [for row in matrix yield row[1]];
+    let col = [row[1] for row in matrix];
     print(f"Second column: {col}");
 }
 
@@ -89,11 +85,11 @@ fn test_tensor_arithmetic() {
     print(f"Addition: {sum}");
 
     // Element-wise multiplication
-    let product = [for i in 0..5 yield a[i] * b[i]];
+    let product = [a[i] * b[i] for i in 0..5];
     print(f"Product: {product}");
 
     // Scalar multiplication
-    let scaled = [for x in a yield x * 10];
+    let scaled = [x * 10 for x in a];
     print(f"Scaled: {scaled}");
 }
 
@@ -104,23 +100,17 @@ fn test_matrix_operations() {
     let m2 = [[5, 6], [7, 8]];
 
     // Matrix addition
-    let m_sum = [
-        for i in 0..2 yield [
-            for j in 0..2 yield m1[i][j] + m2[i][j]
-        ]
-    ];
+    let m_sum = [[m1[i][j] + m2[i][j] for j in 0..2] for i in 0..2];
     print(f"Matrix sum: {m_sum}");
 
     // Transpose
-    let transpose = [for j in 0..2 yield [for i in 0..2 yield m1[i][j]]];
+    let transpose = [[m1[i][j] for i in 0..2] for j in 0..2];
     print(f"Transpose: {transpose}");
 
     // Matrix multiplication (2x2)
     let m_prod = [
-        for i in 0..2 yield [
-            for j in 0..2 yield
-                m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j]
-        ]
+        [m1[i][0] * m2[0][j] + m1[i][1] * m2[1][j] for j in 0..2]
+        for i in 0..2
     ];
     print(f"Matrix product: {m_prod}");
 }
@@ -132,7 +122,7 @@ fn test_tensor_reshaping() {
 
     // Flatten
     let matrix = [[1, 2, 3], [4, 5, 6]];
-    let flat = [for row in matrix for x in row yield x];
+    let flat = [x for row in matrix for x in row];
     print(f"Flattened: {flat}");
 
     // Reshape 1D to 2D
@@ -160,11 +150,11 @@ fn test_tensor_comparison() {
     let threshold = 4;
 
     // Element-wise comparison
-    let mask = [for x in a yield x > threshold];
+    let mask = [x > threshold for x in a];
     print(f"Greater than {threshold}: {mask}");
 
     // Filter based on mask
-    let filtered = [for i in 0..5 if mask[i] yield a[i]];
+    let filtered = [a[i] for i in 0..5 if mask[i]];
     print(f"Filtered values: {filtered}");
 }
 
@@ -177,12 +167,12 @@ fn test_broadcasting() {
     let scalar = 10;
 
     // Broadcast scalar to matrix
-    let broadcasted = [for row in matrix yield [for x in row yield x + scalar]];
+    let broadcasted = [[x + scalar for x in row] for row in matrix];
     print(f"Broadcasted scalar: {broadcasted}");
 
     // Broadcast vector to matrix (row-wise)
     let vec = [10, 20, 30];
-    let row_broadcast = [for row in matrix yield [for i in 0..3 yield row[i] + vec[i]]];
+    let row_broadcast = [[row[i] + vec[i] for i in 0..3] for row in matrix];
     print(f"Row broadcast: {row_broadcast}");
 }
 
@@ -202,12 +192,12 @@ fn test_tensor_views() {
     print(f"View as 3x4: {view_3x4}");
 
     // Strided access (every 2nd element)
-    let strided = [for i in 0..6 yield data[i * 2]];
+    let strided = [data[i * 2] for i in 0..6];
     print(f"Strided (step=2): {strided}");
 
     // Diagonal
     let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
-    let diagonal = [for i in 0..3 yield matrix[i][i]];
+    let diagonal = [matrix[i][i] for i in 0..3];
     print(f"Diagonal: {diagonal}");
 }
 
