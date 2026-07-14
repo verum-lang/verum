@@ -37338,11 +37338,31 @@ fn lower_spawn<'ctx>(
                     let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         let pool_submit_fn = super::error::get_or_declare_function(module, "verum_pool_global_submit", fn_type);
 
+                    // RAW-code tag (bit0=1) on the parked callable.
+                    // AOT-INTRINSIC-QUALIFIED-NAME-1 layer 2 (task
+                    // #14): the pool worker (`pool_worker_entry`,
+                    // platform_ir.rs) discriminates the parked value
+                    // by bit0 — untagged values are the canonical
+                    // 16-byte closure object {fn_ptr, env} every
+                    // Verum-level `fn` value has at AOT, called as
+                    // `i64 (ptr env, i64 arg)`; tagged values are
+                    // bare code addresses called as `i64 (i64)`.
+                    // This site parks a bare LLVM function address,
+                    // so it MUST tag.  NB: only the POOL-parked copy
+                    // is tagged — the multi-arg pack below stores the
+                    // UNTAGGED address because its consumer is
+                    // `verum_thread_spawn_multi`'s own indirect call,
+                    // not the pool worker.
+                    let fn_ptr_tagged = ctx
+                        .builder()
+                        .build_or(fn_ptr, i64_type.const_int(1, false), "spawn_fn_tagged")
+                        .or_llvm_err()?;
+
                     let pool_handle = ctx
                         .builder()
                         .build_call(
                             pool_submit_fn,
-                            &[fn_ptr.into(), arg_i64.into()],
+                            &[fn_ptr_tagged.into(), arg_i64.into()],
                             "pool_handle",
                         )
                         .or_llvm_err()?
@@ -37435,6 +37455,17 @@ fn lower_spawn<'ctx>(
                             trampoline_fn.as_global_value().as_pointer_value(),
                             i64_type,
                             "tramp_ptr",
+                        )
+                        .or_llvm_err()?;
+                    // RAW-code tag (bit0=1) for the pool worker's
+                    // shape discrimination — see the fast path above
+                    // (AOT-INTRINSIC-QUALIFIED-NAME-1 layer 2).
+                    let tramp_ptr = ctx
+                        .builder()
+                        .build_or(
+                            tramp_ptr,
+                            i64_type.const_int(1, false),
+                            "tramp_ptr_tagged",
                         )
                         .or_llvm_err()?;
 

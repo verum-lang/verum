@@ -11588,18 +11588,144 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_unconditional_branch(execute_bb)
             .or_llvm_err()?;
 
-        // execute: call func_ptr(arg), store result, set done flag
+        // execute: call the parked callable, store result, set done flag.
+        //
+        // AOT-INTRINSIC-QUALIFIED-NAME-1 layer 2 (task #14): the parked
+        // `func` i64 is a shape-tagged callable descriptor, NOT a bare
+        // code address:
+        //
+        //   bit0 == 0 → pointer to the canonical 16-byte closure object
+        //     {fn_ptr @0, env_ptr @8} — the ONE representation every
+        //     Verum-level `fn` value has at AOT (NewClosure product;
+        //     a zero-capture named fn carries its `$trampoline$` whose
+        //     ABI is `i64 (ptr env, i64 arg)` with env == null).  The
+        //     call shape mirrors the CallClosure lowering exactly.
+        //   bit0 == 1 → raw code pointer (addr | 1) with ABI
+        //     `i64 (i64)`; produced ONLY by codegen-internal submitters
+        //     that park a known LLVM function address (the
+        //     `lower_thread_spawn` fast path and the
+        //     `verum_thread_spawn_multi` pack trampoline).
+        //
+        // The tag can never collide: closure objects come from
+        // verum_checked_malloc (>= 8-byte aligned), so their bit0 is
+        // always 0.  Pre-fix the worker indirect-called the closure
+        // OBJECT as `i64 (i64)` code — a jump into heap data
+        // (garbage result or SIGSEGV).  Tier-0's eager
+        // `__pool_submit_raw` arm classifies the same shapes
+        // explicitly (closure object → call_closure_sync, id →
+        // call_function_sync), so the tiers keep one behavioral
+        // contract: submit(f, x) … join() == f(x).
         builder.position_at_end(execute_bb);
-        // Cast func_ptr i64 → function pointer, call it
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let fn_ptr = builder
-            .build_int_to_ptr(func_ptr_val, ptr_type, "fn_ptr")
+        let exec_null_bb = ctx.append_basic_block(func, "exec_null");
+        let exec_tagged_bb = ctx.append_basic_block(func, "exec_tag");
+        let exec_raw_bb = ctx.append_basic_block(func, "exec_raw");
+        let exec_closure_bb = ctx.append_basic_block(func, "exec_closure");
+        let exec_store_bb = ctx.append_basic_block(func, "exec_store");
+
+        // Null safety net: NewClosure's unresolved-fn sentinel
+        // materialises 0 — complete the task with result 0 instead of
+        // jumping to address 0.
+        let fn_is_null = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                func_ptr_val,
+                i64_type.const_zero(),
+                "fn_null",
+            )
             .or_llvm_err()?;
-        let result = builder
-            .build_indirect_call(fn_type, fn_ptr, &[arg_val.into()], "result")
+        builder
+            .build_conditional_branch(fn_is_null, exec_null_bb, exec_tagged_bb)
+            .or_llvm_err()?;
+
+        builder.position_at_end(exec_null_bb);
+        builder
+            .build_unconditional_branch(exec_store_bb)
+            .or_llvm_err()?;
+
+        // exec_tag: discriminate raw (bit0=1) vs closure object (bit0=0)
+        builder.position_at_end(exec_tagged_bb);
+        let fn_tag = builder
+            .build_and(func_ptr_val, i64_type.const_int(1, false), "fn_tag")
+            .or_llvm_err()?;
+        let is_raw = builder
+            .build_int_compare(IntPredicate::NE, fn_tag, i64_type.const_zero(), "is_raw")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_raw, exec_raw_bb, exec_closure_bb)
+            .or_llvm_err()?;
+
+        // exec_raw: strip the tag bit, call as `i64 (i64)`
+        builder.position_at_end(exec_raw_bb);
+        let raw_addr = builder
+            .build_and(
+                func_ptr_val,
+                i64_type.const_int(!1u64, false),
+                "raw_addr",
+            )
+            .or_llvm_err()?;
+        let raw_fn_ptr = builder
+            .build_int_to_ptr(raw_addr, ptr_type, "raw_fn_ptr")
+            .or_llvm_err()?;
+        let raw_fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let raw_result = builder
+            .build_indirect_call(raw_fn_type, raw_fn_ptr, &[arg_val.into()], "raw_result")
             .or_llvm_err()?
             .basic_value_or("expected basic value")?
             .into_int_value();
+        builder
+            .build_unconditional_branch(exec_store_bb)
+            .or_llvm_err()?;
+
+        // exec_closure: unwrap {fn_ptr @0, env @8}, call as
+        // `i64 (ptr env, i64 arg)` — the CallClosure/trampoline ABI.
+        builder.position_at_end(exec_closure_bb);
+        let closure_obj_ptr = builder
+            .build_int_to_ptr(func_ptr_val, ptr_type, "closure_obj")
+            .or_llvm_err()?;
+        let closure_fn = builder
+            .build_load(ptr_type, closure_obj_ptr, "closure_fn")
+            .or_llvm_err()?
+            .into_pointer_value();
+        // SAFETY: GEP into the 16-byte closure struct {fn_ptr, env_ptr}
+        // at offset 8 (environment pointer).
+        let closure_env_slot = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    closure_obj_ptr,
+                    &[i64_type.const_int(8, false)],
+                    "closure_env_slot",
+                )
+                .or_llvm_err()?
+        };
+        let closure_env = builder
+            .build_load(ptr_type, closure_env_slot, "closure_env")
+            .or_llvm_err()?;
+        let closure_fn_type =
+            i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let closure_result = builder
+            .build_indirect_call(
+                closure_fn_type,
+                closure_fn,
+                &[closure_env.into(), arg_val.into()],
+                "closure_result",
+            )
+            .or_llvm_err()?
+            .basic_value_or("expected basic value")?
+            .into_int_value();
+        builder
+            .build_unconditional_branch(exec_store_bb)
+            .or_llvm_err()?;
+
+        // exec_store: merge the three paths
+        builder.position_at_end(exec_store_bb);
+        let result_phi = builder.build_phi(i64_type, "task_result").or_llvm_err()?;
+        result_phi.add_incoming(&[
+            (&i64_type.const_zero(), exec_null_bb),
+            (&raw_result, exec_raw_bb),
+            (&closure_result, exec_closure_bb),
+        ]);
+        let result = result_phi.as_basic_value().into_int_value();
 
         // Store result at result_ptr
         let result_p = builder
