@@ -5076,7 +5076,32 @@ impl VbcCodegen {
                             if self.ctx.registers.contains(&name) {
                                 return self.compile_indirect_call(func, args);
                             }
-                            name
+                            // SELF-NEWTYPE-CTOR-1 (codegen leg):
+                            // `Self(v)` inside an `implement <Type>`
+                            // block is the impl type's constructor call
+                            // — rewrite to the concrete type name so it
+                            // resolves through the normal newtype-ctor
+                            // path (sentinel `u32::MAX / 2` transparent
+                            // pass-through).  Pre-fix the unresolved
+                            // "Self" fell into the variant-suffix scan
+                            // and the stdlib bake mis-lowered
+                            // `SupervisorId.root()`'s body to a stray
+                            // MakeVariant — `.raw()` read Variant(138,0)
+                            // instead of 0.  Generic impl headers carry
+                            // their args (`Maybe<T>`) — strip to the
+                            // base name.
+                            if name == "Self"
+                                && let Some(impl_ty) =
+                                    self.ctx.current_impl_type_name.clone()
+                            {
+                                impl_ty
+                                    .split('<')
+                                    .next()
+                                    .unwrap_or(impl_ty.as_str())
+                                    .to_string()
+                            } else {
+                                name
+                            }
                         }
                         PathSegment::SelfValue => "self".to_string(),
                         _ => return Err(CodegenError::unsupported_expr("non-name function path")),

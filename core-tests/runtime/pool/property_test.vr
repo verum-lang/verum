@@ -64,8 +64,7 @@ fn law_pool_batch_isolation() {
     }
     let mut j = 0;
     while j < 16 {
-        let mut h = handles[j];
-        assert_eq(h.await(), j * j, "batched handle observed a sibling's result");
+        assert_eq(handles[j].await(), j * j, "batched handle observed a sibling's result");
         j = j + 1;
     }
 }

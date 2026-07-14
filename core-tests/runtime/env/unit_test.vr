@@ -214,21 +214,18 @@ fn test_cpu_affinity_pairwise_disjoint() {
 // until #28 closes.
 //
 
-@ignore
 @test
 fn test_env_task_id_main_is_zero() {
     let t = EnvTaskId.main();
     assert(t.id == 0_u64);
 }
 
-@ignore
 @test
 fn test_env_task_id_main_no_parent() {
     let t = EnvTaskId.main();
     assert(t.parent_id is None);
 }
 
-@ignore
 @test
 fn test_env_task_id_construct_with_parent() {
     let parent = EnvTaskId.main();

@@ -7274,7 +7274,22 @@ impl TypeChecker {
             // also what powers `<X>.0` field access). A non-newtype Named type
             // has no such key and correctly falls through to NotAFunction.
             Type::Named { ref path, .. } => {
-                let type_name = path.last_segment_name().to_string();
+                let mut type_name = path.last_segment_name().to_string();
+                // SELF-NEWTYPE-CTOR-1: `Self(v)` inside an
+                // `implement <Newtype>` block is the same constructor
+                // call — resolve `Self` to the enclosing impl type
+                // before probing the newtype-inner binding.  Pre-fix,
+                // `fn root() -> Self { Self(0) }` on
+                // `type SupervisorId is (UInt64);` failed
+                // `not a function: Self` locally, while the lenient
+                // stdlib bake mis-lowered it to a stray MakeVariant
+                // (SupervisorId.root().raw() returned Variant(138, 0)).
+                if type_name == "Self"
+                    && let Maybe::Some(ref self_ty) = self.current_self_type
+                    && let Type::Named { path: self_path, .. } = self_ty
+                {
+                    type_name = self_path.last_segment_name().to_string();
+                }
                 let inner_key = format!("__newtype_inner_{}", type_name);
                 if let Some(inner_ty) = self.ctx.lookup_type(inner_key.as_str()) {
                     let inner_ty = inner_ty.clone();

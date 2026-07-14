@@ -40,7 +40,8 @@ fn cfg_law_init_error_message_interpolates_payload() {
 // §H (nullary-Display dispatch) — see audit.md. f"{e}" on nullary variants
 // (TlsInitFailed/PlatformNotSupported/AlreadyInitialized) falls through to the
 // Debug path, so Display ≠ message() for them. Payload variants format fine.
-@ignore  // audit.md §H — Display dispatch falls through for nullary variants
+// audit.md §H — CLOSED 2026-07-14 (nullary-variant Display dispatch fixed
+// upstream).  Un-pinned; guards Display == message() for ALL variants.
 @test
 fn cfg_law_init_error_display_equals_message() {
     // Display delegates to message() — the two must never diverge.

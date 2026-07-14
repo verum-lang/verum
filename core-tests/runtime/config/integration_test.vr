@@ -80,11 +80,10 @@ fn cfg_it_init_error_in_maybe() {
 // LIVE Display path — currently broken by §H (nullary-Display dispatch falls
 // through to Debug, so f"{WouldBlock}" yields "WouldBlock" not "operation
 // would block"; is_transient_error("wouldblock") is then false). This is a
-// REAL functional bug: recovery.execute_with_retry does `f"{error}"` then
-// is_transient_error(...), so under §H the retry layer silently abandons
-// transient I/O errors. Pinned @ignore; the contract is verified against the
-// known Display strings in cfg_it_transient_contract_strings below.
-@ignore  // audit.md §H — nullary RuntimeIoError Display ⇒ retry classifier breaks
+// audit.md §H — CLOSED 2026-07-14 (nullary-variant Display dispatch fixed
+// upstream; probe: f"{RuntimeIoError.WouldBlock}" == "operation would
+// block").  Un-pinned — this test now guards the retry classifier
+// end-to-end against a §H regression.
 @test
 fn cfg_it_transient_io_errors_recognised_by_recovery() {
     let transient = [
