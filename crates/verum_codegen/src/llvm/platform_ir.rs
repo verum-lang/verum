@@ -5639,6 +5639,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_connect"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_connect", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -5745,6 +5746,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_listen"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_listen", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -5879,6 +5881,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i8_type = ctx.i8_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_accept"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_accept", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -5928,6 +5931,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_send_text"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_send_text", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6011,6 +6015,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_recv_text"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_recv_text", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6232,6 +6237,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i64_type = ctx.i64_type();
         let fn_type =
             i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_recv_timeout"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_recv_timeout", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6280,6 +6286,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i64_type = ctx.i64_type();
         let fn_type =
             i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_send_timeout"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_send_timeout", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6329,6 +6336,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_accept_timeout"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_accept_timeout", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6378,6 +6386,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let fn_type =
             i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_connect_timeout"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_connect_timeout", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6441,6 +6450,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i64_type = ctx.i64_type();
         let fn_type =
             i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_udp_recv_timeout"); }
         let func = self.get_or_declare_fn(module, "verum_udp_recv_timeout", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6496,6 +6506,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
         let i8_type = ctx.i8_type();
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_io_wait_readable"); }
         let func = self.get_or_declare_fn(module, "verum_io_wait_readable", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6599,6 +6610,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_io_wait_writable"); }
         let func = self.get_or_declare_fn(module, "verum_io_wait_writable", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6660,6 +6672,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_tcp_close"); }
         let func = self.get_or_declare_fn(module, "verum_tcp_close", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6690,6 +6703,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_udp_bind"); }
         let func = self.get_or_declare_fn(module, "verum_udp_bind", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6776,6 +6790,7 @@ impl<'ctx> PlatformIR<'ctx> {
             ],
             false,
         );
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_udp_send_text"); }
         let func = self.get_or_declare_fn(module, "verum_udp_send_text", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6876,6 +6891,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
         let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_udp_recv_text"); }
         let func = self.get_or_declare_fn(module, "verum_udp_recv_text", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
@@ -6995,6 +7011,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir]   net:verum_udp_close"); }
         let func = self.get_or_declare_fn(module, "verum_udp_close", fn_type);
         if func.count_basic_blocks() > 0 {
             return Ok(());
