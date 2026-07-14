@@ -1811,6 +1811,91 @@ pub(in super::super) fn handle_ffi_extended(
                     state.set_reg(ret_reg, Value::from_i64(0));
                     return Ok(DispatchResult::Continue);
                 }
+
+                // **THREAD-EAGER-TIER0-1 intercept**: pthread thread
+                // primitives.  The Tier-0 interpreter is single-threaded
+                // by design (dispatch cannot re-enter from a foreign OS
+                // thread — `CURRENT_INTERPRETER` is thread-local), so a
+                // REAL `pthread_create` can never run a Verum
+                // `start_routine`: pre-fix the FFI marshalling failed and
+                // `Thread.spawn` died with `SpawnFailed` on every spawn.
+                // Tier-0 semantics instead run the start routine EAGERLY
+                // on the interpreter thread (run-to-completion at the
+                // spawn point) and park its return value; `pthread_join`
+                // replays it.  Observable results equal Tier-1's native
+                // threads for any join-observing program — only the
+                // interleaving differs, which the language does not
+                // promise.  The stdlib thread stack
+                // (`core/runtime/thread.vr` wrapper → `Shared<Maybe<T>>`
+                // result cell → `sys.<os>.thread`) runs UNCHANGED on
+                // top.  Linux Tier-0 reaches thread creation via the
+                // clone-syscall path, not this FFI surface — its eager
+                // twin lives with the syscall handlers.
+                if matches!(
+                    bare,
+                    "pthread_create"
+                        | "pthread_join"
+                        | "pthread_detach"
+                        | "pthread_threadid_np"
+                ) {
+                    match bare {
+                        "pthread_create" if arg_count == 4 => {
+                            // (thread_out, attr, start_routine, arg)
+                            let func_val = args[2];
+                            let func_id = if func_val.is_func_ref() {
+                                func_val.as_func_id()
+                            } else {
+                                crate::module::FunctionId(func_val.as_i64() as u32)
+                            };
+                            let ret = super::super::call_function_sync(
+                                state,
+                                func_id,
+                                &[args[3]],
+                            )?;
+                            let handle = crate::interpreter::task_pool::thread_store(
+                                ret.to_bits() as i64,
+                            );
+                            // Write the synthetic handle into the
+                            // caller's `&mut PthreadT` via the same
+                            // writeback map the real FFI path uses.
+                            if let Some(&src) = source_reg_map.get(&0u8) {
+                                state.set_reg(Reg(src), Value::from_i64(handle));
+                            }
+                            state.set_reg(ret_reg, Value::from_i64(0));
+                            return Ok(DispatchResult::Continue);
+                        }
+                        "pthread_join" if arg_count == 2 => {
+                            let handle = args[0].as_integer_compatible();
+                            let bits =
+                                crate::interpreter::task_pool::thread_take(handle);
+                            if let Some(&src) = source_reg_map.get(&1u8) {
+                                state.set_reg(Reg(src), Value::from_bits(bits as u64));
+                            }
+                            state.set_reg(ret_reg, Value::from_i64(0));
+                            return Ok(DispatchResult::Continue);
+                        }
+                        "pthread_detach" => {
+                            if arg_count >= 1 {
+                                let handle = args[0].as_integer_compatible();
+                                let _ =
+                                    crate::interpreter::task_pool::thread_take(handle);
+                            }
+                            state.set_reg(ret_reg, Value::from_i64(0));
+                            return Ok(DispatchResult::Continue);
+                        }
+                        "pthread_threadid_np" if arg_count == 2 => {
+                            // Tier-0 runs everything on the ONE
+                            // interpreter thread; report tid 1 (matches
+                            // the whitelist stub for pthread_self).
+                            if let Some(&src) = source_reg_map.get(&1u8) {
+                                state.set_reg(Reg(src), Value::from_i64(1));
+                            }
+                            state.set_reg(ret_reg, Value::from_i64(0));
+                            return Ok(DispatchResult::Continue);
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             #[cfg(feature = "ffi")]

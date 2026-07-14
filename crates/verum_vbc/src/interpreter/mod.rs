@@ -71,6 +71,7 @@ mod registers;
 pub mod script_engine;
 mod stack;
 mod state;
+pub(crate) mod task_pool;
 pub mod tensor;
 pub mod waitgroup;
 pub mod worker_pool;

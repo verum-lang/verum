@@ -1925,12 +1925,47 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(Value::from_i64(crate::interpreter::io_engine::take_ready(h, fd, flags))))
         }
 
-        // --- Thread Pool (interpreter: single-threaded execution) ---
+        // --- Thread Pool (POOL-INTERP-STUB-1) ---
+        // Tier-0 runs submitted tasks EAGERLY on the interpreter
+        // thread: same observable contract as the Tier-1 native pool
+        // (`verum_pool_*`) — every task runs exactly once, `await()`
+        // returns its result — only the interleaving differs.  The
+        // historical arms here returned 0 without ever CALLING the
+        // submitted function: `pool.submit(f, x).await()` was a silent
+        // constant-zero, a cross-tier soundness divergence.  When the
+        // worker_pool V1 (dispatch-on-workers) lands, it swaps in
+        // behind the same `task_pool` handle table.
         "__pool_create_raw" => Ok(Some(Value::from_i64(1))),
-        "__pool_submit_raw"
-        | "__pool_await_raw"
-        | "__pool_destroy_raw"
-        | "__pool_global_submit_raw" => Ok(Some(Value::from_i64(0))),
+        "__pool_destroy_raw" => Ok(Some(Value::from_i64(0))),
+        "__pool_submit_raw" | "__pool_global_submit_raw" => {
+            // submit(pool, func, arg) / global_submit(func, arg)
+            let (func_idx, arg_idx) = if func_name == "__pool_submit_raw" {
+                (1, 2)
+            } else {
+                (0, 1)
+            };
+            let func_val = get_arg(state, func_idx);
+            let arg_val = get_arg(state, arg_idx);
+            // `func as Int` reaches us either still FuncRef-tagged or
+            // already collapsed to a plain Int holding the function id
+            // (the NaN-box payload is the id, so truncation is exact
+            // either way — but classify explicitly, never guess bits).
+            let func_id = if func_val.is_func_ref() {
+                func_val.as_func_id()
+            } else {
+                FunctionId(func_val.as_i64() as u32)
+            };
+            let result = super::super::call_function_sync(state, func_id, &[arg_val])?;
+            Ok(Some(Value::from_i64(
+                crate::interpreter::task_pool::store(result.as_i64()),
+            )))
+        }
+        "__pool_await_raw" => {
+            let h = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(crate::interpreter::task_pool::take(
+                h,
+            ))))
+        }
 
         // --- Socket Options (VBC-IO-ENGINE-1: real syscalls,
         //     not no-op) ---
