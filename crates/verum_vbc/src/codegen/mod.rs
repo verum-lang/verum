@@ -8753,6 +8753,55 @@ impl VbcCodegen {
 
     /// This processes imports like `import sys.linux.syscall.{write as sys_write}` and
     /// registers `sys_write` as pointing to `sys.linux.syscall.write`.
+    /// **REEXPORT-QUALIFIED-KEY-1** — the ONE success path for a
+    /// resolved `mount` binding.  Every resolution branch in
+    /// `process_import_tree` funnels here (they used to each repeat
+    /// the same three-step block).
+    ///
+    /// Besides the local authoritative alias, the function is ALSO
+    /// registered under `<current_source_module>.<alias>` — the
+    /// re-exporting module's qualified path.  This is what makes a
+    /// CROSS-SUBTREE re-export chain resolvable: `core/runtime/time.vr`
+    /// (`module runtime.time;`) re-exports
+    /// `core.intrinsics.runtime.time.monotonic_nanos`; a consumer
+    /// writes `mount core.runtime.time.{monotonic_nanos}` and probes
+    /// `runtime.time.monotonic_nanos` — a key that, pre-fix, NOTHING
+    /// created (the subtree-scan branch only finds re-exports whose
+    /// canonical module lives UNDER the re-exporter's path, like
+    /// `core.sys` → `core.sys.common`).  The consumer then fell to the
+    /// bare-name table and bound whichever same-named stranger won the
+    /// first-wins race — `monotonic_nanos` resolved to the darwin
+    /// mach-path (`DivisionByZero` on the unwired timebase), and
+    /// `num_cpus` to `sys.mod`'s delegator, which resolved its own
+    /// callee back to itself (`StackOverflow`).  Both pinned at
+    /// `core-tests/runtime/time/`.
+    ///
+    /// The qualified key registers via `register_function`
+    /// (first-wins under stdlib bake) — never authoritative — so a
+    /// genuine local declaration at the same qualified name cannot be
+    /// clobbered by a mount.
+    fn bind_mounted_function(
+        &mut self,
+        alias_name: &str,
+        func_name: &str,
+        func_info: FunctionInfo,
+    ) {
+        let fid = func_info.id;
+        if let Some(scope) = self.ctx.current_source_module.clone()
+            && !scope.is_empty()
+        {
+            let qualified_alias = format!("{}.{}", scope, alias_name);
+            self.ctx
+                .register_function(qualified_alias, func_info.clone());
+        }
+        self.ctx
+            .register_function_authoritative(alias_name.to_string(), func_info);
+        if alias_name != func_name {
+            self.mount_aliases_buffer
+                .push((alias_name.to_string(), fid));
+        }
+    }
+
     fn register_import_aliases(&mut self, import: &MountDecl) -> CodegenResult<()> {
         // #122 — propagate the OUTER `MountDecl.alias` into the tree
         // walker. The grammar admits two surfaces for `as <alias>`:
@@ -8912,26 +8961,13 @@ impl VbcCodegen {
 
                 // First try Verum-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
-                    let fid = func_info.id;
-                    self.ctx
-                        .register_function_authoritative(alias_name.clone(), func_info);
-                    // Task #11 Phase 2: capture rename for archive-side
-                    // alias plumbing (only when alias name truly differs
-                    // from the canonical last-segment name).
-                    if alias_name != func_name {
-                        self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                    }
+                    self.bind_mounted_function(&alias_name, &func_name, func_info);
                     return Ok(());
                 }
 
                 // Try Rust-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_rust).cloned() {
-                    let fid = func_info.id;
-                    self.ctx
-                        .register_function_authoritative(alias_name.clone(), func_info);
-                    if alias_name != func_name {
-                        self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                    }
+                    self.bind_mounted_function(&alias_name, &func_name, func_info);
                     return Ok(());
                 }
 
@@ -8944,12 +8980,7 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&simplified_qualified).cloned()
                     {
-                        let fid = func_info.id;
-                        self.ctx
-                            .register_function_authoritative(alias_name.clone(), func_info);
-                        if alias_name != func_name {
-                            self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                        }
+                        self.bind_mounted_function(&alias_name, &func_name, func_info);
                         return Ok(());
                     }
                 }
@@ -8970,12 +9001,7 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&stripped_qualified).cloned()
                     {
-                        let fid = func_info.id;
-                        self.ctx
-                            .register_function_authoritative(alias_name.clone(), func_info);
-                        if alias_name != func_name {
-                            self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                        }
+                        self.bind_mounted_function(&alias_name, &func_name, func_info);
                         return Ok(());
                     }
                 }
@@ -9026,12 +9052,7 @@ impl VbcCodegen {
                         if let Some(func_info) =
                             self.ctx.lookup_function(&qualified).cloned()
                         {
-                            let fid = func_info.id;
-                            self.ctx
-                                .register_function_authoritative(alias_name.clone(), func_info);
-                            if alias_name != func_name {
-                                self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                            }
+                            self.bind_mounted_function(&alias_name, &func_name, func_info);
                             return Ok(());
                         }
                     }
@@ -9050,24 +9071,14 @@ impl VbcCodegen {
                     }
                     let core_qualified = core_path.join(".");
                     if let Some(func_info) = self.ctx.lookup_function(&core_qualified).cloned() {
-                        let fid = func_info.id;
-                        self.ctx
-                            .register_function_authoritative(alias_name.clone(), func_info);
-                        if alias_name != func_name {
-                            self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                        }
+                        self.bind_mounted_function(&alias_name, &func_name, func_info);
                         return Ok(());
                     }
                     // Also try without the file component: core.sys.linux.futex_wait → core.sys.futex_wait
                     if core_path.len() >= 3 {
                         let simplified = format!("core.{}.{}", core_path[1], func_name);
                         if let Some(func_info) = self.ctx.lookup_function(&simplified).cloned() {
-                            let fid = func_info.id;
-                            self.ctx
-                                .register_function_authoritative(alias_name.clone(), func_info);
-                            if alias_name != func_name {
-                                self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                            }
+                            self.bind_mounted_function(&alias_name, &func_name, func_info);
                             return Ok(());
                         }
                     }
@@ -9179,14 +9190,7 @@ impl VbcCodegen {
                         if let Some(func_info) =
                             self.ctx.lookup_function(&hits[0]).cloned()
                         {
-                            let fid = func_info.id;
-                            self.ctx.register_function_authoritative(
-                                alias_name.clone(),
-                                func_info,
-                            );
-                            if alias_name != func_name {
-                                self.mount_aliases_buffer.push((alias_name.clone(), fid));
-                            }
+                            self.bind_mounted_function(&alias_name, &func_name, func_info);
                             return Ok(());
                         }
                     }
@@ -9194,13 +9198,7 @@ impl VbcCodegen {
 
                 // Try just the function name (it might be already registered without qualification)
                 if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
-                    let fid = func_info.id;
-                    let has_rename = alias_name != func_name;
-                    self.ctx
-                        .register_function_authoritative(alias_name.clone(), func_info);
-                    if has_rename {
-                        self.mount_aliases_buffer.push((alias_name, fid));
-                    }
+                    self.bind_mounted_function(&alias_name, &func_name, func_info);
                     return Ok(());
                 }
 

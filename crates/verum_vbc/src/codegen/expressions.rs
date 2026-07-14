@@ -2045,6 +2045,43 @@ impl VbcCodegen {
                     }
                 }
 
+                // MOUNTED-UNIT-VALUE-1: bare `TypeName` as the value of a
+                // unit type (`type X is ();`).  For LOCALLY-declared unit
+                // types `register_type_constructors` registers a sentinel
+                // `FunctionId(u32::MAX / 2)` FunctionInfo and the
+                // function-registry branch above emits `LoadUnit` — but
+                // archive-mounted types only get a `TypeDescriptor`
+                // (`register_archive_type_qualified` registers no
+                // constructor infos), so `let x: NoopDriver = NoopDriver;`
+                // compiled fine in the DECLARING stdlib module and died
+                // with `UndefinedVariable` in every consumer module.  One
+                // construction semantics for both origins: if the bare
+                // uppercase name resolves to a fieldless, non-transparent
+                // Record descriptor, it IS the unit value.  Gated on the
+                // module's local-visibility oracle (`alias_scope`, the
+                // ALIAS-VS-MARKER #41 discipline) so an unmounted
+                // stranger in the accumulated global `type_name_to_id`
+                // cannot make an undefined name silently compile.
+                if name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                    && self
+                        .alias_scope
+                        .as_ref()
+                        .is_none_or(|scope| scope.contains(name.as_str()))
+                    && let Some(tid) = self.type_name_to_id.get(name.as_str()).copied()
+                    && let Some(desc) = self.types.iter().find(|d| d.id == tid)
+                    && desc.kind == crate::types::TypeKind::Record
+                    && desc.fields.is_empty()
+                    && !desc.is_transparent_wrapper
+                {
+                    let dest = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadUnit { dst: dest });
+                    return Ok(Some(dest));
+                }
+
                 // Not found - truly undefined
                 // [diag] VERUM_TRACE_UNDEF_VAR=<substr> — where and
                 // what scope state (uppercase-locals class triage:
@@ -9848,6 +9885,19 @@ impl VbcCodegen {
                     .next()
                     .map(|c| c.is_lowercase())
                     .unwrap_or(false)
+                // CTX-SHADOWS-TYPE-1 (#53): a name in this function's
+                // `using` clause is a CONTEXT receiver — dependency
+                // injection semantics shadow the same-named type
+                // declaration inside the body.  The context declaration
+                // registers a Protocol-stub TypeDescriptor, so `Logger`
+                // is always "a known type" here; pre-gate this branch
+                // hijacked `Logger.log(msg)` into a static TypeRef call
+                // (LoadT on the type marker), the provided VALUE was
+                // never consulted, and the bare-suffix walker then
+                // dispatched 'log' to `core.intrinsics.float.log`.
+                // Skipping hands the call to the context branch below
+                // (CtxGet + CallM on the provided value).
+                && !self.ctx.is_required_context(&parts[0])
             {
                 let head = self.resolve_type_alias(&parts[0]);
                 if let Some(&tid) = self.type_name_to_id.get(&head) {
