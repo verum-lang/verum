@@ -5671,6 +5671,23 @@ impl VbcCodegen {
             .or_insert(fid);
     }
 
+    /// Read-side twin of [`Self::record_archive_function_name`].
+    ///
+    /// STUB-STAGE-INSUITE-1: the loader's mount-alias install pass
+    /// (`archive_ctx_loader::install_mount_alias_archive_names`)
+    /// chases re-export target keys through the archive-wide index
+    /// before installing the alias SPELLING as a first-class key, so
+    /// `ArchiveBodyRemap::map_function`'s exact-name tiers resolve
+    /// cross-module Calls recorded under a re-export's qualified
+    /// alias name (`core.base.memory.memcpy` →
+    /// `core.intrinsics.memory.memcpy`).
+    pub fn lookup_archive_function_name(
+        &self,
+        name: &str,
+    ) -> Option<crate::module::FunctionId> {
+        self.archive_func_name_to_fid.get(name).copied()
+    }
+
     /// Test-only: push a synthetic `TypeDescriptor` into the codegen's
     /// type table. Used by integration tests for the layout verifier
     /// to construct deliberately-malformed types and assert the
@@ -21616,7 +21633,15 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
             // QUALIFIED-CALL-FIRST-MATCH-1: a stage-5 stub's recorded
             // dotted RELATIVE spelling resolves via the ranked
             // qualified-suffix chase (see `qualified_suffix_chase`).
-            if crate::stub_ranges::is_name_resolved_stub_id(src.0)
+            // STUB-STAGE-INSUITE-1 widens eligibility to XMOD-band
+            // ids: their recorded names are module-anchored qualified
+            // spellings by the same emission-time construction
+            // (`canonical_name_better` over `ctx.functions`), so a
+            // band id whose exact-name lookups missed gets the same
+            // last-resort chase instead of freezing into the body and
+            // dying as `FunctionNotFound(0x2000_00xx)` at runtime.
+            if (crate::stub_ranges::is_name_resolved_stub_id(src.0)
+                || crate::stub_ranges::in_xmod_call_band(src.0))
                 && let Some(fid) = self.qualified_suffix_chase(name)
             {
                 return fid;
@@ -21685,7 +21710,11 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
             // QUALIFIED-CALL-FIRST-MATCH-1: stage-5 dotted-relative
             // stub names resolve via the ranked qualified-suffix
             // chase when both exact indices miss.
-            if crate::stub_ranges::is_name_resolved_stub_id(src.0)
+            // STUB-STAGE-INSUITE-1: XMOD-band ids are chase-eligible
+            // too — same module-anchored spelling construction (see
+            // the Tier-0 site above).
+            if (crate::stub_ranges::is_name_resolved_stub_id(src.0)
+                || crate::stub_ranges::in_xmod_call_band(src.0))
                 && let Some(fid) = self.qualified_suffix_chase(name)
             {
                 return fid;

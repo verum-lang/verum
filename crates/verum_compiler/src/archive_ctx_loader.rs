@@ -2085,6 +2085,34 @@ impl ArchiveCtxCache {
                     codegen.record_archive_function_name(name, user_fid);
                 }
             }
+        }
+        // STUB-STAGE-INSUITE-1: install re-export alias SPELLINGS into
+        // the archive-wide name index AFTER every entry's kept names
+        // are recorded (alias targets resolve independent of entry
+        // order) and BEFORE any body merge snapshots the index —
+        // cross-module Calls recorded under an alias's qualified key
+        // (`core.base.memory.memcpy`) resolve exactly, instead of
+        // freezing the XMOD band id into the rewritten body.  Keep the
+        // triples alive: pass-2 / supplemental-wave registrations can
+        // resolve targets this round left pending, and the install is
+        // idempotent first-wins.
+        let mut primary_alias_triples: Vec<(
+            String,
+            Option<verum_vbc::module::FunctionId>,
+            String,
+        )> = Vec::new();
+        for (entry_name, pruned_remap) in &pruned_remaps {
+            let Some(module) = module_by_name.get(entry_name.as_str()).copied() else {
+                continue;
+            };
+            primary_alias_triples
+                .extend(collect_mount_alias_triples(module, pruned_remap));
+        }
+        install_mount_alias_archive_names(&primary_alias_triples, codegen);
+        for (entry_name, pruned_remap) in &pruned_remaps {
+            let Some(module) = module_by_name.get(entry_name.as_str()).copied() else {
+                continue;
+            };
             // Task #11 Phase 4: replay mount-rename aliases captured at
             // precompile.  Each (alias_str_id, archive_fid) entry maps
             // an alias name (interned in this module's string table) to
@@ -2207,6 +2235,23 @@ impl ArchiveCtxCache {
                     .collect()
             };
             let mut matched_modules = matched_modules;
+            // STUB-STAGE-INSUITE-1 phase split — mirror the primary
+            // pass's task-#12 two-phase discipline in the pass-2 loop.
+            // Pre-fix each matched module was registered AND merged
+            // inside ONE iteration, so (a) module M1's bodies froze
+            // XMOD band ids for callees that M2, later in the same
+            // loop, would have registered, and (b) pass-2 bodies froze
+            // ids for primary-entry functions that only the
+            // supplemental keep-wave (which ran AFTER these merges)
+            // recorded into the archive-wide index.  Both froze as
+            // Tier-3 identity ids in rewritten bytecode and died at
+            // runtime as `FunctionNotFound(0x2000_00xx)`.  Phase A
+            // (this loop): register + type import + name recording for
+            // ALL matched modules.  Phase B (below, after the
+            // supplemental wave's name recording): body merges.
+            let mut pass2_remaps: Vec<
+                std::collections::HashMap<u32, verum_vbc::module::FunctionId>,
+            > = Vec::with_capacity(matched_modules.len());
             for (entry_name, module) in matched_modules.iter_mut() {
                 let next_id_ref: &mut u32 = unsafe { &mut *next_id_ptr };
                 // UMBRELLA-MOUNT-PRUNE-1: the second pass keeps the
@@ -2274,17 +2319,31 @@ impl ArchiveCtxCache {
                         codegen.record_archive_function_name(name, user_fid);
                     }
                 }
-                // Body merge for the unqualified-wanted second pass —
-                // same Phase 2 path as the primary pass above. See
-                // that site for rationale.
-                codegen.merge_archive_function_bodies(module, &func_id_remap);
+                pass2_remaps.push(func_id_remap);
+            }
+            // STUB-STAGE-INSUITE-1: alias-spelling install for the
+            // pass-2 modules, plus a retry of the primary pass's
+            // pending aliases — targets registered only by pass-2 can
+            // now resolve.  Both idempotent first-wins.
+            let mut pass2_alias_triples: Vec<(
+                String,
+                Option<verum_vbc::module::FunctionId>,
+                String,
+            )> = Vec::new();
+            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
+                pass2_alias_triples
+                    .extend(collect_mount_alias_triples(module, &pass2_remaps[i]));
+            }
+            install_mount_alias_archive_names(&pass2_alias_triples, codegen);
+            install_mount_alias_archive_names(&primary_alias_triples, codegen);
+            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
                 // Task #11 Phase 4: alias replay in the unqualified
                 // second pass too — symmetric with the Phase-1 site
                 // above.  Aliases captured by stdlib modules brought
                 // in through the bare-name fallback need the same
                 // user-side reinstall as those from explicit-mount
                 // modules in the primary pass.
-                replay_mount_aliases(module, &func_id_remap, codegen);
+                replay_mount_aliases(module, &pass2_remaps[i], codegen);
             }
             // UMBRELLA-MOUNT-PRUNE-1 supplemental wave (upgrade-once).
             //
@@ -2299,6 +2358,20 @@ impl ArchiveCtxCache {
             // allocated.  Each entry's merged surface therefore grows
             // at most once — the function-granular equivalent of the
             // TypeOnly→Full single upgrade.
+            //
+            // STUB-STAGE-INSUITE-1: the wave's NAME RECORDING runs
+            // here, BEFORE the pass-2 body merges below — pre-fix the
+            // merges ran first, so a pass-2 body's Call into a
+            // supplement-only function missed every remap tier and
+            // froze its XMOD band id (the merge is a one-shot
+            // bytecode rewrite; a later index insert can't heal an
+            // already-frozen operand).  The supplement BODY merges
+            // stay last — merge order never matters, only
+            // names-before-any-merge does.
+            let mut supplemental_merges: Vec<(
+                String,
+                std::collections::HashMap<u32, verum_vbc::module::FunctionId>,
+            )> = Vec::new();
             if let Some(keep1) = keep_by_entry.as_ref()
                 && !matched_modules.is_empty()
             {
@@ -2313,7 +2386,6 @@ impl ArchiveCtxCache {
                     &supplemental_seeds,
                     &wanted,
                 );
-                let mut upgraded_fns = 0usize;
                 for (entry_name, total) in &per_archive_remaps {
                     let k1 = keep1.get(entry_name);
                     let Some(k2) = keep2.get(entry_name) else {
@@ -2343,15 +2415,39 @@ impl ArchiveCtxCache {
                             codegen.record_archive_function_name(name, user_fid);
                         }
                     }
-                    codegen.merge_archive_function_bodies(module, &supplement);
-                    upgraded_fns += supplement.len();
+                    supplemental_merges.push((entry_name.clone(), supplement));
                 }
-                if std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok() {
-                    eprintln!(
-                        "[mount-prune] pass-2 supplemental merged_fns={}",
-                        upgraded_fns,
-                    );
-                }
+                // STUB-STAGE-INSUITE-1: aliases whose targets were
+                // pruned by keep1 but re-opened by keep2 resolve now
+                // that the supplement names are recorded.
+                install_mount_alias_archive_names(&primary_alias_triples, codegen);
+                install_mount_alias_archive_names(&pass2_alias_triples, codegen);
+            }
+            // ── Phase B: body merges — every kept, pass-2,
+            // supplemental, and alias name is now in the archive-wide
+            // index, so no merge can freeze a name-resolvable XMOD id.
+            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
+                // Body merge for the unqualified-wanted second pass —
+                // same Phase 2 path as the primary pass above. See
+                // that site for rationale.
+                codegen.merge_archive_function_bodies(module, &pass2_remaps[i]);
+            }
+            let mut upgraded_fns = 0usize;
+            for (entry_name, supplement) in &supplemental_merges {
+                let Some(module) = module_by_name.get(entry_name.as_str()).copied()
+                else {
+                    continue;
+                };
+                codegen.merge_archive_function_bodies(module, supplement);
+                upgraded_fns += supplement.len();
+            }
+            if !supplemental_merges.is_empty()
+                && std::env::var("VERUM_TRACE_CODEGEN_PATH").is_ok()
+            {
+                eprintln!(
+                    "[mount-prune] pass-2 supplemental merged_fns={}",
+                    upgraded_fns,
+                );
             }
         }
         (fn_modules, type_modules)
@@ -2384,31 +2480,7 @@ fn replay_mount_aliases(
     // Pre-resolve (alias_name, fid?, target_key) triples in a single
     // read pass so the subsequent register loop can hold &mut
     // codegen.ctx without aliasing the immutable module borrow.
-    let mut pairs: Vec<(
-        String,
-        Option<verum_vbc::module::FunctionId>,
-        String,
-    )> = Vec::with_capacity(module.mount_aliases.len());
-    for (alias_str_id, archive_fid, target_str_id) in module.mount_aliases.iter() {
-        let alias_name = match module.get_string(*alias_str_id) {
-            Some(s) if !s.is_empty() => s.to_string(),
-            _ => continue,
-        };
-        let target_key = module
-            .get_string(*target_str_id)
-            .unwrap_or("")
-            .to_string();
-        // The fid maps only when the target lives in THIS archive
-        // entry (fids are renumbered per-entry at serialization).  A
-        // miss is the NORMAL case for cross-subtree re-exports —
-        // resolution falls to the carried target key below
-        // (REEXPORT-QUALIFIED-KEY-1), never silently skips.
-        let user_fid = func_id_remap.get(&archive_fid.0).copied();
-        if user_fid.is_none() && target_key.is_empty() {
-            continue;
-        }
-        pairs.push((alias_name, user_fid, target_key));
-    }
+    let pairs = collect_mount_alias_triples(module, func_id_remap);
     if pairs.is_empty() {
         return;
     }
@@ -2429,6 +2501,130 @@ fn replay_mount_aliases(
             None => continue,
         };
         ctx.register_function_authoritative(alias_name, info);
+    }
+}
+
+/// Shared mount-alias reader (STUB-STAGE-INSUITE-1 refactor): resolve
+/// each `(alias_str_id, archive_fid, target_str_id)` row of a decoded
+/// module's `mount_aliases` table into an owned
+/// `(alias_name, same_entry_user_fid, carried_target_key)` triple.
+///
+/// The fid maps only when the target lives in THIS archive entry
+/// (fids are renumbered per-entry at serialization).  A miss is the
+/// NORMAL case for cross-subtree re-exports — resolution falls to the
+/// carried target key (REEXPORT-QUALIFIED-KEY-1), never silently
+/// skips.  Consumed by [`replay_mount_aliases`] (ctx-side
+/// FunctionInfo re-install) and
+/// [`install_mount_alias_archive_names`] (archive-wide name-index
+/// install).
+fn collect_mount_alias_triples(
+    module: &VbcModule,
+    func_id_remap: &std::collections::HashMap<u32, verum_vbc::module::FunctionId>,
+) -> Vec<(String, Option<verum_vbc::module::FunctionId>, String)> {
+    let mut triples = Vec::with_capacity(module.mount_aliases.len());
+    for (alias_str_id, archive_fid, target_str_id) in module.mount_aliases.iter() {
+        let alias_name = match module.get_string(*alias_str_id) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => continue,
+        };
+        let target_key = module
+            .get_string(*target_str_id)
+            .unwrap_or("")
+            .to_string();
+        let user_fid = func_id_remap.get(&archive_fid.0).copied();
+        if user_fid.is_none() && target_key.is_empty() {
+            continue;
+        }
+        triples.push((alias_name, user_fid, target_key));
+    }
+    triples
+}
+
+/// STUB-STAGE-INSUITE-1 — install re-export (mount-alias) SPELLINGS
+/// as first-class keys of the archive-wide name index
+/// (`VbcCodegen::archive_func_name_to_fid`).
+///
+/// Root defect this closes: stdlib bodies record cross-module callees
+/// under the spelling the CALLER knew, which for a re-exported
+/// function is the alias's qualified key — `core.base.memory.memcpy`
+/// for `public mount core.intrinsics.memory.memcpy` in
+/// `core/base/memory.vr`.  No function DESCRIPTOR carries that name,
+/// so the kept-function name recording can never index it; the only
+/// load-time authority is the `mount_aliases` row (alias spelling +
+/// carried resolved target key, REEXPORT-QUALIFIED-KEY-1).
+/// `replay_mount_aliases` re-installs the binding into
+/// `ctx.functions` ONLY when the target is itself
+/// mount-filter-accepted; when it isn't (the merged core-tests suite:
+/// no test mounts `core.intrinsics.memory` directly), the alias
+/// spelling appeared in NO name index,
+/// `ArchiveBodyRemap::map_function` missed every tier, and the XMOD
+/// band id froze into the rewritten body — surfacing at runtime as
+/// `FunctionNotFound(0x2000_00xx)` (pinned across
+/// `core-tests/runtime/{spawn,ctx_bridge,mod,config,thread}`).
+///
+/// Resolution is NAME-authoritative (the carried target key): the
+/// same-entry fid fast path is deliberately not used here — the
+/// emission drain stores PRE-remap codegen ids, so a cross-entry fid
+/// can collide with an unrelated local archive id (the exact
+/// ambiguity XMOD-CALL-ID-BAND-1 exists to prevent).  Runs AFTER all
+/// loaded entries' kept-function names are recorded, so alias→target
+/// and alias→alias chains resolve independent of entry order.
+/// Bounded fixpoint: each pass installs at least one pending alias or
+/// stops; chains resolve in chain-length passes; cycles terminate by
+/// no-progress.  Stub-range ids are never installed (same reject
+/// discipline as the remap tiers).  First-wins: an alias spelling
+/// already bound (e.g. by a genuine descriptor of the same name)
+/// keeps its binding.
+fn install_mount_alias_archive_names(
+    alias_triples: &[(String, Option<verum_vbc::module::FunctionId>, String)],
+    codegen: &mut verum_vbc::codegen::VbcCodegen,
+) {
+    let mut pending: Vec<(&str, &str)> = alias_triples
+        .iter()
+        .filter(|(alias, _fid, target)| !target.is_empty() && alias != target)
+        .map(|(alias, _fid, target)| (alias.as_str(), target.as_str()))
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    let trace = std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok();
+    loop {
+        let mut progressed = false;
+        pending.retain(|(alias, target)| {
+            if codegen.lookup_archive_function_name(alias).is_some() {
+                // Already bound (descriptor name or earlier alias
+                // pass) — first-wins.
+                return false;
+            }
+            let resolved = codegen
+                .lookup_archive_function_name(target)
+                .or_else(|| {
+                    codegen
+                        .ctx_mut()
+                        .lookup_function(target)
+                        .map(|info| info.id)
+                })
+                .filter(|fid| !verum_vbc::stub_ranges::is_stub_id(fid.0));
+            match resolved {
+                Some(fid) => {
+                    if trace {
+                        eprintln!(
+                            "[remap-fallback] alias-install '{}' → '{}' → user_fid={}",
+                            alias, target, fid.0
+                        );
+                    }
+                    codegen.record_archive_function_name(alias, fid);
+                    progressed = true;
+                    false
+                }
+                // Possibly an alias→alias chain whose tail resolves
+                // in a later pass — retry.
+                None => true,
+            }
+        });
+        if !progressed || pending.is_empty() {
+            break;
+        }
     }
 }
 
@@ -2610,6 +2806,57 @@ fn compute_merge_keep_sets(
         });
     }
 
+    // STUB-STAGE-INSUITE-1: re-export alias SPELLINGS are first-class
+    // callee keys.  A body's cross-module Call edge records the
+    // spelling the caller knew — for a re-exported function that is
+    // the alias's qualified key (`core.base.memory.memcpy` for
+    // `public mount core.intrinsics.memory.memcpy` in
+    // `core/base/memory.vr`); NO descriptor carries that name, so the
+    // descriptor-derived index above can never chase the edge
+    // (observed as `ext_resolved=false` under
+    // VERUM_TRACE_MOUNT_PRUNE) and an alias-only-reachable callee
+    // body gets pruned.  Index every `mount_aliases` row under its
+    // alias spelling, resolved name-authoritatively through the
+    // carried target key (REEXPORT-QUALIFIED-KEY-1; per-entry fid
+    // renumbering makes the row's fid unreliable across entries).
+    // Bounded fixpoint for alias→alias chains; cycles terminate by
+    // no-progress.  `or`-semantics: a genuine descriptor spelling
+    // already in the index wins.
+    {
+        let mut pending_aliases: Vec<(String, String)> = Vec::new();
+        for (_entry_name, module) in decoded.iter() {
+            for (alias_sid, _archive_fid, target_sid) in module.mount_aliases.iter() {
+                let alias = match module.get_string(*alias_sid) {
+                    Some(s) if !s.is_empty() => s,
+                    _ => continue,
+                };
+                let target = module.get_string(*target_sid).unwrap_or("");
+                if target.is_empty() || alias == target {
+                    continue;
+                }
+                pending_aliases.push((alias.to_string(), target.to_string()));
+            }
+        }
+        loop {
+            let mut progressed = false;
+            pending_aliases.retain(|(alias, target)| {
+                if name_to_loc.contains_key(alias.as_str()) {
+                    return false;
+                }
+                if let Some(loc) = name_to_loc.get(target.as_str()).copied() {
+                    name_to_loc.insert(alias.clone(), loc);
+                    progressed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+            if !progressed || pending_aliases.is_empty() {
+                break;
+            }
+        }
+    }
+
     let mut keep: Vec<HashSet<u32>> = vec![HashSet::new(); decoded.len()];
     let mut worklist: Vec<(usize, u32)> = Vec::new();
     macro_rules! push_fn {
@@ -2758,6 +3005,19 @@ fn compute_merge_keep_sets(
             .collect();
         for tid in wanted_tids {
             keep_type_surface!(idx, tid);
+        }
+    }
+    // STUB-STAGE-INSUITE-1: resolve seed names through the FULL
+    // resolution index (canonical spellings, 2-segment suffixes,
+    // mount-alias spellings) — not just raw descriptor names.  The
+    // supplemental wave feeds pass-2 bodies' cross-module callee
+    // names in as `reached_names`, and those are recorded under the
+    // spelling the CALLER knew — frequently a re-export alias with no
+    // matching descriptor.  Without this, an alias-spelled seed was
+    // silently dropped and the target body stayed pruned.
+    for name in reached_names.iter() {
+        if let Some(&(eidx, efid)) = name_to_loc.get(name.as_str()) {
+            push_fn!(eidx, efid);
         }
     }
     // USER-CALLM seed (ARCHIVE-MERGE-MISSING-FN, task #24 leg 2): the
