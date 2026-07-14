@@ -5202,14 +5202,25 @@ impl VbcCodegen {
         // `unreachable_unchecked` arm — `Unreachable { pc: 1 }`).
         let lexical_scoped_lookup: Option<(String, FunctionInfo)> = {
             let only_simple_segment = !func_name.contains("::") && !func_name.contains('.');
+            // Parent source: ctx.current_function is stamped by
+            // begin_function on EVERY body compile; several compile
+            // paths leave current_fn_lookup_name unset, and the probe
+            // then silently skipped — the CALL form bound the global
+            // bare slot while the fn-REF form (which already used this
+            // chain) bound lexically.  Live split: `f(5)` dispatched
+            // 'law_monad_associativity$f' while `.and_then(f)` held
+            // 'law_monad_left_identity$f' in the same body.
             if only_simple_segment
-                && let Some(parent) = self.current_fn_lookup_name.as_deref()
+                && let Some(parent) = self
+                    .ctx
+                    .current_function
+                    .as_deref()
+                    .or(self.current_fn_lookup_name.as_deref())
             {
                 // Nested fns mangle under the parent's BARE name
                 // (`nested_function_scope` holds undotted fn names),
-                // while `current_fn_lookup_name` may be
-                // module-qualified (`test.law_x`).  Probe both
-                // spellings.
+                // while the parent may be module-qualified
+                // (`test.law_x`).  Probe both spellings.
                 let bare_parent = parent.rsplit('.').next().unwrap_or(parent);
                 [parent, bare_parent]
                     .iter()
