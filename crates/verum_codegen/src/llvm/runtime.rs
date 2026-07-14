@@ -1856,6 +1856,36 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_store(tuple_ptr, i32_type.const_int(type_id as u64, false))
             .or_llvm_err()?;
 
+        // PACK-SELF-DESCRIBING-1: record the data-region byte count
+        // (`values.len() * VALUE_SIZE`) in the ObjectHeader `size` field @
+        // offset 12 (u32), mirroring lower_make_variant. `verum_generic_eq`'s
+        // structural path GATES on `size != 0` (and size_a == size_b, matching
+        // TypeId) before element-wise comparing the value slots at
+        // OBJECT_HEADER_SIZE + i*8. A Pack left size@12 == 0 (the header
+        // zeroing above), so every tuple `==` fell straight through to
+        // ret_neq: `(1,2) == (1,2)` was FALSE under AOT (the julian
+        // round-trip's `assert_eq` on a 6-tuple, and every tuple compare).
+        // The slot layout already matches a variant's data region (values
+        // start at offset 24, no tag word), so populating size@12 is all the
+        // comparator needs — recursive verum_generic_eq then handles nested
+        // tuples / Text elements per slot.
+        let data_size = (values.len() as u64) * VALUE_SIZE;
+        // SAFETY: in-bounds GEP into the always-present 24-byte header; offset
+        // 12 is the `size: u32` field.
+        let size_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(
+                    i8_type,
+                    tuple_ptr,
+                    &[i64_type.const_int(12, false)],
+                    "pack_size_ptr",
+                )
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(size_ptr, i32_type.const_int(data_size, false))
+            .or_llvm_err()?;
+
         // Store each value
         for (i, value) in values.iter().enumerate() {
             let offset = Self::OBJECT_HEADER_SIZE + (i as u64 * VALUE_SIZE);
