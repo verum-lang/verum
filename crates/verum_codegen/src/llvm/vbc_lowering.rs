@@ -2948,6 +2948,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // This enables correct dispatch in GetE/GetF/Len for typed parameters.
             for (i, p) in vbc_func.descriptor.params.iter().enumerate() {
                 let reg = i as u16;
+                if let Ok(filter) = std::env::var("VERUM_TRACE_PARAMMARK")
+                    && (filter == "1" || func_name.contains(&filter))
+                {
+                    eprintln!(
+                        "[parammark] {} p{} type_ref={:?}",
+                        func_name, i, p.type_ref
+                    );
+                }
                 match &p.type_ref {
                     TypeRef::Slice(_) => {
                         ctx.mark_slice_register(reg);
@@ -3043,6 +3051,26 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                         ctx.set_obj_register_type(reg, type_name);
                                     }
                                 }
+                            }
+                            // PARAM-REF-SLICE-UNMARKED-1: `&[T]` / `&mut [T]`
+                            // — a reference to a slice IS the slice value
+                            // (pack/cell), same dispatch as a bare `[T]`
+                            // param. Without this leg the register stayed
+                            // unmarked and every raw-bytes consumer
+                            // (DecodeUtf8 0x51 slice-gate) treated the PACK
+                            // OBJECT as the byte buffer — reading the header
+                            // (tid 528 = bytes 0x10 0x02) as "data": Chars
+                            // yielded U+0010/U+0002 for every string, so
+                            // reverse/parse/to_ascii round-trips built empty
+                            // or control-char garbage at Tier-1 only.
+                            TypeRef::Slice(_) => {
+                                ctx.mark_slice_register(reg);
+                            }
+                            // `&[T; N]` coerces to RefSlice at the call site
+                            // (ffi-byte-buffer contract, task #24) — runtime
+                            // shape is the same slice value.
+                            TypeRef::Array { .. } => {
+                                ctx.mark_slice_register(reg);
                             }
                             _ => {}
                         }

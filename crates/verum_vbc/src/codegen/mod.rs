@@ -13881,15 +13881,39 @@ impl VbcCodegen {
                 self.ast_type_to_type_ref(base)
             }
             TypeKind::Char => TypeRef::Concrete(TypeId::CHAR),
-            TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
+            // PARAM-REF-SLICE-UNMARKED-1: lower slices/arrays HONESTLY.
+            // The old arm flattened both to `Instantiated{LIST,..}` /
+            // `Concrete(LIST)`, so `TypeRef::Slice` NEVER arose from the
+            // AST path and Tier-1's parameter/return markers (which
+            // dispatch on `TypeRef::Slice` / `TypeRef::Array`) list-marked
+            // every `&[Byte]` parameter — raw-bytes consumers (DecodeUtf8
+            // slice-gate) then read the PACK HEADER as data: `Chars`
+            // yielded U+0010/U+0002 (LE bytes of tid 528) for every
+            // string at Tier-1.  Structure consumers dispatch on must
+            // survive lowering — same rule as the RETNAME render.
+            TypeKind::Slice(element) => {
+                TypeRef::Slice(Box::new(self.ast_type_to_type_ref(element)))
+            }
+            TypeKind::Array { element, size } => {
                 let elem_ref = self.ast_type_to_type_ref(element);
-                if let TypeRef::Concrete(base_id) = elem_ref {
-                    TypeRef::Instantiated {
-                        base: TypeId::LIST,
-                        args: vec![TypeRef::Concrete(base_id)],
-                    }
-                } else {
-                    TypeRef::Concrete(TypeId::LIST)
+                // Length only when it is a plain integer literal; 0 is the
+                // established "statically unknown" carrier (const-generic
+                // sizes resolve at monomorphization, not here).
+                let length = match size {
+                    verum_common::Maybe::Some(expr) => match &expr.kind {
+                        verum_ast::expr::ExprKind::Literal(lit) => match &lit.kind {
+                            verum_ast::literal::LiteralKind::Int(il) if il.value >= 0 => {
+                                il.value as u64
+                            }
+                            _ => 0,
+                        },
+                        _ => 0,
+                    },
+                    _ => 0,
+                };
+                TypeRef::Array {
+                    element: Box::new(elem_ref),
+                    length,
                 }
             }
             // Associated-type projection `F.Output` / `I.Item`.  Preserve it

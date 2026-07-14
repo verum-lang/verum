@@ -1359,7 +1359,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
-    "v16-2026-07-14-retname_ref_args";
+    "v17-2026-07-14-typeref_slice_array_honest";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
