@@ -1127,6 +1127,20 @@ impl TypeChecker {
         if method_patterns.is_empty() {
             return true;
         }
+        // CONST-GENERIC-IMPL-METHODS-1: a receiver that carries NO type
+        // arguments provides no instantiation evidence — the gate can
+        // only reject when the receiver's args positively CONTRADICT
+        // every registered pattern.  Bare receivers arise when an
+        // upstream resolution leg drops the instantiation (observed:
+        // the return type of an alias static call `TinyStackAllocator
+        // .new()` arrived as bare `StackAllocator`, and the previous
+        // unconditional length check rejected it against the
+        // `implement<const SIZE: Int> StackAllocator<SIZE>` pattern —
+        // E400 `no method named `capacity``).  Same rule as the bare-
+        // TypeVar receiver slot: stay permissive, let unification pin.
+        if receiver_args.is_empty() {
+            return true;
+        }
         // At least one registered impl pattern must accept these args.
         method_patterns
             .iter()
@@ -1151,10 +1165,64 @@ impl TypeChecker {
 
     /// Slot-level match: `Var` pattern slots accept anything; a
     /// concrete slot must structurally match the receiver.
-    fn impl_pattern_slot_matches(receiver: &Type, pattern: &Type) -> bool {
+    ///
+    /// CONST-GENERIC-IMPL-METHODS-1: const-generic args ride the SAME
+    /// wildcard/pin semantics as type args — this fn is the ONE
+    /// authority for per-instantiation impl gating, so `Type::Meta`
+    /// (the representation of a const-generic argument, see
+    /// `eval_const_arg` / `Type::meta_value`) is handled here and NOT
+    /// in a sibling table:
+    ///
+    ///  * pattern slot from `implement<const SIZE: Int> Stack<SIZE>`
+    ///    registers today as the const's BASE type (`Int` — the
+    ///    `GenericParamKind::Const` arms bind `define_type(SIZE,
+    ///    base_ty)`), so a primitive pattern slot must accept a
+    ///    receiver `Meta { ty: <same primitive>, .. }` instantiation
+    ///    (`Stack<256>` → `Meta{value: Some(256), ty: Int}`).
+    ///    Pre-fix this compared `Meta == Int` → `false` → the gate
+    ///    rejected EVERY method on a const-generic receiver whose
+    ///    args survived as `Meta` (alias expansion `type Tiny is
+    ///    Stack<1024>;`, cross-module mounts) — the E400 "no method
+    ///    named `capacity` found for type `StackAllocator`" class.
+    ///  * a `Meta` PATTERN slot (impl target pinned to a concrete
+    ///    const, e.g. `implement Stack<1024>`) pins the receiver's
+    ///    value: equal values match, differing values reject —
+    ///    mirroring unify's value-carrying-Meta precedence rule.
+    ///  * declaration-site `Meta { value: None }` slots are
+    ///    wildcards, exactly like `Var` type-param slots.
+    ///
+    /// Exposed (`pub`) so the pure slot-matcher is directly unit-testable
+    /// from `tests/const_generic_impl_methods_tests.rs`.
+    pub fn impl_pattern_slot_matches(receiver: &Type, pattern: &Type) -> bool {
         match pattern {
             // Impl-level generic (e.g. `T` in `implement<T: Copy> Register<T, …>`).
             Type::Var(_) | Type::Placeholder { .. } | Type::Unknown => true,
+            // Declaration-site const/meta parameter (`SIZE` bound as
+            // `Meta { value: None }`) — wildcard over instantiations,
+            // same rule as an impl-level type Var.
+            Type::Meta { value: None, .. } => true,
+            // Impl target pinned to a concrete const value
+            // (`implement Stack<1024>`): pin the receiver's value.
+            Type::Meta {
+                value: Some(pv),
+                ty: pty,
+                ..
+            } => match receiver {
+                Type::Meta {
+                    value: Some(rv), ..
+                } => rv == pv,
+                // Unresolved receiver const (another const param, or a
+                // bare TypeVar) — nothing is known, stay permissive so
+                // inference isn't pinned prematurely.
+                Type::Meta { value: None, .. }
+                | Type::Var(_)
+                | Type::Placeholder { .. }
+                | Type::Unknown => true,
+                // Receiver collapsed to the const's base type (value
+                // information lost upstream) — permissive on base-type
+                // agreement, mirroring unify's Meta-vs-non-Meta rule.
+                other => other == &**pty,
+            },
             Type::Named { path: pp, .. } => match receiver {
                 Type::Named { path: rp, .. } => {
                     Self::get_protocol_name_str(pp) == Self::get_protocol_name_str(rp)
@@ -1171,9 +1239,15 @@ impl TypeChecker {
                 Type::Var(_) | Type::Placeholder { .. } | Type::Unknown => true,
                 _ => false,
             },
-            // Primitive literal slot — must equal the receiver primitive.
+            // Primitive literal slot — must equal the receiver primitive,
+            // OR be a const-generic instantiation of that primitive: the
+            // `GenericParamKind::Const` registration arms bind the const
+            // param to its BASE type, so `implement<const SIZE: Int>
+            // Stack<SIZE>` registers the slot as `Int` while the receiver
+            // `Stack<256>` carries `Meta { ty: Int, value: Some(256) }`.
             Type::Int | Type::Float | Type::Bool | Type::Text | Type::Char | Type::Unit => {
                 receiver == pattern
+                    || matches!(receiver, Type::Meta { ty, .. } if **ty == *pattern)
             }
             // Compound types are rare in impl headers; be permissive.
             _ => true,
