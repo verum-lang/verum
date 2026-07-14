@@ -1961,8 +1961,11 @@ fn try_dispatch_intrinsic_by_name(
                 };
                 super::super::call_function_sync(state, func_id, &[arg_val])?
             };
+            // The task contract is fn(Int) -> Int; the callee's return
+            // may arrive as a BOXED int (uniform-i64 register slots) —
+            // normalize through the canonical unboxer, never raw bits.
             Ok(Some(Value::from_i64(
-                crate::interpreter::task_pool::store(result.as_i64()),
+                crate::interpreter::task_pool::store(result.as_integer_compatible()),
             )))
         }
         "__pool_await_raw" => {
