@@ -376,7 +376,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     let interp_child = std::env::var_os("VERUM_TEST_INTERP_CHILD").is_some();
     let interp_isolate = opts.tier == Tier::Interpret
         && !interp_child
-        && !opts.differential
+        && !cfg.differential
         && std::env::var_os("VERUM_TEST_NO_ISOLATE").is_none()
         && !matches!(
             opts.format,
