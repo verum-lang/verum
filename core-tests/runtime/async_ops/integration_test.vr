@@ -70,9 +70,11 @@ fn test_async_sleep_zero_is_no_op() {
     assert(true);
 }
 
-@ignore  // QUALIFIED-CALL-FIRST-MATCH-1 — the elapsed probe rides
-         // sys.monotonic_nanos whose baked body self-recurses
-         // (StackOverflow); task filed.
+@ignore  // QUALIFIED-CALL-2 (follow-up leg): the dotted-call resolver fixed
+         // the mutual-recursion class (Bencher/jitter GREEN), but these
+         // sys-delegator shapes now bind a UNIT-returning stub —
+         // available_parallelism prints (), sleep elapsed=0 (probe
+         // 2026-07-14 r12). Task filed.
 @test
 fn test_async_sleep_ms_lower_bound() {
     let start = monotonic_nanos();

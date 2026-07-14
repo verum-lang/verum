@@ -147,9 +147,6 @@ fn test_bencher_ns_per_iter_guards_zero_iterations() {
     assert_eq(b.ns_per_iter(), 0);
 }
 
-@ignore  // QUALIFIED-CALL-FIRST-MATCH-1 — Bencher.iter -> sys.monotonic_nanos
-         // whose baked body's `darwin.time.monotonic_nanos()` call bound
-         // back to itself (mutual recursion, StackOverflow); task filed.
 @test
 fn test_bencher_iter_accumulates_elapsed() {
     let mut b = Bencher.new().with_iterations(10);
