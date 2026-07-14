@@ -143,3 +143,13 @@ quirk (cf. INTLIT-OVERFLOW / the Int32 comparison-routing fix). Tests use
 | OneForAll supervision strategy live test | sister | gated on spawn |
 | Supervisor.start_child + propagation + escalation flow | sister | gated on root_supervisor() intrinsic |
 | Display/Debug rendering tests for all 6 ADTs | this folder | 1 h |
+
+## 2026-07-14 — SELF-NEWTYPE-CTOR-1 closed
+
+`SupervisorId.root()` returned `Variant(138, 0)` instead of the
+newtype value: `Self(0)` inside `implement SupervisorId` failed
+`not a function: Self` at typecheck locally while the lenient stdlib
+bake mis-lowered it to a stray MakeVariant.  Fixed at both levels
+(typecheck substitutes current_self_type in the Named-callee ctor
+probe; codegen rewrites callee `Self` → current impl type).  Suite
+74/74 GREEN under --interp.

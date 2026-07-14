@@ -71,3 +71,9 @@ intrinsic backing for the global ptr.
 | Property test on tier overhead monotonicity | this folder | 30 min |
 | MemoryContext.fork SendBoundary test | this folder | gated on alloc interp |
 | Sister tests for `core.runtime.{spawn,supervisor,recovery,thread,pool,task_queue}` | sister folders | 1 week total |
+
+## 2026-07-14 — §A pins retired
+
+`EnvTaskId.main()` (wide-record static-method shadow, task #17/#39)
+was fixed by intervening toolchain work — probed live; the 5 @ignore
+pins (unit + regression) are removed and the tests are GREEN.

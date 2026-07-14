@@ -125,3 +125,19 @@ interpolation lowering / VBC dispatch site. Tracked as task #6.
 | Display/Debug rendering tests for the 2 error ADTs | this folder | 30 min |
 | Live FullRuntime.init() / shutdown() cycle | `vcs/specs/L2-standard/runtime/config/` | gated on platform thread+I/O intrinsics |
 | IoOp 5-variant per-payload tests | this folder | gated on safe-FD harness |
+
+## 2026-07-14 — §H CLOSED; unit-type construction pinned through TWO compiler roots
+
+* §H (nullary-variant Display fall-through) closed by intervening
+  toolchain work — probed live (`f"{RuntimeIoError.WouldBlock}"` ==
+  "operation would block"); the property/integration guards are
+  un-pinned and now protect against regression.  The two suite-only
+  Display divergences remain pinned on STUB-STAGE-INSUITE-1.
+* NoopExecutor/NoopDriver bare-value construction surfaced a TWO-ROOT
+  language defect (MOUNTED-UNIT-VALUE-1): (1) `TypeDeclBody::Unit`
+  never created a TypeDescriptor at all — only the sentinel ctor
+  FunctionInfo, which does not survive the archive, so consumers had
+  NO record of the type; (2) the bare-value fallback keyed on
+  fieldless Records while unit descriptors carry the dedicated
+  `TypeKind::Unit`.  Both fixed; the whole unit suite (30) is GREEN
+  under --interp on the v19 bake.

@@ -90,3 +90,18 @@ with explicit granularity bounds.
 | §B `realtime_*` non-monotone documentation pin | `core/runtime/time.vr` | 15 min |
 | Sleep-resolution per-arch property test | `vcs/specs/L4-performance/runtime/time/` | 1 h |
 | Live `Instant.elapsed() > Duration.from_millis(N)` after `sleep_ms(N)` test | this folder or sister | 30 min once §A confirmed |
+
+## 2026-07-14 — §A closed at TWO deeper roots (REEXPORT-QUALIFIED-KEY-1)
+
+The shim's re-exports resolved to WRONG same-named functions via the
+bare-name first-wins table: `monotonic_nanos` bound the darwin
+mach-timebase path (DivisionByZero on the unwired timebase under
+--interp) and `num_cpus` bound sys.mod's delegator which resolved its
+own callee back to itself (StackOverflow).  Fix in two legs:
+(1) resolved mounts register `<module>.<alias>` qualified keys;
+(2) the keys survive the archive via `mount_aliases` carrying the
+RESOLVED TARGET NAME (fids are renumbered per-entry and cross-entry
+targets were silently skipped at replay) — schema v19.  Suite 13/13
+GREEN under --interp.  Related open: QUALIFIED-CALL-FIRST-MATCH-1 —
+dotted-path CALLS inside baked bodies still bind bare first-match
+(sys.monotonic_nanos self-recursion pins in mod/ and async_ops/).
