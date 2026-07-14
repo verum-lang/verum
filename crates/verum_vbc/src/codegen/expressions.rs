@@ -2418,23 +2418,10 @@ impl VbcCodegen {
         let right_type_name = self
             .extract_expr_type_name(right)
             .or_else(|| self.infer_expr_type_name(right));
-        let names_text = |n: &Option<String>| {
-            n.as_deref()
-                .map(|t| {
-                    let t = t.trim();
-                    let t = t
-                        .strip_prefix("&mut ")
-                        .or_else(|| t.strip_prefix('&'))
-                        .unwrap_or(t)
-                        .trim_start();
-                    t == "Text"
-                })
-                .unwrap_or(false)
-        };
         let is_text = matches!(left_type, Some(verum_ast::ty::TypeKind::Text))
             || matches!(right_type, Some(verum_ast::ty::TypeKind::Text))
-            || names_text(&left_type_name)
-            || names_text(&right_type_name);
+            || Self::type_name_is_text(left_type_name.as_deref())
+            || Self::type_name_is_text(right_type_name.as_deref());
         // Check if both types are known primitives (Int, Bool, Char,
         // and any sized integer alias: Int8..Int128 / UInt8..UInt128 /
         // ISize / USize / Byte plus legacy / Rust-style spellings).
@@ -3579,6 +3566,24 @@ impl VbcCodegen {
     }
 
     /// Compiles compound assignment (+=, -=, etc.).
+    /// Reference-spelling-normalised "is this type name Text?" — the ONE
+    /// authority shared by `compile_binary`'s `+`-classification and the
+    /// compound-assignment arms (`s += t`). Strips `&`/`&mut` first:
+    /// AOT Text is a headerless flat record, so the EMISSION decision is
+    /// the only honest place to make `+`/`+=` mean concat.
+    fn type_name_is_text(n: Option<&str>) -> bool {
+        n.map(|t| {
+            let t = t.trim();
+            let t = t
+                .strip_prefix("&mut ")
+                .or_else(|| t.strip_prefix('&'))
+                .unwrap_or(t)
+                .trim_start();
+            t == "Text"
+        })
+        .unwrap_or(false)
+    }
+
     fn compile_compound_assignment(
         &mut self,
         op: BinOp,
@@ -3715,9 +3720,34 @@ impl VbcCodegen {
                     target_reg
                 };
 
+                // TEXT-ADDASSIGN-CONCAT-1: `s += t` on Text operands is
+                // concatenation. This arm always emitted BinaryI{Add} —
+                // Tier-0's polymorphic AddI masked it (small-string/TEXT
+                // receivers concat), Tier-1's honest integer add SUMMED
+                // TWO TEXT POINTERS (tp4: fault at ptrA+ptrB inside the
+                // next verum_text_concat). Same inference surface as
+                // compile_binary's `+`: declared/inferred operand names,
+                // reference spellings normalised.
+                let addassign_is_text = matches!(op, BinOp::AddAssign) && {
+                    let l = self
+                        .extract_expr_type_name(target)
+                        .or_else(|| self.infer_expr_type_name(target));
+                    let r = self
+                        .extract_expr_type_name(value)
+                        .or_else(|| self.infer_expr_type_name(value));
+                    Self::type_name_is_text(l.as_deref())
+                        || Self::type_name_is_text(r.as_deref())
+                };
+
                 // Perform operation
                 let result_reg = if var_is_cell { op_reg } else { target_reg };
-                if let Some(bop) = bitwise_op {
+                if addassign_is_text {
+                    self.ctx.emit(Instruction::Concat {
+                        dst: result_reg,
+                        a: op_reg,
+                        b: right_reg,
+                    });
+                } else if let Some(bop) = bitwise_op {
                     self.ctx.emit(Instruction::Bitwise {
                         op: bop,
                         dst: result_reg,
@@ -3806,9 +3836,35 @@ impl VbcCodegen {
                     })
                     .unwrap_or(false);
 
+                // TEXT-ADDASSIGN-CONCAT-1 (field leg): `obj.f += t` on a
+                // Text field concatenates — detect from the field's
+                // DECLARED type, the same carrier the float branch uses.
+                let field_is_text = matches!(op, BinOp::AddAssign)
+                    && obj_type
+                        .as_deref()
+                        .and_then(|bt| {
+                            let key = Self::strip_generic_args(Self::strip_wrapper_type(bt));
+                            self.type_field_type_names
+                                .get(&(key.to_string(), field_name.to_string()))
+                                .or_else(|| {
+                                    self.resolve_record_type_key(key).and_then(|rk| {
+                                        self.type_field_type_names
+                                            .get(&(rk, field_name.to_string()))
+                                    })
+                                })
+                        })
+                        .map(|ftn| Self::type_name_is_text(Some(ftn)))
+                        .unwrap_or(false);
+
                 // Perform operation
                 let result = self.ctx.alloc_temp();
-                if let Some(bop) = bitwise_op {
+                if field_is_text {
+                    self.ctx.emit(Instruction::Concat {
+                        dst: result,
+                        a: current_val,
+                        b: right_reg,
+                    });
+                } else if let Some(bop) = bitwise_op {
                     self.ctx.emit(Instruction::Bitwise {
                         op: bop,
                         dst: result,
@@ -5277,7 +5333,15 @@ impl VbcCodegen {
                 } else {
                     Reg(0)
                 };
-                let method_id = self.ctx.intern_string_raw(&method);
+                // dyn:-prefixed token — same discipline as the
+                // compile_method_call context branch.  The dyn: handler
+                // reads the RECEIVER's type_id from the object header and
+                // walks receiver override -> protocol default -> builtin;
+                // a bare method name would instead fall to the
+                // first-suffix-wins '*.method' scan and could bind a
+                // FOREIGN body (build-order dependent).
+                let ctx_method_name = format!("dyn:{}.{}", ctx_name, method);
+                let method_id = self.intern_string(&ctx_method_name);
                 let result = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CallM {
                     dst: result,
@@ -9780,8 +9844,20 @@ impl VbcCodegen {
             let qualified_rust = parts.join("::");
             let qualified_verum = parts.join(".");
 
+            // CTX-SHADOWS-TYPE-1 (#53): a `using`-clause name shadows
+            // EVERY static resolution of `<Name>.<method>` — the
+            // context declaration registers `Logger.log` as a callable
+            // FunctionInfo, so the qualified lookups below would
+            // compile `Logger.log(msg)` into a DIRECT static Call and
+            // the provided value would never be consulted.  Skip the
+            // whole static chain; the context branch further down
+            // emits CtxGet + dyn CallM on the provided value.
+            let head_is_required_context =
+                parts.len() == 2 && self.ctx.is_required_context(&parts[0]);
+
             // Try Rust-style first - only use if argument count matches
-            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned()
+            if !head_is_required_context
+                && let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned()
                 && func_info.param_count == args.len()
             {
                 if let Some(tag) = func_info.variant_tag {
@@ -9791,10 +9867,11 @@ impl VbcCodegen {
             }
 
             // Try Verum-style - only use if argument count matches
-            if let Some(func_info) = self
-                .ctx
-                .lookup_qualified_function(&qualified_verum)
-                .cloned()
+            if !head_is_required_context
+                && let Some(func_info) = self
+                    .ctx
+                    .lookup_qualified_function(&qualified_verum)
+                    .cloned()
                 && func_info.param_count == args.len()
             {
                 if let Some(tag) = func_info.variant_tag {
@@ -33987,10 +34064,27 @@ impl VbcCodegen {
                 sub_op: CbgrSubOpcode::NewGeneration as u8,
                 operands: encode_operands(dest, args),
             }),
-            "verum_cbgr_invalidate" => self.ctx.emit(Instruction::CbgrExtended {
-                sub_op: CbgrSubOpcode::Invalidate as u8,
-                operands: encode_operands(dest, args),
-            }),
+            // INVALIDATE-OPERAND-SHAPE-1: invalidate is VOID — encode
+            // args ONLY.  The historical dst-first encoding desynced
+            // BOTH consumers (interp read operands[0] as src and bumped
+            // the DST register's slot generation; AOT passed the dst
+            // register's garbage as user_ptr), and the leftover operand
+            // byte shifted the interp bytecode stream so the following
+            // instruction decoded as garbage (assert(true) after
+            // cbgr_invalidate(0) failed at a phantom pc).
+            "verum_cbgr_invalidate" => {
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: CbgrSubOpcode::Invalidate as u8,
+                    operands: args.iter().flat_map(|r| {
+                        let mut v = Vec::new();
+                        Self::write_reg(&mut v, r.0);
+                        v
+                    }).collect(),
+                });
+                // The call's value slot is unit — keep dest defined for
+                // any `let _ = ...` binding downstream.
+                self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            }
             "verum_cbgr_get_generation" => self.ctx.emit(Instruction::CbgrExtended {
                 sub_op: CbgrSubOpcode::GetGeneration as u8,
                 operands: encode_operands(dest, args),
