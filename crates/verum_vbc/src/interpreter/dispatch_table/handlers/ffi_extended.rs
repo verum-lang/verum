@@ -172,11 +172,19 @@ pub(in super::super) fn handle_ffi_extended(
         // ================================================================
         Some(SystemSubOpcode::CMemcpy) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
+            //
+            // MEM-BULK-ADDR-DUAL-1: raw buffer addresses legitimately
+            // arrive EITHER pointer-tagged OR int-tagged (see
+            // `value_as_addr`).  The previous bare `as_ptr()` decoded an
+            // int-tagged address (cbgr_allocate bridge, `as *mut T`
+            // casts) as NULL, so the null-guard silently skipped the
+            // copy — every `core.intrinsics.memory.memcpy` over a
+            // bridge buffer was a no-op at Tier-0 while AOT copied.
             let dst_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let dst_ptr = state.get_reg(dst_reg).as_ptr::<u8>();
-            let src_ptr = state.get_reg(src_reg).as_ptr::<u8>();
+            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
+            let src_ptr = value_as_addr(state.get_reg(src_reg)) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values and
@@ -208,8 +216,9 @@ pub(in super::super) fn handle_ffi_extended(
             let dst_reg = read_reg(state)?;
             let value_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let dst_val = state.get_reg(dst_reg);
-            let dst_ptr = dst_val.as_ptr::<u8>();
+            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
+            // CMemcpy above) — bare `as_ptr()` no-op'd int-tagged buffers.
+            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
             let value = state.get_reg(value_reg).as_i64() as u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
@@ -252,8 +261,9 @@ pub(in super::super) fn handle_ffi_extended(
             // Action #2.
             let dst_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let dst_val = state.get_reg(dst_reg);
-            let dst_ptr = dst_val.as_ptr::<u8>();
+            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
+            // CMemcpy above).
+            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: same bounds discipline as `CMemset`.
@@ -292,8 +302,10 @@ pub(in super::super) fn handle_ffi_extended(
             let dst_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let dst_ptr = state.get_reg(dst_reg).as_ptr::<u8>();
-            let src_ptr = state.get_reg(src_reg).as_ptr::<u8>();
+            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
+            // CMemcpy above).
+            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
+            let src_ptr = value_as_addr(state.get_reg(src_reg)) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values
@@ -325,8 +337,11 @@ pub(in super::super) fn handle_ffi_extended(
             let ptr1_reg = read_reg(state)?;
             let ptr2_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let ptr1 = state.get_reg(ptr1_reg).as_ptr::<u8>();
-            let ptr2 = state.get_reg(ptr2_reg).as_ptr::<u8>();
+            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
+            // CMemcpy above) — bare `as_ptr()` compared garbage for
+            // int-tagged buffers (two equal bridge buffers ranked -1).
+            let ptr1 = value_as_addr(state.get_reg(ptr1_reg)) as *const u8;
+            let ptr2 = value_as_addr(state.get_reg(ptr2_reg)) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values
@@ -375,7 +390,9 @@ pub(in super::super) fn handle_ffi_extended(
             let expected_reg = read_reg(state)?;
             let timeout_reg = read_reg(state)?;
 
-            let addr = state.get_reg(addr_reg).as_i64() as u64 as *const i32;
+            // MEM-BULK-ADDR-DUAL-1: futex words arrive via as_mut_ptr
+            // (ptr- OR int-tagged) — use the canonical dual extraction.
+            let addr = value_as_addr(state.get_reg(addr_reg)) as *const i32;
             let expected = state.get_reg(expected_reg).as_i64() as i32;
             let timeout_ns = state.get_reg(timeout_reg).as_i64();
 
@@ -391,7 +408,8 @@ pub(in super::super) fn handle_ffi_extended(
             let addr_reg = read_reg(state)?;
             let count_reg = read_reg(state)?;
 
-            let addr = state.get_reg(addr_reg).as_i64() as u64 as *const i32;
+            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction.
+            let addr = value_as_addr(state.get_reg(addr_reg)) as *const i32;
             let count = state.get_reg(count_reg).as_i64();
 
             let woken = futex_park::wake(addr, count);
@@ -406,7 +424,8 @@ pub(in super::super) fn handle_ffi_extended(
             let dst = read_reg(state)?;
             let lock_reg = read_reg(state)?;
 
-            let lock_addr = state.get_reg(lock_reg).as_i64() as u64 as *mut u8;
+            // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction.
+            let lock_addr = value_as_addr(state.get_reg(lock_reg)) as *mut u8;
             if !lock_addr.is_null() {
                 // SAFETY: caller is responsible for `lock_addr` pointing
                 // at a live u8 lock cell. Use atomic CAS to flip 0→1.
@@ -3463,11 +3482,16 @@ pub(in super::super) fn handle_ffi_extended(
             let dst = read_reg(state)?;
             let slot_reg = read_reg(state)?;
             let slot = state.get_reg(slot_reg).as_integer_compatible() as usize;
+            // TLS-SLOT-GET-NULL-1: the declared return is `*const Byte` —
+            // an ABSENT slot is the NULL POINTER (0), not nil.  A nil here
+            // was both type-dishonest (silent-nil class) and a cross-tier
+            // divergence: the AOT twin reads a zero-initialised
+            // `__verum_tls_slots` thread-local and honestly yields 0.
             let value = state
                 .user_tls_slots
                 .get(&(slot as u16))
                 .copied()
-                .unwrap_or_else(Value::nil);
+                .unwrap_or_else(|| Value::from_i64(0));
             state.set_reg(dst, value);
             Ok(DispatchResult::Continue)
         }
