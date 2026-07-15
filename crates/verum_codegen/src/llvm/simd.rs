@@ -517,17 +517,10 @@ impl<'ctx> SimdLowering<'ctx> {
         self.context.f64_type().vec_type(lanes)
     }
 
-    /// Get the LLVM type for a SIMD element.
-    fn element_type(&self, element: SimdElementKind) -> BasicTypeEnum<'ctx> {
-        match element {
-            SimdElementKind::I8 | SimdElementKind::U8 => self.context.i8_type().into(),
-            SimdElementKind::I16 | SimdElementKind::U16 => self.context.i16_type().into(),
-            SimdElementKind::I32 | SimdElementKind::U32 => self.context.i32_type().into(),
-            SimdElementKind::I64 | SimdElementKind::U64 => self.context.i64_type().into(),
-            SimdElementKind::F32 => self.context.f32_type().into(),
-            SimdElementKind::F64 => self.context.f64_type().into(),
-        }
-    }
+    // A15: the `element_type(&self, SimdElementKind)` helper was removed —
+    // confirmed dead (the SIMD lowering reads element types via LLVM's
+    // `get_type().get_element_type()` at the use sites, never through this
+    // helper).
 
     // =========================================================================
     // VECTOR CONSTRUCTION
