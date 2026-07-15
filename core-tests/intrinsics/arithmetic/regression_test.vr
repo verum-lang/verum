@@ -108,7 +108,6 @@ fn regression_overflowing_mul_overflows() {
     assert_eq(o, true);
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_overflowing_neg_min_overflows() {
     let (_r, o) = overflowing_neg(Int.MIN);
@@ -136,7 +135,6 @@ fn regression_wrapping_abs_basic() {
     assert_eq(wrapping_abs(-5), 5);
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_widening_mul_u64() {
     // 0xFFFFFFFF * 0xFFFFFFFF = 0xFFFFFFFE00000001 (fits in one u64, hi=0).
@@ -145,52 +143,56 @@ fn regression_widening_mul_u64() {
     assert_eq(hi, 0 as UInt64);
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_carrying_add_carry_out() {
-    let (_s, c) = carrying_add(Int.MAX, 1, false);
-    assert_eq(c, true);
+    // carrying_add is the BIGNUM primitive: carry_out is the UNSIGNED
+    // wrap of the 64-bit patterns (chain limbs with it), NOT signed
+    // overflow — that is overflowing_add's contract.  Int.MAX + 1
+    // overflows SIGNED but not unsigned (0x7FF..F + 1 = 0x800..0).
+    let (_s1, c1) = carrying_add(Int.MAX, 1, false);
+    assert_eq(c1, false);
+    // All-ones + 1 wraps the unsigned domain — carry out.
+    let (s2, c2) = carrying_add(-1, 1, false);
+    assert_eq(s2, 0);
+    assert_eq(c2, true);
+    // Carry-in propagates through an all-ones limb.
+    let (s3, c3) = carrying_add(-1, 0, true);
+    assert_eq(s3, 0);
+    assert_eq(c3, true);
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_borrowing_sub_borrow_out() {
     let (_d, b) = borrowing_sub(0, 1, false);
     assert_eq(b, true);
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_checked_shl_in_range() {
     assert(checked_shl(1 as Int, 3 as UInt32) is Some(8));
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_checked_shr_in_range() {
     assert(checked_shr(256 as Int, 4 as UInt32) is Some(16));
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_checked_next_power_of_two() {
     assert(checked_next_power_of_two(5) is Some(8));
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_ilog10_basic() {
     assert_eq(ilog10(1000), 3);
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_leading_sign_bits_zero() {
     // 0 has 63 leading sign bits (all bits above the sign are 0).
     assert_eq(leading_sign_bits(0 as Int), 63);
 }
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_saturating_div_basic() {
     assert_eq(saturating_div(20, 5), 4);

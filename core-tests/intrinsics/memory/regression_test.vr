@@ -14,7 +14,7 @@ mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
 mount core.intrinsics.memory.{
     null_ptr, null_ptr_mut, ptr_is_null, swap, replace, transmute,
     memset, memcpy, memcmp, ptr_to_ref, ptr_to_mut_ref,
-    ptr_read, ptr_write, slice_len, ptr_is_aligned,
+    ptr_read, ptr_write, slice_len, ptr_is_aligned_to,
 };
 
 // MEM-NULLPTR-1: null_ptr / ptr_is_null returned nil.  The registry strategies
@@ -159,7 +159,6 @@ fn regression_ptr_write_then_read_round_trips() {
 // subslice/split_at route to `verum_slice_*` library symbols defined nowhere
 // (ghost-symbol drift class).
 
-@ignore("MEM-SLICE-INTRINSIC-FATREF-1 (task #17, 2026-07-15) — slice_len(&xs[..]) SIGSEGVs the interpreter (Unpack on a FatRef). DO NOT un-ignore before the FatRef-view rerouting lands.")
 @test
 fn regression_slice_len_reads_fatref_not_tuple() {
     let mut xs: List<Int> = [1, 2, 3];
@@ -171,11 +170,14 @@ fn regression_slice_len_reads_fatref_not_tuple() {
 // MEM-PTR-ALIGN-NIL-1 (task #18, 2026-07-15) — OPEN, pinned
 // =============================================================================
 
-@ignore("MEM-PTR-ALIGN-NIL-1 (task #18, 2026-07-15) — ptr_is_aligned returns nil (registry gap, same LoadNil class as MEM-NULLPTR-1).")
 @test
-fn regression_ptr_is_aligned_returns_bool_not_nil() {
+fn regression_ptr_is_aligned_to_returns_bool_not_nil() {
+    // MEM-PTR-ALIGN-NIL-1 fixed 2026-07-15: ptr_is_aligned_to was
+    // UNREGISTERED (LoadNil, same class as MEM-NULLPTR-1); now a real
+    // mask-and-compare.  The generic ptr_is_aligned<T> remains on the
+    // task #16 width channel.
     let a = cbgr_allocate(16, 8);
-    let aligned = ptr_is_aligned(a as *const Int);
-    assert(aligned == true || aligned == false);
+    let aligned = ptr_is_aligned_to(a as *const Int, 8 as USize);
+    assert(aligned == true);
     cbgr_deallocate(a);
 }

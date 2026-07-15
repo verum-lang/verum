@@ -343,20 +343,34 @@ fn law_ptr_write_read_round_trip_over_extremes() {
     cbgr_deallocate(a);
 }
 
-@ignore("MEM-PTR-ALIGN-NIL-1 (task #18, 2026-07-15) — ptr_is_aligned/_to return nil (registry gap). Alignment ladder: aligned_to(8) ⇒ aligned_to(4) ⇒ aligned_to(2) ⇒ aligned_to(1).")
 @test
 fn law_alignment_ladder_downward_closed() {
+    // MEM-PTR-ALIGN-NIL-1 fixed 2026-07-15: ptr_is_aligned_to =
+    // (ptr & (align-1)) == 0.  An 8-aligned bridge allocation satisfies
+    // the whole downward ladder.
     let a = cbgr_allocate(16, 8);
     let p = a as *const Int;
-    assert(ptr_is_aligned_to(p, 1));
-    assert(ptr_is_aligned_to(p, 2));
-    assert(ptr_is_aligned_to(p, 4));
-    assert(ptr_is_aligned_to(p, 8));
-    assert(ptr_is_aligned(p));
+    assert(ptr_is_aligned_to(p, 1 as USize));
+    assert(ptr_is_aligned_to(p, 2 as USize));
+    assert(ptr_is_aligned_to(p, 4 as USize));
+    assert(ptr_is_aligned_to(p, 8 as USize));
+    // An odd address fails every rung above 1.
+    let odd = (a + 1) as *const Byte;
+    assert(ptr_is_aligned_to(odd, 1 as USize));
+    assert(!ptr_is_aligned_to(odd, 2 as USize));
+    assert(!ptr_is_aligned_to(odd, 8 as USize));
     cbgr_deallocate(a);
 }
 
-@ignore("MEM-SLICE-INTRINSIC-FATREF-1 (task #17, 2026-07-15) — slice_len emits Unpack on a FatRef and SIGSEGVs the interpreter; slice family routes to ghost symbols. DO NOT un-ignore before the FatRef-view rerouting lands.")
+@ignore("MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — generic ptr_is_aligned<T> derives the alignment from T and needs the call-site width channel; ptr_is_aligned_to (explicit alignment) is live above.")
+@test
+fn law_ptr_is_aligned_generic_matches_explicit() {
+    let a = cbgr_allocate(16, 8);
+    let p = a as *const Int;
+    assert_eq(ptr_is_aligned(p), ptr_is_aligned_to(p, 8 as USize));
+    cbgr_deallocate(a);
+}
+
 @test
 fn law_slice_len_matches_source_and_split_partitions() {
     let mut xs: List<Int> = [10, 20, 30, 40, 50];

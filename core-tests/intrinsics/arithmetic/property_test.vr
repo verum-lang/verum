@@ -300,7 +300,6 @@ fn law_lt_le_coherent() {
 // is_power_of_two ↔ ilog2 round trip
 // -----------------------------------------------------------------------------
 
-@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn law_power_of_two_ilog2_roundtrip() {
     // 2^k for k in 0..=40 is a power of two and ilog2 recovers k.
