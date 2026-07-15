@@ -183,8 +183,8 @@ pub(in super::super) fn handle_ffi_extended(
             let dst_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
-            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
-            let src_ptr = value_as_addr(state.get_reg(src_reg)) as *const u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
+            let src_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values and
@@ -218,7 +218,7 @@ pub(in super::super) fn handle_ffi_extended(
             let size_reg = read_reg(state)?;
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above) — bare `as_ptr()` no-op'd int-tagged buffers.
-            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
             let value = state.get_reg(value_reg).as_i64() as u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
@@ -263,7 +263,7 @@ pub(in super::super) fn handle_ffi_extended(
             let size_reg = read_reg(state)?;
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above).
-            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: same bounds discipline as `CMemset`.
@@ -304,8 +304,8 @@ pub(in super::super) fn handle_ffi_extended(
             let size_reg = read_reg(state)?;
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above).
-            let dst_ptr = value_as_addr(state.get_reg(dst_reg)) as *mut u8;
-            let src_ptr = value_as_addr(state.get_reg(src_reg)) as *const u8;
+            let dst_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(dst_reg))) as *mut u8;
+            let src_ptr = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values
@@ -340,8 +340,8 @@ pub(in super::super) fn handle_ffi_extended(
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction (see
             // CMemcpy above) — bare `as_ptr()` compared garbage for
             // int-tagged buffers (two equal bridge buffers ranked -1).
-            let ptr1 = value_as_addr(state.get_reg(ptr1_reg)) as *const u8;
-            let ptr2 = value_as_addr(state.get_reg(ptr2_reg)) as *const u8;
+            let ptr1 = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(ptr1_reg))) as *const u8;
+            let ptr2 = value_as_addr(super::cbgr_helpers::resolve_arg_value(state, state.get_reg(ptr2_reg))) as *const u8;
             let size_raw = state.get_reg(size_reg).as_i64();
 
             // SECURITY: `size` is attacker-controlled. Reject negative values
