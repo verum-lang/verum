@@ -33097,6 +33097,25 @@ impl VbcCodegen {
                     operands,
                 });
             }
+            InlineSequenceId::ExecutionTier => {
+                // TIER-DETECT-AOT-1: per-tier runtime answer, never a
+                // VBC-codegen fold (one bytecode stream serves both
+                // tiers). Interp handler → 0; LLVM lowering → const 1.
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x86, // SystemSubOpcode::ExecutionTier
+                    operands,
+                });
+            }
+            InlineSequenceId::IsInterpretedSeq => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x87, // SystemSubOpcode::IsInterpreted
+                    operands,
+                });
+            }
             InlineSequenceId::SysGettid => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
@@ -33844,17 +33863,11 @@ impl VbcCodegen {
                     value: cpus,
                 });
             }
-            "is_interpreted" => {
-                // VBC interpreter → always true
-                self.ctx.emit(Instruction::LoadTrue { dst: dest });
-            }
-            "get_tier" => {
-                // VBC interpreter → tier 0
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: 0,
-                });
-            }
+            // TIER-DETECT-AOT-1: `is_interpreted` / `get_tier` are
+            // deliberately ABSENT here — a CompileTimeConstant fold
+            // bakes ONE answer into the VBC both tiers share. They
+            // route through InlineSequence (System sub-ops 0x86/0x87)
+            // so each tier answers itself.
             "tier_promote" => {
                 // No-op in interpreter, load nil
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
