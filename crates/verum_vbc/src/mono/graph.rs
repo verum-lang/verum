@@ -266,6 +266,7 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
 /// - Index by function ID for fast lookup
 /// - Dependencies between instantiations (A calls B<T>)
 /// - Mapping from instantiation to specialized function ID
+#[derive(Clone)]
 pub struct InstantiationGraph {
     /// All instantiation requests (deduplicated).
     instantiations: Vec<InstantiationRequest>,
