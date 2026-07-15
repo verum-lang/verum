@@ -5245,7 +5245,15 @@ impl VbcCodegen {
                     .or_else(|| self.infer_expr_type_name(&args[0]));
                 Self::type_name_is_text(t.as_deref())
             } {
-            format!("{}_text", func_name)
+            // BARE name, exactly like the desugared `format_debug` it
+            // replaces: qualified spelling does NOT resolve in user
+            // scopes (qualified lookup consults the caller's mounts,
+            // not the global registry), so the twin is re-exported on
+            // the same prelude chain (core/text/mod.vr + core/mod.vr)
+            // and substituted in place. First attempt used the
+            // qualified name and took 351 text-mix tests down with
+            // "undefined function".
+            "format_debug_text".to_string()
         } else {
             func_name
         };

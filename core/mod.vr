@@ -500,6 +500,10 @@ public module prelude {
     // dispatch work transparently in user code without requiring an
     // explicit `mount core.text.format.{...}`.
     public mount super.text.format.format_debug;
+    // TEXT-DEBUG-STATIC-1: the concrete-Text twin rides the SAME bare
+    // resolution surface — the codegen rewrite substitutes the callee
+    // name in place, so it must resolve exactly where format_debug does.
+    public mount super.text.format.format_debug_text;
     public mount super.text.format.format_display;
 
     // From sync (common primitives)

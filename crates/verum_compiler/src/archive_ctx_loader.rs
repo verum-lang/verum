@@ -1549,6 +1549,24 @@ impl ArchiveCtxCache {
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut wanted);
         }
+        // TEXT-DEBUG-STATIC-1 wanted-pair: the codegen rewrites a
+        // statically-Text `format_debug(&x)` call (the `f"{x:?}"`
+        // desugar) to the concrete `format_debug_text` twin — but that
+        // substitution happens AFTER this AST-name harvest, so the twin
+        // is never in `wanted` on its own and user compilation died with
+        // "undefined function: format_debug_text" while the generic
+        // original resolved fine. Wherever the original can be called,
+        // the twin must be loadable too.
+        if wanted.contains("format_debug") {
+            wanted.insert("format_debug_text".to_string());
+        }
+        if std::env::var("VERUM_TRACE_WANTED").is_ok() {
+            let dbg: Vec<&String> = wanted
+                .iter()
+                .filter(|n| n.contains("format_debug"))
+                .collect();
+            eprintln!("[wanted] apply_lazy fmt-related: {:?} (total {})", dbg, wanted.len());
+        }
         if wanted.is_empty() {
             return;
         }
@@ -1723,6 +1741,28 @@ impl ArchiveCtxCache {
             std::collections::HashSet::new();
         for item in user_module.items.iter() {
             collect_referenced_function_names(item, &mut wanted);
+        }
+        // TEXT-DEBUG-STATIC-1 wanted-pair: the codegen rewrites a
+        // statically-Text `format_debug(&x)` call (the `f"{x:?}"`
+        // desugar) to the concrete `format_debug_text` twin — but that
+        // substitution happens AFTER this AST-name harvest, so the twin
+        // is never wanted on its own and user compilation died with
+        // "undefined function: format_debug_text" while the generic
+        // original resolved fine. Wherever the original can be called,
+        // the twin must be loadable too.
+        if wanted.contains("format_debug") {
+            wanted.insert("format_debug_text".to_string());
+        }
+        if std::env::var("VERUM_TRACE_WANTED").is_ok() {
+            let dbg: Vec<&String> = wanted
+                .iter()
+                .filter(|n| n.contains("format_debug"))
+                .collect();
+            eprintln!(
+                "[wanted] apply_lazy_with_types fmt-related: {:?} (total {})",
+                dbg,
+                wanted.len()
+            );
         }
         if wanted.is_empty() {
             return (0, 0);

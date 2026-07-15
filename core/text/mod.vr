@@ -82,6 +82,7 @@ public mount .format.println_empty;
 public mount .format.eprint;
 public mount .format.eprintln;
 public mount .format.format_debug;
+public mount .format.format_debug_text;
 public mount .format.format_display;
 public mount .format.dbg;
 
