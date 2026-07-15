@@ -14879,6 +14879,37 @@ fn lower_call_method<'ctx>(
                         ctx.set_generic_type_args(src, type_args.clone());
                         current = src;
                     }
+                } else if let Some(elem_tname) =
+                    ctx.get_obj_register_type(args.start.0).map(|s| s.to_string())
+                {
+                    // GETE-ELEM-OBJ-MARK-1 producer leg (#34): the CallM
+                    // push intercept lacked the heap-OBJECT element stamp
+                    // that Instruction::ListPush has (ELEM-TYPE-STAMP) —
+                    // `handles.push(pool.submit(...))` left
+                    // List<PoolTaskHandle> with NO element authority, so
+                    // the GetE consumer had nothing to mark and
+                    // `handles[j].join()` received the alloca SLOT address
+                    // (EXC_BAD_ACCESS deref [slot+8] in verum_pool_await).
+                    // Same tid resolution as the ListPush leg — ONE stamp
+                    // semantics on both push sites.
+                    let tid = ctx.vbc_module().and_then(|m| {
+                        m.types
+                            .iter()
+                            .find(|td| {
+                                m.get_type_name(td.id).as_deref()
+                                    == Some(elem_tname.as_str())
+                            })
+                            .map(|td| td.id)
+                    });
+                    if let Some(tid) = tid {
+                        let type_args = vec![TypeRef::Concrete(tid)];
+                        ctx.set_generic_type_args(receiver.0, type_args.clone());
+                        let mut current = receiver.0;
+                        while let Some(src) = ctx.get_refmut_source(current) {
+                            ctx.set_generic_type_args(src, type_args.clone());
+                            current = src;
+                        }
+                    }
                 }
                 ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
                 return Ok(());
@@ -24436,6 +24467,27 @@ fn lower_char_extended<'ctx>(
                 // tag rather than short-circuiting on a zero header.
                 ctx.builder()
                     .build_store(variant_ptr, i32_ty.const_int(type_id as u64, false))
+                    .or_llvm_err()?;
+                // Stamp size@12 = 8 (the tag word) — verum_generic_eq's
+                // structural gate requires size != 0 (the aot-tuple-eq
+                // precedent, 84606e1f6); without it two EQUAL unit
+                // variants fell to the pointer-compare ret_neq:
+                // 'A' == 'Z' was false while both are Lu
+                // (test_char_general_category_uppercase_letters_consistent).
+                // With size=8 the structural loop compares exactly the
+                // tag slot.
+                let size_ptr = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(
+                            ctx.types().i8_type(),
+                            variant_ptr,
+                            &[i64_ty.const_int(12, false)],
+                            "gc_size_ptr",
+                        )
+                        .or_llvm_err()?
+                };
+                ctx.builder()
+                    .build_store(size_ptr, i32_ty.const_int(8, false))
                     .or_llvm_err()?;
                 // Store the runtime tag (i64→i32) at VARIANT_TAG_OFFSET.
                 // SAFETY: in-bounds GEP within the just-allocated variant.
