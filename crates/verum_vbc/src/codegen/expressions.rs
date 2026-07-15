@@ -9155,6 +9155,44 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
+    /// NEWTYPE-METHOD-DISPATCH-QUALIFIED-1 — upgrade a `Type.method`
+    /// dispatch id to its fully-qualified `<module>.Type.method` form
+    /// when a module authority disambiguates same-named types:
+    ///
+    ///  1. **Mount authority** — the file explicitly mounted `Type`
+    ///     from a module (`pending_mount_aliases[Type]` carries the
+    ///     FULL qualified path); if `<target>.method` names a
+    ///     registered function, that is what the caller meant —
+    ///     never whichever same-named type's method wins the
+    ///     runtime's bare scan.
+    ///  2. **Declaring-module authority** — inside a module whose own
+    ///     type is being dispatched (`self` receivers, same-module
+    ///     vars), `<current_source_module>.Type.method` wins when
+    ///     registered.
+    ///
+    /// Returns None when neither authority yields a registered
+    /// function — the caller keeps the plain `Type.method` form, so
+    /// unambiguous worlds behave byte-identically.
+    fn qualify_method_with_module_authority(
+        &self,
+        base_type: &str,
+        method: &str,
+    ) -> Option<String> {
+        if let Some(target) = self.ctx.pending_mount_aliases.get(base_type) {
+            let candidate = format!("{}.{}", target, method);
+            if self.ctx.lookup_function(&candidate).is_some() {
+                return Some(candidate);
+            }
+        }
+        if let Some(module) = self.ctx.current_source_module.as_ref() {
+            let candidate = format!("{}.{}.{}", module, base_type, method);
+            if self.ctx.lookup_function(&candidate).is_some() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
     fn compile_method_call(
         &mut self,
         receiver: &Expr,
@@ -11866,7 +11904,20 @@ impl VbcCodegen {
                                     let bare_name = VbcCodegen::strip_generic_args(type_name);
                                     let resolved_type = self.resolve_type_alias(bare_name);
                                     let base_type = VbcCodegen::strip_generic_args(&resolved_type);
-                                    format!("{}.{}", base_type, method.name)
+                                    // NEWTYPE-METHOD-DISPATCH-QUALIFIED-1: when
+                                    // two modules declare same-named types with
+                                    // same-named methods (core.shell.resources.Fd
+                                    // vs core.sys.io_engine.Fd, both with
+                                    // `as_raw`), the `Type.method` id is STILL
+                                    // ambiguous at runtime (a newtype receiver
+                                    // erases to its inner kind, so the id string
+                                    // is the only discriminator).  The caller's
+                                    // MOUNT is the authority: upgrade to the
+                                    // fully-qualified `<module>.Type.method`
+                                    // when the mount-alias target names a
+                                    // registered function.
+                                    self.qualify_method_with_module_authority(&base_type, method.name.as_str())
+                                        .unwrap_or_else(|| format!("{}.{}", base_type, method.name))
                                 }
                             } else {
                                 method.name.to_string()
@@ -11907,7 +11958,8 @@ impl VbcCodegen {
                         if verum_common::well_known_types::looks_like_type_param(&base_type) {
                             method.name.to_string()
                         } else {
-                            format!("{}.{}", base_type, method.name)
+                            self.qualify_method_with_module_authority(&base_type, method.name.as_str())
+                                .unwrap_or_else(|| format!("{}.{}", base_type, method.name))
                         }
                     } else {
                         method.name.to_string()
@@ -11980,7 +12032,8 @@ impl VbcCodegen {
                             // Type name (e.g., FileDesc.STDIN.is_valid)
                             let resolved_type = self.resolve_type_alias(&type_name);
                             let base_type = VbcCodegen::strip_generic_args(&resolved_type);
-                            format!("{}.{}", base_type, method.name)
+                            self.qualify_method_with_module_authority(&base_type, method.name.as_str())
+                                .unwrap_or_else(|| format!("{}.{}", base_type, method.name))
                         } else {
                             // Instance variable field access (e.g., var.field.method())
                             // Look up variable type, then field type for method prefix
@@ -12129,7 +12182,8 @@ impl VbcCodegen {
                     if verum_common::well_known_types::looks_like_type_param(&base_type) {
                         method.name.to_string()
                     } else {
-                        format!("{}.{}", base_type, method.name)
+                        self.qualify_method_with_module_authority(&base_type, method.name.as_str())
+                            .unwrap_or_else(|| format!("{}.{}", base_type, method.name))
                     }
                 } else {
                     method.name.to_string()
@@ -12278,7 +12332,8 @@ impl VbcCodegen {
                             if verum_common::well_known_types::looks_like_type_param(&base_type) {
                                 method.name.to_string()
                             } else {
-                                format!("{}.{}", base_type, method.name)
+                                self.qualify_method_with_module_authority(&base_type, method.name.as_str())
+                                    .unwrap_or_else(|| format!("{}.{}", base_type, method.name))
                             }
                         } else {
                             method.name.to_string()
@@ -12349,7 +12404,8 @@ impl VbcCodegen {
                 // For any other paren-wrapped expression, try extract_expr_type_name
                 if let Some(type_name) = self.extract_expr_type_name(inner) {
                     let base_type = VbcCodegen::strip_generic_args(&type_name);
-                    format!("{}.{}", base_type, method.name)
+                    self.qualify_method_with_module_authority(&base_type, method.name.as_str())
+                        .unwrap_or_else(|| format!("{}.{}", base_type, method.name))
                 } else {
                     method.name.to_string()
                 }
