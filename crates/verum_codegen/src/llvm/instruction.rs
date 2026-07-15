@@ -31005,6 +31005,24 @@ fn lower_get_element<'ctx>(
     let is_list = ctx.is_list_register(arr.0);
     let is_slice = ctx.is_slice_register(arr.0);
 
+    // GETE-ELEM-OBJ-MARK-1 (#34): propagate the container's element type onto
+    // the loaded-element register — the twin of CALLM-RETNAME-OBJ-MARK-1
+    // (commit 540819218) for the GetE path.  Without it, a boxed-record
+    // element (`List<PoolTaskHandle>[j]`, any `List<UserRecord>`) comes out
+    // UNMARKED: a later `Ref` of it (auto-`&mut self`/`&self` on the element)
+    // then falls to `lower_ref`'s non-heap branch and SPILLS the heap object
+    // pointer into a fresh stack cell, handing the SLOT ADDRESS to the method.
+    // The method body reads its fields at header-relative offsets against the
+    // stack cell → garbage (POOL-BATCH-AOT-SIGNAL-1: `handles[j].join()` read
+    // `self.handle` as 0x1 → `verum_pool_await(0x1)` → EXC_BAD_ACCESS).  The
+    // direct-local path (`let mut h = pool.submit(..); h.join()`) already
+    // works precisely because the CallM result carried this obj-type mark.
+    // `mark_register_from_return_type` is conservative (primitive/byte
+    // elements are skipped), so scalar/typed-array reads are unaffected.
+    let gete_elem_type: Option<TypeRef> = ctx
+        .get_generic_type_args(arr.0)
+        .and_then(|a| a.first().cloned());
+
     // For list registers, arr_ptr is a NewG object: [header(24)][ptr:i64][len:i64][cap:i64].
     // Load the backing pointer from LIST_PTR_OFFSET (field 0 = offset 24).
     let data_ptr = if is_list {
@@ -31066,6 +31084,9 @@ fn lower_get_element<'ctx>(
             .or_llvm_err()?;
         let gm_val = emit_slice_cell_elem_load(ctx, gm_elem, gm_eptr, "getem")?;
         ctx.set_register(dst.0, gm_val.into());
+        if let Some(ref et) = gete_elem_type {
+            mark_register_from_return_type(ctx, dst.0, et);
+        }
         return Ok(());
     }
 
@@ -31094,6 +31115,9 @@ fn lower_get_element<'ctx>(
         .or_llvm_err()?;
     let ug_val = emit_slice_cell_elem_load(ctx, ug_elem, ug_eptr, "geteu")?;
     ctx.set_register(dst.0, ug_val.into());
+    if let Some(ref et) = gete_elem_type {
+        mark_register_from_return_type(ctx, dst.0, et);
+    }
     Ok(())
 }
 
