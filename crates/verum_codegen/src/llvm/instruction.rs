@@ -1706,7 +1706,7 @@ fn as_ptr<'ctx>(
 
 /// True when the coherent (tagged) reference model is active.
 fn ref_tagging_enabled() -> bool {
-    std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some()
+    verum_vbc::mono::mono_aot_enabled()
 }
 
 /// Set bit 0 on a slot-address i64 to mark it a reference.

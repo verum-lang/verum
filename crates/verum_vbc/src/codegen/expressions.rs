@@ -6740,7 +6740,7 @@ impl VbcCodegen {
         // at Tier-0. Only the mono SEED recording (specialize → route →
         // devirtualize, still under reconstruction #3) stays behind
         // VERUM_ENABLE_MONO_AOT.
-        let mono_seed = std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some();
+        let mono_seed = crate::mono::mono_aot_enabled();
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let found = self
                 .functions

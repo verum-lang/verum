@@ -2272,7 +2272,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         value
                     }
                 }
-                BasicValueEnum::PointerValue(v) if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some() => {
+                BasicValueEnum::PointerValue(v) if verum_vbc::mono::mono_aot_enabled() => {
                     // Uniform i64 register model (this function's DOCUMENTED
                     // contract: "All alloca slots uniformly use i64 ... pointers
                     // → ptrtoint on store"). Coerce the pointer to i64 and fall
