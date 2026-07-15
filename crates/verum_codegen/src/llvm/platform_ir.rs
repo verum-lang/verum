@@ -3134,61 +3134,20 @@ impl<'ctx> PlatformIR<'ctx> {
     // ========================================================================
     // Context system — provide/get/end in LLVM IR
     // ========================================================================
-
-    /// Emit context system operations (dependency injection).
-    fn emit_context_system(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let void_type = ctx.void_type();
-
-        // Context stack globals
-        if module.get_global("__verum_context_stack").is_none() {
-            let arr_type = i64_type.array_type(512); // 256 slots × 2 (type_id, value)
-            let g = module.add_global(arr_type, None, "__verum_context_stack");
-            g.set_initializer(&arr_type.const_zero());
-            g.set_linkage(verum_llvm::module::Linkage::Internal);
-        }
-        if module.get_global("__verum_context_count").is_none() {
-            let g = module.add_global(i64_type, None, "__verum_context_count");
-            g.set_initializer(&i64_type.const_zero());
-            g.set_linkage(verum_llvm::module::Linkage::Internal);
-        }
-
-        // verum_ctx_get(type_id: i64) → i64
-        // Searches context stack for matching type_id, returns value or 0
-        let get_type = i64_type.fn_type(&[i64_type.into()], false);
-        let get_fn = super::error::get_or_declare_function(module, "verum_ctx_get", get_type);
-        if get_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(get_fn, "entry");
-            builder.position_at_end(entry);
-            // Simple stub: return 0 (full implementation searches the context stack)
-            builder
-                .build_return(Some(&i64_type.const_zero()))
-                .or_llvm_err()?;
-        }
-
-        // verum_ctx_provide(type_id: i64, value: i64) → void
-        let provide_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let provide_fn = super::error::get_or_declare_function(module, "verum_ctx_provide", provide_type);
-        if provide_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(provide_fn, "entry");
-            builder.position_at_end(entry);
-            builder.build_return(None).or_llvm_err()?;
-        }
-
-        // verum_ctx_end(type_id: i64) → void
-        let end_type = void_type.fn_type(&[i64_type.into()], false);
-        let end_fn = super::error::get_or_declare_function(module, "verum_ctx_end", end_type);
-        if end_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(end_fn, "entry");
-            builder.position_at_end(entry);
-            builder.build_return(None).or_llvm_err()?;
-        }
-        Ok(())
-    }
+    //
+    // CTX-AOT-INCOHERENCE-1 leg 3: the former `emit_context_system` here
+    // emitted return-0 STUB bodies for verum_ctx_get/provide/end (plus dead
+    // `__verum_context_stack` / `__verum_context_count` globals) with an
+    // i64 type_id signature that also disagreed with the i32 signature
+    // declared by `emit_context_system_decls`. It was never called — dead
+    // but linkable, i.e. silent-wrong if it ever won the get_or_declare
+    // race — so it has been REMOVED. The live family is:
+    //   * `emit_context_system_decls` (declarations, i32 type_id), and
+    //   * `emit_context_system_ir` (real bodies over the execution-context
+    //     bindings array) — the working fallback that whole-program AOT
+    //     currently reaches because the compiled `core.runtime.ctx_bridge`
+    //     module is not yet linked into user binaries.
+    // The ONE forbidden state (a linkable silent no-op body) is gone.
 
     // ========================================================================
     // Threading — spawn/join via pthread

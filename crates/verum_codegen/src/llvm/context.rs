@@ -376,10 +376,30 @@ pub struct FunctionContext<'a, 'ctx> {
     /// The return value register is excluded (ownership transfers to caller).
     heap_alloc_registers: std::collections::HashSet<u16>,
 
-    /// Current context provide nesting depth.
-    /// Incremented on CtxProvide, decremented on CtxEnd.
-    /// Used to pass accurate stack depth to the context runtime.
-    ctx_provide_depth: u64,
+    /// Stack of DENSE context slot ids for the lexically-open `provide`
+    /// scopes (CTX-AOT-INCOHERENCE-1 leg 1). `CtxProvide` pushes the slot
+    /// it installed; `CtxEnd` pops it so the bridge `env_ctx_end(slot_id)`
+    /// clears the SAME slot the matching provide set — symmetric with
+    /// `env_ctx_get`/`env_ctx_set`. VBC emits CtxProvide/CtxEnd as
+    /// lexically-nested matched pairs in the linear instruction stream
+    /// (provide-scope emits one CtxEnd at its end label; unscoped provide
+    /// defers exactly one CtxEnd to scope exit — `compile_return` does NOT
+    /// materialize defers), so a compile-time LIFO stack is sound.
+    /// `len()` doubles as the legacy provide nesting depth for the
+    /// C-runtime fallback path.
+    ctx_provide_slots: Vec<u32>,
+
+    /// Lazily-built dense per-module context slot table
+    /// (CTX-AOT-INCOHERENCE-1 leg 2): VBC `ctx_type` operands are raw
+    /// string-table ids (empirically 44934..651674 under the baked
+    /// stdlib — NEVER < 256), while the TLS bridge slot table is
+    /// `0..CONTEXT_SLOT_COUNT` (256, `core/sys/common.vr`). This map
+    /// compacts the distinct context-type string-ids of the module into
+    /// dense slots starting at CTX_DYNAMIC_SLOT_BASE, derived
+    /// deterministically from the VBC module (sorted ascending by
+    /// string-id), so every FunctionContext of the same module computes
+    /// the SAME table with no shared mutable state.
+    ctx_slot_map: Option<HashMap<u32, u32>>,
 
     /// Tracks which struct fields contain list values.
     /// Key: (obj_register, field_idx), Value: true if field holds a list.
@@ -779,7 +799,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
             element_stride_registers: HashMap::new(),
             pending_call_witness: None,
-            ctx_provide_depth: 0,
+            ctx_provide_slots: Vec::new(),
+            ctx_slot_map: None,
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
             obj_register_types: HashMap::new(),
@@ -884,7 +905,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
             element_stride_registers: HashMap::new(),
             pending_call_witness: None,
-            ctx_provide_depth: 0,
+            ctx_provide_slots: Vec::new(),
+            ctx_slot_map: None,
             struct_list_fields: HashMap::new(),
             struct_string_fields: HashMap::new(),
             obj_register_types: HashMap::new(),
@@ -1945,19 +1967,100 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.obj_register_types.get(&reg).map(|s| s.as_str())
     }
 
-    /// Get the current context provide nesting depth.
+    /// Get the current context provide nesting depth (number of
+    /// lexically-open provide scopes at this lowering point). Retained
+    /// for the C-runtime fallback path, whose `verum_ctx_provide` still
+    /// carries a stack-depth argument.
     pub fn ctx_provide_depth(&self) -> u64 {
-        self.ctx_provide_depth
+        self.ctx_provide_slots.len() as u64
     }
 
-    /// Increment the context provide nesting depth (called on CtxProvide).
-    pub fn increment_ctx_provide_depth(&mut self) {
-        self.ctx_provide_depth += 1;
+    /// Record the dense slot installed by a `CtxProvide` (called during
+    /// lower_ctx_provide, both strategies).
+    pub fn push_ctx_provide_slot(&mut self, slot: u32) {
+        self.ctx_provide_slots.push(slot);
     }
 
-    /// Decrement the context provide nesting depth (called on CtxEnd).
-    pub fn decrement_ctx_provide_depth(&mut self) {
-        self.ctx_provide_depth = self.ctx_provide_depth.saturating_sub(1);
+    /// Pop the dense slot of the innermost open provide scope (called
+    /// during lower_ctx_end). `None` means an unbalanced CtxEnd — a VBC
+    /// codegen invariant break the caller must surface loudly.
+    pub fn pop_ctx_provide_slot(&mut self) -> Option<u32> {
+        self.ctx_provide_slots.pop()
+    }
+
+    /// Map a VBC `ctx_type` (context-type string-table id) to its dense
+    /// TLS bridge slot in `CTX_DYNAMIC_SLOT_BASE..CONTEXT_SLOT_COUNT`
+    /// (CTX-AOT-INCOHERENCE-1 leg 2).
+    ///
+    /// The table is built once per FunctionContext by scanning EVERY
+    /// decoded instruction of the VBC module for CtxGet / CtxProvide /
+    /// CtxCheckNegative operands, then numbering the distinct ids in
+    /// ascending order — deterministic and identical across all
+    /// functions of the module, so provide in one function and get in
+    /// another agree on the slot. A ctx_type not covered by the scan
+    /// (e.g. a monomorphized clone lowered from instructions outside
+    /// `vbc_module.functions`, or a FunctionContext built without a VBC
+    /// module) is allocated the next free slot on demand — still
+    /// deterministic given the deterministic lowering order.
+    ///
+    /// Returns `None` only on slot-table overflow (more distinct context
+    /// types than the TLS table can hold) — the caller must turn that
+    /// into a loud compile-time error, never a silent wrap.
+    pub fn ctx_dense_slot(&mut self, ctx_type: u32) -> Option<u32> {
+        // First TLS slot available for compiler-assigned context types.
+        // Slots below this are the statically-allocated stdlib region
+        // (EXEC_ENV_SLOT=0, SUPERVISOR_SLOT=1, RECOVERY_SLOT=2,
+        // SLOT_DATABASE=10, SLOT_LOGGER=11, … — see
+        // `core/runtime/mod.vr` and `core/async/executor.vr`); keeping
+        // dynamic slots above the static region preserves the existing
+        // non-coupling between `provide` and the raw `ctx_get(SLOT_*)`
+        // surface on both tiers. Mirrors CONTEXT_DYNAMIC_SLOT_BASE in
+        // `core/sys/common.vr` — the two MUST stay equal.
+        const CTX_DYNAMIC_SLOT_BASE: u32 = 32;
+        // Mirrors CONTEXT_SLOT_COUNT in `core/sys/common.vr` and
+        // CTX_SLOT_COUNT in verum_vbc's ctx_runtime.rs.
+        const CTX_SLOT_COUNT: u32 = 256;
+
+        if self.ctx_slot_map.is_none() {
+            let mut ids: Vec<u32> = Vec::new();
+            if let Some(vbc_mod) = self.vbc_module {
+                for func in &vbc_mod.functions {
+                    if let Some(instrs) = &func.instructions {
+                        for instr in instrs {
+                            match instr {
+                                verum_vbc::Instruction::CtxGet { ctx_type, .. }
+                                | verum_vbc::Instruction::CtxProvide { ctx_type, .. }
+                                | verum_vbc::Instruction::CtxCheckNegative {
+                                    ctx_type, ..
+                                } => ids.push(*ctx_type),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            ids.sort_unstable();
+            ids.dedup();
+            let map: HashMap<u32, u32> = ids
+                .into_iter()
+                .enumerate()
+                .map(|(rank, id)| (id, CTX_DYNAMIC_SLOT_BASE + rank as u32))
+                .collect();
+            self.ctx_slot_map = Some(map);
+        }
+
+        // Just built above if it was absent.
+        let map = self.ctx_slot_map.as_mut()?;
+        if let Some(slot) = map.get(&ctx_type) {
+            return Some(*slot);
+        }
+        // On-demand allocation for ids missed by the scan.
+        let next = CTX_DYNAMIC_SLOT_BASE + map.len() as u32;
+        if next >= CTX_SLOT_COUNT {
+            return None; // overflow — caller raises a loud error
+        }
+        map.insert(ctx_type, next);
+        Some(next)
     }
 
     /// Register a reference in a register for escape tracking.

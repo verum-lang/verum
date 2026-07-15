@@ -59,22 +59,31 @@ public fn env_ctx_get(slot_id: Int) -> Int {
 }
 
 /// Set a context value in the current execution environment.
-/// Called by AOT-compiled CtxProvide instruction. Out-of-range slots
-/// are silently dropped — generated code is expected to honour the
-/// 0..CONTEXT_SLOT_COUNT contract; this guard is defence in depth.
+/// Called by AOT-compiled CtxProvide instruction.
+///
+/// CTX-AOT-INCOHERENCE-1 leg 2: the AOT lowering assigns COMPACT dense
+/// slot ids (0..CONTEXT_SLOT_COUNT, dynamic region from
+/// CONTEXT_DYNAMIC_SLOT_BASE) — a slot outside the table can only mean
+/// corrupted generated code or a caller bug, and silently dropping the
+/// provide is the one forbidden state (the context would simply "not be
+/// provided" much later, with no trace). Panic LOUDLY instead.
 public fn env_ctx_set(slot_id: Int, value: Int) {
     if slot_id < 0 || slot_id >= CONTEXT_SLOT_COUNT {
-        return;
+        panic(f"env_ctx_set: context slot {slot_id} out of range 0..{CONTEXT_SLOT_COUNT} — dropped provide would be silent-wrong (CTX-AOT-INCOHERENCE-1)");
     }
     let bytes_ptr = unsafe { value as &unsafe Byte };
     ctx_set(slot_id as UInt8, bytes_ptr);
 }
 
 /// Remove a context value from the current execution environment.
-/// Called by AOT-compiled CtxEnd instruction.
+/// Called by AOT-compiled CtxEnd instruction with the SAME slot id the
+/// matching CtxProvide installed (slot-flat TLS semantics).
+///
+/// Out-of-range slots panic for the same reason as `env_ctx_set`: a
+/// silently-skipped end leaks the provide past its scope.
 public fn env_ctx_end(slot_id: Int) {
     if slot_id < 0 || slot_id >= CONTEXT_SLOT_COUNT {
-        return;
+        panic(f"env_ctx_end: context slot {slot_id} out of range 0..{CONTEXT_SLOT_COUNT} — skipped scope end would be silent-wrong (CTX-AOT-INCOHERENCE-1)");
     }
     ctx_clear(slot_id as UInt8);
 }

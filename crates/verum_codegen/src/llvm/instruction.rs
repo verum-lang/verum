@@ -30131,6 +30131,41 @@ fn lower_get_exception<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg) -> R
 // for context stack management. Contexts are NOT algebraic effects -- they are
 // simple scoped DI with provider override via `provide` keyword.
 
+/// Resolve the dense TLS bridge slot for a VBC `ctx_type` string-id
+/// (CTX-AOT-INCOHERENCE-1 leg 2). VBC ctx_type operands are raw
+/// string-table ids (empirically ≥ 44934 under the baked stdlib), while
+/// the ctx_bridge/TLS slot table only holds 0..CONTEXT_SLOT_COUNT (256)
+/// slots — passing the raw id through the bridge guard silently dropped
+/// every provide. The dense per-module numbering restores the
+/// 0..CONTEXT_SLOT_COUNT contract; overflow is a LOUD compile-time
+/// error, never a silent wrap or drop.
+fn ctx_bridge_slot(ctx: &mut FunctionContext<'_, '_>, ctx_type: u32) -> Result<u32> {
+    ctx.ctx_dense_slot(ctx_type).ok_or_else(|| {
+        LlvmLoweringError::internal(format!(
+            "context slot table overflow lowering ctx_type {}: more distinct context \
+             types than the TLS slot table holds (CONTEXT_SLOT_COUNT=256, dynamic \
+             region starts at 32) — see CTX-AOT-INCOHERENCE-1",
+            ctx_type
+        ))
+    })
+}
+
+/// Look up the compiled ctx_bridge.vr function for `op` ("get" / "set" /
+/// "end"), trying the fully-qualified baked-stdlib symbol first
+/// (`core.runtime.ctx_bridge.env_ctx_*` — the name the bake actually
+/// produces, cf. `core.context.provider.env_ctx_set` in dumped IR),
+/// then the historical short forms.
+fn ctx_bridge_fn<'ctx>(
+    module: &verum_llvm::module::Module<'ctx>,
+    op: &str,
+) -> Option<FunctionValue<'ctx>> {
+    module
+        .get_function(&format!("core.runtime.ctx_bridge.env_ctx_{op}"))
+        .or_else(|| module.get_function(&format!("runtime.ctx_bridge.env_ctx_{op}")))
+        .or_else(|| module.get_function(&format!("env_ctx_{op}")))
+        .or_else(|| module.get_function(&format!("ctx_bridge.env_ctx_{op}")))
+}
+
 /// Lower CtxGet instruction.
 ///
 
@@ -30139,14 +30174,11 @@ fn lower_get_exception<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg) -> R
 fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: u32) -> Result<()> {
     let module = ctx.get_module();
     let i64_type = ctx.types().i64_type();
+    let slot = ctx_bridge_slot(ctx, ctx_type)?;
 
     // Strategy 1: Try compiled ctx_bridge.vr first
-    if let Some(bridge_fn) = module
-        .get_function("runtime.ctx_bridge.env_ctx_get")
-        .or_else(|| module.get_function("env_ctx_get"))
-        .or_else(|| module.get_function("ctx_bridge.env_ctx_get"))
-    {
-        let slot_val = i64_type.const_int(ctx_type as u64, false);
+    if let Some(bridge_fn) = ctx_bridge_fn(&module, "get") {
+        let slot_val = i64_type.const_int(slot as u64, false);
         let result = ctx
             .builder()
             .build_call(bridge_fn, &[slot_val.into()], "ctx_value")
@@ -30156,9 +30188,11 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
         return Ok(());
     }
 
-    // Fallback: emit LLVM IR directly via RuntimeLowering
+    // Fallback: emit LLVM IR directly via RuntimeLowering. Uses the SAME
+    // dense slot so every ctx op in the module shares one id namespace
+    // regardless of which strategy each call site resolved to.
     let runtime = RuntimeLowering::new(ctx.llvm_context());
-    let value = runtime.lower_ctx_get(ctx.builder(), &module, ctx_type)?;
+    let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
     ctx.set_register(dst.0, value.into());
 
     Ok(())
@@ -30169,8 +30203,8 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
 
 /// Pushes a context value onto the thread-local context stack.
 /// The value remains active until CtxEnd is called.
-/// The stack depth reflects the nesting depth of provide blocks,
-/// tracked via FunctionContext::ctx_provide_depth.
+/// The dense slot installed here is pushed on the FunctionContext
+/// provide-slot stack so the matching CtxEnd clears the SAME slot.
 fn lower_ctx_provide<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     ctx_type: u32,
@@ -30178,34 +30212,34 @@ fn lower_ctx_provide<'ctx>(
 ) -> Result<()> {
     let module = ctx.get_module();
     let i64_type = ctx.types().i64_type();
+    let slot = ctx_bridge_slot(ctx, ctx_type)?;
 
     // Get the value to provide
     let value_val = as_i64(ctx, ctx.get_register(value.0)?, "value_val")?;
 
+    // Track the provide for the matching CtxEnd (both strategies): CtxEnd
+    // carries no ctx_type operand, so the slot travels via this
+    // compile-time LIFO stack (VBC emits provide/end as lexically-nested
+    // matched pairs in the linear instruction stream).
+    ctx.push_ctx_provide_slot(slot);
+
     // Strategy 1: Try compiled ctx_bridge.vr first
-    if let Some(bridge_fn) = module
-        .get_function("runtime.ctx_bridge.env_ctx_set")
-        .or_else(|| module.get_function("env_ctx_set"))
-        .or_else(|| module.get_function("ctx_bridge.env_ctx_set"))
-    {
-        let slot_val = i64_type.const_int(ctx_type as u64, false);
+    if let Some(bridge_fn) = ctx_bridge_fn(&module, "set") {
+        let slot_val = i64_type.const_int(slot as u64, false);
         ctx.builder()
             .build_call(bridge_fn, &[slot_val.into(), value_val.into()], "")
             .or_llvm_err()?;
-        // Still track provide depth for fallback CtxEnd compatibility
-        ctx.increment_ctx_provide_depth();
         return Ok(());
     }
 
-    // Fallback: emit LLVM IR directly via RuntimeLowering
-    let runtime = RuntimeLowering::new(ctx.llvm_context());
-
-    // Use the current provide nesting depth, then increment for nested provides
-    let depth = ctx.ctx_provide_depth();
+    // Fallback: emit LLVM IR directly via RuntimeLowering.
+    // Depth AFTER push is len; the depth associated with THIS provide is
+    // len-1 (the pre-push depth), matching the previous increment-after
+    // ordering.
+    let depth = ctx.ctx_provide_depth().saturating_sub(1);
     let stack_depth = i64_type.const_int(depth, false);
-    ctx.increment_ctx_provide_depth();
-
-    runtime.lower_ctx_provide(ctx.builder(), &module, ctx_type, value_val, stack_depth)?;
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    runtime.lower_ctx_provide(ctx.builder(), &module, slot, value_val, stack_depth)?;
 
     Ok(())
 }
@@ -30213,32 +30247,42 @@ fn lower_ctx_provide<'ctx>(
 /// Lower CtxEnd instruction.
 ///
 
-/// Ends a context scope, removing all context entries at or above
-/// the current stack depth. Decrements the provide depth counter
-/// so that the depth passed to the runtime matches the depth used
-/// in the corresponding CtxProvide.
+/// Ends the innermost open provide scope. The bridge `env_ctx_end`
+/// takes the SLOT id to clear (slot-flat TLS semantics) — NOT a provide
+/// nesting depth. Before CTX-AOT-INCOHERENCE-1 leg 1 this passed the
+/// provide DEPTH (0, 1, …) as the slot argument, clearing the wrong
+/// slot — depth 0 aliased EXEC_ENV_SLOT=0. The slot now comes from the
+/// provide-slot stack pushed by the matching lower_ctx_provide.
 fn lower_ctx_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
     let module = ctx.get_module();
     let i64_type = ctx.types().i64_type();
 
-    // Decrement first so end_scope receives the same depth as the matching provide
-    ctx.decrement_ctx_provide_depth();
-    let depth = ctx.ctx_provide_depth();
-    let stack_depth = i64_type.const_int(depth, false);
+    // Pop the innermost provide's slot — the one this CtxEnd closes.
+    let slot = ctx.pop_ctx_provide_slot().ok_or_else(|| {
+        LlvmLoweringError::internal(
+            "CtxEnd without matching CtxProvide in the linear instruction stream \
+             (unbalanced provide/end pairing) — VBC codegen invariant break, \
+             see CTX-AOT-INCOHERENCE-1 leg 1"
+                .to_string(),
+        )
+    })?;
 
-    // Strategy 1: Try compiled ctx_bridge.vr first
-    if let Some(bridge_fn) = module
-        .get_function("runtime.ctx_bridge.env_ctx_end")
-        .or_else(|| module.get_function("env_ctx_end"))
-        .or_else(|| module.get_function("ctx_bridge.env_ctx_end"))
-    {
+    // Strategy 1: Try compiled ctx_bridge.vr first — pass the SLOT,
+    // symmetric with lower_ctx_get / lower_ctx_provide.
+    if let Some(bridge_fn) = ctx_bridge_fn(&module, "end") {
+        let slot_val = i64_type.const_int(slot as u64, false);
         ctx.builder()
-            .build_call(bridge_fn, &[stack_depth.into()], "")
+            .build_call(bridge_fn, &[slot_val.into()], "")
             .or_llvm_err()?;
         return Ok(());
     }
 
-    // Fallback: emit LLVM IR directly via RuntimeLowering
+    // Fallback: emit LLVM IR directly via RuntimeLowering. The C-runtime
+    // verum_ctx_end pops the topmost context entry (LIFO, matching the
+    // interpreter's pop_one); its argument is carried for ABI
+    // compatibility and ignored by the emitted body.
+    let depth = ctx.ctx_provide_depth();
+    let stack_depth = i64_type.const_int(depth, false);
     let runtime = RuntimeLowering::new(ctx.llvm_context());
     runtime.lower_ctx_end(ctx.builder(), &module, stack_depth)?;
 
@@ -30259,17 +30303,15 @@ fn lower_ctx_check_negative<'ctx>(
     let llvm_ctx = ctx.llvm_context();
     let i64_type = ctx.types().i64_type();
     let module = ctx.get_module();
+    // Same dense slot mapping as lower_ctx_get / lower_ctx_provide —
+    // negative checks must query the SAME key the provide installed.
+    let slot = ctx_bridge_slot(ctx, ctx_type)?;
 
     // Step 1: Try to get the context value (reuse CtxGet logic).
     // If the context is NOT provided, the result will be 0 (null/nil).
     let ctx_value = {
-        let bridge_fn = module
-            .get_function("runtime.ctx_bridge.env_ctx_get")
-            .or_else(|| module.get_function("env_ctx_get"))
-            .or_else(|| module.get_function("ctx_bridge.env_ctx_get"));
-
-        if let Some(bridge_fn) = bridge_fn {
-            let slot_val = i64_type.const_int(ctx_type as u64, false);
+        if let Some(bridge_fn) = ctx_bridge_fn(&module, "get") {
+            let slot_val = i64_type.const_int(slot as u64, false);
             ctx.builder()
                 .build_call(bridge_fn, &[slot_val.into()], "neg_ctx_check")
                 .or_llvm_err()?
@@ -30278,7 +30320,7 @@ fn lower_ctx_check_negative<'ctx>(
                 .unwrap_or_else(|| i64_type.const_zero().into())
         } else {
             let runtime = RuntimeLowering::new(llvm_ctx);
-            let value = runtime.lower_ctx_get(ctx.builder(), &module, ctx_type)?;
+            let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
             value.into()
         }
     };

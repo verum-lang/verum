@@ -1285,6 +1285,19 @@ public const MAX_CONTEXT_SLOTS: Int = 256;
 /// Alias for MAX_CONTEXT_SLOTS for capability context usage.
 public const CONTEXT_SLOT_COUNT: Int = 256;
 
+/// First slot of the DYNAMIC region: slots below this are statically
+/// allocated by hand in the stdlib (EXEC_ENV_SLOT=0, SUPERVISOR_SLOT=1,
+/// RECOVERY_SLOT=2 in core/runtime/mod.vr; SLOT_RUNTIME=0,
+/// SLOT_CURRENT_TASK=1, SLOT_IO_ENGINE=2, SLOT_DATABASE=10,
+/// SLOT_LOGGER=11 in core/async/executor.vr). The AOT context lowering
+/// (CTX-AOT-INCOHERENCE-1 leg 2) assigns each distinct context TYPE a
+/// dense slot starting HERE, so compiler-assigned `provide` slots can
+/// never collide with the static region. Mirrored by
+/// CTX_DYNAMIC_SLOT_BASE in
+/// crates/verum_codegen/src/llvm/context.rs::ctx_dense_slot — the two
+/// MUST stay equal.
+public const CONTEXT_DYNAMIC_SLOT_BASE: Int = 32;
+
 /// Context stack depth for nested provide blocks.
 public const CONTEXT_STACK_DEPTH: Int = 8;
 

@@ -140,30 +140,43 @@ fn test_env_ctx_set_isolation_two_slots() {
 }
 
 // =============================================================================
-// Section 3: env_ctx_set out-of-range no-op
+// Section 3: env_ctx_set / env_ctx_end out-of-range → PANIC
 // =============================================================================
+//
+// CONTRACT FLIP (CTX-AOT-INCOHERENCE-1 leg 2, 2026-07-15): out-of-range
+// set/end used to be a SILENT no-op — the exact silent-wrong state that
+// let the AOT lowering drop every `provide` whose raw string-table
+// ctx_type id (empirically ≥ 44934) exceeded CONTEXT_SLOT_COUNT.  Now
+// that codegen assigns dense slots (CONTEXT_DYNAMIC_SLOT_BASE..256), an
+// out-of-range slot at the bridge can only be corrupted generated code
+// or a caller bug, and `env_ctx_set` / `env_ctx_end` PANIC loudly
+// ("env_ctx_set: context slot N out of range …").  `env_ctx_get` keeps
+// the total read contract (out of range → 0 / absent) — Section 1 pins
+// stay.
+//
+// The three former silent-no-op pins are @ignore'd until the test
+// runner grows an @expected-runtime-panic fixture (deferred in
+// core-tests/README.md) — a panicking body cannot be asserted today.
 
+@ignore  // needs @expected-runtime-panic fixture — set now PANICS on out-of-range slot
 @test
-fn test_env_ctx_set_negative_slot_is_no_op() {
-    // Negative slot_id is silently dropped (no panic, no state change).
-    env_ctx_set(-5, 0xDEAD);
-    let v = env_ctx_get(-5);
-    assert(v == 0, "negative-slot set should be silently dropped");
+fn test_env_ctx_set_negative_slot_panics() {
+    env_ctx_set(-5, 0xDEAD);  // expected panic: "env_ctx_set: context slot -5 out of range"
+    assert(false, "env_ctx_set(-5, _) must panic, not silently drop");
 }
 
+@ignore  // needs @expected-runtime-panic fixture — set now PANICS on out-of-range slot
 @test
-fn test_env_ctx_set_huge_positive_slot_is_no_op() {
-    env_ctx_set(100_000, 0xBEEF);
-    let v = env_ctx_get(100_000);
-    assert(v == 0, "huge-slot set should be silently dropped");
+fn test_env_ctx_set_huge_positive_slot_panics() {
+    env_ctx_set(100_000, 0xBEEF);  // expected panic
+    assert(false, "env_ctx_set(100_000, _) must panic, not silently drop");
 }
 
+@ignore  // needs @expected-runtime-panic fixture — end now PANICS on out-of-range slot
 @test
-fn test_env_ctx_end_out_of_range_is_no_op() {
-    // Defence in depth — ctx_end on garbage doesn't crash.
-    env_ctx_end(-1);
-    env_ctx_end(1_000_000);
-    assert(true);
+fn test_env_ctx_end_out_of_range_panics() {
+    env_ctx_end(-1);  // expected panic
+    assert(false, "env_ctx_end(-1) must panic, not silently skip");
 }
 
 // =============================================================================

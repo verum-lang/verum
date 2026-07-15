@@ -20,10 +20,14 @@
 //!
 //! Key namespace: the slot id shares the u32 ctx_type namespace the
 //! opcodes use — intentionally.  At Tier-1 the AOT `CtxGet` lowering
-//! passes its ctx_type as the `env_ctx_get(slot_id)` argument (see
-//! `verum_codegen/src/llvm/instruction.rs::lower_ctx_get`), so "slot
-//! ids and ctx types are the same namespace" is the cross-tier
-//! contract.
+//! maps its ctx_type through the dense per-module slot table
+//! (CTX-AOT-INCOHERENCE-1 leg 2, `FunctionContext::ctx_dense_slot` in
+//! `verum_codegen/src/llvm/context.rs`: raw string-table ids are ≥ 256
+//! under the baked stdlib and can never fit the TLS slot table) and
+//! passes the DENSE slot as the `env_ctx_get(slot_id)` argument.  On
+//! Tier-0 the opcode store still keys raw ctx_type string-ids; keying
+//! the interpreter store by the same dense table is the remaining
+//! CTX-STORE-AUTHORITY-1 unification step.
 //!
 //! History: this module previously held `try_intercept_ctx_runtime`, a
 //! pre-gate intercept for the V-LLSI `__ctx_*_raw` / `__defer_*_raw`
