@@ -1414,15 +1414,36 @@ impl<'s> CompilationPipeline<'s> {
                     .into_owned()
             }
         };
+        use verum_codegen::link::NoLibcConfig;
         use verum_codegen::llvm::target_triple::{triple_str_is_darwin, triple_str_is_linux};
         let target_is_darwin = triple_str_is_darwin(&target_triple_string);
         let target_is_linux = triple_str_is_linux(&target_triple_string);
+
+        // #28 NOSTDLIB-CC-DRIVER-1: opt-in full `-nostdlib` on the
+        // cc-driver.  Default OFF preserves today's behaviour (driver
+        // adds its default crt/libc); the darwin acceptance check
+        // (otool -L → libSystem only) is unaffected.  Audited-clear on
+        // darwin (see NoLibcConfig::nostdlib_cc_driver_enabled): codegen
+        // emits zero compiler-rt builtins, so `-nostdlib -lSystem`
+        // links a correct, libSystem-only binary today.
+        let nostdlib_gate = NoLibcConfig::nostdlib_cc_driver_enabled();
 
         if target_is_darwin {
             cmd.arg("-Wl,-dead_strip");
             cmd.arg("-Wl,-undefined,dynamic_lookup");
             // 16MB stack for recursive algorithms (default 8MB causes SIGSEGV in deep recursion)
             cmd.arg("-Wl,-stack_size,0x1000000");
+            if nostdlib_gate {
+                // Drop the driver's default crt + default libs, then
+                // re-add libSystem (Apple's required boundary — NOT
+                // libc in the glibc/musl sense).  libSystem re-provides
+                // every non-syscall symbol the IR references (memcpy,
+                // sin/cos/pow, pthread_*), so no other library is
+                // needed.  Compiler-rt builtins, if ever emitted, come
+                // from the archive appended below.
+                cmd.arg("-nostdlib");
+                cmd.arg("-lSystem");
+            }
             // Link Metal + Foundation frameworks ONLY when the program
             // actually uses GPU (post-globaldce probe — see #100).
             // Pre-fix every macOS Verum binary unconditionally pulled
@@ -1446,8 +1467,33 @@ impl<'s> CompilationPipeline<'s> {
             // (verum_codegen::link), consumed by the FinalLinker/lld
             // path.  This cc-driver fallback still relies on the
             // driver's default crt/libc until the no-libc punch list
-            // closes (compiler-rt builtins strategy, strtod, Linux
-            // setjmp body — see docs/architecture/no-libc-architecture.md).
+            // closes (Linux strtod / setjmp bodies — see
+            // docs/architecture/no-libc-architecture.md).
+            if nostdlib_gate {
+                // NOTE(needs native Linux verify): grep/logically
+                // derived — no Linux host in this environment.  Linux
+                // has no libSystem: `-nostdlib -nostartfiles` drops crt
+                // AND libc; the runtime must supply its own `_start`
+                // and every libc symbol via direct syscalls.  Blocked
+                // until the Linux strtod / setjmp bodies land; kept
+                // behind the gate so it can be exercised on a native
+                // Linux box without affecting the default path.
+                cmd.arg("-nostdlib");
+                cmd.arg("-nostartfiles");
+            }
+        }
+
+        // Compiler-rt builtins archive (compiler support, NOT libc) —
+        // appended after the objects so its members resolve on demand.
+        // Only relevant under the `-nostdlib` gate (the default link
+        // keeps the driver's own builtins); target-aware locate, and
+        // inert when no builtin is referenced (the norm today — #28).
+        if nostdlib_gate {
+            if let Some(archive) =
+                NoLibcConfig::compiler_rt_builtins_archive(&target_triple_string)
+            {
+                cmd.arg(archive);
+            }
         }
 
         // Execute linker

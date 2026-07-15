@@ -147,7 +147,57 @@ shipping):
 | ✅ `FinalLinker` system-mode host-`#[cfg]` defaults | `-lrt` (Linux), `-framework CoreFoundation` (macOS) | Removed — unjustified (no CF symbol is ever emitted) and host-gated (cross-link miscompile).  User-specified `[link] libraries` remain the explicit FFI escape hatch. **Closed.** |
 | ✅ `linker_config.rs::default_libraries`      | `pthread`/`m`/`dl` (Linux), **`msvcrt`** (Windows) | Linux default now EMPTY; Windows default now `kernel32` + `ntdll` (msvcrt violated the no-CRT rule outright). **Closed.** |
 | ✅ `NoLibcConfig::macos()` unconditional GPU frameworks | Metal/Foundation/objc | Removed from the preset — framework links are gated by the post-globaldce `needs_metal` probe (#100) via `extra_flags`. **Closed.** |
-| `link_executable` (cc-driver path) full `-nostdlib` | host crt/libc via driver defaults | The canonical no-libc flags live in `NoLibcConfig` (consumed by the FinalLinker/lld path — Linux default).  The cc-driver fallback (and the primary macOS path) still lets the driver add crt/libc.  Blockers before flipping: (a) compiler-rt builtins strategy — LLVM lowers i128 div / float↔int128 to `__divti3`-family symbols that `-nostdlib` drops (link `libclang_rt` explicitly — it is compiler support, not libc — or emit IR soft-int helpers); (b) `strtod` Linux body; (c) `setjmp`/`longjmp` Linux body; (d) `getaddrinfo` native resolver.  **Open — closing item for this table.** |
+| `link_executable` (cc-driver path) full `-nostdlib` | host crt/libc via driver defaults | The canonical no-libc flags live in `NoLibcConfig` (consumed by the FinalLinker/lld path — Linux default).  The cc-driver fallback (and the primary macOS path) still let the driver add crt/libc.  **Groundwork landed (#28 NOSTDLIB-CC-DRIVER-1, 2026-07-15):** opt-in gate `VERUM_NOSTDLIB_CC_DRIVER` in `link_executable` adds `-nostdlib -lSystem` (darwin) / `-nostdlib -nostartfiles` (Linux) + a target-aware compiler-rt **builtins** archive (`NoLibcConfig::compiler_rt_builtins_archive`).  Default OFF ⇒ darwin acceptance (otool -L → libSystem only) unchanged.  Blocker status after audit: **(a) compiler-rt builtins — CLOSED on darwin** (see §Compiler-rt audit below: 0 builtin symbols emitted; `-nostdlib -lSystem` links a correct libSystem-only binary today); (b) `strtod` Linux body — open; (c) `setjmp`/`longjmp` Linux body — open; (d) `getaddrinfo` native resolver — open.  **Open — Linux bodies + native Linux link verify remain.** |
+
+## Compiler-rt audit (#28, 2026-07-15, darwin arm64)
+
+Method: built representative AOT binaries with `verum build --keep-temps`
+(a basic-arithmetic probe, an `Int128` div/rem + `Float`↔`Int128`
+probe, and a `Float` div/convert probe) and ran `nm` on the emitted
+`.o` objects and linked binaries.  The bigint conformance suite is
+*not* a compiler-rt exercise: Verum's `BigInt` is
+`{ sign: Bool, digits: List<Int> }` (base-10⁹ chunks over `Int` =
+i64) — it never touches a native 128-bit integer.
+
+Findings (facts):
+
+* **Zero compiler-rt builtin symbols** (`__divti3`, `__udivti3`,
+  `__modti3`, `__multi3`, `__floattidf`, `__fixdfti`, `__ashlti3`,
+  …) appear in *any* object or binary — including the `Int128`
+  probe.  Confirmed by `nm` over defined **and** undefined symbols.
+* `Int128` arithmetic collapses to **i64** under the uniform-i64
+  register model: the probe's division lowers to native
+  `sdiv x8, x8, x9` (64-bit registers), never a `bl ___divti3`.
+  Float↔int conversions are all f64↔i64 (`fcvtzs`/`scvtf`, inline).
+  (The `Int128` probe therefore also mis-computes / crashes on
+  large values — a *separate* correctness gap, not a link concern.)
+* Every remaining undefined symbol in the objects
+  (`memcpy`/`memmove`/`memset`/`bzero`/`strlen`,
+  `sin`/`cos`/`exp`/`log`/`pow`, `pthread_*`, `clock_gettime`,
+  `nanosleep`, `mmap`, `write`, `kqueue`, `__error`, …) is provided
+  by **libSystem** on macOS (acceptable per the architecture rule).
+* Empirical link test: `cc probe.o <darwin-flags> -nostdlib -lSystem`
+  produces a working binary that `otool -L` shows depends on
+  **libSystem.B.dylib only** — identical to the default link.  Adding
+  the compiler-rt builtins archive (`libclang_rt.osx.a`) on top is
+  **inert**: no new dylib dependency, no pulled members.
+
+Conclusion: blocker (a) is **empirically closed on darwin**.  A
+`-nostdlib -lSystem` cc-driver link is correct today; the compiler-rt
+builtins archive is wired as an opt-in, target-aware fallback
+(`NoLibcConfig::compiler_rt_builtins_archive`) so the link stays
+correct the day codegen *does* emit an i128 libcall — without
+hand-authoring soft-int IR that nothing currently calls.  The
+in-tree `llvm/install` ships no compiler-rt; the locator falls back
+to the host `clang` resource dir and the Apple CommandLineTools /
+Xcode toolchains (`libclang_rt.osx.a`).
+
+Strategy rejected: **IR soft-int helpers** (`platform_ir.rs`).  With
+zero builtin symbols referenced today, emitting `__divti3` &c. in IR
+would be speculative dead code, contradicting the "only really-used
+symbols" rule.  Revisit only if/when the register model gains a real
+native i128 and a survey shows which specific builtins the backend
+then lowers to a libcall on each target.
 
 ## Why this matters
 

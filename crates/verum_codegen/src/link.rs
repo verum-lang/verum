@@ -336,9 +336,28 @@ pub struct NoLibcConfig {
     pub libraries: Vec<String>,
     /// Linker flags
     pub flags: Vec<String>,
+    /// Optional compiler-rt **builtins** archive to link as a
+    /// compiler-support fallback (NOT libc).
+    ///
+    /// The builtins archive (`libclang_rt.osx.a` on Darwin,
+    /// `libclang_rt.builtins-<arch>.a` on Linux) implements the
+    /// soft-int / soft-float helpers LLVM lowers certain operations to
+    /// (`__divti3`, `__floattidf`, `__fixdfti`, …).  It is *compiler
+    /// support*, not the C library: it declares no libc symbols and
+    /// pulls no libc dependency.  As a static archive its members are
+    /// resolved on demand, so linking it is inert unless codegen
+    /// actually emits a builtin call — which, per the #28 audit, no
+    /// Verum program does on Darwin today (the register model is
+    /// uniform-i64, so `Int128` division never reaches native
+    /// `__divti3`).  Kept as an opt-in fallback so the moment codegen
+    /// *does* emit an i128 libcall (or a backend lowers one at some
+    /// optimisation level) the symbol resolves structurally rather
+    /// than failing the `-nostdlib` link.  `None` = don't link it.
+    pub builtins_archive: Option<PathBuf>,
 }
 
 impl NoLibcConfig {
+
     /// Create Linux no-libc linking configuration.
     ///
 
@@ -348,6 +367,7 @@ impl NoLibcConfig {
     pub fn linux() -> Self {
         Self {
             platform: Platform::Linux,
+            builtins_archive: None,
             entry_point: "_start".to_string(),
             libraries: vec![
                 // NO libc, NO libm, NO pthread
@@ -370,6 +390,7 @@ impl NoLibcConfig {
     pub fn macos() -> Self {
         Self {
             platform: Platform::MacOS,
+            builtins_archive: None,
             entry_point: "main".to_string(),
             libraries: vec![
                 // Only libSystem - minimal system library
@@ -397,6 +418,7 @@ impl NoLibcConfig {
     pub fn windows() -> Self {
         Self {
             platform: Platform::Windows,
+            builtins_archive: None,
             entry_point: "mainCRTStartup".to_string(),
             libraries: vec![
                 // NT Native API and basic kernel functions
@@ -460,6 +482,7 @@ impl NoLibcConfig {
     pub fn freebsd() -> Self {
         Self {
             platform: Platform::FreeBSD,
+            builtins_archive: None,
             entry_point: "_start".to_string(),
             libraries: vec![],
             flags: vec![
@@ -478,6 +501,7 @@ impl NoLibcConfig {
     pub fn embedded() -> Self {
         Self {
             platform: Platform::Embedded,
+            builtins_archive: None,
             entry_point: "Reset_Handler".to_string(),
             libraries: vec![],
             flags: vec![
@@ -498,6 +522,7 @@ impl NoLibcConfig {
     pub fn wasm_wasi() -> Self {
         Self {
             platform: Platform::WasmWasi,
+            builtins_archive: None,
             entry_point: "_start".to_string(),
             libraries: vec![
                 // No libraries — WASI imports are resolved by the runtime
@@ -519,6 +544,7 @@ impl NoLibcConfig {
     pub fn wasm_embedded() -> Self {
         Self {
             platform: Platform::WasmEmbedded,
+            builtins_archive: None,
             entry_point: "main".to_string(),
             libraries: vec![],
             flags: vec![
@@ -546,6 +572,162 @@ impl NoLibcConfig {
     /// Get no-libc configuration for the host platform.
     pub fn for_host() -> Self {
         Self::for_platform(Platform::host())
+    }
+
+    /// Attach a compiler-rt builtins archive to this config (builder
+    /// form).  See [`NoLibcConfig::builtins_archive`].
+    pub fn with_builtins_archive(mut self, archive: Option<PathBuf>) -> Self {
+        self.builtins_archive = archive;
+        self
+    }
+
+    /// Gate for the full `-nostdlib` cc-driver path (#28
+    /// NOSTDLIB-CC-DRIVER-1).
+    ///
+    /// The canonical no-libc flag authority is `NoLibcConfig`, but the
+    /// cc-driver fallback (and the primary macOS link path) still lets
+    /// the driver add its default crt/libc.  Flipping that on by
+    /// default is the *closing* item of the no-libc punch list; until
+    /// the remaining blockers land (Linux `strtod` / `setjmp` bodies,
+    /// native DNS resolver) it is opt-in via `VERUM_NOSTDLIB_CC_DRIVER`.
+    ///
+    /// Audited-clear as of #28 on Darwin: `-nostdlib -lSystem` links a
+    /// correct, libSystem-only binary today because codegen emits zero
+    /// compiler-rt builtins (uniform-i64 register model — `Int128`
+    /// division never reaches native `__divti3`) and every other
+    /// undefined symbol (`memcpy`, `sin`, `pthread_*`, the syscall
+    /// wrappers) lives in libSystem, which `-lSystem` re-provides.
+    pub fn nostdlib_cc_driver_enabled() -> bool {
+        std::env::var("VERUM_NOSTDLIB_CC_DRIVER")
+            .map(|v| v != "0" && !v.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Locate the compiler-rt **builtins** archive for `triple`.
+    ///
+    /// Target-aware (reads the target triple, never host `#[cfg]`):
+    /// the archive name and toolchain sub-path differ per platform —
+    /// `lib/darwin/libclang_rt.osx.a` on Darwin,
+    /// `lib/<os>/libclang_rt.builtins-<arch>.a` on Linux/FreeBSD.
+    ///
+    /// This is *compiler support*, not libc: the archive provides only
+    /// the soft-int / soft-float helpers (`__divti3`, `__floattidf`,
+    /// …) that some LLVM lowerings call.  As a static archive its
+    /// members are pulled on demand, so attaching it is inert unless a
+    /// builtin call is actually emitted.
+    ///
+    /// Fail-soft: returns `None` when no archive is found (the link
+    /// proceeds without it — correct today, since no Verum program
+    /// references a builtin on Darwin).  Search order: an explicit
+    /// `VERUM_LLVM_DIR`, then the host `clang`'s resource dir, then the
+    /// platform's well-known system-toolchain locations.
+    ///
+    /// NOTE(needs native Linux verify): the Linux/FreeBSD arm below is
+    /// grep/logically derived only — there is no Linux host in this
+    /// environment.  Verify the resolved path on a native Linux box.
+    pub fn compiler_rt_builtins_archive(triple: &str) -> Option<PathBuf> {
+        let platform = Platform::from_triple(triple)?;
+        let arch = triple.split('-').next().unwrap_or("");
+
+        // Candidate toolchain resource roots (each expected to contain
+        // a `lib/<os>/…` subtree), highest priority first.
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if let Ok(dir) = std::env::var("VERUM_LLVM_DIR") {
+            // The in-tree LLVM keeps clang builtins under
+            // `lib/clang/<ver>/`; probe every version dir present.
+            let clang_root = PathBuf::from(&dir).join("lib/clang");
+            if let Ok(entries) = std::fs::read_dir(&clang_root) {
+                for e in entries.flatten() {
+                    roots.push(e.path());
+                }
+            }
+        }
+        if let Some(res) = Self::host_clang_resource_dir() {
+            roots.push(res);
+        }
+
+        match platform {
+            Platform::MacOS => {
+                for r in &roots {
+                    let p = r.join("lib/darwin/libclang_rt.osx.a");
+                    if p.exists() {
+                        return Some(p);
+                    }
+                }
+                // Well-known Apple system-toolchain locations.
+                for base in [
+                    "/Library/Developer/CommandLineTools/usr/lib/clang",
+                    "/Applications/Xcode.app/Contents/Developer/Toolchains/\
+                     XcodeDefault.xctoolchain/usr/lib/clang",
+                ] {
+                    if let Some(p) = Self::first_glob_builtins(base, "darwin", "libclang_rt.osx.a") {
+                        return Some(p);
+                    }
+                }
+                None
+            }
+            Platform::Linux | Platform::FreeBSD => {
+                let os = if platform == Platform::FreeBSD {
+                    "freebsd"
+                } else {
+                    "linux"
+                };
+                let fname = format!("libclang_rt.builtins-{}.a", arch);
+                for r in &roots {
+                    for os_dir in [os, "linux"] {
+                        let p = r.join(format!("lib/{}/{}", os_dir, fname));
+                        if p.exists() {
+                            return Some(p);
+                        }
+                    }
+                }
+                None
+            }
+            // Windows uses its own compiler-rt import; WASM / embedded
+            // resolve builtins in-target (no host archive to attach).
+            _ => None,
+        }
+    }
+
+    /// `<toolchain>/lib/clang/<ver>` for the host `clang`, via
+    /// `clang -print-resource-dir`.  Used only as a builtins-archive
+    /// search root; `None` if `clang` is absent or errors.
+    fn host_clang_resource_dir() -> Option<PathBuf> {
+        let out = std::process::Command::new("clang")
+            .arg("-print-resource-dir")
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let path = String::from_utf8(out.stdout).ok()?;
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(trimmed))
+        }
+    }
+
+    /// Find `<base>/<ver>/lib/<os>/<fname>` for the first version dir
+    /// under `base` that has it.  `base` typically has per-version
+    /// subdirs (`21`, `15.0.0`, …); higher lexicographic name wins so
+    /// the newest toolchain is preferred.
+    fn first_glob_builtins(base: &str, os: &str, fname: &str) -> Option<PathBuf> {
+        let mut versions: Vec<PathBuf> = std::fs::read_dir(base)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        versions.sort();
+        versions.reverse();
+        for v in versions {
+            let p = v.join("lib").join(os).join(fname);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        None
     }
 }
 

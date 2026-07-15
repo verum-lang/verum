@@ -1506,6 +1506,17 @@ impl FinalLinker {
             }
         }
 
+        // Compiler-rt builtins archive (compiler support, NOT libc):
+        // resolves the soft-int / soft-float helpers a `-nostdlib`
+        // link would otherwise drop.  A static archive placed *after*
+        // the objects so its members are pulled on demand; inert when
+        // codegen emits no builtin call (the norm today — see #28).
+        if let Some(ref no_libc) = self.config.no_libc_config {
+            if let Some(ref archive) = no_libc.builtins_archive {
+                cmd.arg(archive);
+            }
+        }
+
         if self.config.pic {
             cmd.arg("-fPIC");
         }
