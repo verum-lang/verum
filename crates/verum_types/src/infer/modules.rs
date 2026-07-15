@@ -8779,7 +8779,14 @@ impl TypeChecker {
         const_name: &str,
         registry: &ModuleRegistry,
     ) -> Option<Type> {
-        // Iterate over all modules to find ones that are children of the parent
+        // UMBRELLA-REEXPORT-RESOLVE-1: `all_modules()` iterates a
+        // HashMap — per-process random order.  A first-match walk here
+        // rolled dice whenever two children export a same-named const;
+        // collect the candidate children and visit them in canonical
+        // path order (the METADATA-DETERMINISM-1 sorted-walk policy),
+        // so resolution is stable run-to-run.
+        let name_text: Text = const_name.to_string().into();
+        let mut candidates: Vec<Text> = Vec::new();
         for (_id, module_info_shared) in registry.all_modules() {
             let module_info: &verum_modules::ModuleInfo = module_info_shared;
             let module_path_str = module_info.path.to_string();
@@ -8788,15 +8795,18 @@ impl TypeChecker {
             if module_path_str.starts_with(parent_module_path)
                 && module_path_str.len() > parent_module_path.len()
                 && module_path_str.as_bytes().get(parent_module_path.len()) == Some(&b'.')
+                && module_info.exports.get(&name_text).is_some()
             {
-                // Check if the const/static is exported from this submodule
-                let name_text: Text = const_name.to_string().into();
-                if module_info.exports.get(&name_text).is_some() {
-                    if let Some(const_type) =
-                        self.extract_const_type_from_module(&module_info.ast, const_name)
-                    {
-                        return Some(const_type);
-                    }
+                candidates.push(Text::from(module_path_str.as_str()));
+            }
+        }
+        candidates.sort();
+        for path in candidates {
+            if let Some(info) = registry.get_by_path(path.as_str()) {
+                if let Some(const_type) =
+                    self.extract_const_type_from_module(&info.ast, const_name)
+                {
+                    return Some(const_type);
                 }
             }
         }
@@ -11402,16 +11412,24 @@ impl TypeChecker {
         let prefix = format!("{}.", owning_canonical);
         let suffix = format!(".{}{}", key_prefix, name);
         let registry = self.module_registry.read();
-        for (_, info_shared) in registry.all_modules() {
-            let path = info_shared.path.to_string();
-            let canonical_path = path
-                .strip_prefix("cog.")
-                .unwrap_or(&path);
-            if canonical_path.starts_with(&prefix) {
-                let candidate = format!("{}{}", canonical_path, suffix);
-                if let Some(ty) = self.ctx.lookup_type(&candidate) {
-                    return Some(ty.clone());
-                }
+        // UMBRELLA-REEXPORT-RESOLVE-1: `all_modules()` iterates a
+        // HashMap — sort the child-module candidates so the extra-hop
+        // probe resolves the SAME definer every run (first-match over
+        // random order rolled per-process dice when several submodules
+        // publish a same-named qualified key).
+        let mut child_paths: Vec<String> = registry
+            .all_modules()
+            .map(|(_, info_shared)| {
+                let path = info_shared.path.to_string();
+                path.strip_prefix("cog.").unwrap_or(&path).to_string()
+            })
+            .filter(|canonical_path| canonical_path.starts_with(&prefix))
+            .collect();
+        child_paths.sort();
+        for canonical_path in child_paths {
+            let candidate = format!("{}{}", canonical_path, suffix);
+            if let Some(ty) = self.ctx.lookup_type(&candidate) {
+                return Some(ty.clone());
             }
         }
         None

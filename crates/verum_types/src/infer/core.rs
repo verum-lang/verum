@@ -1296,6 +1296,44 @@ impl TypeChecker {
                 }
             }
         }
+
+        // SYS-IOENGINE-FD-CTOR (MOUNT-TYPE-AUTHORITY-1 newtype leg) —
+        // the exact transparent-wrapper mirror of the qualified
+        // `__struct_fields_` block above.  A COLLIDING mounted
+        // newtype's ctor/`.0` inner type must exist under the
+        // qualified `<module>.__newtype_inner_<name>` key: the bare
+        // `__newtype_inner_<name>` written by the simple-slot load may
+        // describe the OTHER module's same-named type — or not exist
+        // at all when the simple slot holds a same-named RECORD (the
+        // live case: `core.shell.resources.Fd` record vs
+        // `core.sys.io_engine.Fd` newtype — the record wins the
+        // sorted-walk simple slot, so `Fd(0)` failed `not a function`
+        // for every mounted io_engine consumer).  Consumers probe via
+        // `lookup_type_mount_scoped(name, "__newtype_inner_")`.
+        if desc.is_transparent_wrapper
+            && let crate::core_metadata::TypeDescriptorKind::Record { fields } = &desc.kind
+            && let Some(first_field) = fields.first()
+            && !first_field.ty.is_empty()
+        {
+            let inner_ty = crate::infer::helpers::parse_descriptor_type_string(
+                first_field.ty.as_str(),
+            );
+            for base_key in [&owning_key, &direct_key] {
+                let prefix = base_key
+                    .as_str()
+                    .strip_suffix(name)
+                    .unwrap_or("")
+                    .to_string();
+                if prefix.is_empty() {
+                    continue;
+                }
+                let inner_key: Text =
+                    format!("{}__newtype_inner_{}", prefix, name).into();
+                if self.ctx.lookup_type(inner_key.as_str()).is_none() {
+                    self.ctx.define_type(inner_key, inner_ty.clone());
+                }
+            }
+        }
         Some(ty)
     }
 

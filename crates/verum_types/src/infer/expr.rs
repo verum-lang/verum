@@ -7290,9 +7290,54 @@ impl TypeChecker {
                 {
                     type_name = self_path.last_segment_name().to_string();
                 }
+                // SYS-IOENGINE-FD-CTOR: the MOUNT-scoped qualified key
+                // (`<module>.__newtype_inner_<X>`) is authoritative —
+                // when two modules declare same-named types (record
+                // `core.shell.resources.Fd` vs newtype
+                // `core.sys.io_engine.Fd`), the bare key describes
+                // whichever won the sorted-walk simple slot; a file
+                // that explicitly mounted the newtype must construct
+                // ITS type.  Falls back to the flat key for the
+                // non-colliding world.
                 let inner_key = format!("__newtype_inner_{}", type_name);
-                if let Some(inner_ty) = self.ctx.lookup_type(inner_key.as_str()) {
-                    let inner_ty = inner_ty.clone();
+                // Ctor-position names may never have passed through
+                // TYPE resolution, so the mount-scoped qualified keys
+                // (including `<module>.__newtype_inner_<X>`) may not be
+                // registered yet.  Invoke the QUALIFIED metadata loader
+                // DIRECTLY: `resolve_type_name_mount_scoped` early-returns
+                // on a usable TYPE hit without ever reaching the loader,
+                // so the auxiliary `__newtype_inner_` keys would stay
+                // unregistered exactly when the type resolves fine.
+                // Idempotent; a no-op for unmounted/ambiguous names.
+                let mount_canonical: Option<String> = self
+                    .imported_names
+                    .get(&verum_common::Text::from(type_name.as_str()))
+                    .and_then(|sources| {
+                        if sources.len() != 1 {
+                            return None;
+                        }
+                        sources.iter().next().map(|s| {
+                            s.as_str()
+                                .strip_prefix("cog.")
+                                .unwrap_or(s.as_str())
+                                .to_string()
+                        })
+                    })
+                    .filter(|c| !c.is_empty() && c != "cog");
+                if let Some(canonical) = mount_canonical {
+                    let _ = self.ensure_mounted_type_loaded_qualified(
+                        type_name.as_str(),
+                        canonical.as_str(),
+                    );
+                }
+                let mut inner_ty_hit: Option<Type> =
+                    self.lookup_type_mount_scoped(type_name.as_str(), "__newtype_inner_");
+                if inner_ty_hit.is_none()
+                    && let Some(inner_ty) = self.ctx.lookup_type(inner_key.as_str())
+                {
+                    inner_ty_hit = Some(inner_ty.clone());
+                }
+                if let Some(inner_ty) = inner_ty_hit {
                     if args.len() == 1
                         && let Some(arg0) = args.get(0)
                     {

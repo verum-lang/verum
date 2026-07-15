@@ -2107,6 +2107,18 @@ impl TypeError {
                 // E400: Type mismatch - type system incompatibility error
                 // Format matches spec expectation: "Type mismatch: expected 'X', found 'Y'"
                 // Note: E310 is for borrow/aliasing errors, E400 is for type mismatches
+                //
+                // LITERAL-SIZED-ALIAS-COERCE-1 oracle: E400s from deep
+                // resolution stacks are hard to attribute — surface the
+                // construction stack on demand.
+                if std::env::var("VERUM_TRACE_E400").is_ok() {
+                    eprintln!(
+                        "[e400] expected='{}' actual='{}'\n{}",
+                        expected,
+                        actual,
+                        std::backtrace::Backtrace::force_capture()
+                    );
+                }
                 let mut builder = DiagnosticBuilder::error().code("E400").message(format!(
                     "Type mismatch: expected '{}', found '{}'",
                     expected, actual

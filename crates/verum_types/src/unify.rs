@@ -1444,6 +1444,20 @@ impl Unifier {
                 std::backtrace::Backtrace::force_capture()
             );
         }
+        // LITERAL-SIZED-ALIAS-COERCE-1 oracle: same choke point, no
+        // value filter — every top-level unify mismatch dumps its two
+        // types + the RAISE stack under VERUM_TRACE_E400.
+        if self.unify_depth == 1
+            && let Err(crate::TypeError::Mismatch { .. }) = result
+            && std::env::var("VERUM_TRACE_E400").is_ok()
+        {
+            eprintln!(
+                "[e400-unify] t1={:?} t2={:?}\n{}",
+                t1,
+                t2,
+                std::backtrace::Backtrace::force_capture()
+            );
+        }
         self.unify_depth -= 1;
         result
     }

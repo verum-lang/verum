@@ -333,6 +333,23 @@ impl TypeChecker {
     pub(super) fn scheme_from_function_descriptor(
         fd: &crate::core_metadata::FunctionDescriptor,
     ) -> crate::context::TypeScheme {
+        // LITERAL-SIZED-ALIAS-COERCE-1 oracle: dump the RAW descriptor
+        // strings for a named fn (`VERUM_TRACE_FNSCHEME=ptr_add`).
+        if let Ok(want) = std::env::var("VERUM_TRACE_FNSCHEME") {
+            if fd.name.as_str().contains(want.as_str()) {
+                let params: Vec<String> = fd
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: `{}`", p.name.as_str(), p.ty.as_str()))
+                    .collect();
+                eprintln!(
+                    "[fnscheme] {} params=[{}] ret=`{}`",
+                    fd.name.as_str(),
+                    params.join(", "),
+                    fd.return_type.as_str()
+                );
+            }
+        }
         let to_type = |s: &verum_common::Text| -> crate::ty::Type {
             crate::infer::helpers::parse_descriptor_type_string(s.as_str())
         };
