@@ -20864,9 +20864,22 @@ impl VbcCodegen {
         //
 
         // Suppress the `Await` opcode when the inner expression is not a
-        // `Spawn`. Most user code (`some_async_fn(x).await`) flows through
-        // this path; `spawn { … }.await` keeps the threaded-await path.
-        let needs_runtime_await = matches!(inner.kind, ExprKind::Spawn { .. });
+        // task handle. Most user code (`some_async_fn(x).await`) flows
+        // through this path; `spawn { … }.await` keeps the threaded-await
+        // path.  Handle-ness is decided by TWO signals: the syntactic
+        // `spawn {…}.await` form AND the carried type fact for
+        // variable-held handles (`let h = spawn f(); h.await` — the
+        // extract_expr_type_name Spawn arm records "TaskHandle" at the
+        // let-binding).  Shape-only gating passed the RAW sentinel into
+        // the surrounding code: match arms ran IsVar/GetVariantData on an
+        // int and every spawn-result match printed the catch-all arm with
+        // a nil payload (test_async_errors "Spawn N Error: nil", #51).
+        let needs_runtime_await = matches!(inner.kind, ExprKind::Spawn { .. })
+            || self
+                .extract_expr_type_name(inner)
+                .as_deref()
+                .map(|t| t.split('<').next().unwrap_or(t) == "TaskHandle")
+                .unwrap_or(false);
 
         if !needs_runtime_await {
             return Ok(Some(task_reg));
@@ -23326,7 +23339,26 @@ impl VbcCodegen {
             // `r: <unknown>` which fell through method dispatch into
             // free-fn shadowing for stdlib names like
             // `core.io.stdio.stdout`.
-            ExprKind::Await(inner) => self.extract_expr_type_name(inner),
+            ExprKind::Await(inner) => {
+                let t = self.extract_expr_type_name(inner);
+                // A handle-typed inner means the await RESULT is the
+                // task's payload type, which the bare "TaskHandle"
+                // marker does not carry — return None (honest unknown)
+                // instead of leaking the marker onto the awaited value
+                // (a `let r = h.await;` typed as TaskHandle would emit
+                // a second runtime Await on a non-handle downstream).
+                match t.as_deref().map(|s| s.split('<').next().unwrap_or(s)) {
+                    Some("TaskHandle") => None,
+                    _ => t,
+                }
+            }
+            // Spawn produces a runtime task handle (sentinel-encoded
+            // task id).  The canonical marker name lets `let h =
+            // spawn f();` record handle-ness as a carried fact at the
+            // let-binding — `compile_await` consults it to emit the
+            // runtime `Await` opcode for variable-held handles
+            // (`h.await`), not only the syntactic `spawn {…}.await`.
+            ExprKind::Spawn { .. } => Some("TaskHandle".to_string()),
             // If/else expression: infer type from then branch
             ExprKind::If { then_branch, .. } => self.extract_type_from_block(then_branch),
             // Match expression: infer type from first arm body with a known
