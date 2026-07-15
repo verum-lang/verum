@@ -313,8 +313,8 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
 // Verum-runtime symbols — internal helpers emitted by the LLVM runtime
 // layer.  Distinct from POSIX_SYSCALLS because these are NOT platform
 // syscalls — they're stdlib runtime functions implemented in LLVM IR
-// (some inline, some as opaque imports satisfied by
-// `verum_runtime_stubs.o`).
+// (platform_ir.rs / tensor_ir.rs / metal_ir.rs — every symbol has an
+// IR body; nothing is satisfied by external objects).
 //
 // Pre-fix these were declared at multiple emit paths with conflicting
 // signatures (`verum_string_join` ptr-vs-i64 first param,

@@ -133,7 +133,6 @@ pub mod passes;
 pub mod link;
 
 // C runtime stubs for AOT compilation
-pub mod runtime_stubs;
 
 // Re-export error types
 pub mod error;

@@ -11,14 +11,13 @@
 
 //!  * `phase_generate_native` — primary AOT entry; lowers VBC
 //!  to LLVM IR via `VbcToLlvmLowering`, runs LLVM optimisation
-//!  passes, emits object files, links with the C runtime.
+//!  passes, emits object files, links the executable.
 //!  * `get_project_root` — find Verum.toml-rooted project for
 //!  output-directory resolution.
-//!  * `generate_runtime_stubs` — emit the small C-runtime
-//!  bridge that wraps the verum stdlib's libc-facing symbols.
-//!  * `compile_c_file` — invoke the host C compiler on a single
-//!  stub file.
-//!  * `detect_c_compiler` — host-`cc` discovery (clang / gcc).
+//!  * `detect_c_compiler` — host-`cc` discovery (clang / gcc),
+//!  used ONLY as the platform linker driver — no C is compiled
+//!  anywhere in the pipeline (the whole runtime is LLVM IR:
+//!  platform_ir.rs / tensor_ir.rs / metal_ir.rs).
 //!  * `link_executable` — orchestrate linker invocation.
 //!  * `load_linker_config` / `link_with_config` /
 //!  `link_with_lld` — Verum.toml-driven linker configuration
@@ -520,11 +519,9 @@ impl<'s> CompilationPipeline<'s> {
             return Ok(artifact);
         }
 
-        // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
-        // ALL runtime functions are now pure LLVM IR (platform_ir.rs + tensor_ir.rs + metal_ir.rs).
-        // No C compilation needed. We still generate an empty .o for the linker.
-        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir, module_name)?;
-        let runtime_obj = self.compile_c_file(&runtime_stubs_path, &build_dir)?;
+        // Runtime: ALL runtime functions are pure LLVM IR
+        // (platform_ir.rs + tensor_ir.rs + metal_ir.rs) — already inside
+        // obj_path.  No C compilation step exists in the pipeline.
 
         // Metal GPU runtime — now in LLVM IR (metal_ir.rs), no Objective-C compilation needed
         let metal_obj: Option<PathBuf> = None;
@@ -621,18 +618,12 @@ impl<'s> CompilationPipeline<'s> {
 
         // Link object files into executable in target/<profile>/
         info!("  Linking executable");
-        let mut link_objects = vec![obj_path.clone(), runtime_obj];
+        let mut link_objects = vec![obj_path.clone()];
         if let Some(ref metal) = metal_obj {
             link_objects.push(metal.clone());
             info!("  Including Metal GPU runtime in link");
         }
         self.link_with_config(&link_objects, &output_path, &linker_config, needs_metal)?;
-
-        // Clean up intermediate files
-        let _ = std::fs::remove_file(&runtime_stubs_path);
-        // verum_platform.c deleted — no cleanup needed
-        // verum_tensor.c deleted — no cleanup needed
-        // verum_metal.m deleted — no cleanup needed
 
         let elapsed = start.elapsed();
         info!(
@@ -1278,88 +1269,6 @@ impl<'s> CompilationPipeline<'s> {
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-    }
-
-    /// Generate C runtime stubs for CBGR and stdlib functions
-    pub(super) fn generate_runtime_stubs(&self, temp_dir: &Path, tag: &str) -> Result<PathBuf> {
-        // Per-compilation-unique stub path. The C source is a fixed
-        // constant, but the `.c` is written here and `remove_file`d after
-        // linking, and `compile_c_file` derives the `.o` name from this
-        // stem. Under `verum test --aot`'s `par_iter`, a shared
-        // `verum_runtime_stubs.c` / `.o` would be written, clang-compiled,
-        // and deleted by many workers at once — racing into corrupt object
-        // files or missing-source clang errors (sporadic link failures).
-        // Tagging by the unit's module name gives every worker its own.
-        let stubs_path = temp_dir.join(format!("verum_runtime_stubs_{}.c", tag));
-
-        // Use the extracted C runtime from verum_codegen
-        let stubs_code = verum_codegen::runtime_stubs::RUNTIME_C;
-
-        std::fs::write(&stubs_path, stubs_code)?;
-        debug!("Generated runtime stubs: {}", stubs_path.display());
-
-        // verum_platform.c DELETED — all platform functions in LLVM IR (platform_ir.rs)
-
-        Ok(stubs_path)
-    }
-
-    /// Compile a C file to object file
-    pub(super) fn compile_c_file(&self, source_path: &Path, output_dir: &Path) -> Result<PathBuf> {
-        let output_path = output_dir
-            .join(
-                source_path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_str()
-                    .unwrap_or("runtime"),
-            )
-            .with_extension("o");
-
-        // Detect C compiler
-        let cc = self.detect_c_compiler()?;
-
-        debug!("Compiling C file with {}: {}", cc, source_path.display());
-
-        // Compile C file to object file with architecture-specific SIMD flags
-        let mut cmd = std::process::Command::new(&cc);
-        let c_opt = if self.session.options().optimization_level >= 3 {
-            "-O3"
-        } else {
-            "-O2"
-        };
-        cmd.arg("-c")
-            .arg(source_path)
-            .arg("-o")
-            .arg(&output_path)
-            .arg(c_opt)
-            .arg("-fPIC")
-            .arg("-ffast-math")
-            .arg("-DNDEBUG");
-
-        // Add architecture-specific SIMD flags for auto-vectorization
-        #[cfg(target_arch = "x86_64")]
-        {
-            cmd.arg("-march=native");
-            cmd.arg("-mavx2");
-            cmd.arg("-mfma");
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            cmd.arg("-march=armv8-a+simd");
-        }
-
-        // Entry point provided by LLVM IR (platform_ir.rs) — skip C entry points
-        cmd.arg("-DVERUM_LLVM_IR_ENTRY");
-        // File I/O, time, networking C code deleted — LLVM IR only (platform_ir.rs)
-
-        let output = cmd.output()?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("C compilation failed:\n{}", stderr));
-        }
-
-        Ok(output_path)
     }
 
     /// Detect available C compiler

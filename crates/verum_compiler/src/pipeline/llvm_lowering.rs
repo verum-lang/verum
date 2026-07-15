@@ -283,11 +283,6 @@ impl<'s> CompilationPipeline<'s> {
             .write_to_file(llvm_module, FileType::Object, &obj_path)
             .map_err(|e| anyhow::anyhow!("Failed to write object file: {}", e))?;
 
-        // Generate runtime stubs (tag by module name so parallel test
-        // compilation doesn't race on a shared stub `.c`/`.o`).
-        let runtime_stubs_path = self.generate_runtime_stubs(&build_dir, module_name)?;
-        let runtime_obj = self.compile_c_file(&runtime_stubs_path, &build_dir)?;
-
         // Link into executable.  GPU-usage probe (#100): if the
         // post-pass module has no `verum_metal_ensure_init` body,
         // skip Metal/Foundation/objc framework links.
@@ -296,7 +291,7 @@ impl<'s> CompilationPipeline<'s> {
             .map(|f| f.count_basic_blocks() > 0)
             .unwrap_or(false);
         info!("  Linking executable to {}", output_path.display());
-        self.link_executable(&[obj_path, runtime_obj], &output_path, needs_metal)?;
+        self.link_executable(&[obj_path], &output_path, needs_metal)?;
 
         Ok(output_path)
     }
