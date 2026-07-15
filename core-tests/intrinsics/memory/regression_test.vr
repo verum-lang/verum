@@ -85,16 +85,21 @@ fn regression_transmute_bits_to_float_reinterprets() {
 // =============================================================================
 // MEM-BULK-ADDR-DUAL-1 (2026-07-15) — CLOSED, pass-guards
 // =============================================================================
-// The Tier-0 bulk-memory handlers (CMemcpy/CMemset/CSecureZero/CMemmove/
-// CMemcmp in handlers/ffi_extended.rs) extracted buffer addresses with bare
-// `Value::as_ptr()`.  Raw addresses legitimately arrive EITHER pointer-tagged
-// OR int-tagged (cbgr_allocate bridge, `as *mut T` casts) — an int-tagged
-// address decoded as NULL, the null-guard silently skipped the operation, and
-// every `core.intrinsics.memory` bulk op over a bridge buffer was a Tier-0
-// no-op while AOT executed it (cross-tier divergence).  memcmp additionally
-// ranked garbage (two equal buffers compared -1).  Fixed with the canonical
-// `value_as_addr` dual extraction — the same helper the PtrAdd family and the
-// atomic handlers already used.
+// THREE stacked legs kept the Tier-0 bulk-memory surface inert while AOT
+// executed it (cross-tier divergence):
+//   1. The handlers (CMemcpy/CMemset/CSecureZero/CMemmove/CMemcmp in
+//      handlers/ffi_extended.rs) extracted buffer addresses with bare
+//      `Value::as_ptr()` — an INT-TAGGED address (cbgr bridge, `as *mut T`
+//      casts) decoded as NULL and the null-guard skipped the op; memcmp
+//      ranked garbage (two equal buffers compared -1).  → canonical
+//      `value_as_addr` dual extraction (the PtrAdd/atomic pattern).
+//   2. The .vr params are `&[mut] Byte` REFERENCES — a real CBGR reg-ref
+//      whose REFERENT holds the address; extraction alone read the ref
+//      ENCODING.  → `resolve_arg_value` (three-shape unwrap, contract §6)
+//      before extraction.
+//   3. `ptr_to_mut_ref` was UNREGISTERED entirely (LoadNil) — every
+//      memset/memcpy destination was nil.  → registered with ptr_to_ref's
+//      Tier-0 identity strategy.
 
 @test
 fn regression_memset_writes_through_int_tagged_address() {

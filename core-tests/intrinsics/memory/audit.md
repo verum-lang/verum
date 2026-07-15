@@ -48,21 +48,32 @@ ptr, tmp`).  Re-pointed `null_ptr`/`null_ptr_mut`/`ptr_is_null` (+ their
 
 ## 2b. Defects FIXED 2026-07-15 (session campaign)
 
-### MEM-BULK-ADDR-DUAL-1 — Tier-0 bulk ops silently no-op'd int-tagged buffers
+### MEM-BULK-ADDR-DUAL-1 — Tier-0 bulk ops silently inert (THREE stacked legs)
 
-The interpreter's CMemcpy/CMemset/CSecureZero/CMemmove/CMemcmp handlers
-(`handlers/ffi_extended.rs`) extracted buffer addresses with bare
-`Value::as_ptr()`.  Raw addresses legitimately arrive EITHER pointer-tagged
-OR int-tagged (`cbgr_allocate` bridge, `as *mut T` casts — the
-RAWPTR-DROPREF-1 int-tagging); an int-tagged address decoded as NULL and
-the null-guard silently skipped the operation — every
-`core.intrinsics.memory` bulk op over a bridge buffer was a Tier-0 no-op
-while AOT executed it (cross-tier divergence), and memcmp ranked garbage
-(two equal buffers compared -1).  FutexWait/FutexWake/SpinlockLock had the
-mirror int-only extraction.  **Fix**: the canonical `value_as_addr` dual
-extraction (the helper the PtrAdd family and atomic handlers already used)
-across all eight handlers.  Pass-guards in regression_test.vr; laws in
-property_test.vr §6; two-module agreement in integration_test.vr.
+Three independent defects kept the whole Tier-0 bulk-memory surface a
+silent no-op while AOT executed it (cross-tier divergence):
+
+1. **Handler extraction** — CMemcpy/CMemset/CSecureZero/CMemmove/CMemcmp
+   (`handlers/ffi_extended.rs`) used bare `Value::as_ptr()`; an INT-TAGGED
+   address (cbgr bridge, `as *mut T` casts — the RAWPTR-DROPREF-1 tagging)
+   decoded as NULL and the null-guard skipped the op; memcmp ranked
+   garbage (two equal buffers compared -1).
+   FutexWait/FutexWake/SpinlockLock had the mirror int-only extraction.
+   → the canonical `value_as_addr` dual extraction across all eight.
+2. **Reference unwrap** — the .vr params are `&[mut] Byte` REFERENCES: a
+   real CBGR reg-ref whose REFERENT holds the address; extraction alone
+   read the ref ENCODING as the address.  → `resolve_arg_value`
+   (the three-shape unwrap of intrinsic-dispatch-contract §6) before
+   extraction, same as the slice handlers.
+3. **Registry hole** — `ptr_to_mut_ref` was UNREGISTERED entirely
+   (LoadNil): every memset/memcpy DESTINATION was nil regardless of the
+   other legs.  → registered with `ptr_to_ref`'s Tier-0 identity strategy.
+
+Pass-guards in regression_test.vr; laws in property_test.vr §6;
+two-module agreement in integration_test.vr.  Diagnosis pattern worth
+keeping: each leg was invisible until the previous one was fixed — the
+probe (`refs_equal` + independent `load_byte` observation) had to
+distinguish "wrong address" from "no write" from "nil ref".
 
 ## 3. Defects OPEN / deferred
 
