@@ -302,6 +302,12 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
     SyscallSig { name: "sem_wait",    args: &[AbiTy::Ptr], ret: AbiTy::I64 },
     SyscallSig { name: "sem_post",    args: &[AbiTy::Ptr], ret: AbiTy::I64 },
     SyscallSig { name: "sem_destroy", args: &[AbiTy::Ptr], ret: AbiTy::I64 },
+    // ── CPU topology (AOT-NUM-CPUS-LEG-1) ────────────────────────────
+    // C: int sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask)
+    // Linux-only symbol — emitted as a direct-syscall wrapper
+    // (x86_64=204 / aarch64=123) by `emit_num_cpus`; darwin never
+    // declares it (sysconf via libSystem instead).
+    SyscallSig { name: "sched_getaffinity", args: &[AbiTy::I64, AbiTy::I64, AbiTy::Ptr], ret: AbiTy::I64 },
     // ── Process management (core/sys/process) ───────────────────────
     SyscallSig { name: "pipe",   args: &[AbiTy::Ptr], ret: AbiTy::I64 },
     SyscallSig { name: "fork",   args: &[], ret: AbiTy::I64 },

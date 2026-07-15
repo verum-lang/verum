@@ -9423,6 +9423,31 @@ fn lower_call<'ctx>(
         func_name.rsplit('.').next().unwrap_or(func_name)
     };
 
+    // AOT-NUM-CPUS-LEG-1: the bodiless `num_cpus` intrinsic decl (the
+    // whole delegator chain — sys.num_cpus → core.intrinsics.num_cpus →
+    // core.intrinsics.runtime.time.num_cpus — bottoms out here) would
+    // otherwise lower to the skipped-entry const-0 shell:
+    // available_parallelism() == 0 at Tier-1 while Tier-0 answers via
+    // the runtime name-intercept. Route to the ONE platform helper.
+    // The bodiless gate (bytecode_length <= 1, same widened intrinsic
+    // gate as Tier-0's calls.rs) keeps any USER free fn named
+    // `num_cpus` with a real body on the normal path.
+    if bare_name == "num_cpus" && args.count == 0 && func_desc.bytecode_length <= 1 {
+        let i64_type = ctx.types().i64_type();
+        let helper = super::error::get_or_declare_function(
+            ctx.get_module(),
+            "verum_num_cpus",
+            i64_type.fn_type(&[], false),
+        );
+        let n = ctx
+            .builder()
+            .build_call(helper, &[], "num_cpus")
+            .or_llvm_err()?
+            .basic_value_or("verum_num_cpus: expected return value")?;
+        ctx.set_register(dst.0, n);
+        return Ok(());
+    }
+
     // Intercept low-level process C runtime bridge functions.
     // These are simple (Int, Text) → Int functions that the Verum
     // process.vr code calls. The high-level Result wrapping happens

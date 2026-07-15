@@ -516,6 +516,10 @@ impl<'ctx> PlatformIR<'ctx> {
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_raw_open3"); }
         self.emit_raw_open3(module)?;
 
+        // verum_num_cpus — ONE CPU-count authority (AOT-NUM-CPUS-LEG-1)
+        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_num_cpus"); }
+        self.emit_num_cpus(module)?;
+
         // Memory allocator (bump allocator with spinlock)
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_allocator"); }
         self.emit_allocator(module)?;
@@ -781,6 +785,129 @@ impl<'ctx> PlatformIR<'ctx> {
     /// calling convention puts extra args on the stack instead of registers.
     /// By declaring `open` as variadic here and calling it with 3 args, LLVM
     /// generates the correct ARM64 calling convention.
+    /// verum_num_cpus — the ONE CPU-count authority (AOT-NUM-CPUS-LEG-1).
+    ///
+    /// Tier-0 answers `num_cpus` via the runtime name-intercept; Tier-1
+    /// previously lowered the bodiless `core.intrinsics.num_cpus` decl to
+    /// a skipped-entry const-0 (available_parallelism() == 0). Per-target,
+    /// no-libc:
+    ///  - darwin:  sysconf(_SC_NPROCESSORS_ONLN = 58) via libSystem
+    ///    (allowed boundary), clamped to >= 1;
+    ///  - linux:   direct SYS_sched_getaffinity (x86_64 204 / aarch64
+    ///    123) over a zeroed 128-byte mask, popcount of the mask words,
+    ///    clamped to >= 1 (no libc);
+    ///  - other:   const 1 (documented conservative floor).
+    fn emit_num_cpus(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+
+        let fn_type = i64_type.fn_type(&[], false);
+        let func = self.get_or_declare_fn(module, "verum_num_cpus", fn_type);
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(func, "entry");
+        builder.position_at_end(entry);
+
+        let one = i64_type.const_int(1, false);
+        let raw_count: verum_llvm::values::IntValue = if target_is_darwin(module) {
+            let sysconf_fn = self.get_or_declare_fn(
+                module,
+                "sysconf",
+                i64_type.fn_type(&[i64_type.into()], false),
+            );
+            // _SC_NPROCESSORS_ONLN = 58 on darwin.
+            builder
+                .build_call(sysconf_fn, &[i64_type.const_int(58, false).into()], "ncpu")
+                .or_llvm_err()?
+                .basic_value_or("sysconf: expected return value")?
+                .into_int_value()
+        } else if target_is_linux(module) {
+            // Direct-syscall wrapper from the canonical registry.
+            self.emit_libc_free_socket_wrapper(module, "sched_getaffinity", 204, 123)?;
+            let aff_fn = module
+                .get_function("sched_getaffinity")
+                .or_internal("sched_getaffinity wrapper missing after emit")?;
+            // Zeroed 16-word (128-byte) cpu mask on the stack.
+            let mask_ty = i64_type.array_type(16);
+            let mask = builder.build_alloca(mask_ty, "cpu_mask").or_llvm_err()?;
+            let mut word_ptrs = Vec::with_capacity(16);
+            for i in 0..16u64 {
+                // SAFETY: constant in-bounds indices into the [16 x i64]
+                // stack allocation created above.
+                let wp = unsafe {
+                    builder
+                        .build_in_bounds_gep(
+                            mask_ty,
+                            mask,
+                            &[i64_type.const_zero(), i64_type.const_int(i, false)],
+                            &format!("mask_w{}", i),
+                        )
+                        .or_llvm_err()?
+                };
+                builder.build_store(wp, i64_type.const_zero()).or_llvm_err()?;
+                word_ptrs.push(wp);
+            }
+            let rc = builder
+                .build_call(
+                    aff_fn,
+                    &[
+                        i64_type.const_zero().into(),
+                        i64_type.const_int(128, false).into(),
+                        mask.into(),
+                    ],
+                    "aff_rc",
+                )
+                .or_llvm_err()?
+                .basic_value_or("sched_getaffinity: expected return value")?
+                .into_int_value();
+            let ctpop = self.get_or_declare_fn(
+                module,
+                "llvm.ctpop.i64",
+                i64_type.fn_type(&[i64_type.into()], false),
+            );
+            let mut sum = i64_type.const_zero();
+            for (i, wp) in word_ptrs.iter().enumerate() {
+                let w = builder
+                    .build_load(i64_type, *wp, &format!("w{}", i))
+                    .or_llvm_err()?
+                    .into_int_value();
+                let bits = builder
+                    .build_call(ctpop, &[w.into()], &format!("pop{}", i))
+                    .or_llvm_err()?
+                    .basic_value_or("ctpop: expected return value")?
+                    .into_int_value();
+                sum = builder
+                    .build_int_add(sum, bits, &format!("sum{}", i))
+                    .or_llvm_err()?;
+            }
+            // rc < 0 (syscall error) => raw 0, clamped to 1 below.
+            let rc_ok = builder
+                .build_int_compare(IntPredicate::SGE, rc, i64_type.const_zero(), "aff_ok")
+                .or_llvm_err()?;
+            builder
+                .build_select(rc_ok, sum, i64_type.const_zero(), "ncpu_raw")
+                .or_llvm_err()?
+                .into_int_value()
+        } else {
+            // Windows/embedded: conservative floor until their legs land
+            // (kernel32 GetSystemInfo / bare-metal config respectively).
+            one
+        };
+
+        let lt1 = builder
+            .build_int_compare(IntPredicate::SLT, raw_count, one, "lt1")
+            .or_llvm_err()?;
+        let clamped = builder
+            .build_select(lt1, one, raw_count, "ncpu")
+            .or_llvm_err()?
+            .into_int_value();
+        builder.build_return(Some(&clamped)).or_llvm_err()?;
+        Ok(())
+    }
+
     fn emit_raw_open3(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -12661,23 +12788,20 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // create: CAS(global, 0, new_pool)
         builder.position_at_end(create_bb);
-        // Use sysconf(_SC_NPROCESSORS_ONLN) for num_cpus, fallback to 4
+        // CPU count via the ONE authority (AOT-NUM-CPUS-LEG-1) — the
+        // previous inline sysconf here was ALSO a no-libc violation on
+        // Linux (libc sysconf symbol); verum_num_cpus does libSystem
+        // sysconf on darwin and a direct sched_getaffinity syscall on
+        // Linux. Pool sizing keeps its own [2, 64] clamp.
         let num_cpus = {
-            let sysconf_fn = self.get_or_declare_fn(
-                module,
-                "sysconf",
-                i64_type.fn_type(&[i64_type.into()], false),
-            );
-            // _SC_NPROCESSORS_ONLN: macOS=58, Linux=84.  Target-aware per #70.
-            let sc_nproc = if super::target_triple::target_is_linux(module) {
-                i64_type.const_int(84, false)
-            } else {
-                i64_type.const_int(58, false)
-            };
+            self.emit_num_cpus(module)?;
+            let ncpu_fn = module
+                .get_function("verum_num_cpus")
+                .or_internal("verum_num_cpus missing after emit")?;
             let ncpu = builder
-                .build_call(sysconf_fn, &[sc_nproc.into()], "ncpu")
+                .build_call(ncpu_fn, &[], "ncpu")
                 .or_llvm_err()?
-            .basic_value_or("expected basic value")?
+                .basic_value_or("expected basic value")?
                 .into_int_value();
             // Clamp: min 2, max 64
             let min_2 = builder
