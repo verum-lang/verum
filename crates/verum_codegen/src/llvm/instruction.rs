@@ -10014,7 +10014,7 @@ fn lower_call<'ctx>(
             | "__metal_max_memory"
             | "__metal_max_threads_per_threadgroup"
             | "__metal_gpu_core_count" => {
-                let c_name = match func_name {
+                let c_name = match bare_name {
                     "__metal_get_device" => "verum_metal_get_device",
                     "__metal_device_name" => "verum_metal_device_name",
                     "__metal_max_memory" => "verum_metal_max_memory",
@@ -10039,7 +10039,7 @@ fn lower_call<'ctx>(
 
             "__metal_alloc" | "__metal_buffer_contents" | "__metal_buffer_length" => {
                 let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "m_arg")?;
-                let c_name = match func_name {
+                let c_name = match bare_name {
                     "__metal_alloc" => "verum_metal_alloc",
                     "__metal_buffer_contents" => "verum_metal_buffer_contents",
                     "__metal_buffer_length" => "verum_metal_buffer_length",
@@ -10076,7 +10076,7 @@ fn lower_call<'ctx>(
 
             "__metal_free" | "__metal_wait" => {
                 let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "m_arg")?;
-                let c_name = match func_name {
+                let c_name = match bare_name {
                     "__metal_free" => "verum_metal_free",
                     "__metal_wait" => "verum_metal_wait",
                     _ => unreachable!(),
@@ -10294,7 +10294,7 @@ fn lower_call<'ctx>(
             | "__llvm_fabs" | "__llvm_floor" | "__llvm_ceil" | "__llvm_round" => {
                 // Unary f64 → f64 LLVM intrinsics
                 let f64_type = ctx.types().f64_type();
-                let llvm_name = match func_name {
+                let llvm_name = match bare_name {
                     "__llvm_sqrt" => "llvm.sqrt.f64",
                     "__llvm_sin" => "llvm.sin.f64",
                     "__llvm_cos" => "llvm.cos.f64",
@@ -10324,7 +10324,7 @@ fn lower_call<'ctx>(
             "__llvm_pow" | "__llvm_copysign" | "__llvm_minnum" | "__llvm_maxnum" => {
                 // Binary f64 × f64 → f64 LLVM intrinsics
                 let f64_type = ctx.types().f64_type();
-                let llvm_name = match func_name {
+                let llvm_name = match bare_name {
                     "__llvm_pow" => "llvm.pow.f64",
                     "__llvm_copysign" => "llvm.copysign.f64",
                     "__llvm_minnum" => "llvm.minnum.f64",
@@ -10553,7 +10553,7 @@ fn lower_call<'ctx>(
 
             "__file_size_raw" | "__file_seek_raw" | "__file_delete_raw" | "__mkdir_raw" => {
                 // All take (Int) or (Int, Int, Int) -> Int. Route to C.
-                let c_name = match func_name {
+                let c_name = match bare_name {
                     "__file_size_raw" => "verum_file_size",
                     "__file_seek_raw" => "verum_file_seek",
                     "__file_delete_raw" => "verum_file_delete",
@@ -10758,7 +10758,7 @@ fn lower_call<'ctx>(
             // Context system
             // ============================================================
             "__ctx_get_raw" | "__ctx_provide_raw" | "__ctx_end_raw" => {
-                let c_name = match func_name {
+                let c_name = match bare_name {
                     "__ctx_get_raw" => "verum_ctx_get",
                     "__ctx_provide_raw" => "verum_ctx_provide",
                     "__ctx_end_raw" => "verum_ctx_end",
@@ -11124,7 +11124,12 @@ fn lower_call<'ctx>(
             | "__socket_get_error_raw" => {
                 // All take (fd: Int) -> Int
                 let fd_val = ctx.get_register(args.start.0)?;
-                let c_name = match func_name {
+                // AOT-INTRINSIC-QUALIFIED-NAME-1 (leg 2, task #21): the inner
+                // narrow-match MUST key on the same normalized `bare_name` as the
+                // outer arm — descriptor names arrive MODULE-QUALIFIED from the
+                // bake, so `match func_name` here hit `_ => unreachable!()` and
+                // SIGABRT'd the whole runtime/mod umbrella compile.
+                let c_name = match bare_name {
                     "__socket_set_nonblocking_raw" => "verum_socket_set_nonblocking",
                     "__socket_set_blocking_raw" => "verum_socket_set_blocking",
                     "__socket_set_reuseaddr_raw" => "verum_socket_set_reuseaddr",
