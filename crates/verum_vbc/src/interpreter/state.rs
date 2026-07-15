@@ -778,6 +778,11 @@ pub struct InterpreterState {
     /// task scripts are unaffected.
     pub coop_pump_depth: u32,
 
+    /// **XMOD-BAND-FREEZE-1 (#54)** — dispatch-time lazy-link memo for
+    /// band-range function ids: band id → real body FunctionId, bound
+    /// BY NAME from `module.external_function_names` on first call.
+    pub xmod_link_cache: HashMap<u32, crate::module::FunctionId>,
+
     /// Task #18 — escape-cell storage for refs that flow out of a
     /// function via `Ret`.
     ///
@@ -2688,6 +2693,7 @@ impl InterpreterState {
             escape_cells: Vec::new(),
             global_instruction_count: 0,
             coop_pump_depth: 0,
+            xmod_link_cache: HashMap::new(),
             permission_router: Box::new(
                 crate::interpreter::permission::PermissionRouter::allow_all(),
             ),

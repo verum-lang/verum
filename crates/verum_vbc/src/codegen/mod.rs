@@ -694,6 +694,31 @@ pub struct VbcCodegen {
     pub(crate) archive_func_name_to_fid:
         std::collections::HashMap<String, crate::module::FunctionId>,
 
+    /// **XMOD-BAND-FREEZE-1 (#54)** — user-side re-homing of UNRESOLVED
+    /// cross-module externals.  An archive body's `Call { band_id }`
+    /// whose recorded qualified name can't be resolved at THIS module's
+    /// merge time (the owning archive loads later, or the symbol is a
+    /// module-private nested fn) must NOT freeze the ARCHIVE-LOCAL band
+    /// id into the rewritten body: the same numeric id means a
+    /// DIFFERENT name in every other module's external table, so the
+    /// merged id-space would alias unrelated externals (observed:
+    /// `List.fmt`'s `Formatter.write_str` translated into weft's
+    /// `panic_safe` slot → `Function 5368710xx not found`).  Instead
+    /// each unresolved NAME gets ONE fresh user-band id (dedup by name
+    /// — same missing symbol referenced from many modules converges),
+    /// recorded in the USER module's `external_function_names` so the
+    /// interpreter's dispatch-time lazy link (`resolve_xmod_band`, the
+    /// Tier-0 half of this contract) can bind it BY NAME once every
+    /// archive has loaded.  Allocation starts at the band midpoint —
+    /// disjoint from precompile-emitted seq ids by construction.
+    user_xmod_band_by_name: std::collections::HashMap<String, u32>,
+    /// Next fresh user-band id (see `user_xmod_band_by_name`).
+    user_xmod_band_next: u32,
+    /// (fresh user-band id, qualified name) pairs pending emission
+    /// into the finalized module's `external_function_names` — the
+    /// carrier the interpreter's dispatch-time lazy link reads.
+    user_xmod_carry: Vec<(u32, String)>,
+
     /// Collection type generic parameter name templates.
     /// Maps collection type name (e.g. "Map") to its generic parameter names (e.g. ["K", "V"]).
     /// Used by `resolve_generic_return_type` to map return type names to concrete types.
@@ -1717,6 +1742,9 @@ impl VbcCodegen {
             pending_constants: Vec::new(),
             pending_specializations: Vec::new(),
             archive_func_name_to_fid: std::collections::HashMap::new(),
+            user_xmod_band_by_name: std::collections::HashMap::new(),
+            user_xmod_band_next: crate::module::XMOD_CALL_ID_BAND_BASE + 0x1000_0000,
+            user_xmod_carry: Vec::new(),
             // Type name to TypeId mapping for Drop dispatch.
             // Pre-populated with all well-known type names and their aliases so that
             // ast_type_to_type_ref and type_ref_for_type_kind can do a single lookup
@@ -19719,6 +19747,23 @@ impl VbcCodegen {
             module.external_function_names = external_list;
         }
 
+        // **XMOD-BAND-FREEZE-1 (#54)**: append the re-homed unresolved
+        // externals collected during archive merges.  Each entry is a
+        // FRESH user-band id bound to the missing symbol's qualified
+        // name — the interpreter's dispatch-time lazy link
+        // (`resolve_xmod_band`) binds it BY NAME once every archive
+        // has loaded; a symbol that never materialises surfaces as a
+        // NAMED `external never linked` panic instead of the opaque
+        // `Function 5368710xx not found`.
+        if !self.user_xmod_carry.is_empty() {
+            for (fid, name) in std::mem::take(&mut self.user_xmod_carry) {
+                let sid = module.intern_string(&name);
+                module
+                    .external_function_names
+                    .push((FunctionId(fid), sid));
+            }
+        }
+
         // Task #11 Phase 2: drain mount-alias capture buffer into the
         // module-level `mount_aliases` table.  Each tuple is
         // `(alias_string_id, FunctionId)` — the loader-side replay
@@ -20862,6 +20907,62 @@ impl VbcCodegen {
         let archive_func_by_name_snapshot: HashMap<String, crate::module::FunctionId> =
             self.archive_func_name_to_fid.clone();
 
+        // **XMOD-BAND-FREEZE-1 prepass (#54)**: pre-resolve EVERY
+        // band-external of this module to a definitive user-side id
+        // BEFORE the body walk.  Resolvable names take the real body
+        // id (stub-range and band-range targets rejected — neither is
+        // executable).  Unresolvable names re-home to ONE fresh
+        // user-band id per NAME, carried in the user module's
+        // `external_function_names` for the interpreter's
+        // dispatch-time lazy link.  `map_function` consults this map
+        // FIRST for band-range ids — the Tier-3 identity fallback can
+        // no longer freeze an archive-local band id into a rewritten
+        // body (the root of the `Function 5368710xx not found` class).
+        let mut band_redirect: HashMap<u32, crate::module::FunctionId> =
+            HashMap::with_capacity(archive_external_id_to_name.len());
+        {
+            let resolvable = |fid: crate::module::FunctionId| -> bool {
+                !crate::stub_ranges::is_stub_id(fid.0)
+                    && !crate::stub_ranges::in_xmod_call_band(fid.0)
+            };
+            for (&band_id, name) in archive_external_id_to_name.iter() {
+                let resolved = ctx_func_by_name
+                    .get(name)
+                    .copied()
+                    .filter(|&fid| resolvable(fid))
+                    .or_else(|| {
+                        archive_func_by_name_snapshot
+                            .get(name)
+                            .copied()
+                            .filter(|&fid| resolvable(fid))
+                    });
+                let target = match resolved {
+                    Some(fid) => fid,
+                    None => {
+                        let fresh = match self.user_xmod_band_by_name.get(name) {
+                            Some(&id) => id,
+                            None => {
+                                let id = self.user_xmod_band_next;
+                                self.user_xmod_band_next += 1;
+                                self.user_xmod_band_by_name.insert(name.clone(), id);
+                                id
+                            }
+                        };
+                        // Carry (fresh id → name) exactly once; the
+                        // finalize pass (`build_module`) interns the
+                        // name into the module string table and emits
+                        // the pair into `external_function_names` for
+                        // the runtime lazy link.
+                        if !self.user_xmod_carry.iter().any(|(f, _)| *f == fresh) {
+                            self.user_xmod_carry.push((fresh, name.clone()));
+                        }
+                        crate::module::FunctionId(fresh)
+                    }
+                };
+                band_redirect.insert(band_id, target);
+            }
+        }
+
         // ----- Walk archive functions and copy bodies -----
 
         let remap = ArchiveBodyRemap {
@@ -20870,6 +20971,7 @@ impl VbcCodegen {
             consts: &const_id_remap,
             archive_id_to_name: &archive_id_to_name,
             archive_external_id_to_name: &archive_external_id_to_name,
+            band_redirect: &band_redirect,
             ctx_func_by_name: &ctx_func_by_name,
             archive_func_by_name: &archive_func_by_name_snapshot,
         };
@@ -21560,6 +21662,15 @@ struct ArchiveBodyRemap<'a> {
     /// `Call { func_id }` targets stdlib function Y whose home module
     /// isn't directly mounted by the user.
     archive_func_by_name: &'a std::collections::HashMap<String, crate::module::FunctionId>,
+    /// **XMOD-BAND-FREEZE-1 (#54)** — definitive per-module translation
+    /// for band-range external ids, precomputed by the merge prepass:
+    /// resolvable names → real body ids; unresolvable names → fresh
+    /// user-band ids carried in the user module's
+    /// `external_function_names` for the dispatch-time lazy link.
+    /// Consulted FIRST for band-range src ids; the Tier-3 identity
+    /// fallback can therefore never freeze an ARCHIVE-LOCAL band id
+    /// (whose number aliases a DIFFERENT name in every other module).
+    band_redirect: &'a std::collections::HashMap<u32, crate::module::FunctionId>,
 }
 
 impl ArchiveBodyRemap<'_> {
@@ -21689,6 +21800,20 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
         // module Call whose target's stub_id leaked into ctx because
         // the dependency was loaded out of resolution order.
         let is_stub_id = |id: u32| -> bool { crate::stub_ranges::is_stub_id(id) };
+        // **XMOD-BAND-FREEZE-1 (#54)**: band-range ids have ONE
+        // authoritative translation — the merge prepass table.  Every
+        // band id is per-module (same number = different name in other
+        // modules), so neither the Tier-1 per-module map nor the
+        // Tier-3 identity fallback may ever emit one into a rewritten
+        // body.
+        if crate::stub_ranges::in_xmod_call_band(src.0) {
+            if let Some(&fid) = self.band_redirect.get(&src.0) {
+                return fid;
+            }
+            // No external record for this band id (malformed archive
+            // entry) — fall through to the name tiers below, which at
+            // worst leave the id for the runtime's NAMED band panic.
+        }
         // **Tier 0 (task #47) — cross-module Call by qualified name.**
         // `external_function_names` is the precompile's authoritative
         // record that `src`, in THIS module's bodies, is a cross-module
