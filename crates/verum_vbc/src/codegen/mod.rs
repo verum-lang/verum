@@ -5952,6 +5952,11 @@ impl VbcCodegen {
         // Mark all types in this module as user-defined (for variant disambiguation)
         self.mark_user_defined_types(module);
 
+        // Pass 1.6 (#32): generate FFI struct layouts for record types
+        // referenced in extern signatures, so forward-declared structs
+        // (extern block precedes the struct decl) resolve to StructPtr.
+        self.pregenerate_ffi_struct_layouts(module);
+
         // Pass 2: Collect all function declarations
         // Filter items based on @cfg attributes to prevent cross-platform conflicts
         for item in module.items.iter() {
@@ -6034,6 +6039,9 @@ impl VbcCodegen {
         // Mark all types in this module as user-defined (for variant disambiguation)
         self.mark_user_defined_types(module);
 
+        // Pass 1.6 (#32): see compile_module — forward-declared FFI structs.
+        self.pregenerate_ffi_struct_layouts(module);
+
         // Pass 2: Collect all function declarations
         for item in module.items.iter() {
             if self.should_compile_item(item) {
@@ -6090,6 +6098,9 @@ impl VbcCodegen {
                 self.claim_user_type_name(&module_key, &type_name);
             }
         }
+
+        // Pass 1.6 (#32): see compile_module — forward-declared FFI structs.
+        self.pregenerate_ffi_struct_layouts(module);
 
         // Pass 2: Collect all function declarations (adds to existing)
         // Filter items based on @cfg attributes to prevent cross-platform conflicts
@@ -6273,6 +6284,14 @@ impl VbcCodegen {
                 }
             }
         }
+
+        // Pass 1.6 (#32): generate FFI struct layouts for record types
+        // referenced in this module's extern signatures BEFORE the
+        // collect_declarations walk builds those signatures — the multi-file
+        // (stdlib-precompile) counterpart of the same pre-pass in
+        // compile_module. Without this the baked archive carries `CType::Ptr`
+        // for `&mut <record>` OUT-params (e.g. `mach_timebase_info`).
+        self.pregenerate_ffi_struct_layouts(module);
 
         for item in module.items.iter() {
             if self.should_compile_item(item) {
@@ -10947,6 +10966,138 @@ impl VbcCodegen {
         layout_idx
     }
 
+    /// If `ty` names a struct-shaped type at an FFI boundary — either a bare
+    /// record path (`MachTimebaseInfo`, by-value) or a reference / raw pointer
+    /// to one (`&mut MachTimebaseInfo`, by-pointer) — return that type's name.
+    ///
+    /// This mirrors exactly the two arms of [`Self::verum_type_to_ctype`] that
+    /// can produce `CType::StructValue` / `CType::StructPtr`
+    /// (`TypeKind::Path` and `TypeKind::Reference | TypeKind::Pointer` whose
+    /// inner is a `Path`). Keeping the shapes in lock-step guarantees the
+    /// pre-pass generates a layout for precisely the types that the C-type
+    /// mapper will later try to resolve as structs.
+    fn ffi_referenced_struct_name(ty: &verum_ast::ty::Type) -> Option<String> {
+        use verum_ast::ty::TypeKind;
+        match &ty.kind {
+            TypeKind::Path(path) => Some(path.to_string()),
+            TypeKind::Reference { inner, .. } | TypeKind::Pointer { inner, .. } => {
+                if let TypeKind::Path(path) = &inner.kind {
+                    Some(path.to_string())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// MACH-TIMEBASE-FFI-WRITEBACK-1 (#32): generate FFI struct layouts for
+    /// record types referenced in FFI extern signatures BEFORE Pass 2 builds
+    /// those signatures — so `&mut <record>` OUT-params (and by-value record
+    /// params) resolve to `CType::StructPtr` / `CType::StructValue` with a
+    /// valid layout regardless of source order.
+    ///
+    /// Root cause this closes: `verum_type_to_ctype` only maps a record type
+    /// to a struct C-type when the type is already present in `repr_c_types`,
+    /// and layouts were previously generated ONLY for `@repr(C)` records, ONLY
+    /// during Pass 2's `register_type_constructors`. In the stdlib the extern
+    /// block precedes the struct declarations it references (e.g.
+    /// `core/sys/darwin/libsystem.vr`: the `@ffi` extern block is at the top,
+    /// `MachTimebaseInfo` far below), so at FFI-signature-build time no layout
+    /// existed and `&mut MachTimebaseInfo` collapsed to a bare `CType::Ptr`.
+    /// At runtime that passed the raw Verum heap-object pointer to C, whose
+    /// `mach_timebase_info` then scribbled the `ObjectHeader` while the
+    /// NaN-boxed `numer`/`denom` fields stayed 0 — leaving the timebase
+    /// uninitialised on Tier-0 (division-by-zero in `mach.vr::monotonic_nanos`).
+    ///
+    /// A `&record` at a C boundary is unambiguously a C struct pointer, so this
+    /// is the CTYPE-DRIVEN fix (never guessing struct-ness from a value's bytes
+    /// at the FFI boundary — see the B1d note in `ffi/runtime.rs`). Both tiers
+    /// read the same `FfiSignature`, so the layout also feeds the AOT lowering.
+    ///
+    /// Scope is deliberately tight: only records ACTUALLY referenced by an
+    /// extern signature get a layout (non-FFI records are untouched), and the
+    /// generation is idempotent against `@repr(C)` records that Pass 2 also
+    /// handles (guarded by `repr_c_types` membership on both sides).
+    fn pregenerate_ffi_struct_layouts(&mut self, module: &Module) {
+        use verum_ast::decl::{FunctionParamKind, TypeDeclBody};
+
+        // 1. Index this module's record type declarations by name (respecting
+        //    @cfg gating so we don't materialise a cross-platform record).
+        let mut record_fields: std::collections::HashMap<
+            String,
+            verum_common::List<verum_ast::decl::RecordField>,
+        > = std::collections::HashMap::new();
+        for item in module.items.iter() {
+            if !self.should_compile_item(item) {
+                continue;
+            }
+            if let ItemKind::Type(type_decl) = &item.kind
+                && let TypeDeclBody::Record(fields) = &type_decl.body
+            {
+                record_fields
+                    .entry(type_decl.name.name.to_string())
+                    .or_insert_with(|| fields.clone());
+            }
+        }
+        if record_fields.is_empty() {
+            return;
+        }
+
+        // 2. Collect the record type names referenced by any FFI extern
+        //    signature (param or return position, by value or by pointer).
+        let mut needed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut note = |ty: &verum_ast::ty::Type| {
+            if let Some(name) = Self::ffi_referenced_struct_name(ty)
+                && record_fields.contains_key(&name)
+            {
+                needed.insert(name);
+            }
+        };
+        for item in module.items.iter() {
+            if !self.should_compile_item(item) {
+                continue;
+            }
+            match &item.kind {
+                // `@ffi("lib") extern { ... }` blocks.
+                ItemKind::FFIBoundary(boundary) => {
+                    for func in boundary.functions.iter() {
+                        for (_ident, ty) in func.signature.params.iter() {
+                            note(ty);
+                        }
+                        note(&func.signature.return_type);
+                    }
+                }
+                // `extern "C" { ... }` blocks (kernel-intrinsic FFI).
+                ItemKind::ExternBlock(extern_block) => {
+                    for func in extern_block.functions.iter() {
+                        for param in func.params.iter() {
+                            if let FunctionParamKind::Regular { ty, .. } = &param.kind {
+                                note(ty);
+                            }
+                        }
+                        if let verum_common::Maybe::Some(ret_ty) = &func.return_type {
+                            note(ret_ty);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 3. Generate a layout for each referenced record not already present
+        //    (idempotent w.r.t. the Pass 2 @repr(C) generation site).
+        for name in needed {
+            if self.repr_c_types.contains_key(&name) {
+                continue;
+            }
+            if let Some(fields) = record_fields.get(&name) {
+                let fields = fields.clone();
+                self.generate_ffi_struct_layout(&name, &fields);
+            }
+        }
+    }
+
     /// Returns the size and alignment for a C type.
     fn ctype_size_align(&self, c_type: CType) -> (u16, u16) {
         match c_type {
@@ -11989,8 +12140,14 @@ impl VbcCodegen {
             // Record types: register the type name as a constructor
             // For `type Point is { x: Int, y: Int }`, register `Point` as constructor
             TypeDeclBody::Record(fields) => {
-                // Check for @repr(C) attribute - generate FFI struct layout if present
-                if self.has_repr_c(&type_decl.attributes) {
+                // Check for @repr(C) attribute - generate FFI struct layout if present.
+                // The `!contains_key` guard keeps this idempotent with
+                // `pregenerate_ffi_struct_layouts` (#32), which may already have
+                // generated a layout for this record if an extern signature
+                // references it.
+                if self.has_repr_c(&type_decl.attributes)
+                    && !self.repr_c_types.contains_key(&type_name)
+                {
                     self.generate_ffi_struct_layout(&type_name, fields);
                 }
 

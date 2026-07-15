@@ -1260,11 +1260,18 @@ unsafe fn marshal_verum_struct_to_c(
     // SAFETY: Caller guarantees obj_ptr points to a valid Verum heap object
     // and struct_buffer is large enough to hold the marshalled struct.
     unsafe {
-        for field in layout.fields.iter() {
-            let string_id = field.name.0 as usize;
+        // The Verum-side slot index is the field's DECLARED POSITION (heap
+        // objects store fields contiguously at HEADER + pos*sizeof(Value), the
+        // same order `resolve_field_index` / GetF use). `field.name` is a
+        // GLOBAL interned field id (see the NOTE on `intern_field_name` in
+        // codegen) — NOT the per-type position — so it must never be used as
+        // the slot index. `layout.fields` is built in declared order, so the
+        // enumeration index is exactly the object slot; `field.offset` remains
+        // the (independent) packed C-struct byte offset. (#32)
+        for (slot, field) in layout.fields.iter().enumerate() {
             let value_ptr = obj_ptr
                 .add(crate::interpreter::OBJECT_HEADER_SIZE)
-                .add(string_id * std::mem::size_of::<Value>());
+                .add(slot * std::mem::size_of::<Value>());
             let field_value = *(value_ptr as *const Value);
 
             let c_field_ptr = struct_buffer.as_mut_ptr().add(field.offset as usize);
@@ -1289,12 +1296,15 @@ unsafe fn marshal_c_to_verum_struct(
     // SAFETY: Caller guarantees obj_ptr points to a valid writable Verum heap object
     // and struct_buffer contains valid marshalled data.
     unsafe {
-        for field in layout.fields.iter() {
-            let string_id = field.name.0 as usize;
+        // See `marshal_verum_struct_to_c`: the Verum-side slot is the field's
+        // declared position (enumeration index), NOT the global interned
+        // `field.name` id. `field.offset` is the packed C-struct byte offset
+        // the kernel wrote through. (#32)
+        for (slot, field) in layout.fields.iter().enumerate() {
             let c_field_ptr = struct_buffer.as_ptr().add(field.offset as usize);
             let value_ptr = obj_ptr
                 .add(crate::interpreter::OBJECT_HEADER_SIZE)
-                .add(string_id * std::mem::size_of::<Value>())
+                .add(slot * std::mem::size_of::<Value>())
                 as *mut Value;
 
             if let Some(field_value) = marshal_field_from_c(field.c_type, c_field_ptr) {
