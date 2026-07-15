@@ -517,6 +517,14 @@ impl VbcCodegen {
                                             verum_ast::ty::GenericArg::Type(ty) => {
                                                 self.extract_type_name(ty)
                                             }
+                                            // CONST-GENERIC-VALUE-CARRY-1:
+                                            // `let a: StackAllocator<1024>`
+                                            // must record the const arg so
+                                            // receiver-driven witness
+                                            // derivation can parse it back.
+                                            verum_ast::ty::GenericArg::Const(expr) => {
+                                                crate::codegen::VbcCodegen::render_const_generic_arg(expr)
+                                            }
                                             _ => None,
                                         })
                                         .collect();

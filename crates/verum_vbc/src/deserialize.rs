@@ -1198,6 +1198,11 @@ impl<'a> Deserializer<'a> {
      self.offset += len;
      Ok(TypeRef::AssociatedProjection { base, assoc })
  }
+ 0x0B => {
+     // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1 (format 2.8).
+     let v = decode_u64(self.data, &mut self.offset)? as i64;
+     Ok(TypeRef::ConstValue(v))
+ }
  _ => Err(VbcError::InvalidTypeRefTag(tag)),
  }
  }

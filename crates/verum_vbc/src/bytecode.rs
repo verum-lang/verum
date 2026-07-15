@@ -2966,6 +2966,8 @@ fn encode_optional_reg(reg: Option<Reg>, output: &mut Vec<u8>) {
 /// - 0x06: Array { element, length }
 /// - 0x07: Slice(inner)
 /// - 0x08: Rank2Function { type_param_count, params, return_type, contexts }
+/// - 0x09: AssociatedProjection { base, assoc }
+/// - 0x0A: ConstValue(i64) — const-generic value argument
 #[inline]
 fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
     match type_ref {
@@ -3051,6 +3053,13 @@ fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             let bytes = assoc.as_bytes();
             encode_varint(bytes.len() as u64, output);
             output.extend_from_slice(bytes);
+        }
+        TypeRef::ConstValue(v) => {
+            // CONST-GENERIC-VALUE-CARRY-1: const-generic value argument.
+            // Two's-complement round-trip through u64 (negatives take the
+            // 10-byte varint form; lossless).
+            output.push(0x0A);
+            encode_varint(*v as u64, output);
         }
     }
 }
@@ -5793,6 +5802,8 @@ fn decode_extended_reg_operands(
 /// - 0x06: Array { element, length }
 /// - 0x07: Slice(inner)
 /// - 0x08: Rank2Function { type_param_count, params, return_type, contexts }
+/// - 0x09: AssociatedProjection { base, assoc }
+/// - 0x0A: ConstValue(i64) — const-generic value argument
 fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
     use smallvec::SmallVec;
 
@@ -5927,6 +5938,11 @@ fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
             let assoc = String::from_utf8_lossy(&data[*offset..*offset + len]).into_owned();
             *offset += len;
             Ok(TypeRef::AssociatedProjection { base, assoc })
+        }
+        0x0A => {
+            // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1
+            let v = decode_varint(data, offset)? as i64;
+            Ok(TypeRef::ConstValue(v))
         }
         _ => Err(VbcError::InvalidTypeRef {
             offset: *offset as u32 - 1,

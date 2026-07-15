@@ -84,6 +84,9 @@ impl<'ctx> TypeLowering<'ctx> {
             TypeRef::AssociatedProjection { .. } => Err(LlvmLoweringError::type_lowering(
                 "Associated-type projections should be resolved before lowering",
             )),
+            // CONST-GENERIC-VALUE-CARRY-1: a const-generic VALUE argument
+            // is an integer at the value level.
+            TypeRef::ConstValue(_) => Ok(self.i64_type.into()),
         }
     }
 

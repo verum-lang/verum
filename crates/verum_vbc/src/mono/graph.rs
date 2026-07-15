@@ -227,6 +227,12 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             hash_type_ref(base, hasher);
             assoc.hash(hasher);
         }
+        TypeRef::ConstValue(v) => {
+            // Const-generic VALUE — distinct values are distinct
+            // specializations (CONST-GENERIC-VALUE-CARRY-1).
+            11u8.hash(hasher);
+            v.hash(hasher);
+        }
         TypeRef::Rank2Function {
             type_param_count,
             params,

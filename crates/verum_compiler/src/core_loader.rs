@@ -775,6 +775,9 @@ fn type_ref_to_text(type_ref: &TypeRef, module: &VbcModule) -> Text {
         TypeRef::AssociatedProjection { base, assoc } => {
             format!("::{}<{}>", assoc, type_ref_to_text(base, module)).into()
         }
+        // CONST-GENERIC-VALUE-CARRY-1: const-generic VALUE argument —
+        // renders as its literal (`StackAllocator<256>` round-trips).
+        TypeRef::ConstValue(v) => v.to_string().into(),
     }
 }
 

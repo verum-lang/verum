@@ -181,6 +181,10 @@ pub(super) fn skip_type_ref(state: &mut InterpreterState) -> InterpreterResult<(
                 read_u8(state)?;
             }
         }
+        0x0A => {
+            // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1
+            read_varint(state)?;
+        }
         other => {
             return Err(InterpreterError::InvalidBytecode {
                 pc: state.pc() as usize,
@@ -264,6 +268,13 @@ pub(super) fn read_type_ref(
                 read_u8(state)?;
             }
             base
+        }
+        0x0A => {
+            // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1: round-trips
+            // EXACTLY (the generic-witness channel delivers the value to
+            // the callee frame; `LoadT { Generic(idx) }` on a ConstValue
+            // witness materializes `Value::from_i64(v)`).
+            TypeRef::ConstValue(read_varint(state)? as i64)
         }
         other => {
             return Err(InterpreterError::InvalidBytecode {

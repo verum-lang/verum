@@ -110,6 +110,30 @@ pub(in super::super) fn handle_loadt(
     // Generic (no witness) loads nil — callers keep their legacy
     // erased-T fallbacks.
     let tr = super::bytecode_io::read_type_ref(state)?;
+    // CONST-GENERIC-VALUE-CARRY-1 (task #19): a const-generic witness is a
+    // VALUE, not a type.  `LoadT { Generic(idx) }` in a const-param body
+    // (`fn capacity(&self) -> Int { SIZE }`) resolves through the SAME
+    // frame witness table type params use; a `ConstValue(v)` entry
+    // materializes the instantiation's integer (`StackAllocator<256>` →
+    // 256).  A direct `ConstValue` payload (post-specialization) loads
+    // the literal.  No witness → nil (legacy erased fallback), unchanged.
+    {
+        let frame_args = state.call_stack.current_generic_witnesses();
+        let const_hit: Option<i64> = match &tr {
+            crate::types::TypeRef::ConstValue(v) => Some(*v),
+            crate::types::TypeRef::Generic(param) => frame_args
+                .and_then(|ta| ta.get(param.0 as usize))
+                .and_then(|inner| match inner {
+                    crate::types::TypeRef::ConstValue(v) => Some(*v),
+                    _ => None,
+                }),
+            _ => None,
+        };
+        if let Some(v) = const_hit {
+            state.set_reg(dst, Value::from_i64(v));
+            return Ok(DispatchResult::Continue);
+        }
+    }
     let resolved: Option<TypeId> = {
         fn head_id(
             tr: &crate::types::TypeRef,

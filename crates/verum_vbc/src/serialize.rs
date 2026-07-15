@@ -561,6 +561,15 @@ impl Serializer {
                 encode_varint(bytes.len() as u64, &mut self.output);
                 self.output.extend_from_slice(bytes);
             }
+            TypeRef::ConstValue(v) => {
+                // CONST-GENERIC-VALUE-CARRY-1 (format 2.8): const-generic
+                // value argument.  Fixed 8-byte two's-complement payload —
+                // the archive reader gates on header.version_minor, so
+                // pre-8 readers reject the archive cleanly via
+                // is_version_compatible rather than mis-parsing.
+                self.output.push(0x0B);
+                encode_u64(*v as u64, &mut self.output);
+            }
         }
         Ok(())
     }

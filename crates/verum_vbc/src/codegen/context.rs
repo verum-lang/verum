@@ -475,6 +475,21 @@ pub struct CodegenContext {
     /// them as runtime values via GetConst since they're resolved during monomorphization.
     pub const_generic_params: HashSet<String>,
 
+    /// CONST-GENERIC-VALUE-CARRY-1 (task #19): staged type/const witness
+    /// args for the IMMEDIATELY-FOLLOWING `compile_static_method_call`.
+    ///
+    /// `StackAllocator<256>.new()` reaches the static-call emitter through
+    /// a `FunctionInfo` that carries no callsite instantiation, and for a
+    /// const-only impl the descriptor is not even "generic" (const params
+    /// have no `TypeRef::Generic` occurrence in params/return), so
+    /// `record_generic_instantiation` derives nothing.  The TypeExpr
+    /// receiver branch in `compile_method_call` parses the receiver's
+    /// generic args (`Const(256)` → `ConstValue(256)`) and stages them
+    /// here; `compile_static_method_call` TAKES the value at entry (every
+    /// early-return path drops it — no leakage into unrelated calls by
+    /// construction) and emits `CallG` carrying the witnesses.
+    pub pending_static_call_type_args: Option<Vec<crate::types::TypeRef>>,
+
     /// Newtype type names (single-field wrapper types like `type FileDesc is (Int)`).
     ///
 
@@ -1403,6 +1418,7 @@ impl CodegenContext {
             type_generic_params: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
+            pending_static_call_type_args: None,
             newtype_names: HashSet::new(),
             newtype_inner_type: HashMap::new(),
             user_defined_types: HashSet::new(),
@@ -1432,6 +1448,7 @@ impl CodegenContext {
             type_generic_params: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
+            pending_static_call_type_args: None,
             typed_array_vars: HashMap::new(),
             byte_array_vars: HashSet::new(),
             required_contexts: HashSet::new(),

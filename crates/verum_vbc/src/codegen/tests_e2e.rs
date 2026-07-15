@@ -2871,3 +2871,216 @@ mod debug_assert_cfg_tests {
         );
     }
 }
+
+// ============================================================================
+// CONST-GENERIC-VALUE-CARRY-1 (task #19): const-generic value witnesses
+// ============================================================================
+//
+// `implement<const N: Int> B<N> { fn cap(&self) -> Int { N } }` must return
+// the INSTANTIATION's value (7 for B<7>) at Tier-0.  The const param
+// compiles to `LoadT { Generic(idx) }` over the shared ordered-params
+// numbering; the callsite carries `TypeRef::ConstValue(v)` through the
+// #44-B generic-witness channel (CallG type_args / SetCallWitness sidecar)
+// and the LoadT handler materializes `Value::from_i64(v)`.
+mod const_generic_value_carry_tests {
+    use super::{compile_module, parse_source};
+    use crate::interpreter::Interpreter;
+    use crate::value::Value;
+    use std::sync::Arc;
+
+    /// Parse + compile + run `main` in the Tier-0 interpreter.
+    ///
+    /// `main` is resolved BY NAME ("<module>.main" — the codegen qualifies
+    /// it), not by FunctionId(0): impl methods compile before top-level
+    /// fns, so id 0 is whatever method happened first.
+    fn compile_and_run(source: &str) -> Value {
+        let ast = parse_source(source).expect("parse failed");
+        let vbc = compile_module(&ast).expect("compile failed");
+        let main_id = vbc
+            .functions
+            .iter()
+            .find(|f| {
+                vbc.get_string(f.name)
+                    .map(|n| n == "main" || n.ends_with(".main"))
+                    .unwrap_or(false)
+            })
+            .map(|f| f.id)
+            .expect("main not found");
+        let mut interp = Interpreter::new(Arc::new(vbc));
+        interp.execute_function(main_id).expect("execution failed")
+    }
+
+    fn assert_main_returns_int(source: &str, expected: i64) {
+        let result = compile_and_run(source);
+        assert_eq!(
+            result.try_as_i64(),
+            Some(expected),
+            "expected Int {}, got {:?}",
+            expected,
+            result
+        );
+    }
+
+    /// Receiver-driven const witness: `let b = B<7>.new(); b.cap()` — the
+    /// let-binding carries "B<7>" (constructor full-instantiation carry),
+    /// the method callsite parses it back into [ConstValue(7)], and the
+    /// body's `N` resolves through the frame witness table.
+    #[test]
+    fn const_generic_method_body_returns_instantiation_value() {
+        assert_main_returns_int(
+            r#"
+            type B<const N: Int> is { x: Int };
+
+            implement<const N: Int> B<N> {
+                public fn new() -> Self {
+                    Self { x: 1 }
+                }
+                public fn cap(&self) -> Int {
+                    N
+                }
+            }
+
+            fn main() -> Int {
+                let b = B<7>.new();
+                b.cap()
+            }
+            "#,
+            7,
+        );
+    }
+
+    /// Static-call const witness: `B<21>.size2()` — the TypeExpr receiver's
+    /// args stage [ConstValue(21)] onto the static CallG; the static body's
+    /// `N * 2` resolves N through the callee frame witnesses.
+    #[test]
+    fn const_generic_static_method_uses_value() {
+        assert_main_returns_int(
+            r#"
+            type B<const N: Int> is { x: Int };
+
+            implement<const N: Int> B<N> {
+                public fn size2() -> Int {
+                    N * 2
+                }
+            }
+
+            fn main() -> Int {
+                B<21>.size2()
+            }
+            "#,
+            42,
+        );
+    }
+
+    /// Distinct instantiations resolve distinct values through the SAME
+    /// shared generic body (no cross-contamination of witnesses).
+    #[test]
+    fn const_generic_distinct_instantiations() {
+        assert_main_returns_int(
+            r#"
+            type B<const N: Int> is { x: Int };
+
+            implement<const N: Int> B<N> {
+                public fn new() -> Self {
+                    Self { x: 0 }
+                }
+                public fn cap(&self) -> Int {
+                    N
+                }
+            }
+
+            fn main() -> Int {
+                let small = B<16>.new();
+                let big = B<256>.new();
+                big.cap() - small.cap()
+            }
+            "#,
+            240,
+        );
+    }
+
+    /// The stack_alloc shape: capacity() + remaining() arithmetic over the
+    /// const param, `&self` receiver, annotated let.
+    #[test]
+    fn const_generic_stack_allocator_shape() {
+        assert_main_returns_int(
+            r#"
+            type StackAlloc<const SIZE: Int> is { top: Int };
+
+            implement<const SIZE: Int> StackAlloc<SIZE> {
+                public fn new() -> Self {
+                    Self { top: 0 }
+                }
+                public fn capacity(&self) -> Int {
+                    SIZE
+                }
+                public fn remaining(&self) -> Int {
+                    SIZE - self.top
+                }
+            }
+
+            fn main() -> Int {
+                let a = StackAlloc<1024>.new();
+                a.capacity() + a.remaining()
+            }
+            "#,
+            2048,
+        );
+    }
+
+    /// Alias of an instantiated const-generic target
+    /// (`type Tiny is Alloc<1024>;`) — both the alias static call and the
+    /// alias-typed receiver derive the target's const witnesses through
+    /// `alias_instantiation_targets`.
+    #[test]
+    fn const_generic_alias_instantiation() {
+        assert_main_returns_int(
+            r#"
+            type Alloc<const SIZE: Int> is { top: Int };
+
+            implement<const SIZE: Int> Alloc<SIZE> {
+                public fn new() -> Self {
+                    Self { top: 0 }
+                }
+                public fn capacity(&self) -> Int {
+                    SIZE
+                }
+            }
+
+            type Tiny is Alloc<1024>;
+
+            fn main() -> Int {
+                let a = Tiny.new();
+                a.capacity()
+            }
+            "#,
+            1024,
+        );
+    }
+
+    /// ConstValue wire round-trip: bytecode-stream encode/decode.
+    #[test]
+    fn const_value_typeref_bytecode_roundtrip() {
+        use crate::instruction::{Instruction, Reg};
+        use crate::types::TypeRef;
+        for v in [0i64, 7, 256, -3, i64::MAX, i64::MIN] {
+            let instr = Instruction::LoadT {
+                dst: Reg(0),
+                type_ref: TypeRef::ConstValue(v),
+            };
+            let mut bytes = Vec::new();
+            crate::bytecode::encode_instruction(&instr, &mut bytes);
+            let mut offset = 0usize;
+            let decoded = crate::bytecode::decode_instruction(&bytes, &mut offset)
+                .expect("decode failed");
+            assert_eq!(offset, bytes.len(), "stream fully consumed");
+            match decoded {
+                Instruction::LoadT {
+                    type_ref: TypeRef::ConstValue(dv),
+                    ..
+                } => assert_eq!(dv, v),
+                other => panic!("expected LoadT(ConstValue), got {:?}", other),
+            }
+        }
+    }
+}

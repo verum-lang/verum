@@ -897,6 +897,8 @@ impl VbcLinker {
                 base: Box::new(self.remap_type_ref(base, remap)?),
                 assoc: assoc.clone(),
             },
+            // Const-generic VALUE — no ids to remap.
+            TypeRef::ConstValue(v) => TypeRef::ConstValue(*v),
         })
     }
 

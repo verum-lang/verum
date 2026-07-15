@@ -467,6 +467,10 @@ impl RegisterType {
 
             // A projection like `F.Output` is generic until monomorphized.
             TypeRef::AssociatedProjection { .. } => Self::GenericParam,
+
+            // CONST-GENERIC-VALUE-CARRY-1: a const-generic VALUE argument
+            // is an integer at the value level.
+            TypeRef::ConstValue(_) => Self::Int,
         }
     }
 

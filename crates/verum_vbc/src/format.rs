@@ -53,7 +53,15 @@ pub const VERSION_MAJOR: u16 = 2;
 /// receivers; Instantiated → base-only, generic args dropped).  Gated on
 /// minor >= 6 in the deserializer; pre-6 data decodes as `None` and keeps
 /// the legacy derivation.
-pub const VERSION_MINOR: u16 = 7;
+/// Version 2.8: additive `TypeRef::ConstValue(i64)` variant (0x0A in the
+/// bytecode wire format, 0x0B in the archive wire format) —
+/// CONST-GENERIC-VALUE-CARRY-1 (task #19).  Carries a const-generic
+/// instantiation's VALUE (`StackAllocator<256>` → ConstValue(256))
+/// through CallG type_args / witness sidecars so method bodies resolve
+/// const params (`SIZE`) at Tier-0 via the #44-B generic-witness channel.
+/// Additive: old readers reject the new tag via `is_version_compatible`,
+/// new readers accept all 2.x archives.
+pub const VERSION_MINOR: u16 = 8;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

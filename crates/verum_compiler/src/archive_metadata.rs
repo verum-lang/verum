@@ -1291,6 +1291,10 @@ fn type_ref_to_text_with_params(
                 type_ref_to_text_with_params(base, type_id_to_name, param_id_to_name)
             )
         }
+        // CONST-GENERIC-VALUE-CARRY-1: const-generic VALUE argument renders
+        // as its literal so `StackAllocator<256>` round-trips through the
+        // metadata text form instead of degrading to `__opaque_typeref`.
+        TypeRef::ConstValue(v) => v.to_string(),
         _ => "__opaque_typeref".to_string(),
     }
 }

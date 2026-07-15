@@ -521,6 +521,9 @@ impl VbcModule {
             TypeRef::AssociatedProjection { base, assoc } => {
                 format!("{}.{}", self.display_type_ref(base), assoc)
             }
+            // Const-generic VALUE argument renders as its literal —
+            // `StackAllocator<256>` round-trips as written.
+            TypeRef::ConstValue(v) => v.to_string(),
         }
     }
 

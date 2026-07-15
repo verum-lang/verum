@@ -1963,14 +1963,38 @@ impl VbcCodegen {
 
                 // Check if this is a const generic parameter (SIZE, N, etc.)
                 // These appear in expressions like `SIZE * 8` or `N - 1` and represent
-                // compile-time known values. During monomorphization, these are replaced
-                // with actual integer values.
+                // compile-time known values.
+                //
+                // CONST-GENERIC-VALUE-CARRY-1 (task #19): emit the #44-B
+                // generic-witness form — `LoadT { Generic(idx) }` over the
+                // shared ordered-params numbering (impl-level type AND const
+                // params, declaration order).  At Tier-0 the frame's
+                // CallG/SetCallWitness-delivered witness table resolves the
+                // slot to `TypeRef::ConstValue(v)` and the LoadT handler
+                // materializes `Value::from_i64(v)` — `StackAllocator<256>
+                // .capacity()` returns 256.  With NO witness LoadT yields
+                // nil, byte-identical to the historical LoadNil placeholder
+                // (strictly-better, never-worse).
                 if self.ctx.const_generic_params.contains(&name.to_string()) {
                     let dest = self.ctx.alloc_temp();
-                    // Const generics are resolved during monomorphization.
-                    // At codegen time, emit LoadNil as a placeholder - the specializer
-                    // will substitute the actual integer value during specialization.
-                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    if let Some(idx) = self
+                        .ctx
+                        .generic_type_params_ordered
+                        .iter()
+                        .position(|p| p == &name.to_string())
+                    {
+                        self.ctx.emit(Instruction::LoadT {
+                            dst: dest,
+                            type_ref: crate::types::TypeRef::Generic(
+                                crate::types::TypeParamId(idx as u16),
+                            ),
+                        });
+                    } else {
+                        // Not in the ordered numbering (registration path
+                        // that never populated it) — keep the legacy
+                        // placeholder.
+                        self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    }
                     return Ok(Some(dest));
                 }
 
@@ -6911,6 +6935,19 @@ impl VbcCodegen {
     /// Returns None when the base name is unknown or a bare type parameter.
     fn type_name_to_type_ref_mono(&self, name: &str) -> Option<crate::types::TypeRef> {
         let name = name.trim();
+        // CONST-GENERIC-VALUE-CARRY-1: a const-generic ARG renders as its
+        // integer literal (`StackAllocator<256>` → arg "256") — parse it
+        // back as the value form so receiver-name-derived witnesses carry
+        // the instantiation's VALUE.
+        if name
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit() || c == '-')
+            .unwrap_or(false)
+            && let Ok(v) = name.parse::<i64>()
+        {
+            return Some(crate::types::TypeRef::ConstValue(v));
+        }
         if let Some(lt) = name.find('<') {
             let base_name = name[..lt].trim();
             let close = name.rfind('>')?;
@@ -6933,11 +6970,88 @@ impl VbcCodegen {
             // 2-char concrete types like `Pt`).  An UNBOUND unknown name
             // simply misses `type_name_to_id` below and returns None.
             None
+        } else if let Some(full) = self.alias_instantiation_targets.get(name) {
+            // CONST-GENERIC-VALUE-CARRY-1: an alias of an INSTANTIATED
+            // target (`TinyStackAllocator` -> `StackAllocator<1024>`)
+            // resolves to the target's full form so its const/type args
+            // become witnesses.  The expansion text always differs from
+            // the alias name (it contains '<'), so recursion terminates.
+            self.type_name_to_type_ref_mono(&full.clone())
         } else {
             self.type_name_to_id
                 .get(name)
                 .map(|&id| crate::types::TypeRef::Concrete(id))
         }
+    }
+
+    /// CONST-GENERIC-VALUE-CARRY-1 (task #19): derive positional generic
+    /// witnesses from an explicit TypeExpr's argument list
+    /// (`StackAllocator<256>` → `[ConstValue(256)]`,
+    /// `Pair<Int, 7>` → `[Concrete(Int), ConstValue(7)]`).
+    ///
+    /// Symbolic args (a const-param or type-param NAME in scope) map to
+    /// `Generic(idx)` over the shared ordered-params numbering so nested
+    /// generic bodies re-resolve them against their own frame witnesses at
+    /// CallG time.  Returns `None` unless at least one slot is concrete
+    /// (an all-placeholder vector carries no information).
+    fn type_expr_witness_args(
+        &self,
+        ty: &verum_ast::ty::Type,
+    ) -> Option<Vec<crate::types::TypeRef>> {
+        use crate::types::{TypeParamId, TypeRef};
+        use verum_ast::ty::{GenericArg, TypeKind};
+        let TypeKind::Generic { args, .. } = &ty.kind else {
+            return None;
+        };
+        if args.is_empty() {
+            return None;
+        }
+        let ordered_pos = |ordered: &[String], n: &str| {
+            ordered
+                .iter()
+                .position(|p| p == n)
+                .map(|idx| TypeRef::Generic(TypeParamId(idx as u16)))
+        };
+        let mut out: Vec<TypeRef> = Vec::with_capacity(args.len());
+        let mut any_concrete = false;
+        for (i, arg) in args.iter().enumerate() {
+            let tr: Option<TypeRef> = match arg {
+                GenericArg::Const(expr) => {
+                    VbcCodegen::render_const_generic_arg(expr).and_then(|s| {
+                        if let Ok(v) = s.parse::<i64>() {
+                            Some(TypeRef::ConstValue(v))
+                        } else {
+                            // Symbolic const-param name — witness chains
+                            // through the caller's own witness table.
+                            ordered_pos(&self.ctx.generic_type_params_ordered, &s)
+                        }
+                    })
+                }
+                GenericArg::Type(t) => {
+                    let name = VbcCodegen::extract_type_name_from_ast(t);
+                    if name.is_empty() {
+                        None
+                    } else {
+                        self.type_name_to_type_ref_mono(&name)
+                            .or_else(|| ordered_pos(&self.ctx.generic_type_params_ordered, &name))
+                    }
+                }
+                _ => None,
+            };
+            match tr {
+                Some(t) => {
+                    if !matches!(t, TypeRef::Generic(_)) {
+                        any_concrete = true;
+                    }
+                    out.push(t);
+                }
+                // Positional honesty: an unresolvable slot keeps its index
+                // as a placeholder — never collapse the vector (the
+                // consumer indexes by position).
+                None => out.push(TypeRef::Generic(TypeParamId(i as u16))),
+            }
+        }
+        if any_concrete { Some(out) } else { None }
     }
 
     /// Split a generic argument list on top-level commas, respecting `<>` nesting
@@ -9952,10 +10066,62 @@ impl VbcCodegen {
         // `Productive(payload)` / `NonProductive` (the first two-variant
         // sum to load: `core/base/coinductive.vr::ProductivityResult`).
         // Pinned by `core-tests/async/poll/regression_test.vr` §A.
+        // CONST-GENERIC-VALUE-CARRY-1 (task #19): derive callsite generic
+        // witnesses from an explicit TypeExpr receiver's args —
+        // `StackAllocator<256>.new()` carries [ConstValue(256)] so the
+        // constructor body's `SIZE` (`buffer: [0; SIZE]`) resolves through
+        // the frame witness table.  A symbolic arg (`B<N>.new()` inside a
+        // generic body) maps to `Generic(idx)` over the shared ordered
+        // numbering, so nested chains re-resolve at the outer CallG.
+        let static_witness_args: Option<Vec<crate::types::TypeRef>> =
+            if let ExprKind::TypeExpr(ty) = &receiver.kind {
+                self.type_expr_witness_args(ty)
+            } else {
+                // Alias static call (`TinyStackAllocator.new()`): the bare
+                // Path receiver names an alias of an INSTANTIATED target —
+                // its recorded expansion carries the const/type witnesses.
+                static_receiver_type
+                    .as_deref()
+                    .filter(|n| self.alias_instantiation_targets.contains_key(*n))
+                    .and_then(|n| match self.type_name_to_type_ref_mono(n) {
+                        Some(crate::types::TypeRef::Instantiated { args, .. })
+                            if args
+                                .iter()
+                                .any(|t| !matches!(t, crate::types::TypeRef::Generic(_))) =>
+                        {
+                            Some(args)
+                        }
+                        _ => None,
+                    })
+            };
+
         if let Some(ref type_name) = static_receiver_type {
             let qualified_rust = format!("{}::{}", type_name, method.name);
             let qualified_verum = format!("{}.{}", type_name, method.name);
-            for candidate in [&qualified_rust, &qualified_verum] {
+            // CONST-GENERIC-VALUE-CARRY-1: alias statics resolve against
+            // the alias TARGET's method table (`TinyStackAllocator.new` →
+            // `StackAllocator.new`) — appended AFTER the literal
+            // spellings so a genuinely-registered alias-qualified method
+            // still wins.  Only aliases with a recorded instantiated
+            // target participate (everything else keeps the legacy flow).
+            let alias_candidates: Vec<String> =
+                if self.alias_instantiation_targets.contains_key(type_name.as_str()) {
+                    let base = self.resolve_type_alias(type_name);
+                    if &base != type_name {
+                        vec![
+                            format!("{}::{}", base, method.name),
+                            format!("{}.{}", base, method.name),
+                        ]
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+            for candidate in [&qualified_rust, &qualified_verum]
+                .into_iter()
+                .chain(alias_candidates.iter())
+            {
                 if let Some(func_info) = self.ctx.lookup_qualified_function(candidate).cloned()
                     && func_info.param_count == args.len()
                 {
@@ -9967,6 +10133,10 @@ impl VbcCodegen {
                             Some(type_name),
                         );
                     }
+                    // Stage witnesses for the immediately-following static
+                    // call (taken at its entry; every non-consuming path
+                    // drops them).
+                    self.ctx.pending_static_call_type_args = static_witness_args.clone();
                     return self.compile_static_method_call(&func_info, args);
                 }
                 if let Some(func_info) = self.ctx.lookup_function(candidate).cloned()
@@ -9980,6 +10150,7 @@ impl VbcCodegen {
                             Some(type_name),
                         );
                     }
+                    self.ctx.pending_static_call_type_args = static_witness_args.clone();
                     return self.compile_static_method_call(&func_info, args);
                 }
             }
@@ -12359,6 +12530,26 @@ impl VbcCodegen {
             verum_common::well_known_types::WellKnownType::has_runtime_inline_dispatch(prefix)
         }
 
+        // `lookup_function_with_arity` handles overload sets via the
+        // `name#arity` suffix convention (`compile_static_method_call`
+        // uses the same pathway).  +1 for the receiver `self` slot.
+        // Computed BEFORE the devirt split (CONST-GENERIC-VALUE-CARRY-1):
+        // the generic-witness sidecar derivation below needs the resolved
+        // callee id on BOTH emission paths — the devirt Call upgrades to
+        // CallG when witnesses derive, the CallM path stages them via
+        // SetCallWitness.
+        let resolvable_fid: Option<u32> = self
+            .ctx
+            .lookup_function_with_arity(&effective_method_name, args.len() + 1)
+            .filter(|fi| {
+                fi.param_count == args.len() + 1
+                    && fi.id.0 != u32::MAX
+                    && fi.id.0 != u32::MAX / 2
+                    && fi.variant_tag.is_none()
+                    && fi.intrinsic_name.is_none()
+            })
+            .map(|fi| fi.id.0);
+
         let devirt_func_id: Option<u32> = if effective_method_name.starts_with("dyn:")
             || effective_method_name.starts_with("byte$")
             || effective_method_name.starts_with("int32$")
@@ -12377,20 +12568,51 @@ impl VbcCodegen {
         {
             None
         } else {
-            // `lookup_function_with_arity` handles overload sets via the
-            // `name#arity` suffix convention (`compile_static_method_call`
-            // uses the same pathway).  +1 for the receiver `self` slot.
-            self.ctx
-                .lookup_function_with_arity(&effective_method_name, args.len() + 1)
-                .filter(|fi| {
-                    fi.param_count == args.len() + 1
-                        && fi.id.0 != u32::MAX
-                        && fi.id.0 != u32::MAX / 2
-                        && fi.variant_tag.is_none()
-                        && fi.intrinsic_name.is_none()
-                })
-                .map(|fi| fi.id.0)
+            resolvable_fid
         };
+
+        // #44-B generic-witness derivation (hoisted above the devirt split
+        // for CONST-GENERIC-VALUE-CARRY-1 — see the CallM-branch comment
+        // below for the full derivation contract).
+        let sidecar_args: Option<Vec<crate::types::TypeRef>> = resolvable_fid
+            .and_then(|fid| {
+                let mut with_recv: verum_common::List<Expr> =
+                    verum_common::List::new();
+                with_recv.push(receiver.clone());
+                for a in args.iter() {
+                    with_recv.push(a.clone());
+                }
+                self.record_generic_instantiation(fid, &with_recv)
+            })
+            // ARCHIVE-BLIND fallback: user-script codegen has no stdlib
+            // FunctionDescriptors (self.functions is module-local), so
+            // the structural binder above derives nothing for stdlib
+            // methods. For an impl method the witnesses ARE the
+            // receiver's own instantiation args — `implement<T>
+            // Maybe<T>` puts the type's params first in the positional
+            // order (generic_type_params_ordered convention), so
+            // `Maybe<Maybe<Int>>` ⇒ [Maybe<Int>].  Const-generic impls
+            // ride the SAME channel: `StackAllocator<256>` ⇒
+            // [ConstValue(256)] (CONST-GENERIC-VALUE-CARRY-1).  Methods
+            // with extra fn-level generics get only the impl prefix; the
+            // body's out-of-range LoadT(Generic) loads nil and keeps the
+            // legacy fallback.
+            .or_else(|| {
+                let recv_ty = self.infer_expr_type_name(receiver)?;
+                match self.type_name_to_type_ref_mono(recv_ty.trim()) {
+                    Some(crate::types::TypeRef::Instantiated {
+                        args: inst_args,
+                        ..
+                    }) if !inst_args.is_empty() => Some(inst_args),
+                    _ => None,
+                }
+            })
+            .filter(|ta| {
+                !ta.is_empty()
+                    && ta
+                        .iter()
+                        .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
+            });
 
         if let Some(func_id) = devirt_func_id {
             // Allocate a consecutive (receiver, args...) block.
@@ -12411,14 +12633,37 @@ impl VbcCodegen {
                     src: Reg(args_start.0 + i as u16),
                 });
             }
-            self.ctx.emit(Instruction::Call {
-                dst: result,
-                func_id,
-                args: crate::instruction::RegRange {
-                    start: call_block_start,
-                    count: (args.len() + 1) as u8,
-                },
-            });
+            // CONST-GENERIC-VALUE-CARRY-1: when witnesses derive for the
+            // devirtualized callee, upgrade the direct Call to CallG —
+            // SAME func_id, same args, plus the type_args vector the
+            // interpreter materializes into the callee frame's witness
+            // table (`handle_call_generic`).  This is NOT the cycle-4
+            // CallM→CallG regression shape: dispatch was already static
+            // here (the devirt denylist filtered WKT intercepts), only
+            // the witness channel is added.
+            match &sidecar_args {
+                Some(type_args) => {
+                    self.ctx.emit(Instruction::CallG {
+                        dst: result,
+                        func_id,
+                        type_args: type_args.clone(),
+                        args: crate::instruction::RegRange {
+                            start: call_block_start,
+                            count: (args.len() + 1) as u8,
+                        },
+                    });
+                }
+                None => {
+                    self.ctx.emit(Instruction::Call {
+                        dst: result,
+                        func_id,
+                        args: crate::instruction::RegRange {
+                            start: call_block_start,
+                            count: (args.len() + 1) as u8,
+                        },
+                    });
+                }
+            }
             // Suppress the unused `method_id` warning when the devirt
             // path wins — the interned string is harmless and cached.
             let _ = method_id;
@@ -12444,54 +12689,8 @@ impl VbcCodegen {
             // attaches the staged vector to the frame it pushes, giving
             // the shared generic body (`Maybe.flatten`'s `T.default()`)
             // its `LoadT(Generic)` witness at Tier-0. Non-push outcomes
-            // drop the sidecar harmlessly.
-            let sidecar_args: Option<Vec<crate::types::TypeRef>> = self
-                .ctx
-                .lookup_function_with_arity(&effective_method_name, args.len() + 1)
-                .filter(|fi| {
-                    fi.param_count == args.len() + 1
-                        && fi.id.0 != u32::MAX
-                        && fi.id.0 != u32::MAX / 2
-                        && fi.variant_tag.is_none()
-                        && fi.intrinsic_name.is_none()
-                })
-                .map(|fi| fi.id.0)
-                .and_then(|fid| {
-                    let mut with_recv: verum_common::List<Expr> =
-                        verum_common::List::new();
-                    with_recv.push(receiver.clone());
-                    for a in args.iter() {
-                        with_recv.push(a.clone());
-                    }
-                    self.record_generic_instantiation(fid, &with_recv)
-                })
-                // ARCHIVE-BLIND fallback: user-script codegen has no stdlib
-                // FunctionDescriptors (self.functions is module-local), so
-                // the structural binder above derives nothing for stdlib
-                // methods. For an impl method the witnesses ARE the
-                // receiver's own instantiation args — `implement<T>
-                // Maybe<T>` puts the type's params first in the positional
-                // order (generic_type_params_ordered convention), so
-                // `Maybe<Maybe<Int>>` ⇒ [Maybe<Int>]. Methods with extra
-                // fn-level generics get only the impl prefix; the body's
-                // out-of-range LoadT(Generic) loads nil and keeps the
-                // legacy fallback.
-                .or_else(|| {
-                    let recv_ty = self.infer_expr_type_name(receiver)?;
-                    match self.type_name_to_type_ref_mono(recv_ty.trim()) {
-                        Some(crate::types::TypeRef::Instantiated {
-                            args: inst_args,
-                            ..
-                        }) if !inst_args.is_empty() => Some(inst_args),
-                        _ => None,
-                    }
-                })
-                .filter(|ta| {
-                    !ta.is_empty()
-                        && ta
-                            .iter()
-                            .any(|t| !matches!(t, crate::types::TypeRef::Generic(_)))
-                });
+            // drop the sidecar harmlessly.  (Derivation hoisted above the
+            // devirt split — `sidecar_args`.)
             if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
                 eprintln!(
                     "[tpcall] sidecar? method={} derived={:?}",
@@ -13446,6 +13645,12 @@ impl VbcCodegen {
         func_info: &FunctionInfo,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        // CONST-GENERIC-VALUE-CARRY-1: take the callsite-staged witness
+        // args UNCONDITIONALLY at entry — every early-return path
+        // (variant ctor, transparent wrapper, intrinsic) drops them, so a
+        // staged vector can never leak into an unrelated later call.
+        let staged_type_args: Option<Vec<crate::types::TypeRef>> =
+            self.ctx.pending_static_call_type_args.take();
         // Variant constructors MUST be checked first — a variant's FunctionInfo
         // may share the sentinel ID with newtype constructors (u32::MAX / 2),
         // and mis-dispatching `Maybe.Some(42)` through the newtype pass-through
@@ -13641,11 +13846,21 @@ impl VbcCodegen {
         // T from the receiver's instantiation and the callee's LoadT
         // (Generic) resolves it at Tier-0 through the frame witness
         // table.
+        //
+        // CONST-GENERIC-VALUE-CARRY-1: the argument-structural binder
+        // cannot derive CONST witnesses (const params never occur as
+        // `TypeRef::Generic` in the descriptor's params/return), so the
+        // callsite-staged TypeExpr witnesses (`StackAllocator<256>.new()`
+        // → [ConstValue(256)]) fill in via `.or(...)` when structural
+        // derivation produced nothing.
         let call_args = crate::instruction::RegRange {
             start: args_start,
             count: args.len() as u8,
         };
-        match self.record_generic_instantiation(func_info.id.0, args) {
+        match self
+            .record_generic_instantiation(func_info.id.0, args)
+            .or(staged_type_args)
+        {
             Some(type_args) if !type_args.is_empty() => {
                 self.ctx.emit(Instruction::CallG {
                     dst: result,
@@ -22604,6 +22819,44 @@ impl VbcCodegen {
                 args,
                 ..
             } => {
+                // CONST-GENERIC-VALUE-CARRY-1 (task #19): static call on an
+                // explicit TypeExpr receiver (`B<7>.new()`,
+                // `StackAllocator<1024>.new()`).  Pre-fix this arm ignored
+                // TypeExpr receivers entirely, so resolution fell through to
+                // the short-name registry fallback below, which returns the
+                // BARE declared return name ("B") — losing the callsite's
+                // instantiation.  The callsite TypeExpr is the ONLY holder
+                // of the const/type args, so a constructor-shaped return
+                // (bare base / Self) re-attaches the FULL rendered
+                // instantiation — `let b = B<7>.new()` records "B<7>", which
+                // the receiver-driven witness derivation later parses back
+                // into `ConstValue(7)`.
+                if let ExprKind::TypeExpr(recv_ty) = &receiver.kind {
+                    let full = VbcCodegen::extract_type_name_from_ast(recv_ty);
+                    if !full.is_empty() {
+                        let base = VbcCodegen::strip_generic_args(&full).to_string();
+                        let qualified = format!("{}.{}", base, method.name);
+                        if let Some(func_info) = self.ctx.lookup_function(&qualified)
+                            && let Some(ref ret_type_name) = func_info.return_type_name
+                        {
+                            let resolved = VbcCodegen::substitute_self_in_type_name(
+                                ret_type_name,
+                                &full,
+                            );
+                            if resolved == base && full.contains('<') {
+                                return Some(full);
+                            }
+                            if let Some(ref inner) = func_info.return_type_inner
+                                && !inner.is_empty()
+                                && inner.iter().all(|s| !s.trim().is_empty())
+                                && !resolved.contains('<')
+                            {
+                                return Some(format!("{}<{}>", resolved, inner.join(", ")));
+                            }
+                            return Some(resolved);
+                        }
+                    }
+                }
                 // First, check if this is a static method call on a type
                 if let ExprKind::Path(path) = &receiver.kind
                     && path.segments.len() == 1
@@ -24465,6 +24718,17 @@ impl VbcCodegen {
                         // covers the stripped-generic-base lookup path
                         // (`Map<Int, V>` → look up `Map.method`).
                         let ret = VbcCodegen::substitute_self_in_type_name(&ret, &receiver_type);
+                        // CONST-GENERIC-VALUE-CARRY-1: constructor-shaped
+                        // returns (`B<7>.new() -> Self`, registered with the
+                        // BARE base name after Self substitution) must keep
+                        // the CALLSITE's full instantiation — the callsite is
+                        // the only holder of the const/type args.  Without
+                        // this, `let b = B<7>.new()` records "B" and the
+                        // receiver-driven const-witness derivation for
+                        // `b.cap()` has nothing to parse.
+                        if ret == base_type && receiver_type.contains('<') {
+                            return Some(receiver_type);
+                        }
                         return Some(ret);
                     }
                 }
@@ -24541,6 +24805,18 @@ impl VbcCodegen {
             // let-binding mis-resolved field offsets via the global
             // field-name interner.
             ExprKind::Range { .. } => Some("Range".to_string()),
+            // Type expression in expression position (`B<7>` as the
+            // receiver of `B<7>.new()`) — its "type name" IS the rendered
+            // type, generic args INCLUDED.  CONST-GENERIC-VALUE-CARRY-1:
+            // this lets the MethodCall arm above compose `B<7>.new()` →
+            // constructor return "B<7>" (the callsite is the only place
+            // the const instantiation is known), which the let-binding
+            // records and the receiver-driven witness derivation later
+            // parses back into `ConstValue(7)`.
+            ExprKind::TypeExpr(ty) => {
+                let name = VbcCodegen::extract_type_name_from_ast(ty);
+                if name.is_empty() { None } else { Some(name) }
+            }
             _ => None,
         }
     }

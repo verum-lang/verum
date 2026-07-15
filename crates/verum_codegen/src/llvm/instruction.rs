@@ -1944,6 +1944,16 @@ pub fn lower_instruction<'ctx>(
         }
 
         Instruction::LoadT { dst, type_ref } => {
+            // CONST-GENERIC-VALUE-CARRY-1 (task #19): a const-generic
+            // VALUE payload (post-specialization, or a direct
+            // `ConstValue` emission) lowers to the integer constant —
+            // it is a VALUE, not runtime type info.
+            if let TypeRef::ConstValue(v) = type_ref {
+                ctx.loadt_generic_regs.remove(&dst.0);
+                let llvm_val = ctx.types().i64_type().const_int(*v as u64, true);
+                ctx.set_register(dst.0, llvm_val.into());
+                return Ok(());
+            }
             // Type references are lowered as pointer type (runtime type info)
             // #44-B: a Generic payload has no witness at AOT (frames are
             // native, no witness table) — track the register so CallM

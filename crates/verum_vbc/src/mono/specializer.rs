@@ -912,6 +912,7 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Rank2Function { .. } => 8, // function pointer (rank-2 polymorphic)
             TypeRef::Generic(_) => 8,           // Should be substituted by now
             TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
+            TypeRef::ConstValue(_) => 8,        // integer value slot
         }
     }
 
@@ -940,6 +941,7 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Rank2Function { .. } => 8,
             TypeRef::Generic(_) => 8,
             TypeRef::AssociatedProjection { .. } => 8, // resolved before mono
+            TypeRef::ConstValue(_) => 8,       // integer value slot
         }
     }
 
@@ -1299,6 +1301,11 @@ impl<'a> BytecodeSpecializer<'a> {
                 let element = Box::new(self.read_type_ref(bytecode, pc)?);
                 Ok(TypeRef::Slice(element))
             }
+            10 => {
+                // ConstValue — CONST-GENERIC-VALUE-CARRY-1
+                let v = self.read_varint(bytecode, pc)? as i64;
+                Ok(TypeRef::ConstValue(v))
+            }
             _ => {
                 // Unknown tag - default to unit
                 Ok(TypeRef::Concrete(TypeId::UNIT))
@@ -1418,6 +1425,11 @@ impl<'a> BytecodeSpecializer<'a> {
                 let bytes = assoc.as_bytes();
                 self.write_varint(output, bytes.len() as u64);
                 output.extend_from_slice(bytes);
+            }
+            TypeRef::ConstValue(v) => {
+                // CONST-GENERIC-VALUE-CARRY-1: const-generic value argument.
+                output.push(10); // tag for ConstValue
+                self.write_varint(output, *v as u64);
             }
         }
     }

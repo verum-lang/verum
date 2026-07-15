@@ -277,6 +277,9 @@ impl<'a> Validator<'a> {
             TypeRef::AssociatedProjection { base, .. } => {
                 self.validate_type_ref(base, depth + 1);
             }
+            TypeRef::ConstValue(_) => {
+                // Const-generic VALUE — nothing to validate (no ids).
+            }
             TypeRef::Rank2Function {
                 params,
                 return_type,

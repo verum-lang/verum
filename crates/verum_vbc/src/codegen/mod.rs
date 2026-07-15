@@ -750,6 +750,18 @@ pub struct VbcCodegen {
     /// For simple aliases like `type MyInt = Int`, we store `Int`.
     type_aliases: std::collections::HashMap<String, String>,
 
+    /// CONST-GENERIC-VALUE-CARRY-1: alias name -> FULL rendered
+    /// instantiated target (`TinyStackAllocator` ->
+    /// `StackAllocator<1024>`).  `type_aliases` deliberately stores only
+    /// the BASE target name (method-resolution contract:
+    /// `Vec4f.splat()` -> `Vec.splat`); the const/type ARGUMENTS of an
+    /// instantiated alias target live here so the witness derivation
+    /// (`type_name_to_type_ref_mono`) can recover
+    /// `[ConstValue(1024)]` for alias-typed receivers and alias static
+    /// calls.  Populated by the source Alias arm AND the archive-type
+    /// importer.
+    alias_instantiation_targets: std::collections::HashMap<String, String>,
+
     /// Names this module declares as a CONCRETE type (a non-alias body:
     /// a multi-variant sum, a record, or a single marker whose name is
     /// NOT an existing type). Such a name must be immune to any
@@ -1929,6 +1941,7 @@ impl VbcCodegen {
             protocol_registry: std::collections::HashMap::new(),
             // Type alias registry for method resolution
             type_aliases: std::collections::HashMap::new(),
+            alias_instantiation_targets: std::collections::HashMap::new(),
             local_concrete_types: std::collections::HashSet::new(),
             alias_scope: None,
             // Context name registry for ContextRef string table
@@ -4383,10 +4396,29 @@ impl VbcCodegen {
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
                             self.ctx.generic_type_params.insert(g.clone());
-                            self.ctx.generic_type_params_ordered.push(g.clone());
                         }
                         for g in &impl_const_generics {
                             self.ctx.const_generic_params.insert(g.clone());
+                        }
+                        // CONST-GENERIC-VALUE-CARRY-1 (task #19): the ORDERED
+                        // list is the positional witness-index authority the
+                        // body-side `LoadT { Generic(idx) }` form keys on, and
+                        // impl-level TYPE and CONST params share ONE
+                        // declaration-ordered numbering — the same slot order
+                        // the receiver's instantiation args carry
+                        // (`implement<const SIZE: Int> StackAllocator<SIZE>`
+                        // ⇒ SIZE = slot 0).  A split type-then-const push
+                        // would mis-number `implement<const N, T>` shapes.
+                        for g in impl_decl.generics.iter() {
+                            match &g.kind {
+                                verum_ast::ty::GenericParamKind::Type { name, .. }
+                                | verum_ast::ty::GenericParamKind::Const { name, .. } => {
+                                    self.ctx
+                                        .generic_type_params_ordered
+                                        .push(name.name.to_string());
+                                }
+                                _ => {}
+                            }
                         }
 
                         // Compile function individually - skip if it fails.
@@ -12381,6 +12413,17 @@ impl VbcCodegen {
                     self.type_aliases
                         .insert(type_name.clone(), base_name);
                 }
+                // CONST-GENERIC-VALUE-CARRY-1: an INSTANTIATED alias target
+                // (`type TinyStackAllocator is StackAllocator<1024>;`)
+                // additionally records its FULL rendered form so the
+                // witness layer can parse the const/type args back.
+                {
+                    let full = Self::extract_type_name_from_ast(target_type);
+                    if full.contains('<') {
+                        self.alias_instantiation_targets
+                            .insert(type_name.clone(), full);
+                    }
+                }
                 // Emit a `TypeKind::Alias` TypeDescriptor so the
                 // archive preserves the alias relation.
                 // Pre-fix every `type IoResult<T> is Result<T,
@@ -13820,12 +13863,21 @@ impl VbcCodegen {
             if let TypeRef::Concrete(base_id) = base_ref {
                 let arg_refs: Vec<TypeRef> = args
                     .iter()
-                    .filter_map(|arg| {
-                        if let verum_ast::ty::GenericArg::Type(inner_ty) = arg {
+                    .filter_map(|arg| match arg {
+                        verum_ast::ty::GenericArg::Type(inner_ty) => {
                             Some(self.resolve_field_type_ref(inner_ty, generic_param_map))
-                        } else {
-                            None
                         }
+                        // CONST-GENERIC-VALUE-CARRY-1: a LITERAL const arg
+                        // carries its value (`StackAllocator<1024>` →
+                        // ConstValue(1024)); symbolic const-param mentions
+                        // keep the legacy drop (positional recovery happens
+                        // at the callsite witness layer).
+                        verum_ast::ty::GenericArg::Const(expr) => {
+                            Self::render_const_generic_arg(expr)
+                                .and_then(|s| s.parse::<i64>().ok())
+                                .map(TypeRef::ConstValue)
+                        }
+                        _ => None,
                     })
                     .collect();
                 return TypeRef::Instantiated {
@@ -14144,13 +14196,19 @@ impl VbcCodegen {
                 if let TypeRef::Concrete(base_id) = base_ref {
                     let arg_refs: Vec<TypeRef> = args
                         .iter()
-                        .filter_map(|arg| {
+                        .filter_map(|arg| match arg {
                             // Extract the inner Type from GenericArg::Type
-                            if let verum_ast::ty::GenericArg::Type(inner_ty) = arg {
+                            verum_ast::ty::GenericArg::Type(inner_ty) => {
                                 Some(self.ast_type_to_type_ref(inner_ty))
-                            } else {
-                                None
                             }
+                            // CONST-GENERIC-VALUE-CARRY-1: literal const
+                            // args carry their VALUE.
+                            verum_ast::ty::GenericArg::Const(expr) => {
+                                Self::render_const_generic_arg(expr)
+                                    .and_then(|s| s.parse::<i64>().ok())
+                                    .map(TypeRef::ConstValue)
+                            }
+                            _ => None,
                         })
                         .collect();
                     TypeRef::Instantiated {
@@ -14406,7 +14464,15 @@ impl VbcCodegen {
                             verum_ast::ty::GenericArg::Type(ty) => {
                                 self.extract_type_name_at(ty, false)
                             }
-                            verum_ast::ty::GenericArg::Const(_) => None,
+                            // CONST-GENERIC-VALUE-CARRY-1: render const args
+                            // (`StackAllocator<256>` / symbolic
+                            // `StackAllocator<SIZE>`) so name-carried routing
+                            // keeps the instantiation instead of degrading to
+                            // the bare base.  Unrenderable const exprs keep
+                            // the honest-lossy base-only degrade below.
+                            verum_ast::ty::GenericArg::Const(expr) => {
+                                Self::render_const_generic_arg(expr)
+                            }
                             verum_ast::ty::GenericArg::Lifetime(_) => None,
                             verum_ast::ty::GenericArg::Binding(_) => None,
                         };
@@ -14459,6 +14525,45 @@ impl VbcCodegen {
                     .unwrap_or_else(|| "T".to_string());
                 Some(format!("[{}]", inner_name))
             }
+            _ => None,
+        }
+    }
+
+    /// Renders a const-generic ARGUMENT expression as its canonical
+    /// type-name token (CONST-GENERIC-VALUE-CARRY-1, task #19).
+    ///
+    /// Integer literals render as the literal (`256` → "256", `-3` → "-3");
+    /// a bare single-segment path renders as the (const-param) name
+    /// (`StackAllocator<SIZE>` inside a generic body → "SIZE").  Anything
+    /// else returns `None` — callers keep their honest-lossy degrade.
+    /// Both the codegen renderers (`extract_type_name_at`,
+    /// `extract_type_name_from_ast`) and the let-annotation renderer in
+    /// statements.rs route through this ONE helper so the carried names
+    /// can never drift.
+    pub fn render_const_generic_arg(expr: &verum_ast::Expr) -> Option<String> {
+        use verum_ast::expr::{ExprKind, UnOp};
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                verum_ast::literal::LiteralKind::Int(il) => Some(il.value.to_string()),
+                _ => None,
+            },
+            ExprKind::Unary { op: UnOp::Neg, expr: inner } => {
+                if let ExprKind::Literal(lit) = &inner.kind
+                    && let verum_ast::literal::LiteralKind::Int(il) = &lit.kind
+                {
+                    Some(format!("-{}", il.value))
+                } else {
+                    None
+                }
+            }
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
+                    Some(ident.name.to_string())
+                } else {
+                    None
+                }
+            }
+            ExprKind::Paren(inner) => Self::render_const_generic_arg(inner),
             _ => None,
         }
     }
@@ -14587,10 +14692,29 @@ impl VbcCodegen {
                         self.ctx.const_generic_params.clear();
                         for g in &impl_type_generics {
                             self.ctx.generic_type_params.insert(g.clone());
-                            self.ctx.generic_type_params_ordered.push(g.clone());
                         }
                         for g in &impl_const_generics {
                             self.ctx.const_generic_params.insert(g.clone());
+                        }
+                        // CONST-GENERIC-VALUE-CARRY-1 (task #19): the ORDERED
+                        // list is the positional witness-index authority the
+                        // body-side `LoadT { Generic(idx) }` form keys on, and
+                        // impl-level TYPE and CONST params share ONE
+                        // declaration-ordered numbering — the same slot order
+                        // the receiver's instantiation args carry
+                        // (`implement<const SIZE: Int> StackAllocator<SIZE>`
+                        // ⇒ SIZE = slot 0).  A split type-then-const push
+                        // would mis-number `implement<const N, T>` shapes.
+                        for g in impl_decl.generics.iter() {
+                            match &g.kind {
+                                verum_ast::ty::GenericParamKind::Type { name, .. }
+                                | verum_ast::ty::GenericParamKind::Const { name, .. } => {
+                                    self.ctx
+                                        .generic_type_params_ordered
+                                        .push(name.name.to_string());
+                                }
+                                _ => {}
+                            }
                         }
                         // Per-method error containment.  Pre-fix the
                         // `compile_function(...)?` propagated any single
@@ -15046,6 +15170,12 @@ impl VbcCodegen {
                 }
                 verum_ast::ty::GenericParamKind::Const { name, .. } => {
                     self.ctx.const_generic_params.insert(name.name.to_string());
+                    // CONST-GENERIC-VALUE-CARRY-1: fn-level const params
+                    // join the SAME ordered positional numbering as type
+                    // params — the witness-index space is shared.
+                    self.ctx
+                        .generic_type_params_ordered
+                        .push(name.name.to_string());
                 }
                 // Context polymorphism: fn<using C>(f: fn(T) -> U using C) -> R using C
                 // Register the context parameter name as a generic type param so it's
@@ -17833,7 +17963,14 @@ impl VbcCodegen {
                         .iter()
                         .map(|arg| match arg {
                             GenericArg::Type(ty) => Self::extract_type_name_from_ast(ty),
-                            GenericArg::Const(_) => "_".to_string(),
+                            // CONST-GENERIC-VALUE-CARRY-1: render the const
+                            // value/name (`StackAllocator<1024>`, symbolic
+                            // `B<N>`) so name-carried const witnesses can be
+                            // parsed back at method-call sites.
+                            GenericArg::Const(expr) => {
+                                Self::render_const_generic_arg(expr)
+                                    .unwrap_or_else(|| "_".to_string())
+                            }
                             _ => "_".to_string(),
                         })
                         .collect();
@@ -19836,6 +19973,13 @@ impl VbcCodegen {
                         h
                     }
                     TypeRef::Generic(tp) => (tp.0 as u32) ^ 0x4000_0000,
+                    // CONST-GENERIC-VALUE-CARRY-1: distinct const values are
+                    // distinct specializations — StackAllocator<256> and
+                    // StackAllocator<1024> must not collapse to one key.
+                    TypeRef::ConstValue(v) => {
+                        ((*v as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u32
+                            ^ 0x2000_0000
+                    }
                     _ => u32::MAX,
                 }
             }
@@ -20564,6 +20708,20 @@ impl VbcCodegen {
                 })
             });
             if let Some(name) = target_name {
+                // CONST-GENERIC-VALUE-CARRY-1: archive-loaded alias with an
+                // INSTANTIATED target — record the full rendered form
+                // (`StackAllocator<1024>`; `display_type_ref` renders
+                // `ConstValue` args as their literals) so alias-typed
+                // receivers derive const witnesses on the user side too.
+                if let crate::types::TypeRef::Instantiated { args, .. } = target_ref
+                    && !args.is_empty()
+                {
+                    let full = module.display_type_ref(target_ref);
+                    if full.contains('<') {
+                        self.alias_instantiation_targets
+                            .insert(alias_name.clone(), full);
+                    }
+                }
                 self.type_aliases.insert(alias_name, name);
             }
         }
@@ -22092,6 +22250,8 @@ fn remap_type_ref_archive(
             base: Box::new(remap_type_ref_archive(base, type_id_remap)),
             assoc: assoc.clone(),
         },
+        // Const-generic VALUE — no type ids to remap.
+        TypeRef::ConstValue(v) => TypeRef::ConstValue(*v),
     }
 }
 

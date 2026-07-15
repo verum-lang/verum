@@ -118,6 +118,8 @@ impl TypeSubstitution {
                 base: Box::new(self.apply(base)),
                 assoc: assoc.clone(),
             },
+            // Const-generic VALUE argument — already fully concrete.
+            TypeRef::ConstValue(_) => type_ref.clone(),
         }
     }
 

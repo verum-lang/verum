@@ -448,6 +448,22 @@ pub enum TypeRef {
         /// The associated-type name (e.g. `"Output"`).
         assoc: String,
     },
+
+    /// Const-generic VALUE argument: the `256` in `StackAllocator<256>`.
+    ///
+    /// CONST-GENERIC-VALUE-CARRY-1 (task #19): const generic parameters
+    /// occupy positional type-argument slots (`implement<const SIZE: Int>
+    /// StackAllocator<SIZE>`), but pre-carry `TypeRef` had no value form —
+    /// `CallG.type_args` / witness sidecars could only degrade the slot to
+    /// a bare `Generic` placeholder, so a method body's `SIZE` compiled to
+    /// `LoadNil`.  This variant carries the instantiation's VALUE through
+    /// the same #44-B generic-witness channel type witnesses use; at
+    /// Tier-0 a `LoadT { Generic(idx) }` whose frame witness resolves to
+    /// `ConstValue(v)` materializes `Value::from_i64(v)`.
+    ///
+    /// Wire format: bytecode-stream tag 0x0A, archive tag 0x0B (both
+    /// additive — VBC format 2.8).
+    ConstValue(i64),
 }
 
 impl Default for TypeRef {
@@ -507,6 +523,8 @@ impl TypeRef {
             // A projection `F.Output` is generic iff its base is (it references
             // the type param `F`).
             TypeRef::AssociatedProjection { base, .. } => base.is_generic(),
+            // A carried const VALUE is fully concrete.
+            TypeRef::ConstValue(_) => false,
         }
     }
 
