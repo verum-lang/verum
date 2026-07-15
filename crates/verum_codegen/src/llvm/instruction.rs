@@ -2075,8 +2075,8 @@ pub fn lower_instruction<'ctx>(
                     // we use a loop: result = 1; while (exp > 0) { if (exp & 1) result *= base; base *= base; exp >>= 1; }
                     lower_int_pow(ctx, lhs, rhs)?
                 }
-                BinaryIntOp::UDiv => safe_int_div(ctx, lhs, rhs, "udiv")?,
-                BinaryIntOp::UMod => safe_int_rem(ctx, lhs, rhs, "urem")?,
+                BinaryIntOp::UDiv => safe_int_udiv(ctx, lhs, rhs, "udiv")?,
+                BinaryIntOp::UMod => safe_int_urem(ctx, lhs, rhs, "urem")?,
             };
 
             ctx.set_register(dst.0, result.into());
@@ -29683,6 +29683,94 @@ fn safe_int_div<'ctx>(
         .or_llvm_err()?;
 
     Ok(result)
+}
+
+/// Guarded UNSIGNED division — the Tier-1 twin of the interpreter's
+/// `BinaryIntOp::UDiv` (0x1B). Delegating UDiv to `safe_int_div`'s
+/// SIGNED divide read `UInt64.MAX` as -1, so `UInt64.MAX / radix`
+/// returned 0 — parse_int_radix's Knuth overflow pre-check then
+/// rejected EVERY digit ("would overflow") and `"42".parse_int()`
+/// was Err at Tier-1 while Tier-0 (whose handler divides unsigned)
+/// parsed fine. Same zero-divisor guard; no INT_MIN/-1 case exists
+/// for unsigned.
+fn safe_int_udiv<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    lhs: verum_llvm::values::IntValue<'ctx>,
+    rhs: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    emit_div_zero_guard(ctx, rhs)?;
+    ctx.builder()
+        .build_int_unsigned_div(lhs, rhs, name)
+        .or_llvm_err()
+}
+
+/// Guarded UNSIGNED remainder — Tier-1 twin of `BinaryIntOp::UMod`
+/// (0x1C); see `safe_int_udiv`.
+fn safe_int_urem<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    lhs: verum_llvm::values::IntValue<'ctx>,
+    rhs: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    emit_div_zero_guard(ctx, rhs)?;
+    ctx.builder()
+        .build_int_unsigned_rem(lhs, rhs, name)
+        .or_llvm_err()
+}
+
+/// Shared zero-divisor guard: branch to a puts+exit panic block when
+/// rhs == 0, leaving the builder positioned in the safe continuation.
+fn emit_div_zero_guard<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    rhs: verum_llvm::values::IntValue<'ctx>,
+) -> Result<()> {
+    let module = ctx.get_module();
+    let i64_type = ctx.types().i64_type();
+    let zero = i64_type.const_zero();
+    let is_zero = ctx
+        .builder()
+        .build_int_compare(verum_llvm::IntPredicate::EQ, rhs, zero, "div_zero_check")
+        .or_llvm_err()?;
+    let parent = ctx
+        .builder()
+        .get_insert_block()
+        .or_internal("no insert block")?;
+    let parent_fn = parent
+        .get_parent()
+        .or_internal("block has no parent function")?;
+    let panic_bb = ctx
+        .llvm_context()
+        .append_basic_block(parent_fn, "div_zero_panic");
+    let safe_bb = ctx.llvm_context().append_basic_block(parent_fn, "div_safe");
+    ctx.builder()
+        .build_conditional_branch(is_zero, panic_bb, safe_bb)
+        .or_llvm_err()?;
+    ctx.builder().position_at_end(panic_bb);
+    let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
+    let fn_type = ctx
+        .llvm_context()
+        .void_type()
+        .fn_type(&[i64_type.into()], false);
+    let exit_fn = super::error::get_or_declare_noreturn_function(
+        &module,
+        ctx.llvm_context(),
+        "verum_internal_exit_i64",
+        fn_type,
+    );
+    let msg_ptr = ctx
+        .builder()
+        .build_global_string_ptr("panic: integer division by zero", "div_zero_msg")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_call(exit_fn, &[i64_type.const_int(1, false).into()], "")
+        .or_llvm_err()?;
+    ctx.builder().build_unreachable().or_llvm_err()?;
+    ctx.builder().position_at_end(safe_bb);
+    Ok(())
 }
 
 /// Emit a guarded integer signed remainder: checks for zero divisor and panics.
