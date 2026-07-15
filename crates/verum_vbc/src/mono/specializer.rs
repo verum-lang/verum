@@ -15,7 +15,6 @@
 
 use std::collections::HashMap;
 
-use crate::instruction::Opcode;
 use crate::module::{Constant, FunctionDescriptor, FunctionId, VbcModule};
 use crate::types::{ProtocolId, TypeDescriptor, TypeId, TypeParamId, TypeRef};
 
@@ -220,6 +219,9 @@ pub struct SpecializerStats {
     pub sizeof_g_specialized: usize,
     /// Number of CALL_V devirtualized.
     pub call_v_devirtualized: usize,
+    /// Number of builtin `ToString` sites expanded into the concrete
+    /// type's Display chain (L2, task #44).
+    pub to_string_displayed: usize,
     /// Total instructions processed.
     pub total_instructions: usize,
     /// Bytes input.
@@ -331,9 +333,6 @@ impl<'a> BytecodeSpecializer<'a> {
         let bytecode = &self.module.bytecode[start..end];
         self.stats.bytes_input = bytecode.len();
 
-        let mut output = Vec::with_capacity(bytecode.len());
-        let mut pc = 0;
-
         let trace_this = std::env::var_os("VERUM_TRACE_MONO").is_some()
             && self
                 .module
@@ -349,68 +348,47 @@ impl<'a> BytecodeSpecializer<'a> {
             );
         }
 
-        while pc < bytecode.len() {
-            self.stats.total_instructions += 1;
-            let opcode_byte = bytecode[pc];
-            let opcode = Opcode::from_byte(opcode_byte);
-
-            match opcode {
-                // Generic call: rewrite to direct call
-                Opcode::CallG => {
-                    self.specialize_call_g(bytecode, &mut pc, &mut output)?;
-                    self.stats.call_g_specialized += 1;
-                }
-
-                // Virtual dispatch: attempt devirtualization
-                Opcode::CallV => {
-                    self.specialize_call_v(bytecode, &mut pc, &mut output)?;
-                }
-
-                // Method call: devirtualize a `dyn:Protocol.method` token using
-                // the concrete substitution (F → ReadyFuture ⇒ ReadyFuture.poll).
-                Opcode::CallM => {
-                    self.specialize_call_m(bytecode, &mut pc, &mut output)?;
-                }
-
-                // Generic object creation
-                Opcode::NewG => {
-                    self.specialize_new_g(bytecode, &mut pc, &mut output)?;
-                    self.stats.new_g_specialized += 1;
-                }
-
-                // Generic arithmetic: specialize to typed variants
-                Opcode::AddG | Opcode::SubG | Opcode::MulG | Opcode::DivG => {
-                    self.specialize_generic_arith(opcode, bytecode, &mut pc, &mut output)?;
-                    self.stats.arith_g_specialized += 1;
-                }
-
-                // Generic comparison: specialize to typed variants
-                Opcode::EqG | Opcode::CmpG => {
-                    self.specialize_generic_cmp(opcode, bytecode, &mut pc, &mut output)?;
-                    self.stats.cmp_g_specialized += 1;
-                }
-
-                // Size/alignment of generic type
-                Opcode::SizeOfG => {
-                    self.specialize_sizeof_g(bytecode, &mut pc, &mut output)?;
-                    self.stats.sizeof_g_specialized += 1;
-                }
-
-                Opcode::AlignOfG => {
-                    self.specialize_alignof_g(bytecode, &mut pc, &mut output)?;
-                    self.stats.sizeof_g_specialized += 1;
-                }
-
-                // Load type reference: may need substitution
-                Opcode::LoadT => {
-                    self.specialize_load_t(bytecode, &mut pc, &mut output)?;
-                }
-
-                // All other opcodes: copy through with potential operand substitution
-                _ => {
-                    self.copy_instruction(opcode, bytecode, &mut pc, &mut output)?;
-                }
+        // **L2/L3 STRUCTURAL DISCIPLINE (task #44)** — the previous
+        // per-opcode BYTE walkers had their own wire grammar, which had
+        // drifted from the canonical codec on every call-family
+        // instruction (CallG read `type_arg_count` as u8 vs varint and
+        // args as count+regs vs RegRange; CallV read a protocol/method
+        // pair the wire does not carry; NewG read static TypeRefs where
+        // the wire carries REGISTERS).  Worse, rewrites that changed
+        // byte length (CallG→Call) never recomputed jump offsets — any
+        // jump across a specialized site landed mid-instruction.  That
+        // was the gate-ON crash constellation.
+        //
+        // Canonical pipeline instead: decode the WHOLE body with the
+        // one true codec → convert jump offsets to instruction-index
+        // form → transform instruction VALUES → recompute byte offsets
+        // against the new widths → encode.  Undecodable bodies fail
+        // typed (same contract as before).
+        let mut instrs = crate::bytecode::decode_instructions(bytecode).map_err(|e| {
+            SpecializationError::InvalidBytecode {
+                offset: start,
+                message: format!("canonical decode failed: {e:?}"),
             }
+        })?;
+        crate::bytecode::jump_offsets_to_instr_indices(&mut instrs);
+        for instr in instrs.iter_mut() {
+            self.stats.total_instructions += 1;
+            self.specialize_instr_value(instr);
+        }
+        // **L2 (task #44): ToString → Display expansion.**  With T
+        // substituted concrete, a `f"{x}"` in the generic body should
+        // route through the type's own `fmt` exactly like a
+        // non-generic body would — the codegen made the builtin
+        // `ToString` decision BEFORE mono existed to overturn it.
+        // Write-once register typing from the SUBSTITUTED param
+        // descriptors (sound without flow analysis) finds the sites;
+        // the structural pipeline makes the 1→7 instruction expansion
+        // legal (jump index offsets are remapped around insertions).
+        let extra_regs = self.expand_display_tostrings(&mut instrs, func);
+        crate::bytecode::fixup_jump_offsets(&mut instrs);
+        let mut output: Vec<u8> = Vec::with_capacity(bytecode.len() + 16);
+        for instr in instrs.iter() {
+            crate::bytecode::encode_instruction(instr, &mut output);
         }
 
         self.stats.bytes_output = output.len();
@@ -442,7 +420,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
         Ok(SpecializedFunction {
             bytecode: output,
-            register_count: func.register_count,
+            register_count: func.register_count.saturating_add(extra_regs),
             locals_count: func.locals_count,
             max_stack: func.max_stack,
             new_constants: std::mem::take(&mut self.new_constants),
@@ -454,252 +432,372 @@ impl<'a> BytecodeSpecializer<'a> {
     /// Specializes a CALL_G instruction.
     ///
 
-    /// CALL_G format: dst:reg func:varint type_arg_count:u8 [type_refs...] arg_count:u8 [args:reg...]
-    /// CALL format: dst:reg func:varint arg_count:u8 [args:reg...]
-    fn specialize_call_g(
-        &mut self,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        // Read destination register
-        let dst = self.read_reg(bytecode, pc)?;
-
-        // Read function ID
-        let func_id = FunctionId(self.read_varint(bytecode, pc)? as u32);
-
-        // Read type arguments
-        let type_arg_count =
-            bytecode
-                .get(*pc)
-                .copied()
-                .ok_or_else(|| SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Unexpected end of bytecode reading type_arg_count".to_string(),
-                })?;
-        *pc += 1;
-
-        let mut call_type_args = Vec::with_capacity(type_arg_count as usize);
-        for _ in 0..type_arg_count {
-            let type_ref = self.read_type_ref(bytecode, pc)?;
-            let substituted = self.substitution.apply(&type_ref);
-            call_type_args.push(substituted);
-        }
-
-        // Read arguments
-        let arg_count =
-            bytecode
-                .get(*pc)
-                .copied()
-                .ok_or_else(|| SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Unexpected end of bytecode reading arg_count".to_string(),
-                })?;
-        *pc += 1;
-
-        let mut args = Vec::with_capacity(arg_count as usize);
-        for _ in 0..arg_count {
-            args.push(self.read_reg(bytecode, pc)?);
-        }
-
-        // Look up specialized function
-        let key = InstantiationKey::new(func_id, call_type_args.clone());
-        let specialized_fn = self
-            .graph
-            .get_specialization_by_key(&key)
-            .unwrap_or(func_id); // Fall back to original if not found
-
-        // Emit CALL instruction
-        output.push(Opcode::Call.to_byte());
-        self.write_reg(output, dst);
-        self.write_varint(output, specialized_fn.0 as u64);
-        output.push(arg_count);
-        for arg in args {
-            self.write_reg(output, arg);
-        }
-
-        Ok(())
-    }
-
     /// Specializes a CALL_V instruction.
     ///
 
     /// CALL_V format: dst:reg receiver:reg protocol:varint method_idx:u8 arg_count:u8 [args:reg...]
     ///
 
-    /// Attempts devirtualization if the receiver type is monomorphic and implements the protocol.
-    /// If devirtualizable: emits CALL with direct function ID
-    /// Otherwise: copies through as CALL_V
-    fn specialize_call_v(
-        &mut self,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        // Read destination register
-        let dst = self.read_reg(bytecode, pc)?;
-
-        // Read receiver register
-        let receiver = self.read_reg(bytecode, pc)?;
-
-        // Read protocol ID
-        let protocol_id = ProtocolId(self.read_varint(bytecode, pc)? as u32);
-
-        // Read method index in the protocol
-        let method_idx =
-            bytecode
-                .get(*pc)
-                .copied()
-                .ok_or_else(|| SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Unexpected end reading method_idx for CALL_V".to_string(),
-                })?;
-        *pc += 1;
-
-        // Read arguments
-        let arg_count =
-            bytecode
-                .get(*pc)
-                .copied()
-                .ok_or_else(|| SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Unexpected end reading arg_count for CALL_V".to_string(),
-                })?;
-        *pc += 1;
-
-        let mut args = Vec::with_capacity(arg_count as usize);
-        for _ in 0..arg_count {
-            args.push(self.read_reg(bytecode, pc)?);
-        }
-
-        // Attempt devirtualization
-        // Check if we know the concrete type of the receiver
-        if let Some(receiver_type) = self.register_types.get(&receiver).cloned()
-            && let Some(direct_fn) =
-                self.lookup_protocol_impl(&receiver_type, protocol_id, method_idx)
-        {
-            // Devirtualize: emit CALL instead of CALL_V
-            output.push(Opcode::Call.to_byte());
-            self.write_reg(output, dst);
-            self.write_varint(output, direct_fn.0 as u64);
-            output.push(arg_count + 1); // +1 for receiver as first arg
-            self.write_reg(output, receiver); // receiver becomes first argument
-            for arg in args {
-                self.write_reg(output, arg);
-            }
-            self.stats.call_v_devirtualized += 1;
-            return Ok(());
-        }
-
-        // Fallback: check if substitution provides a primary type that could help
-        if let Some(primary_type) = self.substitution.get(TypeParamId(0))
-            && let Some(direct_fn) =
-                self.lookup_protocol_impl(primary_type, protocol_id, method_idx)
-        {
-            // Devirtualize using substituted type
-            output.push(Opcode::Call.to_byte());
-            self.write_reg(output, dst);
-            self.write_varint(output, direct_fn.0 as u64);
-            output.push(arg_count + 1);
-            self.write_reg(output, receiver);
-            for arg in args {
-                self.write_reg(output, arg);
-            }
-            self.stats.call_v_devirtualized += 1;
-            return Ok(());
-        }
-
-        // Cannot devirtualize: emit CALL_V as-is
-        output.push(Opcode::CallV.to_byte());
-        self.write_reg(output, dst);
-        self.write_reg(output, receiver);
-        self.write_varint(output, protocol_id.0 as u64);
-        output.push(method_idx);
-        output.push(arg_count);
-        for arg in args {
-            self.write_reg(output, arg);
-        }
-
-        Ok(())
-    }
-
-    /// Specializes a CALL_M (method call) instruction.
-    ///
-    /// If the method token is a `dyn:Protocol.method` dispatch on a type
-    /// parameter, devirtualize it to the concrete implementation by rewriting
-    /// the method-id string to `ConcreteType.method` (the concrete receiver
-    /// type comes from the substitution's primary type parameter).  The AOT
-    /// method-call lowering then resolves the concrete method directly instead
-    /// of hitting the unresolved-dyn const-zero stub (the async-AOT SIGSEGV).
-    /// Re-emitting CALL_M unchanged in shape (not rewriting to CALL) avoids any
-    /// receiver/argument-register-contiguity assumptions.
-    fn specialize_call_m(
-        &mut self,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        use crate::instruction::Instruction;
-        // Decode/re-encode through the CANONICAL codec so the CALL_M operand
-        // layout (dst, receiver, method_id-varint, reg-RANGE args) round-trips
-        // byte-for-byte — a hand-rolled re-emit that got the args encoding
-        // wrong desynchronised the whole specialized stream, so every later
-        // instruction misdecoded (a phantom RANGE_NEW etc.) and the body was
-        // lowered to garbage.  Only `method_id` is rewritten (devirtualized).
-        let start = *pc;
-        let instr =
-            crate::bytecode::decode_instruction(bytecode, pc).map_err(|e| {
-                SpecializationError::InvalidBytecode {
-                    offset: start,
-                    message: format!("specialize_call_m: canonical decode failed: {:?}", e),
-                }
-            })?;
-        if let Instruction::CallM {
-            dst,
-            receiver,
-            method_id,
-            args,
-        } = instr
-        {
-            if std::env::var_os("VERUM_TRACE_MONO").is_some() {
-                let nm = self
-                    .module
-                    .get_string(crate::types::StringId(method_id))
-                    .unwrap_or("<none>");
-                if nm.contains("poll") || nm.contains("dyn:") || nm.contains("Future") {
-                    eprintln!(
-                        "[mono-callm-raw] method_id={} name='{}' subst_T0={:?}",
-                        method_id,
-                        nm,
-                        self.substitution.get(TypeParamId(0))
-                    );
-                }
-            }
-            let method_id = self.devirt_dyn_method_id(method_id).unwrap_or(method_id);
-            crate::bytecode::encode_instruction(
-                &Instruction::CallM {
-                    dst,
-                    receiver,
-                    method_id,
-                    args,
-                },
-                output,
-            );
-        } else {
-            // Not actually a CALL_M — re-encode verbatim (defensive).
-            crate::bytecode::encode_instruction(&instr, output);
-        }
-        Ok(())
-    }
-
     /// Resolve a `dyn:Protocol.method` method-id string to the concrete
     /// `ConcreteType.method` string id via the substitution's primary type
     /// parameter.  Returns None if the token is not a dyn-dispatch, the primary
     /// type isn't concrete, or the concrete method function is absent.
+    /// Value-form specialization of one canonical instruction
+    /// (task #44 L2/L3 structural discipline — see `specialize`).
+    /// Mutates in place; instructions with no generic content pass
+    /// through untouched.
+    fn specialize_instr_value(&mut self, instr: &mut crate::instruction::Instruction) {
+        use crate::instruction::Instruction as I;
+        match instr {
+            I::CallG {
+                dst,
+                func_id,
+                type_args,
+                args,
+            } => {
+                let substituted: Vec<TypeRef> = type_args
+                    .iter()
+                    .map(|t| self.substitution.apply(t))
+                    .collect();
+                let key = InstantiationKey::new(FunctionId(*func_id), substituted.clone());
+                match self.graph.get_specialization_by_key(&key) {
+                    Some(spec_fn) => {
+                        // Direct call to the specialization.  The
+                        // RegRange arg block carries over verbatim —
+                        // receiver/argument contiguity is preserved by
+                        // construction.
+                        *instr = I::Call {
+                            dst: *dst,
+                            func_id: spec_fn.0,
+                            args: *args,
+                        };
+                        self.stats.call_g_specialized += 1;
+                    }
+                    None => {
+                        // No exact instantiation — keep the CallG but
+                        // carry the SUBSTITUTED type args so a later
+                        // merge round (or the runtime witness path)
+                        // sees concrete types instead of stale
+                        // Generic(i) placeholders.
+                        *type_args = substituted;
+                    }
+                }
+            }
+            I::CallM { method_id, .. } => {
+                if let Some(devirt) = self.devirt_dyn_method_id(*method_id) {
+                    *method_id = devirt;
+                }
+            }
+            I::BinaryG {
+                op,
+                dst,
+                a,
+                b,
+                protocol_id: _,
+            } => {
+                use crate::instruction::{BinaryFloatOp, BinaryGenericOp, BinaryIntOp};
+                let operand_type = self.infer_operand_type_from_context();
+                let concrete = match &operand_type {
+                    Some(TypeRef::Concrete(id)) if id.is_integer() || id.0 == TypeId::INT.0 => {
+                        Some(false)
+                    }
+                    Some(TypeRef::Concrete(id)) if id.is_float() || id.0 == TypeId::FLOAT.0 => {
+                        Some(true)
+                    }
+                    _ => None,
+                };
+                if let Some(is_float) = concrete {
+                    let (iop, fop) = match op {
+                        BinaryGenericOp::Add => (BinaryIntOp::Add, BinaryFloatOp::Add),
+                        BinaryGenericOp::Sub => (BinaryIntOp::Sub, BinaryFloatOp::Sub),
+                        BinaryGenericOp::Mul => (BinaryIntOp::Mul, BinaryFloatOp::Mul),
+                        BinaryGenericOp::Div => (BinaryIntOp::Div, BinaryFloatOp::Div),
+                    };
+                    *instr = if is_float {
+                        I::BinaryF {
+                            op: fop,
+                            dst: *dst,
+                            a: *a,
+                            b: *b,
+                        }
+                    } else {
+                        I::BinaryI {
+                            op: iop,
+                            dst: *dst,
+                            a: *a,
+                            b: *b,
+                        }
+                    };
+                    self.stats.arith_g_specialized += 1;
+                }
+            }
+            I::CmpG {
+                eq: true,
+                dst,
+                a,
+                b,
+                protocol_id: _,
+            } => {
+                use crate::instruction::CompareOp;
+                let operand_type = self.infer_operand_type_from_context();
+                match &operand_type {
+                    Some(TypeRef::Concrete(id))
+                        if id.is_integer() || id.0 == TypeId::INT.0 || id.0 == TypeId::BOOL.0 =>
+                    {
+                        *instr = I::CmpI {
+                            op: CompareOp::Eq,
+                            dst: *dst,
+                            a: *a,
+                            b: *b,
+                        };
+                        self.stats.cmp_g_specialized += 1;
+                    }
+                    Some(TypeRef::Concrete(id)) if id.is_float() => {
+                        *instr = I::CmpF {
+                            op: CompareOp::Eq,
+                            dst: *dst,
+                            a: *a,
+                            b: *b,
+                        };
+                        self.stats.cmp_g_specialized += 1;
+                    }
+                    _ => {}
+                }
+            }
+            I::LoadT { type_ref, .. } => {
+                *type_ref = self.substitution.apply(type_ref);
+            }
+            // NewG carries RUNTIME type-argument REGISTERS on the wire
+            // (the old byte arm misread them as static TypeRefs and
+            // rewrote the instruction from garbage).  A static rewrite
+            // needs a witness-aware design — passthrough until then.
+            // CallV carries a vtable slot, not the (protocol, method)
+            // pair the old arm assumed — devirtualization by slot needs
+            // the vtable layout carried into the specializer;
+            // passthrough keeps runtime dispatch correct.
+            _ => {}
+        }
+    }
+
+    /// **L2 (task #44)**: expand builtin `ToString` sites whose source
+    /// register provably (write-once) holds a substituted-concrete
+    /// value of a type with its own `fmt` into the canonical Display
+    /// chain the non-generic codegen would have emitted:
+    ///
+    /// ```text
+    /// buf       = Call Text.new()
+    /// r_buf     = RefObj buf
+    /// formatter = Call Formatter.new(r_buf)
+    /// a0        = Mov src
+    /// a1        = RefObj formatter
+    /// _         = Call <T>.fmt(a0, a1)
+    /// dst       = Mov buf
+    /// ```
+    ///
+    /// Returns the number of EXTRA registers the expansions use (the
+    /// caller bumps the specialized descriptor's register_count).
+    /// Sites that don't resolve (no write-once type, no `<T>.fmt`
+    /// arity-2 body, missing Text.new/Formatter.new) keep the builtin
+    /// `ToString` — today's behaviour, honest degradation.
+    fn expand_display_tostrings(
+        &mut self,
+        instrs: &mut Vec<crate::instruction::Instruction>,
+        func: &FunctionDescriptor,
+    ) -> u16 {
+        use crate::instruction::Instruction as I;
+        use crate::instruction::Reg;
+
+        // ---- write-once register typing from substituted params ----
+        let mut write_counts: std::collections::HashMap<u16, u32> =
+            std::collections::HashMap::new();
+        for instr in instrs.iter() {
+            if let Some(d) = Self::written_reg(instr) {
+                *write_counts.entry(d.0).or_insert(0) += 1;
+            }
+        }
+        let mut reg_types: std::collections::HashMap<u16, TypeRef> =
+            std::collections::HashMap::new();
+        for (i, p) in func.params.iter().enumerate() {
+            let substituted = self.substitution.apply(&p.type_ref);
+            // Param registers are written by the CALL frame, not the
+            // body; a body write means reuse — drop the fact.
+            if write_counts.get(&(i as u16)).copied().unwrap_or(0) == 0 {
+                reg_types.insert(i as u16, substituted);
+            }
+        }
+        // One forward propagation over write-once Movs (chains resolve
+        // because sources settle before their single-write consumers
+        // in a second sweep).
+        for _ in 0..2 {
+            for instr in instrs.iter() {
+                if let I::Mov { dst, src } = instr
+                    && write_counts.get(&dst.0).copied().unwrap_or(0) == 1
+                    && let Some(t) = reg_types.get(&src.0).cloned()
+                {
+                    reg_types.insert(dst.0, t);
+                }
+            }
+        }
+
+        // ---- collect expandable sites ----
+        let mut sites: Vec<(usize, u16, u32)> = Vec::new(); // (idx, src_reg, fmt_fid)
+        for (idx, instr) in instrs.iter().enumerate() {
+            let I::ToString { src, .. } = instr else { continue };
+            let Some(TypeRef::Concrete(tid)) = reg_types.get(&src.0) else {
+                continue;
+            };
+            // Primitives keep the builtin formatter (identical text,
+            // one opcode instead of seven).
+            if tid.is_builtin() {
+                continue;
+            }
+            let Some(type_name) = self.type_name_of(*tid) else { continue };
+            let fmt_name = format!("{}.fmt", type_name);
+            let Some(fmt_fid) = self.module.find_function_by_name(&fmt_name) else {
+                continue;
+            };
+            sites.push((idx, src.0, fmt_fid.0));
+        }
+        if sites.is_empty() {
+            return 0;
+        }
+        let (Some(text_new), Some(formatter_new)) = (
+            self.module.find_function_by_name("Text.new"),
+            self.module.find_function_by_name("Formatter.new"),
+        ) else {
+            return 0;
+        };
+
+        // ---- jump bookkeeping: absolute targets before insertion ----
+        let mut abs_targets: Vec<Option<i64>> = Vec::with_capacity(instrs.len());
+        for (idx, instr) in instrs.iter().enumerate() {
+            abs_targets.push(Self::jump_offset_of(instr).map(|o| idx as i64 + o as i64));
+        }
+
+        // ---- expand, back to front (indices stay valid) ----
+        let base = func.register_count;
+        let mut expansions = 0u16;
+        // position map: old index -> shift accumulated AFTER insertions
+        let mut inserted_at: Vec<(usize, usize)> = Vec::new(); // (old_idx, count_inserted)
+        for &(idx, src_reg, fmt_fid) in sites.iter().rev() {
+            let I::ToString { dst, .. } = instrs[idx] else { continue };
+            let r = |k: u16| Reg(base + expansions * 6 + k);
+            let buf = r(0);
+            let buf_ref = r(1);
+            let formatter = r(2);
+            let a0 = r(3);
+            let a1 = r(4);
+            let res = r(5);
+            let seq = vec![
+                I::Call {
+                    dst: buf,
+                    func_id: text_new.0,
+                    args: crate::instruction::RegRange { start: Reg(0), count: 0 },
+                },
+                I::RefObj { dst: buf_ref, src: buf },
+                I::Call {
+                    dst: formatter,
+                    func_id: formatter_new.0,
+                    args: crate::instruction::RegRange { start: buf_ref, count: 1 },
+                },
+                I::Mov { dst: a0, src: Reg(src_reg) },
+                I::RefObj { dst: a1, src: formatter },
+                I::Call {
+                    dst: res,
+                    func_id: fmt_fid,
+                    args: crate::instruction::RegRange { start: a0, count: 2 },
+                },
+                I::Mov { dst, src: buf },
+            ];
+            let n = seq.len();
+            instrs.splice(idx..idx + 1, seq);
+            inserted_at.push((idx, n - 1)); // net growth
+            expansions += 1;
+            self.stats.to_string_displayed += 1;
+        }
+
+        // ---- remap jump index offsets across insertions ----
+        let shift_for = |old_idx: usize| -> i64 {
+            inserted_at
+                .iter()
+                .map(|&(at, n)| if old_idx > at { n as i64 } else { 0 })
+                .sum()
+        };
+        for (old_idx, tgt) in abs_targets.iter().enumerate() {
+            let Some(abs) = tgt else { continue };
+            let new_idx = old_idx as i64 + shift_for(old_idx);
+            // Target shifts when it lies strictly beyond an insertion
+            // point; a target AT the site (jump to the expanded
+            // instruction) lands on the expansion's first instruction.
+            let new_abs = *abs + shift_for((*abs).max(0) as usize);
+            let new_off = (new_abs - new_idx) as i32;
+            if let Some(slot) = Self::jump_offset_slot(&mut instrs[new_idx as usize]) {
+                *slot = new_off;
+            }
+        }
+
+        expansions * 6
+    }
+
+    /// Register written by an instruction, for the write-once census.
+    /// Conservative: instructions with multi-reg or indirect writes
+    /// return None (their dsts simply never qualify as typed).
+    fn written_reg(instr: &crate::instruction::Instruction) -> Option<crate::instruction::Reg> {
+        use crate::instruction::Instruction as I;
+        match instr {
+            I::Mov { dst, .. }
+            | I::LoadI { dst, .. }
+            | I::LoadK { dst, .. }
+            | I::Call { dst, .. }
+            | I::CallM { dst, .. }
+            | I::CallG { dst, .. }
+            | I::ToString { dst, .. }
+            | I::Concat { dst, .. }
+            | I::GetF { dst, .. }
+            | I::RefObj { dst, .. } => Some(*dst),
+            _ => None,
+        }
+    }
+
+    fn jump_offset_of(instr: &crate::instruction::Instruction) -> Option<i32> {
+        use crate::instruction::Instruction as I;
+        match instr {
+            I::Jmp { offset }
+            | I::JmpIf { offset, .. }
+            | I::JmpNot { offset, .. }
+            | I::JmpCmp { offset, .. } => Some(*offset),
+            I::CtxProvide { body_offset, .. } => Some(*body_offset),
+            I::TryBegin { handler_offset } => Some(*handler_offset),
+            _ => None,
+        }
+    }
+
+    fn jump_offset_slot(instr: &mut crate::instruction::Instruction) -> Option<&mut i32> {
+        use crate::instruction::Instruction as I;
+        match instr {
+            I::Jmp { offset }
+            | I::JmpIf { offset, .. }
+            | I::JmpNot { offset, .. }
+            | I::JmpCmp { offset, .. } => Some(offset),
+            I::CtxProvide { body_offset, .. } => Some(body_offset),
+            I::TryBegin { handler_offset } => Some(handler_offset),
+            _ => None,
+        }
+    }
+
+    /// Resolve a TypeId to its declared name via the module type table.
+    fn type_name_of(&self, tid: TypeId) -> Option<String> {
+        self.module
+            .types
+            .iter()
+            .find(|t| t.id == tid)
+            .and_then(|t| self.module.get_string(t.name))
+            .map(|s| {
+                // Strip module qualification: `core.time.Duration` → `Duration`
+                s.rsplit('.').next().unwrap_or(s).to_string()
+            })
+    }
+
     fn devirt_dyn_method_id(&self, method_id: u32) -> Option<u32> {
         let name = self
             .module
@@ -782,278 +880,14 @@ impl<'a> BytecodeSpecializer<'a> {
     /// Specializes a NEW_G instruction.
     ///
 
-    /// NEW_G format: dst:reg type_id:varint type_arg_count:u8 [type_refs...]
-    /// NEW format: dst:reg type_id:varint
-    fn specialize_new_g(
-        &mut self,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        // Read destination register
-        let dst = self.read_reg(bytecode, pc)?;
-
-        // Read base type ID
-        let base_type_id = TypeId(self.read_varint(bytecode, pc)? as u32);
-
-        // Read type arguments
-        let type_arg_count =
-            bytecode
-                .get(*pc)
-                .copied()
-                .ok_or_else(|| SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Unexpected end of bytecode reading type_arg_count for NEW_G"
-                        .to_string(),
-                })?;
-        *pc += 1;
-
-        let mut type_args = Vec::with_capacity(type_arg_count as usize);
-        for _ in 0..type_arg_count {
-            let type_ref = self.read_type_ref(bytecode, pc)?;
-            let substituted = self.substitution.apply(&type_ref);
-            type_args.push(substituted);
-        }
-
-        // Get or create concrete instantiated type
-        let concrete_type_id = self.get_or_create_instantiated_type(base_type_id, &type_args);
-
-        // Emit NEW instruction
-        output.push(Opcode::New.to_byte());
-        self.write_reg(output, dst);
-        self.write_varint(output, concrete_type_id.0 as u64);
-
-        Ok(())
-    }
-
     /// Specializes generic arithmetic operations.
     ///
-
-    /// ADD_G/SUB_G/MUL_G/DIV_G format: dst:reg a:reg b:reg protocol_id:varint
-    fn specialize_generic_arith(
-        &mut self,
-        opcode: Opcode,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        // Read registers
-        let dst = self.read_reg(bytecode, pc)?;
-        let a = self.read_reg(bytecode, pc)?;
-        let b = self.read_reg(bytecode, pc)?;
-
-        // Read protocol ID
-        let _protocol_id = self.read_varint(bytecode, pc)?;
-
-        // Determine operand type from substitution context
-        // In a full implementation, we'd track types through registers.
-        // For now, we check if there's a primary type parameter that determines the operation.
-        let operand_type = self.infer_operand_type_from_context();
-
-        // Specialize based on concrete type
-        let specialized_op = match (opcode, &operand_type) {
-            (Opcode::AddG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::INT.0 => Opcode::AddI,
-            (Opcode::AddG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::FLOAT.0 => Opcode::AddF,
-            (Opcode::AddG, Some(TypeRef::Concrete(id))) if id.is_integer() => Opcode::AddI,
-            (Opcode::AddG, Some(TypeRef::Concrete(id))) if id.is_float() => Opcode::AddF,
-
-            (Opcode::SubG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::INT.0 => Opcode::SubI,
-            (Opcode::SubG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::FLOAT.0 => Opcode::SubF,
-            (Opcode::SubG, Some(TypeRef::Concrete(id))) if id.is_integer() => Opcode::SubI,
-            (Opcode::SubG, Some(TypeRef::Concrete(id))) if id.is_float() => Opcode::SubF,
-
-            (Opcode::MulG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::INT.0 => Opcode::MulI,
-            (Opcode::MulG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::FLOAT.0 => Opcode::MulF,
-            (Opcode::MulG, Some(TypeRef::Concrete(id))) if id.is_integer() => Opcode::MulI,
-            (Opcode::MulG, Some(TypeRef::Concrete(id))) if id.is_float() => Opcode::MulF,
-
-            (Opcode::DivG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::INT.0 => Opcode::DivI,
-            (Opcode::DivG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::FLOAT.0 => Opcode::DivF,
-            (Opcode::DivG, Some(TypeRef::Concrete(id))) if id.is_integer() => Opcode::DivI,
-            (Opcode::DivG, Some(TypeRef::Concrete(id))) if id.is_float() => Opcode::DivF,
-
-            // Keep generic for user-defined types (will use virtual dispatch at runtime)
-            _ => opcode,
-        };
-
-        // Emit specialized or generic instruction
-        if specialized_op == opcode {
-            // Keep as generic - re-emit with protocol ID
-            output.push(opcode.to_byte());
-            self.write_reg(output, dst);
-            self.write_reg(output, a);
-            self.write_reg(output, b);
-            self.write_varint(output, _protocol_id);
-        } else {
-            // Emit typed variant (no protocol ID needed)
-            output.push(specialized_op.to_byte());
-            self.write_reg(output, dst);
-            self.write_reg(output, a);
-            self.write_reg(output, b);
-        }
-
-        Ok(())
-    }
 
     /// Specializes generic comparison operations.
     ///
 
-    /// EQ_G/CMP_G format: dst:reg a:reg b:reg protocol_id:varint
-    fn specialize_generic_cmp(
-        &mut self,
-        opcode: Opcode,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        // Read registers
-        let dst = self.read_reg(bytecode, pc)?;
-        let a = self.read_reg(bytecode, pc)?;
-        let b = self.read_reg(bytecode, pc)?;
-
-        // Read protocol ID
-        let _protocol_id = self.read_varint(bytecode, pc)?;
-
-        // Determine operand type
-        let operand_type = self.infer_operand_type_from_context();
-
-        // Specialize based on concrete type
-        let specialized_op = match (opcode, &operand_type) {
-            (Opcode::EqG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::INT.0 => Opcode::EqI,
-            (Opcode::EqG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::FLOAT.0 => Opcode::EqF,
-            (Opcode::EqG, Some(TypeRef::Concrete(id))) if id.0 == TypeId::BOOL.0 => Opcode::EqI,
-            (Opcode::EqG, Some(TypeRef::Concrete(id))) if id.is_integer() => Opcode::EqI,
-            (Opcode::EqG, Some(TypeRef::Concrete(id))) if id.is_float() => Opcode::EqF,
-
-            // CMP_G doesn't have direct specialization - uses protocol dispatch
-            _ => opcode,
-        };
-
-        // Emit specialized or generic instruction
-        if specialized_op == opcode {
-            output.push(opcode.to_byte());
-            self.write_reg(output, dst);
-            self.write_reg(output, a);
-            self.write_reg(output, b);
-            self.write_varint(output, _protocol_id);
-        } else {
-            output.push(specialized_op.to_byte());
-            self.write_reg(output, dst);
-            self.write_reg(output, a);
-            self.write_reg(output, b);
-        }
-
-        Ok(())
-    }
-
     /// Specializes SIZE_OF_G instruction.
     ///
-
-    /// SIZE_OF_G format: dst:reg type_ref
-    /// Becomes: LOAD_I dst, <concrete_size>
-    fn specialize_sizeof_g(
-        &mut self,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        let dst = self.read_reg(bytecode, pc)?;
-        let type_ref = self.read_type_ref(bytecode, pc)?;
-        let substituted = self.substitution.apply(&type_ref);
-
-        let size = self.get_type_size(&substituted);
-
-        // Emit LOAD_I with concrete size
-        output.push(Opcode::LoadI.to_byte());
-        self.write_reg(output, dst);
-        self.write_signed_varint(output, size as i64);
-
-        Ok(())
-    }
-
-    /// Specializes ALIGN_OF_G instruction.
-    fn specialize_alignof_g(
-        &mut self,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        let dst = self.read_reg(bytecode, pc)?;
-        let type_ref = self.read_type_ref(bytecode, pc)?;
-        let substituted = self.substitution.apply(&type_ref);
-
-        let alignment = self.get_type_alignment(&substituted);
-
-        // Emit LOAD_I with concrete alignment
-        output.push(Opcode::LoadI.to_byte());
-        self.write_reg(output, dst);
-        self.write_signed_varint(output, alignment as i64);
-
-        Ok(())
-    }
-
-    /// Specializes LOAD_T instruction.
-    fn specialize_load_t(
-        &mut self,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        *pc += 1; // Skip opcode
-
-        let dst = self.read_reg(bytecode, pc)?;
-        let type_ref = self.read_type_ref(bytecode, pc)?;
-        let substituted = self.substitution.apply(&type_ref);
-
-        output.push(Opcode::LoadT.to_byte());
-        self.write_reg(output, dst);
-        self.write_type_ref(output, &substituted);
-
-        Ok(())
-    }
-
-    /// Copies an instruction through, handling operand-level substitution.
-    fn copy_instruction(
-        &mut self,
-        opcode: Opcode,
-        bytecode: &[u8],
-        pc: &mut usize,
-        output: &mut Vec<u8>,
-    ) -> Result<(), SpecializationError> {
-        // Copy a non-specialized instruction verbatim, using the CANONICAL
-        // decoder to find its exact length.  The previous `get_operand_bytes`
-        // was a self-described "simplified" (incomplete) operand-length table:
-        // one wrong/missing opcode length desynchronised the stream, after
-        // which a later operand byte decoded as a phantom instruction — the
-        // failure surfaced as an out-of-bounds slice panic (a LoadF read as 9
-        // bytes with 2 remaining).  Delegating to `decode_instruction` makes
-        // the copy correct for every current and future opcode.  These opcodes
-        // carry no type operands to substitute, so a verbatim copy is exact.
-        let start = *pc;
-        let mut probe = *pc;
-        crate::bytecode::decode_instruction(bytecode, &mut probe).map_err(|e| {
-            SpecializationError::InvalidBytecode {
-                offset: start,
-                message: format!(
-                    "copy_instruction: canonical decode of {:?} failed: {:?}",
-                    opcode, e
-                ),
-            }
-        })?;
-        output.extend_from_slice(&bytecode[start..probe]);
-        *pc = probe;
-        Ok(())
-    }
 
     // ========================================================================
     // Type Layout Helpers
@@ -1588,45 +1422,6 @@ impl<'a> BytecodeSpecializer<'a> {
         }
     }
 
-    /// Counts bytes for a register at the given offset.
-    fn count_reg_bytes(
-        &self,
-        bytecode: &[u8],
-        offset: usize,
-    ) -> Result<usize, SpecializationError> {
-        if offset >= bytecode.len() {
-            return Err(SpecializationError::InvalidBytecode {
-                offset,
-                message: "Unexpected end counting register bytes".to_string(),
-            });
-        }
-        if bytecode[offset] < 128 { Ok(1) } else { Ok(2) }
-    }
-
-    /// Counts bytes for a varint at the given offset.
-    fn count_varint_bytes(
-        &self,
-        bytecode: &[u8],
-        offset: usize,
-    ) -> Result<usize, SpecializationError> {
-        let mut count = 0;
-        let mut pos = offset;
-        loop {
-            if pos >= bytecode.len() {
-                return Err(SpecializationError::InvalidBytecode {
-                    offset: pos,
-                    message: "Unexpected end counting varint bytes".to_string(),
-                });
-            }
-            count += 1;
-            if bytecode[pos] < 128 {
-                break;
-            }
-            pos += 1;
-        }
-        Ok(count)
-    }
-
     /// Returns statistics from specialization.
     pub fn stats(&self) -> &SpecializerStats {
         &self.stats
@@ -1660,7 +1455,7 @@ mod tests {
     #[test]
     fn test_specialized_function_layout() {
         let sf = SpecializedFunction {
-            bytecode: vec![Opcode::Nop.to_byte(), Opcode::RetV.to_byte()],
+            bytecode: vec![crate::instruction::Opcode::Nop.to_byte(), crate::instruction::Opcode::RetV.to_byte()],
             register_count: 4,
             locals_count: 2,
             max_stack: 8,

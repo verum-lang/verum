@@ -22000,64 +22000,10 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
 /// built linearly; per-jump lookup is a binary search. For typical
 /// stdlib bodies (10-50 instructions) this is microseconds.
 fn byte_offsets_to_instr_indices(instructions: &mut [crate::instruction::Instruction]) {
-    use crate::instruction::Instruction;
-    if instructions.is_empty() {
-        return;
-    }
-    // Byte offset of each instruction (cumulative size of preceding
-    // instructions). Includes a sentinel at the end equal to total
-    // bytecode length, so a jump to "past last instruction" maps to
-    // index `instructions.len()` (Ret-fall-through pattern).
-    let mut byte_offsets: Vec<usize> = Vec::with_capacity(instructions.len() + 1);
-    let mut instr_sizes: Vec<usize> = Vec::with_capacity(instructions.len());
-    let mut cur = 0usize;
-    for instr in instructions.iter() {
-        byte_offsets.push(cur);
-        let sz = crate::bytecode::instruction_size(instr);
-        instr_sizes.push(sz);
-        cur += sz;
-    }
-    byte_offsets.push(cur); // sentinel for end-of-function
-    let byte_to_idx = |byte: usize| -> Option<i32> {
-        // Binary search; the table is monotone-strictly-increasing
-        // because every instruction has size >= 1.
-        match byte_offsets.binary_search(&byte) {
-            Ok(idx) => Some(idx as i32),
-            Err(_) => None,
-        }
-    };
-    for (idx, instr) in instructions.iter_mut().enumerate() {
-        let instr_end_byte = byte_offsets[idx] + instr_sizes[idx];
-        let convert = |old_byte_offset: i32| -> i32 {
-            let target_byte = (instr_end_byte as i32) + old_byte_offset;
-            if target_byte < 0 {
-                return old_byte_offset; // out-of-range; preserve
-            }
-            match byte_to_idx(target_byte as usize) {
-                Some(target_idx) => target_idx - (idx as i32),
-                None => old_byte_offset, // doesn't land on an instruction boundary
-            }
-        };
-        match instr {
-            Instruction::Jmp { offset } => {
-                *offset = convert(*offset);
-            }
-            Instruction::JmpIf { offset, .. }
-            | Instruction::JmpNot { offset, .. } => {
-                *offset = convert(*offset);
-            }
-            Instruction::JmpCmp { offset, .. } => {
-                *offset = convert(*offset);
-            }
-            Instruction::CtxProvide { body_offset, .. } => {
-                *body_offset = convert(*body_offset);
-            }
-            Instruction::TryBegin { handler_offset } => {
-                *handler_offset = convert(*handler_offset);
-            }
-            _ => {}
-        }
-    }
+    // Delegates to the canonical inverse in `bytecode` (L1-WIDTH #44
+    // exposed it publicly; keeping a second copy here was exactly the
+    // codec-drift class the ONE-grammar-authority rule exists to kill).
+    crate::bytecode::jump_offsets_to_instr_indices(instructions);
 }
 
 /// Recursive [`TypeRef`] remap shared by

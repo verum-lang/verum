@@ -3844,11 +3844,19 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         Opcode::SizeOfG | Opcode::AlignOfG | Opcode::Instantiate => {
-            // Use Raw for now
-            Ok(Instruction::Raw {
-                opcode,
-                data: vec![],
-            })
+            // These opcodes are never emitted by the current codegen
+            // (size_of/align_of resolve at compile time).  The old arm
+            // returned `Raw { data: vec![] }` WITHOUT consuming any
+            // operand bytes — a silent stream desync for any body that
+            // did carry them.  Fail loudly instead: structural
+            // consumers (mono specializer, merger L1 re-encode,
+            // archive body import) treat a decode error as
+            // "leave this body untransformed", which is safe; a silent
+            // desync is not.
+            Err(VbcError::Deserialization(format!(
+                "decode_instruction: opcode {:?} has no canonical wire decoding (never emitted); refusing to guess",
+                opcode
+            )))
         }
 
         // ====================================================================
@@ -6140,6 +6148,72 @@ pub fn instruction_size(instr: &Instruction) -> usize {
     // Encode to a temporary buffer and return length
     let mut buf = Vec::with_capacity(32);
     encode_instruction(instr, &mut buf)
+}
+
+/// Converts BYTE-level jump offsets back to instruction-INDEX offsets —
+/// the exact inverse of [`fixup_jump_offsets`].
+///
+/// Freshly decoded archive/merged bytecode carries byte-form offsets
+/// (that is what was serialised).  Structural rewriting — id remaps
+/// that change operand VARINT WIDTHS (mono L1-WIDTH #44, archive body
+/// import) — must convert to index form first, transform, then
+/// re-encode via [`fixup_jump_offsets`] so byte offsets are recomputed
+/// against the NEW widths.  This is the single canonical authority;
+/// per-consumer copies are delegates.
+///
+/// A jump whose byte target does not land exactly on an instruction
+/// boundary is left untouched (defensive: the caller's decode already
+/// proved boundaries for everything it will re-encode).
+pub fn jump_offsets_to_instr_indices(instructions: &mut [Instruction]) {
+    if instructions.is_empty() {
+        return;
+    }
+    let mut byte_offsets: Vec<usize> = Vec::with_capacity(instructions.len() + 1);
+    let mut instr_sizes: Vec<usize> = Vec::with_capacity(instructions.len());
+    let mut cur = 0usize;
+    for instr in instructions.iter() {
+        byte_offsets.push(cur);
+        let sz = instruction_size(instr);
+        instr_sizes.push(sz);
+        cur += sz;
+    }
+    byte_offsets.push(cur); // end sentinel: "jump past last instruction"
+    let byte_to_idx = |byte: i64| -> Option<i32> {
+        if byte < 0 {
+            return None;
+        }
+        byte_offsets
+            .binary_search(&(byte as usize))
+            .ok()
+            .map(|idx| idx as i32)
+    };
+    for idx in 0..instructions.len() {
+        let instr_end = (byte_offsets[idx] + instr_sizes[idx]) as i64;
+        let convert = |byte_off: i32| -> Option<i32> {
+            byte_to_idx(instr_end + byte_off as i64).map(|t| t - idx as i32)
+        };
+        match &mut instructions[idx] {
+            Instruction::Jmp { offset }
+            | Instruction::JmpIf { offset, .. }
+            | Instruction::JmpNot { offset, .. }
+            | Instruction::JmpCmp { offset, .. } => {
+                if let Some(v) = convert(*offset) {
+                    *offset = v;
+                }
+            }
+            Instruction::CtxProvide { body_offset, .. } => {
+                if let Some(v) = convert(*body_offset) {
+                    *body_offset = v;
+                }
+            }
+            Instruction::TryBegin { handler_offset } => {
+                if let Some(v) = convert(*handler_offset) {
+                    *handler_offset = v;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Converts instruction-level jump offsets to byte-level offsets.
