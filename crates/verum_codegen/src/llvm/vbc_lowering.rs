@@ -584,6 +584,15 @@ pub struct VbcToLlvmLowering<'ctx> {
     /// was created for a different arity). These are stdlib functions whose body
     /// would produce invalid IR if lowered into the wrong-arity LLVM function.
     skip_body_func_ids: std::collections::HashSet<u32>,
+    /// **CTOR-TRAP-QUARANTINE-1 (#44)**: function IDs whose body
+    /// lowering FAILED (partially or fully).  Their placeholder bodies
+    /// degrade to typed zero-returns, and — critically — the
+    /// global-ctor/dtor emitters refuse to call them: a trap or
+    /// half-lowered init running BEFORE main turned every AOT binary
+    /// into a pre-main EXC_BREAKPOINT (observed: a one-`brk`
+    /// `__tls_init_AUXV_PTR` in @llvm.global_ctors).  Mirrors Tier-0's
+    /// lenient WARN+skip ctor discipline.
+    failed_lowering_ids: std::collections::HashSet<u32>,
 
     /// DWARF debug info builder (created when config.debug_info is true).
     dibuilder: Option<DebugInfoBuilder<'ctx>>,
@@ -845,6 +854,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             func_name_index: None,
             has_arity_collisions: false,
             skip_body_func_ids: std::collections::HashSet::new(),
+            failed_lowering_ids: std::collections::HashSet::new(),
             dibuilder,
             di_compile_unit,
             di_file,
@@ -1199,16 +1209,41 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 }
                             }
                         } else {
+                            // Partially-lowered body: seal every
+                            // unterminated block with a TYPED ZERO
+                            // RETURN, not `unreachable` — the latter
+                            // compiles to a naked `brk` and a caller
+                            // (worst case: the global-ctor array,
+                            // pre-main) traps the whole process.
+                            // Zero-return matches the const-zero
+                            // skipped-call discipline: degraded but
+                            // alive, and the failure is recorded for
+                            // the diagnostics + the ctor quarantine.
+                            let ret_ty_opt = llvm_fn.get_type().get_return_type();
                             let mut bb = llvm_fn.get_first_basic_block();
                             while let Some(block) = bb {
                                 if block.get_terminator().is_none() {
                                     builder.position_at_end(block);
-                                    let _ = builder.build_unreachable();
+                                    match ret_ty_opt {
+                                        Some(verum_llvm::types::BasicTypeEnum::IntType(it)) => {
+                                            let _ = builder.build_return(Some(&it.const_zero()));
+                                        }
+                                        Some(verum_llvm::types::BasicTypeEnum::FloatType(ft)) => {
+                                            let _ = builder.build_return(Some(&ft.const_zero()));
+                                        }
+                                        Some(verum_llvm::types::BasicTypeEnum::PointerType(pt)) => {
+                                            let _ = builder.build_return(Some(&pt.const_null()));
+                                        }
+                                        Some(_) | None => {
+                                            let _ = builder.build_return(None);
+                                        }
+                                    }
                                 }
                                 bb = block.get_next_basic_block();
                             }
                         }
                     }
+                    self.failed_lowering_ids.insert(func_desc.id.0);
                     continue;
                 }
                 if is_tracked {
@@ -4617,6 +4652,19 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             builder.position_at_end(entry_bb);
 
             for (func_id, _priority) in &vbc_module.global_ctors {
+                // CTOR-TRAP-QUARANTINE-1: a ctor whose body lowering
+                // failed must not run before main — Tier-0's lenient
+                // WARN+skip, mirrored.  Tests touching its static hit
+                // a clear default-value read instead of a pre-main trap.
+                if self.failed_lowering_ids.contains(&func_id.0) {
+                    if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
+                        eprintln!(
+                            "[aot-ctor-quarantine] ctor fn_id={} lowering failed — skipped from __verum_static_init",
+                            func_id.0
+                        );
+                    }
+                    continue;
+                }
                 if let Some(target_fn) = self.functions.get(&func_id.0).copied() {
                     // Only call functions with 0 parameters — true static init functions.
                     // Module merging can remap func IDs incorrectly, mapping init functions
@@ -4656,6 +4704,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             builder.position_at_end(entry_bb);
 
             for (func_id, _priority) in &vbc_module.global_dtors {
+                if self.failed_lowering_ids.contains(&func_id.0) {
+                    continue; // CTOR-TRAP-QUARANTINE-1 (dtor twin)
+                }
                 if let Some(target_fn) = self.functions.get(&func_id.0).copied() {
                     builder
                         .build_call(target_fn, &[], "fini_result")
