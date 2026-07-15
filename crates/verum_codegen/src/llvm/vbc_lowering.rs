@@ -1155,6 +1155,26 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         if func_name.starts_with("llvm.") {
                             continue;
                         }
+                        // **LENIENT-CTOR-TIER1** (AOT-STUB-SENTINEL-CHASE-1,
+                        // Tier-1 twin of the #20 lenient-ctor contract): a
+                        // global ctor (`__tls_init_*`) whose lowering failed
+                        // must NOT keep a partial body patched with
+                        // `unreachable` — global_ctors run it at startup and
+                        // the `brk` kills the process before main (the
+                        // 43/426 r24b collapse). Erase the partial body so
+                        // the default-return synthesis below applies: WARN +
+                        // static stays nil — byte-coherent with Tier-0's
+                        // lenient ctor skip.
+                        if func_name.starts_with("__tls_init_") {
+                            while let Some(block) = llvm_fn.get_first_basic_block() {
+                                // SAFETY: block was just obtained from
+                                // llvm_fn so it has a parent; no other
+                                // references to it are retained here.
+                                if unsafe { block.delete() }.is_err() {
+                                    break;
+                                }
+                            }
+                        }
                         let builder = self.context.create_builder();
                         if llvm_fn.get_first_basic_block().is_none() {
                             // Bodyless declaration — synthesise a default-return entry.

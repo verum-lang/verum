@@ -2961,10 +2961,14 @@ pub fn lower_instruction<'ctx>(
             // of the entire enclosing function ("Skipping function '…':
             // NewClosure: function id 5368709xx not found" — the
             // TcpStream.connect_* class).
-            let xmod_closure_fid = if *func_id
+            // AOT-STUB-SENTINEL-CHASE-1: stage-band stub sentinels are
+            // by-name references too (SERIALIZE-STUB-IDENTITY-1 keeps
+            // them in the stream) — chase them like XMOD-band ids.
+            let is_by_name_ref = (*func_id
                 >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
-                && *func_id < 0x4000_0000
-            {
+                && *func_id < 0x4000_0000)
+                || verum_vbc::stub_ranges::is_stub_id(*func_id);
+            let xmod_closure_fid = if is_by_name_ref {
                 vbc_mod
                     .external_function_names
                     .iter()
@@ -2975,10 +2979,27 @@ pub fn lower_instruction<'ctx>(
                 None
             };
             let effective_fn_id = xmod_closure_fid.map(|f| f.0).unwrap_or(*func_id);
-            let func_desc = vbc_mod.get_function(FunctionId(effective_fn_id)).or_internal_else(|| format!(
-                    "NewClosure: function id {} not found",
-                    func_id
-                ))?;
+            let func_desc = match vbc_mod.get_function(FunctionId(effective_fn_id)) {
+                Some(d) => d,
+                None if is_by_name_ref => {
+                    // Unresolvable by-name closure target: mirror the
+                    // 0x7FFFFFFF leg — null closure + WARN, never a
+                    // whole-function skip (a skipped __tls_init_* ctor
+                    // became a startup `brk` that killed EVERY binary).
+                    tracing::warn!(
+                        "NewClosure: by-name id {} unresolved — null closure (lenient)",
+                        func_id
+                    );
+                    ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
+                    return Ok(());
+                }
+                None => {
+                    return Err(LlvmLoweringError::internal(format!(
+                        "NewClosure: function id {} not found",
+                        func_id
+                    )));
+                }
+            };
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
             let llvm_fn = ctx.get_module().get_function(func_name).or_internal_else(|| format!(
                     "NewClosure: function '{}' not found in LLVM module",
@@ -9271,9 +9292,14 @@ fn lower_call<'ctx>(
                 // resolve it to a concrete function in the module, so the call
                 // lowers through the normal path (and its name-intercept /
                 // get_or_declare_ ABI routing) instead of const-zero'ing.
-                let xmod_name: Option<&str> = if func_id
+                // AOT-STUB-SENTINEL-CHASE-1: stage-band stub sentinels
+                // (stub_ranges near u32::MAX) survive serialization since
+                // SERIALIZE-STUB-IDENTITY-1 — they are BY-NAME references
+                // exactly like XMOD-band ids and chase the same way.
+                let xmod_name: Option<&str> = if (func_id
                     >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
-                    && func_id < 0x4000_0000
+                    && func_id < 0x4000_0000)
+                    || verum_vbc::stub_ranges::is_stub_id(func_id)
                 {
                     vbc_mod
                         .external_function_names
