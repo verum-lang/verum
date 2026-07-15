@@ -512,10 +512,10 @@ impl<'a> RecursiveParser<'a> {
                     }
                 }
             }
-            Some(TokenKind::Const) => self.parse_const(vis),
+            Some(TokenKind::Const) => self.parse_const(attrs, vis),
             // Allow `let` at item level as equivalent to `const`
             // Handles: `public let NAME: Type = value;`
-            Some(TokenKind::Let) => self.parse_const(vis),
+            Some(TokenKind::Let) => self.parse_const(attrs, vis),
             Some(TokenKind::Static) => self.parse_static(attrs, vis),
             Some(TokenKind::Module) => self.parse_module_decl(attrs, vis),
             Some(TokenKind::Mount) => self.parse_mount(attrs.into(), vis),
@@ -581,7 +581,7 @@ impl<'a> RecursiveParser<'a> {
                     Some(TokenKind::Axiom) => self.parse_axiom(attrs, vis),
                     Some(TokenKind::Lemma) => self.parse_lemma(attrs, vis),
                     Some(TokenKind::Theorem) => self.parse_theorem(attrs, vis),
-                    Some(TokenKind::Const) => self.parse_const(vis),
+                    Some(TokenKind::Const) => self.parse_const(attrs, vis),
                     Some(TokenKind::Static) => self.parse_static(attrs, vis),
                     _ => {
                         // Unknown ghost item — produce an error
@@ -5350,7 +5350,14 @@ impl<'a> RecursiveParser<'a> {
     }
 
     /// Parse a const declaration.
-    fn parse_const(&mut self, vis: Visibility) -> ParseResult<Item> {
+    ///
+    /// CFG-CONST-SELECT-1: takes the collected outer attributes (mirror
+    /// of `parse_static`) — pre-fix they were DROPPED, so
+    /// `@cfg(target_arch = "...")` const declarations all compiled and
+    /// the LAST same-named declaration won regardless of target
+    /// (`MAX_SIMD_WIDTH` resolved to the not(any(...)) fallback 128 on
+    /// every arch while fn-body statement-level @cfg branched correctly).
+    fn parse_const(&mut self, attrs: Vec<Attribute>, vis: Visibility) -> ParseResult<Item> {
         let start_pos = self.stream.position();
 
         // Accept both `const` and `let` at item level
@@ -5399,7 +5406,7 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::Semicolon)?;
 
         let span = self.stream.make_span(start_pos);
-        Ok(Item::new(
+        Ok(Item::new_with_attrs(
             ItemKind::Const(ConstDecl {
                 visibility: vis,
                 name: Ident::new(name, name_span),
@@ -5408,6 +5415,7 @@ impl<'a> RecursiveParser<'a> {
                 value,
                 span,
             }),
+            attrs.into_iter().collect(),
             span,
         ))
     }
