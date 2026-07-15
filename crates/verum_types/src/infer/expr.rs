@@ -6780,12 +6780,20 @@ impl TypeChecker {
                     && !is_generic_type_call
                     && !self.stdlib_single_file_mode
                 {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Function accepts at most {} argument{}, got {}",
-                        total_params,
-                        if total_params == 1 { "" } else { "s" },
-                        provided_args
-                    ))));
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: verum_common::Text::from("E102"),
+                        msg: verum_common::Text::from(format!(
+                            "Function accepts at most {} argument{}, got {}{}",
+                            total_params,
+                            if total_params == 1 { "" } else { "s" },
+                            provided_args,
+                            func_name
+                                .as_ref()
+                                .map(|n| format!(" (calling `{}`)", n))
+                                .unwrap_or_default()
+                        )),
+                        span: expr.span,
+                    });
                 }
 
                 // ============================================================

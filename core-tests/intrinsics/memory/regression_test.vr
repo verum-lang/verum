@@ -104,7 +104,7 @@ fn regression_transmute_bits_to_float_reinterprets() {
 @test
 fn regression_memset_writes_through_int_tagged_address() {
     let a = cbgr_allocate(8, 8);
-    memset(ptr_to_mut_ref(a as *mut Byte), 66 as Byte, 8 as USize);
+    memset(ptr_to_mut_ref(a as *mut Byte), 66 as Byte, 8);
     assert_eq(load_byte(a), 66);
     assert_eq(load_byte(a + 7), 66);
     cbgr_deallocate(a);
@@ -115,7 +115,7 @@ fn regression_memcpy_copies_through_int_tagged_addresses() {
     let src = cbgr_allocate(8, 8);
     let dst = cbgr_allocate(8, 8);
     store_byte(src, 123);
-    memcpy(ptr_to_mut_ref(dst as *mut Byte), ptr_to_ref(src as *const Byte), 1 as USize);
+    memcpy(ptr_to_mut_ref(dst as *mut Byte), ptr_to_ref(src as *const Byte), 1);
     assert_eq(load_byte(dst), 123);
     cbgr_deallocate(src);
     cbgr_deallocate(dst);
@@ -125,11 +125,11 @@ fn regression_memcpy_copies_through_int_tagged_addresses() {
 fn regression_memcmp_compares_contents_not_addresses() {
     let a = cbgr_allocate(8, 8);
     let b = cbgr_allocate(8, 8);
-    memset(ptr_to_mut_ref(a as *mut Byte), 7 as Byte, 8 as USize);
-    memset(ptr_to_mut_ref(b as *mut Byte), 7 as Byte, 8 as USize);
+    memset(ptr_to_mut_ref(a as *mut Byte), 7 as Byte, 8);
+    memset(ptr_to_mut_ref(b as *mut Byte), 7 as Byte, 8);
     // Pre-fix this ranked the two ALLOCATION ADDRESSES (-1); the contents
     // are equal so the honest verdict is 0.
-    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 8 as USize), 0);
+    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 8), 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }
@@ -182,7 +182,7 @@ fn regression_ptr_is_aligned_to_returns_bool_not_nil() {
     // mask-and-compare.  The generic ptr_is_aligned<T> remains on the
     // task #16 width channel.
     let a = cbgr_allocate(16, 8);
-    let aligned = ptr_is_aligned_to(a as *const Int, 8 as USize);
+    let aligned = ptr_is_aligned_to(a as *const Int, 8);
     assert(aligned == true);
     cbgr_deallocate(a);
 }

@@ -152,7 +152,7 @@ fn law_live_allocation_is_not_null() {
 fn law_ptr_add_sub_inverse() {
     let a = cbgr_allocate(64, 8);
     let p = a as *const Int;
-    let q = ptr_sub(ptr_add(p, 3 as USize), 3 as USize);
+    let q = ptr_sub(ptr_add(p, 3), 3);
     assert_eq(q as Int, p as Int);
     cbgr_deallocate(a);
 }
@@ -161,8 +161,8 @@ fn law_ptr_add_sub_inverse() {
 fn law_ptr_add_accumulates() {
     let a = cbgr_allocate(64, 8);
     let p = a as *const Int;
-    let lhs = ptr_add(ptr_add(p, 2 as USize), 3 as USize);
-    let rhs = ptr_add(p, 5 as USize);
+    let lhs = ptr_add(ptr_add(p, 2), 3);
+    let rhs = ptr_add(p, 5);
     assert_eq(lhs as Int, rhs as Int);
     cbgr_deallocate(a);
 }
@@ -171,7 +171,7 @@ fn law_ptr_add_accumulates() {
 fn law_ptr_offset_agrees_with_add_for_nonnegative() {
     let a = cbgr_allocate(64, 8);
     let p = a as *const Int;
-    assert_eq(ptr_offset(p, 2 as ISize) as Int, ptr_add(p, 2 as USize) as Int);
+    assert_eq(ptr_offset(p, 2) as Int, ptr_add(p, 2) as Int);
     cbgr_deallocate(a);
 }
 
@@ -179,8 +179,8 @@ fn law_ptr_offset_agrees_with_add_for_nonnegative() {
 fn law_ptr_add_is_strictly_monotonic() {
     let a = cbgr_allocate(64, 8);
     let p = a as *const Int;
-    assert((ptr_add(p, 1 as USize) as Int) > (p as Int));
-    assert((ptr_add(p, 2 as USize) as Int) > (ptr_add(p, 1 as USize) as Int));
+    assert((ptr_add(p, 1) as Int) > (p as Int));
+    assert((ptr_add(p, 2) as Int) > (ptr_add(p, 1) as Int));
     cbgr_deallocate(a);
 }
 
@@ -189,7 +189,7 @@ fn law_ptr_add_is_strictly_monotonic() {
 fn law_ptr_add_byte_stride_is_one() {
     let a = cbgr_allocate(16, 8);
     let bp = a as *const Byte;
-    let d = (ptr_add(bp, 1 as USize) as Int) - (bp as Int);
+    let d = (ptr_add(bp, 1) as Int) - (bp as Int);
     assert_eq(d, 1);
     cbgr_deallocate(a);
 }
@@ -205,7 +205,7 @@ fn law_ptr_add_byte_stride_is_one() {
 @test
 fn law_memset_fills_exactly_count_bytes() {
     let a = cbgr_allocate(16, 8);
-    memset(ptr_to_mut_ref(a as *mut Byte), 170 as Byte, 8 as USize);
+    memset(ptr_to_mut_ref(a as *mut Byte), 170 as Byte, 8);
     let mut i = 0;
     while i < 8 {
         assert_eq(load_byte(a + i), 170);
@@ -225,7 +225,7 @@ fn law_memcpy_preserves_source() {
         store_byte(src + i, 100 + i);
         i = i + 1;
     }
-    memcpy(ptr_to_mut_ref(dst as *mut Byte), ptr_to_ref(src as *const Byte), 8 as USize);
+    memcpy(ptr_to_mut_ref(dst as *mut Byte), ptr_to_ref(src as *const Byte), 8);
     let mut j = 0;
     while j < 8 {
         assert_eq(load_byte(src + j), 100 + j);
@@ -240,11 +240,11 @@ fn law_memcpy_preserves_source() {
 fn law_memcmp_reflexive_equal_is_zero() {
     let a = cbgr_allocate(8, 8);
     let b = cbgr_allocate(8, 8);
-    memset(ptr_to_mut_ref(a as *mut Byte), 7 as Byte, 8 as USize);
-    memset(ptr_to_mut_ref(b as *mut Byte), 7 as Byte, 8 as USize);
-    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 8 as USize), 0);
+    memset(ptr_to_mut_ref(a as *mut Byte), 7 as Byte, 8);
+    memset(ptr_to_mut_ref(b as *mut Byte), 7 as Byte, 8);
+    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 8), 0);
     // Reflexivity: a buffer equals itself.
-    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(a as *const Byte), 8 as USize), 0);
+    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(a as *const Byte), 8), 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }
@@ -253,10 +253,10 @@ fn law_memcmp_reflexive_equal_is_zero() {
 fn law_memcmp_antisymmetric() {
     let a = cbgr_allocate(8, 8);
     let b = cbgr_allocate(8, 8);
-    memset(ptr_to_mut_ref(a as *mut Byte), 1 as Byte, 8 as USize);
-    memset(ptr_to_mut_ref(b as *mut Byte), 2 as Byte, 8 as USize);
-    let ab = memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 8 as USize);
-    let ba = memcmp(ptr_to_ref(b as *const Byte), ptr_to_ref(a as *const Byte), 8 as USize);
+    memset(ptr_to_mut_ref(a as *mut Byte), 1 as Byte, 8);
+    memset(ptr_to_mut_ref(b as *mut Byte), 2 as Byte, 8);
+    let ab = memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 8);
+    let ba = memcmp(ptr_to_ref(b as *const Byte), ptr_to_ref(a as *const Byte), 8);
     assert(ab < 0);
     assert(ba > 0);
     cbgr_deallocate(a);
@@ -271,7 +271,7 @@ fn law_memcmp_first_difference_decides() {
     // memcmp must rank by the FIRST difference only.
     store_byte(a, 5); store_byte(a + 1, 5); store_byte(a + 2, 1); store_byte(a + 3, 200);
     store_byte(b, 5); store_byte(b + 1, 5); store_byte(b + 2, 2); store_byte(b + 3, 0);
-    assert(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 4 as USize) < 0);
+    assert(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 4) < 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }
@@ -281,7 +281,7 @@ fn law_memmove_overlapping_shift_right() {
     let a = cbgr_allocate(16, 8);
     store_byte(a, 10); store_byte(a + 1, 20); store_byte(a + 2, 30);
     // Shift [10,20] right by one: overlap-safe copy must yield [10,10,20].
-    memmove(ptr_to_mut_ref((a + 1) as *mut Byte), ptr_to_ref(a as *const Byte), 2 as USize);
+    memmove(ptr_to_mut_ref((a + 1) as *mut Byte), ptr_to_ref(a as *const Byte), 2);
     assert_eq(load_byte(a), 10);
     assert_eq(load_byte(a + 1), 10);
     assert_eq(load_byte(a + 2), 20);
@@ -293,7 +293,7 @@ fn law_memmove_overlapping_shift_left() {
     let a = cbgr_allocate(16, 8);
     store_byte(a, 1); store_byte(a + 1, 2); store_byte(a + 2, 3);
     // Shift [2,3] left by one: [2,3,3].
-    memmove(ptr_to_mut_ref(a as *mut Byte), ptr_to_ref((a + 1) as *const Byte), 2 as USize);
+    memmove(ptr_to_mut_ref(a as *mut Byte), ptr_to_ref((a + 1) as *const Byte), 2);
     assert_eq(load_byte(a), 2);
     assert_eq(load_byte(a + 1), 3);
     assert_eq(load_byte(a + 2), 3);
@@ -304,13 +304,13 @@ fn law_memmove_overlapping_shift_left() {
 fn law_bulk_zero_count_is_noop() {
     let a = cbgr_allocate(8, 8);
     let b = cbgr_allocate(8, 8);
-    memset(ptr_to_mut_ref(a as *mut Byte), 9 as Byte, 8 as USize);
-    memset(ptr_to_mut_ref(b as *mut Byte), 9 as Byte, 8 as USize);
-    memcpy(ptr_to_mut_ref(a as *mut Byte), ptr_to_ref(b as *const Byte), 0 as USize);
-    memmove(ptr_to_mut_ref(a as *mut Byte), ptr_to_ref(b as *const Byte), 0 as USize);
-    memset(ptr_to_mut_ref(a as *mut Byte), 255 as Byte, 0 as USize);
+    memset(ptr_to_mut_ref(a as *mut Byte), 9 as Byte, 8);
+    memset(ptr_to_mut_ref(b as *mut Byte), 9 as Byte, 8);
+    memcpy(ptr_to_mut_ref(a as *mut Byte), ptr_to_ref(b as *const Byte), 0);
+    memmove(ptr_to_mut_ref(a as *mut Byte), ptr_to_ref(b as *const Byte), 0);
+    memset(ptr_to_mut_ref(a as *mut Byte), 255 as Byte, 0);
     assert_eq(load_byte(a), 9);
-    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 0 as USize), 0);
+    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 0), 0);
     cbgr_deallocate(a);
     cbgr_deallocate(b);
 }
@@ -350,15 +350,15 @@ fn law_alignment_ladder_downward_closed() {
     // the whole downward ladder.
     let a = cbgr_allocate(16, 8);
     let p = a as *const Int;
-    assert(ptr_is_aligned_to(p, 1 as USize));
-    assert(ptr_is_aligned_to(p, 2 as USize));
-    assert(ptr_is_aligned_to(p, 4 as USize));
-    assert(ptr_is_aligned_to(p, 8 as USize));
+    assert(ptr_is_aligned_to(p, 1));
+    assert(ptr_is_aligned_to(p, 2));
+    assert(ptr_is_aligned_to(p, 4));
+    assert(ptr_is_aligned_to(p, 8));
     // An odd address fails every rung above 1.
     let odd = (a + 1) as *const Byte;
-    assert(ptr_is_aligned_to(odd, 1 as USize));
-    assert(!ptr_is_aligned_to(odd, 2 as USize));
-    assert(!ptr_is_aligned_to(odd, 8 as USize));
+    assert(ptr_is_aligned_to(odd, 1));
+    assert(!ptr_is_aligned_to(odd, 2));
+    assert(!ptr_is_aligned_to(odd, 8));
     cbgr_deallocate(a);
 }
 
@@ -367,7 +367,7 @@ fn law_alignment_ladder_downward_closed() {
 fn law_ptr_is_aligned_generic_matches_explicit() {
     let a = cbgr_allocate(16, 8);
     let p = a as *const Int;
-    assert_eq(ptr_is_aligned(p), ptr_is_aligned_to(p, 8 as USize));
+    assert_eq(ptr_is_aligned(p), ptr_is_aligned_to(p, 8));
     cbgr_deallocate(a);
 }
 
