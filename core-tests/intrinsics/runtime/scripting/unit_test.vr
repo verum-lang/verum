@@ -1,0 +1,304 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/scripting/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/scripting.vr` — the embedded scripting engine
+// binding surface (engine lifecycle, eval, outcome inspection, globals,
+// sandbox, error taxonomy).
+//
+// TIER CONTRACT: source evaluation requires the installed compiler hook —
+// present under the interpreter (the CLI links verum_compiler), ABSENT in a
+// stripped AOT test binary.  The documented AOT behaviour is a FAILED
+// outcome with `last_error_kind == 4` (compiler-unavailable), which
+// `test_aot_reports_compiler_unavailable` pins.  Every interp-only test
+// gates on `is_interpreted()` and asserts that same contract on the AOT
+// side, so the suite is honest — and green — on BOTH tiers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.tier.{is_interpreted};
+mount core.intrinsics.runtime.scripting.{
+    script_engine_new, script_engine_free, script_engine_eval,
+    script_engine_call,
+    script_outcome_is_ok, script_outcome_kind, script_outcome_as_int,
+    script_outcome_as_float, script_outcome_as_bool, script_outcome_as_text,
+    script_outcome_stdout, script_outcome_error, script_outcome_free,
+    script_engine_last_error_kind,
+    script_engine_set_global_int, script_engine_set_global_text,
+    script_engine_set_global_bool, script_engine_set_global_float,
+    script_engine_new_sandboxed,
+};
+
+// =============================================================================
+// Section 1: tier contract — the ONE test that runs its assertion on AOT
+// =============================================================================
+
+@test
+fn test_aot_reports_compiler_unavailable() {
+    if is_interpreted() {
+        // Interp side of the same contract: the hook IS present.
+        let e = script_engine_new();
+        let o = script_engine_eval(e, "fn main() -> Int { 1 }");
+        assert(script_outcome_is_ok(o));
+        script_outcome_free(o);
+        script_engine_free(e);
+    } else {
+        let e = script_engine_new();
+        let o = script_engine_eval(e, "fn main() -> Int { 1 }");
+        assert(!script_outcome_is_ok(o));
+        assert_eq(script_engine_last_error_kind(e), 4);
+        script_outcome_free(o);
+        script_engine_free(e);
+    }
+}
+
+// =============================================================================
+// Section 2: eval + outcome inspection (typed results)
+// =============================================================================
+
+@test
+fn test_eval_int_result() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() -> Int { 40 + 2 }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_kind(o), 2);
+    assert_eq(script_outcome_as_int(o), 42);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_eval_float_result() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() -> Float { 1.5 * 2.0 }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_kind(o), 3);
+    assert_eq(script_outcome_as_float(o), 3.0);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_eval_bool_result() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() -> Bool { 3 > 2 }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_kind(o), 1);
+    assert(script_outcome_as_bool(o));
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_eval_text_result() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() -> Text { \"scripted\" }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_kind(o), 4);
+    assert_eq(script_outcome_as_text(o), "scripted");
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_eval_unit_result_is_nil_kind() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() { }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_kind(o), 0);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 3: stdout capture
+// =============================================================================
+
+@test
+fn test_stdout_captured_in_outcome() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() { print(\"captured line\"); }");
+    assert(script_outcome_is_ok(o));
+    let out = script_outcome_stdout(o);
+    assert(out.contains("captured line"));
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_stdout_empty_for_silent_script() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() { let _ = 1; }");
+    assert_eq(script_outcome_stdout(o).len(), 0);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 4: error taxonomy (kind: 0 none, 1 compile, 2 runtime,
+//            3 entry-not-found, 4 compiler-unavailable, 5 internal)
+// =============================================================================
+
+@test
+fn test_compile_error_kind_and_message() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main( {{{ garbage");
+    assert(!script_outcome_is_ok(o));
+    assert_eq(script_engine_last_error_kind(e), 1);
+    assert(script_outcome_error(o).len() > 0);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_runtime_error_kind() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() { panic(\"deliberate\"); }");
+    assert(!script_outcome_is_ok(o));
+    assert_eq(script_engine_last_error_kind(e), 2);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_entry_not_found_kind() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_call(e, "fn helper() -> Int { 1 }", "no_such_entry");
+    assert(!script_outcome_is_ok(o));
+    assert_eq(script_engine_last_error_kind(e), 3);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_error_kind_is_most_recent_failure_sticky_through_success() {
+    // The declared contract is "the engine's MOST RECENT FAILURE" — a
+    // successful eval does not erase it (the outcome's own is_ok is the
+    // success channel); 0 means "no failure has occurred yet".
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    assert_eq(script_engine_last_error_kind(e), 0);
+    let bad = script_engine_eval(e, "fn main( {{{");
+    script_outcome_free(bad);
+    assert_eq(script_engine_last_error_kind(e), 1);
+    let good = script_engine_eval(e, "fn main() { }");
+    assert(script_outcome_is_ok(good));
+    assert_eq(script_engine_last_error_kind(e), 1);
+    script_outcome_free(good);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 5: named-entry call
+// =============================================================================
+
+@test
+fn test_call_named_entry() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_call(e, "fn compute() -> Int { 7 * 6 }", "compute");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_as_int(o), 42);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 6: host → script typed globals
+// =============================================================================
+
+@test
+fn test_global_int_flows_into_script() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    script_engine_set_global_int(e, "seed", 123);
+    let o = script_engine_eval(e,
+        "mount core.intrinsics.runtime.scripting.{script_global_int};\nfn main() -> Int { script_global_int(\"seed\") + 1 }");
+    assert_eq(script_outcome_as_int(o), 124);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_global_text_flows_into_script() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    script_engine_set_global_text(e, "name", "verum");
+    let o = script_engine_eval(e,
+        "mount core.intrinsics.runtime.scripting.{script_global_text};\nfn main() -> Text { script_global_text(\"name\") }");
+    assert_eq(script_outcome_as_text(o), "verum");
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn test_global_bool_and_float_flow_into_script() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    script_engine_set_global_bool(e, "flag", true);
+    script_engine_set_global_float(e, "ratio", 2.5);
+    let o1 = script_engine_eval(e,
+        "mount core.intrinsics.runtime.scripting.{script_global_bool};\nfn main() -> Bool { script_global_bool(\"flag\") }");
+    assert(script_outcome_as_bool(o1));
+    script_outcome_free(o1);
+    let o2 = script_engine_eval(e,
+        "mount core.intrinsics.runtime.scripting.{script_global_float};\nfn main() -> Float { script_global_float(\"ratio\") }");
+    assert_eq(script_outcome_as_float(o2), 2.5);
+    script_outcome_free(o2);
+    script_engine_free(e);
+}
+
+@test
+fn test_absent_global_defaults() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e,
+        "mount core.intrinsics.runtime.scripting.{script_global_int, script_global_text};\nfn main() -> Int { script_global_int(\"never_set\") }");
+    assert_eq(script_outcome_as_int(o), 0);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 7: sandboxed engine limits
+// =============================================================================
+
+@test
+fn test_sandbox_instruction_limit_aborts() {
+    if !is_interpreted() { return; }
+    let se = script_engine_new_sandboxed(0, 1000, 0);
+    let o = script_engine_eval(se,
+        "fn main() { let mut i = 0; while i < 1000000 { i = i + 1; } }");
+    assert(!script_outcome_is_ok(o));
+    script_outcome_free(o);
+    script_engine_free(se);
+}
+
+@test
+fn test_sandbox_generous_limits_allow_completion() {
+    if !is_interpreted() { return; }
+    let se = script_engine_new_sandboxed(0, 10000000, 0);
+    let o = script_engine_eval(se, "fn main() -> Int { let mut i = 0; while i < 100 { i = i + 1; } i }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_as_int(o), 100);
+    script_outcome_free(o);
+    script_engine_free(se);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

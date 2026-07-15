@@ -1,0 +1,122 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/scripting/integration_test.vr
+// =============================================================================
+//
+// Cross-surface scenarios: scripts that themselves use the Verum stdlib
+// (collections, f-strings, control flow), structural marshaling of List /
+// Map outcomes back into the host, and the host↔script data plane composed
+// end-to-end.  Interp-gated (compiler hook required; AOT contract pinned in
+// unit_test.vr).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.tier.{is_interpreted};
+mount core.intrinsics.runtime.scripting.{
+    script_engine_new, script_engine_free, script_engine_eval,
+    script_outcome_is_ok, script_outcome_kind, script_outcome_as_int,
+    script_outcome_stdout, script_outcome_free,
+    script_outcome_list_len, script_outcome_list_elem_kind,
+    script_outcome_list_elem_int, script_outcome_list_elem_text,
+    script_engine_set_global_int,
+};
+
+// =============================================================================
+// Section 1: scripts using the stdlib internally
+// =============================================================================
+
+@test
+fn integration_script_uses_list_and_iterators() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e,
+        "fn main() -> Int { let xs: List<Int> = [1, 2, 3, 4]; let mut s = 0; for x in xs.iter() { s = s + *x; } s }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_as_int(o), 10);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn integration_script_fstring_stdout() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e,
+        "fn main() { let n = 6 * 7; print(f\"answer={n}\"); }");
+    assert(script_outcome_is_ok(o));
+    assert(script_outcome_stdout(o).contains("answer=42"));
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 2: structural List-outcome marshaling
+// =============================================================================
+
+@test
+fn integration_list_outcome_len_and_elements() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() -> List<Int> { [10, 20, 30] }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_kind(o), 5);
+    assert_eq(script_outcome_list_len(o), 3);
+    assert_eq(script_outcome_list_elem_kind(o, 0), 2);
+    assert_eq(script_outcome_list_elem_int(o, 0), 10);
+    assert_eq(script_outcome_list_elem_int(o, 1), 20);
+    assert_eq(script_outcome_list_elem_int(o, 2), 30);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn integration_list_outcome_of_texts() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() -> List<Text> { [\"a\", \"bb\"] }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_kind(o), 5);
+    assert_eq(script_outcome_list_len(o), 2);
+    assert_eq(script_outcome_list_elem_kind(o, 0), 4);
+    assert_eq(script_outcome_list_elem_text(o, 0), "a");
+    assert_eq(script_outcome_list_elem_text(o, 1), "bb");
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn integration_list_len_zero_for_non_list_outcome() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let o = script_engine_eval(e, "fn main() -> Int { 5 }");
+    assert_eq(script_outcome_list_len(o), 0);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 3: host data plane composed — seed globals, compute in script,
+//            marshal a structured result back
+// =============================================================================
+
+@test
+fn integration_host_seeds_script_computes_list_returns() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    script_engine_set_global_int(e, "base", 100);
+    let o = script_engine_eval(e,
+        "mount core.intrinsics.runtime.scripting.{script_global_int};\nfn main() -> List<Int> { let b = script_global_int(\"base\"); [b + 1, b + 2, b + 3] }");
+    assert(script_outcome_is_ok(o));
+    assert_eq(script_outcome_list_len(o), 3);
+    assert_eq(script_outcome_list_elem_int(o, 0), 101);
+    assert_eq(script_outcome_list_elem_int(o, 2), 103);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

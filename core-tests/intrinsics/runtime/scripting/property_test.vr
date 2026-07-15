@@ -1,0 +1,135 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/scripting/property_test.vr
+// =============================================================================
+//
+// Laws for the embedded scripting engine.  All laws gate on
+// `is_interpreted()` — evaluation needs the compiler hook; the AOT-side
+// contract (failed outcome, kind 4) is pinned once in unit_test.vr.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.tier.{is_interpreted};
+mount core.intrinsics.runtime.scripting.{
+    script_engine_new, script_engine_free, script_engine_eval,
+    script_outcome_is_ok, script_outcome_kind, script_outcome_as_int,
+    script_outcome_free,
+    script_engine_set_global_int, script_engine_last_error_kind,
+};
+
+// =============================================================================
+// Section 1: evaluation determinism — same source, same verdict, N runs
+// =============================================================================
+
+@test
+fn law_eval_deterministic_across_runs() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let src = "fn main() -> Int { let mut acc = 0; let mut i = 1; while i <= 10 { acc = acc + i; i = i + 1; } acc }";
+    let mut run = 0;
+    while run < 3 {
+        let o = script_engine_eval(e, src);
+        assert(script_outcome_is_ok(o));
+        assert_eq(script_outcome_as_int(o), 55);
+        script_outcome_free(o);
+        run = run + 1;
+    }
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 2: host globals — last-write-wins, per-engine isolation
+// =============================================================================
+
+@test
+fn law_global_last_write_wins() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    script_engine_set_global_int(e, "v", 1);
+    script_engine_set_global_int(e, "v", 2);
+    script_engine_set_global_int(e, "v", 3);
+    let o = script_engine_eval(e,
+        "mount core.intrinsics.runtime.scripting.{script_global_int};\nfn main() -> Int { script_global_int(\"v\") }");
+    assert_eq(script_outcome_as_int(o), 3);
+    script_outcome_free(o);
+    script_engine_free(e);
+}
+
+@test
+fn law_engines_isolate_globals() {
+    if !is_interpreted() { return; }
+    let e1 = script_engine_new();
+    let e2 = script_engine_new();
+    script_engine_set_global_int(e1, "who", 1);
+    script_engine_set_global_int(e2, "who", 2);
+    let src = "mount core.intrinsics.runtime.scripting.{script_global_int};\nfn main() -> Int { script_global_int(\"who\") }";
+    let o1 = script_engine_eval(e1, src);
+    let o2 = script_engine_eval(e2, src);
+    assert_eq(script_outcome_as_int(o1), 1);
+    assert_eq(script_outcome_as_int(o2), 2);
+    script_outcome_free(o1);
+    script_outcome_free(o2);
+    script_engine_free(e1);
+    script_engine_free(e2);
+}
+
+// =============================================================================
+// Section 3: outcome-kind taxonomy is total over the scalar types
+// =============================================================================
+
+@test
+fn law_outcome_kind_taxonomy_scalars() {
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+
+    let o_nil = script_engine_eval(e, "fn main() { }");
+    assert_eq(script_outcome_kind(o_nil), 0);
+    script_outcome_free(o_nil);
+
+    let o_bool = script_engine_eval(e, "fn main() -> Bool { true }");
+    assert_eq(script_outcome_kind(o_bool), 1);
+    script_outcome_free(o_bool);
+
+    let o_int = script_engine_eval(e, "fn main() -> Int { 1 }");
+    assert_eq(script_outcome_kind(o_int), 2);
+    script_outcome_free(o_int);
+
+    let o_float = script_engine_eval(e, "fn main() -> Float { 1.0 }");
+    assert_eq(script_outcome_kind(o_float), 3);
+    script_outcome_free(o_float);
+
+    let o_text = script_engine_eval(e, "fn main() -> Text { \"t\" }");
+    assert_eq(script_outcome_kind(o_text), 4);
+    script_outcome_free(o_text);
+
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Section 4: error-state machine — kind reflects the LATEST run only
+// =============================================================================
+
+@test
+fn law_error_kind_tracks_latest_failure() {
+    // Sticky-through-success: the kind names the LATEST FAILURE; each
+    // new failure overwrites it, a success leaves it untouched.
+    if !is_interpreted() { return; }
+    let e = script_engine_new();
+    let seq_bad = script_engine_eval(e, "fn main( {{{");
+    script_outcome_free(seq_bad);
+    assert_eq(script_engine_last_error_kind(e), 1);
+    let seq_panic = script_engine_eval(e, "fn main() { panic(\"x\"); }");
+    script_outcome_free(seq_panic);
+    assert_eq(script_engine_last_error_kind(e), 2);
+    let seq_ok = script_engine_eval(e, "fn main() { }");
+    script_outcome_free(seq_ok);
+    assert_eq(script_engine_last_error_kind(e), 2);
+    script_engine_free(e);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
