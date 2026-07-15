@@ -774,18 +774,16 @@ public fn page_size() -> Int {
     4096
 }
 
-/// Get monotonic time in nanoseconds (platform-independent)
+/// Get monotonic time in nanoseconds (platform-independent).
+///
+/// DARWIN-MACH-TIMEBASE-TIER0-1: the runtime intrinsic is the ONE
+/// clock authority — Tier-0 answers via the shared runtime clock,
+/// Tier-1 via the per-platform IR emitter (mach timebase / direct
+/// clock_gettime syscall). The previous per-platform hand-rolled
+/// bodies duplicated that authority, and the darwin leg returned RAW
+/// mach ticks at Tier-0 (statics read 0==0 → the numer==denom fast
+/// path fired without a real timebase — clocks ran 41.67x slow on
+/// Apple Silicon, breaking every elapsed-vs-absolute-bound contract).
 public fn monotonic_time_ns() -> UInt64 {
-    @cfg(target_os = "linux")
-    {
-        let mut ts = linux.syscall.Timespec { tv_sec: 0, tv_nsec: 0 };
-        linux.syscall.clock_gettime(1, &mut ts);  // CLOCK_MONOTONIC = 1
-        return (ts.tv_sec as UInt64) * 1_000_000_000 + (ts.tv_nsec as UInt64);
-    }
-
-    @cfg(target_os = "macos")
-    { return darwin.time.monotonic_nanos(); }
-
-    // Fallback
-    0 as UInt64
+    core.intrinsics.monotonic_nanos()
 }

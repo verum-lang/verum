@@ -74,12 +74,21 @@ fn init_timebase() {
 fn mach_to_nanos(mach_time: UInt64) -> UInt64 {
     init_timebase();
     unsafe {
-        // Common case: numer == denom (true on most modern Macs)
-        if TIMEBASE_NUMER == TIMEBASE_DENOM {
+        // DARWIN-MACH-TIMEBASE-TIER0-1: a ZERO denom means the
+        // timebase never initialized (Tier-0 mach_timebase_info
+        // out-param write-back) — 0 == 0 satisfied the fast path and
+        // RAW mach ticks leaked out as "nanoseconds" (41.67x slow on
+        // Apple Silicon). An uninitialized timebase must never take
+        // the identity path.
+        if TIMEBASE_DENOM != 0 && TIMEBASE_NUMER == TIMEBASE_DENOM {
             mach_time
-        } else {
+        } else if TIMEBASE_DENOM != 0 {
             // General case: scale by timebase ratio
             (mach_time * (TIMEBASE_NUMER as UInt64)) / (TIMEBASE_DENOM as UInt64)
+        } else {
+            // Timebase unavailable: the runtime intrinsic is the
+            // canonical clock authority on both tiers.
+            core.intrinsics.monotonic_nanos()
         }
     }
 }
