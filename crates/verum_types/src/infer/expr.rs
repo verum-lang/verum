@@ -7956,20 +7956,17 @@ impl TypeChecker {
                         Ok(InferResult::new(Type::int()))
                     }
                     "is_signed" => Ok(InferResult::new(Type::bool())),
+                    // min/max as compile-time type metadata return the type
+                    // itself (the bound value's type). A13: a second, Numeric-
+                    // guarded `"min" | "max"` arm below this one was unreachable
+                    // — this unconditional arm already matches every min/max,
+                    // and both had an identical body — so it was removed rather
+                    // than silenced with an allow.
                     "min" | "max" => Ok(InferResult::new(normalized_ty.clone())),
                     "id" => Ok(InferResult::new(Type::int())),
                     "name" => {
                         // Type name property returns Text
                         Ok(InferResult::new(Type::text()))
-                    }
-                    "min" | "max"
-                        if {
-                            let pc = self.protocol_checker.read();
-                            pc.implements_protocol(&normalized_ty, "Numeric")
-                        } || matches!(normalized_ty, Type::Int | Type::Float) =>
-                    {
-                        // min/max return the type itself for Numeric types
-                        Ok(InferResult::new(normalized_ty.clone()))
                     }
                     _ => {
                         // Try associated constant lookup via receiver Path

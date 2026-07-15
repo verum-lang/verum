@@ -12827,17 +12827,11 @@ impl TypeChecker {
                     args: substituted_args,
                 }
             }
-            // Type variables: check if there's a binding in the substitution map
-            // The format is "T{id}" for type variables created during type inference
-            // This is essential for protocol method return type substitution
-            Type::Var(tv) => {
-                let var_name: verum_common::Text = format!("T{}", tv.id()).into();
-                if let Some(replacement) = param_subst.get(&var_name) {
-                    replacement.clone()
-                } else {
-                    ty.clone()
-                }
-            }
+            // A13: the `Type::Var(tv)` substitution is handled by the FIRST
+            // arm of this match (see above — the poison-avoidance comment).
+            // A duplicate `Type::Var` arm here was unreachable dead code with
+            // an identical body; removed so the match's substitution logic has
+            // a single source of truth.
             // Primitive and other types: return as-is
             _ => ty.clone(),
         }

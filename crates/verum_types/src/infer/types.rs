@@ -6286,8 +6286,8 @@ impl TypeChecker {
             // cover raw `Pointer`/`VolatilePointer`). The `as` keyword is the
             // explicit opt-in; emit the same address-safety warning as the
             // int->reference arm when outside an `@unsafe` block.
-            (Int | Named { .. }, Pointer { .. } | VolatilePointer { .. })
-            | (Pointer { .. } | VolatilePointer { .. }, Int | Named { .. }) => {
+            (Int, Pointer { .. } | VolatilePointer { .. })
+            | (Pointer { .. } | VolatilePointer { .. }, Int) => {
                 if !self.in_unsafe_context {
                     self.emit_diagnostic(
                         DiagnosticBuilder::warning()
@@ -6298,6 +6298,40 @@ impl TypeChecker {
                     );
                 }
                 Ok(())
+            }
+
+            // A named type cast to/from a raw or volatile pointer is the same
+            // address-arithmetic idiom, but ONLY for the sized-integer aliases
+            // (`USize` / `ISize` / `UInt64` / `Int64` / lowercase forms). A13:
+            // the prior arm wrote a blanket `Named { .. }` here, which silently
+            // accepted `ptr as AnyStruct` and made the restrictive
+            // `(Pointer, Named)` / `(VolatilePointer, Named)` / `(Named,
+            // VolatilePointer)` arms below unreachable. Restored to the arm's
+            // own documented intent — a non-sized-integer named type is a real
+            // cast error — and the now-redundant specific arms were removed.
+            (Named { path, .. }, Pointer { .. } | VolatilePointer { .. })
+            | (Pointer { .. } | VolatilePointer { .. }, Named { path, .. }) => {
+                let name = self.path_to_string(path);
+                match name.as_str() {
+                    "USize" | "ISize" | "usize" | "isize" | "UInt64" | "Int64" => {
+                        if !self.in_unsafe_context {
+                            self.emit_diagnostic(
+                                DiagnosticBuilder::warning()
+                                    .message(
+                                        "casting between integer and raw pointer - ensure a valid address",
+                                    )
+                                    .build(),
+                            );
+                        }
+                        Ok(())
+                    }
+                    _ => Err(TypeError::InvalidCast {
+                        from: from_ty.to_text(),
+                        to: to_ty.to_text(),
+                        reason: "only an integer or a sized-integer-alias type casts to a raw pointer".to_text(),
+                        span,
+                    }),
+                }
             }
 
             // Reference casts - handled through subtyping
@@ -6527,15 +6561,9 @@ impl TypeChecker {
                 }
             }
 
-            // Integer to raw pointer cast (for FFI/low-level code)
-            (Int, Pointer { .. }) => {
-                self.emit_diagnostic(
-                    DiagnosticBuilder::warning()
-                        .message("casting integer to pointer is inherently unsafe")
-                        .build(),
-                );
-                Ok(())
-            }
+            // (A13: the `(Int, Pointer { .. })` arm that stood here is now
+            // handled by the consolidated Int<->pointer arm above; removed as
+            // unreachable.)
 
             // Unsafe reference to integer cast (for address extraction)
             (UnsafeReference { .. }, Int) => Ok(()),
@@ -6570,50 +6598,12 @@ impl TypeChecker {
                 }
             }
 
-            // Raw pointer to integer cast (for address manipulation)
-            (Pointer { .. }, Int) => Ok(()),
-
-            // Raw pointer to USize/ISize cast (for address manipulation)
-            (Pointer { .. }, Named { path, .. }) => {
-                let name = self.path_to_string(path);
-                match name.as_str() {
-                    "USize" | "ISize" | "usize" | "isize" | "UInt64" | "Int64" => Ok(()),
-                    _ => Err(TypeError::InvalidCast {
-                        from: from_ty.to_text(),
-                        to: to_ty.to_text(),
-                        reason: "types are not compatible for casting".to_text(),
-                        span,
-                    }),
-                }
-            }
-
-            // Volatile pointer casts (same rules as raw pointers)
-            (Int, VolatilePointer { .. }) => Ok(()),
-            (VolatilePointer { .. }, Int) => Ok(()),
-            (VolatilePointer { .. }, Named { path, .. }) => {
-                let name = self.path_to_string(path);
-                match name.as_str() {
-                    "USize" | "ISize" | "usize" | "isize" | "UInt64" | "Int64" => Ok(()),
-                    _ => Err(TypeError::InvalidCast {
-                        from: from_ty.to_text(),
-                        to: to_ty.to_text(),
-                        reason: "types are not compatible for casting".to_text(),
-                        span,
-                    }),
-                }
-            }
-            (Named { path, .. }, VolatilePointer { .. }) => {
-                let name = self.path_to_string(path);
-                match name.as_str() {
-                    "USize" | "ISize" | "usize" | "isize" | "UInt64" | "Int64" => Ok(()),
-                    _ => Err(TypeError::InvalidCast {
-                        from: from_ty.to_text(),
-                        to: to_ty.to_text(),
-                        reason: "types are not compatible for casting".to_text(),
-                        span,
-                    }),
-                }
-            }
+            // (A13: the `(Pointer, Int)`, `(Pointer, Named)`, `(Int,
+            // VolatilePointer)`, `(VolatilePointer, Int)`, `(VolatilePointer,
+            // Named)` and `(Named, VolatilePointer)` arms that stood here are
+            // now covered by the two consolidated integer<->pointer arms above
+            // — the sized-integer-alias restriction they carried was folded
+            // into the `Named`-side arm. Removed as unreachable.)
 
             // ═══════════════════════════════════════════════════════════════
             // Volatile pointer casts (MMIO support)
