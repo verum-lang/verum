@@ -9756,6 +9756,8 @@ fn lower_call<'ctx>(
     || bare_name == "__store_i32"
     || bare_name == "__file_open_raw"
     || bare_name == "__file_close_raw"
+    || bare_name == "__file_read_raw"
+    || bare_name == "__file_write_raw"
     || bare_name == "__file_size_raw"
     || bare_name == "__file_seek_raw"
     || bare_name == "__file_delete_raw"
@@ -10645,16 +10647,79 @@ fn lower_call<'ctx>(
                 } else {
                     i64_type.const_int(0, false)
                 };
-                let mode = if args.count > 2 {
-                    as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "fo_mode")?
-                } else {
-                    i64_type.const_int(0o644, false)
-                };
+                // Translate the ABSTRACT flag convention (the Tier-0
+                // contract at handlers/calls.rs `__file_open_raw`:
+                // access = flags & 3, O_APPEND = 0x400, O_CREAT =
+                // 0x40|0x100, O_TRUNC = 0x200) into verum_file_open's
+                // mode enum (0=read, 1=write|create|trunc, 2=append,
+                // 3=rdwr|create). Pre-fix the raw abstract flags
+                // (e.g. 0x301) were passed straight into the enum
+                // switch and fell to the default O_RDONLY arm — a
+                // create-intent open on a missing file returned a
+                // negative fd only at Tier-1 (tier divergence).
+                let builder = ctx.builder();
+                let access = builder
+                    .build_and(flags, i64_type.const_int(0x3, false), "fo_access")
+                    .or_llvm_err()?;
+                let append_bit = builder
+                    .build_and(flags, i64_type.const_int(0x400, false), "fo_append_bit")
+                    .or_llvm_err()?;
+                let is_append = builder
+                    .build_int_compare(
+                        verum_llvm::IntPredicate::NE,
+                        append_bit,
+                        i64_type.const_zero(),
+                        "fo_is_append",
+                    )
+                    .or_llvm_err()?;
+                let is_rdwr = builder
+                    .build_int_compare(
+                        verum_llvm::IntPredicate::EQ,
+                        access,
+                        i64_type.const_int(2, false),
+                        "fo_is_rdwr",
+                    )
+                    .or_llvm_err()?;
+                let is_wr = builder
+                    .build_int_compare(
+                        verum_llvm::IntPredicate::EQ,
+                        access,
+                        i64_type.const_int(1, false),
+                        "fo_is_wr",
+                    )
+                    .or_llvm_err()?;
+                let wr_or_rd = builder
+                    .build_select(
+                        is_wr,
+                        i64_type.const_int(1, false),
+                        i64_type.const_zero(),
+                        "fo_wr_or_rd",
+                    )
+                    .or_llvm_err()?
+                    .into_int_value();
+                let non_append = builder
+                    .build_select(
+                        is_rdwr,
+                        i64_type.const_int(3, false),
+                        wr_or_rd,
+                        "fo_non_append",
+                    )
+                    .or_llvm_err()?
+                    .into_int_value();
+                let mode_enum = builder
+                    .build_select(
+                        is_append,
+                        i64_type.const_int(2, false),
+                        non_append,
+                        "fo_mode_enum",
+                    )
+                    .or_llvm_err()?
+                    .into_int_value();
                 let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
         let open_fn = super::error::get_or_declare_function(module, "verum_file_open", fn_type);
                 let result = ctx
                     .builder()
-                    .build_call(open_fn, &[path_ptr.into(), flags.into()], "fd")
+                    .build_call(open_fn, &[path_ptr.into(), mode_enum.into()], "fd")
                     .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
@@ -10678,14 +10743,56 @@ fn lower_call<'ctx>(
                 return Ok(());
             }
 
-            "__file_size_raw" | "__file_seek_raw" | "__file_delete_raw" | "__mkdir_raw" => {
-                // All take (Int) or (Int, Int, Int) -> Int. Route to C.
+            "__file_read_raw" | "__file_write_raw" => {
+                // (fd: Int, buf: Int address, len: Int) -> Int.
+                // Route to the internal read/write wrappers (bodyless
+                // declaration here; the runtime-lowering phase adopts
+                // and fills it — same adopt-and-emit contract as
+                // verum_internal_write/puts). LIBSYS-ALIAS-STUB-1:
+                // these two names were missing from the arm gate
+                // entirely, so both degraded to nil at Tier-1.
+                let wrapper_name = if bare_name == "__file_read_raw" {
+                    "verum_internal_read"
+                } else {
+                    "verum_internal_write"
+                };
+                let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "fd_i64")?;
+                let buf_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "buf_i64")?;
+                let len_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "len_i64")?;
+                let buf_ptr = ctx
+                    .builder()
+                    .build_int_to_ptr(buf_val, ptr_type, "buf_ptr")
+                    .or_llvm_err()?;
+                let fn_type = i64_type.fn_type(
+                    &[i64_type.into(), ptr_type.into(), i64_type.into()],
+                    false,
+                );
+                let io_fn =
+                    super::error::get_or_declare_function(module, wrapper_name, fn_type);
+                let result = ctx
+                    .builder()
+                    .build_call(
+                        io_fn,
+                        &[fd_val.into(), buf_ptr.into(), len_val.into()],
+                        "io_r",
+                    )
+                    .or_llvm_err()?
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                return Ok(());
+            }
+
+            "__file_size_raw" | "__file_seek_raw" => {
+                // fd-based: (Int fd[, Int offset, Int whence]) -> Int.
+                // Route to the verum_file_{size,seek} runtime helpers
+                // (defined over the internal lseek wrapper —
+                // LIBSYS-ALIAS-STUB-1 found them referenced but never
+                // defined, silently zero-stubbed by the safety net).
                 let c_name = match bare_name {
                     "__file_size_raw" => "verum_file_size",
-                    "__file_seek_raw" => "verum_file_seek",
-                    "__file_delete_raw" => "verum_file_delete",
-                    "__mkdir_raw" => "verum_mkdir",
-                    _ => unreachable!(),
+                    _ => "verum_file_seek",
                 };
                 let arg_count = args.count.min(3);
                 let mut call_args: Vec<BasicMetadataValueEnum> = Vec::new();
@@ -10704,6 +10811,64 @@ fn lower_call<'ctx>(
                     .try_as_basic_value()
                     .basic()
                     .unwrap_or_else(|| i64_type.const_int(0, false).into());
+                ctx.set_register(dst.0, result);
+                return Ok(());
+            }
+
+            "__file_delete_raw" | "__mkdir_raw" => {
+                // path-based: first arg is a Text VALUE — extract the
+                // C pointer via verum_text_get_ptr exactly like the
+                // __file_read_to_string_raw arm. Pre-fix the raw Text
+                // value was passed straight through as an i64 "path";
+                // the callee's defensive int_to_ptr turned it into a
+                // garbage pointer. Invisible while the underlying
+                // unlink was a safety-net zero-stub returning 0
+                // ("success"): probe showed delete=0 with the file
+                // still on disk (LIBSYS-ALIAS-STUB-1, two stacked
+                // faults).
+                let text_get_ptr_fn = {
+                    let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+                    super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type)
+                };
+                let path_val = as_i64(ctx, ctx.get_register(args.start.0)?, "path_i64")?;
+                let path_ptr = ctx
+                    .builder()
+                    .build_call(text_get_ptr_fn, &[path_val.into()], "path_cptr")
+                    .or_llvm_err()?
+                    .basic_value_or("text_get_ptr: no value")?
+                    .into_pointer_value();
+
+                let result = if bare_name == "__file_delete_raw" {
+                    let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+                    let c_fn = super::error::get_or_declare_function(
+                        module,
+                        "verum_file_delete",
+                        fn_type,
+                    );
+                    ctx.builder()
+                        .build_call(c_fn, &[path_ptr.into()], "result")
+                        .or_llvm_err()?
+                        .try_as_basic_value()
+                        .basic()
+                        .unwrap_or_else(|| i64_type.const_int(0, false).into())
+                } else {
+                    // __mkdir_raw(path: Text, mode: Int)
+                    let mode_val = if args.count >= 2 {
+                        ctx.get_register(args.start.0 + 1)?
+                    } else {
+                        i64_type.const_int(0o755, false).into()
+                    };
+                    let fn_type =
+                        i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+                    let c_fn =
+                        super::error::get_or_declare_function(module, "verum_mkdir", fn_type);
+                    ctx.builder()
+                        .build_call(c_fn, &[path_ptr.into(), mode_val.into()], "result")
+                        .or_llvm_err()?
+                        .try_as_basic_value()
+                        .basic()
+                        .unwrap_or_else(|| i64_type.const_int(0, false).into())
+                };
                 ctx.set_register(dst.0, result);
                 return Ok(());
             }
@@ -29132,6 +29297,36 @@ fn lower_ffi_extended<'ctx>(
                 .or_llvm_err()?
             .basic_value_or("TimeCpuNanos: expected return value")?;
             ctx.set_register(dst_reg, result);
+            Ok(())
+        }
+
+        // TIER-DETECT-AOT-1: per-tier answers. THIS side is the LLVM
+        // (AOT) lowering, so tier = 1 / is_interpreted = false; the
+        // interpreter handler answers 0 / true for the same sub-ops.
+        // Still zero runtime cost — the answer is a constant per
+        // tier, it just must never be folded into the SHARED VBC.
+        Some(SystemSubOpcode::ExecutionTier) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "ExecutionTier: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let one = ctx.types().i64_type().const_int(1, false);
+            ctx.set_register(dst_reg, one.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::IsInterpreted) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "IsInterpreted: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let f = ctx.types().bool_type().const_int(0, false);
+            ctx.set_register(dst_reg, f.into());
+            ctx.mark_bool_register(dst_reg);
             Ok(())
         }
 

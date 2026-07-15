@@ -6505,6 +6505,155 @@ impl<'ctx> RuntimeLowering<'ctx> {
         }
 
         // ============================================================
+        // verum_file_seek(fd: i64, offset: i64, whence: i64) -> i64
+        // Thin adapter over the internal lseek wrapper. Declared by the
+        // `__file_seek_raw` instruction arm; LIBSYS-ALIAS-STUB-1 found
+        // it referenced-but-never-defined, so the bodyless-decl safety
+        // net zero-stubbed it (every seek "succeeded" at offset 0).
+        // ============================================================
+        {
+            let fn_type = i64_type.fn_type(
+                &[i64_type.into(), i64_type.into(), i64_type.into()],
+                false,
+            );
+            let func = super::error::get_or_declare_function(module, "verum_file_seek", fn_type);
+            if func.count_basic_blocks() == 0 {
+                let entry = self.context.append_basic_block(func, "entry");
+                let builder = self.context.create_builder();
+                builder.position_at_end(entry);
+                let fd = func
+                    .get_nth_param(0)
+                    .or_internal("seek param 0")?
+                    .into_int_value();
+                let off = func
+                    .get_nth_param(1)
+                    .or_internal("seek param 1")?
+                    .into_int_value();
+                let whence = func
+                    .get_nth_param(2)
+                    .or_internal("seek param 2")?
+                    .into_int_value();
+                let ret =
+                    self.build_libc_call(&builder, lseek_fn, &[fd.into(), off.into(), whence.into()], "pos")?;
+                builder.build_return(Some(&ret)).or_llvm_err()?;
+            }
+        }
+
+        // ============================================================
+        // verum_file_size(fd: i64) -> i64
+        // Position-preserving size probe: save cursor, seek END, restore.
+        // Referenced by the `__file_size_raw` arm; previously undefined
+        // (same LIBSYS-ALIAS-STUB-1 silent-zero class).
+        // ============================================================
+        {
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+            let func = super::error::get_or_declare_function(module, "verum_file_size", fn_type);
+            if func.count_basic_blocks() == 0 {
+                let entry = self.context.append_basic_block(func, "entry");
+                let builder = self.context.create_builder();
+                builder.position_at_end(entry);
+                let fd = func
+                    .get_nth_param(0)
+                    .or_internal("size param 0")?
+                    .into_int_value();
+                // SEEK_CUR=1, SEEK_END=2, SEEK_SET=0 (identical on
+                // linux/darwin for the classic whence triple).
+                let cur = self.build_libc_call(
+                    &builder,
+                    lseek_fn,
+                    &[
+                        fd.into(),
+                        i64_type.const_zero().into(),
+                        i32_type.const_int(1, false).into(),
+                    ],
+                    "cur",
+                )?;
+                let size = self.build_libc_call(
+                    &builder,
+                    lseek_fn,
+                    &[
+                        fd.into(),
+                        i64_type.const_zero().into(),
+                        i32_type.const_int(2, false).into(),
+                    ],
+                    "size",
+                )?;
+                self.build_libc_call_void(
+                    &builder,
+                    lseek_fn,
+                    &[fd.into(), cur.into(), i32_type.const_zero().into()],
+                    "",
+                )?;
+                builder.build_return(Some(&size)).or_llvm_err()?;
+            }
+        }
+
+        // ============================================================
+        // verum_mkdir(path: *i8, mode: i64) -> i64
+        // Referenced by the `__mkdir_raw` arm; previously undefined
+        // (LIBSYS-ALIAS-STUB-1 silent-zero class). Linux: direct
+        // syscall (mkdirat on aarch64); darwin/other-Unix: libSystem
+        // `mkdir` extern.
+        // ============================================================
+        {
+            let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+            let func = super::error::get_or_declare_function(module, "verum_mkdir", fn_type);
+            if func.count_basic_blocks() == 0 {
+                let entry = self.context.append_basic_block(func, "entry");
+                let builder = self.context.create_builder();
+                builder.position_at_end(entry);
+                let raw_path = func.get_nth_param(0).or_internal("mkdir param 0")?;
+                let path = match raw_path {
+                    verum_llvm::values::BasicValueEnum::PointerValue(p) => p,
+                    verum_llvm::values::BasicValueEnum::IntValue(i) => builder
+                        .build_int_to_ptr(i, ptr_type, "path_ptr")
+                        .or_llvm_err()?,
+                    _ => {
+                        return Err(LlvmLoweringError::internal(
+                            "verum_mkdir: param 0 has unexpected variant",
+                        ));
+                    }
+                };
+                let mode = func
+                    .get_nth_param(1)
+                    .or_internal("mkdir param 1")?
+                    .into_int_value();
+                if target_is_linux(module) {
+                    let path_addr = builder
+                        .build_ptr_to_int(path, i64_type, "path_addr")
+                        .or_llvm_err()?;
+                    let ret = if target_is_aarch64(module) {
+                        // SYS_mkdirat(AT_FDCWD=-100, path, mode) = 34
+                        let at_fdcwd = i64_type.const_int(u64::wrapping_sub(0, 100), false);
+                        self.emit_linux_syscall(
+                            &builder,
+                            module,
+                            34,
+                            &[at_fdcwd, path_addr, mode],
+                        )?
+                    } else {
+                        // SYS_mkdir(path, mode) = 83 on x86_64.
+                        self.emit_linux_syscall(&builder, module, 83, &[path_addr, mode])?
+                    };
+                    builder.build_return(Some(&ret)).or_llvm_err()?;
+                } else {
+                    let mkdir_fn = libsys_extern(
+                        self.context,
+                        module,
+                        "mkdir",
+                        i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+                    );
+                    let ret = builder
+                        .build_call(mkdir_fn, &[path.into(), mode.into()], "ret")
+                        .or_llvm_err()?
+                        .basic_value_or("mkdir: call returned void")?
+                        .into_int_value();
+                    builder.build_return(Some(&ret)).or_llvm_err()?;
+                }
+            }
+        }
+
+        // ============================================================
         // verum_file_write_all(path: *i8, text_obj: i64) -> i64
         // Opens file, writes content from Text object, closes. Returns bytes written.
         // ============================================================
@@ -8552,30 +8701,33 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("open ret trunc");
             builder.build_return(Some(&ret_i32)).expect("open return");
         } else {
-            // libSystem path: declare a non-variadic 3-arg `open` —
-            // libSystem on macOS accepts the fixed shape (the variadic
-            // ABI confusion only matters when the caller's declaration
-            // mismatches). Since *we* control the callee's declaration
-            // here, fixed-3 is safe.
-            let fn_type =
-                i32_type.fn_type(&[ptr_type.into(), i32_type.into(), i32_type.into()], false);
-            let libsys = super::error::get_or_declare_libsys_function(
-                module,
-                self.context,
-                "__verum_libsys_open",
-                fn_type,
-                "open",
+            // libSystem path: route through the `verum_raw_open3`
+            // C shim — the canonical open(2) entry used by
+            // `verum_file_open` (avoids the ARM64 variadic-open ABI
+            // trap). LIBSYS-ALIAS-STUB-1: the previous
+            // `__verum_libsys_open` indirection had no retarget pass
+            // and was zero-stubbed by the safety net.
+            let flags_c = builder
+                .build_int_z_extend(flags_i32, i64_type, "flags_c")
+                .expect("open flags zext");
+            let mode_c = builder
+                .build_int_z_extend(mode_i32, i64_type, "mode_c")
+                .expect("open mode zext");
+            let raw_open_ty = i64_type.fn_type(
+                &[ptr_type.into(), i64_type.into(), i64_type.into()],
+                false,
             );
+            let raw_open =
+                super::error::get_or_declare_function(module, "verum_raw_open3", raw_open_ty);
             let ret = builder
-                .build_call(
-                    libsys,
-                    &[path.into(), flags_i32.into(), mode_i32.into()],
-                    "ret",
-                )
-                .expect("open libsys call")
+                .build_call(raw_open, &[path.into(), flags_c.into(), mode_c.into()], "ret")
+                .expect("open raw_open3 call")
                 .basic_value_expect("open return value")
                 .into_int_value();
-            builder.build_return(Some(&ret)).expect("open return");
+            let ret_i32 = builder
+                .build_int_truncate(ret, i32_type, "ret_i32")
+                .expect("open ret trunc");
+            builder.build_return(Some(&ret_i32)).expect("open return");
         }
 
         wrapper
@@ -8638,28 +8790,27 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("close syscall");
             builder.build_return(Some(&ret)).expect("close return");
         } else {
-            // macOS / other Unix: libSystem close(int fd) -> int.
-            // Narrow Verum i64 fd → POSIX i32; sign-extend i32 ret → i64.
-            let fd_i32 = builder
-                .build_int_truncate(fd_i64, i32_type, "fd_i32")
-                .expect("close fd trunc");
-            let fn_type = i32_type.fn_type(&[i32_type.into()], false);
-            let libsys_close = super::error::get_or_declare_libsys_function(
-                module,
+            // macOS / other Unix: call the real libSystem `close`
+            // directly under the canonical registry signature
+            // (i64 fd -> i64). LIBSYS-ALIAS-STUB-1: the previous
+            // `__verum_libsys_close` indirection assumed a retarget
+            // pass that never existed; the bodyless-decl safety net
+            // stamped it `mov w0, #0; ret`, silently no-op'ing every
+            // close on darwin AOT. Same fix as `write` (#78 /
+            // task #16): bare extern, linker binds libSystem.
+            let _ = i32_type;
+            let libsys_close = libsys_extern(
                 self.context,
-                "__verum_libsys_close",
-                fn_type,
+                module,
                 "close",
+                i64_type.fn_type(&[i64_type.into()], false),
             );
-            let ret_i32 = builder
-                .build_call(libsys_close, &[fd_i32.into()], "ret")
+            let ret = builder
+                .build_call(libsys_close, &[fd_i64.into()], "ret")
                 .expect("close libsys call")
                 .basic_value_expect("close return value")
                 .into_int_value();
-            let ret_i64 = builder
-                .build_int_s_extend(ret_i32, i64_type, "ret_i64")
-                .expect("close ret sext");
-            builder.build_return(Some(&ret_i64)).expect("close return");
+            builder.build_return(Some(&ret)).expect("close return");
         }
 
         wrapper
@@ -8711,22 +8862,22 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("read syscall");
             builder.build_return(Some(&ret)).expect("read return");
         } else {
-            let fd_i32 = builder
-                .build_int_truncate(fd_i64, i32_type, "fd_i32")
-                .expect("read fd trunc");
-            let fn_type =
-                i64_type.fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false);
-            let libsys_read = super::error::get_or_declare_libsys_function(
-                module,
+            // LIBSYS-ALIAS-STUB-1: bare `read` extern under the
+            // canonical registry signature (i64, ptr, i64) -> i64 —
+            // the `__verum_libsys_read` indirection had no retarget
+            // pass and was zero-stubbed by the safety net. Mirrors
+            // the `write` fix (#78 / task #16).
+            let _ = i32_type;
+            let libsys_read = libsys_extern(
                 self.context,
-                "__verum_libsys_read",
-                fn_type,
+                module,
                 "read",
+                i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
             );
             let ret = builder
                 .build_call(
                     libsys_read,
-                    &[fd_i32.into(), buf.into(), count.into()],
+                    &[fd_i64.into(), buf.into(), count.into()],
                     "ret",
                 )
                 .expect("read libsys call")
@@ -8788,20 +8939,25 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("unlink ret trunc");
             builder.build_return(Some(&ret_i32)).expect("unlink return");
         } else {
-            let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-            let libsys = super::error::get_or_declare_libsys_function(
-                module,
+            // LIBSYS-ALIAS-STUB-1: bare `unlink` extern (canonical
+            // registry shape (ptr) -> i64); truncate to the wrapper's
+            // i32 return. The old `__verum_libsys_unlink` indirection
+            // was zero-stubbed by the safety net.
+            let libsys = libsys_extern(
                 self.context,
-                "__verum_libsys_unlink",
-                fn_type,
+                module,
                 "unlink",
+                i64_type.fn_type(&[ptr_type.into()], false),
             );
             let ret = builder
                 .build_call(libsys, &[path.into()], "ret")
                 .expect("unlink libsys call")
                 .basic_value_expect("unlink return value")
                 .into_int_value();
-            builder.build_return(Some(&ret)).expect("unlink return");
+            let ret_i32 = builder
+                .build_int_truncate(ret, i32_type, "ret_i32")
+                .expect("unlink ret trunc");
+            builder.build_return(Some(&ret_i32)).expect("unlink return");
         }
 
         wrapper
@@ -8846,19 +9002,33 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("lseek syscall");
             builder.build_return(Some(&ret)).expect("lseek return");
         } else {
-            let fn_type =
-                i64_type.fn_type(&[i32_type.into(), i64_type.into(), i32_type.into()], false);
-            let libsys = super::error::get_or_declare_libsys_function(
-                module,
+            // LIBSYS-ALIAS-STUB-1 ROOT SITE: `__verum_libsys_lseek`
+            // was a bodyless declaration whose promised retarget pass
+            // never existed; the safety net stamped `mov x0, #0; ret`,
+            // so lseek(fd, 0, SEEK_END) returned 0 for every file and
+            // `verum_file_read_to_string` yielded empty Text for the
+            // whole darwin os AOT cluster. Bare `lseek` extern under
+            // the canonical registry signature (i64, i64, i64) -> i64;
+            // widen the wrapper's i32 fd/whence at the boundary.
+            let fd_c = builder
+                .build_int_s_extend(fd_i32, i64_type, "fd_c")
+                .expect("lseek fd sext");
+            let whence_c = builder
+                .build_int_s_extend(whence_i32, i64_type, "whence_c")
+                .expect("lseek whence sext");
+            let libsys = libsys_extern(
                 self.context,
-                "__verum_libsys_lseek",
-                fn_type,
+                module,
                 "lseek",
+                i64_type.fn_type(
+                    &[i64_type.into(), i64_type.into(), i64_type.into()],
+                    false,
+                ),
             );
             let ret = builder
                 .build_call(
                     libsys,
-                    &[fd_i32.into(), offset.into(), whence_i32.into()],
+                    &[fd_c.into(), offset.into(), whence_c.into()],
                     "ret",
                 )
                 .expect("lseek libsys call")
@@ -8925,20 +9095,27 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("access ret trunc");
             builder.build_return(Some(&ret_i32)).expect("access return");
         } else {
-            let fn_type = i32_type.fn_type(&[ptr_type.into(), i32_type.into()], false);
-            let libsys = super::error::get_or_declare_libsys_function(
-                module,
+            // LIBSYS-ALIAS-STUB-1: bare `access` extern (canonical
+            // registry shape (ptr, i64) -> i64); widen mode, truncate
+            // return to the wrapper's i32.
+            let mode_c = builder
+                .build_int_s_extend(mode_i32, i64_type, "mode_c")
+                .expect("access mode sext");
+            let libsys = libsys_extern(
                 self.context,
-                "__verum_libsys_access",
-                fn_type,
+                module,
                 "access",
+                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
             );
             let ret = builder
-                .build_call(libsys, &[path.into(), mode_i32.into()], "ret")
+                .build_call(libsys, &[path.into(), mode_c.into()], "ret")
                 .expect("access libsys call")
                 .basic_value_expect("access return value")
                 .into_int_value();
-            builder.build_return(Some(&ret)).expect("access return");
+            let ret_i32 = builder
+                .build_int_truncate(ret, i32_type, "ret_i32")
+                .expect("access ret trunc");
+            builder.build_return(Some(&ret_i32)).expect("access return");
         }
 
         wrapper

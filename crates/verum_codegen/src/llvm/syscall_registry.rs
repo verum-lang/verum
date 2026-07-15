@@ -162,6 +162,17 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         args: &[AbiTy::Ptr],
         ret: AbiTy::I64,
     },
+    // C: off_t lseek(int fd, off_t offset, int whence)
+    // (LIBSYS-ALIAS-STUB-1: the darwin lseek path routed through the
+    // phantom `__verum_libsys_lseek` indirection, which the bodyless-
+    // decl safety net zero-stubbed — file_read_to_string saw size 0
+    // for every file. Canonical entry so `libsys_extern` declares the
+    // real symbol under the i64-everywhere ABI.)
+    SyscallSig {
+        name: "lseek",
+        args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
     // C: int access(const char *pathname, int mode)
     SyscallSig {
         name: "access",
