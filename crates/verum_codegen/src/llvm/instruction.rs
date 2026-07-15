@@ -1706,7 +1706,7 @@ fn as_ptr<'ctx>(
 
 /// True when the coherent (tagged) reference model is active.
 fn ref_tagging_enabled() -> bool {
-    verum_vbc::mono::mono_aot_enabled()
+    std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some()
 }
 
 /// Set bit 0 on a slot-address i64 to mark it a reference.
@@ -32392,7 +32392,29 @@ fn mark_call_result_from_retname<'ctx>(
         || base == "Result"
         || (base.len() <= 2 && base.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()))
         || is_primitive_type_name(base)
-        || WKT::from_name(base).is_some()
+        // Only the WKTs with their OWN mark machinery are excluded —
+        // containers (list/map/... marks), payload wrappers, atomics.
+        // Record/variant WKTs (Ordering, Duration, Instant, Mutex, …)
+        // are exactly what obj_register_type exists for: `Text.cmp ->
+        // Ordering` stayed unmarked here and `&c` spilled the variant
+        // pointer into a stack slot (empty `{c:?}` render).
+        || matches!(
+            base,
+            "List"
+                | "Map"
+                | "Set"
+                | "Deque"
+                | "BTreeMap"
+                | "BTreeSet"
+                | "BinaryHeap"
+                | "Heap"
+                | "Shared"
+                | "Channel"
+                | "AtomicInt"
+                | "AtomicBool"
+                | "Range"
+                | "Text"
+        )
     {
         return;
     }

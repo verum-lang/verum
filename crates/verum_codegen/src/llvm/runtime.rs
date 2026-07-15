@@ -14140,7 +14140,17 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     }
 
     // --- verum_list_reverse(list_ptr: ptr) -> void ---
-    if module.get_function("verum_list_reverse").is_none() {
+    // RUNTIME-BODY-DECLARE-SHADOW: gate on a MISSING BODY, not a missing
+    // name. The syscall registry pre-declares this symbol (extern), so a
+    // name-existence gate skipped body emission entirely; the skipped-
+    // entry stub pass then silenced the link with a bare `ret` — every
+    // List.reverse()/swap() was a silent no-op at Tier-1 (tp10/tp11:
+    // [1,2,3].reverse() stayed [1,2,3]; parse round-trips built reversed
+    // strings that never reversed).
+    if module
+        .get_function("verum_list_reverse")
+        .map_or(true, |f| f.count_basic_blocks() == 0)
+    {
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
         let func = super::error::get_or_declare_function(module, "verum_list_reverse", fn_type);
         func.set_linkage(verum_llvm::module::Linkage::Internal);
@@ -14252,7 +14262,11 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
     }
 
     // --- verum_list_swap(list_ptr: ptr, i: i64, j: i64) -> void ---
-    if module.get_function("verum_list_swap").is_none() {
+    // Same body-not-name gate as verum_list_reverse above.
+    if module
+        .get_function("verum_list_swap")
+        .map_or(true, |f| f.count_basic_blocks() == 0)
+    {
         let fn_type =
             void_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
         let func = super::error::get_or_declare_function(module, "verum_list_swap", fn_type);
