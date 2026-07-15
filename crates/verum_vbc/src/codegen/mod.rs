@@ -9465,6 +9465,55 @@ impl VbcCodegen {
                     .pending_mount_aliases
                     .insert(alias_name.clone(), full_path.join("."));
                 let owning_module = self.ctx.current_source_module.clone();
+                // PENDING-MOUNT-ALIAS-CARRY-1 (task #17 QUALIFIED-CALL-2):
+                // an unresolved re-export must still leave its INTENT in
+                // the archive's `mount_aliases` channel.  A stage-5 stub
+                // synthesized against this alias records the RE-EXPORT
+                // spelling (`core.intrinsics.num_cpus`); no suffix chase
+                // can bridge the elided intermediate segments
+                // (`runtime.time`) to the producing module's decl-rooted
+                // key (`core.intrinsics.runtime.time.num_cpus`) — the
+                // mount row is the ONLY carrier of that mapping.  Emit
+                // name-authoritative rows (fid = u32::MAX, deliberately
+                // never same-entry-mappable) under the re-exporter's
+                // qualified alias:
+                //   * the owner-ANCHORED target for RELATIVE mount paths
+                //     (`runtime.time.num_cpus` inside `core.intrinsics`
+                //     → `core.intrinsics.runtime.time.num_cpus`), and
+                //   * the AS-WRITTEN path (alias→alias chains such as
+                //     `core.time.sleep_ns` → `core.intrinsics.sleep_ns`;
+                //     `install_mount_alias_archive_names` resolves
+                //     chains to fixpoint, first-wins, and drops rows
+                //     whose target never materialises).
+                // Gate: only genuinely QUALIFIED paths (>= 2 segments)
+                // carry intent rows — a single-segment `mount foo;`
+                // pending has no re-export elision to bridge, and a
+                // bare-name target row would reintroduce the
+                // first-wins-stranger bind at load.
+                if full_path.len() >= 2
+                    && let Some(owner) = owning_module
+                        .as_deref()
+                        .filter(|m| !m.is_empty() && *m != "main")
+                {
+                    let qualified_alias = format!("{}.{}", owner, alias_name);
+                    let written = full_path.join(".");
+                    let placeholder = crate::module::FunctionId(u32::MAX);
+                    if full_path.first().map(|s| s.as_str()) != Some("core") {
+                        let anchored = format!("{}.{}", owner, written);
+                        self.mount_aliases_buffer.push((
+                            qualified_alias.clone(),
+                            placeholder,
+                            anchored,
+                        ));
+                    }
+                    if qualified_alias != written {
+                        self.mount_aliases_buffer.push((
+                            qualified_alias,
+                            placeholder,
+                            written,
+                        ));
+                    }
+                }
                 self.pending_imports
                     .push((full_path, alias_name, owning_module));
                 Ok(())
@@ -9692,6 +9741,57 @@ impl VbcCodegen {
                         );
                     }
                     continue;
+                }
+            }
+
+            // QUALIFIED-CALL-2 — owning-module-anchored probe.  A
+            // RELATIVE re-export path (`public mount
+            // runtime.time.{num_cpus}` inside `module core.intrinsics;`)
+            // resolves against the producing module's decl-rooted key
+            // (`core.intrinsics.runtime.time.num_cpus`) — a spelling
+            // NONE of the probes above construct.  Without it, the
+            // pending either fell to the bare-name last resort below
+            // (binding the alias to whichever same-named STRANGER won
+            // the first-wins race — `core.intrinsics.sleep_ms` →
+            // sys-delegator class) or resolved nowhere at all
+            // (`num_cpus`, `sleep_ns`), leaving every consumer call to
+            // a stage-5 stub.  Probe the anchored spelling (and its
+            // `core.`-stripped-owner twin) BEFORE the bare fallback.
+            if let Some(owner) = owning_module
+                .as_deref()
+                .filter(|m| !m.is_empty() && *m != "main")
+                && full_path.first().map(|s| s.as_str()) != Some("core")
+            {
+                let anchored = format!("{}.{}", owner, full_path.join("."));
+                if let Some(func_info) = self.ctx.lookup_function(&anchored).cloned() {
+                    if should_register(&self.ctx, &alias_name, &func_info) {
+                        self.bind_deferred_mounted_function(
+                            &alias_name,
+                            &func_name,
+                            &anchored,
+                            func_info,
+                            owning_module.as_deref(),
+                        );
+                    }
+                    continue;
+                }
+                if let Some(stripped_owner) = owner.strip_prefix("core.") {
+                    let anchored2 =
+                        format!("{}.{}", stripped_owner, full_path.join("."));
+                    if let Some(func_info) =
+                        self.ctx.lookup_function(&anchored2).cloned()
+                    {
+                        if should_register(&self.ctx, &alias_name, &func_info) {
+                            self.bind_deferred_mounted_function(
+                                &alias_name,
+                                &func_name,
+                                &anchored2,
+                                func_info,
+                                owning_module.as_deref(),
+                            );
+                        }
+                        continue;
+                    }
                 }
             }
 
@@ -17984,13 +18084,6 @@ impl VbcCodegen {
             return;
         }
 
-        // 2. Already-emitted IDs.
-        let emitted: HashSet<u32> = self
-            .functions
-            .iter()
-            .map(|f| f.descriptor.id.0)
-            .collect();
-
         // 3. Build id → (name, info) map for referenced stage-3 ids.
         // Canonical ranked choice (see canonical_name_better) — the
         // previous dots-only rule left EQUAL-dot ties (bare vs
@@ -18090,75 +18183,40 @@ impl VbcCodegen {
             }
         }
 
-        // 4. Synthesise minimal descriptor for each id not in emitted.
-        let mut to_push: Vec<(u32, String, crate::codegen::FunctionInfo)> = Vec::new();
-        for (&id, (name, info)) in id_to_entry.iter() {
-            if emitted.contains(&id) {
-                continue;
-            }
-            to_push.push((id, name.clone(), info.clone()));
-        }
-        // ARCHIVE-SERIALIZE-DETERMINISM-1: id_to_entry is a HashMap —
-        // emitting in walk order leaked the per-process hasher seed
-        // into the string-table interning sequence (descriptor name +
-        // param names), shifting every later StringId across bakes.
-        to_push.sort_by(|a, b| a.0.cmp(&b.0));
-
-        for (id, name, info) in to_push {
-            let name_id = StringId(self.ctx.intern_string_raw(&name));
-            let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
-            descriptor.id = crate::module::FunctionId(id);
-            descriptor.register_count = 1;
-            descriptor.locals_count = info.param_count as u16;
-            // RETNAME-CARRY-1 — stubs carry the declared return-type name too;
-            // user-side bindings typed from a pre-overlay stub lookup must not
-            // degrade to the lossy TypeRef re-derivation.
-            descriptor.return_type_name = info
-                .return_type_name
-                .as_ref()
-                .map(|n| StringId(self.ctx.intern_string_raw(n)));
-            for (i, pname) in info.param_names.iter().enumerate() {
-                let pname_to_use = if pname.is_empty() {
-                    format!("_arg{}", i)
-                } else {
-                    pname.clone()
-                };
-                let pname_id =
-                    StringId(self.ctx.intern_string_raw(&pname_to_use));
-                descriptor.params.push(crate::module::ParamDescriptor {
-                    name: pname_id,
-                    type_ref: TypeRef::Concrete(TypeId::UNIT),
-                    is_mut: false,
-                    default: None,
-                });
-            }
-            while descriptor.params.len() < info.param_count {
-                let i = descriptor.params.len();
-                let pname_id = StringId(
-                    self.ctx.intern_string_raw(&format!("_arg{}", i)),
-                );
-                descriptor.params.push(crate::module::ParamDescriptor {
-                    name: pname_id,
-                    type_ref: TypeRef::Concrete(TypeId::UNIT),
-                    is_mut: false,
-                    default: None,
-                });
-            }
-            if info.is_async {
-                descriptor.properties |= crate::types::PropertySet::ASYNC;
-            }
-            descriptor.is_generator = info.is_generator;
-            if let Some(parent_name) = info.parent_type_name.as_deref()
-                && let Some(&parent_tid) = self.type_name_to_id.get(parent_name)
-            {
-                descriptor.parent_type = Some(parent_tid);
-            }
-            descriptor.is_const = info.is_const;
-            let vbc_func = crate::module::VbcFunction::new(
-                descriptor,
-                vec![Instruction::RetV],
-            );
-            self.functions.push(vbc_func);
+        // 4. SERIALIZE-STUB-IDENTITY-1 (task #17 QUALIFIED-CALL-2):
+        // do NOT synthesise callable `VbcFunction`s for these ids.
+        //
+        // The previous implementation pushed a RetV-bodied
+        // `VbcFunction` per referenced stub id.  That entry then
+        // entered `build_module`'s `func_id_remap` (it lives in
+        // `self.functions`), which (a) rewrote every Call operand
+        // holding the sentinel to the descriptor's contiguous local id
+        // and (b) suppressed the `external_function_names` record —
+        // stub identity was fully ERASED from the archive.  At load,
+        // Tier-1 of `ArchiveBodyRemap` mapped the call straight onto
+        // the loaded RetV body: the name chase never ran, the stage-N
+        // LOUD panic could never fire, and every unresolved-at-bake
+        // dotted/mount call SILENTLY returned unit (live class:
+        // `Thread.available_parallelism()` printing `()`,
+        // `Thread.sleep_ms`/`Time.sleep`/`async_sleep_ms` no-ops via
+        // the `core.intrinsics.{num_cpus,sleep_*}` re-export chain).
+        // The loaded descriptor also poisoned the archive-wide name
+        // index under the stub's dotted spelling, blocking the
+        // first-wins mount-alias install of the SAME spelling onto the
+        // real body.
+        //
+        // The name channel the load-side chase actually consumes is
+        // `external_function_names`; the collection gate in
+        // `build_module` now records stub-range ids unconditionally
+        // and falls back to `ctx.stage3_stub_names` for spellings
+        // whose `ctx.functions` slot was overwritten.  All we must
+        // guarantee here is that every referenced stub id has a
+        // canonical recorded name.
+        for (&id, (name, _info)) in id_to_entry.iter() {
+            self.ctx
+                .stage3_stub_names
+                .entry(id)
+                .or_insert_with(|| name.clone());
         }
     }
 
@@ -19163,10 +19221,27 @@ impl VbcCodegen {
                 // path as cross-module Calls — they're known-name
                 // entries in `ctx.functions` that need Tier 2 lookup
                 // at user-side merge to reach the real body.
+                //
+                // SERIALIZE-STUB-IDENTITY-1 (task #17 QUALIFIED-CALL-2):
+                // record the name UNCONDITIONALLY.  The previous
+                // `func_id_remap.contains_key(&fid) { continue; }`
+                // short-circuit fired whenever the finalize-time stub
+                // DESCRIPTOR (a RetV-bodied `VbcFunction` pushed by
+                // `emit_stage3_stub_descriptors`) had entered
+                // `self.functions` — the remap then rewrote the Call
+                // operand to the descriptor's contiguous local id,
+                // erasing stub identity from the archive entirely: the
+                // load-side name chase never ran, `is_stub_id` guards
+                // never fired, and the stage-5 LOUD panic could not
+                // trigger — every unresolved-at-bake dotted/mount call
+                // SILENTLY returned unit (the
+                // `Thread.available_parallelism()` → `()` /
+                // `Thread.sleep_ms` no-op class).  Stub descriptors are
+                // no longer serialized as callable functions (see
+                // `emit_stage3_stub_descriptors`), so the operand keeps
+                // its sentinel and this name entry is what the
+                // ArchiveBodyRemap Tier-0 chase resolves it by.
                 if is_stage_stub(fid) {
-                    if func_id_remap.contains_key(&fid) {
-                        continue;
-                    }
                     if external_seen.insert(fid) {
                         external_pending.push(fid);
                     }
@@ -19324,7 +19399,17 @@ impl VbcCodegen {
                     | Instruction::CallG { func_id, .. }
                     | Instruction::GenCreate { func_id, .. }
                     | Instruction::Spawn { func_id, .. } => {
-                        if let Some(&new_id) = func_id_remap.get(func_id) {
+                        // SERIALIZE-STUB-IDENTITY-1: a stub-range
+                        // sentinel is a BY-NAME reference by contract
+                        // (`stub_ranges` module doc) — it must survive
+                        // serialization verbatim so the load-side
+                        // ArchiveBodyRemap Tier-0/name-chase resolves
+                        // it (via `external_function_names`) and a
+                        // genuine miss dies LOUD at dispatch
+                        // (stage-N lenient panic), never silent-unit.
+                        if crate::stub_ranges::is_stub_id(*func_id) {
+                            // keep sentinel
+                        } else if let Some(&new_id) = func_id_remap.get(func_id) {
                             *func_id = new_id;
                         } else if let Some(&band_id) = xmod_band.get(func_id) {
                             *func_id = band_id;
@@ -19596,6 +19681,19 @@ impl VbcCodegen {
                     })
                     .or_insert_with(|| name.clone());
             }
+            // SERIALIZE-STUB-IDENTITY-1: a name-resolved stub whose
+            // `ctx.functions` slot was overwritten by the real body's
+            // later registration has NO ctx key left pointing at the
+            // sentinel — recover the spelling from the
+            // `stage3_stub_names` side table (populated at
+            // registration and by `emit_stage3_stub_descriptors`), so
+            // the sentinel still rides `external_function_names` and
+            // stays name-chaseable at archive load.
+            for (&sid, nm) in self.ctx.stage3_stub_names.iter() {
+                if external_seen.contains(&sid) {
+                    ctx_id_to_name.entry(sid).or_insert_with(|| nm.clone());
+                }
+            }
             let mut external_list: Vec<(FunctionId, StringId)> =
                 Vec::with_capacity(external_pending.len());
             for fid in external_pending {
@@ -19637,13 +19735,18 @@ impl VbcCodegen {
         // same pair.  We dedupe so the archive doesn't grow
         // quadratically across re-resolution sweeps.
         if !self.mount_aliases_buffer.is_empty() {
-            let mut seen: std::collections::HashSet<(String, u32)> =
+            // PENDING-MOUNT-ALIAS-CARRY-1: the dedup key includes the
+            // carried target — one alias can legitimately emit BOTH an
+            // owner-anchored and an as-written intent row (same
+            // placeholder fid), and the load-side install is
+            // first-wins over whichever target resolves.
+            let mut seen: std::collections::HashSet<(String, u32, String)> =
                 std::collections::HashSet::with_capacity(self.mount_aliases_buffer.len());
             let drained = std::mem::take(&mut self.mount_aliases_buffer);
             let mut emitted: Vec<(StringId, FunctionId, StringId)> =
                 Vec::with_capacity(drained.len());
             for (alias_name, fid, target_key) in drained {
-                if !seen.insert((alias_name.clone(), fid.0)) {
+                if !seen.insert((alias_name.clone(), fid.0, target_key.clone())) {
                     continue;
                 }
                 let sid = module.intern_string(&alias_name);

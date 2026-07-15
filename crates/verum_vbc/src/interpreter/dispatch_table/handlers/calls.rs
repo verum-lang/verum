@@ -547,14 +547,32 @@ pub(in super::super) fn handle_call_generic(
     }
     let args = read_reg_range(state)?;
 
+    // QUALIFIED-CALL-2: same named stage-N lenient panic as
+    // `handle_call` — a stub-range id surviving to CallG dispatch is
+    // an unresolved BY-NAME reference and must die LOUD with its
+    // stage/class, never the bare `Function N not found`.
+    let stub_stage = crate::stub_ranges::stage_of(func_id.0);
+
     // Get function descriptor — extract needed fields to release borrow
-    let func = state
-        .module
-        .get_function(func_id)
-        .ok_or(InterpreterError::FunctionNotFound(func_id))?;
+    let func = match state.module.get_function(func_id) {
+        Some(f) => f,
+        None => {
+            if let Some(stage) = stub_stage {
+                let stub_class = crate::stub_ranges::stub_class(func_id.0).unwrap_or("stub");
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "[lenient] stage-{} {} stub never resolved (func_id={}); the producing stdlib module failed precompile OR the body lives in an archive that wasn't loaded — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
+                        stage, stub_class, func_id.0
+                    ),
+                });
+            }
+            return Err(InterpreterError::FunctionNotFound(func_id));
+        }
+    };
     let bytecode_length = func.bytecode_length;
     let func_name_id = func.name;
     let reg_count = func.register_count;
+    let has_intrinsic_marker = func.intrinsic_name.is_some();
 
     if std::env::var("VERUM_TRACE_CALLS").is_ok() {
         let func_name: String = state
@@ -569,8 +587,12 @@ pub(in super::super) fn handle_call_generic(
         );
     }
 
-    // Intercept external/intrinsic functions with no bytecode body
-    if bytecode_length == 0 {
+    // Intercept external/intrinsic functions with no bytecode body OR
+    // an `@intrinsic`-tagged forward declaration with a 1-byte Return
+    // stub body — the same widened gate as `handle_call` (0x5B); the
+    // narrow `== 0` gate let a CallG onto an intrinsic declaration
+    // execute the stub's RetV and silently return unit.
+    if bytecode_length == 0 || (bytecode_length <= 1 && has_intrinsic_marker) {
         let caller_base = state.reg_base();
         if let Some(result) = try_dispatch_intrinsic_by_name(
             state,
