@@ -1437,14 +1437,17 @@ impl<'s> CompilationPipeline<'s> {
 
         if target_is_linux {
             cmd.arg("-Wl,--gc-sections");
-            cmd.arg("-rdynamic");
             // 16MB stack for recursive algorithms
             cmd.arg("-Wl,-z,stacksize=16777216");
-            // Link additional system libraries for runtime
-            cmd.arg("-ldl");
-            cmd.arg("-lrt");
-            // Link C++ stdlib for CBGR
-            cmd.arg("-lstdc++");
+            // NO -ldl / -lrt / -lstdc++ / -rdynamic: the emitted IR
+            // references no dl* symbols, no rt-only symbols (time is
+            // direct syscalls), and no C++ runtime (CBGR is pure IR).
+            // Canonical no-libc flag authority is `NoLibcConfig`
+            // (verum_codegen::link), consumed by the FinalLinker/lld
+            // path.  This cc-driver fallback still relies on the
+            // driver's default crt/libc until the no-libc punch list
+            // closes (compiler-rt builtins strategy, strtod, Linux
+            // setjmp body — see docs/architecture/no-libc-architecture.md).
         }
 
         // Execute linker

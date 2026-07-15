@@ -379,13 +379,11 @@ impl NoLibcConfig {
                 "-nostdlib".to_string(),
                 // Link only with libSystem
                 "-lSystem".to_string(),
-                // Metal GPU compute framework (Apple Silicon)
-                "-framework".to_string(),
-                "Metal".to_string(),
-                "-framework".to_string(),
-                "Foundation".to_string(),
-                // Objective-C runtime (for Metal bridge)
-                "-lobjc".to_string(),
+                // NO unconditional Metal/Foundation/objc here: GPU
+                // framework links are gated by the post-globaldce
+                // `needs_metal` probe (#100) and flow through
+                // `LinkingConfig.extra_flags` — an unconditional
+                // preset re-bloated LC_LOAD_DYLIB for every binary.
             ],
         }
     }

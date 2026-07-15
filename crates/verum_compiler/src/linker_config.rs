@@ -54,8 +54,9 @@
 //! library_paths = ["/usr/local/lib", "vendor/lib"]
 //!
 
-//! # Libraries to link
-//! libraries = ["pthread", "m", "dl"]
+//! # Libraries to link (explicit FFI dependencies only — the Verum
+//! # runtime itself needs NO libraries; see no-libc-architecture.md)
+//! libraries = ["ssl", "crypto"]
 //!
 
 //! # Symbols to export (for shared libraries)
@@ -68,11 +69,11 @@
 
 //! # Platform-specific settings
 //! [linker.linux]
-//! libraries = ["rt", "pthread"]
+//! libraries = ["ssl"]
 //!
 
 //! [linker.macos]
-//! extra_flags = ["-framework", "CoreFoundation"]
+//! extra_flags = ["-framework", "Security"]
 //!
 
 //! [linker.windows]
@@ -215,19 +216,21 @@ fn default_debug_info() -> bool {
 }
 
 fn default_libraries() -> Vec<String> {
-    #[cfg(target_os = "linux")]
-    {
-        vec!["pthread".to_string(), "m".to_string(), "dl".to_string()]
-    }
+    // No-libc architecture (docs/architecture/no-libc-architecture.md):
+    // - Linux: NOTHING — all runtime functionality is direct syscalls
+    //   (no pthread/m/dl; math is LLVM intrinsics, threads are clone3).
+    // - macOS: libSystem only (Apple-required boundary).
+    // - Windows: kernel32 + ntdll ONLY — never msvcrt/ucrt (no C runtime).
+    // Users can add FFI libraries explicitly via `[link] libraries = [...]`.
     #[cfg(target_os = "macos")]
     {
         vec!["System".to_string()]
     }
     #[cfg(target_os = "windows")]
     {
-        vec!["kernel32".to_string(), "msvcrt".to_string()]
+        vec!["kernel32".to_string(), "ntdll".to_string()]
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         vec![]
     }

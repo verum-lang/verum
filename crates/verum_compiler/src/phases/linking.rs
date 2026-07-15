@@ -1495,17 +1495,15 @@ impl FinalLinker {
                 }
             }
         } else {
-            // Standard mode: user-specified libraries
+            // Standard mode: user-specified libraries only.  No
+            // platform defaults — the emitted IR needs no -lrt (time
+            // is direct syscalls) and no CoreFoundation (no CF symbol
+            // is ever emitted); adding them here would violate the
+            // no-libc architecture and, being host-`#[cfg]` gated,
+            // would also miscompile cross links.
             for lib in &self.config.libraries {
                 cmd.arg(format!("-l{}", lib.as_str()));
             }
-
-            // Platform-specific defaults (only in standard mode)
-            #[cfg(target_os = "linux")]
-            cmd.arg("-lrt");
-
-            #[cfg(target_os = "macos")]
-            cmd.args(&["-framework", "CoreFoundation"]);
         }
 
         if self.config.pic {
