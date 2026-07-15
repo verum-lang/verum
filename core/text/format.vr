@@ -493,6 +493,23 @@ public fn format_debug<T: Debug>(value: &T) -> Text {
     buf
 }
 
+// TEXT-DEBUG-STATIC-1: concrete-Text twin of `format_debug<T>`.
+// Tier-1 cannot recover "this is a Text" at runtime — Text is a
+// headerless flat record (no NaN tag, no header stamp), so the generic
+// body's `value.fmt_debug(f)` dyn-dispatch falls through the RTID
+// switch to the empty default for every Text receiver (`f"{t:?}"`
+// printed nothing; quotes/escape suites all red at Tier-1 only). The
+// VBC codegen rewrites `format_debug(&x)` to this twin whenever `x`'s
+// STATIC type is Text; the concrete receiver resolves `Text.fmt_debug`
+// at compile time — identical emission on BOTH tiers, no runtime
+// shape guessing.
+public fn format_debug_text(value: &Text) -> Text {
+    let mut buf = Text.new();
+    let mut f = Formatter.new(&mut buf);
+    value.fmt_debug(&mut f);
+    buf
+}
+
 // Format a Display value to Text.
 //
 // Same type-match rule as `format_debug` — `Display` protocol takes

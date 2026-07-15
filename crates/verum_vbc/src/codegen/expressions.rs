@@ -5227,6 +5227,29 @@ impl VbcCodegen {
             }
         };
 
+        // TEXT-DEBUG-STATIC-1: `f"{x:?}"` desugars (in the parser, which
+        // has no type info) to the GENERIC `format_debug(&x)`. For a
+        // STATICALLY-Text argument, rewrite to the concrete
+        // `format_debug_text` twin — Tier-1 cannot recover Text-ness at
+        // runtime (headerless flat record: no NaN tag, no header stamp),
+        // so the generic body's dyn fmt_debug dispatch fell through the
+        // RTID switch to the empty default and every `{text:?}` printed
+        // nothing at Tier-1. Static fact at the emission site is the only
+        // honest channel; both tiers share the rewritten call.
+        let func_name = if (func_name == "format_debug"
+            || func_name.ends_with(".format_debug"))
+            && args.len() == 1
+            && {
+                let t = self
+                    .extract_expr_type_name(&args[0])
+                    .or_else(|| self.infer_expr_type_name(&args[0]));
+                Self::type_name_is_text(t.as_deref())
+            } {
+            format!("{}_text", func_name)
+        } else {
+            func_name
+        };
+
         // #44-B: `T.method(args)` — a static call on a GENERIC TYPE PARAM
         // (typechecker stamp `StaticCall{"T.default"}`). No registered
         // function can ever match a type-param prefix, so pre-fix the
@@ -6740,7 +6763,7 @@ impl VbcCodegen {
         // at Tier-0. Only the mono SEED recording (specialize → route →
         // devirtualize, still under reconstruction #3) stays behind
         // VERUM_ENABLE_MONO_AOT.
-        let mono_seed = crate::mono::mono_aot_enabled();
+        let mono_seed = std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some();
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let found = self
                 .functions

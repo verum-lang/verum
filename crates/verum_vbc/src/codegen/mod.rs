@@ -15990,35 +15990,20 @@ impl VbcCodegen {
                     let should_wrap_ref = if matches!(&ty.kind, verum_ast::ty::TypeKind::Reference { .. }) {
                         match &resolved {
                             // Concrete scalar `&Int`/`&Float`/… — deref directly.
-                            // PARAM-REF-RECORD-1 (#44/#21 AOT Display root):
-                            // USER-DECLARED record types (`&mut Formatter` in a
-                            // Display impl) must ALSO keep the Reference wrapper —
-                            // an unwrapped descriptor lowered the param as a
-                            // bare i64 with no ref-param mark, so the body's
-                            // re-ref (`f.write_str(s)`) took the ALLOCA ADDRESS
-                            // of the param slot and every field read downstream
-                            // hit stack garbage (raw-binary EXC_BAD_ACCESS in
-                            // Formatter.write_str; `{3, 4}` silent-wrong before
-                            // that).  Builtin heap containers (Text/List/Map/…)
-                            // keep the historic unwrapped path — their
-                            // passthrough works via the collection heuristics
-                            // and re-marking them is a separate, wider change.
-                            TypeRef::Concrete(tid) => {
-                                matches!(
-                                    *tid,
-                                    TypeId::INT
-                                        | TypeId::FLOAT
-                                        | TypeId::BOOL
-                                        | TypeId::U8
-                                        | TypeId::I8
-                                        | TypeId::U16
-                                        | TypeId::I16
-                                        | TypeId::U32
-                                        | TypeId::I32
-                                        | TypeId::U64
-                                        | TypeId::F32
-                                ) || !tid.is_builtin()
-                            }
+                            TypeRef::Concrete(tid) => matches!(
+                                *tid,
+                                TypeId::INT
+                                    | TypeId::FLOAT
+                                    | TypeId::BOOL
+                                    | TypeId::U8
+                                    | TypeId::I8
+                                    | TypeId::U16
+                                    | TypeId::I16
+                                    | TypeId::U32
+                                    | TypeId::I32
+                                    | TypeId::U64
+                                    | TypeId::F32
+                            ),
                             // Bare generic `&T`: mono/substitution.rs `apply` recurses
                             // into the Reference wrapper (→ Reference{Concrete}), and
                             // the AOT param-mark gates on a scalar inner — so only
@@ -19998,6 +19983,31 @@ impl VbcCodegen {
         // See the rationale block at the collection site above for
         // why this is needed and the size budget it lives within.
         if !external_pending.is_empty() {
+            // **STUB-STAGE-INSUITE-2 (#26)** — drain the archive-merge
+            // band redirects (`band_redirect`'s unresolvable-at-merge
+            // externals: NAME → fresh id in `user_xmod_band_by_name`,
+            // carried here).  These fresh ids sit ABOVE the
+            // `in_xmod_call_band` window (`XMOD_CALL_ID_BAND_BASE +
+            // 0x1000_0000` vs the `+ 0x800_0000`-wide predicate), so the
+            // `xmod_band` re-home pass below rewrites every body operand
+            // holding one to a FRESH in-window `XMOD_CALL_ID_BAND_BASE +
+            // seq` id.  Seeding `ctx_id_to_name` with the carried NAME
+            // makes the `external_pending` loop emit
+            // `(re-homed-in-window-id → NAME)` — keyed by exactly the id
+            // the bytecode now carries — so the runtime's
+            // `resolve_xmod_band` binds it BY NAME to the real body once
+            // every archive has loaded (and AOT-STUB-SENTINEL-CHASE-1
+            // does the same on Tier-1).  Pre-fix the carry was appended
+            // UNDER ITS PRE-REHOME id, which no operand references, so
+            // the re-homed operand reached the terminal user module with
+            // NO name record and died `FunctionNotFound(0x2000_00xx)` —
+            // the frozen-band-id root of task #20's global-ctor MISS
+            // class (`__tls_init_*$static$*` statics left nil, e.g.
+            // `static NEXT_ID: AtomicInt = AtomicInt.new(1)` whose
+            // `AtomicInt.new` was unresolvable at the async-module
+            // merge).  Draining here empties the legacy append below.
+            let carried_externals: Vec<(u32, String)> =
+                std::mem::take(&mut self.user_xmod_carry);
             let mut ctx_id_to_name: std::collections::HashMap<u32, String> =
                 std::collections::HashMap::with_capacity(external_pending.len());
             for (name, info) in self.ctx.functions.iter() {
@@ -20031,6 +20041,15 @@ impl VbcCodegen {
                     ctx_id_to_name.entry(sid).or_insert_with(|| nm.clone());
                 }
             }
+            // STUB-STAGE-INSUITE-2 (#26): seed the carried band-redirect
+            // NAMEs.  The `external_pending` loop keys each entry through
+            // `xmod_band` (the in-window re-home), so the emitted record
+            // matches the id the body operand now carries.
+            for (fresh_id, name) in &carried_externals {
+                ctx_id_to_name
+                    .entry(*fresh_id)
+                    .or_insert_with(|| name.clone());
+            }
             let mut external_list: Vec<(FunctionId, StringId)> =
                 Vec::with_capacity(external_pending.len());
             for fid in external_pending {
@@ -20056,14 +20075,16 @@ impl VbcCodegen {
             module.external_function_names = external_list;
         }
 
-        // **XMOD-BAND-FREEZE-1 (#54)**: append the re-homed unresolved
-        // externals collected during archive merges.  Each entry is a
-        // FRESH user-band id bound to the missing symbol's qualified
-        // name — the interpreter's dispatch-time lazy link
-        // (`resolve_xmod_band`) binds it BY NAME once every archive
-        // has loaded; a symbol that never materialises surfaces as a
-        // NAMED `external never linked` panic instead of the opaque
-        // `Function 5368710xx not found`.
+        // **XMOD-BAND-FREEZE-1 (#54) / STUB-STAGE-INSUITE-2 (#26)**:
+        // append any re-homed unresolved externals collected during
+        // archive merges.  In the normal path these were already drained
+        // above (`carried_externals`) and re-emitted UNDER THE IN-WINDOW
+        // id the `xmod_band` pass assigned to their body operands, so the
+        // runtime `resolve_xmod_band` can bind them BY NAME; this block
+        // is then empty.  It stays as a defensive fallback for the
+        // degenerate case where a carry exists with no cross-module body
+        // operand (empty `external_pending`) — such an entry rides its
+        // raw carry id, unreferenced, and never reaches dispatch.
         if !self.user_xmod_carry.is_empty() {
             for (fid, name) in std::mem::take(&mut self.user_xmod_carry) {
                 let sid = module.intern_string(&name);
