@@ -2235,6 +2235,16 @@ impl TypeChecker {
             self.get_module_with_path_aliases(module_path.as_str(), registry)
         {
             let probed_name_text: Text = item_name.to_string().into();
+            if std::env::var("VERUM_TRACE_TASK21").is_ok() {
+                eprintln!(
+                    "[task21] gate: mod='{}' item='{}' exports_len={} export_hit={} span={}",
+                    module_path.as_str(),
+                    item_name,
+                    probed_module_info.exports.len(),
+                    probed_module_info.exports.get(&probed_name_text).is_some(),
+                    import_span.is_some(),
+                );
+            }
             if probed_module_info.exports.get(&probed_name_text).is_none() {
                 // Try the simple-path inline fallback (mirrors the
                 // resolution in `import_item_from_module_body` so we
@@ -2271,6 +2281,14 @@ impl TypeChecker {
                             .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
                     {
                         self.ctx.env.insert(bind_name, scheme);
+                    }
+                    if std::env::var("VERUM_TRACE_TASK21").is_ok() {
+                        eprintln!(
+                            "[task21] gate early-return: mod='{}' item='{}' bound_after={}",
+                            module_path.as_str(),
+                            item_name,
+                            self.ctx.env.lookup(&Text::from(bind_name)).is_some(),
+                        );
                     }
                     return Ok(());
                 }
@@ -6126,7 +6144,86 @@ impl TypeChecker {
             })
         };
 
-        let fd = direct_fd.or(reexport_fd)?;
+        // Step 2.5 — one-hop qualified-key probe
+        // (UMBRELLA-REEXPORT-RESOLVE-1).  The umbrella's captured
+        // re-export LEAVES can lag the truth: the precompile glob
+        // expansion drops names whose descriptors it can't leaf-match
+        // (proven live: `core.intrinsics`'s 855-leaf table carried
+        // NEITHER `wrapping_add` NOR `saturating_add` while the
+        // archive held both under fully-qualified keys — the first
+        // brace item per source submodule then resolved only by
+        // bare-key luck).  The archive's qualified function keys
+        // (`<module>.<sub>.<item>`) ARE the carried fact — probe them
+        // directly: exactly one intermediate segment (the umbrella
+        // re-exports its own submodules), deterministic min-by-key
+        // pick over sorted candidates.
+        let onehop_fd = if direct_fd.is_some() || reexport_fd.is_some() {
+            None
+        } else {
+            let mut candidates: Vec<&Text> = Vec::new();
+            for prefix in [Some(module_path), module_path.strip_prefix("core.")]
+                .into_iter()
+                .flatten()
+            {
+                let head = format!("{}.", prefix);
+                let tail = format!(".{}", item_name);
+                for (key, _) in metadata.functions.iter() {
+                    let k = key.as_str();
+                    if k.starts_with(head.as_str())
+                        && k.ends_with(tail.as_str())
+                        && k.len() > head.len() + tail.len() - 1
+                    {
+                        let mid = &k[head.len()..k.len() - tail.len()];
+                        if !mid.is_empty() && !mid.contains('.') {
+                            // Lowercase first char = module segment, not a
+                            // `Type.method` carrier.
+                            let is_module_seg = mid
+                                .chars()
+                                .next()
+                                .map(|c| c.is_lowercase() || c == '_')
+                                .unwrap_or(false);
+                            if is_module_seg {
+                                candidates.push(key);
+                            }
+                        }
+                    }
+                }
+            }
+            candidates.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            // Prefer a fully-typed descriptor when several submodules
+            // carry the name; degraded (`__opaque_*`) shapes are still
+            // USABLE — parse_descriptor_type_string maps opaque
+            // spellings to fresh type vars — but an honest twin is a
+            // tighter scheme, so it wins the tie.
+            let is_honest = |fd: &crate::core_metadata::FunctionDescriptor| -> bool {
+                !fd.return_type.as_str().contains("__opaque")
+                    && fd
+                        .params
+                        .iter()
+                        .all(|p| !p.ty.as_str().contains("__opaque"))
+            };
+            let hit = candidates
+                .iter()
+                .filter_map(|k| metadata.functions.get(*k))
+                .find(|fd| is_honest(fd))
+                .or_else(|| {
+                    candidates
+                        .first()
+                        .and_then(|k| metadata.functions.get(*k))
+                });
+            if std::env::var("VERUM_TRACE_TASK21").is_ok() {
+                eprintln!(
+                    "[task21] onehop probe: mod='{}' item='{}' candidates={} hit={}",
+                    module_path,
+                    item_name,
+                    candidates.len(),
+                    hit.is_some(),
+                );
+            }
+            hit
+        };
+
+        let fd = direct_fd.or(reexport_fd).or(onehop_fd)?;
 
         if fd.is_const {
             // Const re-exports flow through the Const arm; refuse to

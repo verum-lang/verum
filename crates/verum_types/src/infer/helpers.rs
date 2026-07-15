@@ -1625,6 +1625,13 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
     if trimmed.starts_with("__opaque_type_")
         || trimmed.starts_with("__generic_")
         || trimmed == "__opaque_typeref"
+        // Source-scan injector spelling (precompile.rs render_type's
+        // exotic-shape fallback). Same contract as the archive
+        // spellings above: opaque = unknown = fresh var; a rigid
+        // Named("__opaque_src") fails every use-site unification
+        // (`sqrt(9.0)` → E400 "expected '__opaque_src', found
+        // 'Float'" — UMBRELLA-REEXPORT-RESOLVE-1 one-hop probe).
+        || trimmed == "__opaque_src"
     {
         // Within a function-scheme scope (`with_generic_var_scope`), the SAME
         // `__generic_N` placeholder must map to the SAME TypeVar across the
