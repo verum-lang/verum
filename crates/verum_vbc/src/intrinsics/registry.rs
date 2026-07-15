@@ -1012,6 +1012,11 @@ pub enum InlineSequenceId {
     SysGetpid,
     /// sys_gettid: get thread ID
     SysGettid,
+    /// get_tier: execution-tier query — MUST stay a per-tier runtime
+    /// answer (TIER-DETECT-AOT-1), never a compile-time constant.
+    ExecutionTier,
+    /// is_interpreted: interpreter-tier predicate (same per-tier rule).
+    IsInterpretedSeq,
     /// sys_mmap: memory map (safe wrapper)
     SysMmap,
     /// sys_munmap: memory unmap (safe wrapper)
@@ -5390,14 +5395,19 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Request JIT compilation",
     },
     Intrinsic {
+        // TIER-DETECT-AOT-1: was CompileTimeConstant ("false in AOT,
+        // true in interpreter") — impossible to deliver from ONE
+        // shared VBC stream; both tiers saw the interp fold (true)
+        // and every `if !is_interpreted()` AOT gate ran the interp
+        // branch. Now a System sub-op each tier answers itself.
         name: "is_interpreted",
         category: IntrinsicCategory::Tier,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval],
+        hints: &[IntrinsicHint::Pure],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::CompileTimeConstant, // false in AOT, true in interpreter
-        mlir_op: Some("llvm.mlir.constant"),
-        doc: "Check if running in interpreter",
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsInterpretedSeq),
+        mlir_op: None,
+        doc: "Check if running in interpreter (per-tier runtime answer)",
     },
     Intrinsic {
         name: "get_tier",
@@ -5405,9 +5415,9 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::CompileTimeConstant, // Returns 0 in interpreter
-        mlir_op: Some("llvm.mlir.constant"),
-        doc: "Get current execution tier (0-3)",
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ExecutionTier),
+        mlir_op: None,
+        doc: "Get current execution tier (0 = interpreter, 1 = AOT)",
     },
     // =========================================================================
     // Time Intrinsics

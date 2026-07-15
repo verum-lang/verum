@@ -5566,6 +5566,26 @@ pub enum SystemSubOpcode {
     /// Returns: Result variant (Ok=unit, Err=OSError).
     SysGetentropy = 0x85,
 
+    /// Execution-tier query (`get_tier`). TIER-DETECT-AOT-1: tier
+    /// detection MUST be resolved per tier, never folded into the
+    /// shared VBC — one bytecode stream serves both tiers, so a
+    /// compile-time constant is tier-incoherent by construction.
+    /// The interpreter answers 0; the LLVM lowering emits const 1.
+    ///
+
+    /// Format: `dst:reg`
+    /// Returns: Int tier id (0 = interpreter, 1 = AOT).
+    ExecutionTier = 0x86,
+
+    /// Interpreter-tier predicate (`is_interpreted`). Same per-tier
+    /// contract as [`ExecutionTier`]: interpreter answers true, the
+    /// LLVM lowering emits const false.
+    ///
+
+    /// Format: `dst:reg`
+    /// Returns: Bool.
+    IsInterpreted = 0x87,
+
     // =========================================================================
     // Mach Kernel Operations (macOS)
     // =========================================================================
@@ -6143,6 +6163,8 @@ impl SystemSubOpcode {
             0x83 => Some(Self::SysMunmap),
             0x84 => Some(Self::SysMadvise),
             0x85 => Some(Self::SysGetentropy),
+            0x86 => Some(Self::ExecutionTier),
+            0x87 => Some(Self::IsInterpreted),
             // Mach Kernel Operations
             0x90 => Some(Self::MachVmAllocate),
             0x91 => Some(Self::MachVmDeallocate),
@@ -6316,6 +6338,8 @@ impl SystemSubOpcode {
             Self::SysMunmap              => m!("SYS_MUNMAP",                 SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=true),
             Self::SysMadvise             => m!("SYS_MADVISE",                SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::SysGetentropy          => m!("SYS_GETENTROPY",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::ExecutionTier          => m!("EXECUTION_TIER",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::IsInterpreted          => m!("IS_INTERPRETED",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Mach Kernel Operations (0x90-0x9F) =====
             // Allocation-vs-release tagging mirrors Linux mmap pair.

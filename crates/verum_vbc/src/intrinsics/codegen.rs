@@ -588,6 +588,11 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::NullPtr
             | InlineSequenceId::PtrIsNull
             | InlineSequenceId::PtrIsAlignedTo => args.first().copied(),
+            // Tier detection — authoritative emission (FfiExtended
+            // 0x86/0x87) lives in codegen/expressions.rs; this
+            // intermediate path is a pass-through (TIER-DETECT-AOT-1).
+            InlineSequenceId::ExecutionTier
+            | InlineSequenceId::IsInterpretedSeq => args.first().copied(),
             // Conversion
             InlineSequenceId::IntToFloat => self.emit_int_to_float(args),
             InlineSequenceId::FloatToInt => self.emit_float_to_int(args),

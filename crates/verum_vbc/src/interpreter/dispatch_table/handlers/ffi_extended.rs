@@ -2378,6 +2378,21 @@ pub(in super::super) fn handle_ffi_extended(
             Ok(DispatchResult::Continue)
         }
 
+        // TIER-DETECT-AOT-1: per-tier answers. THIS side is the
+        // interpreter, so tier = 0 / is_interpreted = true; the LLVM
+        // lowering emits const 1 / false for the same sub-ops.
+        Some(SystemSubOpcode::ExecutionTier) => {
+            let dst = read_reg(state)?;
+            state.set_reg(dst, Value::from_i64(0));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(SystemSubOpcode::IsInterpreted) => {
+            let dst = read_reg(state)?;
+            state.set_reg(dst, Value::from_bool(true));
+            Ok(DispatchResult::Continue)
+        }
+
         Some(SystemSubOpcode::SysGettid) => {
             let dst = read_reg(state)?;
             #[cfg(unix)]
