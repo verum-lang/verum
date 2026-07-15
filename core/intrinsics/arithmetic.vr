@@ -30,6 +30,11 @@
 )
 module core.intrinsics.arithmetic;
 
+// ARITH-PURE-BODY-1: the pure bodies below (widening_mul,
+// leading_sign_bits, checked_next_power_of_two) build on the registered
+// bitwise primitives.
+mount core.intrinsics.bitwise.{lshr, clz};
+
 // =============================================================================
 // SECTION 1: Basic Arithmetic
 // =============================================================================
@@ -140,8 +145,18 @@ public fn checked_mul<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_mul", a, 
 /// Checked division (returns Maybe.None on division by zero)
 public fn checked_div<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_div", a, b) }
 
-/// Checked remainder (returns Maybe.None on division by zero)
-public fn checked_rem<T>(a: T, b: T) -> Maybe<T> { @intrinsic("checked_rem", a, b) }
+/// Checked remainder (returns Maybe.None on division by zero).
+///
+/// ARITH-PURE-BODY-1 (2026-07-15): pure Verum body — the historical
+/// `@intrinsic("checked_rem")` had no registry entry and compiled to
+/// LoadNil.  Totality choice: `T.MIN % -1` is `Some(0)` (consistent with
+/// the wrapping family), not Rust's `None` — the remainder of that
+/// division is mathematically zero and `wrapping_rem` already carries
+/// that contract on both tiers.
+public fn checked_rem<T>(a: T, b: T) -> Maybe<T> {
+    if b == (0 as T) { return Maybe.None; }
+    Maybe.Some(wrapping_rem(a, b))
+}
 
 /// Checked negation (returns Maybe.None if self is MIN)
 public fn checked_neg<T>(x: T) -> Maybe<T> { @intrinsic("checked_neg", x) }
@@ -150,11 +165,22 @@ public fn checked_neg<T>(x: T) -> Maybe<T> { @intrinsic("checked_neg", x) }
 /// as `checked_neg`). Symmetric counterpart added in #100/task #25.
 public fn checked_abs<T>(x: T) -> Maybe<T> { @intrinsic("checked_abs", x) }
 
-/// Checked left shift (returns Maybe.None if shift >= bit width)
-public fn checked_shl<T>(x: T, n: UInt32) -> Maybe<T> { @intrinsic("checked_shl", x, n) }
+/// Checked left shift (returns Maybe.None if shift >= bit width).
+///
+/// ARITH-PURE-BODY-1: pure body (was an unregistered @intrinsic →
+/// LoadNil).  Bit width follows the 64-bit generic value model; the
+/// sized variants own narrower widths.
+public fn checked_shl<T>(x: T, n: UInt32) -> Maybe<T> {
+    if (n as Int) >= 64 { return Maybe.None; }
+    Maybe.Some(x << n)
+}
 
-/// Checked right shift (returns Maybe.None if shift >= bit width)
-public fn checked_shr<T>(x: T, n: UInt32) -> Maybe<T> { @intrinsic("checked_shr", x, n) }
+/// Checked right shift (returns Maybe.None if shift >= bit width).
+/// ARITH-PURE-BODY-1: pure body; see `checked_shl`.
+public fn checked_shr<T>(x: T, n: UInt32) -> Maybe<T> {
+    if (n as Int) >= 64 { return Maybe.None; }
+    Maybe.Some(x >> n)
+}
 
 // --- UInt64-specific checked arithmetic (uses unsigned overflow detection) ---
 /// Checked unsigned 64-bit addition (returns Maybe.None on overflow)
@@ -189,14 +215,31 @@ public fn overflowing_sub<T>(a: T, b: T) -> (T, Bool) { @intrinsic("overflowing_
 /// Multiply returning (result, overflow_flag)
 public fn overflowing_mul<T>(a: T, b: T) -> (T, Bool) { @intrinsic("overflowing_mul", a, b) }
 
-/// Negate returning (result, overflow_flag)
-public fn overflowing_neg<T>(x: T) -> (T, Bool) { @intrinsic("overflowing_neg", x) }
+/// Negate returning (result, overflow_flag).
+///
+/// ARITH-PURE-BODY-1 (2026-07-15): pure body (was an unregistered
+/// @intrinsic → LoadNil).  Overflow ⇔ the operand is the two's-complement
+/// minimum (its negation is unrepresentable); the result then wraps to
+/// the same bit pattern.
+public fn overflowing_neg<T>(x: T) -> (T, Bool) {
+    let min = (1 as T) << (63 as UInt32);
+    (wrapping_neg(x), x == min)
+}
 
-/// Left shift returning (result, overflow_flag)
-public fn overflowing_shl<T>(x: T, n: UInt32) -> (T, Bool) { @intrinsic("overflowing_shl", x, n) }
+/// Left shift returning (result, overflow_flag).  The shift amount is
+/// taken modulo the bit width (like `wrapping_shl`); the flag reports
+/// `n >= bits`.  ARITH-PURE-BODY-1: pure body.
+public fn overflowing_shl<T>(x: T, n: UInt32) -> (T, Bool) {
+    let masked = n & (63 as UInt32);
+    (x << masked, (n as Int) >= 64)
+}
 
-/// Right shift returning (result, overflow_flag)
-public fn overflowing_shr<T>(x: T, n: UInt32) -> (T, Bool) { @intrinsic("overflowing_shr", x, n) }
+/// Right shift returning (result, overflow_flag).  Same contract shape
+/// as `overflowing_shl`.  ARITH-PURE-BODY-1: pure body.
+public fn overflowing_shr<T>(x: T, n: UInt32) -> (T, Bool) {
+    let masked = n & (63 as UInt32);
+    (x >> masked, (n as Int) >= 64)
+}
 
 // =============================================================================
 // SECTION 4: Wrapping Arithmetic
@@ -276,8 +319,19 @@ public fn saturating_sub<T>(a: T, b: T) -> T { @intrinsic("saturating_sub", a, b
 /// Saturating multiplication
 public fn saturating_mul<T>(a: T, b: T) -> T { @intrinsic("saturating_mul", a, b) }
 
-/// Saturating division
-public fn saturating_div<T>(a: T, b: T) -> T { @intrinsic("saturating_div", a, b) }
+/// Saturating division.  The single overflow case of two's-complement
+/// division (`T.MIN / -1`) saturates to `T.MAX` instead of trapping.
+/// Division by zero keeps the `/` operator's panic contract.
+/// ARITH-PURE-BODY-1 (2026-07-15): pure body (was an unregistered
+/// @intrinsic → LoadNil).
+public fn saturating_div<T>(a: T, b: T) -> T {
+    let min = (1 as T) << (63 as UInt32);
+    let neg_one = (0 as T) - (1 as T);
+    if a == min && b == neg_one {
+        return wrapping_sub(min, 1 as T);
+    }
+    a / b
+}
 
 /// Saturating negation
 public fn saturating_neg<T>(x: T) -> T { @intrinsic("saturating_neg", x) }
@@ -353,36 +407,130 @@ public fn clamp<T>(x: T, min_val: T, max_val: T) -> T {
 // =============================================================================
 
 /// Full-width multiply: returns (low_bits, high_bits)
-/// e.g., for u64 * u64 -> (u64, u64) representing u128 result
-public fn widening_mul<T>(a: T, b: T) -> (T, T) { @intrinsic("widening_mul", a, b) }
+/// Unsigned full-width multiply: `(lo, hi)` halves of the 128-bit
+/// product of the operands' 64-bit patterns.
+///
+/// ARITH-PURE-BODY-1 (2026-07-15): pure body via the textbook 32-bit
+/// split (was an unregistered @intrinsic → LoadNil).  Every partial
+/// product of two 32-bit halves fits in 64 bits, so the recomposition
+/// is carry-exact with plain wrapping adds; LLVM folds this shape to a
+/// single `umulh`/`mul` pair at Tier-1.
+public fn widening_mul<T>(a: T, b: T) -> (T, T) {
+    let mask = (0xFFFFFFFF) as T;
+    let a_lo = a & mask;
+    let a_hi = lshr(a, 32 as UInt32);
+    let b_lo = b & mask;
+    let b_hi = lshr(b, 32 as UInt32);
 
-/// Signed full-width multiply
-public fn widening_mul_signed<T>(a: T, b: T) -> (T, T) { @intrinsic("widening_mul_signed", a, b) }
+    let p_ll = wrapping_mul(a_lo, b_lo);
+    let p_lh = wrapping_mul(a_lo, b_hi);
+    let p_hl = wrapping_mul(a_hi, b_lo);
+    let p_hh = wrapping_mul(a_hi, b_hi);
 
-/// Carrying add: (a + b + carry_in) -> (sum, carry_out)
-public fn carrying_add<T>(a: T, b: T, carry: Bool) -> (T, Bool) { @intrinsic("carrying_add", a, b, carry) }
+    // mid collects the two cross products plus ll's high half; each term
+    // is < 2^32 (a 32×32 product's half), so the sum fits without carry.
+    let mid = wrapping_add(wrapping_add(lshr(p_ll, 32 as UInt32), p_lh & mask), p_hl & mask);
 
-/// Borrowing sub: (a - b - borrow_in) -> (diff, borrow_out)
-public fn borrowing_sub<T>(a: T, b: T, borrow: Bool) -> (T, Bool) { @intrinsic("borrowing_sub", a, b, borrow) }
+    let lo = (p_ll & mask) | (mid << (32 as UInt32));
+    let hi = wrapping_add(
+        wrapping_add(p_hh, lshr(p_lh, 32 as UInt32)),
+        wrapping_add(lshr(p_hl, 32 as UInt32), lshr(mid, 32 as UInt32)),
+    );
+    (lo, hi)
+}
+
+/// Signed full-width multiply: `(lo, hi)` of the 128-bit two's-complement
+/// product.  Standard `mulh`-from-`mulhu` correction: subtract each
+/// operand from the unsigned high half when the OTHER operand is
+/// negative.  ARITH-PURE-BODY-1: pure body.
+public fn widening_mul_signed<T>(a: T, b: T) -> (T, T) {
+    let (lo, hi_u) = widening_mul(a, b);
+    let mut hi = hi_u;
+    if a < (0 as T) { hi = wrapping_sub(hi, b); }
+    if b < (0 as T) { hi = wrapping_sub(hi, a); }
+    (lo, hi)
+}
+
+/// Carrying add: (a + b + carry_in) -> (sum, carry_out).
+///
+/// ARITH-PURE-BODY-1 (2026-07-15): pure body (was an unregistered
+/// @intrinsic → LoadNil).  Carry-out is the UNSIGNED wrap of the 64-bit
+/// patterns — detected with the sign-bias compare (`x ^ 2^63` orders
+/// bit patterns unsigned under the signed comparator).  LLVM folds the
+/// chain to `adds`/`adcs` at Tier-1.
+public fn carrying_add<T>(a: T, b: T, carry: Bool) -> (T, Bool) {
+    let bias = (1 as T) << (63 as UInt32);
+    let s1 = wrapping_add(a, b);
+    let c1 = (s1 ^ bias) < (a ^ bias);
+    let s2 = if carry { wrapping_add(s1, 1 as T) } else { s1 };
+    let c2 = carry && s2 == (0 as T);
+    (s2, c1 || c2)
+}
+
+/// Borrowing sub: (a - b - borrow_in) -> (diff, borrow_out).
+/// Borrow-out is the unsigned underflow of the 64-bit patterns.
+/// ARITH-PURE-BODY-1: pure body; see `carrying_add`.
+public fn borrowing_sub<T>(a: T, b: T, borrow: Bool) -> (T, Bool) {
+    let bias = (1 as T) << (63 as UInt32);
+    let d1 = wrapping_sub(a, b);
+    let b1 = (a ^ bias) < (b ^ bias);
+    let d2 = if borrow { wrapping_sub(d1, 1 as T) } else { d1 };
+    let b2 = borrow && d1 == (0 as T);
+    (d2, b1 || b2)
+}
 
 // =============================================================================
 // SECTION 8: Integer Utilities
 // =============================================================================
 
-/// Count leading sign bits (not including the sign bit itself)
-public fn leading_sign_bits<T>(x: T) -> Int { @intrinsic("leading_sign_bits", x) }
+/// Count leading sign bits (not including the sign bit itself) — the
+/// number of redundant high bits equal to the sign bit; e.g. `0` and `-1`
+/// give 63, `1` gives 62.
+///
+/// ARITH-PURE-BODY-1 (2026-07-15): pure body (was an unregistered
+/// @intrinsic → LoadNil).  `x ^ (x >> 63)` clears every redundant sign
+/// bit (arithmetic shift replicates the sign), so `clz` of that pattern
+/// counts them plus the sign position itself.
+public fn leading_sign_bits<T>(x: T) -> Int {
+    clz(x ^ (x >> (63 as UInt32))) - 1
+}
 
 /// Integer log2 (floor)
 public fn ilog2<T>(x: T) -> Int { @intrinsic("ilog2", x) }
 
-/// Integer log10 (floor)
-public fn ilog10<T>(x: T) -> Int { @intrinsic("ilog10", x) }
+/// Integer log10 (floor).  Panics on non-positive input (mirror of the
+/// `ilog2` domain contract).  ARITH-PURE-BODY-1 (2026-07-15): pure body
+/// (was an unregistered @intrinsic → LoadNil); ≤ 19 divisions for the
+/// 64-bit domain.
+public fn ilog10<T>(x: T) -> Int {
+    if x <= (0 as T) { panic("ilog10: input must be positive"); }
+    let mut v = x;
+    let mut digits = 0;
+    while v >= (10 as T) {
+        v = v / (10 as T);
+        digits = digits + 1;
+    }
+    digits
+}
 
-/// Check if value is power of 2
-public fn is_power_of_two<T>(x: T) -> Bool { @intrinsic("is_power_of_two", x) }
+/// Check if value is a power of 2 (signed contract: positive with exactly
+/// one bit set).  ARITH-PURE-BODY-1 (2026-07-15): pure body (was an
+/// unregistered @intrinsic → LoadNil).
+public fn is_power_of_two<T>(x: T) -> Bool {
+    x > (0 as T) && (x & wrapping_sub(x, 1 as T)) == (0 as T)
+}
 
-/// Next power of 2 (returns Maybe.None if overflow)
-public fn checked_next_power_of_two<T>(x: T) -> Maybe<T> { @intrinsic("checked_next_power_of_two", x) }
+/// Next power of 2 ≥ x (returns Maybe.None if unrepresentable — above
+/// 2^62 for the signed 64-bit generic domain; `x <= 1` yields 1).
+/// ARITH-PURE-BODY-1 (2026-07-15): pure body via `clz` (was an
+/// unregistered @intrinsic → LoadNil).
+public fn checked_next_power_of_two<T>(x: T) -> Maybe<T> {
+    if x <= (1 as T) { return Maybe.Some(1 as T); }
+    let max_pow = (1 as T) << (62 as UInt32);
+    if x > max_pow { return Maybe.None; }
+    let shift = 64 - clz(wrapping_sub(x, 1 as T));
+    Maybe.Some((1 as T) << (shift as UInt32))
+}
 
 /// Next power of 2 (wraps on overflow)
 public fn wrapping_next_power_of_two<T>(x: T) -> T { @intrinsic("wrapping_next_power_of_two", x) }

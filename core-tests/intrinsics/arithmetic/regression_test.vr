@@ -108,7 +108,7 @@ fn regression_overflowing_mul_overflows() {
     assert_eq(o, true);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_overflowing_neg_min_overflows() {
     let (_r, o) = overflowing_neg(Int.MIN);
@@ -136,7 +136,7 @@ fn regression_wrapping_abs_basic() {
     assert_eq(wrapping_abs(-5), 5);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_widening_mul_u64() {
     // 0xFFFFFFFF * 0xFFFFFFFF = 0xFFFFFFFE00000001 (fits in one u64, hi=0).
@@ -145,52 +145,52 @@ fn regression_widening_mul_u64() {
     assert_eq(hi, 0 as UInt64);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_carrying_add_carry_out() {
     let (_s, c) = carrying_add(Int.MAX, 1, false);
     assert_eq(c, true);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_borrowing_sub_borrow_out() {
     let (_d, b) = borrowing_sub(0, 1, false);
     assert_eq(b, true);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_checked_shl_in_range() {
     assert(checked_shl(1 as Int, 3 as UInt32) is Some(8));
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_checked_shr_in_range() {
     assert(checked_shr(256 as Int, 4 as UInt32) is Some(16));
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_checked_next_power_of_two() {
     assert(checked_next_power_of_two(5) is Some(8));
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_ilog10_basic() {
     assert_eq(ilog10(1000), 3);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_leading_sign_bits_zero() {
     // 0 has 63 leading sign bits (all bits above the sign are 0).
     assert_eq(leading_sign_bits(0 as Int), 63);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn regression_saturating_div_basic() {
     assert_eq(saturating_div(20, 5), 4);

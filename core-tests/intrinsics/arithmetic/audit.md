@@ -153,10 +153,29 @@ dispatched nested-call-with-deref path is affected. Pinned `@ignore`:
 
 ## 3. Defects OPEN (ranked) — ARITH-MISSING-INTRINSICS-1
 
-These resolve to `nil` even via a direct `@intrinsic` call: the intrinsic has
-no registry entry and/or no interpreter + LLVM dispatch arm.  `lookup_intrinsic`
-returns `None` and `compile_intrinsic_call` emits `LoadNil`.  All pinned
-`@ignore` in `regression_test.vr`.
+### 3.0 STATUS UPDATE 2026-07-15 — ARITH-PURE-BODY-1 landed; pins now blocked by ARCHIVE-GENERIC-BODY-NIL-1
+
+Fourteen of the missing intrinsics (3.3–3.7 below + `overflowing_neg/shl/
+shr`, `checked_rem`, `is_power_of_two`) no longer NEED registry entries:
+they received PURE VERUM BODIES in `core/intrinsics/arithmetic.vr`
+(textbook 32-bit-split `widening_mul`, sign-bias unsigned-carry
+`carrying_add`/`borrowing_sub`, `clz`-based `leading_sign_bits`/
+`checked_next_power_of_two`, division-loop `ilog10`, guard-based
+`checked_shl/shr/rem`, `saturating_div`, `overflowing_neg/shl/shr` over the
+wrapping family).  LLVM folds these shapes to `umulh`/`adcs` at Tier-1; the
+interpreter executes them directly — no new opcodes, no width channel, no
+VBC-GENERIC-INSTANTIATION dependency.
+
+A LOCALLY-COMPILED twin of each body is proven correct
+(`probe_genbody.vr`, `probe_local_vs_baked.vr`); the BAKED copies currently
+execute to nil / mis-tagged Maybe — ARCHIVE-GENERIC-BODY-NIL-1 (session
+task #22, same root family as INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 §0 and
+the 0x2000_00xx stub-id class).  The suite pins carry that reason now and
+flip live with #22; `probe_arith14.vr` (scratchpad) is the full
+14-function acceptance battery.
+
+The original class analysis (registry-gap fix shapes) is kept below for
+3.1/3.2, which remain registry-level (their interp sub-opcodes exist).
 
 | # | Intrinsics | Note / fix shape |
 |---|---|---|

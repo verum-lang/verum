@@ -136,7 +136,7 @@ fn test_checked_div_by_zero_is_none() {
     assert(checked_div(5, 0) is None);
 }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn test_checked_rem_ok() { assert(checked_rem(20, 6) is Some(2)); }
 
@@ -417,11 +417,11 @@ fn test_ilog2_power_of_two() { assert_eq(ilog2(8), 3); }
 @test
 fn test_ilog2_non_power_of_two_floors() { assert_eq(ilog2(15), 3); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn test_is_power_of_two_true() { assert(is_power_of_two(16)); }
 
-@ignore("INTRINSIC-GENERIC-WRAPPER-ARCHIVE-1 — stdlib generic intrinsic free-fn wrapper unreliable via precompiled archive; direct @intrinsic + fresh user-defined generic wrapper both work. See audit.md §0/§3, task #4.")
+@ignore("ARITH-PURE-BODY-1 landed 2026-07-15 (pure Verum body; locally-compiled twin proven correct by probe_local_vs_baked). Still pinned by ARCHIVE-GENERIC-BODY-NIL-1 (session task #22): BAKED generic bodies execute to nil / Maybe payload mis-tag. Un-ignore with #22.")
 @test
 fn test_is_power_of_two_false() { assert(is_power_of_two(15) == false); }
 
