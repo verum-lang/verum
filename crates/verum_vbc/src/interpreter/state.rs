@@ -446,6 +446,16 @@ pub struct InterpreterState {
     /// Context stack for scoped context values.
     pub context_stack: ContextStack,
 
+    /// Cached raw-`ctx_type` → dense-slot map for the executing module
+    /// (CTX-STORE-AUTHORITY-1). Built lazily on the first context op from
+    /// the ONE authority `VbcModule::ctx_dense_slot_map` — the SAME
+    /// numbering the Tier-1 lowering uses — so the interpreter's
+    /// `ContextStack` keys by the dense slot, unifying the `provide`/`get`
+    /// opcode store with the user-callable `ctx_get(slot)` surface exactly
+    /// as Tier-1 does. `None` until the first `CtxProvide`/`CtxGet`, so
+    /// context-free programs pay nothing.
+    pub ctx_dense_slot_map: Option<HashMap<u32, u32>>,
+
     /// V-LLSI defer stack — pairs of (cleanup_fn_id, arg) registered
     /// via `core.sys.context_ops.defer_register`. The interpreter
     /// maintains stack depth + push/pop semantics so user-code
@@ -2591,6 +2601,28 @@ impl InterpreterState {
         Self::with_config(module, InterpreterConfig::default())
     }
 
+    /// Map a raw VBC `ctx_type` (context-type string-table id) to its
+    /// dense context slot via the module-level ONE authority
+    /// (`VbcModule::ctx_dense_slot_map`, CTX-STORE-AUTHORITY-1).
+    ///
+    /// Built lazily on first use and cached. Keying the interpreter's
+    /// `ContextStack` by this slot — rather than the raw string-id — is
+    /// what unifies the Tier-0 opcode store with the user-callable
+    /// `ctx_get(slot)` / `ctx_set(slot)` surface (which keys the same
+    /// `ContextStack` by small slot ids) and matches the Tier-1 dense
+    /// numbering. Ids not covered by the module scan fall through to the
+    /// raw id unchanged, so `provide`/`get` of the same context stay
+    /// paired regardless of map coverage.
+    pub fn ctx_dense_slot(&mut self, ctx_type: u32) -> u32 {
+        if self.ctx_dense_slot_map.is_none() {
+            self.ctx_dense_slot_map = Some(self.module.ctx_dense_slot_map());
+        }
+        self.ctx_dense_slot_map
+            .as_ref()
+            .and_then(|m| m.get(&ctx_type).copied())
+            .unwrap_or(ctx_type)
+    }
+
     /// Creates a new interpreter state with custom configuration.
     pub fn with_config(module: Arc<VbcModule>, config: InterpreterConfig) -> Self {
         let mut modules = HashMap::new();
@@ -2648,6 +2680,7 @@ impl InterpreterState {
             stats: ExecutionStats::default(),
             config,
             context_stack: ContextStack::new(),
+            ctx_dense_slot_map: None,
             defer_stack: Vec::new(),
             open_files: std::collections::HashMap::new(),
             next_fd: 100,

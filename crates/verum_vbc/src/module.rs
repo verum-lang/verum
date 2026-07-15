@@ -63,6 +63,32 @@ pub struct ConstId(pub u32);
 /// and the stage-1/2/3 stub ranges near `u32::MAX`.
 pub const XMOD_CALL_ID_BAND_BASE: u32 = 0x2000_0000;
 
+/// First dense context slot available for compiler-assigned context
+/// types (CTX-STORE-AUTHORITY-1). Slots below this are the statically-
+/// allocated stdlib region (`EXEC_ENV_SLOT=0`, `SLOT_DATABASE=10`,
+/// `SLOT_LOGGER=11`, …). Mirrors `CONTEXT_DYNAMIC_SLOT_BASE` in
+/// `core/sys/common.vr` and the `CTX_DYNAMIC_SLOT_BASE` codegen constant
+/// (`verum_codegen/src/llvm/context.rs`) — the three MUST stay equal.
+pub const CTX_DYNAMIC_SLOT_BASE: u32 = 32;
+
+/// Number of context slots. Mirrors `CONTEXT_SLOT_COUNT` in
+/// `core/sys/common.vr` and `CTX_SLOT_COUNT` in the interpreter's
+/// `dispatch_table/handlers/ctx_runtime.rs`.
+pub const CTX_SLOT_COUNT: u32 = 256;
+
+/// Collect the raw `ctx_type` string-table id of a context instruction
+/// (`CtxGet` / `CtxProvide` / `CtxCheckNegative`) into `ids`; ignores
+/// every other opcode. Shared by both scan representations in
+/// [`VbcModule::ctx_dense_slot_map`].
+fn push_ctx_type_id(instr: &Instruction, ids: &mut Vec<u32>) {
+    match instr {
+        Instruction::CtxGet { ctx_type, .. }
+        | Instruction::CtxProvide { ctx_type, .. }
+        | Instruction::CtxCheckNegative { ctx_type, .. } => ids.push(*ctx_type),
+        _ => {}
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VbcModule {
     /// Module header.
@@ -295,6 +321,64 @@ impl Default for VbcModule {
 }
 
 impl VbcModule {
+    /// Canonical raw-`ctx_type` → dense-slot map (CTX-STORE-AUTHORITY-1).
+    ///
+    /// The SINGLE source of the context slot numbering shared by both
+    /// tiers: the Tier-1 LLVM lowering (`FunctionContext::ctx_dense_slot`
+    /// in `verum_codegen`) and the Tier-0 interpreter
+    /// (`InterpreterState::ctx_dense_slot`) both derive the slot for a
+    /// given context type from THIS map, so `provide` on one tier and
+    /// `get` / the user-callable `ctx_get(slot)` surface on the other
+    /// agree on the slot.
+    ///
+    /// VBC `ctx_type` operands are raw string-table ids (empirically
+    /// ≥ 256 under the baked stdlib), while the TLS / bindings slot table
+    /// only holds `0..CTX_SLOT_COUNT`. Distinct ids are numbered in
+    /// ascending order from [`CTX_DYNAMIC_SLOT_BASE`], keeping
+    /// compiler-assigned dynamic slots above the statically-allocated
+    /// stdlib region.
+    ///
+    /// Derivation is representation-agnostic: it scans decoded
+    /// [`FunctionDescriptor::instructions`] when present (the codegen
+    /// path), else decodes the concatenated [`Self::bytecode`] (the
+    /// interpreter path, whose loaded modules carry only raw bytecode).
+    /// Because the numbering depends solely on the *set* of context-type
+    /// ids, both representations of the same module yield an identical
+    /// map. Ids beyond the dynamic slot capacity are dropped (the caller
+    /// turns an out-of-range lookup into a loud error, never a silent
+    /// wrap).
+    pub fn ctx_dense_slot_map(&self) -> HashMap<u32, u32> {
+        let mut ids: Vec<u32> = Vec::new();
+        let mut saw_decoded = false;
+        for func in &self.functions {
+            if let Some(instrs) = &func.instructions {
+                saw_decoded = true;
+                for instr in instrs {
+                    push_ctx_type_id(instr, &mut ids);
+                }
+            }
+        }
+        // Interpreter path: the loaded module carries no decoded
+        // instruction lists — recover the context ops from the raw
+        // concatenated bytecode stream instead.
+        if !saw_decoded
+            && !self.bytecode.is_empty()
+            && let Ok(decoded) = crate::bytecode::decode_instructions(&self.bytecode)
+        {
+            for instr in &decoded {
+                push_ctx_type_id(instr, &mut ids);
+            }
+        }
+
+        ids.sort_unstable();
+        ids.dedup();
+        ids.into_iter()
+            .take((CTX_SLOT_COUNT - CTX_DYNAMIC_SLOT_BASE) as usize)
+            .enumerate()
+            .map(|(rank, id)| (id, CTX_DYNAMIC_SLOT_BASE + rank as u32))
+            .collect()
+    }
+
     /// Creates a new empty module.
     ///
 

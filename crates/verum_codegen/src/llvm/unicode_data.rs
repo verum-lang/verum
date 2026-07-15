@@ -670,6 +670,237 @@ pub const CASE_PAIRS: &[(u32, u32)] = &[
 ];
 
 // ---------------------------------------------------------------------------
+// General-category (Unicode Mn/Sc/Sm/So/Po/Cf) ranges — non-ASCII fallback.
+//
+// These mirror the interpreter's `CharSubOpcode::GeneralCategory` branch
+// (`verum_vbc::interpreter::…::char_extended`) so Tier-0 and Tier-1 return
+// byte-identical `GeneralCategory` tags for every codepoint. Each table is
+// sorted ascending by `lo` (binary-search precondition of
+// `__unicode_in_range_table`).
+// ---------------------------------------------------------------------------
+
+/// Mn — Mark, nonspacing (combining) ranges.
+pub const GC_MN_RANGES: &[(u32, u32)] = &[
+    (0x0300, 0x036F),
+    (0x0483, 0x0489),
+    (0x0591, 0x05BD),
+    (0x0610, 0x061A),
+    (0x064B, 0x065F),
+    (0x0670, 0x0670),
+    (0x20D0, 0x20FF),
+    (0xFE20, 0xFE2F),
+];
+
+/// Sc — Symbol, currency ranges.
+pub const GC_SC_RANGES: &[(u32, u32)] = &[(0x00A2, 0x00A5), (0x20A0, 0x20CF)];
+
+/// Sm — Symbol, math ranges.
+pub const GC_SM_RANGES: &[(u32, u32)] = &[(0x2190, 0x21FF), (0x2200, 0x22FF), (0x2300, 0x23FF)];
+
+/// So — Symbol, other ranges.
+pub const GC_SO_RANGES: &[(u32, u32)] = &[
+    (0x25A0, 0x25FF),
+    (0x2600, 0x26FF),
+    (0x2700, 0x27BF),
+    (0x1F300, 0x1F9FF),
+];
+
+/// Po — Punctuation, other ranges.
+pub const GC_PO_RANGES: &[(u32, u32)] =
+    &[(0x00A1, 0x00A1), (0x00BF, 0x00BF), (0x2010, 0x2027), (0x2030, 0x205E)];
+
+/// Cf — Format ranges.
+pub const GC_CF_RANGES: &[(u32, u32)] = &[(0x2060, 0x206F), (0xFFF9, 0xFFFB)];
+
+/// `GeneralCategory` variant tags, in the declaration order pinned by
+/// `core/text/char.vr` (Lu=0 … Cn=29). Mirrors the interpreter's constants.
+mod gc_tag {
+    pub const LU: u64 = 0;
+    pub const LL: u64 = 1;
+    pub const LO: u64 = 4;
+    pub const MN: u64 = 5;
+    pub const ND: u64 = 8;
+    pub const PC: u64 = 11;
+    pub const PD: u64 = 12;
+    pub const PS: u64 = 13;
+    pub const PE: u64 = 14;
+    pub const PO: u64 = 17;
+    pub const SM: u64 = 18;
+    pub const SC: u64 = 19;
+    pub const SK: u64 = 20;
+    pub const SO: u64 = 21;
+    pub const ZS: u64 = 22;
+    pub const ZL: u64 = 23;
+    pub const ZP: u64 = 24;
+    pub const CC: u64 = 25;
+    pub const CF: u64 = 26;
+    pub const CS: u64 = 27;
+    pub const CO: u64 = 28;
+    pub const CN: u64 = 29;
+}
+
+/// Exact ASCII general-category tag for a codepoint `< 128`, mirroring the
+/// interpreter's ASCII fast path.
+const fn ascii_gc_tag(cp: u8) -> u8 {
+    match cp {
+        0x41..=0x5A => gc_tag::LU as u8,       // A-Z
+        0x61..=0x7A => gc_tag::LL as u8,       // a-z
+        0x30..=0x39 => gc_tag::ND as u8,       // 0-9
+        0x20 => gc_tag::ZS as u8,              // space
+        0x00..=0x1F | 0x7F => gc_tag::CC as u8, // control
+        0x5F => gc_tag::PC as u8,              // _
+        0x2D => gc_tag::PD as u8,              // -
+        0x28 | 0x5B | 0x7B => gc_tag::PS as u8, // ( [ {
+        0x29 | 0x5D | 0x7D => gc_tag::PE as u8, // ) ] }
+        0x24 => gc_tag::SC as u8,              // $
+        // + < = > | ~
+        0x2B | 0x3C | 0x3D | 0x3E | 0x7C | 0x7E => gc_tag::SM as u8,
+        0x5E | 0x60 => gc_tag::SK as u8, // ^ `
+        // Other punctuation: ! " # % & ' * , . / : ; ? @ \
+        0x21 | 0x22 | 0x23 | 0x25 | 0x26 | 0x27 | 0x2A | 0x2C | 0x2E | 0x2F | 0x3A | 0x3B
+        | 0x3F | 0x40 | 0x5C => gc_tag::PO as u8,
+        _ => gc_tag::CN as u8,
+    }
+}
+
+/// Emit inline IR that computes the Unicode `GeneralCategory` variant tag
+/// (an i64 in `[0, 29]`) for codepoint `ch`. This is the Tier-1 counterpart
+/// of the interpreter's `GeneralCategory` sub-op: an exact 128-entry ASCII
+/// table plus a range-table cascade for non-ASCII, in the same first-match
+/// priority order (Lu > Ll > Lo > Nd > Zl > Zp > Zs > Mn > Sc > Sm > So > Po
+/// > Cc > Co > Cs > Cf > Cn). The caller wraps the tag in a
+/// `GeneralCategory` variant so the `is` operator and `==`/`!=` behave
+/// identically across tiers.
+pub fn emit_general_category<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    ch: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>> {
+    let i64_ty = ctx.llvm_context().i64_type();
+    let i8_ty = ctx.llvm_context().i8_type();
+
+    // --- ASCII path: 128-entry byte table indexed by codepoint. ---
+    let table_name = "__unicode_gc_ascii";
+    if ctx.get_module().get_global(table_name).is_none() {
+        let arr_ty = i8_ty.array_type(128);
+        let values: Vec<_> = (0u16..128)
+            .map(|i| i8_ty.const_int(ascii_gc_tag(i as u8) as u64, false))
+            .collect();
+        let arr_val = i8_ty.const_array(&values);
+        let gv = ctx.get_module().add_global(arr_ty, None, table_name);
+        gv.set_initializer(&arr_val);
+        gv.set_constant(true);
+        gv.set_unnamed_addr(true);
+    }
+    let table_ptr = ctx
+        .get_module()
+        .get_global(table_name)
+        .or_internal("gc ascii table global")?
+        .as_pointer_value();
+
+    let is_ascii = ctx
+        .builder()
+        .build_int_compare(IntPredicate::ULT, ch, i64_ty.const_int(128, false), "gc_is_ascii")
+        .or_llvm_err()?;
+    // Clamp the index so the GEP+load is always in-bounds (the non-ASCII
+    // select discards this value anyway).
+    let idx = ctx
+        .builder()
+        .build_select(is_ascii, ch, i64_ty.const_zero(), "gc_idx")
+        .or_llvm_err()?
+        .into_int_value();
+    // SAFETY: `idx` is clamped to [0, 128), in-bounds for the 128-byte table.
+    let elem_ptr = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i8_ty, table_ptr, &[idx], "gc_ascii_slot")
+            .or_llvm_err()?
+    };
+    let ascii_tag_i8 = ctx
+        .builder()
+        .build_load(i8_ty, elem_ptr, "gc_ascii_tag")
+        .or_llvm_err()?
+        .into_int_value();
+    let ascii_tag = ctx
+        .builder()
+        .build_int_z_extend(ascii_tag_i8, i64_ty, "gc_ascii_tag64")
+        .or_llvm_err()?;
+
+    // --- Non-ASCII path: range-table cascade, lowest priority first so the
+    // highest-priority match (applied last) wins, matching the interpreter's
+    // first-match order. ---
+    // Helper: fold a "predicate → tag" step onto the running tag via select.
+    let mut tag = i64_ty.const_int(gc_tag::CN, false);
+
+    let apply_range = |ctx: &mut FunctionContext<'_, 'ctx>,
+                           cur: IntValue<'ctx>,
+                           name: &str,
+                           data: &[(u32, u32)],
+                           t: u64|
+     -> Result<IntValue<'ctx>> {
+        let hit = emit_range_table_lookup(ctx, ch, name, data)?;
+        let cond = ctx
+            .builder()
+            .build_int_compare(IntPredicate::NE, hit, i64_ty.const_zero(), "gc_hit")
+            .or_llvm_err()?;
+        Ok(ctx
+            .builder()
+            .build_select(cond, i64_ty.const_int(t, false), cur, "gc_sel")
+            .or_llvm_err()?
+            .into_int_value())
+    };
+
+    let apply_cmp = |ctx: &mut FunctionContext<'_, 'ctx>,
+                         cur: IntValue<'ctx>,
+                         lo: u64,
+                         hi: u64,
+                         t: u64|
+     -> Result<IntValue<'ctx>> {
+        let ge = ctx
+            .builder()
+            .build_int_compare(IntPredicate::UGE, ch, i64_ty.const_int(lo, false), "gc_ge")
+            .or_llvm_err()?;
+        let le = ctx
+            .builder()
+            .build_int_compare(IntPredicate::ULE, ch, i64_ty.const_int(hi, false), "gc_le")
+            .or_llvm_err()?;
+        let inr = ctx.builder().build_and(ge, le, "gc_in").or_llvm_err()?;
+        Ok(ctx
+            .builder()
+            .build_select(inr, i64_ty.const_int(t, false), cur, "gc_sel")
+            .or_llvm_err()?
+            .into_int_value())
+    };
+
+    // Cf (format), Cs (surrogate), Co (PUA), Cc (C1 control 0x80-0x9F).
+    tag = apply_range(ctx, tag, "__unicode_gc_cf", GC_CF_RANGES, gc_tag::CF)?;
+    tag = apply_cmp(ctx, tag, 0xD800, 0xDFFF, gc_tag::CS)?;
+    tag = apply_cmp(ctx, tag, 0xE000, 0xF8FF, gc_tag::CO)?;
+    tag = apply_cmp(ctx, tag, 0x80, 0x9F, gc_tag::CC)?;
+    // Po, So, Sm, Sc, Mn.
+    tag = apply_range(ctx, tag, "__unicode_gc_po", GC_PO_RANGES, gc_tag::PO)?;
+    tag = apply_range(ctx, tag, "__unicode_gc_so", GC_SO_RANGES, gc_tag::SO)?;
+    tag = apply_range(ctx, tag, "__unicode_gc_sm", GC_SM_RANGES, gc_tag::SM)?;
+    tag = apply_range(ctx, tag, "__unicode_gc_sc", GC_SC_RANGES, gc_tag::SC)?;
+    tag = apply_range(ctx, tag, "__unicode_gc_mn", GC_MN_RANGES, gc_tag::MN)?;
+    // Zs (whitespace), then the two line/paragraph separators.
+    tag = apply_range(ctx, tag, "__unicode_ws_ranges", WS_RANGES, gc_tag::ZS)?;
+    tag = apply_cmp(ctx, tag, 0x2029, 0x2029, gc_tag::ZP)?;
+    tag = apply_cmp(ctx, tag, 0x2028, 0x2028, gc_tag::ZL)?;
+    // Nd (numeric), Lo (alphabetic), Ll (lowercase), Lu (uppercase — highest).
+    tag = apply_range(ctx, tag, "__unicode_numeric_ranges", NUMERIC_RANGES, gc_tag::ND)?;
+    tag = apply_range(ctx, tag, "__unicode_alpha_ranges", ALPHA_RANGES, gc_tag::LO)?;
+    tag = apply_range(ctx, tag, "__unicode_lower_ranges", LOWER_RANGES, gc_tag::LL)?;
+    tag = apply_range(ctx, tag, "__unicode_upper_ranges", UPPER_RANGES, gc_tag::LU)?;
+
+    // Select ASCII vs non-ASCII result.
+    let result = ctx
+        .builder()
+        .build_select(is_ascii, ascii_tag, tag, "gc_tag")
+        .or_llvm_err()?
+        .into_int_value();
+    Ok(result)
+}
+
+// ---------------------------------------------------------------------------
 // LLVM emission helpers
 // ---------------------------------------------------------------------------
 

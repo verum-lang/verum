@@ -42,12 +42,20 @@ pub(in super::super) fn handle_ctx_get(
     let dst = read_reg(state)?;
     let ctx_type = read_varint(state)? as u32;
 
+    // CTX-STORE-AUTHORITY-1: key the ContextStack by the dense slot from
+    // the module-level ONE authority — the SAME slot the CtxProvide path
+    // and the user-callable `ctx_get(slot)` surface use — so the raw
+    // string-id namespace no longer forks from Tier-1 / the slot surface.
+    let slot = state.ctx_dense_slot(ctx_type);
+
     // Look up the context value from the stack
-    match state.context_stack.get(ctx_type) {
+    match state.context_stack.get(slot) {
         Some(value) => {
             state.set_reg(dst, value);
         }
         None => {
+            // Diagnostics still resolve the human-readable name from the
+            // ORIGINAL string-id, not the dense slot.
             let ctx_name = state
                 .module
                 .strings
@@ -70,9 +78,11 @@ pub(in super::super) fn handle_ctx_provide(
     let value_reg = read_reg(state)?;
     let _body_offset = read_signed_varint(state)?; // Reserved for future use
 
+    // CTX-STORE-AUTHORITY-1: install under the dense slot (see handle_ctx_get).
+    let slot = state.ctx_dense_slot(ctx_type);
     let value = state.get_reg(value_reg);
     let stack_depth = state.call_stack.depth();
-    state.context_stack.provide(ctx_type, value, stack_depth);
+    state.context_stack.provide(slot, value, stack_depth);
 
     Ok(DispatchResult::Continue)
 }

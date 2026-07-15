@@ -2022,30 +2022,13 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         const CTX_SLOT_COUNT: u32 = 256;
 
         if self.ctx_slot_map.is_none() {
-            let mut ids: Vec<u32> = Vec::new();
-            if let Some(vbc_mod) = self.vbc_module {
-                for func in &vbc_mod.functions {
-                    if let Some(instrs) = &func.instructions {
-                        for instr in instrs {
-                            match instr {
-                                verum_vbc::Instruction::CtxGet { ctx_type, .. }
-                                | verum_vbc::Instruction::CtxProvide { ctx_type, .. }
-                                | verum_vbc::Instruction::CtxCheckNegative {
-                                    ctx_type, ..
-                                } => ids.push(*ctx_type),
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-            ids.sort_unstable();
-            ids.dedup();
-            let map: HashMap<u32, u32> = ids
-                .into_iter()
-                .enumerate()
-                .map(|(rank, id)| (id, CTX_DYNAMIC_SLOT_BASE + rank as u32))
-                .collect();
+            // ONE authority (CTX-STORE-AUTHORITY-1): the dense numbering
+            // is owned by `VbcModule::ctx_dense_slot_map`, so Tier-0 and
+            // Tier-1 derive identical slots from the same module.
+            let map = self
+                .vbc_module
+                .map(|m| m.ctx_dense_slot_map())
+                .unwrap_or_default();
             self.ctx_slot_map = Some(map);
         }
 
@@ -2272,7 +2255,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                         value
                     }
                 }
-                BasicValueEnum::PointerValue(v) if verum_vbc::mono::mono_aot_enabled() => {
+                BasicValueEnum::PointerValue(v) if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some() => {
                     // Uniform i64 register model (this function's DOCUMENTED
                     // contract: "All alloca slots uniformly use i64 ... pointers
                     // → ptrtoint on store"). Coerce the pointer to i64 and fall

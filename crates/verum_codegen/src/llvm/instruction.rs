@@ -24391,9 +24391,76 @@ fn lower_char_extended<'ctx>(
             i64_ty.const_zero()
         }
         0x53 => {
-            // GeneralCategory: not yet implemented (no C function exists).
-            // Return 0 (unknown category) to avoid link errors.
-            ctx.set_register(dst, i64_ty.const_zero().into());
+            // GeneralCategory (CHAR-CATEGORY-AOT-VARIANT-1).
+            //
+            // Pre-fix this returned a hardcoded 0 ("unknown category"),
+            // so *every* char mapped to the Lu tag — `'A'.general_category()
+            // == 'a'.general_category()` at Tier-1 (interp returns distinct
+            // Lu/Ll variants). Two roots, both closed here:
+            //
+            //   1. The category tag was never computed. Now emitted inline
+            //      (`emit_general_category`) mirroring the interpreter's
+            //      exact ASCII table + non-ASCII range cascade.
+            //   2. The result was a bare i64, not a `GeneralCategory`
+            //      variant. Tier-0's `GeneralCategory` handler wraps the
+            //      tag in a unit variant so `is`/`==`/`!=` see a real tag
+            //      payload; Tier-1 must do the same or the `is` operator
+            //      and structural equality diverge across tiers.
+            let tag = super::unicode_data::emit_general_category(ctx, ch)?;
+
+            // Resolve `GeneralCategory`'s TypeId (mirrors the interpreter's
+            // `lookup_type_id_by_name`). Absent (e.g. precompile before the
+            // user-side import) → fall back to the raw i64 tag, exactly as
+            // Tier-0 does.
+            let gc_type_id: Option<u32> = ctx.vbc_module().and_then(|m| {
+                m.types.iter().find_map(|d| {
+                    if m.get_string(d.name)
+                        .map(|s| s == "GeneralCategory")
+                        .unwrap_or(false)
+                    {
+                        Some(d.id.0)
+                    } else {
+                        None
+                    }
+                })
+            });
+
+            if let Some(type_id) = gc_type_id {
+                let runtime = RuntimeLowering::new(ctx.llvm_context());
+                // Unit variant: header + tag word, no payload. The tag
+                // slot is overwritten below with the runtime value.
+                let variant_ptr =
+                    runtime.lower_make_variant(ctx.builder(), ctx.get_module(), 0, 0)?;
+                let i32_ty = ctx.types().context().i32_type();
+                // Stamp type_id (u32 @0) so `verum_generic_eq` reads the
+                // tag rather than short-circuiting on a zero header.
+                ctx.builder()
+                    .build_store(variant_ptr, i32_ty.const_int(type_id as u64, false))
+                    .or_llvm_err()?;
+                // Store the runtime tag (i64→i32) at VARIANT_TAG_OFFSET.
+                // SAFETY: in-bounds GEP within the just-allocated variant.
+                let tag_ptr = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(
+                            ctx.types().i8_type(),
+                            variant_ptr,
+                            &[i64_ty
+                                .const_int(RuntimeLowering::VARIANT_TAG_OFFSET, false)],
+                            "gc_tag_ptr",
+                        )
+                        .or_llvm_err()?
+                };
+                let tag_i32 = ctx
+                    .builder()
+                    .build_int_truncate(tag, i32_ty, "gc_tag32")
+                    .or_llvm_err()?;
+                ctx.builder().build_store(tag_ptr, tag_i32).or_llvm_err()?;
+                ctx.set_register(dst, variant_ptr.into());
+                ctx.mark_variant_register(dst);
+                ctx.set_obj_alloc_size(dst, RuntimeLowering::OBJECT_HEADER_SIZE + 8);
+            } else {
+                ctx.set_register(dst, tag.into());
+            }
             return Ok(());
         }
         _ => {
@@ -30240,47 +30307,31 @@ fn ctx_bridge_slot(ctx: &mut FunctionContext<'_, '_>, ctx_type: u32) -> Result<u
     })
 }
 
-/// Look up the compiled ctx_bridge.vr function for `op` ("get" / "set" /
-/// "end"), trying the fully-qualified baked-stdlib symbol first
-/// (`core.runtime.ctx_bridge.env_ctx_*` — the name the bake actually
-/// produces, cf. `core.context.provider.env_ctx_set` in dumped IR),
-/// then the historical short forms.
-fn ctx_bridge_fn<'ctx>(
-    module: &verum_llvm::module::Module<'ctx>,
-    op: &str,
-) -> Option<FunctionValue<'ctx>> {
-    module
-        .get_function(&format!("core.runtime.ctx_bridge.env_ctx_{op}"))
-        .or_else(|| module.get_function(&format!("runtime.ctx_bridge.env_ctx_{op}")))
-        .or_else(|| module.get_function(&format!("env_ctx_{op}")))
-        .or_else(|| module.get_function(&format!("ctx_bridge.env_ctx_{op}")))
-}
-
 /// Lower CtxGet instruction.
 ///
 
 /// Retrieves a context value by type ID from the thread-local context stack.
 /// The result is stored in the destination register.
+///
+/// CTX-BRIDGE-REACHABILITY-1: the `verum_ctx_*` runtime bodies emitted by
+/// `emit_context_system_ir` (a LIFO stack over the execution-context
+/// bindings array) are the ONE canonical Tier-1 opcode store. The former
+/// "strategy 1" that routed through the compiled
+/// `core.runtime.ctx_bridge.env_ctx_*` functions was dormant — bake
+/// reachability never linked `ctx_bridge` (0 symbols), so the lookup
+/// always resolved `None` and fell through here — AND, had it linked,
+/// would have switched the opcode store to the FLAT platform-TLS slot
+/// table, which cannot nest same-type provides (regressing the
+/// bindings-array LIFO semantics that already match the Tier-0
+/// `ContextStack`). It was removed so Tier-1 has a single, deterministic
+/// opcode store regardless of linkage.
 fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: u32) -> Result<()> {
     let module = ctx.get_module();
-    let i64_type = ctx.types().i64_type();
     let slot = ctx_bridge_slot(ctx, ctx_type)?;
 
-    // Strategy 1: Try compiled ctx_bridge.vr first
-    if let Some(bridge_fn) = ctx_bridge_fn(&module, "get") {
-        let slot_val = i64_type.const_int(slot as u64, false);
-        let result = ctx
-            .builder()
-            .build_call(bridge_fn, &[slot_val.into()], "ctx_value")
-            .or_llvm_err()?
-                    .basic_value_or("bridge ctx_get: expected return value")?;
-        ctx.set_register(dst.0, result);
-        return Ok(());
-    }
-
-    // Fallback: emit LLVM IR directly via RuntimeLowering. Uses the SAME
-    // dense slot so every ctx op in the module shares one id namespace
-    // regardless of which strategy each call site resolved to.
+    // Emit LLVM IR directly via RuntimeLowering. Uses the dense slot from
+    // the ONE authority (VbcModule::ctx_dense_slot_map) so every ctx op in
+    // the module — and the Tier-0 interpreter — shares one id namespace.
     let runtime = RuntimeLowering::new(ctx.llvm_context());
     let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
     ctx.set_register(dst.0, value.into());
@@ -30307,22 +30358,15 @@ fn lower_ctx_provide<'ctx>(
     // Get the value to provide
     let value_val = as_i64(ctx, ctx.get_register(value.0)?, "value_val")?;
 
-    // Track the provide for the matching CtxEnd (both strategies): CtxEnd
-    // carries no ctx_type operand, so the slot travels via this
-    // compile-time LIFO stack (VBC emits provide/end as lexically-nested
-    // matched pairs in the linear instruction stream).
+    // Track the provide for the matching CtxEnd: CtxEnd carries no
+    // ctx_type operand, so the slot travels via this compile-time LIFO
+    // stack (VBC emits provide/end as lexically-nested matched pairs in
+    // the linear instruction stream).
     ctx.push_ctx_provide_slot(slot);
 
-    // Strategy 1: Try compiled ctx_bridge.vr first
-    if let Some(bridge_fn) = ctx_bridge_fn(&module, "set") {
-        let slot_val = i64_type.const_int(slot as u64, false);
-        ctx.builder()
-            .build_call(bridge_fn, &[slot_val.into(), value_val.into()], "")
-            .or_llvm_err()?;
-        return Ok(());
-    }
-
-    // Fallback: emit LLVM IR directly via RuntimeLowering.
+    // Emit LLVM IR directly via RuntimeLowering (the ONE canonical Tier-1
+    // opcode store — see lower_ctx_get for why the dormant ctx_bridge
+    // strategy was retired).
     // Depth AFTER push is len; the depth associated with THIS provide is
     // len-1 (the pre-push depth), matching the previous increment-after
     // ordering.
@@ -30357,20 +30401,16 @@ fn lower_ctx_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
         )
     })?;
 
-    // Strategy 1: Try compiled ctx_bridge.vr first — pass the SLOT,
-    // symmetric with lower_ctx_get / lower_ctx_provide.
-    if let Some(bridge_fn) = ctx_bridge_fn(&module, "end") {
-        let slot_val = i64_type.const_int(slot as u64, false);
-        ctx.builder()
-            .build_call(bridge_fn, &[slot_val.into()], "")
-            .or_llvm_err()?;
-        return Ok(());
-    }
+    // `slot` is popped to keep the provide-slot LIFO stack balanced with
+    // lower_ctx_provide even though the emitted verum_ctx_end body pops by
+    // count (see below); an unbalanced pair is a codegen invariant break.
+    let _ = slot;
 
-    // Fallback: emit LLVM IR directly via RuntimeLowering. The C-runtime
-    // verum_ctx_end pops the topmost context entry (LIFO, matching the
-    // interpreter's pop_one); its argument is carried for ABI
-    // compatibility and ignored by the emitted body.
+    // Emit LLVM IR directly via RuntimeLowering (the ONE canonical Tier-1
+    // opcode store — see lower_ctx_get). The C-runtime verum_ctx_end pops
+    // the topmost context entry (LIFO, matching the interpreter's
+    // pop_one); its argument is carried for ABI compatibility and ignored
+    // by the emitted body.
     let depth = ctx.ctx_provide_depth();
     let stack_depth = i64_type.const_int(depth, false);
     let runtime = RuntimeLowering::new(ctx.llvm_context());
@@ -30397,22 +30437,13 @@ fn lower_ctx_check_negative<'ctx>(
     // negative checks must query the SAME key the provide installed.
     let slot = ctx_bridge_slot(ctx, ctx_type)?;
 
-    // Step 1: Try to get the context value (reuse CtxGet logic).
-    // If the context is NOT provided, the result will be 0 (null/nil).
-    let ctx_value = {
-        if let Some(bridge_fn) = ctx_bridge_fn(&module, "get") {
-            let slot_val = i64_type.const_int(slot as u64, false);
-            ctx.builder()
-                .build_call(bridge_fn, &[slot_val.into()], "neg_ctx_check")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .unwrap_or_else(|| i64_type.const_zero().into())
-        } else {
-            let runtime = RuntimeLowering::new(llvm_ctx);
-            let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
-            value.into()
-        }
+    // Step 1: Get the context value (reuse CtxGet logic) from the ONE
+    // canonical Tier-1 opcode store. If the context is NOT provided, the
+    // result is 0 (null/nil).
+    let ctx_value: BasicValueEnum = {
+        let runtime = RuntimeLowering::new(llvm_ctx);
+        let value = runtime.lower_ctx_get(ctx.builder(), &module, slot)?;
+        value.into()
     };
 
     // Step 2: Check if value is non-zero (context IS present -- violation)
