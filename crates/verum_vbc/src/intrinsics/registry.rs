@@ -12557,6 +12557,20 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Convert raw pointer to reference",
     },
     Intrinsic {
+        name: "ptr_to_mut_ref",
+        category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
+        param_count: 1,
+        return_count: 1,
+        // MEM-BULK-ADDR-DUAL-1 third leg: the mutable twin was
+        // UNREGISTERED (LoadNil) — every `memset(ptr_to_mut_ref(...))`
+        // chain received a nil destination.  Same Tier-0 identity as
+        // ptr_to_ref (the pointer IS the ref).
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrToRef),
+        mlir_op: None,
+        doc: "Convert raw pointer to mutable reference",
+    },
+    Intrinsic {
         name: "spin_loop_hint",
         category: IntrinsicCategory::Atomic,
         hints: &[IntrinsicHint::Inline],
