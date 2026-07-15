@@ -2352,6 +2352,44 @@ pub fn lower_instruction<'ctx>(
                 ctx.builder()
                     .build_int_compare(pred, cmp_int, zero_i32, "strcmp_cmp")
                     .or_llvm_err()?
+            } else if matches!(op, CompareOp::Eq | CompareOp::Ne)
+                && (ctx.is_variant_register(a.0)
+                    || ctx.is_variant_register(b.0)
+                    || ctx.get_obj_register_type(a.0).is_some()
+                    || ctx.get_obj_register_type(b.0).is_some())
+            {
+                // CMPI-HEAP-STRUCTURAL-1 (tier coherence): the interpreter's
+                // CmpI Eq/Ne compares heap values STRUCTURALLY (value_eq —
+                // a variant compares by tag+payload), while the raw icmp
+                // below compares POINTERS: two equal unit variants from
+                // separate allocations came out unequal at Tier-1 only
+                // ('A' and 'Z' are both Lu, but
+                // char_general_category('A') == char_general_category('Z')
+                // was false — the CmpI twin of the aot-tuple-eq class).
+                // Route marked heap operands through verum_generic_eq, the
+                // same ONE structural authority CmpG uses.
+                let i64_type = ctx.types().i64_type();
+                let lhs = as_i64(ctx, ctx.get_register(a.0)?, "cmpi_obj_lhs")?;
+                let rhs = as_i64(ctx, ctx.get_register(b.0)?, "cmpi_obj_rhs")?;
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                let eq_fn = super::error::get_or_declare_function(
+                    ctx.get_module(),
+                    "verum_generic_eq",
+                    fn_type,
+                );
+                let eq_res = ctx
+                    .builder()
+                    .build_call(eq_fn, &[lhs.into(), rhs.into()], "cmpi_obj_eq")
+                    .or_llvm_err()?
+                    .basic_value_or("verum_generic_eq: expected return value")?
+                    .into_int_value();
+                let want = match op {
+                    CompareOp::Eq => IntPredicate::NE,
+                    _ => IntPredicate::EQ,
+                };
+                ctx.builder()
+                    .build_int_compare(want, eq_res, i64_type.const_zero(), "cmpi_obj")
+                    .or_llvm_err()?
             } else {
                 // task #41: deref a lone scalar `&T` reference operand so we
                 // compare pointee values, not value-vs-pointer.
