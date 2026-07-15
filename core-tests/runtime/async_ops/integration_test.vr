@@ -74,7 +74,6 @@ fn test_async_sleep_zero_is_no_op() {
          // sys-delegator shapes now bind a UNIT-returning stub —
          // available_parallelism prints (), sleep elapsed=0 (probe
          // 2026-07-14 r12). Task filed.
-@ignore  // ASYNC-SLEEP-INTERP-1: async_sleep_ms lowers to IoSubmit (registry DirectOpcode) — Tier-0 has no executor-backed blocking-sleep semantics for it; NOT the QUALIFIED-CALL-2 class (that leg resolved). Task #17 residual re-filed.
 @test
 fn test_async_sleep_ms_lower_bound() {
     let start = monotonic_nanos();

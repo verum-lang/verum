@@ -393,8 +393,12 @@ pub(in super::super) fn handle_ffi_extended(
             // MEM-BULK-ADDR-DUAL-1: futex words arrive via as_mut_ptr
             // (ptr- OR int-tagged) — use the canonical dual extraction.
             let addr = value_as_addr(state.get_reg(addr_reg)) as *const i32;
-            let expected = state.get_reg(expected_reg).as_i64() as i32;
-            let timeout_ns = state.get_reg(timeout_reg).as_i64();
+            // BOXED-INT-OPERAND-SWEEP-1: expected/timeout originate in
+            // user expressions (`Duration.as_nanos() as UInt64` casts can
+            // BOX) — raw .as_i64() read box bits (the TimeSleepNanos
+            // class, 490ae89c3). Canonical maybe-boxed reader.
+            let expected = state.get_reg(expected_reg).as_integer_compatible() as i32;
+            let timeout_ns = state.get_reg(timeout_reg).as_integer_compatible();
 
             let result = futex_park::wait(addr, expected, timeout_ns);
             state.set_reg(dst, Value::from_i64(result));
@@ -410,7 +414,8 @@ pub(in super::super) fn handle_ffi_extended(
 
             // MEM-BULK-ADDR-DUAL-1: dual int-or-pointer extraction.
             let addr = value_as_addr(state.get_reg(addr_reg)) as *const i32;
-            let count = state.get_reg(count_reg).as_i64();
+            // BOXED-INT-OPERAND-SWEEP-1: canonical maybe-boxed reader.
+            let count = state.get_reg(count_reg).as_integer_compatible();
 
             let woken = futex_park::wake(addr, count);
             state.set_reg(dst, Value::from_i64(woken));

@@ -5910,25 +5910,33 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: Some("verum.async.poll"),
         doc: "Poll future synchronously",
     },
+    // ASYNC-SLEEP-INTERP-1: these previously mapped to
+    // DirectOpcode(IoSubmit) — a const-0 STUB on Tier-0 (silent no-op:
+    // async_sleep_ms returned instantly, every lower-bound contract
+    // broke). Under the eager-async execution model both tiers get the
+    // honest blocking semantics via the canonical sleep sub-ops
+    // (FfiExtended 0x76/0x73 — the same ONE authority Time.sleep uses,
+    // proven on both tiers). When a real suspending executor lands,
+    // these two entries are the single point to retarget.
     Intrinsic {
         name: "async_sleep_ms",
         category: IntrinsicCategory::Async,
-        hints: &[],
+        hints: &[IntrinsicHint::IoEffect],
         param_count: 1, // ms
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::IoSubmit),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SleepMillisSeq),
         mlir_op: Some("verum.async.sleep"),
-        doc: "Async sleep (milliseconds)",
+        doc: "Async sleep (milliseconds) — eager blocking until a suspending executor lands",
     },
     Intrinsic {
         name: "async_sleep_ns",
         category: IntrinsicCategory::Async,
-        hints: &[],
+        hints: &[IntrinsicHint::IoEffect],
         param_count: 1, // ns
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::IoSubmit),
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SleepNanosSeq),
         mlir_op: Some("verum.async.sleep"),
-        doc: "Async sleep (nanoseconds)",
+        doc: "Async sleep (nanoseconds) — eager blocking until a suspending executor lands",
     },
     // =========================================================================
     // Context/Supervisor Intrinsics (Library-level)
