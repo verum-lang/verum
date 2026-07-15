@@ -25211,7 +25211,18 @@ impl VbcCodegen {
                                 || name.starts_with("sin")
                                 || name.starts_with("cos")
                                 || name.starts_with("tan")
-                                || name.starts_with("exp")
+                                // CONTROL-EXPECT-GENERIC-ARITH (#30): the
+                                // `exp` PREFIX heuristic captured `expect`
+                                // (the branch hint!) — every let-bound
+                                // `expect(int, int)` var was typed Float,
+                                // `v + 1` dispatched BinaryF over int-tagged
+                                // NaN-box bits, and f-strings float-formatted
+                                // the honest Int as `NaN`.  Exact exponential
+                                // family only.
+                                || name == "exp"
+                                || name == "exp2"
+                                || name == "exp10"
+                                || name == "expm1"
                                 || name.starts_with("log")
                                 || name.starts_with("pow")
                                 || name.starts_with("fabs")
