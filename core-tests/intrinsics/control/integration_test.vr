@@ -51,6 +51,22 @@ fn integration_expect_hint_preserves_arithmetic() {
     assert_eq(acc, 285); // 0²+1²+…+9²
 }
 
+// CONTROL-EXPECT-GENERIC-ARITH (#30) second half FIXED 2026-07-15: the
+// UNANNOTATED form.  infer_expr_type_kind's exponential-family Float
+// heuristic used name.starts_with("exp") — "expect" matched, so a bare
+// `let v = expect(int, int)` recorded v as Float: `v + 1` dispatched
+// BinaryF over int-tagged bits (garbage) and f-strings printed 'NaN'.
+// Exact names (exp/exp2/exp10/expm1) replaced the prefix; the
+// unannotated binding now types from the honest value.
+@test
+fn integration_expect_unannotated_binding_stays_integer() {
+    let v = expect(41, 41);
+    assert_eq(v, 41);
+    assert_eq(v + 1, 42);
+    let m = expect(10, 10) * expect(4, 4);
+    assert_eq(m, 40);
+}
+
 // =============================================================================
 // `unlikely` as a rare-branch hint
 // =============================================================================

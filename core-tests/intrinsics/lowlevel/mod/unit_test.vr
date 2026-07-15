@@ -63,7 +63,9 @@ fn test_simd_width_constants_are_declared_values() {
     assert(PREFERRED_SIMD_WIDTH <= MAX_SIMD_WIDTH);
 }
 
-@ignore("CFG-CONST-SELECT-1 (task #20, 2026-07-15) — @cfg(target_arch) on CONST items resolves to the not(any(...)) fallback (128) while statement-level @cfg in detect_capabilities branches correctly; on aarch64 MAX_SIMD_WIDTH must be 2048.")
+// CFG-CONST-SELECT-1 FIXED 2026-07-15 (parser: parse_const dropped the
+// collected outer attributes, so @cfg gates never reached
+// should_compile_item and the LAST same-named const always won).
 @test
 fn test_max_simd_width_matches_target_arch() {
     // On the two supported dev architectures the fallback 128 is always
