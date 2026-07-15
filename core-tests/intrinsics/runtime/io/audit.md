@@ -5,6 +5,12 @@ Module: `core/intrinsics/runtime/io.vr` (~116 LOC) — I/O engine
 
 Tests: unit (5) — engine lifecycle (new/destroy/distinct), zero-timeout
 poll on an empty engine, readiness of an unregistered fd.
+Property (6, added 2026-07-15) — the fd-free engine ALGEBRA: pairwise
+handle distinctness (4 live engines), capacity-domain acceptance
+(1/16/256/4096), empty-poll stability across repeats and max-event
+values, uniform non-readiness of unregistered fds over an fd domain,
+take_ready purity on an empty engine.  These are the cheapest
+cross-tier drift probes (interp handler ↔ per-triple AOT lowering).
 
 ## Coverage decisions
 

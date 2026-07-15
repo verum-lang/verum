@@ -1,0 +1,122 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/tls/property_test.vr
+// =============================================================================
+//
+// Slot-algebra laws for `core/intrinsics/runtime/tls.vr`.
+//
+// Domain: HIGH user slots 240-244 only (the context system owns the low
+// range; 245 has been observed to carry a live context object).  Hygiene:
+// every law clears the slots it touched before returning — TLS is
+// process-global under the in-process runner.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.tls.{
+    tls_slot_get, tls_slot_set, tls_slot_clear, tls_slot_has,
+    tls_frame_push, tls_frame_pop,
+};
+
+// =============================================================================
+// Section 1: set/get last-write-wins over a value sweep
+// =============================================================================
+
+@test
+fn law_slot_last_write_wins() {
+    let slot = 240 as UInt8;
+    let mut c1: List<Byte> = [1 as Byte];
+    let mut c2: List<Byte> = [2 as Byte];
+    let mut c3: List<Byte> = [3 as Byte];
+    let p1 = c1.as_mut_ptr() as *const Byte;
+    let p2 = c2.as_mut_ptr() as *const Byte;
+    let p3 = c3.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p1);
+    tls_slot_set(slot, p2);
+    tls_slot_set(slot, p3);
+    assert_eq(tls_slot_get(slot) as Int, p3 as Int);
+    tls_slot_clear(slot);
+}
+
+// =============================================================================
+// Section 2: has ⇔ (a set happened and no clear followed)
+// =============================================================================
+
+@test
+fn law_has_tracks_set_clear_cycle() {
+    let slot = 241 as UInt8;
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+    let mut cell: List<Byte> = [9 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p);
+    assert(tls_slot_has(slot));
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+    // A second full cycle behaves identically (no sticky state).
+    tls_slot_set(slot, p);
+    assert(tls_slot_has(slot));
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+}
+
+// =============================================================================
+// Section 3: slot independence — a write sweep over 240..243 disturbs
+//            exactly the written slot
+// =============================================================================
+
+@test
+fn law_slot_writes_are_pairwise_independent() {
+    let mut c240: List<Byte> = [40 as Byte];
+    let mut c241: List<Byte> = [41 as Byte];
+    let mut c242: List<Byte> = [42 as Byte];
+    let mut c243: List<Byte> = [43 as Byte];
+    let p240 = c240.as_mut_ptr() as *const Byte;
+    let p241 = c241.as_mut_ptr() as *const Byte;
+    let p242 = c242.as_mut_ptr() as *const Byte;
+    let p243 = c243.as_mut_ptr() as *const Byte;
+
+    tls_slot_set(240 as UInt8, p240);
+    tls_slot_set(241 as UInt8, p241);
+    tls_slot_set(242 as UInt8, p242);
+    tls_slot_set(243 as UInt8, p243);
+
+    // Every slot holds ITS pointer — no cross-talk from later writes.
+    assert_eq(tls_slot_get(240 as UInt8) as Int, p240 as Int);
+    assert_eq(tls_slot_get(241 as UInt8) as Int, p241 as Int);
+    assert_eq(tls_slot_get(242 as UInt8) as Int, p242 as Int);
+    assert_eq(tls_slot_get(243 as UInt8) as Int, p243 as Int);
+
+    // Clearing one slot leaves the neighbours intact.
+    tls_slot_clear(241 as UInt8);
+    assert(!tls_slot_has(241 as UInt8));
+    assert(tls_slot_has(240 as UInt8));
+    assert(tls_slot_has(242 as UInt8));
+
+    tls_slot_clear(240 as UInt8);
+    tls_slot_clear(242 as UInt8);
+    tls_slot_clear(243 as UInt8);
+}
+
+// =============================================================================
+// Section 4: slot state survives a balanced frame push/pop
+// =============================================================================
+
+@test
+fn law_user_slot_survives_balanced_frame_cycle() {
+    let slot = 244 as UInt8;
+    let mut cell: List<Byte> = [77 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p);
+    let _ = tls_frame_push();
+    tls_frame_pop();
+    assert(tls_slot_has(slot));
+    assert_eq(tls_slot_get(slot) as Int, p as Int);
+    tls_slot_clear(slot);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

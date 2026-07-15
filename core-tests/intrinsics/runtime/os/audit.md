@@ -4,11 +4,16 @@ Module: `core/intrinsics/runtime/os.vr` (~386 LOC) — centralised
 kernel-boundary intrinsics: file I/O, TCP/UDP, time, mmap, process,
 context, defer, argv, concurrency.  Migrated from `core/sys/raw.vr` (#61).
 
-Tests: unit (9) + integration (2) over the FILE I/O subset — the surface
-that is safe to exercise from a test process without a network or a live
-child.  Text-path convenience forms (write_string/read_to_string/delete/
-open/close/size/mkdir) in unit; raw-fd read/write over cbgr buffers +
-seek in integration.
+Tests: unit (9) + integration (2) + property (9, added 2026-07-15) over
+the FILE I/O subset — the surface that is safe to exercise from a test
+process without a network or a live child.  Text-path convenience forms
+(write_string/read_to_string/delete/open/close/size/mkdir) in unit;
+raw-fd read/write over cbgr buffers + seek in integration; LAWS in
+property: write→read round-trip identity over a UTF-8 boundary domain,
+last-write-wins on rewrite, size-counts-BYTES (6 for "мир"), seek
+algebra (SET returns target, CUR 0 reads it back, END 0 == size, SET 0
+rewinds), delete lifecycle (open-after-delete fails; delete-missing
+reports an error).
 
 ## Coverage decisions
 

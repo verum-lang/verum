@@ -9,8 +9,12 @@
 // =============================================================================
 
 mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
 mount core.intrinsics.memory.{
     null_ptr, null_ptr_mut, ptr_is_null, swap, replace, transmute,
+    memset, memcpy, memcmp, ptr_to_ref, ptr_to_mut_ref,
+    ptr_read, ptr_write, slice_len, ptr_is_aligned,
 };
 
 // MEM-NULLPTR-1: null_ptr / ptr_is_null returned nil.  The registry strategies
@@ -76,4 +80,102 @@ fn regression_transmute_float_to_bits_reinterprets() {
 fn regression_transmute_bits_to_float_reinterprets() {
     let f: Float = transmute(4607182418800017408 as UInt64);
     assert_eq(f, 1.0);
+}
+
+// =============================================================================
+// MEM-BULK-ADDR-DUAL-1 (2026-07-15) — CLOSED, pass-guards
+// =============================================================================
+// The Tier-0 bulk-memory handlers (CMemcpy/CMemset/CSecureZero/CMemmove/
+// CMemcmp in handlers/ffi_extended.rs) extracted buffer addresses with bare
+// `Value::as_ptr()`.  Raw addresses legitimately arrive EITHER pointer-tagged
+// OR int-tagged (cbgr_allocate bridge, `as *mut T` casts) — an int-tagged
+// address decoded as NULL, the null-guard silently skipped the operation, and
+// every `core.intrinsics.memory` bulk op over a bridge buffer was a Tier-0
+// no-op while AOT executed it (cross-tier divergence).  memcmp additionally
+// ranked garbage (two equal buffers compared -1).  Fixed with the canonical
+// `value_as_addr` dual extraction — the same helper the PtrAdd family and the
+// atomic handlers already used.
+
+@test
+fn regression_memset_writes_through_int_tagged_address() {
+    let a = cbgr_allocate(8, 8);
+    memset(ptr_to_mut_ref(a as *mut Byte), 66 as Byte, 8 as USize);
+    assert_eq(load_byte(a), 66);
+    assert_eq(load_byte(a + 7), 66);
+    cbgr_deallocate(a);
+}
+
+@test
+fn regression_memcpy_copies_through_int_tagged_addresses() {
+    let src = cbgr_allocate(8, 8);
+    let dst = cbgr_allocate(8, 8);
+    store_byte(src, 123);
+    memcpy(ptr_to_mut_ref(dst as *mut Byte), ptr_to_ref(src as *const Byte), 1 as USize);
+    assert_eq(load_byte(dst), 123);
+    cbgr_deallocate(src);
+    cbgr_deallocate(dst);
+}
+
+@test
+fn regression_memcmp_compares_contents_not_addresses() {
+    let a = cbgr_allocate(8, 8);
+    let b = cbgr_allocate(8, 8);
+    memset(ptr_to_mut_ref(a as *mut Byte), 7 as Byte, 8 as USize);
+    memset(ptr_to_mut_ref(b as *mut Byte), 7 as Byte, 8 as USize);
+    // Pre-fix this ranked the two ALLOCATION ADDRESSES (-1); the contents
+    // are equal so the honest verdict is 0.
+    assert_eq(memcmp(ptr_to_ref(a as *const Byte), ptr_to_ref(b as *const Byte), 8 as USize), 0);
+    cbgr_deallocate(a);
+    cbgr_deallocate(b);
+}
+
+// =============================================================================
+// MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — OPEN, pinned
+// =============================================================================
+// Registry binds ptr_read → DirectOpcode(Deref 0x72) / ptr_write →
+// DirectOpcode(DerefMut 0x73).  A raw Int-tagged address is the FOURTH
+// reference shape those CBGR handlers never dereference: handle_deref falls
+// to the identity fallback (returns the ADDRESS), handle_deref_mut silently
+// does nothing.  AOT lowers both correctly → cross-tier kernel incident.
+// Fix design: call-site width channel → SystemSubOpcode::DerefRaw/
+// DerefRawSigned/DerefMutRaw {size} (task #16).
+
+@ignore("MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — interp ptr_write no-op / ptr_read identity; AOT correct. Acceptance pin for the width-channel rerouting.")
+@test
+fn regression_ptr_write_then_read_round_trips() {
+    let a = cbgr_allocate(16, 8);
+    let p = a as *mut Int;
+    ptr_write(p, 424242);
+    assert_eq(ptr_read(p as *const Int), 424242);
+    cbgr_deallocate(a);
+}
+
+// =============================================================================
+// MEM-SLICE-INTRINSIC-FATREF-1 (task #17, 2026-07-15) — OPEN, pinned
+// =============================================================================
+// slice_len/slice_as_ptr emit `Unpack {count: 2}` treating the slice as a
+// 2-tuple heap object — but a slice value is ONE FatRef; Unpack misreads the
+// FatRef as a Pack-tuple pointer and SIGSEGVs the interpreter.  slice_get/
+// subslice/split_at route to `verum_slice_*` library symbols defined nowhere
+// (ghost-symbol drift class).
+
+@ignore("MEM-SLICE-INTRINSIC-FATREF-1 (task #17, 2026-07-15) — slice_len(&xs[..]) SIGSEGVs the interpreter (Unpack on a FatRef). DO NOT un-ignore before the FatRef-view rerouting lands.")
+@test
+fn regression_slice_len_reads_fatref_not_tuple() {
+    let mut xs: List<Int> = [1, 2, 3];
+    let s = &xs[..];
+    assert_eq(slice_len(s) as Int, 3);
+}
+
+// =============================================================================
+// MEM-PTR-ALIGN-NIL-1 (task #18, 2026-07-15) — OPEN, pinned
+// =============================================================================
+
+@ignore("MEM-PTR-ALIGN-NIL-1 (task #18, 2026-07-15) — ptr_is_aligned returns nil (registry gap, same LoadNil class as MEM-NULLPTR-1).")
+@test
+fn regression_ptr_is_aligned_returns_bool_not_nil() {
+    let a = cbgr_allocate(16, 8);
+    let aligned = ptr_is_aligned(a as *const Int);
+    assert(aligned == true || aligned == false);
+    cbgr_deallocate(a);
 }

@@ -1,0 +1,81 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/tls/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core/intrinsics/runtime/tls.vr` — the slot-trio
+// defect cluster fixed 2026-07-04 (audit.md "Resolution").  Root: the quartet
+// rode `DirectOpcode(TlsGet/TlsSet)` whose operand emission writes DST FIRST,
+// so TlsSet read the DESTINATION REGISTER INDEX as the slot number (writes
+// landed in slot <temp-reg>); `has` returned the stored pointer where Bool
+// was promised; `clear`'s value operand was missing entirely.  Now the
+// quartet rides dedicated `SystemSubOpcode` 0x59-0x5C with declared shapes
+// and a user-slot store isolated from the context system's table.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.tls.{
+    tls_slot_get, tls_slot_set, tls_slot_clear, tls_slot_has,
+};
+
+// TLS-SLOT-OPERAND-SHAPE-1: pre-fix, `tls_slot_set(240, p)` stored into slot
+// <temp-register-index> — the value was unreachable through slot 240 and
+// `tls_slot_get(240)` returned null.  The round-trip IS the pin.
+@test
+fn regression_set_stores_into_the_named_slot() {
+    let slot = 240 as UInt8;
+    let mut cell: List<Byte> = [55 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p);
+    assert_eq(tls_slot_get(slot) as Int, p as Int);
+    tls_slot_clear(slot);
+}
+
+// TLS-SLOT-HAS-BOOL-1: pre-fix `tls_slot_has` returned the STORED POINTER
+// where Bool was promised — truthy by accident for non-null pointers, and a
+// type-honesty violation either way.  Pin the Bool-ness on both sides.
+@test
+fn regression_has_returns_honest_bool() {
+    let slot = 241 as UInt8;
+    tls_slot_clear(slot);
+    let absent = tls_slot_has(slot);
+    assert(absent == false);
+    let mut cell: List<Byte> = [1 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p);
+    let present = tls_slot_has(slot);
+    assert(present == true);
+    tls_slot_clear(slot);
+}
+
+// TLS-SLOT-CLEAR-OPERAND-1: pre-fix `clear`'s value operand was missing from
+// the emission — the instruction decoded garbage and the slot stayed set.
+@test
+fn regression_clear_actually_clears() {
+    let slot = 242 as UInt8;
+    let mut cell: List<Byte> = [2 as Byte];
+    let p = cell.as_mut_ptr() as *const Byte;
+    tls_slot_set(slot, p);
+    assert(tls_slot_has(slot));
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+    assert_eq(tls_slot_get(slot) as Int, 0);
+}
+
+// USER-SLOT-ISOLATION-1: probing found the CONTEXT SYSTEM's own table already
+// populating high slots (245 held a live context object) — user slots now get
+// a DEDICATED store.  Pin: a fresh user slot in the 240-244 window starts
+// absent even though the context system is live in this very process.
+@test
+fn regression_user_slots_isolated_from_context_table() {
+    let slot = 243 as UInt8;
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
