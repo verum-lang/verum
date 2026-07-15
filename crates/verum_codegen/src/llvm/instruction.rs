@@ -3356,6 +3356,22 @@ pub fn lower_instruction<'ctx>(
             // Track string lists: if the pushed value is a string, mark the list
             if ctx.is_string_register(val.0) || ctx.is_text_register(val.0) {
                 ctx.mark_string_list_register(list.0);
+                // **TEXT-ARRAY-ITER-REF-1** (task #15): stamp the ELEMENT
+                // authority too — `generic_type_args = [Text]` — exactly like
+                // the float / nested-list / obj-element legs below.  The
+                // string-list flag alone is a FORMATTING fact that never
+                // reaches the iterator chain: a literal `[Text; N]`
+                // (NewList + ListPush of text consts) carried NO element
+                // type, so IterNew→IterNext's element read-back
+                // (`mark_register_from_return_type` on `type_args.first()`)
+                // could not text-mark the yielded element.
+                let type_args = vec![TypeRef::Concrete(TypeId::TEXT)];
+                ctx.set_generic_type_args(list.0, type_args.clone());
+                let mut current = list.0;
+                while let Some(src) = ctx.get_refmut_source(current) {
+                    ctx.set_generic_type_args(src, type_args.clone());
+                    current = src;
+                }
             }
             // Track lists containing pass-through refs (Heap<T> values).
             // When elements are later read with GetE, they need pass_through_ref
@@ -14741,6 +14757,17 @@ fn lower_call_method<'ctx>(
                 runtime.lower_list_push(ctx.builder(), ctx.get_module(), list_ptr, push_val)?;
                 if ctx.is_string_register(args.start.0) || ctx.is_text_register(args.start.0) {
                     ctx.mark_string_list_register(receiver.0);
+                    // **TEXT-ARRAY-ITER-REF-1** (task #15): same element
+                    // authority stamp as the ListPush instruction arm —
+                    // `list.push(text)` must leave the SAME facts as a
+                    // literal push (ONE element authority).
+                    let type_args = vec![TypeRef::Concrete(TypeId::TEXT)];
+                    ctx.set_generic_type_args(receiver.0, type_args.clone());
+                    let mut current = receiver.0;
+                    while let Some(src) = ctx.get_refmut_source(current) {
+                        ctx.set_generic_type_args(src, type_args.clone());
+                        current = src;
+                    }
                 }
                 // Track nested collections: if pushed value is a list/map,
                 // set generic_type_args on outer list for GetE propagation
@@ -18903,6 +18930,47 @@ fn lower_call_method<'ctx>(
                         ctx.mark_text_register(dst.0);
                     }
                     _ => {}
+                }
+            }
+            // **TEXT-ARRAY-ITER-REF-1** (task #15, the THIRD lowering path):
+            // iterator CONSTRUCTORS (`iter` / `into_iter`) return a wrapper
+            // (`ListIter<T>`, `SetIter<T>`, …) whose ELEMENT type is the
+            // receiver's element type — but the resolved return type is the
+            // ERASED `ListIter<T0>`, so the generic-args stamp above carries a
+            // bare `Generic` and IterNext's element read-back
+            // (`mark_register_from_return_type` on `type_args.first()`) cannot
+            // mark the yielded element.  Carry the receiver's CONCRETE element
+            // authority onto the iterator register: the receiver's own
+            // generic_type_args first (stamped by ListPush / return-type
+            // marks), else the string-list flag (`[Text; N]` literals through
+            // Mov chains).  Without this, `for &m in <[Text;3]>.iter()` left
+            // the IterNext dst untyped: ToString int-formatted the Text
+            // POINTER and the `to_lowercase` CallM fell to the rts
+            // header-switch, which read a HEADERLESS static Text const's data
+            // pointer as a type_id → const-0 result / SIGBUS in the real
+            // flows (rcv_law_transient_*, cfg_it_*_contract_strings).
+            // `iter_mut` is deliberately EXCLUDED: its IterNext dst keeps the
+            // slot ADDRESS for write-through, and an element-type mark on an
+            // address register would misroute Deref to pass-through.  Only
+            // SINGLE-arg receivers qualify (List/Set/Deque — `args[0]` IS the
+            // element): a `Map<K,V>` receiver carries [K, V] and IterNext's
+            // `type_args.first()` would stamp the yielded (k, v) TUPLE as K.
+            if matches!(bare_method_early, "iter" | "into_iter") {
+                let dst_has_concrete_args = ctx
+                    .get_generic_type_args(dst.0)
+                    .map(|a| {
+                        !a.is_empty() && a.iter().all(|t| !matches!(t, TypeRef::Generic(_)))
+                    })
+                    .unwrap_or(false);
+                if !dst_has_concrete_args {
+                    let recv_args = ctx.get_generic_type_args(receiver.0).cloned().filter(|a| {
+                        a.len() == 1 && !matches!(a[0], TypeRef::Generic(_))
+                    });
+                    if let Some(concrete_args) = recv_args {
+                        ctx.set_generic_type_args(dst.0, concrete_args);
+                    } else if ctx.is_string_list_register(receiver.0) {
+                        ctx.set_generic_type_args(dst.0, vec![TypeRef::Concrete(TypeId::TEXT)]);
+                    }
                 }
             }
             // Last resort: carried RETNAME → obj-type (user records/variants
