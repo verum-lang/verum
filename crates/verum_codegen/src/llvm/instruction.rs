@@ -5401,6 +5401,11 @@ pub fn lower_instruction<'ctx>(
         // Call Variants: CallR, CallG, CallV
         // ====================================================================
         Instruction::CallR { dst, func, argc } => {
+            // #24 CALLM-WITNESS-CONSUME-1 invariant: a pending call
+            // witness never survives past ANY call-family instruction —
+            // it belongs to the call it precedes.  CallR is dynamic
+            // (no static generic args to apply), so clear-only.
+            let _ = ctx.take_pending_call_witness();
             // Indirect call through function pointer register
             let func_ptr = as_ptr(ctx, ctx.get_register(func.0)?, "func_ptr")?;
             let i64_type = ctx.types().i64_type();
@@ -5441,6 +5446,10 @@ pub fn lower_instruction<'ctx>(
         } => {
             // Generic function call. Post-monomorphization, this should be resolved
             // to a direct Call. As fallback, treat as direct call ignoring type_args.
+            // #24 witness invariant: CallG carries its type_args INLINE —
+            // a staged sidecar (if any) is superseded; clear so it cannot
+            // leak to a later Call.
+            let _ = ctx.take_pending_call_witness();
             let vbc_mod = ctx.vbc_module().or_internal("CallG requires VBC module for function resolution")?;
             let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!("CallG: function id {} not found", func_id))?;
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
@@ -5502,6 +5511,9 @@ pub fn lower_instruction<'ctx>(
             args,
         } => {
             // Virtual dispatch via vtable
+            // #24 witness invariant: clear-only (dynamic dispatch, no
+            // static generic-arg application point).
+            let _ = ctx.take_pending_call_witness();
             let recv_val = ctx.get_register(receiver.0)?;
             let i64_type = ctx.types().i64_type();
             let ptr_type = ctx.types().ptr_type();
