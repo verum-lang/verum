@@ -13060,6 +13060,14 @@ fn lower_call_method<'ctx>(
     method_id: u32,
     args: &verum_vbc::instruction::RegRange,
 ) -> Result<()> {
+    // #24 CALLM-WITNESS-CONSUME-1: consume the staged generic-call
+    // witness EXACTLY once per CallM.  VBC emits `SetCallWitness` only
+    // before CallM today; before this take() the witness stayed pending
+    // through the whole method lowering and LEAKED to the next free-fn
+    // Call (`lower_call`'s take() picked up a stale foreign fact).
+    // Taking at entry covers every early-return intercept path, and
+    // makes lower_call's "leak-proof by construction" claim true.
+    let call_witness = ctx.take_pending_call_witness();
     let vbc_mod = ctx.vbc_module().or_internal("CallM requires VBC module for method resolution")?;
 
     // method_id is a StringId (method name), NOT a FunctionId.
@@ -18963,10 +18971,19 @@ fn lower_call_method<'ctx>(
                     })
                     .unwrap_or(false);
                 if !dst_has_concrete_args {
+                    // #24 CALLM-WITNESS-CONSUME-1: the staged witness is
+                    // the TYPE-CHECKED instantiation fact for THIS CallM
+                    // (`.iter()` on List<Text> stages [Concrete(TEXT)]) —
+                    // authoritative over receiver-carried args.
+                    let witness_args = call_witness.as_ref().filter(|a| {
+                        a.len() == 1 && !matches!(a[0], TypeRef::Generic(_))
+                    });
                     let recv_args = ctx.get_generic_type_args(receiver.0).cloned().filter(|a| {
                         a.len() == 1 && !matches!(a[0], TypeRef::Generic(_))
                     });
-                    if let Some(concrete_args) = recv_args {
+                    if let Some(concrete_args) = witness_args {
+                        ctx.set_generic_type_args(dst.0, concrete_args.clone());
+                    } else if let Some(concrete_args) = recv_args {
                         ctx.set_generic_type_args(dst.0, concrete_args);
                     } else if ctx.is_string_list_register(receiver.0) {
                         ctx.set_generic_type_args(dst.0, vec![TypeRef::Concrete(TypeId::TEXT)]);
