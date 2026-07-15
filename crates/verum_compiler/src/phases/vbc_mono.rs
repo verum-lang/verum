@@ -285,19 +285,25 @@ impl VbcMonomorphizationPhase {
             );
         }
 
-        // Skip the (expensive) instantiation-graph scan unless there is
-        // actual monomorphization work.  `build_instantiation_graph` walks the
-        // bytecode of EVERY function in the module — including the whole
-        // precompiled stdlib (~42k functions) — so running it per compilation
-        // when there is nothing to specialize is a severe, pure-waste perf
-        // regression.  Instantiations are seeded into `module.specializations`
-        // by the codegen (VBC-GENERIC-INSTANTIATION); with no seeds there is
-        // no work, so short-circuit.  (Historically `is_generic` was never set
-        // so `generic_count` was always 0 and this pass was always a no-op —
-        // gating on the seed set preserves that fast path exactly while
-        // enabling real specialization when the codegen records an
-        // instantiation.)
-        if generic_count == 0 || module.specializations.is_empty() {
+        // CONST-GENERIC-AOT-LEG-1: the old gate was
+        // `generic_count == 0 || module.specializations.is_empty()`.  Because
+        // `is_generic` is historically NEVER set (`generic_count` is always 0),
+        // the `||` short-circuited to `true` on every compile and the pass was
+        // an unconditional no-op — even when the codegen HAD seeded
+        // `module.specializations`.  That also starved the const-generic leg:
+        // an arg-less const-generic static (`StackAllocator<256>.new()`) is not
+        // recorded into `module.specializations` at all, yet its `LoadT{Generic}`
+        // body reads null at Tier-1 unless the callee is specialized (native
+        // frames carry no witness table).
+        //
+        // Build the graph and gate on ITS emptiness instead.  This preserves the
+        // fast path (nothing to specialize → empty graph → early out) while
+        // routing genuine instantiations — crucially the const-generic CallG
+        // sites that carry a `ConstValue` type argument (see
+        // `analyze_function_bytecode`) — through the specializer.  The scan is
+        // O(total bytecode) and small next to LLVM lowering.
+        let graph = self.build_instantiation_graph(module);
+        if graph.is_empty() {
             tracing::debug!(
                 "VBC monomorphization: module '{}' — nothing to specialize \
                  ({} generic fns, {} seeded instantiations)",
@@ -309,13 +315,12 @@ impl VbcMonomorphizationPhase {
         }
 
         tracing::debug!(
-            "VBC monomorphization: module '{}' with {} generic functions",
+            "VBC monomorphization: module '{}' with {} generic functions, {} instantiations",
             module.name,
-            generic_count
+            generic_count,
+            graph.len(),
         );
 
-        // Build instantiation graph from bytecode analysis
-        let graph = self.build_instantiation_graph(module);
         self.metrics.total_instantiations = graph.len();
 
         // Create configuration
@@ -444,7 +449,24 @@ impl VbcMonomorphizationPhase {
                     func_id, type_args, ..
                 }) => {
                     let callee = FunctionId(func_id);
-                    if generic_set.contains(&callee) && !type_args.is_empty() {
+                    // CONST-GENERIC-AOT-LEG-1: a CallG carrying a `ConstValue`
+                    // type argument is a const-generic instantiation whose body
+                    // reads `LoadT{Generic(idx)}`.  At Tier-1 that lowers to null
+                    // (no witness table on native frames), so the callee MUST be
+                    // specialized — the specializer rewrites `LoadT{Generic}` →
+                    // `LoadT{ConstValue}` via the substitution.  Seed it
+                    // regardless of the historically-dead `is_generic` flag
+                    // (which leaves `generic_set` empty).  Type-ONLY generic
+                    // CallGs keep the existing uniform-i64 shared-body path
+                    // (runtime type info rides the value), so only const-generics
+                    // — which genuinely need distinct per-value bodies — are
+                    // routed through mono here.
+                    let has_const_generic = type_args
+                        .iter()
+                        .any(|t| matches!(t, verum_vbc::types::TypeRef::ConstValue(_)));
+                    if !type_args.is_empty()
+                        && (has_const_generic || generic_set.contains(&callee))
+                    {
                         graph.record_instantiation(callee, type_args, SourceLocation::default());
                     }
                 }
