@@ -9178,6 +9178,16 @@ impl VbcCodegen {
         base_type: &str,
         method: &str,
     ) -> Option<String> {
+        // `mounted_types` records EVERY explicit type mount
+        // (alias → full qualified path, unconditional insert at
+        // register_import_aliases); `pending_mount_aliases` only holds
+        // stage-5 unresolved mounts — consult both, mounts first.
+        if let Some(target) = self.ctx.mounted_types.get(base_type) {
+            let candidate = format!("{}.{}", target, method);
+            if self.ctx.lookup_function(&candidate).is_some() {
+                return Some(candidate);
+            }
+        }
         if let Some(target) = self.ctx.pending_mount_aliases.get(base_type) {
             let candidate = format!("{}.{}", target, method);
             if self.ctx.lookup_function(&candidate).is_some() {
