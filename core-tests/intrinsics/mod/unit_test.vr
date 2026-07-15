@@ -1,0 +1,123 @@
+// =============================================================================
+// core-tests/intrinsics/mod/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/mod.vr` — the unified intrinsics umbrella.  This file is
+// pure re-export surface: wildcard mounts of every submodule + EXPLICIT
+// re-export lists for nested-submodule items.
+//
+// SCOPE — UMBRELLA-REEXPORT-RESOLVE-1 (task #21, 2026-07-15): resolution of
+// WILDCARD-propagated names through `mount core.intrinsics.{name}` is
+// NONDETERMINISTIC per run (map-walk name index — two runs of this very
+// suite on one binary produced different unbound sets), so this suite pins
+// ONLY the EXPLICIT re-export lists, which stayed stable across runs.  The
+// wildcard acceptance block at the bottom is the promotion target for #21.
+// One unbound name fails the whole merged unit at compile time, so the
+// frontier cannot ride as @ignore'd tests.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.{
+    // atomic explicit list
+    MemoryOrder,
+    // type_info explicit list
+    size_of, align_of,
+    // runtime/time explicit list
+    monotonic_nanos,
+    // runtime/text explicit list
+    char_is_numeric, char_is_alphabetic,
+    // runtime/sync explicit list
+    spin_hint,
+    // runtime/tls explicit list
+    tls_slot_has, tls_slot_clear,
+};
+
+// =============================================================================
+// Section 1: explicit re-export lists resolve and compute
+// =============================================================================
+
+@test
+fn test_umbrella_atomic_memory_order_resolves() {
+    let m: MemoryOrder = MemoryOrder.SeqCst;
+    assert(m is MemoryOrder.SeqCst);
+    assert(!(m is MemoryOrder.Relaxed));
+}
+
+@test
+fn test_umbrella_type_info_resolves() {
+    // The meta-fn forms are @deprecated legacy (the canonical surface is
+    // the `T.size` type-property syntax — see type_info suite) and the
+    // generic instantiation returns 0 through EVERY path today; the
+    // umbrella pin is RESOLUTION, so assert the calls bind and yield an
+    // Int, and pin the canonical property against it.
+    let s = size_of<Int>() as Int;
+    let a = align_of<Int>() as Int;
+    assert(s >= 0);
+    assert(a >= 0);
+    assert_eq(Int.size, 8);
+}
+
+@test
+fn test_umbrella_runtime_time_resolves() {
+    let t1 = monotonic_nanos();
+    let t2 = monotonic_nanos();
+    assert(t1 > 0);
+    assert(t2 >= t1);
+}
+
+@test
+fn test_umbrella_runtime_text_resolves() {
+    assert(char_is_numeric('7'));
+    assert(char_is_alphabetic('x'));
+    assert(!char_is_numeric('x'));
+}
+
+@test
+fn test_umbrella_runtime_sync_resolves() {
+    // Callable no-op hint — resolution is the assertion.
+    spin_hint();
+    assert(true);
+}
+
+@test
+fn test_umbrella_runtime_tls_resolves() {
+    let slot = 244 as UInt8;
+    tls_slot_clear(slot);
+    assert(!tls_slot_has(slot));
+}
+
+// =============================================================================
+// UMBRELLA-REEXPORT-RESOLVE-1 acceptance block (task #21).  Wildcard-
+// propagated names — promote to live tests when the deterministic ranked
+// name index lands.  Observed dice (same binary, two runs):
+//   run A unbound: wrapping_add, popcnt, nop; sqrt → E400 '__opaque_src'
+//   run B unbound: saturating_add, rotl, is_nan, likely
+//
+// mount core.intrinsics.{
+//     wrapping_add, saturating_add,   // arithmetic.*
+//     popcnt, rotl,                   // bitwise.*
+//     sqrt, is_nan,                   // float.*
+//     swap, replace,                  // memory.* (also reach via prelude)
+//     nop, likely,                    // control.*
+// };
+//
+// @test
+// fn test_umbrella_wildcard_arithmetic() { assert_eq(wrapping_add(1, 2), 3);
+//                                          assert_eq(saturating_add(1, 2), 3); }
+// @test
+// fn test_umbrella_wildcard_bitwise()    { assert_eq(popcnt(255 as UInt64) as Int, 8);
+//                                          assert_eq(rotl(1 as UInt64, 3 as UInt32) as Int, 8); }
+// @test
+// fn test_umbrella_wildcard_float()      { assert_eq(sqrt(9.0), 3.0);
+//                                          assert(!is_nan(1.0)); }
+// @test
+// fn test_umbrella_wildcard_control()    { nop(); assert(likely(true)); }
+// =============================================================================
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

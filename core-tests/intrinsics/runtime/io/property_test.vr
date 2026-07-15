@@ -1,0 +1,109 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/io/property_test.vr
+// =============================================================================
+//
+// Engine-lifecycle laws for `core/intrinsics/runtime/io.vr` (kqueue/epoll/
+// IOCP readiness multiplexer).  Constraint honoured from audit.md: the
+// registration surface (`io_submit`/`io_remove`/`io_modify`) is only
+// meaningful with LIVE fds and belongs to the net suites — the laws here are
+// the fd-free engine algebra, which is also the cheapest cross-tier drift
+// probe (interp handler ↔ per-triple AOT lowering).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.io.{
+    __io_engine_new_raw, __io_engine_destroy_raw, __io_poll_raw,
+    __io_is_ready_raw, __io_take_ready_raw,
+};
+
+// =============================================================================
+// Section 1: engine handles are non-zero and pairwise distinct
+// =============================================================================
+
+@test
+fn law_engine_handles_pairwise_distinct() {
+    let e1 = __io_engine_new_raw(16);
+    let e2 = __io_engine_new_raw(16);
+    let e3 = __io_engine_new_raw(16);
+    let e4 = __io_engine_new_raw(16);
+    assert(e1 > 0);
+    assert(e2 > 0);
+    assert(e3 > 0);
+    assert(e4 > 0);
+    assert(e1 != e2);
+    assert(e1 != e3);
+    assert(e1 != e4);
+    assert(e2 != e3);
+    assert(e2 != e4);
+    assert(e3 != e4);
+    __io_engine_destroy_raw(e1);
+    __io_engine_destroy_raw(e2);
+    __io_engine_destroy_raw(e3);
+    __io_engine_destroy_raw(e4);
+}
+
+@test
+fn law_engine_capacity_domain_accepted() {
+    // Capacity is a hint — every value in the domain must yield a live engine.
+    let caps: List<Int> = [1, 16, 256, 4096];
+    for c in caps.iter() {
+        let e = __io_engine_new_raw(*c);
+        assert(e > 0);
+        __io_engine_destroy_raw(e);
+    }
+}
+
+// =============================================================================
+// Section 2: empty-engine poll is 0 and STABLE (no phantom readiness)
+// =============================================================================
+
+@test
+fn law_empty_poll_zero_timeout_stable_across_repeats() {
+    let e = __io_engine_new_raw(16);
+    assert_eq(__io_poll_raw(e, 8, 0), 0);
+    assert_eq(__io_poll_raw(e, 8, 0), 0);
+    assert_eq(__io_poll_raw(e, 8, 0), 0);
+    __io_engine_destroy_raw(e);
+}
+
+@test
+fn law_empty_poll_max_events_irrelevant() {
+    let e = __io_engine_new_raw(16);
+    assert_eq(__io_poll_raw(e, 1, 0), 0);
+    assert_eq(__io_poll_raw(e, 64, 0), 0);
+    assert_eq(__io_poll_raw(e, 1024, 0), 0);
+    __io_engine_destroy_raw(e);
+}
+
+// =============================================================================
+// Section 3: readiness of unregistered fds is uniformly "not ready"
+// =============================================================================
+
+@test
+fn law_unregistered_fds_never_ready() {
+    let e = __io_engine_new_raw(16);
+    let fds: List<Int> = [0, 1, 2, 100, 9999];
+    for fd in fds.iter() {
+        assert_eq(__io_is_ready_raw(e, *fd, 1), 0);
+        assert_eq(__io_take_ready_raw(e, *fd, 1), 0);
+    }
+    __io_engine_destroy_raw(e);
+}
+
+@test
+fn law_take_ready_on_empty_engine_is_pure_zero() {
+    // take_ready CLEARS a ready bit — on an empty engine it must be a
+    // repeatable zero (nothing to consume, no state disturbed).
+    let e = __io_engine_new_raw(16);
+    assert_eq(__io_take_ready_raw(e, 42, 1), 0);
+    assert_eq(__io_take_ready_raw(e, 42, 1), 0);
+    __io_engine_destroy_raw(e);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

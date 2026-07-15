@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/intrinsics/runtime/mod/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/runtime/mod.vr` — the runtime-intrinsics umbrella: pure
+// WILDCARD re-export surface over twelve submodules (no explicit lists).
+//
+// SCOPE — UMBRELLA-REEXPORT-RESOLVE-1 (task #21, 2026-07-15): wildcard
+// propagation through `mount core.intrinsics.runtime.{name}` rolls
+// per-run map-walk dice (observed: cbgr_allocate/num_cpus/get_tier/
+// __sys_getpid_raw/__io_engine_new_raw/script_engine_new/char_is_whitespace
+// unbound while same-module siblings resolved; memory_fence MIS-BOUND to a
+// 1-arg fence), so NO wildcard name is stably pinnable here yet.  This
+// suite therefore pins the umbrella'S COMPILE PATH (the historical
+// AOT-INTRINSIC-QUALIFIED-NAME-1 SIGABRT surface) through fully-qualified
+// child-module mounts — stable by construction — and the brace-mount
+// acceptance block below is the #21 promotion target.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.runtime.cbgr.{cbgr_allocate, cbgr_deallocate};
+mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
+mount core.intrinsics.runtime.time.{monotonic_nanos};
+mount core.intrinsics.runtime.tier.{get_tier};
+
+// =============================================================================
+// Section 1: the umbrella chain compiles and its children work end-to-end
+// =============================================================================
+
+@test
+fn test_umbrella_chain_cbgr_mem_raw_round_trip() {
+    let p = cbgr_allocate(8, 8);
+    assert(p != 0);
+    store_byte(p, 42);
+    assert_eq(load_byte(p), 42);
+    cbgr_deallocate(p);
+}
+
+@test
+fn test_umbrella_chain_time_monotonic() {
+    let t1 = monotonic_nanos();
+    let t2 = monotonic_nanos();
+    assert(t1 > 0);
+    assert(t2 >= t1);
+}
+
+@test
+fn test_umbrella_chain_tier_in_range() {
+    let t = get_tier() as Int;
+    assert(t == 0 || t == 1 || t == 2 || t == 3);
+}
+
+// =============================================================================
+// UMBRELLA-REEXPORT-RESOLVE-1 acceptance block (task #21) — promote when the
+// deterministic ranked name index lands:
+//
+// mount core.intrinsics.runtime.{
+//     cbgr_allocate, cbgr_deallocate, num_cpus, char_is_whitespace,
+//     get_tier, is_interpreted, __sys_getpid_raw,
+//     __io_engine_new_raw, __io_engine_destroy_raw,
+//     script_engine_new, script_engine_free, memory_fence,
+//     tls_slot_has, monotonic_nanos, spin_hint, load_byte, store_byte,
+// };
+//
+// @test
+// fn test_umbrella_brace_cbgr()      { let p = cbgr_allocate(16, 8); assert(p != 0); cbgr_deallocate(p); }
+// @test
+// fn test_umbrella_brace_tier()      { let t = get_tier() as Int; assert(t >= 0 && t <= 3); }
+// @test
+// fn test_umbrella_brace_os()        { assert(__sys_getpid_raw() > 0); }
+// @test
+// fn test_umbrella_brace_io()        { let e = __io_engine_new_raw(4); assert(e > 0); __io_engine_destroy_raw(e); }
+// @test
+// fn test_umbrella_brace_fence()     { memory_fence(); assert(true); }
+// @test
+// fn test_umbrella_brace_scripting() { let e = script_engine_new(); script_engine_free(e); assert(true); }
+// =============================================================================
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/intrinsics/lowlevel/mod/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/lowlevel/mod.vr` — the low-level umbrella.  The per-arch
+// submodules (x86_64 / aarch64 / kernel / mmio) are @llvm_only or privileged
+// and stay AUDIT-ONLY (see ../audit.md); what IS testable on every host is
+// the umbrella's own CROSS-PLATFORM surface:
+//   * `CpuCapabilities` record + `detect_capabilities()` (runtime dispatch)
+//   * `MAX_SIMD_WIDTH` / `PREFERRED_SIMD_WIDTH` @cfg-selected constants
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.lowlevel.{
+    detect_capabilities, CpuCapabilities, MAX_SIMD_WIDTH, PREFERRED_SIMD_WIDTH,
+};
+
+// =============================================================================
+// Section 1: detect_capabilities() — portable invariants
+// =============================================================================
+
+@test
+fn test_detect_capabilities_returns_record() {
+    let caps = detect_capabilities();
+    // Every supported CI/dev architecture (x86_64 SSE2, aarch64 NEON) has
+    // 128-bit SIMD; only the unknown-arch fallback reports false.
+    assert(caps.has_128bit_simd);
+}
+
+@test
+fn test_detect_capabilities_deterministic() {
+    let a = detect_capabilities();
+    let b = detect_capabilities();
+    assert_eq(a.has_128bit_simd, b.has_128bit_simd);
+    assert_eq(a.has_fma, b.has_fma);
+    assert_eq(a.has_aes, b.has_aes);
+    assert_eq(a.has_popcnt, b.has_popcnt);
+}
+
+@test
+fn test_capabilities_width_ladder_is_monotone() {
+    // 512-bit support implies 256-bit implies 128-bit — the record must
+    // never report a wider width without the narrower ones.
+    let caps = detect_capabilities();
+    if caps.has_512bit_simd {
+        assert(caps.has_256bit_simd);
+    }
+    if caps.has_256bit_simd {
+        assert(caps.has_128bit_simd);
+    }
+}
+
+// =============================================================================
+// Section 2: SIMD width constants
+// =============================================================================
+
+@test
+fn test_simd_width_constants_are_declared_values() {
+    // The three declarations are 128 / 512 / 2048; whichever @cfg selects,
+    // the value must be one of them (and a power of two).
+    assert(MAX_SIMD_WIDTH == 128 || MAX_SIMD_WIDTH == 512 || MAX_SIMD_WIDTH == 2048);
+    assert(PREFERRED_SIMD_WIDTH == 128 || PREFERRED_SIMD_WIDTH == 256);
+    assert(PREFERRED_SIMD_WIDTH <= MAX_SIMD_WIDTH);
+}
+
+@ignore("CFG-CONST-SELECT-1 (task #20, 2026-07-15) — @cfg(target_arch) on CONST items resolves to the not(any(...)) fallback (128) while statement-level @cfg in detect_capabilities branches correctly; on aarch64 MAX_SIMD_WIDTH must be 2048.")
+@test
+fn test_max_simd_width_matches_target_arch() {
+    // On the two supported dev architectures the fallback 128 is always
+    // WRONG: aarch64 declares 2048 (SVE), x86_64 declares 512 (AVX-512).
+    assert(MAX_SIMD_WIDTH == 512 || MAX_SIMD_WIDTH == 2048);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
