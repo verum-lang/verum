@@ -6313,7 +6313,14 @@ impl TypeChecker {
             | (Pointer { .. } | VolatilePointer { .. }, Named { path, .. }) => {
                 let name = self.path_to_string(path);
                 match name.as_str() {
-                    "USize" | "ISize" | "usize" | "isize" | "UInt64" | "Int64" => {
+                    // Every sized-integer alias qualifies (the arm's own
+                    // reason string promises "an integer or a
+                    // sized-integer-alias").  Sub-64-bit aliases are the
+                    // canonical address width on 32-bit embedded targets;
+                    // the un-annotated-context warning below still fires.
+                    "USize" | "ISize" | "usize" | "isize" | "UInt64" | "Int64"
+                    | "UInt32" | "Int32" | "UInt16" | "Int16" | "UInt8" | "Int8"
+                    | "Byte" => {
                         if !self.in_unsafe_context {
                             self.emit_diagnostic(
                                 DiagnosticBuilder::warning()

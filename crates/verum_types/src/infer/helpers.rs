@@ -1639,7 +1639,35 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
         }
         return Type::Var(crate::ty::TypeVar::fresh());
     }
-    // References: "&mut T" / "&T".
+    // References: "&[checked|unsafe] [mut] T" (grammar tier spellings) and
+    // the plain "&mut T" / "&T".  ARCHIVE-REF-TIER-DROP-1: the metadata
+    // writer (`archive_metadata::type_ref_to_text`) renders the CBGR tier
+    // faithfully; the tiered arms MUST come before the generic `&` arm or
+    // "&unsafe T" strips to a garbage `Named { "unsafe T" }`.
+    if let Some(rest) = trimmed.strip_prefix("&unsafe mut ") {
+        return Type::UnsafeReference {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: true,
+        };
+    }
+    if let Some(rest) = trimmed.strip_prefix("&unsafe ") {
+        return Type::UnsafeReference {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: false,
+        };
+    }
+    if let Some(rest) = trimmed.strip_prefix("&checked mut ") {
+        return Type::CheckedReference {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: true,
+        };
+    }
+    if let Some(rest) = trimmed.strip_prefix("&checked ") {
+        return Type::CheckedReference {
+            inner: Box::new(parse_descriptor_type_string(rest.trim_start())),
+            mutable: false,
+        };
+    }
     if let Some(rest) = trimmed.strip_prefix("&mut ") {
         return Type::Reference {
             inner: Box::new(parse_descriptor_type_string(rest.trim_start())),

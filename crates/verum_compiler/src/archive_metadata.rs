@@ -1278,8 +1278,35 @@ fn type_ref_to_text_with_params(
                 type_ref_to_text_with_params(return_type, type_id_to_name, param_id_to_name)
             )
         }
-        TypeRef::Reference { inner, .. } => {
-            format!("&{}", type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name))
+        TypeRef::Reference {
+            inner,
+            mutability,
+            tier,
+        } => {
+            // ARCHIVE-REF-TIER-DROP-1: render the CBGR tier and the
+            // mutability faithfully (grammar: `&[checked|unsafe] [mut] T`).
+            // The previous `{ inner, .. }` render collapsed every
+            // reference to `&T`, so every baked stdlib signature lost
+            // its tier — `List.as_mut_ptr() -> &unsafe T` came back as
+            // `&T`, the method-result auto-deref then stripped it to
+            // bare `T`, and `cell.as_mut_ptr() as *mut UInt32` failed
+            // E401 the moment the (Named, Pointer) cast arm stopped
+            // being a blanket accept (A13).
+            let tier_kw = match tier {
+                verum_vbc::types::CbgrTier::Tier0 => "",
+                verum_vbc::types::CbgrTier::Tier1 => "checked ",
+                verum_vbc::types::CbgrTier::Tier2 => "unsafe ",
+            };
+            let mut_kw = match mutability {
+                verum_vbc::types::Mutability::Mutable => "mut ",
+                verum_vbc::types::Mutability::Immutable => "",
+            };
+            format!(
+                "&{}{}{}",
+                tier_kw,
+                mut_kw,
+                type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name)
+            )
         }
         // Associated-type projection `F.Output` → `::Output<F>` (parseable back
         // into `Type::Generic { name: "::Output", args: [F] }` by
