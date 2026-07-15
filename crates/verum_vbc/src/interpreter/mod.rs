@@ -208,6 +208,22 @@ pub fn execute_table_with_args(
         .module
         .get_function(func_id)
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
+    // **Entry-depth discipline** (SYNC-SYSCALL-CTORS-REGRESSION-1,
+    // task #20): a previous top-level execution on this state that
+    // ended in an error (e.g. a `__tls_init_*` global ctor whose body
+    // hit an unresolved XMOD-band `Call`) leaves its frames on the
+    // call stack — `dispatch_loop_table` (entry_depth = 0) runs until
+    // the WHOLE stack empties, so the next execution's final `Ret`
+    // would pop INTO the dead frame and resume it at the failing
+    // instruction.  Live failure: every test in a suite file reported
+    // the crashed ctor's `FunctionNotFound(0x2000_00xx)` even though
+    // the test body itself completed.  Capturing the pre-push depth
+    // and handing it to the entry-depth-aware loop makes each
+    // top-level execution terminate at ITS OWN entry frame — stale
+    // frames beneath are never re-executed.  With a clean stack the
+    // captured depth is 0 and behavior is byte-identical to the old
+    // `dispatch_loop_table(state)` call.
+    let entry_depth = state.call_stack.depth();
     // Push initial frame — large enough for both the callee's own registers
     // and any host-supplied arguments.
     let reg_count = func.register_count.max(args.len() as u16);
@@ -228,7 +244,7 @@ pub fn execute_table_with_args(
     }
 
     // Run table-based dispatch loop
-    dispatch_table::dispatch_loop_table(state)
+    dispatch_table::dispatch_loop_table_with_entry_depth(state, entry_depth)
 }
 pub use cbgr_heap::{OBJECT_META_SIZE, ObjectMeta};
 pub use error::{CbgrViolationKind, InterpreterError, InterpreterResult};
@@ -502,7 +518,39 @@ impl Interpreter {
                 // ctor, tests that DON'T touch the affected static can
                 // still run, while tests that DO will hit a clear
                 // null-deref pointing at the unresolved name.
+                //
+                // **CTOR-UNWIND** (SYNC-SYSCALL-CTORS-REGRESSION-1,
+                // task #20): an errored ctor aborts the dispatch loop
+                // mid-flight, leaving its frames on `call_stack` and
+                // its register window allocated.  "Lenient skip" MUST
+                // restore the pre-ctor stack shape — otherwise every
+                // subsequent execution on this interpreter (the next
+                // ctor, `main`, every `verum test` body) `Ret`-pops
+                // into the dead frame and re-executes the failing
+                // `Call`, mis-attributing the crashed ctor's
+                // `FunctionNotFound(0x2000_00xx)` to ITSELF.  Live
+                // failure: 9 `core-tests/runtime/{sync,syscall,
+                // supervisor}` tests red with the ctor's frozen
+                // XMOD-band id even though the test bodies completed.
+                // Snapshot the depths, unwind on error.
+                let pre_call_depth = self.state.call_stack.depth();
+                let pre_reg_top = self.state.registers.top();
                 if let Err(e) = self.execute_function(ctor) {
+                    // Drop the crashed ctor's dead frames FIRST —
+                    // both for the lenient-skip continue and for the
+                    // hard-error return (the caller may keep using
+                    // this interpreter).  `Registers::pop_frame`
+                    // bumps generations of the released slots, so
+                    // CBGR refs captured into the dead window go
+                    // stale instead of dangling.
+                    while self.state.call_stack.depth() > pre_call_depth {
+                        if self.state.call_stack.pop_frame().is_err() {
+                            break;
+                        }
+                    }
+                    if self.state.registers.top() > pre_reg_top {
+                        self.state.registers.pop_frame(pre_reg_top as u32);
+                    }
                     let is_lenient_stub_panic = matches!(
                         &e,
                         crate::interpreter::error::InterpreterError::Panic { message }
