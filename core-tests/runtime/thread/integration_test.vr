@@ -29,7 +29,6 @@ fn test_current_id_is_stable_within_thread() {
     assert(a == b, "current_id must be stable across adjacent reads");
 }
 
-@ignore  // QUALIFIED-CALL-2 (follow-up leg): the dotted-call resolver fixed
          // the mutual-recursion class (Bencher/jitter GREEN), but these
          // sys-delegator shapes now bind a UNIT-returning stub —
          // available_parallelism prints (), sleep elapsed=0 (probe
@@ -51,7 +50,6 @@ fn test_yield_now_returns() {
 // Section 2: sleep — lower-bound contract with core.time
 // =============================================================================
 
-@ignore  // QUALIFIED-CALL-2 (follow-up leg): the dotted-call resolver fixed
          // the mutual-recursion class (Bencher/jitter GREEN), but these
          // sys-delegator shapes now bind a UNIT-returning stub —
          // available_parallelism prints (), sleep elapsed=0 (probe
@@ -65,7 +63,6 @@ fn test_sleep_ms_lower_bound() {
     assert(elapsed >= 10_000_000, "sleep_ms(10) returned before 10ms elapsed");
 }
 
-@ignore  // QUALIFIED-CALL-2 (follow-up leg): the dotted-call resolver fixed
          // the mutual-recursion class (Bencher/jitter GREEN), but these
          // sys-delegator shapes now bind a UNIT-returning stub —
          // available_parallelism prints (), sleep elapsed=0 (probe

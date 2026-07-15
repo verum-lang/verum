@@ -2338,7 +2338,13 @@ pub(in super::super) fn handle_ffi_extended(
 
         Some(SystemSubOpcode::TimeSleepNanos) => {
             let nanos_reg = read_reg(state)?;
-            let nanos = state.get_reg(nanos_reg).as_i64();
+            // BOXED-INT-OPERAND-1: the duration arrives via `ns as UInt64`,
+            // which can BOX the value — raw `.as_i64()` read the box bits
+            // (garbage, typically failing the `> 0` gate) and the sleep
+            // silently no-op'd (test_sleep_*_lower_bound pins). Use the
+            // canonical maybe-boxed reader, same as sibling
+            // TimeSleepMillis (0x76).
+            let nanos = state.get_reg(nanos_reg).as_integer_compatible();
             if nanos > 0 {
                 std::thread::sleep(std::time::Duration::from_nanos(nanos as u64));
             }
