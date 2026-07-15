@@ -15833,20 +15833,35 @@ impl VbcCodegen {
                     let should_wrap_ref = if matches!(&ty.kind, verum_ast::ty::TypeKind::Reference { .. }) {
                         match &resolved {
                             // Concrete scalar `&Int`/`&Float`/… — deref directly.
-                            TypeRef::Concrete(tid) => matches!(
-                                *tid,
-                                TypeId::INT
-                                    | TypeId::FLOAT
-                                    | TypeId::BOOL
-                                    | TypeId::U8
-                                    | TypeId::I8
-                                    | TypeId::U16
-                                    | TypeId::I16
-                                    | TypeId::U32
-                                    | TypeId::I32
-                                    | TypeId::U64
-                                    | TypeId::F32
-                            ),
+                            // PARAM-REF-RECORD-1 (#44/#21 AOT Display root):
+                            // USER-DECLARED record types (`&mut Formatter` in a
+                            // Display impl) must ALSO keep the Reference wrapper —
+                            // an unwrapped descriptor lowered the param as a
+                            // bare i64 with no ref-param mark, so the body's
+                            // re-ref (`f.write_str(s)`) took the ALLOCA ADDRESS
+                            // of the param slot and every field read downstream
+                            // hit stack garbage (raw-binary EXC_BAD_ACCESS in
+                            // Formatter.write_str; `{3, 4}` silent-wrong before
+                            // that).  Builtin heap containers (Text/List/Map/…)
+                            // keep the historic unwrapped path — their
+                            // passthrough works via the collection heuristics
+                            // and re-marking them is a separate, wider change.
+                            TypeRef::Concrete(tid) => {
+                                matches!(
+                                    *tid,
+                                    TypeId::INT
+                                        | TypeId::FLOAT
+                                        | TypeId::BOOL
+                                        | TypeId::U8
+                                        | TypeId::I8
+                                        | TypeId::U16
+                                        | TypeId::I16
+                                        | TypeId::U32
+                                        | TypeId::I32
+                                        | TypeId::U64
+                                        | TypeId::F32
+                                ) || !tid.is_builtin()
+                            }
                             // Bare generic `&T`: mono/substitution.rs `apply` recurses
                             // into the Reference wrapper (→ Reference{Concrete}), and
                             // the AOT param-mark gates on a scalar inner — so only
