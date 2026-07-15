@@ -581,10 +581,13 @@ impl<'a> IntrinsicCodegen<'a> {
             // composition is emitted in `codegen/expressions.rs`.  This
             // intermediate-IR path emits the bit-reverse component.
             InlineSequenceId::ByteSwapBits => self.emit_bitreverse(args),
-            // null_ptr / ptr_is_null — authoritative emission (LoadI 0 / CmpI
-            // Eq) is in codegen/expressions.rs; this intermediate path is a
+            // null_ptr / ptr_is_null / ptr_is_aligned_to — authoritative
+            // emission (LoadI 0 / CmpI Eq / mask-and-compare) is in
+            // codegen/expressions.rs; this intermediate path is a
             // pass-through.
-            InlineSequenceId::NullPtr | InlineSequenceId::PtrIsNull => args.first().copied(),
+            InlineSequenceId::NullPtr
+            | InlineSequenceId::PtrIsNull
+            | InlineSequenceId::PtrIsAlignedTo => args.first().copied(),
             // Conversion
             InlineSequenceId::IntToFloat => self.emit_int_to_float(args),
             InlineSequenceId::FloatToInt => self.emit_float_to_int(args),

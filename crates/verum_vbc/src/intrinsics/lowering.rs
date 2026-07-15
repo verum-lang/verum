@@ -1318,6 +1318,17 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            // ptr_is_aligned_to(ptr, align) — the authoritative VBC emission
+            // (mask-and-compare) lives in codegen/expressions.rs; the GPU
+            // path carries the same andi + cmpi-eq-0 shape via the andi op
+            // (the mask materialisation happens in the emitted sequence).
+            InlineSequenceId::PtrIsAlignedTo => self.emit(MlirOp {
+                name: "arith.andi".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
 
             // Type conversions
             InlineSequenceId::IntToFloat => self.emit(MlirOp {

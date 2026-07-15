@@ -336,6 +336,10 @@ pub enum InlineSequenceId {
     /// was a binary compare invoked with a single operand (the pointer), so
     /// it fell through to `LoadNil`; this synthesises the `0` operand.
     PtrIsNull,
+    /// ptr_is_aligned_to: `(ptr & (align - 1)) == 0`.  Width-free — the
+    /// alignment is an explicit operand (MEM-PTR-ALIGN-NIL-1; the generic
+    /// `ptr_is_aligned<T>` needs the call-site width channel, task #16).
+    PtrIsAlignedTo,
     /// rotate_left: bit rotation
     RotateLeft,
     /// rotate_right: bit rotation
@@ -1749,6 +1753,23 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrIsNull), // ptr == 0
         mlir_op: Some("llvm.icmp eq"),
         doc: "Check if pointer is null",
+    },
+    Intrinsic {
+        name: "ptr_is_aligned_to",
+        category: IntrinsicCategory::Memory,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Generic,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 2, // ptr, align
+        return_count: 1,
+        // MEM-PTR-ALIGN-NIL-1: was unregistered (LoadNil).  The generic
+        // `ptr_is_aligned<T>` (alignment from T) still needs the
+        // call-site width channel — task #16.
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PtrIsAlignedTo),
+        mlir_op: None,
+        doc: "Check if pointer is aligned to the given power-of-two alignment",
     },
     Intrinsic {
         name: "intrinsic_ptr_is_null",

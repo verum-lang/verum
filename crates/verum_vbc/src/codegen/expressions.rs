@@ -30047,6 +30047,41 @@ impl VbcCodegen {
                 }
             }
 
+            // MEM-PTR-ALIGN-NIL-1: (ptr & (align - 1)) == 0 — width-free
+            // alignment test with the alignment as an explicit operand.
+            InlineSequenceId::PtrIsAlignedTo => {
+                if args.len() >= 2 {
+                    let one = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: one, value: 1 });
+                    let mask = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Sub,
+                        dst: mask,
+                        a: args[1],
+                        b: one,
+                    });
+                    let band = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::And,
+                        dst: band,
+                        a: args[0],
+                        b: mask,
+                    });
+                    self.ctx.emit(Instruction::LoadI { dst: one, value: 0 });
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Eq,
+                        dst: dest,
+                        a: band,
+                        b: one,
+                    });
+                    self.ctx.free_temp(band);
+                    self.ctx.free_temp(mask);
+                    self.ctx.free_temp(one);
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
             // Rotation - binary operations
             InlineSequenceId::RotateLeft => {
                 self.emit_arith_extended_binary(ArithSubOpcode::RotateLeft, args, dest);
@@ -30732,20 +30767,22 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call(func_name, args, dest)?;
             }
 
-            // Slice operations
+            // Slice operations — MEM-SLICE-INTRINSIC-FATREF-1: a slice value
+            // is ONE FatRef, not a 2-tuple.  The historical arms emitted
+            // `Unpack {count: 2}` (misread the FatRef as a Pack-tuple heap
+            // pointer → SIGSEGV) or library calls to `verum_slice_*`
+            // symbols defined nowhere (the ghost-symbol drift class).  The
+            // canonical CbgrExtended slice family has stride-aware
+            // interpreter handlers (fat_ref.reserved) AND raw-byte AOT
+            // lowerings — route there.
             InlineSequenceId::SliceLen => {
-                // Extract length from fat pointer (second element)
                 if !args.is_empty() {
-                    self.ctx.emit(Instruction::Unpack {
-                        dst_start: dest,
-                        tuple: args[0],
-                        count: 2,
-                    });
-                    // Length is in dest + 1, move it to dest
-                    let len_reg = Reg::new(dest.0 + 1);
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: len_reg,
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    self.ctx.emit(Instruction::CbgrExtended {
+                        sub_op: crate::instruction::CbgrSubOpcode::SliceLen as u8,
+                        operands,
                     });
                 } else {
                     self.ctx.emit(Instruction::LoadI {
@@ -30756,32 +30793,83 @@ impl VbcCodegen {
             }
 
             InlineSequenceId::SliceAsPtr => {
-                // Extract pointer from fat pointer (first element)
                 if !args.is_empty() {
-                    self.ctx.emit(Instruction::Unpack {
-                        dst_start: dest,
-                        tuple: args[0],
-                        count: 2,
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    self.ctx.emit(Instruction::CbgrExtended {
+                        sub_op: crate::instruction::CbgrSubOpcode::Unslice as u8,
+                        operands,
                     });
-                    // Pointer is already in dest
                 } else {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
                 }
             }
 
             InlineSequenceId::SliceGet | InlineSequenceId::SliceGetUnchecked => {
-                // Access element at index
-                self.emit_intrinsic_library_call("verum_slice_get", args, dest)?;
+                // Format: dst, slice_ref, index — bounds-checked (0x06) /
+                // unchecked (0x07); both stride-aware via fat_ref.reserved.
+                if args.len() >= 2 {
+                    let sub = if matches!(seq_id, InlineSequenceId::SliceGetUnchecked) {
+                        crate::instruction::CbgrSubOpcode::SliceGetUnchecked
+                    } else {
+                        crate::instruction::CbgrSubOpcode::SliceGet
+                    };
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    Self::write_reg(&mut operands, args[1].0);
+                    self.ctx.emit(Instruction::CbgrExtended {
+                        sub_op: sub as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
             }
 
             InlineSequenceId::SliceSubslice => {
-                // Create subslice view
-                self.emit_intrinsic_library_call("verum_slice_subslice", args, dest)?;
+                // Format: dst, src, start, end — new FatRef over the range.
+                if args.len() >= 3 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    Self::write_reg(&mut operands, args[1].0);
+                    Self::write_reg(&mut operands, args[2].0);
+                    self.ctx.emit(Instruction::CbgrExtended {
+                        sub_op: crate::instruction::CbgrSubOpcode::SliceSubslice as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
             }
 
             InlineSequenceId::SliceSplitAt => {
-                // Split slice into two parts
-                self.emit_intrinsic_library_call("verum_slice_split_at", args, dest)?;
+                // Format: dst1, dst2, src, mid — two FatRefs, packed into
+                // the declared `(&[T], &[T])` tuple result.
+                if args.len() >= 2 {
+                    let left = self.ctx.alloc_temp();
+                    let right = self.ctx.alloc_temp();
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, left.0);
+                    Self::write_reg(&mut operands, right.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    Self::write_reg(&mut operands, args[1].0);
+                    self.ctx.emit(Instruction::CbgrExtended {
+                        sub_op: crate::instruction::CbgrSubOpcode::SliceSplitAt as u8,
+                        operands,
+                    });
+                    self.ctx.emit(Instruction::Pack {
+                        dst: dest,
+                        src_start: left,
+                        count: 2,
+                    });
+                    self.ctx.free_temp(right);
+                    self.ctx.free_temp(left);
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
             }
 
             // Text operations
