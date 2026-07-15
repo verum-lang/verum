@@ -127,6 +127,14 @@ impl TestFormat {
 
 pub fn execute(opts: TestOptions) -> Result<()> {
     let start = Instant::now();
+    // SCRIPT-HOOK-TEST-RUNNER-1: the in-process interpret tier below drives
+    // `verum_vbc::interpreter::Interpreter` directly (compiled_test_module +
+    // Interpreter::call), bypassing the pipeline entry points that install
+    // the scripting compiler hook — so `script_engine_eval` inside a test
+    // reported "compiler unavailable" (kind 4) while the SAME source under
+    // `verum run` evaluated fine.  The test environment must equal the run
+    // environment wherever verum_compiler is linked; idempotent (Once).
+    verum_compiler::api::ensure_scripting_compiler_installed();
     let quiet = matches!(
         opts.format,
         TestFormat::Json | TestFormat::Junit | TestFormat::Tap | TestFormat::Sarif
