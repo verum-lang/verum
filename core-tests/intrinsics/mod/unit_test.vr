@@ -87,31 +87,32 @@ fn test_umbrella_runtime_tls_resolves() {
 }
 
 // =============================================================================
-// UMBRELLA-REEXPORT-RESOLVE-1 acceptance block (task #21).  Wildcard-
-// propagated names — promote to live tests when the deterministic ranked
-// name index lands.  Observed dice (same binary, two runs):
+// UMBRELLA-REEXPORT-RESOLVE-1 acceptance block (legacy task #21, register A20,
+// pool T0115).  Wildcard-propagated names — PROMOTED to live tests 2026-07-16:
+// the one-hop qualified-key probe landed (a74924270).  Historical dice
+// (pre-fix, same binary, two runs):
 //   run A unbound: wrapping_add, popcnt, nop; sqrt → E400 '__opaque_src'
 //   run B unbound: saturating_add, rotl, is_nan, likely
-//
-// mount core.intrinsics.{
-//     wrapping_add, saturating_add,   // arithmetic.*
-//     popcnt, rotl,                   // bitwise.*
-//     sqrt, is_nan,                   // float.*
-//     swap, replace,                  // memory.* (also reach via prelude)
-//     nop, likely,                    // control.*
-// };
-//
-// @test
-// fn test_umbrella_wildcard_arithmetic() { assert_eq(wrapping_add(1, 2), 3);
-//                                          assert_eq(saturating_add(1, 2), 3); }
-// @test
-// fn test_umbrella_wildcard_bitwise()    { assert_eq(popcnt(255 as UInt64) as Int, 8);
-//                                          assert_eq(rotl(1 as UInt64, 3 as UInt32) as Int, 8); }
-// @test
-// fn test_umbrella_wildcard_float()      { assert_eq(sqrt(9.0), 3.0);
-//                                          assert(!is_nan(1.0)); }
-// @test
-// fn test_umbrella_wildcard_control()    { nop(); assert(likely(true)); }
+// =============================================================================
+
+mount core.intrinsics.{
+    wrapping_add, saturating_add,   // arithmetic.*
+    popcnt, rotl,                   // bitwise.*
+    sqrt, is_nan,                   // float.*
+    nop, likely,                    // control.*
+};
+
+@test
+fn test_umbrella_wildcard_arithmetic() { assert_eq(wrapping_add(1, 2), 3);
+                                         assert_eq(saturating_add(1, 2), 3); }
+@test
+fn test_umbrella_wildcard_bitwise()    { assert_eq(popcnt(255 as UInt64) as Int, 8);
+                                         assert_eq(rotl(1 as UInt64, 3 as UInt32) as Int, 8); }
+@test
+fn test_umbrella_wildcard_float()      { assert_eq(sqrt(9.0), 3.0);
+                                         assert(!is_nan(1.0)); }
+@test
+fn test_umbrella_wildcard_control()    { nop(); assert(likely(true)); }
 // =============================================================================
 
 // =============================================================================
