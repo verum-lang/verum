@@ -1285,10 +1285,11 @@ fn where_tensor<T: Numeric>(
 }
 
 // Sigmoid activation — routed through the canonical element-wise
-// unary channel (op 8 = sigmoid); TENSOR_SIGMOID had a 1-arg wire
-// that could never satisfy the 2-operand UnopFromArgs arm (T0193).
+// unary channel (op 9 = TensorUnaryOp::Sigmoid); TENSOR_SIGMOID had
+// a 1-arg wire that could never satisfy the 2-operand UnopFromArgs
+// arm (T0193).
 fn sigmoid<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
-    @vbc(TENSOR_UNOP, x, 8)
+    @vbc(TENSOR_UNOP, x, 9)
 }
 
 // Reshape tensor

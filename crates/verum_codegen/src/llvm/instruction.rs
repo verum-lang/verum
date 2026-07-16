@@ -34722,14 +34722,14 @@ fn lower_tensor_extended<'ctx>(
         Some(TensorSubOpcode::Softmax) => {
             // Moded wire (T0193): operands = [dst][mode][t][axis]
             //   mode 0 → softmax, mode 1 → log-softmax (elementwise
-            //   log over the softmax result; op 3 = log).
+            //   log over the softmax result; op 4 = TensorUnaryOp::Log).
             let mode = operands.get(1).copied().unwrap_or(0);
             let tensor = get_arg(ctx, 1)?;
             let axis = get_arg(ctx, 2)?;
             let sm =
                 call_tensor_runtime_i64(ctx, "verum_tensor_softmax", &[tensor, axis], "softmax")?;
             let result = if mode == 1 {
-                let log_op = i64_ty.const_int(3, false);
+                let log_op = i64_ty.const_int(4, false);
                 call_tensor_runtime_i64(ctx, "verum_tensor_unop", &[sm, log_op], "log_softmax")?
             } else {
                 sm

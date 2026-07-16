@@ -1,29 +1,71 @@
-# `intrinsics/tensor` audit
+# intrinsics/tensor — suite audit
 
-Module: `core/intrinsics/tensor.vr` (~72 intrinsics) — tensor compute:
-elementwise, matmul, conv, reductions, broadcast, reshape, autodiff hooks.
+**Status (2026-07-16, T0193/T0176/T0140):** first real suite. The
+previous audit deferred to the crate-level JIT-vs-scalar equivalence
+gate ("a .vr suite would duplicate it") — the 2026-07-16 probe
+DISPROVED that rationale: the JIT gate exercises the MLIR kernels,
+not the intrinsic WIRE, and the wire was broken for most of the
+surface. Of ~70 wrappers in `core/intrinsics/tensor.vr`, only the
+~12 `*FromArgs` arms matched the registry emitter's operand shape.
 
-## Coverage decision: AUDIT-ONLY here; behaviour covered at the crate level
+## Defect classes closed (see T0193 for the full matrix)
 
-Tensor intrinsics operate on `Tensor<T, Shape>` values whose construction,
-layout, and lowering are the MLIR compute pipeline's domain (linalg/tensor
-dialects → LLVM JIT, the `mlir-jit` default feature).  The canonical
-conformance for this surface is the JIT-vs-scalar bit-equivalence gate in
-`crates/verum_vbc/tests/jit_cpu_equivalence.rs` — a build invariant.  A
-`.vr`-level tensor suite here would either duplicate that gate or, for the
-value-level ops, hit the same generic-instantiation blocker as SIMD
-(task #3).
+1. **Wire-shape divergence** — the registry emitter packs
+   `[dst][mode?][arg-regs...]`; ~30 interpreter arms read inline
+   f64/varint/u8 immediates (Arange parsed register bytes as three
+   f64s; Identity parsed a register index as its size; Softmax's
+   axis byte was a register index; TENSOR_BROADCAST pointed at the
+   DISTRIBUTED collective-broadcast arm). Multi-output arms
+   (SVD/QR/LU/Eig/Topk) read 2–4 dst registers the emitter never
+   allocated.
+2. **Envelope-authoritative advance** — the dispatcher previously
+   trusted each arm's reads for stream position; any arity drift
+   desynced the bytecode stream (the GPU-memset SIGSEGV mechanism,
+   T0177). `handle_tensor_extended` now repositions pc from the
+   operand-byte-count envelope after every arm.
+3. **Dtype-blind writes** — fill/from_slice/set_scalar wrote through
+   `data_ptr_f64_mut()` (null for every dtype except F64): F32/int
+   tensors silently stayed zero. `TensorHandle::{set_element_f64,
+   fill_f64}` are the dtype-converting write twins of
+   `get_element_f64`.
+4. **Axis-ignoring kernels** — softmax/argmax ignored `axis`
+   (`_axis`); now lane-walking implementations + log-softmax (LSE)
+   + argmax index tensors + randn/randint kernels.
+5. **T0140** — TokenizerDecode/FormatValue/GenerateRequestId
+   discarded results (`nil`, "would need module mutation") though
+   `alloc_string_value` exists; now heap strings.
+6. **WithMode wire** — mode byte moved AFTER dst so `operands[0]`
+   is uniformly dst (AOT read the mode byte as the destination
+   register for RANDN/RANDINT/LOG_SOFTMAX).
 
-## Contract notes
+## Tier contract
 
-* Elementwise + reduction ops fold through the same kernel path the CPU
-  fallback and the MLIR JIT share; ε-equivalence for float reductions is
-  the pinned invariant.
-* Autodiff hooks (`tensor_grad_*`) integrate with the GradBegin/GradEnd
-  opcodes (0xEB-0xEF).
+- `unit_test.vr` — core surface with REAL Tier-1 IR bodies (new/
+  fill/from_slice/get/set/binop/unop/matmul/reduce/reshape/
+  transpose/softmax/clone/contiguous): green BOTH tiers.
+- `integration_test.vr` — factories/indexing/decomp/einsum/conv/norm:
+  green on `--interp`; at Tier-1 each op is a LOUD `verum_panic`
+  stub ("no Tier-1 lowering yet", tensor_ir.rs `emit_panic_stub`)
+  until the T0179 epic lands real IR bodies (was: declared-no-body
+  externs → link-fail/const-zero class).
+- `regression_test.vr` — minimal pins of the T0176/T0193 probe
+  lines, both-tier for the core pins.
 
-## Action items
+## Single-output contracts (documented in tensor.vr)
 
-* If a `.vr`-level smoke suite is wanted, add it AFTER task #3 unblocks
-  generic-vector construction; until then the crate-level JIT equivalence
-  test is the authoritative conformance surface.
+QR → Q, SVD → singular values, LU → U, EIG/EIGH → eigenvalues,
+TOPK → values, SPLIT/SPLIT_AT → List of handles. Full multi-output
+surface: T0179.
+
+## Known residue
+
+- Handle display: `f"{t}"` renders garbage type names ("Release") —
+  Box<TensorHandle> has no ObjectHeader; needs the heap-object
+  handle design (T0179 stage; also fixes the leak — handles are
+  never freed today).
+- `intrinsics/codegen.rs` `IntrinsicCodegen` is a ZERO-caller
+  parallel strategy executor (duplicate-impl class).
+- AOT dtype breadth beyond F64 fill lanes: T0183.
+- MLIR JIT lowering path (`intrinsics/lowering.rs`) not yet
+  differentially covered against the interpreter; the crate-level
+  jit_cpu_equivalence gate remains the kernel-level authority.

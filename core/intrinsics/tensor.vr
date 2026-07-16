@@ -178,7 +178,9 @@ public fn tensor_broadcast<S>(t: Int, shape: S) -> Int { @intrinsic("TENSOR_BROA
 /// Element-wise binary operation (op: 0=add, 1=sub, 2=mul, 3=div, 4=pow, 5=mod)
 public fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
 
-/// Element-wise unary operation (op: 0=neg, 1=abs, 2=exp, 3=log, 4=sqrt, 5=sin, 6=cos, 7=tanh, 8=sigmoid, 9=relu)
+/// Element-wise unary operation (op: 0=neg, 1=abs, 2=sqrt, 3=exp, 4=log,
+/// 5=sin, 6=cos, 7=tan, 8=tanh, 9=sigmoid, 10=relu, 11=gelu, 12=silu,
+/// 13=floor, 14=ceil — mirrors TensorUnaryOp byte values)
 public fn tensor_unop(t: Int, op: Int) -> Int { @intrinsic("TENSOR_UNOP", t, op) }
 
 /// Element-wise comparison (op: 0=eq, 1=ne, 2=lt, 3=le, 4=gt, 5=ge)
@@ -188,16 +190,16 @@ public fn tensor_cmp(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_CMP", 
 public fn tensor_where(cond: Int, a: Int, b: Int) -> Int { @intrinsic("TENSOR_WHERE", cond, a, b) }
 
 /// Clamp values to [min, max]
-public fn tensor_clamp(t: Int, min_val: Int, max_val: Int) -> Int { @intrinsic("TENSOR_CLAMP", t, min_val, max_val) }
+public fn tensor_clamp<L, H>(t: Int, min_val: L, max_val: H) -> Int { @intrinsic("TENSOR_CLAMP", t, min_val, max_val) }
 
 /// Cast tensor to different dtype
 public fn tensor_cast<D>(t: Int, dtype: D) -> Int { @intrinsic("TENSOR_CAST", t, dtype) }
 
 /// Fill masked positions
-public fn tensor_masked_fill(t: Int, mask: Int, value: Int) -> Int { @intrinsic("TENSOR_MASKED_FILL", t, mask, value) }
+public fn tensor_masked_fill<V>(t: Int, mask: Int, value: V) -> Int { @intrinsic("TENSOR_MASKED_FILL", t, mask, value) }
 
 /// Linear interpolation
-public fn tensor_lerp(a: Int, b: Int, weight: Int) -> Int { @intrinsic("TENSOR_LERP", a, b, weight) }
+public fn tensor_lerp<W>(a: Int, b: Int, weight: W) -> Int { @intrinsic("TENSOR_LERP", a, b, weight) }
 
 // =============================================================================
 // SECTION 6: Linear Algebra
@@ -222,7 +224,7 @@ public fn tensor_dot(a: Int, b: Int) -> Int { @intrinsic("TENSOR_DOT", a, b) }
 public fn tensor_outer(a: Int, b: Int) -> Int { @intrinsic("TENSOR_OUTER", a, b) }
 
 /// Einstein summation
-public fn tensor_einsum<E>(expr: E, tensors: Int) -> Int { @intrinsic("TENSOR_EINSUM", expr, tensors) }
+public fn tensor_einsum<E, T>(expr: E, tensors: T) -> Int { @intrinsic("TENSOR_EINSUM", expr, tensors) }
 
 // =============================================================================
 // SECTION 7: Matrix Decomposition
@@ -263,19 +265,20 @@ public fn tensor_tri_solve(a: Int, b: Int) -> Int { @intrinsic("TENSOR_TRI_SOLVE
 public fn tensor_inverse(t: Int) -> Int { @intrinsic("TENSOR_INVERSE", t) }
 
 /// Matrix determinant
-public fn tensor_det(t: Int) -> Int { @intrinsic("TENSOR_DET", t) }
+public fn tensor_det(t: Int) -> Float { @intrinsic("TENSOR_DET", t) }
 
 /// Matrix trace
-public fn tensor_trace(t: Int) -> Int { @intrinsic("TENSOR_TRACE", t) }
+public fn tensor_trace(t: Int) -> Float { @intrinsic("TENSOR_TRACE", t) }
 
 // =============================================================================
 // SECTION 9: Reduction Operations
 // =============================================================================
 
-/// Reduce along axis (op: 0=sum, 1=mean, 2=max, 3=min, 4=prod)
+/// Reduce along axis (op: 0=sum, 1=prod, 2=max, 3=min, 4=mean,
+/// 5=var — mirrors TensorReduceOp byte values)
 public fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
 
-/// Reduce all elements (op: 0=sum, 1=mean, 2=max, 3=min, 4=prod)
+/// Reduce all elements (op: 0=sum, 1=prod, 2=max, 3=min, 4=mean)
 public fn tensor_reduce_all(t: Int, op: Int) -> Int { @intrinsic("TENSOR_REDUCE_ALL", t, op) }
 
 /// Argmax along axis — returns an I64 index tensor. axis < 0

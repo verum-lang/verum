@@ -1,0 +1,404 @@
+// =============================================================================
+// core-tests/intrinsics/tensor/integration_test.vr
+// =============================================================================
+//
+// Extended tensor surface: factories, indexing, comparison/selection,
+// normalization extras, linear-algebra decompositions, einsum, conv.
+//
+// TIER CONTRACT: correct on the interpreter (Tier-0). At Tier-1 these
+// ops currently lower to LOUD verum_panic stubs ("<op>: no Tier-1
+// lowering yet") — run this file with `--interp`; the AOT legs flip
+// green per-op as the T0179 epic lands real IR bodies. Single-output
+// contracts for multi-factor ops are documented in
+// core/intrinsics/tensor.vr (QR → Q, SVD → S, LU → U, EIG → values).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.tensor.{
+    tensor_from_slice, tensor_fill, tensor_get_scalar,
+    tensor_arange, tensor_linspace, tensor_eye, tensor_rand, tensor_randn,
+    tensor_randint,
+    tensor_squeeze, tensor_unsqueeze, tensor_permute, tensor_broadcast,
+    tensor_index_select, tensor_gather, tensor_concat, tensor_stack,
+    tensor_cmp, tensor_where, tensor_clamp, tensor_cast, tensor_masked_fill,
+    tensor_lerp, tensor_argmax, tensor_topk, tensor_cumulative,
+    tensor_svd, tensor_qr, tensor_eigh, tensor_cholesky,
+    tensor_solve, tensor_tri_solve, tensor_inverse, tensor_det, tensor_trace,
+    tensor_matmul, tensor_one_hot, tensor_nonzero, tensor_einsum,
+    tensor_conv, tensor_norm, tensor_rms_norm, tensor_layer_norm,
+    DTYPE_F32, DTYPE_F64, DTYPE_I64, DTYPE_BOOL,
+};
+
+fn feq(a: Float, b: Float) -> Bool {
+    let d = a - b;
+    let ad = if d < 0.0 { 0.0 - d } else { d };
+    ad < 0.000000001
+}
+
+fn feq_loose(a: Float, b: Float) -> Bool {
+    let d = a - b;
+    let ad = if d < 0.0 { 0.0 - d } else { d };
+    ad < 0.000001
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 1 — Factories (T0176 pins: eye/arange were wire-garbage)
+// -----------------------------------------------------------------------------
+
+@test
+fn eye_has_unit_diagonal() {
+    let e = tensor_eye(2);
+    assert(feq(tensor_get_scalar(e, 0), 1.0));
+    assert(feq(tensor_get_scalar(e, 1), 0.0));
+    assert(feq(tensor_get_scalar(e, 2), 0.0));
+    assert(feq(tensor_get_scalar(e, 3), 1.0));
+}
+
+@test
+fn arange_steps_correctly() {
+    let a = tensor_arange(0, 4, 1);
+    assert(feq(tensor_get_scalar(a, 0), 0.0));
+    assert(feq(tensor_get_scalar(a, 2), 2.0));
+    assert(feq(tensor_get_scalar(a, 3), 3.0));
+}
+
+@test
+fn arange_float_step() {
+    let a = tensor_arange(0.0, 1.0, 0.25);
+    assert(feq(tensor_get_scalar(a, 1), 0.25));
+    assert(feq(tensor_get_scalar(a, 3), 0.75));
+}
+
+@test
+fn linspace_hits_endpoints() {
+    let l = tensor_linspace(0.0, 10.0, 5);
+    assert(feq(tensor_get_scalar(l, 0), 0.0));
+    assert(feq(tensor_get_scalar(l, 4), 10.0));
+    assert(feq(tensor_get_scalar(l, 2), 5.0));
+}
+
+@test
+fn rand_produces_values_in_unit_interval() {
+    let r = tensor_rand([8]);
+    let v = tensor_get_scalar(r, 3);
+    assert(v >= 0.0);
+    assert(v < 1.0);
+}
+
+@test
+fn randn_produces_varied_finite_values() {
+    let r = tensor_randn([4]);
+    let a = tensor_get_scalar(r, 0);
+    let b = tensor_get_scalar(r, 1);
+    assert(a > -100.0);
+    assert(a < 100.0);
+    let d = a - b;
+    let ad = if d < 0.0 { 0.0 - d } else { d };
+    assert(ad > 0.0);
+}
+
+@test
+fn randint_respects_bounds() {
+    let r = tensor_randint(3, 6, [16]);
+    let v = tensor_get_scalar(r, 7);
+    assert(v >= 3.0);
+    assert(v < 6.0);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 2 — Shape extras + indexing
+// -----------------------------------------------------------------------------
+
+@test
+fn squeeze_then_unsqueeze_preserves_values() {
+    let x = tensor_from_slice([1.0, 2.0], [1, 2], DTYPE_F64);
+    let s = tensor_squeeze(x);
+    assert(feq(tensor_get_scalar(s, 1), 2.0));
+    let u = tensor_unsqueeze(s, 0);
+    assert(feq(tensor_get_scalar(u, 1), 2.0));
+}
+
+@test
+fn permute_reverses_matrix_axes() {
+    // permute([2,3] tensor, [1,0]) == transpose
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3], DTYPE_F64);
+    let p = tensor_permute(x, [1, 0]);
+    // element (0,1) of the permuted 3x2 = element (1,0) of source = 4
+    assert(feq(tensor_get_scalar(p, 1), 4.0));
+}
+
+@ignore("TENSOR-BROADCAST-KERNEL-1 (T0199, 2026-07-16) — wire fixed under T0193, but the kernel returns None for the standard NumPy row-tile [1,2]->[2,2]; flips green with the kernel materialization.")
+@test
+fn broadcast_tiles_row_vector() {
+    let x = tensor_from_slice([1.0, 2.0], [1, 2], DTYPE_F64);
+    let b = tensor_broadcast(x, [2, 2]);
+    assert(feq(tensor_get_scalar(b, 0), 1.0));
+    assert(feq(tensor_get_scalar(b, 2), 1.0));
+    assert(feq(tensor_get_scalar(b, 3), 2.0));
+}
+
+@test
+fn index_select_picks_rows() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let idx = tensor_from_slice([1.0], [1], DTYPE_I64);
+    let sel = tensor_index_select(x, 0, idx);
+    assert(feq(tensor_get_scalar(sel, 0), 3.0));
+    assert(feq(tensor_get_scalar(sel, 1), 4.0));
+}
+
+@test
+fn concat_joins_vectors() {
+    let a = tensor_from_slice([1.0, 2.0], [2], DTYPE_F64);
+    let b = tensor_from_slice([3.0, 4.0], [2], DTYPE_F64);
+    let c = tensor_concat([a, b], 0);
+    assert(feq(tensor_get_scalar(c, 0), 1.0));
+    assert(feq(tensor_get_scalar(c, 3), 4.0));
+}
+
+@test
+fn stack_adds_leading_axis() {
+    let a = tensor_from_slice([1.0, 2.0], [2], DTYPE_F64);
+    let b = tensor_from_slice([3.0, 4.0], [2], DTYPE_F64);
+    let s = tensor_stack([a, b], 0);
+    assert(feq(tensor_get_scalar(s, 2), 3.0));
+}
+
+@test
+fn one_hot_encodes_indices() {
+    let idx = tensor_from_slice([1.0], [1], DTYPE_I64);
+    let oh = tensor_one_hot(idx, 3);
+    assert(feq(tensor_get_scalar(oh, 0), 0.0));
+    assert(feq(tensor_get_scalar(oh, 1), 1.0));
+    assert(feq(tensor_get_scalar(oh, 2), 0.0));
+}
+
+@test
+fn nonzero_reports_first_hit() {
+    let x = tensor_from_slice([0.0, 5.0, 0.0], [3], DTYPE_F64);
+    let nz = tensor_nonzero(x);
+    assert(feq(tensor_get_scalar(nz, 0), 1.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 3 — Comparison / selection / interpolation
+// -----------------------------------------------------------------------------
+
+@test
+fn cmp_lt_yields_boolean_mask() {
+    let a = tensor_from_slice([1.0, 5.0], [2], DTYPE_F64);
+    let b = tensor_fill([2], 3.0, DTYPE_F64);
+    let m = tensor_cmp(a, b, 2); // lt
+    assert(feq(tensor_get_scalar(m, 0), 1.0));
+    assert(feq(tensor_get_scalar(m, 1), 0.0));
+}
+
+@test
+fn where_selects_by_condition() {
+    let a = tensor_from_slice([1.0, 5.0], [2], DTYPE_F64);
+    let b = tensor_fill([2], 3.0, DTYPE_F64);
+    let cond = tensor_cmp(a, b, 2); // a < b
+    let w = tensor_where(cond, a, b);
+    assert(feq(tensor_get_scalar(w, 0), 1.0));
+    assert(feq(tensor_get_scalar(w, 1), 3.0));
+}
+
+@test
+fn clamp_bounds_values() {
+    let x = tensor_from_slice([-5.0, 0.5, 5.0], [3], DTYPE_F64);
+    let c = tensor_clamp(x, -1, 1);
+    assert(feq(tensor_get_scalar(c, 0), -1.0));
+    assert(feq(tensor_get_scalar(c, 1), 0.5));
+    assert(feq(tensor_get_scalar(c, 2), 1.0));
+}
+
+@test
+fn cast_f64_to_i64_truncates() {
+    let x = tensor_from_slice([1.9, -1.9], [2], DTYPE_F64);
+    let c = tensor_cast(x, DTYPE_I64);
+    assert(feq(tensor_get_scalar(c, 0), 1.0));
+    assert(feq(tensor_get_scalar(c, 1), -1.0));
+}
+
+@test
+fn masked_fill_writes_only_masked() {
+    let x = tensor_from_slice([1.0, 2.0], [2], DTYPE_F64);
+    let ones = tensor_fill([2], 1.0, DTYPE_F64);
+    let mask = tensor_cmp(x, ones, 4); // x > 1 → [0,1]
+    let mf = tensor_masked_fill(x, mask, 9.0);
+    assert(feq(tensor_get_scalar(mf, 0), 1.0));
+    assert(feq(tensor_get_scalar(mf, 1), 9.0));
+}
+
+@test
+fn lerp_midpoint() {
+    let a = tensor_fill([2], 0.0, DTYPE_F64);
+    let b = tensor_fill([2], 10.0, DTYPE_F64);
+    let l = tensor_lerp(a, b, 0.5);
+    assert(feq(tensor_get_scalar(l, 0), 5.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 4 — Reductions extras
+// -----------------------------------------------------------------------------
+
+@test
+fn argmax_returns_flat_index_tensor() {
+    let x = tensor_from_slice([1.0, 9.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let am = tensor_argmax(x, -1);
+    assert(feq(tensor_get_scalar(am, 0), 1.0));
+}
+
+@test
+fn argmax_along_axis_gives_per_lane_indices() {
+    // [[1,9],[7,4]]: argmax axis=1 -> [1, 0]
+    let x = tensor_from_slice([1.0, 9.0, 7.0, 4.0], [2, 2], DTYPE_F64);
+    let am = tensor_argmax(x, 1);
+    assert(feq(tensor_get_scalar(am, 0), 1.0));
+    assert(feq(tensor_get_scalar(am, 1), 0.0));
+}
+
+@test
+fn topk_values_sorted_desc() {
+    let x = tensor_from_slice([3.0, 1.0, 4.0, 1.0, 5.0], [5], DTYPE_F64);
+    let tk = tensor_topk(x, 2, -1);
+    assert(feq(tensor_get_scalar(tk, 0), 5.0));
+    assert(feq(tensor_get_scalar(tk, 1), 4.0));
+}
+
+@test
+fn cumulative_sum_and_prod() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0], [3], DTYPE_F64);
+    let cs = tensor_cumulative(x, 0, 0);
+    assert(feq(tensor_get_scalar(cs, 2), 6.0));
+    let cp = tensor_cumulative(x, 1, 0);
+    assert(feq(tensor_get_scalar(cp, 2), 6.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 5 — Linear algebra
+// -----------------------------------------------------------------------------
+
+@ignore("TENSOR-DET-TRACE-VALUE-1 (T0200, 2026-07-16) — Det arm returns 0.0 and Trace returns int-bits-as-double; value channel of the two scalar-returning arms.")
+@test
+fn det_and_trace_of_diag() {
+    let d = tensor_from_slice([2.0, 0.0, 0.0, 3.0], [2, 2], DTYPE_F64);
+    assert(feq(tensor_det(d), 6.0));
+    assert(feq(tensor_trace(d), 5.0));
+}
+
+@test
+fn inverse_times_original_is_identity() {
+    let a = tensor_from_slice([4.0, 7.0, 2.0, 6.0], [2, 2], DTYPE_F64);
+    let inv = tensor_inverse(a);
+    let prod = tensor_matmul(a, inv);
+    assert(feq_loose(tensor_get_scalar(prod, 0), 1.0));
+    assert(feq_loose(tensor_get_scalar(prod, 1), 0.0));
+    assert(feq_loose(tensor_get_scalar(prod, 3), 1.0));
+}
+
+@test
+fn solve_recovers_known_solution() {
+    // [[2,0],[0,4]] x = [2,8] → x = [1,2]
+    let a = tensor_from_slice([2.0, 0.0, 0.0, 4.0], [2, 2], DTYPE_F64);
+    let b = tensor_from_slice([2.0, 8.0], [2], DTYPE_F64);
+    let x = tensor_solve(a, b);
+    assert(feq_loose(tensor_get_scalar(x, 0), 1.0));
+    assert(feq_loose(tensor_get_scalar(x, 1), 2.0));
+}
+
+@test
+fn tri_solve_lower_triangular() {
+    // [[2,0],[1,1]] x = [4,5] → x = [2,3]
+    let a = tensor_from_slice([2.0, 0.0, 1.0, 1.0], [2, 2], DTYPE_F64);
+    let b = tensor_from_slice([4.0, 5.0], [2], DTYPE_F64);
+    let x = tensor_tri_solve(a, b);
+    assert(feq_loose(tensor_get_scalar(x, 0), 2.0));
+    assert(feq_loose(tensor_get_scalar(x, 1), 3.0));
+}
+
+@test
+fn svd_singular_values_of_diagonal() {
+    let d = tensor_from_slice([3.0, 0.0, 0.0, 2.0], [2, 2], DTYPE_F64);
+    let s = tensor_svd(d);
+    assert(feq_loose(tensor_get_scalar(s, 0), 3.0));
+    assert(feq_loose(tensor_get_scalar(s, 1), 2.0));
+}
+
+@test
+fn eigh_eigenvalues_of_diagonal() {
+    let d = tensor_from_slice([2.0, 0.0, 0.0, 5.0], [2, 2], DTYPE_F64);
+    let ev = tensor_eigh(d);
+    let a = tensor_get_scalar(ev, 0);
+    let b = tensor_get_scalar(ev, 1);
+    assert(feq_loose(a + b, 7.0));
+    assert(feq_loose(a * b, 10.0));
+}
+
+@test
+fn cholesky_of_identity_is_identity() {
+    let e = tensor_eye(2);
+    let l = tensor_cholesky(e);
+    assert(feq_loose(tensor_get_scalar(l, 0), 1.0));
+    assert(feq_loose(tensor_get_scalar(l, 1), 0.0));
+}
+
+@test
+fn qr_q_columns_are_unit_norm() {
+    let a = tensor_from_slice([3.0, 0.0, 4.0, 1.0], [2, 2], DTYPE_F64);
+    let q = tensor_qr(a);
+    let c0 = tensor_get_scalar(q, 0) * tensor_get_scalar(q, 0)
+        + tensor_get_scalar(q, 2) * tensor_get_scalar(q, 2);
+    assert(feq_loose(c0, 1.0));
+}
+
+@test
+fn einsum_matmul_equivalence() {
+    let a = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let b = tensor_from_slice([5.0, 6.0, 7.0, 8.0], [2, 2], DTYPE_F64);
+    let e = tensor_einsum("ij,jk->ik", [a, b]);
+    assert(feq_loose(tensor_get_scalar(e, 0), 19.0));
+    assert(feq_loose(tensor_get_scalar(e, 3), 50.0));
+}
+
+@test
+fn norm_l2_of_pythagorean_vector() {
+    let x = tensor_from_slice([3.0, 4.0], [2], DTYPE_F64);
+    let n = tensor_norm(x, 2, -1);
+    assert(feq_loose(tensor_get_scalar(n, 0), 5.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 6 — Convolution + normalization extras
+// -----------------------------------------------------------------------------
+
+@test
+fn conv1d_moving_sum() {
+    // [1,2,3,4] * [1,1] (valid) = [3,5,7]
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [4], DTYPE_F64);
+    let k = tensor_from_slice([1.0, 1.0], [2], DTYPE_F64);
+    let c = tensor_conv(x, k);
+    assert(feq_loose(tensor_get_scalar(c, 0), 3.0));
+    assert(feq_loose(tensor_get_scalar(c, 1), 5.0));
+    assert(feq_loose(tensor_get_scalar(c, 2), 7.0));
+}
+
+@test
+fn rms_norm_of_constant_vector_is_unit() {
+    let x = tensor_fill([4], 3.0, DTYPE_F64);
+    let ones = tensor_fill([4], 1.0, DTYPE_F64);
+    let r = tensor_rms_norm(x, ones);
+    assert(feq_loose(tensor_get_scalar(r, 0), 1.0));
+}
+
+@test
+fn layer_norm_zero_mean_output() {
+    let x = tensor_from_slice([1.0, 3.0], [1, 2], DTYPE_F64);
+    let ones = tensor_fill([2], 1.0, DTYPE_F64);
+    let zeros = tensor_fill([2], 0.0, DTYPE_F64);
+    let ln = tensor_layer_norm(x, 2, ones, zeros);
+    let a = tensor_get_scalar(ln, 0);
+    let b = tensor_get_scalar(ln, 1);
+    assert(feq_loose(a + b, 0.0));
+    assert(a < 0.0);
+    assert(b > 0.0);
+}
