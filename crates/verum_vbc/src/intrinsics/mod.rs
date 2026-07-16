@@ -41,12 +41,10 @@
 //! | atomic_load | 5 cycles | 3 cycles |
 //! | memcpy(64) | 20 cycles | 8 cycles |
 
-pub mod codegen;
 pub mod lowering;
 pub mod registry;
 pub mod signatures;
 
-pub use codegen::IntrinsicCodegen;
 pub use lowering::IntrinsicLowering;
 pub use registry::{
     INTRINSIC_REGISTRY, Intrinsic, IntrinsicCategory, IntrinsicHint, IntrinsicRegistry,
