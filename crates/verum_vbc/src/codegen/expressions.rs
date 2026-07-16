@@ -1668,6 +1668,50 @@ impl VbcCodegen {
                     return Ok(Some(dest));
                 }
 
+                // Check if this is a const generic parameter (SIZE, N, etc.)
+                // of the enclosing impl/fn (`SIZE * 8`, `N - 1`) — a
+                // compile-time value witness carried through the #44-B
+                // channel.
+                //
+                // CONST-GENERIC-PARAM-SHADOW-1 (#40): this MUST run BEFORE
+                // the function-reference resolution below.  A const param
+                // whose name collides with an in-scope stdlib symbol
+                // (`SIZE` → the `.SIZE` const-shaped fallback, `size` /
+                // `Size` → a scoped `size` function) would otherwise bind
+                // first to that global and compile to `NewClosure` / `Call`
+                // — the body's `SIZE` became a function ref, not the const
+                // witness (`B<17>.capacity()` returned a closure value,
+                // Variant(...)/64 garbage).  Lexical scoping: the enclosing
+                // generic param shadows any global of the same name.  Emits
+                // the #44-B generic-witness form — `LoadT { Generic(idx) }`
+                // over the shared ordered-params numbering; at Tier-0 the
+                // frame's CallG/SetCallWitness-delivered witness resolves
+                // the slot to `ConstValue(v)` and the LoadT handler
+                // materializes `from_i64(v)`.  With NO witness LoadT yields
+                // nil (byte-identical to the historical LoadNil placeholder).
+                if self.ctx.const_generic_params.contains(&name.to_string()) {
+                    let dest = self.ctx.alloc_temp();
+                    if let Some(idx) = self
+                        .ctx
+                        .generic_type_params_ordered
+                        .iter()
+                        .position(|p| p == &name.to_string())
+                    {
+                        self.ctx.emit(Instruction::LoadT {
+                            dst: dest,
+                            type_ref: crate::types::TypeRef::Generic(
+                                crate::types::TypeParamId(idx as u16),
+                            ),
+                        });
+                    } else {
+                        // Not in the ordered numbering (registration path
+                        // that never populated it) — keep the legacy
+                        // placeholder.
+                        self.ctx.emit(Instruction::LoadNil { dst: dest });
+                    }
+                    return Ok(Some(dest));
+                }
+
                 // Try to find as a function (for function references) or static/constant
                 // Extract func info first to avoid borrow conflicts
                 //
@@ -1961,42 +2005,10 @@ impl VbcCodegen {
                     return Ok(Some(dest));
                 }
 
-                // Check if this is a const generic parameter (SIZE, N, etc.)
-                // These appear in expressions like `SIZE * 8` or `N - 1` and represent
-                // compile-time known values.
-                //
-                // CONST-GENERIC-VALUE-CARRY-1 (task #19): emit the #44-B
-                // generic-witness form — `LoadT { Generic(idx) }` over the
-                // shared ordered-params numbering (impl-level type AND const
-                // params, declaration order).  At Tier-0 the frame's
-                // CallG/SetCallWitness-delivered witness table resolves the
-                // slot to `TypeRef::ConstValue(v)` and the LoadT handler
-                // materializes `Value::from_i64(v)` — `StackAllocator<256>
-                // .capacity()` returns 256.  With NO witness LoadT yields
-                // nil, byte-identical to the historical LoadNil placeholder
-                // (strictly-better, never-worse).
-                if self.ctx.const_generic_params.contains(&name.to_string()) {
-                    let dest = self.ctx.alloc_temp();
-                    if let Some(idx) = self
-                        .ctx
-                        .generic_type_params_ordered
-                        .iter()
-                        .position(|p| p == &name.to_string())
-                    {
-                        self.ctx.emit(Instruction::LoadT {
-                            dst: dest,
-                            type_ref: crate::types::TypeRef::Generic(
-                                crate::types::TypeParamId(idx as u16),
-                            ),
-                        });
-                    } else {
-                        // Not in the ordered numbering (registration path
-                        // that never populated it) — keep the legacy
-                        // placeholder.
-                        self.ctx.emit(Instruction::LoadNil { dst: dest });
-                    }
-                    return Ok(Some(dest));
-                }
+                // (Const-generic-param resolution now runs earlier, before
+                // function-reference lookup — see CONST-GENERIC-PARAM-SHADOW-1
+                // above — so an impl's const param shadows any global of the
+                // same name.)
 
                 // Fallback for nullary variant constructors not yet registered as functions.
                 // Try to find a qualified name (Type.Variant) that matches.
@@ -23003,6 +23015,42 @@ impl VbcCodegen {
                                 ret_type_name,
                                 &full,
                             );
+                            // CONST-GENERIC-RETNAME-SUBST-1 (#40): an explicit
+                            // constructor return type that mentions the type's
+                            // OWN symbolic params (`fn new() -> B<CAP>` instead
+                            // of `Self`) surfaces `ret_type_name = "B<CAP>"`.
+                            // `substitute_self_in_type_name` leaves it untouched
+                            // (no `Self` token), so the binding would be typed by
+                            // the UNBOUND param name and the receiver-driven const
+                            // witness derivation parses no literal — the callsite
+                            // degrades to a plain `Call` with no `ConstValue`
+                            // type_arg (nil / wrong body result).  The receiver
+                            // TypeExpr `full` ("B<16>") is the authoritative
+                            // instantiation: when the return type's base is the
+                            // receiver's own base, map the type's declared params
+                            // onto `full`'s concrete args so `B<CAP>` → `B<16>`.
+                            let resolved = {
+                                let ret_base =
+                                    VbcCodegen::strip_generic_args(&resolved).to_string();
+                                if ret_base == base {
+                                    let params = self
+                                        .ctx
+                                        .type_generic_params
+                                        .get(&ret_base)
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    let recv_args = VbcCodegen::split_generic_args(&full);
+                                    if !params.is_empty() && !recv_args.is_empty() {
+                                        VbcCodegen::substitute_generic_params_in_type_name(
+                                            &resolved, &params, &recv_args,
+                                        )
+                                    } else {
+                                        resolved
+                                    }
+                                } else {
+                                    resolved
+                                }
+                            };
                             if resolved == base && full.contains('<') {
                                 return Some(full);
                             }

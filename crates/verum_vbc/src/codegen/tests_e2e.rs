@@ -3083,4 +3083,65 @@ mod const_generic_value_carry_tests {
             }
         }
     }
+
+    /// CONST-GENERIC-RETNAME-SUBST-1 (#40): a constructor with an EXPLICIT
+    /// return type mentioning the type's own const param (`fn new() -> B<N>`
+    /// instead of `Self`) must still carry the callsite instantiation onto
+    /// the `let` binding.  Pre-fix `return_type_name = "B<N>"` was recorded
+    /// verbatim (N unbound), so `b.cap()` degraded to a plain `Call` with no
+    /// `ConstValue` witness and the body's `LoadT(Generic)` read nil.
+    #[test]
+    fn const_generic_explicit_constructor_return_type() {
+        assert_main_returns_int(
+            r#"
+            type B<const N: Int> is { x: Int };
+
+            implement<const N: Int> B<N> {
+                public fn new() -> B<N> {
+                    B { x: 1 }
+                }
+                public fn cap(&self) -> Int {
+                    N
+                }
+            }
+
+            fn main() -> Int {
+                let b = B<7>.new();
+                b.cap()
+            }
+            "#,
+            7,
+        );
+    }
+
+    /// CONST-GENERIC-PARAM-SHADOW-1 (#40): a const param whose name collides
+    /// with an in-scope stdlib symbol (`SIZE` → the `.SIZE` const-shaped
+    /// fallback / a scoped `size` fn) must SHADOW that global inside the
+    /// method body.  Pre-fix the body's `SIZE` bound first to the global and
+    /// compiled to `NewClosure` / `Call` — `capacity()` returned a closure
+    /// value, not the const witness (the `MyAlloc<17>`/`<99>` → garbage repro).
+    #[test]
+    fn const_generic_param_name_shadows_global() {
+        assert_main_returns_int(
+            r#"
+            type MyAlloc<const SIZE: Int> is { used: Int };
+
+            implement<const SIZE: Int> MyAlloc<SIZE> {
+                public fn new() -> MyAlloc<SIZE> {
+                    MyAlloc { used: 0 }
+                }
+                public fn capacity(&self) -> Int {
+                    SIZE
+                }
+            }
+
+            fn main() -> Int {
+                let a = MyAlloc<17>.new();
+                let b = MyAlloc<99>.new();
+                a.capacity() + b.capacity()
+            }
+            "#,
+            116,
+        );
+    }
 }
