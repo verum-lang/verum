@@ -98,6 +98,21 @@ impl Default for TestOptions {
     }
 }
 
+/// Effective default worker count for a test run (ONE authority for
+/// the banner and the pool). Interp tests are cheap in-process jobs —
+/// the CPU count is the right default. AOT tests each spawn an
+/// ISOLATED CHILD that performs a full native compile+link (an LLVM
+/// instance measured in GBs of RSS): a CPU-count default fans out
+/// 8-16 concurrent compilers and has OOM-rebooted a 16-core laptop
+/// (T0203). AOT defaults to 2 workers; `--test-threads` and
+/// `[test].parallel=false` override exactly as before.
+fn default_test_threads(tier: Tier) -> usize {
+    match tier {
+        Tier::Aot => 2,
+        _ => num_cpus::get(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestFormat {
     Pretty,
@@ -287,7 +302,10 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         // previously still printed `parallel=true`, which mis-attributed
         // set-only crashes to parallelism during triage (task #40).
         let effective_threads = if manifest.test.parallel {
-            opts.test_threads.unwrap_or_else(num_cpus::get).max(1)
+            opts
+                .test_threads
+                .unwrap_or_else(|| default_test_threads(opts.tier))
+                .max(1)
         } else {
             1
         };
@@ -348,7 +366,10 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     // executes on the main thread — the same stable configuration as
     // `verum build`.
     let pool: Option<rayon::ThreadPool> = if manifest.test.parallel {
-        let n = opts.test_threads.unwrap_or_else(num_cpus::get).max(1);
+        let n = opts
+            .test_threads
+            .unwrap_or_else(|| default_test_threads(opts.tier))
+            .max(1);
         if n <= 1 {
             None
         } else {
