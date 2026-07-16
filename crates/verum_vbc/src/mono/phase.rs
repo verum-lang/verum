@@ -33,40 +33,6 @@ use super::substitution::TypeSubstitution;
 // ============================================================================
 
 /// Computes type hash for cache metadata.
-/// Canonical-decoder shim (name-collision-free import inside execute's
-/// wave loop).
-fn verum_vbc_decode(
-    bytecode: &[u8],
-) -> Result<Vec<crate::instruction::Instruction>, crate::error::VbcError> {
-    crate::bytecode::decode_instructions(bytecode)
-}
-
-/// A type arg is CONCRETE when no Generic/AssociatedProjection remains
-/// anywhere in it — the recursive twin of the substitution's own
-/// completeness notion (fixpoint discovery must not record
-/// placeholder-carrying keys: they can never match a call-site
-/// lookup and would re-pend forever).
-fn type_ref_is_concrete(t: &TypeRef) -> bool {
-    match t {
-        TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } => false,
-        TypeRef::Concrete(_) => true,
-        TypeRef::Instantiated { args, .. } => args.iter().all(type_ref_is_concrete),
-        TypeRef::Reference { inner, .. } => type_ref_is_concrete(inner),
-        TypeRef::Tuple(elems) => elems.iter().all(type_ref_is_concrete),
-        TypeRef::Array { element, .. } => type_ref_is_concrete(element),
-        TypeRef::Slice(inner) => type_ref_is_concrete(inner),
-        TypeRef::Function {
-            params,
-            return_type,
-            ..
-        } => params.iter().all(type_ref_is_concrete) && type_ref_is_concrete(return_type),
-        TypeRef::Rank2Function { .. } => true,
-        // A resolved const-generic VALUE is fully concrete by definition
-        // (CONST-GENERIC-VALUE-CARRY-1 witness channel, b0c79b174).
-        TypeRef::ConstValue(_) => true,
-    }
-}
-
 fn compute_type_hash(type_args: &[TypeRef]) -> u64 {
     use std::collections::hash_map::DefaultHasher;
 
@@ -301,87 +267,27 @@ impl MonomorphizationPhase {
             eprintln!("[mono-exec] graph.len()={}", graph.len());
         }
 
-        // Steps 2+3: resolve + specialize TO FIXPOINT
-        // (VBC-GENERIC-INSTANTIATION propagation, task #44).
-        //
-        // The instantiation graph is built from PRE-specialization
-        // bodies, where a CallG inside a generic function still
-        // carries `Generic(i)` placeholder type args — `show<T>`
-        // calling `helper<T>(x)` contributes no CONCRETE
-        // instantiation for `helper` even once `show<Pt>` is
-        // specialized.  The specializer substitutes those args
-        // (concrete `CallG helper<Pt>` in the specialized body), so
-        // each wave's OUTPUT is scanned for concrete-arg CallG sites
-        // not yet in the graph; discoveries seed the next wave.
-        // `resolve_one` dedupes by request hash, so re-resolving the
-        // grown graph only pends the new entries.  Bounded by
-        // MAX_MONO_WAVES as a runaway backstop (cycles terminate
-        // naturally: a repeated (fn, args) key is already resolved).
-        const MAX_MONO_WAVES: usize = 32;
-        let mut graph = graph.clone();
-        let mut specialized: Vec<(
-            super::graph::InstantiationRequest,
-            super::specializer::SpecializedFunction,
-        )> = Vec::new();
-        let mut wave = 0usize;
-        loop {
-            resolver.resolve(&graph)?;
-            let pending = resolver.take_pending();
-            if trace_mono {
-                let rs = resolver.stats();
-                eprintln!(
-                    "[mono-exec] wave={} resolved: pending={} stdlib_hits={} cache_hits={}",
-                    wave,
-                    pending.len(),
-                    rs.stdlib_hits,
-                    rs.cache_hits
-                );
-            }
-            if pending.is_empty() {
-                break;
-            }
-            let wave_specialized = if self.config.parallel && pending.len() > 1 {
-                self.specialize_parallel(&user_module, &graph, &pending)?
-            } else {
-                self.specialize_sequential(&user_module, &graph, &pending)?
-            };
-            // Transitive discovery over the freshly substituted bodies.
-            let mut discovered = 0usize;
-            for (_req, sf) in &wave_specialized {
-                let Ok(instrs) = verum_vbc_decode(&sf.bytecode) else {
-                    continue;
-                };
-                for instr in instrs {
-                    if let crate::instruction::Instruction::CallG {
-                        func_id, type_args, ..
-                    } = instr
-                    {
-                        let callee = crate::module::FunctionId(func_id);
-                        let concrete = !type_args.is_empty()
-                            && type_args.iter().all(type_ref_is_concrete);
-                        if concrete && !graph.contains(callee, &type_args) {
-                            graph.record_instantiation(
-                                callee,
-                                type_args,
-                                super::graph::SourceLocation::default(),
-                            );
-                            discovered += 1;
-                        }
-                    }
-                }
-            }
-            specialized.extend(wave_specialized);
-            wave += 1;
-            if trace_mono {
-                eprintln!("[mono-exec] wave={} discovered={} new instantiations", wave, discovered);
-            }
-            if discovered == 0 || wave >= MAX_MONO_WAVES {
-                break;
-            }
-        }
-        let graph = &graph;
+        // Step 2: Resolve all instantiations
+        resolver.resolve(graph)?;
+
+        // Step 3: Specialize pending functions
+        let pending = resolver.take_pending();
         if trace_mono {
-            eprintln!("[mono-exec] specialized={} (fixpoint after {} waves)", specialized.len(), wave);
+            let rs = resolver.stats();
+            eprintln!(
+                "[mono-exec] resolved: pending={} stdlib_hits={} cache_hits={}",
+                pending.len(),
+                rs.stdlib_hits,
+                rs.cache_hits
+            );
+        }
+        let specialized = if self.config.parallel && pending.len() > 1 {
+            self.specialize_parallel(&user_module, graph, &pending)?
+        } else {
+            self.specialize_sequential(&user_module, graph, &pending)?
+        };
+        if trace_mono {
+            eprintln!("[mono-exec] specialized={}", specialized.len());
         }
 
         // Step 4: Cache newly specialized functions

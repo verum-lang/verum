@@ -17,57 +17,6 @@ use crate::value::Value;
 // Call Operations
 // ============================================================================
 
-/// XMOD-BAND-FREEZE-1 (#54): bind a band-range function id to a real
-/// body BY NAME at dispatch time.  See `handle_call` for the contract.
-pub(in super::super) fn resolve_xmod_band(
-    state: &mut InterpreterState,
-    func_id: FunctionId,
-) -> InterpreterResult<FunctionId> {
-    if let Some(&real) = state.xmod_link_cache.get(&func_id.0) {
-        return Ok(real);
-    }
-    let name: Option<String> = state
-        .module
-        .external_function_names
-        .iter()
-        .find(|(fid, _)| fid.0 == func_id.0)
-        .and_then(|(_, sid)| state.module.strings.get(*sid))
-        .map(|s| s.to_string());
-    // Misses fall through to the ORIGINAL id: the legacy flow raises
-    // `FunctionNotFound(band-id)` — the exact error class the existing
-    // recovery layers key on (the global-ctor lenient skip matches
-    // `FunctionNotFound` + `in_xmod_call_band`; a bespoke Panic here
-    // ESCALATED the severity and aborted whole test files that the
-    // lenient discipline deliberately keeps alive).  The name is
-    // surfaced via trace for diagnosis.
-    match name {
-        Some(name) => match state.module.find_function_by_name(&name) {
-            Some(real) => {
-                state.xmod_link_cache.insert(func_id.0, real);
-                Ok(real)
-            }
-            None => {
-                if std::env::var_os("VERUM_TRACE_XMOD").is_some() {
-                    eprintln!(
-                        "[xmod-link] band id {} name '{}' has no loaded body — FunctionNotFound path",
-                        func_id.0, name
-                    );
-                }
-                Ok(func_id)
-            }
-        },
-        None => {
-            if std::env::var_os("VERUM_TRACE_XMOD").is_some() {
-                eprintln!(
-                    "[xmod-link] band id {} has no name record — FunctionNotFound path",
-                    func_id.0
-                );
-            }
-            Ok(func_id)
-        }
-    }
-}
-
 /// Call function: `dst = fn(args...)`
 ///
 
@@ -78,21 +27,6 @@ pub(in super::super) fn handle_call(
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
     let args = read_reg_range(state)?;
-
-    // **XMOD-BAND-FREEZE-1 (#54) — dispatch-time lazy link.**  A
-    // band-range id ([0x2000_0000, 0x4000_0000)) is a NAME REFERENCE,
-    // never a body: the merge prepass re-homed every unresolved
-    // cross-module external to a fresh user-band id carried with its
-    // qualified name in `module.external_function_names`.  Bind it BY
-    // NAME here, once every archive has loaded (load-order
-    // independent); memoised per id.  A symbol that never
-    // materialises panics with the NAME instead of the opaque
-    // `Function 5368710xx not found`.
-    let func_id = if crate::stub_ranges::in_xmod_call_band(func_id.0) {
-        resolve_xmod_band(state, func_id)?
-    } else {
-        func_id
-    };
 
     // Task #16 stages 1+2 unresolved-stub detection (deferred reland
     // prerequisite).  Stage-1 / stage-2 pre-passes in
