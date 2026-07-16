@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/intrinsics/tensor/regression_test.vr
+// =============================================================================
+//
+// Pins for the T0176 / T0193 / T0140 defect class — each test is the
+// minimal reproduction of a probe that failed at HEAD 8f82d9f16.
+// Root cause: the tensor tree had TWO wire-shape authorities (the
+// registry emitter packs `[dst][mode?][arg-regs]`, ~30 interpreter
+// arms read f64/varint/u8 IMMEDIATES) plus an F64-only write path
+// that silently no-op'd for every other dtype.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.tensor.{
+    tensor_fill, tensor_get_scalar, tensor_set_scalar, tensor_eye,
+    tensor_arange, tensor_from_slice, tensor_binop, tensor_reduce,
+    tensor_matmul, tensor_softmax, tensor_argmax,
+    DTYPE_F32, DTYPE_F64,
+};
+
+fn feq(a: Float, b: Float) -> Bool {
+    let d = a - b;
+    let ad = if d < 0.0 { 0.0 - d } else { d };
+    ad < 0.000000001
+}
+
+// T0176 probe line 1: fill(dtype=F32) read back 0.0 (silent-null
+// write through data_ptr_f64_mut).
+@test
+fn pin_t0176_fill_f32_not_zero() {
+    let t = tensor_fill([2, 2], 3.0, DTYPE_F32);
+    assert(feq(tensor_get_scalar(t, 0), 3.0));
+}
+
+// T0176 probe line 2: eye(2) diag read 0.0 — the Identity arm parsed
+// the register byte as a varint size.
+@test
+fn pin_t0176_eye_diag_is_one() {
+    let e = tensor_eye(2);
+    assert(feq(tensor_get_scalar(e, 0), 1.0));
+    assert(feq(tensor_get_scalar(e, 3), 1.0));
+}
+
+// T0176 probe line 3: arange(0,4,1)[2] read 0.0 — the Arange arm
+// parsed register bytes as three inline f64 immediates.
+@test
+fn pin_t0176_arange_reads_values() {
+    let a = tensor_arange(0, 4, 1);
+    assert(feq(tensor_get_scalar(a, 2), 2.0));
+}
+
+// T0176 probe line 4: set_scalar at idx then read-back — the GetScalar
+// twin arm (0x8F) ignored the index operand entirely.
+@test
+fn pin_t0176_set_scalar_honors_index() {
+    let t = tensor_fill([2, 2], 3.0, DTYPE_F64);
+    let t2 = tensor_set_scalar(t, 2, 7);
+    assert(feq(tensor_get_scalar(t2, 2), 7.0));
+    assert(feq(tensor_get_scalar(t2, 1), 3.0));
+}
+
+// T0193 probe: softmax(x, axis=1) returned the GLOBAL softmax
+// (0.0320586…) because the axis byte was a register index and the
+// kernel ignored axis anyway.
+@test
+fn pin_t0193_softmax_axis_not_global() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let sm = tensor_softmax(x, 1);
+    let v = tensor_get_scalar(sm, 0);
+    // must be the per-row value, NOT the global-softmax 0.0320586…
+    assert(feq(v, 0.2689414213699951));
+}
+
+// T0193 probe: argmax returned unit `()` after reading one byte past
+// its operand envelope (keepdim byte of the legacy shape).
+@test
+fn pin_t0193_argmax_returns_index_tensor() {
+    let x = tensor_from_slice([1.0, 9.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let am = tensor_argmax(x, -1);
+    assert(feq(tensor_get_scalar(am, 0), 1.0));
+}
+
+// Envelope-authoritative advance: an instruction FOLLOWING a tensor
+// op must execute correctly even in dense sequences (the old desync
+// class corrupted the next instruction's opcode byte).
+@test
+fn pin_t0193_stream_integrity_after_tensor_ops() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let e = tensor_eye(2);
+    let mm = tensor_matmul(x, e);
+    let s = tensor_reduce(tensor_binop(mm, mm, 0), 0, -1);
+    // (1+2+3+4)*2 = 20 — and plain integer arithmetic still works
+    assert(feq(tensor_get_scalar(s, 0), 20.0));
+    let k = 21 + 21;
+    assert_eq(k, 42);
+}

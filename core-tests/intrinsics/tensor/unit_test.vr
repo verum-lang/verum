@@ -1,0 +1,243 @@
+// =============================================================================
+// core-tests/intrinsics/tensor/unit_test.vr
+// =============================================================================
+//
+// Core tensor surface — the ops whose Tier-1 runtime has REAL IR
+// bodies (create/fill/from_slice/element access/binop/unop/matmul/
+// reduce/reshape/transpose/softmax/clone/contiguous). Green on BOTH
+// tiers is the acceptance bar (T0193).
+//
+// The rest of the surface (factories, indexing, decompositions,
+// normalization extras) lives in integration_test.vr: correct on the
+// interpreter, loud verum_panic stubs at Tier-1 until the T0179
+// epic lands their IR bodies.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.tensor.{
+    tensor_new, tensor_fill, tensor_from_slice, tensor_clone,
+    tensor_get_scalar, tensor_set_scalar,
+    tensor_binop, tensor_unop, tensor_matmul,
+    tensor_reduce, tensor_reduce_all,
+    tensor_reshape, tensor_transpose, tensor_contiguous,
+    tensor_softmax, tensor_log_softmax,
+    DTYPE_F32, DTYPE_F64, DTYPE_I64,
+};
+
+fn feq(a: Float, b: Float) -> Bool {
+    let d = a - b;
+    let ad = if d < 0.0 { 0.0 - d } else { d };
+    ad < 0.000000001
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 1 — Creation + element access
+// -----------------------------------------------------------------------------
+
+@test
+fn new_is_zero_initialised() {
+    let t = tensor_new([2, 3], DTYPE_F64);
+    assert(feq(tensor_get_scalar(t, 0), 0.0));
+    assert(feq(tensor_get_scalar(t, 5), 0.0));
+}
+
+@test
+fn fill_f64_reads_back_at_every_index() {
+    let t = tensor_fill([2, 2], 3.5, DTYPE_F64);
+    assert(feq(tensor_get_scalar(t, 0), 3.5));
+    assert(feq(tensor_get_scalar(t, 3), 3.5));
+}
+
+@test
+fn fill_f32_is_dtype_converted_not_silently_zero() {
+    // T0176 pin: dtype 0 (F32) fills used to no-op via the F64-only
+    // null write path — every F32 tensor read back 0.0.
+    let t = tensor_fill([2, 2], 3.5, DTYPE_F32);
+    assert(feq(tensor_get_scalar(t, 0), 3.5));
+    assert(feq(tensor_get_scalar(t, 3), 3.5));
+}
+
+@test
+fn fill_i64_truncates_into_integer_lane() {
+    let t = tensor_fill([2], 7.9, DTYPE_I64);
+    assert(feq(tensor_get_scalar(t, 0), 7.0));
+}
+
+@test
+fn from_slice_lays_out_row_major() {
+    let t = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    assert(feq(tensor_get_scalar(t, 0), 1.0));
+    assert(feq(tensor_get_scalar(t, 1), 2.0));
+    assert(feq(tensor_get_scalar(t, 2), 3.0));
+    assert(feq(tensor_get_scalar(t, 3), 4.0));
+}
+
+@test
+fn set_scalar_honors_index_and_float_value() {
+    let t = tensor_fill([2, 2], 1.0, DTYPE_F64);
+    let t2 = tensor_set_scalar(t, 2, 7.5);
+    assert(feq(tensor_get_scalar(t2, 2), 7.5));
+    assert(feq(tensor_get_scalar(t2, 1), 1.0));
+    // source tensor is untouched (copy-on-write contract)
+    assert(feq(tensor_get_scalar(t, 2), 1.0));
+}
+
+@test
+fn clone_is_deep() {
+    let t = tensor_fill([2], 2.0, DTYPE_F64);
+    let c = tensor_clone(t);
+    let t2 = tensor_set_scalar(t, 0, 9.0);
+    assert(feq(tensor_get_scalar(c, 0), 2.0));
+    assert(feq(tensor_get_scalar(t2, 0), 9.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 2 — Element-wise arithmetic
+// -----------------------------------------------------------------------------
+
+@test
+fn binop_add_sub_mul_div() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [4], DTYPE_F64);
+    let y = tensor_fill([4], 2.0, DTYPE_F64);
+    assert(feq(tensor_get_scalar(tensor_binop(x, y, 0), 2), 5.0)); // add
+    assert(feq(tensor_get_scalar(tensor_binop(x, y, 1), 2), 1.0)); // sub
+    assert(feq(tensor_get_scalar(tensor_binop(x, y, 2), 2), 6.0)); // mul
+    assert(feq(tensor_get_scalar(tensor_binop(x, y, 3), 2), 1.5)); // div
+}
+
+@test
+fn unop_neg_abs_relu() {
+    let x = tensor_from_slice([-2.0, 3.0], [2], DTYPE_F64);
+    let n = tensor_unop(x, 0); // neg
+    assert(feq(tensor_get_scalar(n, 0), 2.0));
+    let a = tensor_unop(x, 1); // abs
+    assert(feq(tensor_get_scalar(a, 0), 2.0));
+    let r = tensor_unop(x, 10); // relu
+    assert(feq(tensor_get_scalar(r, 0), 0.0));
+    assert(feq(tensor_get_scalar(r, 1), 3.0));
+}
+
+@test
+fn unop_exp_log_roundtrip() {
+    let x = tensor_from_slice([1.0, 2.0], [2], DTYPE_F64);
+    let e = tensor_unop(x, 3); // exp
+    let l = tensor_unop(e, 4); // log
+    assert(feq(tensor_get_scalar(l, 0), 1.0));
+    assert(feq(tensor_get_scalar(l, 1), 2.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 3 — Matmul + reductions
+// -----------------------------------------------------------------------------
+
+@test
+fn matmul_identity_preserves() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let i2 = tensor_from_slice([1.0, 0.0, 0.0, 1.0], [2, 2], DTYPE_F64);
+    let mm = tensor_matmul(x, i2);
+    assert(feq(tensor_get_scalar(mm, 0), 1.0));
+    assert(feq(tensor_get_scalar(mm, 1), 2.0));
+    assert(feq(tensor_get_scalar(mm, 2), 3.0));
+    assert(feq(tensor_get_scalar(mm, 3), 4.0));
+}
+
+@test
+fn matmul_2x2_known_product() {
+    // [[1,2],[3,4]] @ [[5,6],[7,8]] = [[19,22],[43,50]]
+    let a = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let b = tensor_from_slice([5.0, 6.0, 7.0, 8.0], [2, 2], DTYPE_F64);
+    let c = tensor_matmul(a, b);
+    assert(feq(tensor_get_scalar(c, 0), 19.0));
+    assert(feq(tensor_get_scalar(c, 1), 22.0));
+    assert(feq(tensor_get_scalar(c, 2), 43.0));
+    assert(feq(tensor_get_scalar(c, 3), 50.0));
+}
+
+@test
+fn reduce_sum_mean_max_min_all() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [4], DTYPE_F64);
+    assert(feq(tensor_get_scalar(tensor_reduce(x, 0, -1), 0), 10.0)); // sum
+    assert(feq(tensor_get_scalar(tensor_reduce(x, 4, -1), 0), 2.5)); // mean
+    assert(feq(tensor_get_scalar(tensor_reduce(x, 1, -1), 0), 24.0)); // prod
+    assert(feq(tensor_get_scalar(tensor_reduce(x, 2, -1), 0), 4.0)); // max
+    assert(feq(tensor_get_scalar(tensor_reduce(x, 3, -1), 0), 1.0)); // min
+    assert(feq(tensor_get_scalar(tensor_reduce_all(x, 0), 0), 10.0));
+}
+
+@test
+fn reduce_along_axis_of_matrix() {
+    // [[1,2],[3,4]]: sum axis 0 -> [4,6]; sum axis 1 -> [3,7]
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let s0 = tensor_reduce(x, 0, 0);
+    assert(feq(tensor_get_scalar(s0, 0), 4.0));
+    assert(feq(tensor_get_scalar(s0, 1), 6.0));
+    let s1 = tensor_reduce(x, 0, 1);
+    assert(feq(tensor_get_scalar(s1, 0), 3.0));
+    assert(feq(tensor_get_scalar(s1, 1), 7.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 4 — Shape ops
+// -----------------------------------------------------------------------------
+
+@test
+fn reshape_preserves_flat_order() {
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3], DTYPE_F64);
+    let r = tensor_reshape(x, [3, 2]);
+    assert(feq(tensor_get_scalar(r, 0), 1.0));
+    assert(feq(tensor_get_scalar(r, 5), 6.0));
+}
+
+@test
+fn transpose_swaps_last_two_dims() {
+    // [[1,2],[3,4]]ᵀ = [[1,3],[2,4]]
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let t = tensor_transpose(x);
+    assert(feq(tensor_get_scalar(t, 0), 1.0));
+    assert(feq(tensor_get_scalar(t, 1), 3.0));
+    assert(feq(tensor_get_scalar(t, 2), 2.0));
+    assert(feq(tensor_get_scalar(t, 3), 4.0));
+}
+
+@test
+fn contiguous_is_value_preserving() {
+    let x = tensor_from_slice([1.0, 2.0], [2], DTYPE_F64);
+    let c = tensor_contiguous(x);
+    assert(feq(tensor_get_scalar(c, 0), 1.0));
+    assert(feq(tensor_get_scalar(c, 1), 2.0));
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 5 — Softmax (axis semantics, T0193 pin)
+// -----------------------------------------------------------------------------
+
+@test
+fn softmax_rows_sum_to_one_per_lane() {
+    // T0193 pin: softmax([[1,2],[3,4]], axis=1)[0] must be
+    // 1/(1+e) ≈ 0.26894…, not the GLOBAL softmax 0.03205… the
+    // axis-ignoring implementation produced.
+    let x = tensor_from_slice([1.0, 2.0, 3.0, 4.0], [2, 2], DTYPE_F64);
+    let sm = tensor_softmax(x, 1);
+    assert(feq(tensor_get_scalar(sm, 0), 0.2689414213699951));
+    assert(feq(tensor_get_scalar(sm, 1), 0.7310585786300049));
+    // row sums
+    assert(feq(tensor_get_scalar(sm, 0) + tensor_get_scalar(sm, 1), 1.0));
+    assert(feq(tensor_get_scalar(sm, 2) + tensor_get_scalar(sm, 3), 1.0));
+}
+
+@test
+fn softmax_global_when_axis_negative() {
+    let x = tensor_from_slice([0.0, 0.0, 0.0, 0.0], [2, 2], DTYPE_F64);
+    let sm = tensor_softmax(x, -1);
+    assert(feq(tensor_get_scalar(sm, 0), 0.25));
+}
+
+@test
+fn log_softmax_agrees_with_log_of_softmax() {
+    let x = tensor_from_slice([1.0, 2.0], [2], DTYPE_F64);
+    let ls = tensor_log_softmax(x, 0);
+    let sm = tensor_softmax(x, 0);
+    let lsm = tensor_unop(sm, 4); // log
+    assert(feq(tensor_get_scalar(ls, 0), tensor_get_scalar(lsm, 0)));
+    assert(feq(tensor_get_scalar(ls, 1), tensor_get_scalar(lsm, 1)));
+}

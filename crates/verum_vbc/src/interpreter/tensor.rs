@@ -851,6 +851,70 @@ impl TensorHandle {
         }
     }
 
+    /// Writes `value` at flat `index`, converting into this tensor's
+    /// dtype — the write-side twin of `get_element_f64`.  Every dtype
+    /// accepts an f64 and stores its converted representation, so a
+    /// registry-driven fill/set can never silently no-op on a
+    /// non-F64 tensor (T0193 / T0176 root: the old handlers wrote
+    /// through `data_ptr_f64_mut()`, which returns null for any
+    /// dtype other than F64 — F32/int tensors stayed zero).
+    /// Complex dtypes write the real component and zero the
+    /// imaginary one, mirroring the real-part read contract of
+    /// `get_element_f64`. Returns false when the index is out of
+    /// range or the tensor has no data.
+    pub fn set_element_f64(&mut self, index: usize, value: f64) -> bool {
+        if index >= self.numel {
+            return false;
+        }
+        let Some(data) = self.data.as_mut() else {
+            return false;
+        };
+        unsafe {
+            let ptr = (*data.as_ptr()).as_mut_ptr();
+            match self.dtype {
+                DType::F32 => *((ptr as *mut f32).add(index)) = value as f32,
+                DType::F64 => *((ptr as *mut f64).add(index)) = value,
+                DType::I8 => *((ptr as *mut i8).add(index)) = value as i8,
+                DType::I16 => *((ptr as *mut i16).add(index)) = value as i16,
+                DType::I32 => *((ptr as *mut i32).add(index)) = value as i32,
+                DType::I64 => *((ptr as *mut i64).add(index)) = value as i64,
+                DType::U8 => *(ptr.add(index)) = value as u8,
+                DType::U16 => *((ptr as *mut u16).add(index)) = value as u16,
+                DType::U32 => *((ptr as *mut u32).add(index)) = value as u32,
+                DType::U64 => *((ptr as *mut u64).add(index)) = value as u64,
+                DType::Bool => *(ptr.add(index)) = (value != 0.0) as u8,
+                DType::F16 => *((ptr as *mut u16).add(index)) = f32_to_f16_bits(value as f32),
+                DType::BF16 => *((ptr as *mut u16).add(index)) = f32_to_bf16_bits(value as f32),
+                DType::Complex64 => {
+                    let p = (ptr as *mut f32).add(index * 2);
+                    *p = value as f32;
+                    *p.add(1) = 0.0;
+                }
+                DType::Complex128 => {
+                    let p = (ptr as *mut f64).add(index * 2);
+                    *p = value;
+                    *p.add(1) = 0.0;
+                }
+            }
+        }
+        true
+    }
+
+    /// Fills every element with `value`, converting into this
+    /// tensor's dtype (dtype-aware twin of the old F64-only fill
+    /// loops). Returns false when the tensor has no data.
+    pub fn fill_f64(&mut self, value: f64) -> bool {
+        if self.data.is_none() {
+            return false;
+        }
+        for i in 0..self.numel {
+            if !self.set_element_f64(i, value) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Increments the data reference count.
     pub fn incref(&self) {
         if let Some(data) = &self.data {
@@ -2467,72 +2531,140 @@ pub fn tensor_softmax(src: &TensorHandle, axis: Option<i32>) -> Option<TensorHan
     super::kernel::dispatch_softmax(src, axis)
 }
 
-/// CPU implementation of softmax (used as fallback)
-pub fn tensor_softmax_cpu(src: &TensorHandle, _axis: Option<i32>) -> Option<TensorHandle> {
-    // Simplified implementation: softmax over all elements
-    // Full implementation would handle axis-specific softmax
-    let result = TensorHandle::zeros(&src.shape[..src.ndim as usize], src.dtype)?;
+/// CPU implementation of softmax.
+///
 
-    let src_data = src.data.as_ref()?;
-    let dst_data = result.data.as_ref()?;
+/// `axis: None` normalizes over ALL elements; `axis: Some(a)`
+/// normalizes every lane along dimension `a` independently (the
+/// standard ML semantic).  The pre-T0193 version ignored `axis`
+/// entirely and always produced the global softmax — probe pin:
+/// softmax([[1,2],[3,4]], axis=1)[0] must be 1/(1+e) ≈ 0.2689,
+/// not exp(1)/Σexp(1..4) ≈ 0.0321.
+pub fn tensor_softmax_cpu(src: &TensorHandle, axis: Option<i32>) -> Option<TensorHandle> {
+    softmax_lanes(src, axis, false)
+}
 
-    // SAFETY: All pointers are valid
-    unsafe {
-        let src_ptr = (*src_data.as_ptr()).as_ptr();
-        let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr();
+/// Numerically stable log-softmax (log-sum-exp), same axis
+/// contract as `tensor_softmax_cpu`.
+pub fn tensor_log_softmax(src: &TensorHandle, axis: Option<i32>) -> Option<TensorHandle> {
+    softmax_lanes(src, axis, true)
+}
 
-        match src.dtype {
-            DType::F32 => {
-                let s = src_ptr as *const f32;
-                let d = dst_ptr as *mut f32;
+/// Shared lane walker for softmax / log-softmax.
+///
 
-                // Find max for numerical stability
-                let mut max_val = f32::NEG_INFINITY;
-                for i in 0..src.numel {
-                    max_val = max_val.max(*s.add(i));
-                }
-
-                // Compute exp(x - max) and sum
-                let mut sum = 0.0f32;
-                for i in 0..src.numel {
-                    let exp_val = (*s.add(i) - max_val).exp();
-                    *d.add(i) = exp_val;
-                    sum += exp_val;
-                }
-
-                // Normalize
-                for i in 0..src.numel {
-                    *d.add(i) /= sum;
-                }
-            }
-            DType::F64 => {
-                let s = src_ptr as *const f64;
-                let d = dst_ptr as *mut f64;
-
-                // Find max for numerical stability
-                let mut max_val = f64::NEG_INFINITY;
-                for i in 0..src.numel {
-                    max_val = max_val.max(*s.add(i));
-                }
-
-                // Compute exp(x - max) and sum
-                let mut sum = 0.0f64;
-                for i in 0..src.numel {
-                    let exp_val = (*s.add(i) - max_val).exp();
-                    *d.add(i) = exp_val;
-                    sum += exp_val;
-                }
-
-                // Normalize
-                for i in 0..src.numel {
-                    *d.add(i) /= sum;
-                }
-            }
-            _ => return None,
-        }
+/// A "lane" is one 1-D slice along `axis`; for `axis: None` the
+/// whole tensor is a single lane. Iterates lanes via the
+/// contiguous row-major layout every creation path in this module
+/// produces (outer × axis × inner index decomposition), reads and
+/// writes through the dtype-converting element accessors so every
+/// dtype gets correct (if not yet vectorized) results.
+fn softmax_lanes(src: &TensorHandle, axis: Option<i32>, log: bool) -> Option<TensorHandle> {
+    let ndim = src.ndim as usize;
+    let mut result = TensorHandle::zeros(&src.shape[..ndim], src.dtype)?;
+    if src.numel == 0 {
+        return Some(result);
     }
 
+    let (outer, lane, inner) = match axis {
+        None => (1usize, src.numel, 1usize),
+        Some(a) => {
+            let a = if a < 0 { ndim as i32 + a } else { a };
+            if a < 0 || a as usize >= ndim.max(1) {
+                return None;
+            }
+            let a = a as usize;
+            let outer: usize = src.shape[..a].iter().product();
+            let inner: usize = src.shape[a + 1..ndim].iter().product();
+            (outer, src.shape[a], inner)
+        }
+    };
+
+    for o in 0..outer {
+        for i in 0..inner {
+            let base = o * lane * inner + i;
+            // max for stability
+            let mut max_val = f64::NEG_INFINITY;
+            for l in 0..lane {
+                max_val = max_val.max(src.get_element_f64(base + l * inner)?);
+            }
+            let mut sum = 0.0f64;
+            for l in 0..lane {
+                sum += (src.get_element_f64(base + l * inner)? - max_val).exp();
+            }
+            if log {
+                let lse = max_val + sum.ln();
+                for l in 0..lane {
+                    let idx = base + l * inner;
+                    let v = src.get_element_f64(idx)?;
+                    result.set_element_f64(idx, v - lse);
+                }
+            } else {
+                for l in 0..lane {
+                    let idx = base + l * inner;
+                    let v = (src.get_element_f64(idx)? - max_val).exp();
+                    result.set_element_f64(idx, v / sum);
+                }
+            }
+        }
+    }
     Some(result)
+}
+
+/// Argmax as a tensor of I64 indices.
+///
+
+/// `axis: None` → 1-element tensor holding the flat index of the
+/// global maximum; `axis: Some(a)` → tensor of per-lane argmax
+/// indices with dimension `a` removed. Uniform tensor-handle
+/// return makes the .vr `tensor_argmax(t, axis) -> handle`
+/// contract composable with `tensor_get_scalar` on both tiers.
+pub fn tensor_argmax_tensor(src: &TensorHandle, axis: Option<i32>) -> Option<TensorHandle> {
+    let ndim = src.ndim as usize;
+    match axis {
+        None => {
+            let (idx, _val) = tensor_argmax(src, None)?;
+            let mut result = TensorHandle::zeros(&[1], DType::I64)?;
+            result.set_element_f64(0, idx as f64);
+            Some(result)
+        }
+        Some(a) => {
+            let a = if a < 0 { ndim as i32 + a } else { a };
+            if a < 0 || a as usize >= ndim.max(1) {
+                return None;
+            }
+            let a = a as usize;
+            let outer: usize = src.shape[..a].iter().product();
+            let lane = src.shape[a];
+            let inner: usize = src.shape[a + 1..ndim].iter().product();
+            if lane == 0 {
+                return None;
+            }
+            let mut out_shape: Vec<usize> = Vec::with_capacity(ndim.saturating_sub(1));
+            out_shape.extend_from_slice(&src.shape[..a]);
+            out_shape.extend_from_slice(&src.shape[a + 1..ndim]);
+            if out_shape.is_empty() {
+                out_shape.push(1);
+            }
+            let mut result = TensorHandle::zeros(&out_shape, DType::I64)?;
+            for o in 0..outer {
+                for i in 0..inner {
+                    let base = o * lane * inner + i;
+                    let mut best = 0usize;
+                    let mut best_val = f64::NEG_INFINITY;
+                    for l in 0..lane {
+                        let v = src.get_element_f64(base + l * inner)?;
+                        if v > best_val {
+                            best_val = v;
+                            best = l;
+                        }
+                    }
+                    result.set_element_f64(o * inner + i, best as f64);
+                }
+            }
+            Some(result)
+        }
+    }
 }
 
 /// Returns the index of the maximum value along an axis.
@@ -2845,6 +2977,64 @@ pub fn tensor_rand(shape: &[usize], dtype: DType) -> Option<TensorHandle> {
         }
     }
 
+    Some(result)
+}
+
+/// Creates a tensor of standard-normal samples (Box–Muller over the
+/// same xorshift generator family as `tensor_rand`).
+pub fn tensor_randn(shape: &[usize], dtype: DType) -> Option<TensorHandle> {
+    let mut result = TensorHandle::zeros(shape, dtype)?;
+    result.data.as_ref()?;
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEED: AtomicU64 = AtomicU64::new(0xD1B5_4A32_D192_ED03);
+
+    fn next_uniform() -> f64 {
+        let mut s = SEED.load(Ordering::Relaxed);
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        SEED.store(s, Ordering::Relaxed);
+        // (0, 1] to keep ln() finite
+        ((s >> 11) as f64 + 1.0) / ((1u64 << 53) as f64)
+    }
+
+    let mut i = 0usize;
+    while i < result.numel {
+        let u1 = next_uniform();
+        let u2 = next_uniform();
+        let r = (-2.0 * u1.ln()).sqrt();
+        let theta = 2.0 * std::f64::consts::PI * u2;
+        result.set_element_f64(i, r * theta.cos());
+        if i + 1 < result.numel {
+            result.set_element_f64(i + 1, r * theta.sin());
+        }
+        i += 2;
+    }
+    Some(result)
+}
+
+/// Creates a tensor of uniformly distributed integers in `[low, high)`.
+pub fn tensor_randint(low: i64, high: i64, shape: &[usize], dtype: DType) -> Option<TensorHandle> {
+    if high <= low {
+        return None;
+    }
+    let mut result = TensorHandle::zeros(shape, dtype)?;
+    result.data.as_ref()?;
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEED: AtomicU64 = AtomicU64::new(0x9E37_79B9_7F4A_7C15);
+
+    let span = (high - low) as u64;
+    for i in 0..result.numel {
+        let mut s = SEED.load(Ordering::Relaxed);
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        SEED.store(s, Ordering::Relaxed);
+        let v = low + (s % span) as i64;
+        result.set_element_f64(i, v as f64);
+    }
     Some(result)
 }
 
@@ -4963,54 +5153,17 @@ pub fn tensor_argmin(src: &TensorHandle, _axis: Option<i32>) -> Option<(usize, f
         return None;
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
-
+    // T0200 class: read through the dtype-converting accessor —
+    // the old raw loop used `data.as_ptr()` (the TensorData STRUCT
+    // pointer, not the element buffer).
     let mut min_idx = 0usize;
     let mut min_val = f64::INFINITY;
-
-    match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) } as f64;
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
+    for i in 0..src.numel {
+        let v = src.get_element_f64(i)?;
+        if v < min_val {
+            min_val = v;
+            min_idx = i;
         }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) };
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
-        }
-        DType::I32 => {
-            let ptr = data_ptr as *const i32;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) } as f64;
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
-        }
-        DType::I64 => {
-            let ptr = data_ptr as *const i64;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) } as f64;
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
-        }
-        _ => return None,
     }
 
     Some((min_idx, min_val))
@@ -5110,26 +5263,14 @@ pub fn tensor_det(src: &TensorHandle) -> Option<f64> {
         return Some(1.0);
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
-
-    // Copy to working matrix
+    // T0200: copy in through the dtype-converting accessor — the
+    // old raw loop read `data.as_ptr()` (the TensorData STRUCT
+    // pointer, not the element buffer), so the working matrix was
+    // header bytes and every determinant was garbage. The accessor
+    // is the ONE element-read authority and covers every dtype.
     let mut matrix: Vec<f64> = Vec::with_capacity(n * n);
-
-    match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            for i in 0..(n * n) {
-                matrix.push(unsafe { *ptr.add(i) } as f64);
-            }
-        }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            for i in 0..(n * n) {
-                matrix.push(unsafe { *ptr.add(i) });
-            }
-        }
-        _ => return None,
+    for i in 0..(n * n) {
+        matrix.push(src.get_element_f64(i)?);
     }
 
     // LU decomposition in-place
@@ -5189,38 +5330,12 @@ pub fn tensor_trace(src: &TensorHandle) -> Option<f64> {
         return Some(0.0);
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
+    // T0200: same struct-pointer misuse as tensor_det — route the
+    // diagonal reads through the dtype-converting accessor.
     let cols = src.shape[1];
-
     let mut trace = 0.0;
-
-    match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) } as f64;
-            }
-        }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) };
-            }
-        }
-        DType::I32 => {
-            let ptr = data_ptr as *const i32;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) } as f64;
-            }
-        }
-        DType::I64 => {
-            let ptr = data_ptr as *const i64;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) } as f64;
-            }
-        }
-        _ => return None,
+    for i in 0..n {
+        trace += src.get_element_f64(i * cols + i)?;
     }
 
     Some(trace)
@@ -5246,35 +5361,12 @@ pub fn tensor_norm(src: &TensorHandle, ord: i8) -> Option<f64> {
         return Some(0.0);
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
-
-    // Get values as f64
-    let values: Vec<f64> = match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            (0..src.numel)
-                .map(|i| unsafe { *ptr.add(i) } as f64)
-                .collect()
-        }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            (0..src.numel).map(|i| unsafe { *ptr.add(i) }).collect()
-        }
-        DType::I32 => {
-            let ptr = data_ptr as *const i32;
-            (0..src.numel)
-                .map(|i| unsafe { *ptr.add(i) } as f64)
-                .collect()
-        }
-        DType::I64 => {
-            let ptr = data_ptr as *const i64;
-            (0..src.numel)
-                .map(|i| unsafe { *ptr.add(i) } as f64)
-                .collect()
-        }
-        _ => return None,
-    };
+    // T0200 class: collect through the dtype-converting accessor
+    // (the old raw loops read the TensorData STRUCT pointer).
+    let mut values: Vec<f64> = Vec::with_capacity(src.numel);
+    for i in 0..src.numel {
+        values.push(src.get_element_f64(i)?);
+    }
 
     match ord {
         0 => {
@@ -5802,11 +5894,11 @@ pub fn tensor_nonzero(src: &TensorHandle) -> Option<TensorHandle> {
             }
         }
         DType::Bool => {
-            let data = src.data.as_ref()?;
-            let ptr = data.as_ptr() as *const u8;
-            unsafe {
+            // T0200 class: read through the element accessor — the
+            // old `data.as_ptr()` was the TensorData STRUCT pointer.
+            {
                 for flat_idx in 0..src.numel {
-                    if *ptr.add(flat_idx) != 0 {
+                    if src.get_element_f64(flat_idx)? != 0.0 {
                         let mut multi_idx = vec![0i64; ndim];
                         let mut remaining = flat_idx;
                         for d in 0..ndim {

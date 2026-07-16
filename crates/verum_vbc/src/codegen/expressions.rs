@@ -34825,11 +34825,16 @@ impl VbcCodegen {
         args: &[Reg],
         dest: Reg,
     ) {
-        // Encode operands: [mode:1b] [dst:1-2b] [args...]
+        // Encode operands: [dst:1-2b] [mode:1b] [args...]
+        //
+        // T0193: dst comes FIRST so the canonical TensorExtended
+        // operand shape is uniform for moded and mode-less sub-ops
+        // (`operands[0]` is always dst — the AOT lowering preamble
+        // and the interpreter arms rely on exactly this).  The old
+        // mode-first layout made AOT read the MODE BYTE as the
+        // destination register for every WithMode intrinsic.
         fn encode_tensor_operands_with_mode(mode: u8, dest: Reg, args: &[Reg]) -> Vec<u8> {
             let mut bytes = Vec::with_capacity(args.len() * 2 + 3);
-            // Encode mode byte
-            bytes.push(mode);
             // Encode destination register
             if dest.is_short() {
                 bytes.push(dest.0 as u8);
@@ -34837,6 +34842,8 @@ impl VbcCodegen {
                 bytes.push(0x80 | ((dest.0 >> 8) as u8));
                 bytes.push(dest.0 as u8);
             }
+            // Encode mode byte after dst
+            bytes.push(mode);
             // Encode argument registers
             for arg in args {
                 if arg.is_short() {

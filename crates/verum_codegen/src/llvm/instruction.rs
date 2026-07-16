@@ -34048,12 +34048,49 @@ fn lower_tensor_extended<'ctx>(
             ctx.set_register(dst_reg, result);
         }
         Some(TensorSubOpcode::ReduceFromArgs) => {
-            // verum_tensor_reduce(handle: i64, op: i64, axis: i64) -> i64
-            let tensor = get_arg(ctx, 0)?;
-            let op = get_arg(ctx, 1)?;
-            let axis = get_arg(ctx, 2)?;
-            let result =
-                call_tensor_runtime_i64(ctx, "verum_tensor_reduce", &[tensor, op, axis], "reduce")?;
+            // Moded wire (T0193): operands = [dst][mode][t][op][axis?]
+            //   mode 0 → verum_tensor_reduce(t, op, axis)
+            //   mode 1 → verum_tensor_reduce_all(t, op)
+            //   mode 2 → keepdim — panics via its stub until the
+            //            Tier-1 body lands (T0179).
+            let mode = operands.get(1).copied().unwrap_or(0);
+            let tensor = get_arg(ctx, 1)?;
+            let op = get_arg(ctx, 2)?;
+            let result = match mode {
+                // mode 1 (reduce_all) routes through the SAME
+                // handle-returning runtime fn with axis = -1: the
+                // separate verum_tensor_reduce_all body returns a
+                // scalar double (a different contract) and calling
+                // it through the i64 channel aborts native codegen
+                // for the whole bake.
+                1 => {
+                    let all_axis = i64_ty.const_int(u64::MAX, true);
+                    call_tensor_runtime_i64(
+                        ctx,
+                        "verum_tensor_reduce",
+                        &[tensor, op, all_axis],
+                        "reduce_all",
+                    )?
+                }
+                2 => {
+                    let axis = get_arg(ctx, 3)?;
+                    call_tensor_runtime_i64(
+                        ctx,
+                        "verum_tensor_reduce_keepdim",
+                        &[tensor, op, axis],
+                        "reduce_keepdim",
+                    )?
+                }
+                _ => {
+                    let axis = get_arg(ctx, 3)?;
+                    call_tensor_runtime_i64(
+                        ctx,
+                        "verum_tensor_reduce",
+                        &[tensor, op, axis],
+                        "reduce",
+                    )?
+                }
+            };
             ctx.set_register(dst_reg, result.into());
         }
         Some(TensorSubOpcode::ReshapeFromArgs) => {
@@ -34641,6 +34678,19 @@ fn lower_tensor_extended<'ctx>(
             let result = call_tensor_runtime_i64(ctx, "verum_tensor_clone", &[tensor], "allgath")?;
             ctx.set_register(dst_reg, result.into());
         }
+        Some(TensorSubOpcode::BroadcastToShape) => {
+            // Registry wire (T0193): tensor_broadcast(t, shape) —
+            // panics via its stub until the Tier-1 body lands.
+            let tensor = get_arg(ctx, 0)?;
+            let shape = get_arg(ctx, 1)?;
+            let result = call_tensor_runtime_i64(
+                ctx,
+                "verum_tensor_broadcast_to",
+                &[tensor, shape],
+                "broadcast_to",
+            )?;
+            ctx.set_register(dst_reg, result.into());
+        }
         Some(TensorSubOpcode::Broadcast) | Some(TensorSubOpcode::ReduceScatter) => {
             let tensor = get_arg(ctx, 0)?;
             let result = call_tensor_runtime_i64(ctx, "verum_tensor_clone", &[tensor], "bcast")?;
@@ -35021,10 +35071,20 @@ fn lower_tensor_extended<'ctx>(
             ctx.set_register(dst_reg, result.into());
         }
         Some(TensorSubOpcode::Softmax) => {
-            let tensor = get_arg(ctx, 0)?;
-            let axis = get_arg(ctx, 1)?;
-            let result =
+            // Moded wire (T0193): operands = [dst][mode][t][axis]
+            //   mode 0 → softmax, mode 1 → log-softmax (elementwise
+            //   log over the softmax result; op 4 = TensorUnaryOp::Log).
+            let mode = operands.get(1).copied().unwrap_or(0);
+            let tensor = get_arg(ctx, 1)?;
+            let axis = get_arg(ctx, 2)?;
+            let sm =
                 call_tensor_runtime_i64(ctx, "verum_tensor_softmax", &[tensor, axis], "softmax")?;
+            let result = if mode == 1 {
+                let log_op = i64_ty.const_int(4, false);
+                call_tensor_runtime_i64(ctx, "verum_tensor_unop", &[sm, log_op], "log_softmax")?
+            } else {
+                sm
+            };
             ctx.set_register(dst_reg, result.into());
         }
         Some(TensorSubOpcode::LayerNorm) => {
