@@ -82,7 +82,7 @@ The fundamental fix is type-directed resolution of bare variant names in
 match arms / constructors when the enclosing expression's type is known
 (so the bare form resolves to the correct ADT instead of first-wins).
 This is multi-day VBC codegen work (compiler task #17/#39) and is tracked
-in `website:docs/stdlib/defect-class-catalogue.md`. Until then,
+in `docs/architecture/defect-class-catalogue.md`. Until then,
 qualified-form discipline is mandatory for every payload-carrying ADT
 whose variant names are not globally unique.
 

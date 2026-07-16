@@ -28,7 +28,7 @@ None. Pure-Verum byte arithmetic.
 ## 3. Language-implementation gaps
 
 > **Defect-class catalogue**: CONNEG-1 is the
-> [EXTSLICE-1](website:docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv)
+> [EXTSLICE-1](docs/architecture/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv)
 > intrinsic-chain class.
 
 ### §3.1 CONNEG-1 — `parse_*` / `select_*` SIGSEGV (CLOSED 2026-05-28)

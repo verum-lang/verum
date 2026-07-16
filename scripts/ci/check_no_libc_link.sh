@@ -33,7 +33,9 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-VERUM_BIN="${1:-target/debug/verum}"
+# Default honors a session-private CARGO_TARGET_DIR (multi-session machine
+# rule — see CLAUDE.md § Multi-session coordination); falls back to ./target.
+VERUM_BIN="${1:-${CARGO_TARGET_DIR:-target}/debug/verum}"
 SMOKE_SRC="${2:-}"
 
 if [[ ! -x "$VERUM_BIN" ]]; then

@@ -31,10 +31,10 @@ only used internally.
 ## 3. Language-implementation gaps
 
 > **Defect-class catalogue**: URL-1 / URL-7 was the
-> [Text.slice alias-via-raw-pointer](website:docs/stdlib/defect-class-catalogue.md)
+> [Text.slice alias-via-raw-pointer](docs/architecture/defect-class-catalogue.md)
 > defect — the stdlib-side rewrite (eager-copy walk) is its own pattern.
 > URL-8 is the
-> [QUALRESULT-1](website:docs/stdlib/defect-class-catalogue.md#4-qualified-resultokresulterr-match-arms)
+> [QUALRESULT-1](docs/architecture/defect-class-catalogue.md#4-qualified-resultokresulterr-match-arms)
 > qualified-arm class.
 
 ### §3.1 URL-1 / URL-7 — Text.slice alias-via-raw-pointer (CLOSED 2026-05-28)

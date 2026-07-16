@@ -70,7 +70,7 @@ consts) dispatch fine — only the method-returned newtype loses its type.
 Same class as the core `Duration` single-field-record unboxing defect
 (2026-05-27) and the `WindowsDuration.add().as_millis()` mis-read pinned in
 `core-tests/sys/windows/time`. Catalogued as **NEWTYPE-UNBOX-1** in
-`website:docs/stdlib/defect-class-catalogue.md §12`; deep fix is VBC
+`docs/architecture/defect-class-catalogue.md §12`; deep fix is VBC
 codegen newtype boxing/unboxing parity (tracked task). Working idiom:
 `integration_test.vr` asserts `iosb.status_or_pointer == 0` and
 `iosb.bytes_transferred() == 0` directly; `regression_test.vr` pins the broken

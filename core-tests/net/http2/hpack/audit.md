@@ -51,7 +51,7 @@ Pinned by `regression_hpack_decode_string_raw_no_extslice_sigsegv`.
 
 The deeper compiler-layer fix for EXTSLICE-1 (so sub-range slices
 lower cleanly everywhere) remains tracked in
-`website:docs/stdlib/defect-class-catalogue.md §1`.
+`docs/architecture/defect-class-catalogue.md §1`.
 
 ### §3.2 HPACK-HUFFMAN — Huffman string form is intrinsic-backed
 

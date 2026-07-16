@@ -30,8 +30,8 @@ None. Pure-Verum byte arithmetic.
 ## 3. Language-implementation gaps
 
 > **Defect-class catalogue**: HTTPRNG-1 spans
-> [EXTSLICE-1](website:docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv)
-> + [BSTRLIT-1](website:docs/stdlib/defect-class-catalogue.md#2-bliteral-byte-string-literal-sigsegv).
+> [EXTSLICE-1](docs/architecture/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv)
+> + [BSTRLIT-1](docs/architecture/defect-class-catalogue.md#2-bliteral-byte-string-literal-sigsegv).
 
 ### §3.1 HTTPRNG-1 — `parse_range_header` / `resolve_and_merge` / `encode_*` SIGSEGV (CLOSED 2026-05-28)
 

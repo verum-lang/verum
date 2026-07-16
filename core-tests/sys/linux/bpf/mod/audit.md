@@ -63,7 +63,7 @@ umbrella-imported FREE FUNCTIONS via a lenient global function table even
 when the strict import-resolution path fails to bind them; the Tier-2 AOT
 type-checker is strict and rejected them as `E100 unbound variable`. Root
 cause + fix tracked in
-`website:docs/stdlib/defect-class-catalogue.md` (D1 — umbrella
+`docs/architecture/defect-class-catalogue.md` (D1 — umbrella
 re-export resolution). The umbrella TYPE re-exports (the names this module
 exposes) resolve via the type registry on both tiers; the function
 re-exports (`load_program`, `attach_*`, `create_map`, `map_*`) are the

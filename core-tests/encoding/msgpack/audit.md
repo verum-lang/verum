@@ -53,7 +53,7 @@ resolver class as MsgPackError record variants.
 ### §C — Encode/decode round-trip
 Gated on the same byte-array compile-time SIGSEGV class that gates
 Base58 + CBOR round-trip. This is the
-[EXTSLICE-1 / BSTRLIT-1](website:docs/stdlib/defect-class-catalogue.md)
+[EXTSLICE-1 / BSTRLIT-1](docs/architecture/defect-class-catalogue.md)
 family applied to byte-array element-addr lowering. The
 EXTSLICE-1 byte-push discipline has already been applied at the
 stdlib side to `core/encoding/msgpack.vr` (commit `ab9ec931b`);

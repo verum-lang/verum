@@ -39,7 +39,7 @@ byte-array-on-stack defect). 2 placeholder tests pinned @ignored.
 3 EXTSLICE-1 sites inside `core/encoding/base58.vr` (encode buf-copy,
 encode_check payload+checksum concat, decode_check payload trim)
 replaced with byte-by-byte push walks per the
-[EXTSLICE-1 discipline](website:docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv).
+[EXTSLICE-1 discipline](docs/architecture/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv).
 This eliminates one potential SIGSEGV trigger surface but does not
 address the byte-array element-addr lowering defect that gates §A.
 
