@@ -1188,6 +1188,21 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
+            // ENV-IMPL-TRIO-1: env intrinsics are CPU-runtime System
+            // sub-ops (FfiExtended 0x88..0x8A); the GPU/MLIR pipeline has
+            // no environment — lower to a zero placeholder like the other
+            // host-only sequences.
+            InlineSequenceId::EnvGetSeq
+            | InlineSequenceId::EnvSetSeq
+            | InlineSequenceId::EnvUnsetSeq => {
+                self.emit(MlirOp {
+                    name: "llvm.mlir.zero".to_string(),
+                    attrs: vec![],
+                    result_types: vec![MlirType::I64],
+                    operands: vec![],
+                    region: None,
+                })
+            }
             InlineSequenceId::Zeroed => {
                 // Return zeroinitializer
                 self.emit(MlirOp {

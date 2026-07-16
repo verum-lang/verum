@@ -1078,6 +1078,12 @@ impl<'a> IntrinsicCodegen<'a> {
             // System call intrinsics — emit via TimeIntrinsic (reusing infra)
             InlineSequenceId::SysGetpid => self.emit_sys_getpid(args),
             InlineSequenceId::SysGettid => self.emit_sys_gettid(args),
+            // ENV-IMPL-TRIO-1: this legacy surface Nop-stubs the Sys*
+            // family (the REAL emission is expressions.rs' FfiExtended
+            // 0x88..0x8A arms) — mirror that discipline.
+            InlineSequenceId::EnvGetSeq
+            | InlineSequenceId::EnvSetSeq
+            | InlineSequenceId::EnvUnsetSeq => self.emit_sys_gettid(args),
             InlineSequenceId::SysMmap => self.emit_sys_mmap(args),
             InlineSequenceId::SysMunmap => self.emit_sys_munmap(args),
             InlineSequenceId::SysMadvise => self.emit_sys_madvise(args),
