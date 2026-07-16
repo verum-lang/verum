@@ -27,6 +27,34 @@ cross builds.  Helpers in
 `target_is_aarch64` / `target_is_x86_64`) are the canonical
 inspection API.
 
+## CRITICAL: Multi-session coordination (task pool)
+
+Several sessions (Claude agents and humans) work on this repo in
+parallel. All cross-session work items live in ONE shared task pool;
+per-session task numbering is FORBIDDEN (the duplicate `#N` labels in
+old commit history came from it).
+
+* Pool: `<main-checkout>/.taskpool/` — reachable from any worktree as
+  `$(git rev-parse --git-common-dir)/../.taskpool` (machine-local,
+  gitignored). CLI: `scripts/taskpool/tp`. Full protocol:
+  `docs/architecture/multi-session-taskpool.md`.
+* IDs are global and monotone (`T0123`), allocated by `tp new` — never
+  invented by hand. Every commit that works a task references it in
+  the subject: `fix(vbc): ... (T0123)`; finish with
+  `tp done T0123 -c <sha>`.
+* Claim before you work (`tp claim T0123` or `tp claim --next`) —
+  claims are atomic, exactly one winner. Blocked → `tp release` with a
+  note. Found an unrelated defect → file it with `tp new` instead of
+  stretching your claim.
+* Session bootstrap: `scripts/taskpool/tp status && scripts/taskpool/tp list open`.
+* Working-tree hygiene (each rule exists because its violation burned
+  a real session):
+  - Stage only your own paths; NEVER `git add -A`; never commit,
+    stash, or revert changes you did not make.
+  - Build/test with a session-private `CARGO_TARGET_DIR` (e.g. under
+    your scratchpad); never trust binaries in the shared `target/`.
+  - Never run two AOT test suites concurrently on this machine.
+
 ## CRITICAL: Verum Grammar Specification
 
 **AUTHORITATIVE SOURCE**: `grammar/verum.ebnf` - The ONLY source of truth for Verum syntax.
@@ -162,7 +190,7 @@ Function {
 
 ```rust
 // CORRECT
-use verum_common::core::{List, Text, Map, Set, Maybe, Heap, Shared};
+use verum_common::{List, Text, Map, Set, Maybe, Shared};
 
 // FORBIDDEN - Never use Rust std types
 use std::vec::Vec;        // Use List
@@ -224,8 +252,8 @@ use std::collections::*;  // Use Map/Set
 
 | Crate | Purpose | Key Files |
 |-------|---------|-----------|
-| **verum_common** | Semantic types, no deps | `core.rs` (List, Text, Map, Maybe) |
-| **verum_cbgr** | Memory safety system | `managed.rs`, `checked.rs`, `unsafe_ref.rs` |
+| **verum_common** | Semantic types, no deps | `semantic_types.rs` (List, Text, Map), `maybe.rs`, `shared.rs` |
+| **verum_cbgr** | Memory safety system | `escape_analysis.rs`, `ownership_analysis.rs`, `tier_analysis.rs` |
 | **verum_ast** | AST definitions | `expr.rs`, `ty.rs`, `pattern.rs`, `decl.rs` |
 | **verum_lexer** | Tokenization (logos) | `token.rs`, `lexer.rs` |
 | **verum_fast_parser** | Fast recursive-descent parser | `lib.rs`, main parser used |
@@ -246,6 +274,7 @@ use std::collections::*;  // Use Map/Set
 | **verum_protocol_types** | Shared protocol type defs | LSP/DAP wire types |
 | **verum_stdlib_precompiler** | Bakes core/ into the embedded .vbca archive | build-time tool |
 | **verum_core** | Core support crate | shared runtime pieces |
+| **verum_integration_tests** | Cross-crate integration tests | test-only crate |
 
 ### core/ Directory (Verum Standard Library)
 
@@ -315,15 +344,17 @@ perf(crate): Optimize by X%
 | Topic | Location |
 |-------|----------|
 | **Verum Grammar** | `grammar/verum.ebnf` |
-| Type System | `docs/detailed/03-type-system.md` |
-| Syntax | `docs/detailed/05-syntax-grammar.md` |
-| Context System | `docs/detailed/16-context-system.md` |
-| CBGR | `docs/detailed/cbgr-implementation.md` |
+| **Live status / debt** | `docs/architecture/tech-debt-register.md` (LIVING) + `core-tests/INVENTORY.md` (per-module conformance truth) |
+| **Multi-session task pool** | `docs/architecture/multi-session-taskpool.md` + `scripts/taskpool/tp` |
+| Type System | `internal/docs/detailed/03-type-system.md` (local-only, `internal/` is not in git) + `docs/architecture/unified-type-theory.md` |
+| Syntax | `internal/docs/detailed/05-syntax-grammar.md` (local-only) + `docs/by-example/` |
+| Context System | `internal/docs/detailed/16-context-system.md` (local-only) + `docs/by-example/16-context-system/` |
+| CBGR | `internal/docs/detailed/cbgr-implementation.md` (local-only) + `docs/by-example/14-cbgr-references/` |
 | **Intrinsic Dispatch Contract** | `docs/architecture/intrinsic-dispatch-contract.md` — body `@intrinsic` vs table authority, LLVM-canonical alias requirements, `static mut` cell-backed address-of, CBGR-ref bound-check, three-tier reference dispatch. Pinned rules with regression-test references. |
 | **FFI Byte-Buffer Contract** | `docs/architecture/ffi-byte-buffer-contract.md` — how byte buffers cross the Verum↔C ABI: packed `[Byte;N]` (`TypeId::U8`) vs NaN-boxed `List`; reserved-stride `FatRef`; `.as_mut_ptr()` on a subslice param (never a raw array, never `transmute`); per-platform `sockaddr` layout. Root of the B1 net-stack cascade; the `&arr`-vs-`&arr[..]` coercion footgun (task #24). |
-| Cog Distribution | `docs/detailed/15-cog-distribution-architecture.md` |
-| Cog Management | `docs/detailed/15-cog-management.md` |
-| Roadmap | `docs/detailed/28-implementation-roadmap.md` |
+| Cog Distribution | `internal/docs/detailed/15-cog-distribution-architecture.md` (local-only) |
+| Cog Management | `internal/docs/detailed/15-cog-management.md` (local-only) |
+| Roadmap | `internal/docs/detailed/28-implementation-roadmap.md` — **STALE (2025-12-21): claims Tier-1 "100% production-ready", contradicted by the tech-debt register. Trust the register.** |
 | SMT backend examples | `experiments/smt.rs/` |
 | verum_llvm fork  | `crates/llvm/verum_llvm/` (in-tree LLVM bindings; do NOT use `inkwell`) |
 

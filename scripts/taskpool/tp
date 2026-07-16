@@ -1,0 +1,343 @@
+#!/usr/bin/env bash
+# tp — Verum multi-session task pool.
+#
+# Shared, file-based task coordination for parallel sessions (Claude agents
+# and humans) working on this repo from any checkout/worktree on this machine.
+# State is the filesystem: a task is exactly one file, its lifecycle state is
+# the directory it sits in, and every transition is an atomic rename(2), so
+# two sessions can never own the same task.
+#
+#   .taskpool/
+#     open/     T0123.md   available — claim before touching anything
+#     claimed/  T0123.md   one session is working on it
+#     done/     T0123.md   finished (kept forever — the ID space is append-only)
+#     dead/     T0123.md   cancelled / obsolete (kept forever)
+#     events.log           append-only audit trail of every transition
+#
+# IDs are global and monotone (T0101, T0102, ...) — allocated here, never
+# invented by hand. Reference them in commit subjects: "fix(vbc): ... (T0123)".
+# Protocol: docs/architecture/multi-session-taskpool.md
+set -eu
+
+die() { printf 'tp: %s\n' "$*" >&2; exit 1; }
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+pool_root() {
+  if [ -n "${VERUM_TASKPOOL_ROOT:-}" ]; then
+    printf '%s\n' "$VERUM_TASKPOOL_ROOT"
+    return 0
+  fi
+  gcd="$(git rev-parse --git-common-dir 2>/dev/null)" \
+    || die 'not inside a git repo and VERUM_TASKPOOL_ROOT is unset'
+  gcd="$(cd "$gcd" && pwd -P)"
+  printf '%s/.taskpool\n' "$(dirname "$gcd")"
+}
+
+POOL="$(pool_root)"
+STATES='open claimed done dead'
+
+owner_id() {
+  if [ -n "${TP_OWNER:-}" ]; then
+    printf '%s\n' "$TP_OWNER"
+  elif [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+    printf '%s\n' "${CLAUDE_CODE_SESSION_ID%%-*}"
+  else
+    printf '%s-%s\n' "$(id -un)" "$$"
+  fi
+}
+
+log_event() { printf '%s %s\n' "$(now)" "$*" >> "$POOL/events.log"; }
+
+ensure_pool() {
+  [ -d "$POOL/open" ] || die "pool missing at $POOL — run 'tp init' once"
+}
+
+# find_task ID -> "state path" on stdout, rc 1 if unknown
+find_task() {
+  for s in $STATES; do
+    if [ -f "$POOL/$s/$1.md" ]; then
+      printf '%s %s\n' "$s" "$POOL/$s/$1.md"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Highest ID across every state, +1. done/dead files are never deleted, so
+# the sequence is monotone even though allocation is lock-free.
+next_id() {
+  max=100
+  for s in $STATES; do
+    for f in "$POOL/$s"/T*.md; do
+      [ -e "$f" ] || continue
+      n="${f##*/T}"
+      n="${n%.md}"
+      case "$n" in *[!0-9]*) continue ;; esac
+      n=$((10#$n))
+      if [ "$n" -gt "$max" ]; then max=$n; fi
+    done
+  done
+  printf '%04d\n' $((max + 1))
+}
+
+task_title() { sed -n '1s/^# T[0-9]* — //p' "$1"; }
+task_field() { sed -n "s/^$2: *//p" "$1" | head -1; }
+
+mtime_epoch() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0
+}
+
+usage() {
+  cat <<'EOF'
+tp — Verum multi-session task pool
+
+  tp init                              create the pool (idempotent)
+  tp new -t TITLE [-p P0..P3] [-a AREA] [-D T0100,..] [-A ACCEPTANCE] [-b BODY|body on stdin]
+                                       allocate a global ID, file the task; prints the ID
+  tp claim T0123 | tp claim --next [-a AREA]
+                                       atomically take a task (loser of a race just retries)
+  tp note T0123 -m TEXT                append a journal/progress line (heartbeat)
+  tp done T0123 [-m RESOLUTION] [-c COMMIT]
+  tp release T0123 [-m REASON]         put a claimed task back into open
+  tp dead T0123 -m REASON              cancel a task (kept for the ID history)
+  tp list [open|claimed|done|dead|all] one line per task (default: open)
+  tp show T0123                        print the task file
+  tp status                            counts per state + who holds what
+  tp reap [-H HOURS]                   claimed tasks idle > HOURS (default 24) go back to open
+
+Owner identity: $TP_OWNER, else Claude session-id prefix, else user-pid.
+Pool location: $VERUM_TASKPOOL_ROOT, else <main-checkout>/.taskpool.
+EOF
+}
+
+cmd_init() {
+  for s in $STATES; do mkdir -p "$POOL/$s"; done
+  [ -f "$POOL/events.log" ] || : > "$POOL/events.log"
+  if [ ! -f "$POOL/README.md" ]; then
+    cat > "$POOL/README.md" <<'EOF'
+# Verum task pool (machine-local, not in git)
+
+Managed by `scripts/taskpool/tp`. Protocol:
+`docs/architecture/multi-session-taskpool.md`.
+Task state = directory (open/claimed/done/dead); transitions are atomic
+renames; never edit a task you have not claimed; never delete task files.
+EOF
+  fi
+  log_event "INIT pool by $(owner_id)"
+  printf 'pool ready at %s\n' "$POOL"
+}
+
+cmd_new() {
+  ensure_pool
+  title='' prio=P2 area=general depends='-' acceptance='TBD' body=''
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -t) title="$2"; shift 2 ;;
+      -p) prio="$2"; shift 2 ;;
+      -a) area="$2"; shift 2 ;;
+      -D) depends="$2"; shift 2 ;;
+      -A) acceptance="$2"; shift 2 ;;
+      -b) body="$2"; shift 2 ;;
+      *) die "new: unknown arg '$1'" ;;
+    esac
+  done
+  [ -n "$title" ] || die 'new: -t TITLE is required'
+  case "$prio" in P0|P1|P2|P3) ;; *) die "new: priority must be P0..P3, got '$prio'" ;; esac
+  if [ -z "$body" ] && [ ! -t 0 ]; then body="$(cat)"; fi
+  [ -n "$body" ] || body='(no spec — see title)'
+  owner="$(owner_id)"
+
+  # Lock-free allocation: O_EXCL create; on a race the loser rescans and retries.
+  while :; do
+    id="$(next_id)"
+    f="$POOL/open/T$id.md"
+    if ( set -C; : > "$f" ) 2>/dev/null; then break; fi
+  done
+
+  {
+    printf '# T%s — %s\n' "$id" "$title"
+    printf 'Priority: %s\n' "$prio"
+    printf 'Area: %s\n' "$area"
+    printf 'Created: %s by %s\n' "$(now)" "$owner"
+    printf 'Depends: %s\n\n' "$depends"
+    printf '## Spec\n%s\n\n' "$body"
+    printf '## Acceptance\n%s\n\n' "$acceptance"
+    printf '## Journal\n- %s %s: created\n' "$(now)" "$owner"
+  } > "$f"
+  log_event "NEW T$id [$prio $area] by $owner: $title"
+  printf 'T%s\n' "$id"
+}
+
+try_claim() { # $1 = bare id (T0123)
+  src="$POOL/open/$1.md" dst="$POOL/claimed/$1.md"
+  mv "$src" "$dst" 2>/dev/null || return 1
+  o="$(owner_id)"
+  printf -- '- %s %s: CLAIMED pid=%s\n' "$(now)" "$o" "$$" >> "$dst"
+  log_event "CLAIM $1 by $o"
+  printf '%s\n' "$dst"
+}
+
+cmd_claim() {
+  ensure_pool
+  if [ "${1:-}" = --next ]; then
+    shift
+    area=''
+    if [ "${1:-}" = -a ]; then area="$2"; shift 2; fi
+    # candidates ordered by priority then id; race losers fall through
+    for cand in $(
+      for f in "$POOL/open"/T*.md; do
+        [ -e "$f" ] || continue
+        if [ -n "$area" ] && [ "$(task_field "$f" Area)" != "$area" ]; then continue; fi
+        printf '%s %s\n' "$(task_field "$f" Priority)" "$(basename "$f" .md)"
+      done | sort | awk '{print $2}'
+    ); do
+      if try_claim "$cand"; then return 0; fi
+    done
+    die 'claim --next: nothing claimable'
+  fi
+  [ -n "${1:-}" ] || die 'claim: task ID required'
+  try_claim "$1" || die "claim: $1 is not open (already taken or unknown) — run 'tp list'"
+}
+
+append_note() { # $1 path, $2 text
+  printf -- '- %s %s: %s\n' "$(now)" "$(owner_id)" "$2" >> "$1"
+}
+
+cmd_note() {
+  ensure_pool
+  id="${1:-}"; [ -n "$id" ] || die 'note: task ID required'
+  shift
+  msg=''
+  if [ "${1:-}" = -m ]; then msg="$2"; fi
+  [ -n "$msg" ] || die 'note: -m TEXT required'
+  res="$(find_task "$id")" || die "note: unknown task $id"
+  append_note "${res#* }" "$msg"
+  log_event "NOTE $id by $(owner_id)"
+}
+
+move_task() { # $1 id, $2 from-state, $3 to-state, $4 journal text, $5 event verb
+  set -- "$1" "$2" "$3" "$4" "$5" "$POOL/$2/$1.md" "$POOL/$3/$1.md"
+  mv "$6" "$7" 2>/dev/null || return 1
+  append_note "$7" "$4"
+  log_event "$5 $1 by $(owner_id)"
+}
+
+cmd_done() {
+  ensure_pool
+  id="${1:-}"; [ -n "$id" ] || die 'done: task ID required'
+  shift
+  msg='resolved' commit=''
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -m) msg="$2"; shift 2 ;;
+      -c) commit="$2"; shift 2 ;;
+      *) die "done: unknown arg '$1'" ;;
+    esac
+  done
+  if [ -n "$commit" ]; then msg="$msg (commit $commit)"; fi
+  move_task "$id" claimed done "DONE: $msg" DONE \
+    || move_task "$id" open done "DONE (unclaimed): $msg" DONE \
+    || die "done: $id is neither claimed nor open"
+}
+
+cmd_release() {
+  ensure_pool
+  id="${1:-}"; [ -n "$id" ] || die 'release: task ID required'
+  shift
+  msg='released'
+  if [ "${1:-}" = -m ]; then msg="$2"; fi
+  move_task "$id" claimed open "RELEASED: $msg" RELEASE \
+    || die "release: $id is not claimed"
+}
+
+cmd_dead() {
+  ensure_pool
+  id="${1:-}"; [ -n "$id" ] || die 'dead: task ID required'
+  shift
+  msg=''
+  if [ "${1:-}" = -m ]; then msg="$2"; fi
+  [ -n "$msg" ] || die 'dead: -m REASON required'
+  move_task "$id" open dead "DEAD: $msg" DEAD \
+    || move_task "$id" claimed dead "DEAD: $msg" DEAD \
+    || die "dead: unknown or already-final task $id"
+}
+
+list_state() { # $1 state
+  for f in "$POOL/$1"/T*.md; do
+    [ -e "$f" ] || continue
+    id="$(basename "$f" .md)"
+    extra=''
+    if [ "$1" = claimed ]; then
+      o="$(grep ': CLAIMED' "$f" | tail -1 | awk '{print $3}' | tr -d :)"
+      age=$(( ( $(date +%s) - $(mtime_epoch "$f") ) / 3600 ))
+      extra=" $o idle=${age}h"
+    fi
+    printf '%s  %-2s  %-12s  %-8s%s  %s\n' \
+      "$id" "$(task_field "$f" Priority)" "$(task_field "$f" Area)" "$1" "$extra" "$(task_title "$f")"
+  done
+}
+
+cmd_list() {
+  ensure_pool
+  sel="${1:-open}"
+  if [ "$sel" = all ]; then
+    for s in $STATES; do list_state "$s"; done
+  else
+    case " $STATES " in *" $sel "*) ;; *) die "list: unknown state '$sel'" ;; esac
+    list_state "$sel"
+  fi
+}
+
+cmd_show() {
+  ensure_pool
+  id="${1:-}"; [ -n "$id" ] || die 'show: task ID required'
+  res="$(find_task "$id")" || die "show: unknown task $id"
+  printf '[%s] %s\n\n' "${res%% *}" "${res#* }"
+  cat "${res#* }"
+}
+
+cmd_status() {
+  ensure_pool
+  for s in $STATES; do
+    n=$(ls "$POOL/$s" 2>/dev/null | grep -c '^T[0-9]*\.md$' || true)
+    printf '%-8s %s\n' "$s" "$n"
+  done
+  printf -- '--- claimed ---\n'
+  list_state claimed
+}
+
+cmd_reap() {
+  ensure_pool
+  hours=24
+  if [ "${1:-}" = -H ]; then hours="$2"; fi
+  cutoff=$(( $(date +%s) - hours * 3600 ))
+  reaped=0
+  for f in "$POOL/claimed"/T*.md; do
+    [ -e "$f" ] || continue
+    if [ "$(mtime_epoch "$f")" -lt "$cutoff" ]; then
+      id="$(basename "$f" .md)"
+      move_task "$id" claimed open "REAPED: claim idle > ${hours}h, returned to open" REAP || true
+      reaped=$((reaped + 1))
+    fi
+  done
+  printf 'reaped %s stale claim(s)\n' "$reaped"
+}
+
+cmd="${1:-}"
+[ -n "$cmd" ] || { usage; exit 1; }
+shift || true
+case "$cmd" in
+  init)    cmd_init "$@" ;;
+  new)     cmd_new "$@" ;;
+  claim)   cmd_claim "$@" ;;
+  note)    cmd_note "$@" ;;
+  done)    cmd_done "$@" ;;
+  release) cmd_release "$@" ;;
+  dead)    cmd_dead "$@" ;;
+  list)    cmd_list "$@" ;;
+  show)    cmd_show "$@" ;;
+  status)  cmd_status "$@" ;;
+  reap)    cmd_reap "$@" ;;
+  help|-h|--help) usage ;;
+  *) die "unknown command '$cmd' (tp help)" ;;
+esac

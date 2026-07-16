@@ -1260,8 +1260,8 @@ array_type      = '[' , type_expr , ';' , expression , ']' ;
 slice_type      = '[' , type_expr , ']' ;
 
 (* Three-tier reference system *)
-(* Spec: docs/detailed/cbgr-implementation.md Section 2 - Three-Tier Reference System *)
-(* &T = managed reference with CBGR (ThinRef 16 bytes / FatRef 24 bytes, automatic selection) *)
+(* Spec: internal/docs/detailed/cbgr-implementation.md Section 2 - Three-Tier Reference System *)
+(* &T = managed reference with CBGR (ThinRef 16 bytes / FatRef 32 bytes, automatic selection) *)
 (* &checked T = compile-time verified reference (0ns overhead) *)
 (* &unsafe T = unsafe reference with no checks (0ns overhead, manual safety proof required) *)
 managed_reference_type = '&' , [ 'mut' ] , type_expr ;

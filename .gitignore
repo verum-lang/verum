@@ -1,4 +1,6 @@
 internal/
+# Multi-session task pool (machine-local work queue; see docs/architecture/multi-session-taskpool.md)
+.taskpool/
 # Build artifacts
 target/
 **/target/
