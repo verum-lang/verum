@@ -851,72 +851,58 @@ fn read_ptr_at(buf: &List<Byte>, offset: Int) -> UInt64 {
        | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56)
 }
 
-/// Read system nameservers from /etc/resolv.conf (Unix) or GetNetworkParams (Windows).
-fn read_system_nameservers() -> List<Ipv4Addr> {
-    let mut nameservers = List.new();
+/// Read a small system configuration file (`/etc/resolv.conf`,
+/// `/etc/hosts`) into `Text` using raw syscalls only — never libc
+/// `fopen`, honouring the no-libc invariant (see
+/// docs/architecture/no-libc-architecture.md). Returns `None` on any
+/// failure (missing file, permission, read error) so callers fall
+/// back to hardcoded defaults rather than propagating an error.
+///
+/// A single `read` of up to 64 KiB is issued; the Unix network
+/// configuration files this serves are far smaller. An ad-block-sized
+/// `/etc/hosts` (hundreds of KiB) would be truncated — acceptable, as
+/// loopback names are answered from the hardcoded table regardless.
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn read_system_file(path: &Text) -> Maybe<Text> {
+    let path_bytes = path.as_bytes();
+    let fd_result = sys_open(path_bytes, O_RDONLY | O_CLOEXEC, 0);
 
-    @cfg(target_os = "macos")
-    {
-        // Try to read /etc/resolv.conf.
-        let path = "/etc/resolv.conf";
-        let path_bytes = path.as_bytes();
+    if let Result.Ok(fd) = fd_result {
+        let mut buf = List.with_capacity(65536);
+        for _ in 0..65536 {
+            buf.push(0);
+        }
 
-        let open_flags = O_RDONLY | O_CLOEXEC;
-        let fd_result = sys_open(path_bytes, open_flags, 0);
+        let read_result = sys_read(fd, &mut buf);
+        let _ = sys_close(fd);
 
-        if let Result.Ok(fd) = fd_result {
-            let mut buf = List.with_capacity(4096);
-            for _ in 0..4096 {
-                buf.push(0);
-            }
-
-            let read_result = sys_read(fd, &mut buf);
-            let _ = sys_close(fd);
-
-            if let Result.Ok(bytes_read) = read_result {
-                let content = Text.from_utf8_lossy(&buf[..(bytes_read as Int)]);
-
-                // Parse nameserver lines.
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("nameserver ") {
-                        let addr_str = trimmed[11..].trim();
-                        if let Result.Ok(ip) = Ipv4Addr.parse(&addr_str) {
-                            nameservers.push(ip);
-                        }
-                    }
-                }
+        if let Result.Ok(bytes_read) = read_result {
+            if bytes_read > 0 {
+                return Maybe.Some(Text.from_utf8_lossy(&buf[..(bytes_read as Int)]));
             }
         }
     }
 
-    @cfg(target_os = "linux")
+    Maybe.None
+}
+
+/// Read system nameservers from /etc/resolv.conf (Unix) or GetNetworkParams (Windows).
+fn read_system_nameservers() -> List<Ipv4Addr> {
+    let mut nameservers = List.new();
+
+    // Unix: parse /etc/resolv.conf. The linux and macos syscall
+    // surfaces are identical here (both mount `sys_open`/`sys_read`/
+    // `sys_close` aliases), so a single shared block serves both —
+    // previously this was two byte-for-byte-duplicated arms.
+    @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        // Try to read /etc/resolv.conf.
-        let path = "/etc/resolv.conf";
-        let path_bytes = path.as_bytes();
-
-        let fd_result = sys_open(path_bytes, O_RDONLY | O_CLOEXEC, 0);
-
-        if let Result.Ok(fd) = fd_result {
-            let mut buf = List.with_capacity(4096);
-            for _ in 0..4096 {
-                buf.push(0);
-            }
-
-            let read_result = sys_read(fd, &mut buf);
-            let _ = sys_close(fd);
-
-            if let Result.Ok(bytes_read) = read_result {
-                let content = Text.from_utf8_lossy(&buf[..(bytes_read as Int)]);
-
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("nameserver ") {
-                        let addr_str = trimmed[11..].trim();
-                        if let Result.Ok(ip) = Ipv4Addr.parse(&addr_str) {
-                            nameservers.push(ip);
-                        }
+        if let Maybe.Some(content) = read_system_file(&"/etc/resolv.conf") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("nameserver ") {
+                    let addr_str = trimmed[11..].trim();
+                    if let Result.Ok(ip) = Ipv4Addr.parse(&addr_str) {
+                        nameservers.push(ip);
                     }
                 }
             }
@@ -1011,6 +997,115 @@ fn read_system_nameservers() -> List<Ipv4Addr> {
     }
 
     nameservers
+}
+
+// =============================================================================
+// Static Host Database (/etc/hosts)
+// =============================================================================
+
+/// Parse `/etc/hosts`-format content into `(address, name)` pairs.
+///
+/// Format (RFC 952 / POSIX hosts file): each line is
+///
+/// ```text
+/// IP-address   canonical-hostname   [alias ...]
+/// ```
+///
+/// `#` begins a comment that runs to end-of-line; blank lines and
+/// comment-only lines are ignored. One pair is emitted per name
+/// (canonical name and every alias) so a caller can match any of
+/// them against a query. Lines whose first field is not a valid IPv4
+/// or IPv6 literal are skipped rather than treated as fatal — a
+/// malformed `/etc/hosts` must not break resolution of well-formed
+/// entries.
+///
+/// Pure function (no I/O): unit-testable without a filesystem or
+/// network, which is why the file read is factored into
+/// `read_system_file`.
+fn parse_hosts_content(content: &Text) -> List<(IpAddr, Text)> {
+    let mut pairs = List.new();
+
+    for line in content.lines() {
+        // Strip any trailing comment.
+        let no_comment = match line.split_once(&"#") {
+            Maybe.Some((before, _)) => before,
+            Maybe.None => line,
+        };
+
+        let trimmed = no_comment.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // First whitespace-delimited field is the address; the
+        // remaining fields are the canonical name and any aliases.
+        let fields = trimmed.split_whitespace();
+        if fields.len() < 2 {
+            continue;
+        }
+
+        let addr_str = &fields[0];
+        let ip = if let Result.Ok(v4) = Ipv4Addr.parse(addr_str) {
+            IpAddr.V4(v4)
+        } else if let Result.Ok(v6) = Ipv6Addr.parse(addr_str) {
+            IpAddr.V6(v6)
+        } else {
+            continue;  // First field is not an IP literal — skip line.
+        };
+
+        for i in 1..fields.len() {
+            pairs.push((ip, fields[i].clone()));
+        }
+    }
+
+    pairs
+}
+
+/// Resolve a hostname against the *static* host database — the
+/// hardcoded loopback names plus `/etc/hosts` — performing NO network
+/// I/O. Returns every matching address, or an empty list when the
+/// name is not statically known (the caller then falls through to a
+/// network DNS query).
+///
+/// RFC 6761 §6.3: the name `localhost` and any name ending in
+/// `.localhost` are special and MUST resolve to loopback
+/// (127.0.0.1 / ::1) even when no resolver is reachable and even if
+/// `/etc/hosts` says nothing about them — so those are answered from
+/// the hardcoded table directly, before any file is consulted. This
+/// guarantees `TcpStream.connect("localhost:PORT")` works in an
+/// offline / sandboxed environment.
+///
+/// Matching is case-insensitive (DNS names are case-insensitive per
+/// RFC 4343).
+fn lookup_static_hosts(hostname: &Text) -> List<IpAddr> {
+    let mut out = List.new();
+    let lower = hostname.to_lowercase();
+
+    // RFC 6761 loopback names — answered without touching any file.
+    if lower == "localhost" || lower.ends_with(&".localhost") {
+        out.push(IpAddr.V4(Ipv4Addr.localhost()));
+        out.push(IpAddr.V6(Ipv6Addr.localhost()));
+        return out;
+    }
+
+    // Unix: consult /etc/hosts. (Windows keeps its hosts file at
+    // %SystemRoot%\System32\drivers\etc\hosts; reading it there is a
+    // follow-up — Windows DNS config already comes from
+    // GetNetworkParams, and loopback is covered by the branch above.)
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        if let Maybe.Some(content) = read_system_file(&"/etc/hosts") {
+            let pairs = parse_hosts_content(&content);
+            for pair in pairs {
+                let (ip, name) = pair;
+                if name.to_lowercase() == lower {
+                    out.push(ip);
+                }
+            }
+        }
+    }
+
+    out
 }
 
 /// Generate a random-ish query ID.
@@ -1506,6 +1601,15 @@ public fn lookup_host(hostname: &Text) -> Result<List<IpAddr>, DnsError> {
         return Result.Ok(List.of(IpAddr.V6(ipv6)));
     }
 
+    // Static host database (hardcoded loopback + /etc/hosts) BEFORE
+    // any network query. This makes `localhost` and other statically
+    // configured names resolve with zero network I/O (RFC 6761), and
+    // lets `/etc/hosts` override DNS the way libc's resolver does.
+    let static_hits = lookup_static_hosts(hostname);
+    if !static_hits.is_empty() {
+        return Result.Ok(static_hits);
+    }
+
     // Use system resolver.
     let resolver = Resolver.system();
     resolver.lookup(hostname)
@@ -1648,6 +1752,14 @@ public async fn lookup_host_async(hostname: &Text) -> Result<List<IpAddr>, DnsEr
     }
     if let Result.Ok(ipv6) = Ipv6Addr.parse(hostname) {
         return Result.Ok(List.of(IpAddr.V6(ipv6)));
+    }
+
+    // Static host database (hardcoded loopback + /etc/hosts) BEFORE
+    // any network query — same offline-`localhost` guarantee as the
+    // synchronous `lookup_host`.
+    let static_hits = lookup_static_hosts(hostname);
+    if !static_hits.is_empty() {
+        return Result.Ok(static_hits);
     }
 
     // Use async UDP for DNS query.
@@ -1925,4 +2037,72 @@ fn test_dns_record_type() {
 
     let record = DnsRecord.MX { priority: 10, exchange: "mail.example.com".to_text() };
     assert_eq(record.record_type(), &"MX");
+}
+
+@test
+fn test_parse_hosts_content_basic() {
+    let content = "127.0.0.1   localhost\n192.168.1.10  server server.local\n";
+    let pairs = parse_hosts_content(&content);
+    // localhost, server, server.local = 3 name entries.
+    assert_eq(pairs.len(), 3);
+
+    let (ip0, name0) = pairs[0];
+    assert_eq(name0, "localhost");
+    assert(ip0 == IpAddr.V4(Ipv4Addr.new(127, 0, 0, 1)));
+
+    let (_, name1) = pairs[1];
+    assert_eq(name1, "server");
+    let (_, name2) = pairs[2];
+    assert_eq(name2, "server.local");
+}
+
+@test
+fn test_parse_hosts_content_comments_and_blanks() {
+    // Comment-only lines, blank lines, inline comments, and a
+    // malformed (non-IP first field) line must all be skipped
+    // without dropping the valid entry.
+    let content = "# a comment\n\n   \nnot-an-ip  bogus\n10.0.0.5  db  # inline comment\n";
+    let pairs = parse_hosts_content(&content);
+    assert_eq(pairs.len(), 1);
+
+    let (ip, name) = pairs[0];
+    assert_eq(name, "db");
+    assert(ip == IpAddr.V4(Ipv4Addr.new(10, 0, 0, 5)));
+}
+
+@test
+fn test_parse_hosts_content_ipv6() {
+    let content = "::1   localhost ip6-localhost\n";
+    let pairs = parse_hosts_content(&content);
+    assert_eq(pairs.len(), 2);
+    let (ip, _) = pairs[0];
+    assert(ip == IpAddr.V6(Ipv6Addr.localhost()));
+}
+
+@test
+fn test_lookup_static_hosts_localhost_offline() {
+    // `localhost` must resolve to loopback with NO network and
+    // regardless of /etc/hosts (RFC 6761). This is the offline
+    // guarantee the whole static-host path exists for.
+    let addrs = lookup_static_hosts(&"localhost");
+    assert_eq(addrs.len(), 2);
+    assert(addrs[0] == IpAddr.V4(Ipv4Addr.localhost()));
+    assert(addrs[1] == IpAddr.V6(Ipv6Addr.localhost()));
+
+    // *.localhost is also loopback per RFC 6761 §6.3.
+    let sub = lookup_static_hosts(&"foo.localhost");
+    assert_eq(sub.len(), 2);
+
+    // Case-insensitive.
+    let upper = lookup_static_hosts(&"LOCALHOST");
+    assert_eq(upper.len(), 2);
+}
+
+@test
+fn test_lookup_host_localhost_offline() {
+    // End-to-end: lookup_host("localhost") must succeed offline.
+    let result = lookup_host(&"localhost");
+    assert(result.is_ok());
+    let addrs = result.unwrap();
+    assert(!addrs.is_empty());
 }
