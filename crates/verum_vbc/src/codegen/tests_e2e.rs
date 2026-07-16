@@ -3114,6 +3114,42 @@ mod const_generic_value_carry_tests {
         );
     }
 
+    /// #40 residual (bare-impl form): `implement MyAlloc<SIZE>` WITHOUT the
+    /// `<const SIZE: Int>` clause, in a module that also declares impl-scoped
+    /// `Type.SIZE` consts.  The bare `SIZE` in the body must still resolve to
+    /// the type's const-generic param, not fold to the colliding const.
+    #[test]
+    fn const_generic_bare_impl_with_colliding_const() {
+        assert_main_returns_int(
+            r#"
+            type AllocPageHeader is { next_page: Int };
+            implement AllocPageHeader {
+                public const SIZE: Int = 64;
+            }
+            type LargeAllocHeader is { requested_size: Int };
+            implement LargeAllocHeader {
+                public const SIZE: Int = 64;
+            }
+
+            type MyAlloc<const SIZE: Int> is { used: Int };
+            implement MyAlloc<SIZE> {
+                public fn new() -> MyAlloc<SIZE> {
+                    MyAlloc { used: 0 }
+                }
+                public fn capacity(&self) -> Int {
+                    SIZE
+                }
+            }
+
+            fn main() -> Int {
+                let a = MyAlloc<17>.new();
+                a.capacity()
+            }
+            "#,
+            17,
+        );
+    }
+
     /// CONST-GENERIC-PARAM-SHADOW-1 (#40): a const param whose name collides
     /// with an in-scope stdlib symbol (`SIZE` → the `.SIZE` const-shaped
     /// fallback / a scoped `size` fn) must SHADOW that global inside the

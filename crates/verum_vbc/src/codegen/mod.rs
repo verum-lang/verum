@@ -4323,29 +4323,11 @@ impl VbcCodegen {
                 // Compile each function individually, skipping those that fail
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
 
-                let impl_type_generics: Vec<String> = impl_decl
-                    .generics
-                    .iter()
-                    .filter_map(|g| {
-                        if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
-                            Some(name.name.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                let impl_const_generics: Vec<String> = impl_decl
-                    .generics
-                    .iter()
-                    .filter_map(|g| {
-                        if let verum_ast::ty::GenericParamKind::Const { name, .. } = &g.kind {
-                            Some(name.name.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                // BARE-IMPL-INHERIT-1 (#40): also binds `implement Type<P>`
+                // params inherited from the type decl when the `<...>` clause
+                // is omitted (see `resolve_impl_generics`).
+                let (impl_type_generics, impl_const_generics, impl_ordered_generics) =
+                    self.resolve_impl_generics(impl_decl);
 
                 for impl_item in impl_decl.items.iter() {
                     // Honour `@cfg` gates on impl items. ImplItem and
@@ -4407,18 +4389,11 @@ impl VbcCodegen {
                         // declaration-ordered numbering — the same slot order
                         // the receiver's instantiation args carry
                         // (`implement<const SIZE: Int> StackAllocator<SIZE>`
-                        // ⇒ SIZE = slot 0).  A split type-then-const push
-                        // would mis-number `implement<const N, T>` shapes.
-                        for g in impl_decl.generics.iter() {
-                            match &g.kind {
-                                verum_ast::ty::GenericParamKind::Type { name, .. }
-                                | verum_ast::ty::GenericParamKind::Const { name, .. } => {
-                                    self.ctx
-                                        .generic_type_params_ordered
-                                        .push(name.name.to_string());
-                                }
-                                _ => {}
-                            }
+                        // ⇒ SIZE = slot 0).  `impl_ordered_generics` already
+                        // mixes type+const in declaration order (and, for the
+                        // bare-impl form, inherits from the target's args).
+                        for g in &impl_ordered_generics {
+                            self.ctx.generic_type_params_ordered.push(g.clone());
                         }
 
                         // Compile function individually - skip if it fails.
@@ -9943,6 +9918,129 @@ impl VbcCodegen {
         self.extract_impl_type_name_from_type(ty)
     }
 
+    /// Effective impl-block generics for the `const_generic_params` /
+    /// `generic_type_params` sets and the shared declaration-ordered
+    /// witness numbering (`generic_type_params_ordered`).
+    ///
+    /// BARE-IMPL-INHERIT-1 (#40): `implement MyAlloc<SIZE>` — with NO
+    /// `<const SIZE: Int>` clause — must still bind `SIZE` as MyAlloc's
+    /// const param.  The impl target's generic ARGS name the type's
+    /// declared params; when the impl omits its own `<...>` clause, inherit
+    /// those args, classified const-vs-type from the type declaration
+    /// (`type_const_param_names`), so the method body resolves `SIZE` to the
+    /// value-witness `LoadT{Generic}` — NOT the colliding global const
+    /// (`AllocPageHeader.SIZE` → `LoadI 64`) it otherwise falls through to.
+    /// The canonical clause form is returned verbatim (no behaviour change).
+    ///
+    /// Returns `(type_generics, const_generics, ordered)`.  `ordered` mixes
+    /// type+const in declaration order — the positional numbering the
+    /// receiver's instantiation witnesses key on.
+    fn resolve_impl_generics(
+        &self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+    ) -> (Vec<String>, Vec<String>, Vec<String>) {
+        use verum_ast::ty::GenericParamKind;
+        // Canonical form: the impl declares its own params.
+        if !impl_decl.generics.is_empty() {
+            let mut type_g = Vec::new();
+            let mut const_g = Vec::new();
+            let mut ordered = Vec::new();
+            for g in impl_decl.generics.iter() {
+                match &g.kind {
+                    GenericParamKind::Type { name, .. } => {
+                        type_g.push(name.name.to_string());
+                        ordered.push(name.name.to_string());
+                    }
+                    GenericParamKind::Const { name, .. } => {
+                        const_g.push(name.name.to_string());
+                        ordered.push(name.name.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            return (type_g, const_g, ordered);
+        }
+        // Bare form: inherit from the target type's declared params, keyed
+        // by the target's generic ARG names.  Only symbolic identifiers that
+        // NAME a declared param bind (a concrete `MyAlloc<17>` arg binds
+        // nothing).
+        let Some(base) = self.extract_impl_type_name(&impl_decl.kind) else {
+            return (Vec::new(), Vec::new(), Vec::new());
+        };
+        let arg_names = Self::impl_target_arg_names(&impl_decl.kind);
+        if arg_names.is_empty() {
+            return (Vec::new(), Vec::new(), Vec::new());
+        }
+        let declared = self.ctx.type_generic_params.get(&base);
+        let const_set = self.ctx.type_const_param_names.get(&base);
+        let mut type_g = Vec::new();
+        let mut const_g = Vec::new();
+        let mut ordered = Vec::new();
+        for arg in arg_names {
+            let is_declared = declared
+                .map(|d| d.iter().any(|p| p == &arg))
+                .unwrap_or(false);
+            if !is_declared {
+                continue;
+            }
+            ordered.push(arg.clone());
+            if const_set.map(|s| s.contains(&arg)).unwrap_or(false) {
+                const_g.push(arg);
+            } else {
+                type_g.push(arg);
+            }
+        }
+        (type_g, const_g, ordered)
+    }
+
+    /// Bare-identifier generic-arg names of an impl target
+    /// (`implement MyAlloc<SIZE>` ⇒ ["SIZE"]).  Concrete literal args
+    /// (`MyAlloc<17>`) contribute no name.  Used by
+    /// [`Self::resolve_impl_generics`] for bare-impl param inheritance.
+    fn impl_target_arg_names(kind: &verum_ast::decl::ImplKind) -> Vec<String> {
+        use verum_ast::decl::ImplKind;
+        let ty = match kind {
+            ImplKind::Inherent(ty) => ty,
+            ImplKind::Protocol { for_type, .. } => for_type,
+        };
+        Self::type_generic_arg_names(ty)
+    }
+
+    /// Single-segment path names appearing as generic args of `ty`
+    /// (both `GenericArg::Type` paths and symbolic `GenericArg::Const`
+    /// identifiers).  Literals and multi-segment/structural args are
+    /// skipped.
+    fn type_generic_arg_names(ty: &verum_ast::ty::Type) -> Vec<String> {
+        use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
+        let TypeKind::Generic { args, .. } = &ty.kind else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for arg in args.iter() {
+            match arg {
+                GenericArg::Type(t) => {
+                    if let TypeKind::Path(path) = &t.kind
+                        && path.segments.len() == 1
+                        && let Some(PathSegment::Name(ident)) = path.segments.first()
+                    {
+                        out.push(ident.name.to_string());
+                    }
+                }
+                GenericArg::Const(expr) => {
+                    if let verum_ast::ExprKind::Path(path) = &expr.kind
+                        && path.segments.len() == 1
+                        && let Some(verum_ast::PathSegment::Name(ident)) =
+                            path.segments.first()
+                    {
+                        out.push(ident.name.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
     /// ARRAY-ITER-CONCRETIZE-1 (a)-leg — materialise a TypeDescriptor
     /// for STRUCTURAL impl targets (`[T]` → "Slice", `[T; N]` →
     /// "Array") the first time an impl block names one in this module.
@@ -11677,6 +11775,23 @@ impl VbcCodegen {
                 self.ctx
                     .type_generic_params
                     .insert(type_name.clone(), params);
+            }
+            // Record which of those params are CONST (bare-impl inheritance
+            // classification — see `type_const_param_names` doc).
+            let const_names: std::collections::HashSet<String> = type_decl
+                .generics
+                .iter()
+                .filter_map(|gp| match &gp.kind {
+                    verum_ast::ty::GenericParamKind::Const { name, .. } => {
+                        Some(name.name.to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if !const_names.is_empty() {
+                self.ctx
+                    .type_const_param_names
+                    .insert(type_name.clone(), const_names);
             }
         }
         if std::env::var("VERUM_TRACE_RTC").is_ok() && (type_name == "IoResult" || type_name == "IoError" || type_name == "Metadata") {
@@ -14788,17 +14903,11 @@ impl VbcCodegen {
 
                 // Pre-populate impl block generics - these will be added to function generics
                 // in compile_function. This enables recognizing T, U etc. in impl<T, U> Foo<T> { ... }
-                let impl_type_generics: Vec<String> = impl_decl
-                    .generics
-                    .iter()
-                    .filter_map(|g| {
-                        if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
-                            Some(name.name.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                // BARE-IMPL-INHERIT-1 (#40): also binds `implement Type<P>`
+                // params inherited from the type decl when the `<...>` clause
+                // is omitted (see `resolve_impl_generics`).
+                let (impl_type_generics, impl_const_generics, impl_ordered_generics) =
+                    self.resolve_impl_generics(impl_decl);
                 if std::env::var("VERUM_TRACE_GP").is_ok()
                     && type_name.as_deref() == Some("Maybe")
                 {
@@ -14807,20 +14916,6 @@ impl VbcCodegen {
                         type_name, impl_decl.generics.len(), impl_type_generics
                     );
                 }
-
-                // Pre-populate impl block const generics - enables recognizing SIZE, N etc.
-                // in impl<const SIZE: Int> StackAllocator<SIZE> { ... }
-                let impl_const_generics: Vec<String> = impl_decl
-                    .generics
-                    .iter()
-                    .filter_map(|g| {
-                        if let verum_ast::ty::GenericParamKind::Const { name, .. } = &g.kind {
-                            Some(name.name.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
 
                 for impl_item in impl_decl.items.iter() {
                     // Honour `@cfg` gates on impl items. Same pattern

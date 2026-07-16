@@ -444,6 +444,15 @@ pub struct CodegenContext {
     /// `register_type_constructors`, archive ctx loader pass 4).
     pub type_generic_params: HashMap<String, Vec<String>>,
 
+    /// The subset of `type_generic_params` that are CONST params
+    /// (`type MyAlloc<const SIZE: Int>` ⇒ {"MyAlloc": {"SIZE"}}).
+    /// `type_generic_params` does not record the const-vs-type kind, but a
+    /// bare-impl form (`implement MyAlloc<SIZE>` with no `<const SIZE: Int>`
+    /// clause) must still classify the inherited `SIZE` as const so the body
+    /// emits the value-witness `LoadT{Generic}` rather than the type-param
+    /// `LoadNil`.  Filled alongside `type_generic_params`.
+    pub type_const_param_names: HashMap<String, std::collections::HashSet<String>>,
+
     /// Same params in DECLARATION ORDER (#44-B): `TypeRef::Generic(idx)`
     /// witnesses are positional, so `T.default()`-class emission needs
     /// T's index among the enclosing function's generics. Maintained in
@@ -1390,6 +1399,7 @@ impl CodegenContext {
             bytes: Vec::new(),
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
+            function_param_defaults: HashMap::new(),
             ambiguous_function_names: std::collections::HashSet::new(),
             scoped_functions: HashMap::new(),
             unit_declared_fns: std::collections::HashSet::new(),
@@ -1416,6 +1426,7 @@ impl CodegenContext {
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
             type_generic_params: HashMap::new(),
+            type_const_param_names: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
             pending_static_call_type_args: None,
@@ -1446,6 +1457,7 @@ impl CodegenContext {
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),
             type_generic_params: HashMap::new(),
+            type_const_param_names: HashMap::new(),
             ref_pinned_regs: std::collections::HashSet::new(),
             const_generic_params: HashSet::new(),
             pending_static_call_type_args: None,
