@@ -33715,12 +33715,21 @@ fn lower_tensor_extended<'ctx>(
             let tensor = get_arg(ctx, 1)?;
             let op = get_arg(ctx, 2)?;
             let result = match mode {
-                1 => call_tensor_runtime_i64(
-                    ctx,
-                    "verum_tensor_reduce_all",
-                    &[tensor, op],
-                    "reduce_all",
-                )?,
+                // mode 1 (reduce_all) routes through the SAME
+                // handle-returning runtime fn with axis = -1: the
+                // separate verum_tensor_reduce_all body returns a
+                // scalar double (a different contract) and calling
+                // it through the i64 channel aborts native codegen
+                // for the whole bake.
+                1 => {
+                    let all_axis = i64_ty.const_int(u64::MAX, true);
+                    call_tensor_runtime_i64(
+                        ctx,
+                        "verum_tensor_reduce",
+                        &[tensor, op, all_axis],
+                        "reduce_all",
+                    )?
+                }
                 2 => {
                     let axis = get_arg(ctx, 3)?;
                     call_tensor_runtime_i64(
