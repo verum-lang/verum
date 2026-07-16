@@ -5153,54 +5153,17 @@ pub fn tensor_argmin(src: &TensorHandle, _axis: Option<i32>) -> Option<(usize, f
         return None;
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
-
+    // T0200 class: read through the dtype-converting accessor —
+    // the old raw loop used `data.as_ptr()` (the TensorData STRUCT
+    // pointer, not the element buffer).
     let mut min_idx = 0usize;
     let mut min_val = f64::INFINITY;
-
-    match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) } as f64;
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
+    for i in 0..src.numel {
+        let v = src.get_element_f64(i)?;
+        if v < min_val {
+            min_val = v;
+            min_idx = i;
         }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) };
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
-        }
-        DType::I32 => {
-            let ptr = data_ptr as *const i32;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) } as f64;
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
-        }
-        DType::I64 => {
-            let ptr = data_ptr as *const i64;
-            for i in 0..src.numel {
-                let val = unsafe { *ptr.add(i) } as f64;
-                if val < min_val {
-                    min_val = val;
-                    min_idx = i;
-                }
-            }
-        }
-        _ => return None,
     }
 
     Some((min_idx, min_val))
@@ -5300,26 +5263,14 @@ pub fn tensor_det(src: &TensorHandle) -> Option<f64> {
         return Some(1.0);
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
-
-    // Copy to working matrix
+    // T0200: copy in through the dtype-converting accessor — the
+    // old raw loop read `data.as_ptr()` (the TensorData STRUCT
+    // pointer, not the element buffer), so the working matrix was
+    // header bytes and every determinant was garbage. The accessor
+    // is the ONE element-read authority and covers every dtype.
     let mut matrix: Vec<f64> = Vec::with_capacity(n * n);
-
-    match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            for i in 0..(n * n) {
-                matrix.push(unsafe { *ptr.add(i) } as f64);
-            }
-        }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            for i in 0..(n * n) {
-                matrix.push(unsafe { *ptr.add(i) });
-            }
-        }
-        _ => return None,
+    for i in 0..(n * n) {
+        matrix.push(src.get_element_f64(i)?);
     }
 
     // LU decomposition in-place
@@ -5379,38 +5330,12 @@ pub fn tensor_trace(src: &TensorHandle) -> Option<f64> {
         return Some(0.0);
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
+    // T0200: same struct-pointer misuse as tensor_det — route the
+    // diagonal reads through the dtype-converting accessor.
     let cols = src.shape[1];
-
     let mut trace = 0.0;
-
-    match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) } as f64;
-            }
-        }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) };
-            }
-        }
-        DType::I32 => {
-            let ptr = data_ptr as *const i32;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) } as f64;
-            }
-        }
-        DType::I64 => {
-            let ptr = data_ptr as *const i64;
-            for i in 0..n {
-                trace += unsafe { *ptr.add(i * cols + i) } as f64;
-            }
-        }
-        _ => return None,
+    for i in 0..n {
+        trace += src.get_element_f64(i * cols + i)?;
     }
 
     Some(trace)
@@ -5436,35 +5361,12 @@ pub fn tensor_norm(src: &TensorHandle, ord: i8) -> Option<f64> {
         return Some(0.0);
     }
 
-    let data = src.data.as_ref()?;
-    let data_ptr = data.as_ptr();
-
-    // Get values as f64
-    let values: Vec<f64> = match src.dtype {
-        DType::F32 => {
-            let ptr = data_ptr as *const f32;
-            (0..src.numel)
-                .map(|i| unsafe { *ptr.add(i) } as f64)
-                .collect()
-        }
-        DType::F64 => {
-            let ptr = data_ptr as *const f64;
-            (0..src.numel).map(|i| unsafe { *ptr.add(i) }).collect()
-        }
-        DType::I32 => {
-            let ptr = data_ptr as *const i32;
-            (0..src.numel)
-                .map(|i| unsafe { *ptr.add(i) } as f64)
-                .collect()
-        }
-        DType::I64 => {
-            let ptr = data_ptr as *const i64;
-            (0..src.numel)
-                .map(|i| unsafe { *ptr.add(i) } as f64)
-                .collect()
-        }
-        _ => return None,
-    };
+    // T0200 class: collect through the dtype-converting accessor
+    // (the old raw loops read the TensorData STRUCT pointer).
+    let mut values: Vec<f64> = Vec::with_capacity(src.numel);
+    for i in 0..src.numel {
+        values.push(src.get_element_f64(i)?);
+    }
 
     match ord {
         0 => {
@@ -5992,11 +5894,11 @@ pub fn tensor_nonzero(src: &TensorHandle) -> Option<TensorHandle> {
             }
         }
         DType::Bool => {
-            let data = src.data.as_ref()?;
-            let ptr = data.as_ptr() as *const u8;
-            unsafe {
+            // T0200 class: read through the element accessor — the
+            // old `data.as_ptr()` was the TensorData STRUCT pointer.
+            {
                 for flat_idx in 0..src.numel {
-                    if *ptr.add(flat_idx) != 0 {
+                    if src.get_element_f64(flat_idx)? != 0.0 {
                         let mut multi_idx = vec![0i64; ndim];
                         let mut remaining = flat_idx;
                         for d in 0..ndim {
