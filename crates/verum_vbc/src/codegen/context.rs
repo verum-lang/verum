@@ -1399,7 +1399,6 @@ impl CodegenContext {
             bytes: Vec::new(),
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
-            function_param_defaults: HashMap::new(),
             ambiguous_function_names: std::collections::HashSet::new(),
             scoped_functions: HashMap::new(),
             unit_declared_fns: std::collections::HashSet::new(),
