@@ -23177,40 +23177,27 @@ fn lower_cbgr_extended<'ctx>(
             Ok(())
         }
         0x05 => {
-            // SliceLen — get length from fat ref / slice / Text
+            // SliceLen — get length from the canonical cell / stamped
+            // Pack / unstamped List, through the ONE classifier
+            // (emit_container_view), exactly like Subslice (0x08) and
+            // SplitAt (0x09). SLICE-OF-LIST-AOT-1: the previous static
+            // guess read offset 32 (Pack: header+8) whenever the
+            // producer marked the register as a slice — but the
+            // canonical 24-byte cell {data@0, len@8, elem@16} that
+            // every #48 producer emits carries len at 8, so the baked
+            // `slice_len` body read past the cell and returned garbage
+            // (0) for `&list[..]` views. The classifier discriminates
+            // at RUNTIME (word0 header vs data-pointer plausibility),
+            // mirroring the interpreter's value-kind dispatch.
             if operands.len() < 2 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
             let src_reg = op_reg(operands, 1);
             let fat_ref = ctx.get_register(src_reg)?;
-            let i64_ty = ctx.types().i64_type();
-            let i8_ty = ctx.types().i8_type();
             let fat_ref_ptr = as_ptr(ctx, fat_ref, "fat_ref_ptr")?;
-            // Text flat layout: len at offset 8
-            // Slices (Pack): len at offset 32 (24-byte header + 8)
-            // CBGR fat refs: len at offset 8
-            let len_offset = if ctx.is_slice_register(src_reg) {
-                32u64 // Pack header + field 1
-            } else {
-                8u64 // Text flat layout: field 1 at offset 8; or CBGR fat ref
-            };
-            // SAFETY: GEP into the fat reference or slice pack to access the length field; the offset is a fixed layout constant (8 or 32)
-            let len_ptr = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i8_ty,
-                        fat_ref_ptr,
-                        &[i64_ty.const_int(len_offset, false)],
-                        "len_ptr",
-                    )
-                    .or_llvm_err()?
-            };
-            let len = ctx
-                .builder()
-                .build_load(i64_ty, len_ptr, "slice_len")
-                .or_llvm_err()?;
-            ctx.set_register(dst, len);
+            let (_data, len, _elem) = emit_container_view(ctx, fat_ref_ptr, "slen")?;
+            ctx.set_register(dst, len.into());
             Ok(())
         }
         0x06 | 0x07 => {
@@ -29716,10 +29703,13 @@ fn lower_ffi_extended<'ctx>(
         }
 
         // TIER-DETECT-AOT-1: per-tier answers. THIS side is the LLVM
-        // (AOT) lowering, so tier = 1 / is_interpreted = false; the
+        // (AOT) lowering, so tier = 3 / is_interpreted = false; the
         // interpreter handler answers 0 / true for the same sub-ops.
         // Still zero runtime cost — the answer is a constant per
         // tier, it just must never be folded into the SHARED VBC.
+        // Wire codes follow the stdlib contract
+        // (core/intrinsics/runtime/tier.vr `get_tier`):
+        // 0 = VBC interpreter, 1/2 = JIT tiers, 3 = AOT.
         Some(SystemSubOpcode::ExecutionTier) => {
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(
@@ -29727,8 +29717,8 @@ fn lower_ffi_extended<'ctx>(
                 ));
             }
             let dst_reg = op_reg(operands, 0);
-            let one = ctx.types().i64_type().const_int(1, false);
-            ctx.set_register(dst_reg, one.into());
+            let aot_code = ctx.types().i64_type().const_int(3, false);
+            ctx.set_register(dst_reg, aot_code.into());
             Ok(())
         }
 

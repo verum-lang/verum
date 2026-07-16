@@ -4730,13 +4730,18 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_store(null_ptr, i8_type.const_zero())
             .or_llvm_err()?;
 
+        // NET-RECV-TEXT-UAF-1 (file_read_text leg): `verum_text_alloc`
+        // aliases the buffer — no copy. text_alloc + dealloc returned
+        // a Text over freed memory. Transfer buffer ownership into the
+        // Text (cap = true allocation size), no dealloc.
         let text = builder
-            .build_call(text_alloc_fn, &[buf.into(), n.into(), n.into()], "text")
+            .build_call(
+                text_alloc_fn,
+                &[buf.into(), n.into(), buf_size.into()],
+                "text",
+            )
             .or_llvm_err()?
             .basic_value_or("expected basic value")?;
-        builder
-            .build_call(dealloc_fn, &[buf.into(), buf_size.into()], "")
-            .or_llvm_err()?;
         builder.build_return(Some(&text)).or_llvm_err()?;
         Ok(())
     }
@@ -5488,6 +5493,23 @@ impl<'ctx> PlatformIR<'ctx> {
         let wrapper_fn_ty = fn_type;
         let wrapper_ret_ty = wrapper_fn_ty.get_return_type();
 
+        // LIBSYS-ALIAS-STUB-1 (socket leg): on NON-Linux targets the
+        // wrapper adds nothing — its body used to call a bodyless
+        // `__verum_libsys_<sym>` alias whose promised retarget pass
+        // never existed, so the safety net zero-stubbed it and every
+        // darwin-AOT socket call silently returned 0 (UDP probe:
+        // bind=0/sent=0/recv=empty while interp round-tripped). The
+        // correct darwin shape is NO body at all: the declaration
+        // stays bodyless, `is_libc_extern` protects it from the
+        // safety net, and the linker binds libSystem's thin syscall
+        // stubs directly. Those stubs return full-width x0 (kernel
+        // value or cerror's -1), so the canonical i64-return ABI is
+        // honest without a narrowing wrapper.
+        if !target_is_linux(module) {
+            let _ = wrapper_ret_ty;
+            return Ok(());
+        }
+
         let entry = ctx.append_basic_block(wrapper, "entry");
         let builder = ctx.create_builder();
         builder.position_at_end(entry);
@@ -5555,56 +5577,9 @@ impl<'ctx> PlatformIR<'ctx> {
             builder
                 .build_return(Some(&ret_typed))
                 .or_llvm_err()?;
-        } else {
-            // libSystem indirection.  The libsys helper conforms to
-            // the WRAPPER's signature so param/return shapes round-trip
-            // cleanly without LLVM type-mismatch errors.
-            let libsys_name = format!("__verum_libsys_{}", name);
-            let libsys = module.get_function(&libsys_name).unwrap_or_else(|| {
-                let f = module.add_function(&libsys_name, wrapper_fn_ty, None);
-                f.add_attribute(
-                    AttributeLoc::Function,
-                    ctx.create_string_attribute("verum.libsys", name),
-                );
-                f
-            });
-
-            // Forward all params 1:1.  Names use `ret` only when the
-            // call has a non-void result — naming a void-returning
-            // call is rejected by LLVM verifier.
-            let n_params = wrapper.count_params();
-            let mut args: Vec<verum_llvm::values::BasicMetadataValueEnum<'ctx>> =
-                Vec::with_capacity(n_params as usize);
-            for i in 0..n_params {
-                let p = wrapper.get_nth_param(i).ok_or_else(|| {
-                    super::error::LlvmLoweringError::internal(format!(
-                        "{}: missing param {}",
-                        name, i
-                    ))
-                })?;
-                args.push(p.into());
-            }
-
-            let call_name = if wrapper_ret_ty.is_some() { "ret" } else { "" };
-            let call_site = builder
-                .build_call(libsys, &args, call_name)
-                .or_llvm_err()?;
-
-            match wrapper_ret_ty {
-                Some(_) => {
-                    let ret = call_site.try_as_basic_value().basic().ok_or_else(|| {
-                        super::error::LlvmLoweringError::internal(format!(
-                            "{}: libsys call returned void but wrapper expects value",
-                            name
-                        ))
-                    })?;
-                    builder.build_return(Some(&ret)).or_llvm_err()?;
-                }
-                None => {
-                    builder.build_return(None).or_llvm_err()?;
-                }
-            }
         }
+        // (non-Linux targets returned early above: the declaration is
+        // left bodyless for the linker — LIBSYS-ALIAS-STUB-1.)
 
         Ok(())
     }
@@ -6213,13 +6188,21 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(term_ptr, i8_type.const_zero())
             .or_llvm_err()?;
+        // NET-RECV-TEXT-UAF-1: `verum_text_alloc` does NOT copy — the
+        // Text object ALIASES the given buffer ({ptr,len,cap} header
+        // over caller memory). The previous `text_alloc(buf, n, n)`
+        // followed by `dealloc(buf)` returned a Text whose data
+        // pointer was already freed (recv'd payload read back empty).
+        // Transfer OWNERSHIP of the recv buffer into the Text instead:
+        // cap records the true allocation size, and no dealloc here.
         let text = builder
-            .build_call(text_alloc_fn, &[buf.into(), n.into(), n.into()], "text")
+            .build_call(
+                text_alloc_fn,
+                &[buf.into(), n.into(), alloc_size.into()],
+                "text",
+            )
             .or_llvm_err()?
             .basic_value_or("expected basic value")?;
-        builder
-            .build_call(dealloc_fn, &[buf.into(), alloc_size.into()], "")
-            .or_llvm_err()?;
         builder.build_return(Some(&text)).or_llvm_err()?;
         Ok(())
     }
@@ -7090,13 +7073,20 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(term_ptr, i8_type.const_zero())
             .or_llvm_err()?;
+        // NET-RECV-TEXT-UAF-1: `verum_text_alloc` aliases the buffer —
+        // no copy. The old `text_alloc(buf, n, n)` + `dealloc(buf)`
+        // handed back a Text over FREED memory (UDP probe: recvfrom
+        // returned 4 with "ping" in the buffer, the printed Text was
+        // empty). Transfer buffer ownership into the Text: cap =
+        // alloc_size, no dealloc on this path.
         let text = builder
-            .build_call(text_alloc_fn, &[buf.into(), n.into(), n.into()], "text")
+            .build_call(
+                text_alloc_fn,
+                &[buf.into(), n.into(), alloc_size.into()],
+                "text",
+            )
             .or_llvm_err()?
             .basic_value_or("expected basic value")?;
-        builder
-            .build_call(dealloc_fn, &[buf.into(), alloc_size.into()], "")
-            .or_llvm_err()?;
         builder.build_return(Some(&text)).or_llvm_err()?;
         Ok(())
     }
