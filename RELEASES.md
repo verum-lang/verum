@@ -248,6 +248,32 @@ Cadences are **targets**, not guarantees — releases ship when the
 release-criteria checklist (CI green, docs updated, changelog
 written, deprecations documented) is satisfied.
 
+### 6.1 The rolling `dev` release
+
+While the language is in dev stage, every push to `main` rebuilds the
+full host-platform matrix and **overwrites** the single GitHub
+pre-release tagged `dev` (`.github/workflows/dev-release.yml`, built by
+the shared matrix in `.github/workflows/build-verum.yml`). No new
+release objects are minted per commit — `dev` is always the latest
+`main` build, and its asset URLs are permanent:
+
+```
+https://github.com/verum-lang/verum/releases/download/dev/verum-dev-<triple>.tar.gz   # Linux / macOS
+https://github.com/verum-lang/verum/releases/download/dev/verum-dev-<triple>.zip      # Windows
+https://github.com/verum-lang/verum/releases/download/dev/SHA256SUMS
+```
+
+Host triples built: `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`,
+`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, and
+`aarch64-pc-windows-msvc` (experimental). Each `verum` binary
+cross-compiles user programs to the full target matrix in
+`llvm/llvm.toml` regardless of host.
+
+The `dev` release carries **no stability guarantees** (it is the
+`main` track of the cadence table). Versioned `v*` tags keep producing
+normal immutable releases via `.github/workflows/release.yml`.
+
 ---
 
 ## 7. Release Branches

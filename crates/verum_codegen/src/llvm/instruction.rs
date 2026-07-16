@@ -5819,6 +5819,57 @@ pub fn lower_instruction<'ctx>(
                 untag_slot_ptr(ctx, ref_val, "ref_ptr")?
             };
 
+            // DEREF-MUT-TEXT-COPY-1: `*self = new_text` inside a
+            // `&mut self` Text method. The AOT Text ABI is a headerless
+            // flat 24-byte record and the CALLER keeps its own pointer to
+            // that record — a single word store through the ref would
+            // overwrite the record's DATA-POINTER word with the address
+            // of the freshly built Text OBJECT (caller then reads len=OLD
+            // and bytes = the pointer's raw bytes: Text.insert produced
+            // len=5/b0=0xE0 garbage; the whole `*self = ...` rewrite
+            // family — insert/insert_str/remove/make_ascii_* — was
+            // corrupted). The honest write is a STRUCTURAL copy of all
+            // three words {data,len,cap} into the caller's record, which
+            // is exactly how Tier-0 observes it (the slot's Text VALUE is
+            // replaced wholesale).
+            if ctx.is_text_register(value.0) || ctx.is_string_register(value.0) {
+                let i64_ty = ctx.types().i64_type();
+                let src_i = as_i64(ctx, store_val, "dm_text_src")?;
+                let src_ptr = ctx
+                    .builder()
+                    .build_int_to_ptr(src_i, ctx.types().ptr_type(), "dm_text_src_ptr")
+                    .or_llvm_err()?;
+                let i8_ty = ctx.types().i8_type();
+                for w in 0..3u64 {
+                    let s_slot = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_ty,
+                                src_ptr,
+                                &[i64_ty.const_int(w * 8, false)],
+                                &format!("dm_ts{}", w),
+                            )
+                            .or_llvm_err()?
+                    };
+                    let word = ctx
+                        .builder()
+                        .build_load(i64_ty, s_slot, &format!("dm_tw{}", w))
+                        .or_llvm_err()?;
+                    let d_slot = unsafe {
+                        ctx.builder()
+                            .build_in_bounds_gep(
+                                i8_ty,
+                                ptr,
+                                &[i64_ty.const_int(w * 8, false)],
+                                &format!("dm_td{}", w),
+                            )
+                            .or_llvm_err()?
+                    };
+                    ctx.builder().build_store(d_slot, word).or_llvm_err()?;
+                }
+                return Ok(());
+            }
+
             ctx.builder()
                 .build_store(ptr, store_val)
                 .or_llvm_err()?;
@@ -29937,6 +29988,136 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        // ENV-IMPL-TRIO-1 (#55, Tier-1 side): environment variables via
+        // libSystem getenv/setenv/unsetenv (darwin's required boundary;
+        // the interpreter side answers with std::env). The byte-slice
+        // argument is resolved through the ONE container classifier and
+        // copied into a NUL-terminated scratch C string; results are the
+        // stdlib-declared variants (Maybe<Text> / Result<(), Text>) with
+        // stamped headers so downstream RTID dispatch stays sound.
+        Some(SystemSubOpcode::EnvGet) => {
+            let mut pos = 0usize;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let name_reg = read_reg_varlen(operands, &mut pos)?;
+            let cstr = emit_env_bytes_to_cstr(ctx, name_reg, "envget_name")?;
+            let module = ctx.get_module();
+            let i8p = ctx.types().ptr_type();
+            let getenv_ty = i8p.fn_type(&[i8p.into()], false);
+            let getenv_fn =
+                super::error::get_or_declare_function(&module, "getenv", getenv_ty);
+            let raw = ctx
+                .builder()
+                .build_call(getenv_fn, &[cstr.into()], "envget_raw")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("getenv returns ptr")?
+                .into_pointer_value();
+            let i64_ty = ctx.types().i64_type();
+            let raw_i = ctx
+                .builder()
+                .build_ptr_to_int(raw, i64_ty, "envget_raw_i")
+                .or_llvm_err()?;
+            let is_null = ctx
+                .builder()
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    raw_i,
+                    i64_ty.const_zero(),
+                    "envget_null",
+                )
+                .or_llvm_err()?;
+            let f = ctx.function();
+            let cx = ctx.llvm_context();
+            let some_bb = cx.append_basic_block(f, "envget_some");
+            let none_bb = cx.append_basic_block(f, "envget_none");
+            let merge_bb = cx.append_basic_block(f, "envget_merge");
+            ctx.builder()
+                .build_conditional_branch(is_null, none_bb, some_bb)
+                .or_llvm_err()?;
+            // Some: text = verum_text_from_cstr(raw); variant tag=1 payload
+            ctx.builder().position_at_end(some_bb);
+            let from_cstr_ty = i8p.fn_type(&[i8p.into()], false);
+            let from_cstr = super::error::get_or_declare_function(
+                &module,
+                "verum_text_from_cstr",
+                from_cstr_ty,
+            );
+            let text_p = ctx
+                .builder()
+                .build_call(from_cstr, &[raw.into()], "envget_text")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("from_cstr returns ptr")?
+                .into_pointer_value();
+            let text_i = ctx
+                .builder()
+                .build_ptr_to_int(text_p, i64_ty, "envget_text_i")
+                .or_llvm_err()?;
+            let some_v = emit_env_variant(ctx, TypeId::MAYBE.0, 1, Some(text_i), "envget_s")?;
+            let some_end = ctx.builder().get_insert_block().unwrap();
+            ctx.builder()
+                .build_unconditional_branch(merge_bb)
+                .or_llvm_err()?;
+            // None: tag=0, no payload
+            ctx.builder().position_at_end(none_bb);
+            let none_v = emit_env_variant(ctx, TypeId::MAYBE.0, 0, None, "envget_n")?;
+            let none_end = ctx.builder().get_insert_block().unwrap();
+            ctx.builder()
+                .build_unconditional_branch(merge_bb)
+                .or_llvm_err()?;
+            ctx.builder().position_at_end(merge_bb);
+            let phi = ctx.builder().build_phi(i64_ty, "envget_out").or_llvm_err()?;
+            phi.add_incoming(&[(&some_v, some_end), (&none_v, none_end)]);
+            ctx.set_register(dst, phi.as_basic_value());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::EnvSet) => {
+            let mut pos = 0usize;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let name_reg = read_reg_varlen(operands, &mut pos)?;
+            let value_reg = read_reg_varlen(operands, &mut pos)?;
+            let name_c = emit_env_bytes_to_cstr(ctx, name_reg, "envset_name")?;
+            let value_c = emit_env_bytes_to_cstr(ctx, value_reg, "envset_val")?;
+            let module = ctx.get_module();
+            let i8p = ctx.types().ptr_type();
+            let i32_ty = ctx.types().i32_type();
+            let setenv_ty = i32_ty.fn_type(&[i8p.into(), i8p.into(), i32_ty.into()], false);
+            let setenv_fn =
+                super::error::get_or_declare_function(&module, "setenv", setenv_ty);
+            ctx.builder()
+                .build_call(
+                    setenv_fn,
+                    &[name_c.into(), value_c.into(), i32_ty.const_int(1, false).into()],
+                    "",
+                )
+                .or_llvm_err()?;
+            let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envset_ok")?;
+            ctx.set_register(dst, ok.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::EnvUnset) => {
+            let mut pos = 0usize;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let name_reg = read_reg_varlen(operands, &mut pos)?;
+            let name_c = emit_env_bytes_to_cstr(ctx, name_reg, "envunset_name")?;
+            let module = ctx.get_module();
+            let i8p = ctx.types().ptr_type();
+            let i32_ty = ctx.types().i32_type();
+            let unsetenv_ty = i32_ty.fn_type(&[i8p.into()], false);
+            let unsetenv_fn =
+                super::error::get_or_declare_function(&module, "unsetenv", unsetenv_ty);
+            ctx.builder()
+                .build_call(unsetenv_fn, &[name_c.into()], "")
+                .or_llvm_err()?;
+            let ok = emit_env_variant(ctx, TypeId::RESULT.0, 0, Some(ctx.types().i64_type().const_zero()), "envunset_ok")?;
+            ctx.set_register(dst, ok.into());
+            Ok(())
+        }
+
         // Mach Kernel Operations (0x90-0x98) — macOS-specific, stub for portability
         Some(SystemSubOpcode::MachVmAllocate)
         | Some(SystemSubOpcode::MachVmDeallocate)
@@ -33061,6 +33242,167 @@ fn store_ffi_void_value<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ret_reg: u16)
 /// every smarter mechanism (structural mark, MAYBE-EXTRACT payload
 /// propagation, container name fallbacks) and only when they all
 /// declined, so it can never override a better fact.
+/// ENV-IMPL-TRIO-1 helper: resolve a `&[Byte]` argument through the ONE
+/// container classifier and copy it into a fresh NUL-terminated C string
+/// (elem-strided read loop — cells/packs carry honest widths, lists are
+/// 8). Returns the i8* scratch pointer (verum_checked_malloc'd; env call
+/// lifetime only, intentionally leaked like other scratch C-strings).
+fn emit_env_bytes_to_cstr<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    bytes_reg: u16,
+    tag: &str,
+) -> Result<verum_llvm::values::PointerValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let ptr_ty = ctx.types().ptr_type();
+    let i8_ty = ctx.types().i8_type();
+    let v = as_i64(ctx, ctx.get_register(bytes_reg)?, &format!("{}_v", tag))?;
+    let obj = ctx
+        .builder()
+        .build_int_to_ptr(v, ptr_ty, &format!("{}_obj", tag))
+        .or_llvm_err()?;
+    let (data_i, len, elem) = emit_container_view(ctx, obj, tag)?;
+    let module = ctx.get_module();
+    let malloc_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+    let malloc_fn =
+        super::error::get_or_declare_function(&module, "verum_checked_malloc", malloc_ty);
+    let len_p1 = ctx
+        .builder()
+        .build_int_add(len, i64_ty.const_int(1, false), &format!("{}_lp1", tag))
+        .or_llvm_err()?;
+    let cstr = ctx
+        .builder()
+        .build_call(malloc_fn, &[len_p1.into()], &format!("{}_cstr", tag))
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .or_internal("malloc returns ptr")?
+        .into_pointer_value();
+    // copy loop: for i in 0..len { cstr[i] = elem_load(data, elem, i) as u8 }
+    let f = ctx.function();
+    let cx = ctx.llvm_context();
+    let head_bb = cx.append_basic_block(f, &format!("{}_head", tag));
+    let body_bb = cx.append_basic_block(f, &format!("{}_body", tag));
+    let done_bb = cx.append_basic_block(f, &format!("{}_done", tag));
+    let entry_end = ctx.builder().get_insert_block().unwrap();
+    ctx.builder().build_unconditional_branch(head_bb).or_llvm_err()?;
+    ctx.builder().position_at_end(head_bb);
+    let i_phi = ctx.builder().build_phi(i64_ty, &format!("{}_i", tag)).or_llvm_err()?;
+    i_phi.add_incoming(&[(&i64_ty.const_zero(), entry_end)]);
+    let i_v = i_phi.as_basic_value().into_int_value();
+    let cont = ctx
+        .builder()
+        .build_int_compare(IntPredicate::ULT, i_v, len, &format!("{}_lt", tag))
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_conditional_branch(cont, body_bb, done_bb)
+        .or_llvm_err()?;
+    ctx.builder().position_at_end(body_bb);
+    let env = super::slice_cell::CellEnv {
+        llvm: ctx.llvm_context(),
+        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
+    };
+    let (_off, slot) = env.elem_addr(ctx.builder(), data_i, elem, i_v, &format!("{}_ea", tag))?;
+    let word = env.elem_load(ctx.builder(), elem, slot, &format!("{}_ld", tag))?;
+    let byte = ctx
+        .builder()
+        .build_int_truncate(word, i8_ty, &format!("{}_b", tag))
+        .or_llvm_err()?;
+    let dst_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i8_ty, cstr, &[i_v], &format!("{}_ds", tag))
+            .or_llvm_err()?
+    };
+    ctx.builder().build_store(dst_slot, byte).or_llvm_err()?;
+    let i_next = ctx
+        .builder()
+        .build_int_add(i_v, i64_ty.const_int(1, false), &format!("{}_in", tag))
+        .or_llvm_err()?;
+    let body_end = ctx.builder().get_insert_block().unwrap();
+    i_phi.add_incoming(&[(&i_next, body_end)]);
+    ctx.builder().build_unconditional_branch(head_bb).or_llvm_err()?;
+    ctx.builder().position_at_end(done_bb);
+    let nul_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i8_ty, cstr, &[len], &format!("{}_ns", tag))
+            .or_llvm_err()?
+    };
+    ctx.builder()
+        .build_store(nul_slot, i8_ty.const_zero())
+        .or_llvm_err()?;
+    Ok(cstr)
+}
+
+/// ENV-IMPL-TRIO-1 helper: build a stamped 40-byte variant
+/// {tid@0(u32), size@12(u32), tag@24(i32), payload@32(i64)} — the
+/// ListIter.next shape — and return it as i64.
+fn emit_env_variant<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    tid: u32,
+    tag: u32,
+    payload: Option<verum_llvm::values::IntValue<'ctx>>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let i32_ty = ctx.types().i32_type();
+    let ptr_ty = ctx.types().ptr_type();
+    let i8_ty = ctx.types().i8_type();
+    let module = ctx.get_module();
+    let malloc_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+    let malloc_fn =
+        super::error::get_or_declare_function(&module, "verum_checked_malloc", malloc_ty);
+    let obj = ctx
+        .builder()
+        .build_call(malloc_fn, &[i64_ty.const_int(40, false).into()], name)
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .or_internal("malloc returns ptr")?
+        .into_pointer_value();
+    let memset_ty = ptr_ty.fn_type(
+        &[ptr_ty.into(), i32_ty.into(), i64_ty.into()],
+        false,
+    );
+    let memset_fn =
+        super::error::get_or_declare_function(&module, "verum_internal_memset", memset_ty);
+    ctx.builder()
+        .build_call(
+            memset_fn,
+            &[obj.into(), i32_ty.const_zero().into(), i64_ty.const_int(40, false).into()],
+            "",
+        )
+        .or_llvm_err()?;
+    ctx.builder()
+        .build_store(obj, i32_ty.const_int(tid as u64, false))
+        .or_llvm_err()?;
+    let size_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i8_ty, obj, &[i64_ty.const_int(12, false)], "env_v_size")
+            .or_llvm_err()?
+    };
+    ctx.builder()
+        .build_store(size_slot, i32_ty.const_int(40, false))
+        .or_llvm_err()?;
+    let tag_slot = unsafe {
+        ctx.builder()
+            .build_in_bounds_gep(i8_ty, obj, &[i64_ty.const_int(24, false)], "env_v_tag")
+            .or_llvm_err()?
+    };
+    ctx.builder()
+        .build_store(tag_slot, i32_ty.const_int(tag as u64, false))
+        .or_llvm_err()?;
+    if let Some(p) = payload {
+        let pay_slot = unsafe {
+            ctx.builder()
+                .build_in_bounds_gep(i8_ty, obj, &[i64_ty.const_int(32, false)], "env_v_pay")
+                .or_llvm_err()?
+        };
+        ctx.builder().build_store(pay_slot, p).or_llvm_err()?;
+    }
+    ctx.builder()
+        .build_ptr_to_int(obj, i64_ty, &format!("{}_i", name))
+        .or_llvm_err()
+}
+
 fn mark_call_result_from_retname<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: u16,

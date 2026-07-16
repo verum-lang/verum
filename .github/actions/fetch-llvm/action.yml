@@ -31,16 +31,18 @@ runs:
 
         LLVM_TAG=$(awk -F'"' '/^tag[[:space:]]*=/ { print $2; exit }' llvm/llvm.toml)
         if [[ -z "${LLVM_TAG}" ]]; then
-          echo "::error::Could not read `tag` from llvm/llvm.toml"
+          echo "::error::Could not read \`tag\` from llvm/llvm.toml"
           exit 1
         fi
         PREBUILT_TAG="llvm-prebuilt-${LLVM_TAG}"
 
         case "${RUNNER_OS}-${RUNNER_ARCH}" in
-          Linux-X64)   TRIPLE=x86_64-unknown-linux-gnu ;;
-          Linux-ARM64) TRIPLE=aarch64-unknown-linux-gnu ;;
-          macOS-ARM64) TRIPLE=aarch64-apple-darwin ;;
-          macOS-X64)   TRIPLE=x86_64-apple-darwin ;;
+          Linux-X64)     TRIPLE=x86_64-unknown-linux-gnu ;;
+          Linux-ARM64)   TRIPLE=aarch64-unknown-linux-gnu ;;
+          macOS-ARM64)   TRIPLE=aarch64-apple-darwin ;;
+          macOS-X64)     TRIPLE=x86_64-apple-darwin ;;
+          Windows-X64)   TRIPLE=x86_64-pc-windows-msvc ;;
+          Windows-ARM64) TRIPLE=aarch64-pc-windows-msvc ;;
           *)
             echo "::warning::No prebuilt triple mapping for ${RUNNER_OS}-${RUNNER_ARCH}; will build LLVM from source"
             echo "unsupported=true" >> "$GITHUB_OUTPUT"
@@ -68,6 +70,8 @@ runs:
             sudo apt-get update && sudo apt-get install -y zstd
           elif [[ "${RUNNER_OS}" == "macOS" ]]; then
             brew install zstd
+          elif [[ "${RUNNER_OS}" == "Windows" ]]; then
+            choco install -y zstandard
           fi
         fi
 
@@ -80,7 +84,7 @@ runs:
       run: |
         set -euo pipefail
 
-        if [[ -f llvm/install/bin/llvm-config ]]; then
+        if [[ -f llvm/install/bin/llvm-config || -f llvm/install/bin/llvm-config.exe ]]; then
           echo "llvm/install/ already present — skipping download"
           echo "fetched=already_present" >> "$GITHUB_OUTPUT"
           exit 0
@@ -101,17 +105,23 @@ runs:
           exit 0
         fi
 
-        # Verify checksum
+        # Verify checksum (sha256sum on Linux/Windows-git-bash, shasum on macOS)
         if [[ -f "${ARCHIVE}.sha256" ]]; then
-          shasum -a 256 -c "${ARCHIVE}.sha256"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "${ARCHIVE}.sha256"
+          else
+            shasum -a 256 -c "${ARCHIVE}.sha256"
+          fi
         fi
 
         mkdir -p llvm
-        # Archive contains `install/` at the top level — extract directly into llvm/
-        tar --zstd -xf "${ARCHIVE}" -C llvm
+        # Archive contains `install/` at the top level — extract directly
+        # into llvm/. Decompress via explicit zstd pipe: bsdtar/GNU-tar
+        # `--zstd` support varies across runner images.
+        zstd -d -c "${ARCHIVE}" | tar -xf - -C llvm
         rm -f "${ARCHIVE}" "${ARCHIVE}.sha256"
 
-        test -f llvm/install/bin/llvm-config
+        test -f llvm/install/bin/llvm-config || test -f llvm/install/bin/llvm-config.exe
         echo "fetched=hit" >> "$GITHUB_OUTPUT"
 
     - name: Build LLVM from source (fallback)
@@ -125,5 +135,15 @@ runs:
           sudo apt-get install -y cmake ninja-build python3
         elif [[ "${RUNNER_OS}" == "macOS" ]]; then
           brew install cmake ninja
+        elif [[ "${RUNNER_OS}" == "Windows" ]]; then
+          # A from-source LLVM build needs the MSVC env (cl/link) loaded by
+          # the CALLING workflow (e.g. ilammy/msvc-dev-cmd) plus ninja —
+          # a composite action cannot bootstrap that itself. Fail with a
+          # actionable message instead of a cryptic cmake error.
+          if ! command -v cl >/dev/null 2>&1; then
+            echo "::error::No prebuilt LLVM for this Windows triple and no MSVC env loaded. Run the 'Build LLVM (prebuilt cache)' workflow first (it back-fills missing triples), or load MSVC (ilammy/msvc-dev-cmd) + ninja before this action."
+            exit 1
+          fi
+          command -v ninja >/dev/null 2>&1 || choco install -y ninja
         fi
         cd llvm && ./build.sh

@@ -54,28 +54,6 @@ mod resolver;
 mod specializer;
 mod substitution;
 
-/// **MONO-DEFAULT-ON-1 (task #44)** — the ONE authority for the
-/// monomorphization + coherent-reference-model gate.
-///
-/// Default is ON: the structural specializer (canonical codec,
-/// jump-safe rewrites), the instantiation fixpoint, spec-time Display
-/// expansion and the uniform-i64/pointer-tagging reference model ship
-/// enabled.  `VERUM_DISABLE_MONO_AOT=1` is the kill-switch (triage
-/// sweeps / A/B); the legacy opt-in spelling `VERUM_ENABLE_MONO_AOT`
-/// remains accepted as a redundant force-on so existing scripts keep
-/// working.  Every consumer (codegen seeding, AOT ref-tagging, the
-/// pointer-store branch) reads THIS function — per-site env reads were
-/// exactly the drift channel the one-authority rule exists to kill.
-pub fn mono_aot_enabled() -> bool {
-    static GATE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *GATE.get_or_init(|| {
-        if std::env::var_os("VERUM_DISABLE_MONO_AOT").is_some_and(|v| v != "0") {
-            return false;
-        }
-        true
-    })
-}
-
 pub use cache::MonomorphizationCache;
 pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,

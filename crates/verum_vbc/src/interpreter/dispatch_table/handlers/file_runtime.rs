@@ -762,10 +762,17 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
 /// Extract a `&[Byte]` (or `List<Byte>`) argument from a register
 /// into an owned `Vec<u8>`. Reads the List header `[len, cap,
 /// backing_ptr]` and copies the byte payload.
-fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
+pub(super) fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
     let v = state
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
+    extract_byte_list_from_value(state, v)
+}
+
+/// Value-form twin of [`extract_byte_list_arg`] for handlers that read
+/// registers from the CURRENT frame (`state.get_reg`) rather than a
+/// caller frame — the FfiExtended System sub-ops (ENV-IMPL-TRIO-1).
+pub(super) fn extract_byte_list_from_value(state: &InterpreterState, v: Value) -> Vec<u8> {
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
         state.registers.get_absolute(abs_index)

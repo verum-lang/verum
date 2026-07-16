@@ -8,13 +8,19 @@ name: Build LLVM (prebuilt cache)
 # Why not just re-use upstream LLVM releases?
 #   `crates/llvm/verum_llvm_sys/build.rs` explicitly refuses system
 #   or upstream LLVM — it needs the exact projects (`clang + lld + mlir`),
-#   targets (`X86 + AArch64 + WebAssembly`), and `MinSizeRel` static
-#   libraries produced by our `llvm/build.sh`. Hence: one heavy build
-#   per LLVM version, amortised across every downstream CI run.
+#   targets, and `MinSizeRel` static libraries produced by our
+#   `llvm/build.sh`. Hence: one heavy build per LLVM version,
+#   amortised across every downstream CI run.
 #
 # Tag scheme: `llvm-prebuilt-<llvmorg-tag>` — e.g. `llvm-prebuilt-llvmorg-21.1.8`.
 # The composite action at `.github/actions/fetch-llvm` derives this
 # tag from `llvm/llvm.toml` and downloads the matching archive.
+#
+# The resolve job checks WHICH per-triple archives are already attached
+# to the release and only builds the missing ones — so adding a new
+# triple to the matrix later back-fills that one asset instead of
+# rebuilding the world (or being skipped entirely because the release
+# object already exists).
 
 on:
   push:
@@ -27,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       force_rebuild:
-        description: "Rebuild and overwrite the prebuilt release even if it already exists"
+        description: "Rebuild and overwrite every prebuilt asset even if it already exists"
         required: false
         default: "false"
 
@@ -40,8 +46,8 @@ permissions:
 
 jobs:
   # -------------------------------------------------------------------------
-  # Job 1 — read `llvm/llvm.toml`, compute the prebuilt tag, and short-circuit
-  # the matrix if the release is already published (unless force_rebuild).
+  # Job 1 — read `llvm/llvm.toml`, compute the prebuilt tag, and emit the
+  # matrix of triples whose archive is missing (all triples on force_rebuild).
   # -------------------------------------------------------------------------
   resolve:
     name: Resolve LLVM version
@@ -50,6 +56,7 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       prebuilt_tag: ${{ steps.v.outputs.prebuilt_tag }}
       skip: ${{ steps.v.outputs.skip }}
+      matrix: ${{ steps.v.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,49 +67,64 @@ jobs:
           set -euo pipefail
           LLVM_TAG=$(awk -F'"' '/^tag[[:space:]]*=/ { print $2; exit }' llvm/llvm.toml)
           if [[ -z "${LLVM_TAG}" ]]; then
-            echo "::error::Could not read `tag` from llvm/llvm.toml"
+            echo "::error::Could not read \`tag\` from llvm/llvm.toml"
             exit 1
           fi
           PREBUILT_TAG="llvm-prebuilt-${LLVM_TAG}"
           echo "tag=${LLVM_TAG}"                     >> "$GITHUB_OUTPUT"
           echo "prebuilt_tag=${PREBUILT_TAG}"        >> "$GITHUB_OUTPUT"
 
+          # triple → runner. One line per supported host platform.
+          TRIPLES=(
+            "x86_64-unknown-linux-gnu ubuntu-latest"
+            "aarch64-unknown-linux-gnu ubuntu-24.04-arm"
+            "aarch64-apple-darwin macos-latest"
+            "x86_64-apple-darwin macos-15-intel"
+            "x86_64-pc-windows-msvc windows-latest"
+            "aarch64-pc-windows-msvc windows-11-arm"
+          )
+
           FORCE="${{ github.event.inputs.force_rebuild || 'false' }}"
-          if gh release view "${PREBUILT_TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            if [[ "${FORCE}" == "true" ]]; then
-              echo "Release ${PREBUILT_TAG} exists; force_rebuild=true → will rebuild"
-              echo "skip=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "Release ${PREBUILT_TAG} already published; skipping build"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
+          EXISTING=""
+          if gh release view "${PREBUILT_TAG}" --repo "${{ github.repository }}" \
+               --json assets --jq '.assets[].name' > /tmp/assets.txt 2>/dev/null; then
+            EXISTING=$(cat /tmp/assets.txt)
+          fi
+
+          INCLUDE=""
+          for entry in "${TRIPLES[@]}"; do
+            triple="${entry%% *}"
+            runner="${entry##* }"
+            archive="verum-llvm-${LLVM_TAG}-${triple}.tar.zst"
+            if [[ "${FORCE}" != "true" ]] && grep -qxF "${archive}" <<< "${EXISTING}"; then
+              echo "✓ ${archive} already published — skipping ${triple}"
+              continue
             fi
+            echo "→ will build ${triple} on ${runner}"
+            INCLUDE+="{\"triple\":\"${triple}\",\"runner\":\"${runner}\"},"
+          done
+
+          if [[ -z "${INCLUDE}" ]]; then
+            echo "All prebuilt archives already published; nothing to build"
+            echo "skip=true"        >> "$GITHUB_OUTPUT"
+            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
           else
-            echo "Release ${PREBUILT_TAG} not yet published; will build"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "skip=false"       >> "$GITHUB_OUTPUT"
+            echo "matrix={\"include\":[${INCLUDE%,}]}" >> "$GITHUB_OUTPUT"
           fi
 
   # -------------------------------------------------------------------------
-  # Job 2 — build LLVM on every supported (runner, triple) pair in parallel.
-  # Windows is deliberately excluded until llvm/build.bat exists.
+  # Job 2 — build LLVM on every (runner, triple) pair still missing.
   # -------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.triple }}
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
+    timeout-minutes: 350
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - triple: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - triple: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
-          - triple: aarch64-apple-darwin
-            runner: macos-latest
-          - triple: x86_64-apple-darwin
-            runner: macos-13
+      matrix: ${{ fromJson(needs.resolve.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -117,27 +139,45 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake ninja zstd
 
+      # llvm/build.sh requires ninja on Windows (no `make` in MSVC land);
+      # cmake + python are preinstalled on hosted Windows runners.
+      - name: Install build deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install -y ninja zstandard
+
+      - name: Load MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.triple == 'aarch64-pc-windows-msvc' && 'arm64' || 'x64' }}
+
       - name: Build LLVM
         working-directory: llvm
+        shell: bash
         run: ./build.sh
-        timeout-minutes: 150
+        timeout-minutes: 340
 
       - name: Verify install layout
         working-directory: llvm
+        shell: bash
         run: |
           set -euo pipefail
-          test -f install/bin/llvm-config
+          # llvm-config gains a .exe suffix on Windows; static libs are
+          # .a with GNU/clang toolchains and .lib with MSVC.
+          test -f install/bin/llvm-config || test -f install/bin/llvm-config.exe
           test -d install/include
-          ls install/lib/LLVM*.a  >/dev/null
-          ls install/lib/LLD*.a   >/dev/null
-          ls install/lib/MLIR*.a  >/dev/null
+          ls install/lib/LLVM*.a  >/dev/null 2>&1 || ls install/lib/LLVM*.lib >/dev/null
+          ls install/lib/LLD*.a   >/dev/null 2>&1 || ls install/lib/LLD*.lib  >/dev/null
+          ls install/lib/MLIR*.a  >/dev/null 2>&1 || ls install/lib/MLIR*.lib >/dev/null
 
       - name: Strip sources + tests (shrink archive)
         working-directory: llvm/install
+        shell: bash
         run: |
           rm -rf share/man share/doc
           # Keep headers, libs, and llvm-config. Drop everything else under bin/
-          # except the binaries Verum's build.rs actually references.
+          # except the binaries Verum's build.rs actually references
+          # (patterns cover the .exe suffix on Windows).
           find bin -maxdepth 1 -type f \
             ! -name 'llvm-config*' \
             ! -name 'lld*' \
@@ -147,11 +187,18 @@ jobs:
 
       - name: Package archive
         working-directory: llvm
+        shell: bash
         run: |
           set -euo pipefail
           ARCHIVE="verum-llvm-${{ needs.resolve.outputs.tag }}-${{ matrix.triple }}.tar.zst"
-          tar --zstd -cf "${ARCHIVE}" install
-          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          # Pipe through zstd explicitly — bsdtar/GNU-tar `--zstd` support
+          # varies across runner images, the pipe form works everywhere.
+          tar -cf - install | zstd -T0 -19 -o "${ARCHIVE}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          else
+            shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          fi
           ls -lh "${ARCHIVE}" "${ARCHIVE}.sha256"
           # Sanity: archive must be < 2 GB (GitHub release asset limit is 2 GB)
           SIZE=$(stat -c%s "${ARCHIVE}" 2>/dev/null || stat -f%z "${ARCHIVE}")
@@ -170,7 +217,9 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
-  # Job 3 — collect the per-triple archives and publish them under one tag.
+  # Job 3 — attach the per-triple archives to the release tag, creating the
+  # release when it does not exist yet. `--clobber` appends/overwrites only
+  # the assets built in this run; previously published triples stay intact.
   # -------------------------------------------------------------------------
   publish:
     name: Publish prebuilt release
@@ -195,20 +244,29 @@ jobs:
           [[ -n "$(ls -A release)" ]]
 
       - name: Publish / update release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.resolve.outputs.prebuilt_tag }}
-          name: "Prebuilt LLVM ${{ needs.resolve.outputs.tag }}"
-          prerelease: true
-          body: |
-            Verum-specific LLVM prebuild for `${{ needs.resolve.outputs.tag }}`.
-
-            Built from `llvm/llvm.toml` by `llvm/build.sh` with:
-            - projects: `clang + lld + mlir`
-            - targets:  `X86 + AArch64 + WebAssembly`
-            - build_type: `MinSizeRel` (static `.a` libs)
-
-            Consumed automatically by `.github/actions/fetch-llvm`
-            in the main Verum CI / release workflows. Not a
-            user-facing release.
-          files: release/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve.outputs.prebuilt_tag }}"
+          if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            NOTES_FILE=$(mktemp)
+            {
+              echo "Verum-specific LLVM prebuild for \`${{ needs.resolve.outputs.tag }}\`."
+              echo
+              echo "Built from \`llvm/llvm.toml\` by \`llvm/build.sh\` with:"
+              echo "- projects: \`clang + lld + mlir\`"
+              echo "- targets:  full cross-compile matrix (see \`llvm/llvm.toml\`)"
+              echo "- build_type: \`MinSizeRel\` (static libraries)"
+              echo
+              echo "Consumed automatically by \`.github/actions/fetch-llvm\`"
+              echo "in the main Verum CI / release workflows. Not a"
+              echo "user-facing release."
+            } > "${NOTES_FILE}"
+            gh release create "${TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --prerelease \
+              --title "Prebuilt LLVM ${{ needs.resolve.outputs.tag }}" \
+              --notes-file "${NOTES_FILE}"
+          fi
+          gh release upload "${TAG}" release/* --repo "${GITHUB_REPOSITORY}" --clobber

@@ -1,0 +1,112 @@
+name: Dev release (rolling)
+
+# Rolling development release: every push to `main` rebuilds the full
+# platform matrix and OVERWRITES the single pre-release tagged `dev` —
+# no new release objects are minted while the language is in dev stage.
+#
+# Download URLs are therefore permanent:
+#   https://github.com/verum-lang/verum/releases/download/dev/verum-dev-<triple>.tar.gz
+#
+# Mechanics:
+#   1. `build-verum.yml` (reusable) produces one asset per host triple.
+#   2. The `dev` tag is force-moved to the built commit.
+#   3. All existing assets on the `dev` release are deleted, then the
+#      fresh set is uploaded — the release always reflects exactly one
+#      commit, never a mix of two builds.
+#
+# Versioned releases are separate: push a `v*` tag → `release.yml`.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only the newest commit matters for a rolling release — cancel stale runs.
+concurrency:
+  group: dev-release
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-verum.yml
+    with:
+      artifact-version: dev
+
+  publish:
+    name: Update rolling `dev` release
+    needs: build
+    # Publish whatever platforms built successfully — a broken (or still
+    # bootstrapping, e.g. Windows before its LLVM prebuilt exists) platform
+    # must not starve the other platforms of fresh dev binaries. The
+    # failing job stays red on the run for visibility.
+    if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), needs.build.result) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+          pattern: verum-*
+          merge-multiple: true
+
+      - name: Collect assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find _artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) \
+            -exec cp {} dist/ \;
+          # Combined checksum manifest (one line per asset).
+          (cd dist && cat ./*.sha256 > SHA256SUMS)
+          ls -lh dist/
+          [[ -n "$(ls -A dist)" ]]
+
+      - name: Force-move `dev` tag to ${{ github.sha }}
+        run: git push origin "+${{ github.sha }}:refs/tags/dev"
+
+      - name: Create or update `dev` release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TITLE="Verum dev build ($(date -u +%Y-%m-%d) @ ${GITHUB_SHA::9})"
+          NOTES_FILE=$(mktemp)
+          {
+            echo "Rolling development build — overwritten on every push to \`main\`."
+            echo
+            echo "- **Commit**: ${GITHUB_SHA} — $(git log -1 --format=%s "${GITHUB_SHA}")"
+            echo "- **Built**: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "- **Workflow run**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "Asset names are stable — pin your scripts to"
+            echo "\`releases/download/dev/verum-dev-<triple>.{tar.gz,zip}\`."
+            echo "Verify downloads against \`SHA256SUMS\`."
+            echo
+            echo "For versioned releases see the \`v*\` tags."
+          } > "${NOTES_FILE}"
+
+          if gh release view dev --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit dev \
+              --repo "${GITHUB_REPOSITORY}" \
+              --prerelease \
+              --title "${TITLE}" \
+              --notes-file "${NOTES_FILE}"
+            # Drop every stale asset so the release is exactly this build.
+            gh release view dev --repo "${GITHUB_REPOSITORY}" \
+              --json assets --jq '.assets[].name' |
+            while read -r asset; do
+              gh release delete-asset dev "${asset}" --repo "${GITHUB_REPOSITORY}" -y
+            done
+          else
+            gh release create dev \
+              --repo "${GITHUB_REPOSITORY}" \
+              --prerelease \
+              --title "${TITLE}" \
+              --notes-file "${NOTES_FILE}"
+          fi
+
+          gh release upload dev dist/* --repo "${GITHUB_REPOSITORY}" --clobber

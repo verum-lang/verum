@@ -1,87 +1,61 @@
 name: Release
 
+# Versioned releases: push a `v*` tag → build the full platform matrix
+# (shared with the rolling dev release via `build-verum.yml`) and publish
+# a normal GitHub release with generated notes.
+#
+# Asset naming matches packaging/homebrew/verum.rb:
+#   verum-<tag>-<triple>.tar.gz / .zip (+ .sha256, + combined SHA256SUMS)
+
 on:
   push:
     tags:
       - 'v*'
 
-env:
-  CARGO_TERM_COLOR: always
+permissions:
+  contents: write
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: verum-linux-x86_64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: verum-macos-aarch64
-          - os: macos-13
-            target: x86_64-apple-darwin
-            artifact: verum-macos-x86_64
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      # The repo's `rust-toolchain.toml` pins the nightly channel
-      # (verum_common uses `#![feature(pattern)]` and the workspace
-      # is on edition 2024). Using @stable here would fail to build
-      # — let cargo read rust-toolchain.toml on first invocation and
-      # install the pinned channel automatically.
-      - name: Install Rust toolchain (nightly per rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
-          targets: ${{ matrix.target }}
-          components: rustfmt, clippy, rust-src
-
-      - name: Fetch prebuilt LLVM
-        uses: ./.github/actions/fetch-llvm
-
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p verum_cli --features verification
-
-      - name: Package binary
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/verum dist/verum
-          chmod +x dist/verum
-          tar czf ${{ matrix.artifact }}.tar.gz -C dist verum
-          shasum -a 256 ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: |
-            ${{ matrix.artifact }}.tar.gz
-            ${{ matrix.artifact }}.tar.gz.sha256
+    uses: ./.github/workflows/build-verum.yml
+    with:
+      artifact-version: ${{ github.ref_name }}
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
         with:
-          files: |
-            verum-linux-x86_64/*.tar.gz
-            verum-linux-x86_64/*.sha256
-            verum-macos-aarch64/*.tar.gz
-            verum-macos-aarch64/*.sha256
-            verum-macos-x86_64/*.tar.gz
-            verum-macos-x86_64/*.sha256
-          generate_release_notes: true
+          path: _artifacts
+          pattern: verum-*
+          merge-multiple: true
+
+      - name: Collect assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find _artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) \
+            -exec cp {} dist/ \;
+          (cd dist && cat ./*.sha256 > SHA256SUMS)
+          ls -lh dist/
+          [[ -n "$(ls -A dist)" ]]
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${TAG}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Verum ${TAG}" \
+              --generate-notes
+          fi
