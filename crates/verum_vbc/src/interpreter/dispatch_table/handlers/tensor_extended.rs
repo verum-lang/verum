@@ -116,7 +116,7 @@ pub(in super::super) fn handle_tensor_extended(
     };
     use super::super::super::tensor::DType;
     use super::super::super::tensor::{
-        PoolOp, TensorHandle, tensor_argmax, tensor_argmin, tensor_batch_matmul, tensor_batch_norm,
+        PoolOp, TensorHandle, tensor_argmin, tensor_batch_matmul, tensor_batch_norm,
         tensor_clone, tensor_conv2d, tensor_layer_norm, tensor_permute, tensor_pool2d,
         tensor_softmax, tensor_topk,
     };
@@ -4671,17 +4671,6 @@ fn reg_i64(state: &InterpreterState, reg: crate::instruction::Reg) -> i64 {
     } else {
         v.as_i64()
     }
-}
-
-/// Reads a register as a raw `*mut TensorHandle` (null when the
-/// register does not hold a pointer value).
-fn reg_tensor(
-    state: &InterpreterState,
-    reg: crate::instruction::Reg,
-) -> *mut super::super::super::tensor::TensorHandle {
-    state
-        .get_reg(reg)
-        .as_ptr::<super::super::super::tensor::TensorHandle>()
 }
 
 /// Extracts the tensor handles stored in a `List` register (for
