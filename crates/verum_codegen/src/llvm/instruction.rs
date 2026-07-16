@@ -22870,6 +22870,19 @@ fn lower_cbgr_extended<'ctx>(
                 .build_and(word0, i64_ty.const_int(0xFFFF_FFFF, false), "rs_tid")
                 .or_llvm_err()?;
             let t = |v: u32| i64_ty.const_int(v as u64, false);
+            // RS-TYPED-SCALAR-WIDTH-1: the comment contract above
+            // ("U8/16/32/64 → data = src+HDR, elem 1/2/4/8") was never
+            // implemented — every STAMPED scalar typed-array fell into
+            // the unknown-header arm whose elem is a hardcoded 8, so
+            // `&mut buf` over a `[Byte; 4]` compact u8 buffer produced a
+            // cell with elem=8: Char.encode_utf8 then smeared 32 bytes
+            // across the 4-byte buffer (Text.insert built garbage bytes
+            // 0xE0/0xC0 — the whole in-place edit family). Dedicated
+            // arms per stamped scalar width, data = src + HDR.
+            let scalar1_bb = llvm_cx.append_basic_block(current_fn, "rs_sc1");
+            let scalar2_bb = llvm_cx.append_basic_block(current_fn, "rs_sc2");
+            let scalar4_bb = llvm_cx.append_basic_block(current_fn, "rs_sc4");
+            let scalar8_bb = llvm_cx.append_basic_block(current_fn, "rs_sc8");
             ctx.builder()
                 .build_switch(
                     tid,
@@ -22877,9 +22890,38 @@ fn lower_cbgr_extended<'ctx>(
                     &[
                         (t(TypeId::LIST.0), list_bb),
                         (t(TypeId::BYTE_LIST.0), bytelist_bb),
+                        (t(TypeId::U8.0), scalar1_bb),
+                        (t(TypeId::I8.0), scalar1_bb),
+                        (t(TypeId::BOOL.0), scalar1_bb),
+                        (t(TypeId::U16.0), scalar2_bb),
+                        (t(TypeId::I16.0), scalar2_bb),
+                        (t(TypeId::U32.0), scalar4_bb),
+                        (t(TypeId::I32.0), scalar4_bb),
+                        (t(TypeId::F32.0), scalar4_bb),
+                        (t(TypeId::U64.0), scalar8_bb),
+                        (t(TypeId::I64.0), scalar8_bb),
+                        (t(TypeId::INT.0), scalar8_bb),
+                        (t(TypeId::FLOAT.0), scalar8_bb),
                     ],
                 )
                 .or_llvm_err()?;
+            let hdr_c = i64_ty.const_int(hdr, false);
+            let mut scalar_arm = |bb, tag: &str| -> Result<(IntValue, _)> {
+                ctx.builder().position_at_end(bb);
+                let data = ctx
+                    .builder()
+                    .build_int_add(base_int, hdr_c, &format!("{}_data", tag))
+                    .or_llvm_err()?;
+                ctx.builder()
+                    .build_unconditional_branch(merge_bb)
+                    .or_llvm_err()?;
+                let end = ctx.builder().get_insert_block().unwrap();
+                Ok((data, end))
+            };
+            let (sc1_data, sc1_end) = scalar_arm(scalar1_bb, "rs_sc1")?;
+            let (sc2_data, sc2_end) = scalar_arm(scalar2_bb, "rs_sc2")?;
+            let (sc4_data, sc4_end) = scalar_arm(scalar4_bb, "rs_sc4")?;
+            let (sc8_data, sc8_end) = scalar_arm(scalar8_bb, "rs_sc8")?;
 
             // LIST / BYTE_LIST: follow backing_ptr (payload slot 2).
             let mut backing_of = |bb, tag: &str| -> Result<IntValue> {
@@ -23017,11 +23059,17 @@ fn lower_cbgr_extended<'ctx>(
             let data_phi = ctx.builder().build_phi(i64_ty, "rs_data").or_llvm_err()?;
             let e8 = i64_ty.const_int(8, false);
             let e1 = i64_ty.const_int(1, false);
+            let e2 = i64_ty.const_int(2, false);
+            let e4 = i64_ty.const_int(4, false);
             data_phi.add_incoming(&[
                 (&list_data, list_end),
                 (&bl_data, bl_end),
                 (&typed_data, typed_end),
                 (&base_int, legacy_end),
+                (&sc1_data, sc1_end),
+                (&sc2_data, sc2_end),
+                (&sc4_data, sc4_end),
+                (&sc8_data, sc8_end),
             ]);
             let elem_phi = ctx.builder().build_phi(i64_ty, "rs_elem").or_llvm_err()?;
             elem_phi.add_incoming(&[
@@ -23029,6 +23077,10 @@ fn lower_cbgr_extended<'ctx>(
                 (&e1, bl_end),
                 (&typed_elem_v, typed_end),
                 (&e8, legacy_end),
+                (&e1, sc1_end),
+                (&e2, sc2_end),
+                (&e4, sc4_end),
+                (&e8, sc8_end),
             ]);
             let data_v = data_phi.as_basic_value().into_int_value();
             let elem_v = elem_phi.as_basic_value().into_int_value();
@@ -24861,81 +24913,32 @@ fn lower_char_extended<'ctx>(
                     .builder()
                     .build_int_to_ptr(buf_val, ptr_type, "enc_buf_obj")
                     .or_llvm_err()?;
-                // PACK-HEADER-STAMP discrimination: the buffer arrives as
-                // EITHER a slice Pack {ptr@24,len@32} (as_mut_slice call
-                // shapes — stamped TUPLE 521) OR a raw LIST object
-                // {len@24,cap@32,ptr@40} (`&mut buf` of a fixed array —
-                // Text.push's shape). The fixed @24 read on a LIST loaded
-                // the LEN (4) as a "pointer" → store at address 0x4 →
-                // EXC_BAD_ACCESS in Char.encode_utf8 (unmasked by the
-                // encode_utf8 dedup fix; pre-dedup the whole fn was a
-                // ret-0 stub). Select the backing slot by the header tid.
-                let i32_ty = ctx.types().context().i32_type();
-                let tid = ctx
-                    .builder()
-                    .build_load(i32_ty, buf_obj, "enc_hdr_tid")
-                    .or_llvm_err()?
-                    .into_int_value();
-                // Slice Pack stamps: TUPLE (521, as_mut_slice shapes) or
-                // BYTE_SLICE (528, ARCH-P5 byte views) — identical
-                // {ptr@24, len@32} layout.
-                let is_tuple_pack = ctx
-                    .builder()
-                    .build_int_compare(
-                        IntPredicate::EQ,
-                        tid,
-                        i32_ty.const_int(TypeId::TUPLE.0 as u64, false),
-                        "enc_is_tuple_pack",
-                    )
-                    .or_llvm_err()?;
-                let is_byte_slice = ctx
-                    .builder()
-                    .build_int_compare(
-                        IntPredicate::EQ,
-                        tid,
-                        i32_ty.const_int(TypeId::BYTE_SLICE.0 as u64, false),
-                        "enc_is_byte_slice",
-                    )
-                    .or_llvm_err()?;
-                let is_pack = ctx
-                    .builder()
-                    .build_or(is_tuple_pack, is_byte_slice, "enc_is_pack")
-                    .or_llvm_err()?;
-                let pack_slot = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(24, false)], "enc_pack_slot")
-                        .or_llvm_err()?
-                };
-                let list_slot = unsafe {
-                    ctx.builder()
-                        .build_in_bounds_gep(i8_ty, buf_obj, &[i64_ty.const_int(super::runtime::LIST_PTR_OFFSET, false)], "enc_list_slot")
-                        .or_llvm_err()?
-                };
-                let pack_i = ctx
-                    .builder()
-                    .build_load(i64_ty, pack_slot, "enc_pack_i")
-                    .or_llvm_err()?
-                    .into_int_value();
-                let list_i = ctx
-                    .builder()
-                    .build_load(i64_ty, list_slot, "enc_list_i")
-                    .or_llvm_err()?
-                    .into_int_value();
-                let backing_i = ctx
-                    .builder()
-                    .build_select(is_pack, pack_i, list_i, "enc_backing_sel")
-                    .or_llvm_err()?
-                    .into_int_value();
-                let data_ptr = ctx
-                    .builder()
-                    .build_int_to_ptr(backing_i, ptr_type, "enc_data_ptr")
-                    .or_llvm_err()?;
+                // ENCODE-UTF8-CANONICAL-VIEW-1: the buffer arrives as ANY
+                // of the three container shapes — canonical 24B cell
+                // ({data@0,len@8,elem@16}: `&mut buf` of a `[Byte; 4]`
+                // local via the RefSlice coercion), stamped Pack
+                // (TUPLE/BYTE_SLICE {ptr@24}), or raw LIST ({ptr@40}).
+                // The previous hand-rolled TWO-arm select (pack@24 |
+                // list@40) executed BOTH loads (the recurring
+                // select-is-not-a-guard lesson) and did not know cells at
+                // all: a cell's word@40 is PAST its 24-byte extent, the
+                // select picked that garbage/zero as "data", and
+                // Char.encode_utf8 stored through NULL (Text.insert's
+                // encode step — the whole in-place edit family crashed).
+                // Route through the ONE classifier and write elem-strided
+                // (cells/packs carry honest widths; lists stay 8).
+                let (enc_data_i, _enc_len, enc_elem) =
+                    emit_container_view(ctx, buf_obj, "encutf8")?;
                 let store_k = |ctx: &mut FunctionContext<'_, 'ctx>, k: u64, byte: verum_llvm::values::IntValue<'ctx>| -> Result<()> {
-                    let slot = unsafe {
-                        ctx.builder().build_in_bounds_gep(i8_ty, data_ptr, &[i64_ty.const_int(k * 8, false)], "enc_slot").or_llvm_err()?
+                    let env = super::slice_cell::CellEnv {
+                        llvm: ctx.llvm_context(),
+                        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
                     };
+                    let idx = i64_ty.const_int(k, false);
+                    let (_off, slot) =
+                        env.elem_addr(ctx.builder(), enc_data_i, enc_elem, idx, "enc_slot")?;
                     let b64 = ctx.builder().build_int_z_extend(byte, i64_ty, "enc_b64").or_llvm_err()?;
-                    ctx.builder().build_store(slot, b64).or_llvm_err()?;
+                    env.elem_store(ctx.builder(), enc_elem, slot, b64, "enc_store")?;
                     Ok(())
                 };
                 let trunc = |ctx: &mut FunctionContext<'_, 'ctx>, v: verum_llvm::values::IntValue<'ctx>, name: &str| ctx.builder().build_int_truncate(v, i8_ty, name).unwrap();
@@ -24953,14 +24956,21 @@ fn lower_char_extended<'ctx>(
                 let done_bb = ctx.llvm_context().append_basic_block(function, "enc_done");
                 let lt = |ctx: &mut FunctionContext<'_, 'ctx>, m: u64, name: &str| ctx.builder().build_int_compare(IntPredicate::ULT, ch, i64_ty.const_int(m, false), name).unwrap();
                 let c = lt(ctx, 0x80, "lt80"); ctx.builder().build_conditional_branch(c, one_bb, c2).or_llvm_err()?;
+                // PHI incomings must ride the LIVE terminating block, not
+                // the branch entry: the width-switched elem_store inside
+                // store_k INTERPOSES its own smerge blocks (the
+                // string-join-PHI class — capture the live insert block
+                // after the last store in each arm).
                 ctx.builder().position_at_end(one_bb);
                 let t = trunc(ctx, ch, "e1_0"); store_k(ctx, 0, t)?;
+                let one_live = ctx.builder().get_insert_block().or_internal("enc_1 live")?;
                 ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
                 ctx.builder().position_at_end(c2);
                 let c = lt(ctx, 0x800, "lt800"); ctx.builder().build_conditional_branch(c, two_bb, c3).or_llvm_err()?;
                 ctx.builder().position_at_end(two_bb);
                 let hi = shr(ctx, ch, 6); let hi = orv(ctx, hi, 0xC0); let t = trunc(ctx, hi, "e2_0"); store_k(ctx, 0, t)?;
                 let lo = andv(ctx, ch, 0x3F); let lo = orv(ctx, lo, 0x80); let t = trunc(ctx, lo, "e2_1"); store_k(ctx, 1, t)?;
+                let two_live = ctx.builder().get_insert_block().or_internal("enc_2 live")?;
                 ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
                 ctx.builder().position_at_end(c3);
                 let c = lt(ctx, 0x10000, "lt10000"); ctx.builder().build_conditional_branch(c, three_bb, four_bb).or_llvm_err()?;
@@ -24968,20 +24978,22 @@ fn lower_char_extended<'ctx>(
                 let v = shr(ctx, ch, 12); let v = orv(ctx, v, 0xE0); let t = trunc(ctx, v, "e3_0"); store_k(ctx, 0, t)?;
                 let v = shr(ctx, ch, 6); let v = andv(ctx, v, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e3_1"); store_k(ctx, 1, t)?;
                 let v = andv(ctx, ch, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e3_2"); store_k(ctx, 2, t)?;
+                let three_live = ctx.builder().get_insert_block().or_internal("enc_3 live")?;
                 ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
                 ctx.builder().position_at_end(four_bb);
                 let v = shr(ctx, ch, 18); let v = orv(ctx, v, 0xF0); let t = trunc(ctx, v, "e4_0"); store_k(ctx, 0, t)?;
                 let v = shr(ctx, ch, 12); let v = andv(ctx, v, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e4_1"); store_k(ctx, 1, t)?;
                 let v = shr(ctx, ch, 6); let v = andv(ctx, v, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e4_2"); store_k(ctx, 2, t)?;
                 let v = andv(ctx, ch, 0x3F); let v = orv(ctx, v, 0x80); let t = trunc(ctx, v, "e4_3"); store_k(ctx, 3, t)?;
+                let four_live = ctx.builder().get_insert_block().or_internal("enc_4 live")?;
                 ctx.builder().build_unconditional_branch(done_bb).or_llvm_err()?;
                 ctx.builder().position_at_end(done_bb);
                 let count = ctx.builder().build_phi(i64_ty, "enc_count").or_llvm_err()?;
                 count.add_incoming(&[
-                    (&i64_ty.const_int(1, false), one_bb),
-                    (&i64_ty.const_int(2, false), two_bb),
-                    (&i64_ty.const_int(3, false), three_bb),
-                    (&i64_ty.const_int(4, false), four_bb),
+                    (&i64_ty.const_int(1, false), one_live),
+                    (&i64_ty.const_int(2, false), two_live),
+                    (&i64_ty.const_int(3, false), three_live),
+                    (&i64_ty.const_int(4, false), four_live),
                 ]);
                 ctx.set_register(dst, count.as_basic_value());
                 return Ok(());
