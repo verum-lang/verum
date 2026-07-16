@@ -4035,32 +4035,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                 module.add_function("verum_exception_push", fn_type, None)
                             });
 
-                    // Declare setjmp(jmp_buf*) -> i32.
-                    //
-
-                    // Cross-compilation-correct: dispatch on the LLVM
-                    // module's TARGET triple (not host `cfg!`). On
-                    // macOS ARM64 use `_setjmp` (non-signal-saving
-                    // variant from libSystem — acceptable per the
-                    // no-libc rule). On Linux / other Unix use
-                    // `verum_internal_setjmp` — a Verum-emitted
-                    // wrapper that traps to LLVM's
-                    // `llvm.eh.sjlj.setjmp` intrinsic (libc-free; the
-                    // intrinsic lowers to inline asm in the LLVM
-                    // backend, no libc symbol reference). Currently
-                    // the wrapper is declared but lacks a body — see
-                    // `docs/architecture/no-libc-architecture.md` for
-                    // the open punch-list item.
-                    let setjmp_name = if super::target_triple::target_is_darwin(&module) {
-                        "_setjmp"
-                    } else {
-                        "setjmp"
-                    };
-                    let setjmp_fn = module.get_function(setjmp_name).unwrap_or_else(|| {
-                        let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-                        module.add_function(setjmp_name, fn_type, None)
-                    });
-
                     // Call verum_exception_push() to get jmp_buf pointer
                     let jmp_buf_ptr = ctx
                         .builder()
@@ -4068,13 +4042,97 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         .or_llvm_err()?
             .basic_value_or("exception_push returned void")?;
 
-                    // Call setjmp(jmp_buf_ptr) → 0 if normal, non-zero if thrown
-                    let setjmp_result = ctx
-                        .builder()
-                        .build_call(setjmp_fn, &[jmp_buf_ptr.into()], "setjmp_result")
-                        .or_llvm_err()?
-            .basic_value_or("setjmp returned void")?
-                        .into_int_value();
+                    // setjmp — cross-compilation-correct dispatch on the LLVM
+                    // module's TARGET triple (never host `cfg!`), returns i32
+                    // (0 on the direct return, non-zero when reached via
+                    // longjmp).
+                    //
+                    //  * macOS: libSystem `_setjmp` (non-signal-saving variant
+                    //    — acceptable per the no-libc boundary rule; libSystem
+                    //    is the Apple-required layer).
+                    //  * Linux / other Unix: libc-free, emitted INLINE via
+                    //    LLVM's `llvm.eh.sjlj.setjmp` intrinsic — exactly the
+                    //    sequence clang lowers `__builtin_setjmp` to (store
+                    //    frameaddress→buf[0], stacksave→buf[2], then call the
+                    //    intrinsic, which lowers to inline asm in the backend —
+                    //    no libc symbol).  It MUST be inline here, NOT a
+                    //    `verum_internal_setjmp` wrapper: the frameaddress /
+                    //    stacksave it saves must belong to THIS function's
+                    //    frame; a helper's frame is dead after it returns, so a
+                    //    later longjmp would restore a stale frame and crash.
+                    //    See `docs/architecture/no-libc-architecture.md`.
+                    let setjmp_result = if super::target_triple::target_is_darwin(&module) {
+                        let setjmp_fn = module.get_function("_setjmp").unwrap_or_else(|| {
+                            let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
+                            module.add_function("_setjmp", fn_type, None)
+                        });
+                        ctx.builder()
+                            .build_call(setjmp_fn, &[jmp_buf_ptr.into()], "setjmp_result")
+                            .or_llvm_err()?
+                            .basic_value_or("setjmp returned void")?
+                            .into_int_value()
+                    } else {
+                        let jmp_buf_p = jmp_buf_ptr.into_pointer_value();
+                        // buf[0] = frameaddress(0)  (overloaded on the ptr type)
+                        let frameaddr_fn =
+                            verum_llvm::intrinsics::Intrinsic::find("llvm.frameaddress")
+                                .and_then(|i| i.get_declaration(&module, &[ptr_type.into()]))
+                                .ok_or_else(|| {
+                                    LlvmLoweringError::internal(
+                                        "llvm.frameaddress intrinsic unavailable (sjlj setjmp)",
+                                    )
+                                })?;
+                        let fp = ctx
+                            .builder()
+                            .build_call(
+                                frameaddr_fn,
+                                &[i32_type.const_int(0, false).into()],
+                                "sjlj_fp",
+                            )
+                            .or_llvm_err()?
+                            .basic_value_or("frameaddress returned void")?;
+                        ctx.builder().build_store(jmp_buf_p, fp).or_llvm_err()?;
+                        // buf[2] = stacksave()
+                        let stacksave_fn =
+                            verum_llvm::intrinsics::Intrinsic::find("llvm.stacksave")
+                                .and_then(|i| i.get_declaration(&module, &[ptr_type.into()]))
+                                .ok_or_else(|| {
+                                    LlvmLoweringError::internal(
+                                        "llvm.stacksave intrinsic unavailable (sjlj setjmp)",
+                                    )
+                                })?;
+                        let sp = ctx
+                            .builder()
+                            .build_call(stacksave_fn, &[], "sjlj_sp")
+                            .or_llvm_err()?
+                            .basic_value_or("stacksave returned void")?;
+                        // sp_slot = &buf[2] (ptr-strided GEP → +2*sizeof(ptr))
+                        let sp_slot = unsafe {
+                            ctx.builder()
+                                .build_gep(
+                                    ptr_type,
+                                    jmp_buf_p,
+                                    &[i32_type.const_int(2, false)],
+                                    "sjlj_sp_slot",
+                                )
+                                .or_llvm_err()?
+                        };
+                        ctx.builder().build_store(sp_slot, sp).or_llvm_err()?;
+                        // The intrinsic itself (non-overloaded) → i32.
+                        let sjlj_setjmp_fn =
+                            verum_llvm::intrinsics::Intrinsic::find("llvm.eh.sjlj.setjmp")
+                                .and_then(|i| i.get_declaration(&module, &[]))
+                                .ok_or_else(|| {
+                                    LlvmLoweringError::internal(
+                                        "llvm.eh.sjlj.setjmp intrinsic unavailable",
+                                    )
+                                })?;
+                        ctx.builder()
+                            .build_call(sjlj_setjmp_fn, &[jmp_buf_p.into()], "setjmp_result")
+                            .or_llvm_err()?
+                            .basic_value_or("eh.sjlj.setjmp returned void")?
+                            .into_int_value()
+                    };
 
                     // Compare setjmp result with 0
                     let is_exception = ctx

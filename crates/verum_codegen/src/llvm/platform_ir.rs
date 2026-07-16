@@ -3211,32 +3211,43 @@ impl<'ctx> PlatformIR<'ctx> {
     // ========================================================================
 
     /// Emit exception handling functions.
-    /// Uses platform setjmp/longjmp which are provided by libSystem/libc.
-    /// For embedded: these would use LLVM's sjlj intrinsics directly.
+    ///
+    /// On macOS the try/throw sites bind libSystem `_setjmp` / `longjmp`
+    /// (acceptable per the no-libc boundary rule), so the bodyless
+    /// declarations are pre-seeded here with the correct attributes.  On
+    /// Linux / other Unix the sites emit LLVM's `llvm.eh.sjlj.setjmp` /
+    /// `llvm.eh.sjlj.longjmp` intrinsics inline (libc-free — see
+    /// `vbc_lowering.rs` TryBegin and `emit_exception_ir`); no bare libc
+    /// `setjmp` / `longjmp` symbol is ever referenced, so none is declared.
     fn emit_exception_handling(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let void_type = ctx.void_type();
 
-        // Declare setjmp/longjmp (resolved at link time)
-        if module.get_function("setjmp").is_none() {
-            let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-            let f = module.add_function("setjmp", fn_type, None);
-            // setjmp returns twice
-            f.add_attribute(
-                AttributeLoc::Function,
-                ctx.create_string_attribute("returns_twice", ""),
-            );
-        }
-        if module.get_function("longjmp").is_none() {
-            let fn_type = void_type.fn_type(&[ptr_type.into(), i32_type.into()], false);
-            let f = module.add_function("longjmp", fn_type, None);
-            f.add_attribute(
-                AttributeLoc::Function,
-                ctx.create_string_attribute("noreturn", ""),
-            );
+        // Declare setjmp/longjmp (libSystem, resolved at link time) ONLY on
+        // the macOS boundary path. The Linux path is libc-free (sjlj
+        // intrinsics), so emitting bare libc declarations here would be a
+        // spurious no-libc-surface entry even if never referenced.
+        if super::target_triple::target_is_darwin(module) {
+            let void_type = ctx.void_type();
+            if module.get_function("setjmp").is_none() {
+                let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
+                let f = module.add_function("setjmp", fn_type, None);
+                // setjmp returns twice
+                f.add_attribute(
+                    AttributeLoc::Function,
+                    ctx.create_string_attribute("returns_twice", ""),
+                );
+            }
+            if module.get_function("longjmp").is_none() {
+                let fn_type = void_type.fn_type(&[ptr_type.into(), i32_type.into()], false);
+                let f = module.add_function("longjmp", fn_type, None);
+                f.add_attribute(
+                    AttributeLoc::Function,
+                    ctx.create_string_attribute("noreturn", ""),
+                );
+            }
         }
 
         // Exception handler stack globals
@@ -17216,11 +17227,6 @@ impl<'ctx> PlatformIR<'ctx> {
                     AttributeLoc::Function,
                     ctx.create_string_attribute("noreturn", ""),
                 );
-                let longjmp_fn = self.get_or_declare_fn(
-                    module,
-                    "longjmp",
-                    void_type.fn_type(&[ptr_type.into(), i32_type.into()], false),
-                );
                 let defer_run_fn = self.get_or_declare_fn(
                     module,
                     "verum_defer_run_to",
@@ -17316,13 +17322,42 @@ impl<'ctx> PlatformIR<'ctx> {
                         .build_gep(i8_type, ec, &[base_off], "jb")
                         .or_llvm_err()?
                 };
-                builder
-                    .build_call(
-                        longjmp_fn,
-                        &[jmpbuf_ptr.into(), i32_type.const_int(1, false).into()],
-                        "",
-                    )
-                    .or_llvm_err()?;
+                // longjmp — cross-compilation-correct dispatch on the LLVM
+                // module's TARGET triple (never host `cfg!`).
+                //  * macOS: libSystem `longjmp` (acceptable per the no-libc
+                //    boundary rule).
+                //  * Linux / other Unix: libc-free via `llvm.eh.sjlj.longjmp`
+                //    — the pair of the inline `llvm.eh.sjlj.setjmp` emitted at
+                //    TryBegin (vbc_lowering.rs). Lowers to inline asm; no libc
+                //    symbol. Takes only the buffer (the non-zero return value
+                //    is fixed by the intrinsic). See
+                //    `docs/architecture/no-libc-architecture.md`.
+                if super::target_triple::target_is_darwin(module) {
+                    let longjmp_fn = self.get_or_declare_fn(
+                        module,
+                        "longjmp",
+                        void_type.fn_type(&[ptr_type.into(), i32_type.into()], false),
+                    );
+                    builder
+                        .build_call(
+                            longjmp_fn,
+                            &[jmpbuf_ptr.into(), i32_type.const_int(1, false).into()],
+                            "",
+                        )
+                        .or_llvm_err()?;
+                } else {
+                    let sjlj_longjmp_fn =
+                        verum_llvm::intrinsics::Intrinsic::find("llvm.eh.sjlj.longjmp")
+                            .and_then(|i| i.get_declaration(module, &[]))
+                            .ok_or_else(|| {
+                                super::error::LlvmLoweringError::internal(
+                                    "llvm.eh.sjlj.longjmp intrinsic unavailable",
+                                )
+                            })?;
+                    builder
+                        .build_call(sjlj_longjmp_fn, &[jmpbuf_ptr.into()], "")
+                        .or_llvm_err()?;
+                }
                 builder.build_unreachable().or_llvm_err()?;
 
                 builder.position_at_end(no_handler);
