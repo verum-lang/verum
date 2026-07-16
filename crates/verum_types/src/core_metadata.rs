@@ -410,6 +410,19 @@ impl ReceiverKind {
 pub struct ParamDescriptor {
     pub name: Text,
     pub ty: Text,
+    /// BAKED-DEFAULT-ARG-1: whether the parameter declares a default
+    /// value (`order: Int = 5`). Serde-default keeps older archives
+    /// readable (absent → false).
+    #[serde(default)]
+    pub has_default: bool,
+    /// The default expression rendered as SOURCE TEXT at precompile
+    /// (stdlib defaults are literals / simple paths). Consumers parse
+    /// it back with the fast parser when injecting omitted trailing
+    /// args at call sites against baked functions. None when the
+    /// param has no default or the expression shape isn't renderable
+    /// — then only the arity relaxation applies.
+    #[serde(default)]
+    pub default_literal: Maybe<Text>,
 }
 
 /// Protocol definition descriptor

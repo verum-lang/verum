@@ -318,6 +318,91 @@ impl TypeChecker {
             self.ctx
                 .env
                 .insert(verum_common::Text::from(qualified_name.as_str()), scheme);
+            self.register_required_params_from_descriptor(qualified_name.as_str(), fd);
+        }
+    }
+
+    /// BAKED-DEFAULT-ARG-1: lazy metadata answer for the arity gate.
+    /// Looks the CALLED name up in the baked descriptors (bare key,
+    /// then deterministic first `.name`-suffixed qualified key), and
+    /// when the descriptor declares defaults returns the required
+    /// prefix count — caching it in `function_required_params`.
+    /// Returns None when no defaulted descriptor matches (the gate
+    /// falls back to full arity, pre-fix behaviour).
+    pub(super) fn required_params_from_metadata(&mut self, name: &str) -> Option<usize> {
+        let metadata = match &self.core_metadata {
+            verum_common::Maybe::Some(m) => m,
+            verum_common::Maybe::None => return None,
+        };
+        let suffix = format!(".{}", name);
+        let mut found: Option<usize> = None;
+        let bare = metadata.functions.get(&verum_common::Text::from(name));
+        let candidates = bare.into_iter().chain(
+            metadata
+                .functions
+                .iter()
+                .filter(|(k, _)| k.as_str().ends_with(suffix.as_str()))
+                .map(|(_, fd)| fd),
+        );
+        for fd in candidates {
+            if !fd.params.iter().any(|p| p.has_default) {
+                continue;
+            }
+            let required = fd
+                .params
+                .iter()
+                .filter(|p| p.name.as_str() != "self")
+                .take_while(|p| !p.has_default)
+                .count();
+            // Deterministic: OrderedMap iteration; the FIRST defaulted
+            // match wins. Multiple same-named fns with different
+            // default shapes keep the most permissive gate — codegen
+            // still injects per the RESOLVED callee.
+            found = Some(match found {
+                Some(prev) => prev.min(required),
+                None => required,
+            });
+        }
+        if let Some(required) = found {
+            self.function_required_params
+                .insert(verum_common::Text::from(name), required);
+        }
+        found
+    }
+
+    /// BAKED-DEFAULT-ARG-1: populate the arity gate's
+    /// `function_required_params` from a baked descriptor — the count
+    /// of leading params WITHOUT a declared default (the same prefix
+    /// rule the AST path applies in decls.rs). Without this, baked
+    /// fns with defaults demanded full arity (`memory_fence()` with
+    /// `order: Int = 5` errored E102 'requires at least 1 argument').
+    /// Registers under the given key and, when the key is qualified,
+    /// under its trailing simple name too (call sites look up by the
+    /// spelling they used).
+    pub(super) fn register_required_params_from_descriptor(
+        &mut self,
+        key: &str,
+        fd: &crate::core_metadata::FunctionDescriptor,
+    ) {
+        if !fd.params.iter().any(|p| p.has_default) {
+            return;
+        }
+        let mut required = 0usize;
+        for p in fd.params.iter() {
+            if p.name.as_str() == "self" {
+                continue;
+            }
+            if p.has_default {
+                break;
+            }
+            required += 1;
+        }
+        self.function_required_params
+            .insert(verum_common::Text::from(key), required);
+        if let Some((_, simple)) = key.rsplit_once('.') {
+            self.function_required_params
+                .entry(verum_common::Text::from(simple))
+                .or_insert(required);
         }
     }
 

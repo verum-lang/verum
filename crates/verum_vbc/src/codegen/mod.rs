@@ -8236,6 +8236,57 @@ impl VbcCodegen {
 
     /// For nested functions, the name is mangled with the parent scope names
     /// using `$` as a separator (e.g., `outer$inner$deeply_nested`).
+    /// BAKED-DEFAULT-ARG-1: intern a parameter's declared default into
+    /// the module constants table when it is a LITERAL (the stdlib
+    /// shape — `order: Int = 5`), so the VBC `ParamDescriptor.default`
+    /// channel (serialized since day one, never populated) carries the
+    /// fact across the archive boundary. Non-literal defaults return
+    /// None — the callee-side arity relaxation still applies, only the
+    /// cross-archive value injection is unavailable for them.
+    fn param_default_const_id(
+        &mut self,
+        param: &verum_ast::decl::FunctionParam,
+    ) -> Option<crate::ConstId> {
+        let verum_ast::decl::FunctionParamKind::Regular {
+            default_value: verum_common::Maybe::Some(expr),
+            ..
+        } = &param.kind
+        else {
+            return None;
+        };
+        self.literal_expr_const_id(expr)
+    }
+
+    /// Literal-expression → ConstId (Int/Float/Text/Bool + negated
+    /// numeric forms). Bool maps onto the Int table (0/1) — the VBC
+    /// constants table has no Bool entry and the call-site consumer
+    /// reconstructs by the PARAM's declared type, not the const kind.
+    fn literal_expr_const_id(&mut self, expr: &verum_ast::Expr) -> Option<crate::ConstId> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::literal::LiteralKind;
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(i) => Some(self.ctx.add_const_int(i.value as i64)),
+                LiteralKind::Float(f) => Some(self.ctx.add_const_float(f.value)),
+                LiteralKind::Bool(b) => Some(self.ctx.add_const_int(*b as i64)),
+                LiteralKind::Text(s) => Some(self.ctx.add_const_string(s.as_str())),
+                _ => None,
+            },
+            ExprKind::Unary {
+                op: verum_ast::UnOp::Neg,
+                expr: inner,
+            } => match &inner.kind {
+                ExprKind::Literal(lit) => match &lit.kind {
+                    LiteralKind::Int(i) => Some(self.ctx.add_const_int(-(i.value as i64))),
+                    LiteralKind::Float(f) => Some(self.ctx.add_const_float(-f.value)),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
         let base_name = func.name.name.to_string();
 
@@ -8275,6 +8326,31 @@ impl VbcCodegen {
                 }
             })
             .collect();
+
+        // BAKED-DEFAULT-ARG-1: carry per-param default expressions so
+        // call sites can inject omitted trailing args. Without this the
+        // typechecker admitted the short call and the callee silently
+        // read nil for every defaulted parameter it wasn't given.
+        let param_defaults: Vec<Option<verum_ast::Expr>> = func
+            .params
+            .iter()
+            .map(|p| {
+                if let verum_ast::decl::FunctionParamKind::Regular {
+                    default_value: verum_common::Maybe::Some(expr),
+                    ..
+                } = &p.kind
+                {
+                    Some(expr.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if param_defaults.iter().any(|d| d.is_some()) {
+            self.ctx
+                .function_param_defaults
+                .insert(name.clone(), param_defaults);
+        }
 
         // For each parameter, extract the closure-arg return-type
         // simple-name when the parameter is function-typed (directly
@@ -14955,18 +15031,11 @@ impl VbcCodegen {
                         // declaration-ordered numbering — the same slot order
                         // the receiver's instantiation args carry
                         // (`implement<const SIZE: Int> StackAllocator<SIZE>`
-                        // ⇒ SIZE = slot 0).  A split type-then-const push
-                        // would mis-number `implement<const N, T>` shapes.
-                        for g in impl_decl.generics.iter() {
-                            match &g.kind {
-                                verum_ast::ty::GenericParamKind::Type { name, .. }
-                                | verum_ast::ty::GenericParamKind::Const { name, .. } => {
-                                    self.ctx
-                                        .generic_type_params_ordered
-                                        .push(name.name.to_string());
-                                }
-                                _ => {}
-                            }
+                        // ⇒ SIZE = slot 0).  `impl_ordered_generics` already
+                        // mixes type+const in declaration order (and, for the
+                        // bare-impl form, inherits from the target's args).
+                        for g in &impl_ordered_generics {
+                            self.ctx.generic_type_params_ordered.push(g.clone());
                         }
                         // Per-method error containment.  Pre-fix the
                         // `compile_function(...)?` propagated any single
@@ -16143,11 +16212,14 @@ impl VbcCodegen {
                 | FunctionParamKind::SelfRefUnsafe => TypeRef::Concrete(TypeId::UNIT),
             };
             let param_name_id = StringId(self.intern_string(param_name));
+            // BAKED-DEFAULT-ARG-1: carry literal defaults through the
+            // (previously dormant) descriptor channel.
+            let default = self.param_default_const_id(param);
             descriptor.params.push(ParamDescriptor {
                 name: param_name_id,
                 type_ref,
                 is_mut: *is_mut,
-                default: None,
+                default,
             });
         }
         // Also fix return_type: the func_info.return_type was built
@@ -16538,11 +16610,14 @@ impl VbcCodegen {
                 | FunctionParamKind::SelfRefUnsafe => TypeRef::Concrete(TypeId::UNIT),
             };
             let param_name_id = StringId(self.intern_string(param_name));
+            // BAKED-DEFAULT-ARG-1: carry literal defaults (see the
+            // primary compile_function site).
+            let default = self.param_default_const_id(param);
             descriptor.params.push(ParamDescriptor {
                 name: param_name_id,
                 type_ref,
                 is_mut: *is_mut,
-                default: None,
+                default,
             });
         }
         if func_info.is_generator {
@@ -18870,6 +18945,29 @@ impl VbcCodegen {
                 .return_type_name
                 .as_ref()
                 .map(|n| StringId(self.ctx.intern_string_raw(n)));
+            // BAKED-DEFAULT-ARG-1: bodyless decls (`@intrinsic` fns
+            // like `memory_fence(order: Int = 5);`) reach the archive
+            // ONLY as stubs — carry their registered literal defaults
+            // into the descriptor's const channel.
+            let stub_default_ids: Vec<Option<crate::ConstId>> = {
+                let simple = name
+                    .rfind('.')
+                    .map(|p| name[p + 1..].to_string())
+                    .unwrap_or_else(|| name.clone());
+                let defaults = self
+                    .ctx
+                    .function_param_defaults
+                    .get(&name)
+                    .or_else(|| self.ctx.function_param_defaults.get(&simple))
+                    .cloned();
+                match defaults {
+                    Some(v) => v
+                        .iter()
+                        .map(|o| o.as_ref().and_then(|e| self.literal_expr_const_id(e)))
+                        .collect(),
+                    None => Vec::new(),
+                }
+            };
             // Populate ParamDescriptors — placeholder names + UNIT
             // type refs.  Arity is the only field the dispatch path
             // checks for stub descriptors; the body is `RetV` so
@@ -18885,7 +18983,7 @@ impl VbcCodegen {
                     name: pname_id,
                     type_ref: TypeRef::Concrete(TypeId::UNIT),
                     is_mut: false,
-                    default: None,
+                    default: stub_default_ids.get(i).copied().flatten(),
                 });
             }
             // Pad to declared param_count when fewer names were
@@ -18898,7 +18996,7 @@ impl VbcCodegen {
                     name: pname_id,
                     type_ref: TypeRef::Concrete(TypeId::UNIT),
                     is_mut: false,
-                    default: None,
+                    default: stub_default_ids.get(i).copied().flatten(),
                 });
             }
             // PropertySet — only ASYNC matters for stubs; the rest
@@ -19143,6 +19241,33 @@ impl VbcCodegen {
                     );
                 }
                 let name_id = StringId(self.ctx.intern_string_raw(&stub_name));
+                // BAKED-DEFAULT-ARG-1: bodyless decls (`@intrinsic`
+                // fns like `memory_fence(order: Int = 5);`) reach the
+                // archive ONLY through this stub path — carry their
+                // registered literal defaults into the descriptor's
+                // const channel so the user-side loader/typechecker
+                // see the arity relaxation and the injectable value.
+                let stub_default_ids: Vec<Option<crate::ConstId>> = {
+                    let simple = stub_name
+                        .rfind('.')
+                        .map(|p| stub_name[p + 1..].to_string())
+                        .unwrap_or_else(|| stub_name.clone());
+                    let defaults = self
+                        .ctx
+                        .function_param_defaults
+                        .get(&stub_name)
+                        .or_else(|| self.ctx.function_param_defaults.get(&simple))
+                        .cloned();
+                    match defaults {
+                        Some(v) => v
+                            .iter()
+                            .map(|o| {
+                                o.as_ref().and_then(|e| self.literal_expr_const_id(e))
+                            })
+                            .collect(),
+                        None => Vec::new(),
+                    }
+                };
                 let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
                 descriptor.id = info.id;
                 descriptor.register_count = 1;
@@ -19165,7 +19290,7 @@ impl VbcCodegen {
                         name: pname_id,
                         type_ref: TypeRef::Concrete(TypeId::UNIT),
                         is_mut: false,
-                        default: None,
+                        default: stub_default_ids.get(i).copied().flatten(),
                     });
                 }
                 while descriptor.params.len() < info.param_count {
@@ -19176,7 +19301,7 @@ impl VbcCodegen {
                         name: pname_id,
                         type_ref: TypeRef::Concrete(TypeId::UNIT),
                         is_mut: false,
-                        default: None,
+                        default: stub_default_ids.get(i).copied().flatten(),
                     });
                 }
                 if info.is_async {

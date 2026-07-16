@@ -147,6 +147,54 @@ pub struct LoadStats {
 /// The predicate inspects `param.type_ref`: if it's
 /// `Reference { mutability: Mutable, inner: T }` AND the
 /// param name is `self`, the receiver is `&mut self`.
+/// BAKED-DEFAULT-ARG-1: reconstruct a parameter's default literal from
+/// the VBC descriptor's const channel as a synthetic AST expression, so
+/// user-side call sites can inject omitted trailing args against baked
+/// functions exactly like local ones. Int/Float/String consts only —
+/// the writer (codegen `param_default_const_id`) interns exactly those.
+fn const_to_literal_expr(
+    module: &VbcModule,
+    cid: verum_vbc::ConstId,
+) -> Option<verum_ast::Expr> {
+    use verum_ast::literal::{Literal, StringLit};
+    use verum_ast::span::Span;
+    use verum_ast::ExprKind;
+    let constant = module.constants.get(cid.0 as usize)?;
+    let lit = match constant {
+        verum_vbc::module::Constant::Int(v) => Literal::int(*v as i128, Span::default()),
+        verum_vbc::module::Constant::Float(v) => Literal::float(*v, Span::default()),
+        verum_vbc::module::Constant::String(sid) => {
+            let s = module.get_string(*sid)?;
+            Literal::new(
+                verum_ast::literal::LiteralKind::Text(StringLit::Regular(
+                    verum_common::Text::from(s),
+                )),
+                Span::default(),
+            )
+        }
+        _ => return None,
+    };
+    Some(verum_ast::Expr::new(ExprKind::Literal(lit), Span::default()))
+}
+
+/// Extract the per-param default expressions for a baked descriptor;
+/// None when no param declares one.
+fn descriptor_param_defaults(
+    module: &VbcModule,
+    fn_desc: &verum_vbc::module::FunctionDescriptor,
+) -> Option<Vec<Option<verum_ast::Expr>>> {
+    if fn_desc.params.iter().all(|p| p.default.is_none()) {
+        return None;
+    }
+    Some(
+        fn_desc
+            .params
+            .iter()
+            .map(|p| p.default.and_then(|cid| const_to_literal_expr(module, cid)))
+            .collect(),
+    )
+}
+
 fn param_is_mut_self_ref(
     param: &verum_vbc::module::ParamDescriptor,
     module: &verum_vbc::module::VbcModule,
@@ -547,6 +595,15 @@ fn register_module(
         // fully-rooted submodule).  See the function-level docstring
         // for the per-shape canonical forms.
         let qualified = merge_module_and_simple_name(module_name, &simple_name);
+        // BAKED-DEFAULT-ARG-1: surface the descriptor's default-value
+        // channel to the call-site injector (qualified + simple keys —
+        // the same spellings this FunctionInfo registers under).
+        if let Some(defaults) = descriptor_param_defaults(module, fn_desc) {
+            ctx.function_param_defaults
+                .insert(qualified.clone(), defaults.clone());
+            ctx.function_param_defaults
+                .insert(simple_name.to_string(), defaults);
+        }
         ctx.register_function(qualified, info.clone());
         stats.functions_registered += 1;
 
@@ -5387,6 +5444,15 @@ fn register_module_filtered(
             param_closure_return_type_names,
         };
         ctx.register_function(qualified.clone(), info.clone());
+        // BAKED-DEFAULT-ARG-1: surface the descriptor's default-value
+        // channel to the call-site injector under every lookup
+        // spelling the FunctionInfo itself registers with.
+        if let Some(defaults) = descriptor_param_defaults(module, fn_desc) {
+            ctx.function_param_defaults
+                .insert(qualified.clone(), defaults.clone());
+            ctx.function_param_defaults
+                .insert(simple_name.to_string(), defaults);
+        }
         // ALSO register under any qualified path from `wanted` whose
         // last segment matches `simple_name`.  This closes the
         // grandparent-bundling discrepancy: when the precompiler

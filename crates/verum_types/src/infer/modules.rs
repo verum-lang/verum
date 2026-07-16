@@ -6065,7 +6065,7 @@ impl TypeChecker {
     ///   4. Wrap in a [`TypeScheme`] — `poly` when generic vars are
     ///      present, `mono` otherwise.
     fn resolve_function_via_metadata_reexports(
-        &self,
+        &mut self,
         module_path: &str,
         item_name: &str,
     ) -> Option<TypeScheme> {
@@ -6254,6 +6254,35 @@ impl TypeChecker {
             });
         let fn_ty = Type::function(params, return_ty);
 
+        // BAKED-DEFAULT-ARG-1: relax the arity gate for defaulted
+        // trailing params — same prefix rule as the AST path in
+        // decls.rs. Computed here (under the fd borrow), inserted
+        // after the borrow ends.
+        if std::env::var("VERUM_TRACE_TASK21").is_ok() {
+            let flags: Vec<String> = fd
+                .params
+                .iter()
+                .map(|p| format!("{}:{}", p.name.as_str(), p.has_default))
+                .collect();
+            eprintln!(
+                "[task21] resolved fd: mod='{}' item='{}' param_defaults=[{}]",
+                module_path,
+                item_name,
+                flags.join(", "),
+            );
+        }
+        let required_entry: Option<usize> = if fd.params.iter().any(|p| p.has_default) {
+            Some(
+                fd.params
+                    .iter()
+                    .filter(|p| p.name.as_str() != "self")
+                    .take_while(|p| !p.has_default)
+                    .count(),
+            )
+        } else {
+            None
+        };
+
         let scheme = {
             use crate::dependent_helpers::collect_type_vars;
             let vars = collect_type_vars(&fn_ty);
@@ -6264,6 +6293,10 @@ impl TypeChecker {
                 TypeScheme::poly(var_list, fn_ty)
             }
         };
+        if let Some(required) = required_entry {
+            self.function_required_params
+                .insert(Text::from(item_name), required);
+        }
         Some(scheme)
     }
 

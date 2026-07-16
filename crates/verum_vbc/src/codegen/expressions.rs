@@ -6459,7 +6459,12 @@ impl VbcCodegen {
             }
         }
 
-        let args_start = if !args.is_empty() {
+        // BAKED-DEFAULT-ARG-1: a ZERO-arg call to a defaulted-param fn
+        // (`f()` with `fn f(x: Int = 5)`) must still run phases 1b-3 —
+        // the pre-fix `!args.is_empty()` gate skipped the whole block
+        // while the Call below claimed count=param_count, so the callee
+        // read whatever registers happened to follow Reg(0).
+        let args_start = if !args.is_empty() || func_info.param_count > 0 {
             // Phase 1: Compile all argument expressions
             // For array element references, compile specially using ArrayToC marshalling
             // For function callbacks, compile using CreateCallback
@@ -6545,16 +6550,41 @@ impl VbcCodegen {
                 }
             }
 
-            // Phase 1b: Pad missing args with defaults (LoadK 0 for Int, etc.)
+            // Phase 1b: Fill omitted trailing parameters.
+            // BAKED-DEFAULT-ARG-1: the callee's DECLARED default
+            // expressions are the authority (`fn f(x: Int = 5)` called
+            // as `f()` must pass 5). Pre-fix this padded a hardcoded
+            // LoadI 0 — every omitted defaulted param silently became
+            // 0/nil regardless of its declaration. Fall back to the
+            // legacy zero-pad only when no default is declared for the
+            // slot (arity mismatch already admitted upstream).
             let actual_arg_count = func_info.param_count.max(args.len());
+            let declared_defaults = self
+                .ctx
+                .function_param_defaults
+                .get(&resolved_name)
+                .or_else(|| self.ctx.function_param_defaults.get(&func_name))
+                .cloned();
             while arg_results.len() < actual_arg_count {
-                // Missing argument — use default value (0 for Int/Bool, 0.0 for Float)
-                let default_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI {
-                    dst: default_reg,
-                    value: 0,
-                });
-                arg_results.push(default_reg);
+                let slot = arg_results.len();
+                let default_expr = declared_defaults
+                    .as_ref()
+                    .and_then(|d| d.get(slot))
+                    .and_then(|o| o.as_ref())
+                    .cloned();
+                if let Some(dexpr) = default_expr {
+                    let r = self
+                        .compile_expr(&dexpr)?
+                        .or_internal("default argument has no value")?;
+                    arg_results.push(r);
+                } else {
+                    let default_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: default_reg,
+                        value: 0,
+                    });
+                    arg_results.push(default_reg);
+                }
             }
 
             // Phase 2: Allocate consecutive FRESH registers for the call
@@ -15106,6 +15136,37 @@ impl VbcCodegen {
         } else {
             None
         };
+        // ITER-BINDER-CHAR-1 (factory leg, hoisted): the factory-method
+        // fact must not depend on extract_expr_type_name succeeding —
+        // inside stdlib bodies (`for ch in self.chars()` in text.vr at
+        // BAKE time) the receiver type extraction returns None and the
+        // whole gated block below is skipped, so the binder stayed
+        // untyped precisely where it mattered (bake trace showed zero
+        // factory hits). Hoist the factory match ahead of the gate.
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            && let verum_ast::ExprKind::MethodCall { method, .. } = &iter.kind
+        {
+            let factory_elem = match method.name.as_str() {
+                "chars" | "char_indices" => Some("Char"),
+                "bytes" => Some("Byte"),
+                "lines" | "split_whitespace" | "words" => Some("Text"),
+                _ => None,
+            };
+            if let Some(t) = factory_elem {
+                if std::env::var("VERUM_TRACE_BINDER").is_ok() {
+                    eprintln!(
+                        "[binder] factory method='{}' binder='{}' -> {}",
+                        method.name, name.name, t
+                    );
+                }
+                let binder = name.name.to_string();
+                self.ctx
+                    .variable_type_names
+                    .insert(binder.clone(), t.to_string());
+                let var_type = self.type_name_to_var_type(t);
+                self.ctx.register_variable_type(&binder, var_type);
+            }
+        }
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
             && let Some(iter_ty) =
                 self.extract_expr_type_name(container_for_element.unwrap_or(iter))
@@ -15123,6 +15184,34 @@ impl VbcCodegen {
             } else {
                 None
             };
+            // ITER-BINDER-CHAR-1: Text's iterator factories yield KNOWN
+            // element types the container branch above can't see (their
+            // receiver is a Text, not a generic container). Without the
+            // binder type, `ch.to_ascii_uppercase()` inside
+            // `for ch in s.chars()` mis-dispatched through the RTS
+            // switch — a Char is a NaN-boxed SCALAR at runtime, the
+            // pointer-plausibility guard sent it to the 0-returning
+            // default, and every to_ascii_* built NUL-filled strings at
+            // Tier-1 (interp dispatches on the value model and was
+            // fine). The factory method IS the carried fact.
+            let elem_ty = elem_ty.or_else(|| {
+                if let verum_ast::ExprKind::MethodCall { method, .. } = &iter.kind {
+                    if std::env::var("VERUM_TRACE_BINDER").is_ok() {
+                        eprintln!(
+                            "[binder] for-loop factory method='{}' binder='{}'",
+                            method.name, name.name
+                        );
+                    }
+                    match method.name.as_str() {
+                        "chars" | "char_indices" => Some("Char".to_string()),
+                        "bytes" => Some("Byte".to_string()),
+                        "lines" | "split_whitespace" | "words" => Some("Text".to_string()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
             if let Some(t) = elem_ty {
                 let binder = name.name.to_string();
                 self.ctx
@@ -33232,6 +33321,42 @@ impl VbcCodegen {
                 Self::write_reg(&mut operands, dest.0);
                 self.ctx.emit(Instruction::FfiExtended {
                     sub_op: 0x87, // SystemSubOpcode::IsInterpreted
+                    operands,
+                });
+            }
+            InlineSequenceId::EnvGetSeq => {
+                // Operands: dst, name_bytes
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                if let Some(&a) = args.first() {
+                    Self::write_reg(&mut operands, a.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x88, // SystemSubOpcode::EnvGet
+                    operands,
+                });
+            }
+            InlineSequenceId::EnvSetSeq => {
+                // Operands: dst, name_bytes, value_bytes
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &a in args.iter().take(2) {
+                    Self::write_reg(&mut operands, a.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x89, // SystemSubOpcode::EnvSet
+                    operands,
+                });
+            }
+            InlineSequenceId::EnvUnsetSeq => {
+                // Operands: dst, name_bytes
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                if let Some(&a) = args.first() {
+                    Self::write_reg(&mut operands, a.0);
+                }
+                self.ctx.emit(Instruction::FfiExtended {
+                    sub_op: 0x8A, // SystemSubOpcode::EnvUnset
                     operands,
                 });
             }

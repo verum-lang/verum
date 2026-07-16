@@ -2192,6 +2192,47 @@ fn inject_declared_module_free_fn_keys(
     root: &Path,
     verbose: bool,
 ) {
+    /// BAKED-DEFAULT-ARG-1: render a default-value expression as
+    /// re-parseable source text. Literal shapes only (the stdlib
+    /// convention); anything more exotic returns None and the caller
+    /// keeps just the arity-relaxation flag.
+    fn render_literal_expr(
+        expr: &verum_ast::Expr,
+    ) -> verum_common::Maybe<verum_common::Text> {
+        use verum_common::{Maybe, Text};
+        use verum_ast::expr::ExprKind;
+        use verum_ast::literal::LiteralKind;
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(i) => Maybe::Some(Text::from(i.value.to_string().as_str())),
+                LiteralKind::Float(f) => {
+                    Maybe::Some(Text::from(format!("{:?}", f.value).as_str()))
+                }
+                LiteralKind::Bool(b) => Maybe::Some(Text::from(if *b { "true" } else { "false" })),
+                LiteralKind::Text(s) => {
+                    Maybe::Some(Text::from(format!("{:?}", s.as_str()).as_str()))
+                }
+                _ => Maybe::None,
+            },
+            ExprKind::Unary {
+                op: verum_ast::UnOp::Neg,
+                expr: inner,
+            } => match &inner.kind {
+                ExprKind::Literal(lit) => match &lit.kind {
+                    LiteralKind::Int(i) => {
+                        Maybe::Some(Text::from(format!("-{}", i.value).as_str()))
+                    }
+                    LiteralKind::Float(f) => {
+                        Maybe::Some(Text::from(format!("-{:?}", f.value).as_str()))
+                    }
+                    _ => Maybe::None,
+                },
+                _ => Maybe::None,
+            },
+            _ => Maybe::None,
+        }
+    }
+
     fn render_type(ty: &verum_ast::ty::Type) -> String {
         use verum_ast::ty::TypeKind as K;
         match &ty.kind {
@@ -2293,16 +2334,32 @@ fn inject_declared_module_free_fn_keys(
                     .params
                     .iter()
                     .filter_map(|p| match &p.kind {
-                        verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } => {
+                        verum_ast::decl::FunctionParamKind::Regular {
+                            pattern,
+                            ty,
+                            default_value,
+                        } => {
                             let pname = match &pattern.kind {
                                 verum_ast::pattern::PatternKind::Ident { name, .. } => {
                                     name.name.as_str().to_string()
                                 }
                                 _ => "_".to_string(),
                             };
+                            // BAKED-DEFAULT-ARG-1: carry the declared
+                            // default straight from the AST — literal
+                            // shapes render exactly; anything else
+                            // keeps only the arity-relaxation flag.
+                            let (has_default, default_literal) = match default_value {
+                                verum_common::Maybe::Some(expr) => {
+                                    (true, render_literal_expr(expr))
+                                }
+                                verum_common::Maybe::None => (false, Maybe::None),
+                            };
                             Some(ParamDescriptor {
                                 name: Text::from(pname.as_str()),
                                 ty: Text::from(render_type(ty).as_str()),
+                                has_default,
+                                default_literal,
                             })
                         }
                         // Free functions have no self; skip any

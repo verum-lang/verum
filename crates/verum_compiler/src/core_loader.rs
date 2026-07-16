@@ -465,6 +465,9 @@ fn extract_method_signature_from_type(
                 .map(|(i, ty)| ParamDescriptor {
                     name: format!("arg{}", i).into(),
                     ty: type_ref_to_text(ty, module),
+                    // Method-signature TypeRefs carry no default channel.
+                    has_default: false,
+                    default_literal: Maybe::None,
                 })
                 .collect();
 
@@ -577,6 +580,11 @@ fn convert_function_descriptor(
         .map(|p| ParamDescriptor {
             name: get_string(&module.strings, p.name),
             ty: type_ref_to_text(&p.type_ref, module),
+            // BAKED-DEFAULT-ARG-1: surface the descriptor default flag;
+            // the literal text is rendered by the archive_metadata path
+            // (this legacy loader only needs the arity relaxation).
+            has_default: p.default.is_some(),
+            default_literal: Maybe::None,
         })
         .collect();
 

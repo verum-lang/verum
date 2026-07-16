@@ -6717,6 +6717,17 @@ impl TypeChecker {
                         .as_ref()
                         .and_then(|name| {
                             self.function_required_params.get(name).copied()
+                                // BAKED-DEFAULT-ARG-1: the registry is
+                                // fed by the AST decl walk and the
+                                // metadata resolvers, but several
+                                // binding paths (eager env loads,
+                                // prelude glob replay) insert schemes
+                                // without passing through either. The
+                                // gate itself is the ONE consumer —
+                                // consult the baked descriptors lazily
+                                // on a registry miss and cache the
+                                // answer.
+                                .or_else(|| self.required_params_from_metadata(name.as_str()))
                         })
                         .unwrap_or(params.len());
                     let capped = from_registry.min(params.len());

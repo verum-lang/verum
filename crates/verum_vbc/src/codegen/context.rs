@@ -155,6 +155,16 @@ pub struct CodegenContext {
 
     /// Function registry for lookups.
     pub functions: HashMap<String, FunctionInfo>,
+    /// BAKED-DEFAULT-ARG-1: per-function default-parameter expressions,
+    /// keyed by the SAME name as `functions`. `defaults[i]` is Some(expr)
+    /// when param `i` declares `= expr`. Call sites with fewer args than
+    /// params compile the missing trailing defaults from here — the
+    /// typechecker admits the short call, and without this injection the
+    /// callee silently read nil for every omitted parameter (probe:
+    /// `fn f(x: Int = 5)`; `f()` printed nil, `g(1)` summed nils as 0).
+    /// AST path fills it in `register_function`; the archive loader
+    /// fills it for baked fns from carried metadata default literals.
+    pub function_param_defaults: HashMap<String, Vec<Option<verum_ast::Expr>>>,
     /// SAME-NAME-PARENT-TIEBREAK-1 (task #50): qualified names that
     /// resolved to MORE THAN ONE distinct real body during
     /// registration (the stdlib carries same-named types — two
@@ -1399,6 +1409,7 @@ impl CodegenContext {
             bytes: Vec::new(),
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
+            function_param_defaults: HashMap::new(),
             ambiguous_function_names: std::collections::HashSet::new(),
             scoped_functions: HashMap::new(),
             unit_declared_fns: std::collections::HashSet::new(),

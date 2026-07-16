@@ -47,6 +47,29 @@ use verum_vbc::archive::VbcArchive;
 use verum_vbc::module::VbcModule;
 use verum_vbc::types::{TypeKind, TypeRef, VariantKind};
 
+/// BAKED-DEFAULT-ARG-1: render a parameter's default (carried through
+/// the VBC descriptor's `default: Option<ConstId>` channel) back to a
+/// SOURCE-TEXT literal for the typecheck metadata. Int/Float/Text
+/// consts render exactly; anything else degrades to `Maybe::None`
+/// (the arity relaxation still applies via `has_default`).
+fn render_param_default(
+    module: &VbcModule,
+    cid: verum_vbc::ConstId,
+) -> Maybe<Text> {
+    use verum_vbc::module::Constant;
+    match module.constants.get(cid.0 as usize) {
+        Some(Constant::Int(v)) => Maybe::Some(Text::from(v.to_string().as_str())),
+        // `{:?}` keeps the trailing `.0` so the round-tripped token
+        // re-parses as a FLOAT literal, not an Int.
+        Some(Constant::Float(v)) => Maybe::Some(Text::from(format!("{:?}", v).as_str())),
+        Some(Constant::String(sid)) => module
+            .get_string(*sid)
+            .map(|s| Maybe::Some(Text::from(format!("{:?}", s).as_str())))
+            .unwrap_or(Maybe::None),
+        _ => Maybe::None,
+    }
+}
+
 /// Convert a precompiled stdlib `VbcArchive` into a
 /// [`CoreMetadata`] suitable for `TypeChecker::new_with_core`.
 ///
@@ -354,6 +377,10 @@ fn register_module_metadata(
                                     &type_id_to_name,
                                     &proto_param_id_to_name,
                                 )),
+                                // Protocol-method payloads are bare
+                                // TypeRefs — no default channel.
+                                has_default: false,
+                                default_literal: Maybe::None,
                             })
                             .collect();
                         let return_type = Text::from(type_ref_to_text_with_params(
@@ -694,6 +721,13 @@ fn register_module_metadata(
                     .map(Text::from)
                     .unwrap_or_default(),
                 ty: Text::from(type_ref_to_text(&p.type_ref, &type_id_to_name)),
+                // BAKED-DEFAULT-ARG-1: surface the descriptor's
+                // default channel to the typechecker.
+                has_default: p.default.is_some(),
+                default_literal: p
+                    .default
+                    .map(|cid| render_param_default(module, cid))
+                    .unwrap_or(Maybe::None),
             })
             .collect();
         // SLICE-METHOD-TYPECHECK-E400 (#51): VBC TypeRefs have NO
@@ -771,6 +805,8 @@ fn register_module_metadata(
                     .map(|p| ParamDescriptor {
                         name: p.name.clone(),
                         ty: rewrite_aliased_typeid(&p.ty, target, alias),
+                        has_default: p.has_default,
+                        default_literal: p.default_literal.clone(),
                     })
                     .collect();
                 let return_type = rewrite_aliased_typeid(&return_type, target, alias);
