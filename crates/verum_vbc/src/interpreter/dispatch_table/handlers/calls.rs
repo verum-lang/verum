@@ -1141,6 +1141,25 @@ fn try_dispatch_intrinsic_by_name(
     // Match against known intrinsic function names.
     // We check both qualified names (e.g., "llvm.sqrt.f64") and bare names
     // (e.g., "sqrt", "sqrt_f64") to handle all codegen paths.
+    // ENV-IMPL-TRIO-1 (#55): the env `@intrinsic` trio bottoms out
+    // HERE (intrinsic-stub bodies route through this by-name dispatch,
+    // not the CallG intercept chain — the qualifier-gated high-level
+    // env_runtime intercepts never see bare-resolved user calls).
+    // Bridge to the shared env_runtime arms.
+    if std::env::var("VERUM_TRACE_ENVSTUB").is_ok() && func_name.contains("env") {
+        eprintln!("[envstub] by-name dispatch sees func_name={} bare={}", func_name, name);
+    }
+    if matches!(name, "get_env_impl" | "set_env_impl" | "unset_env_impl") {
+        if let Some(v) = super::env_runtime::try_intercept_env_runtime(
+            state,
+            name,
+            args_start.0,
+            arg_count,
+            caller_base,
+        )? {
+            return Ok(Some(v));
+        }
+    }
     match name {
         // ================================================================
         // F64 Square Root

@@ -5587,6 +5587,27 @@ pub enum SystemSubOpcode {
     /// Returns: Bool.
     IsInterpreted = 0x87,
 
+    /// ENV-IMPL-TRIO-1 (#55): read env var. Per-tier backend —
+    /// interpreter answers via std::env, LLVM lowering via libSystem
+    /// getenv (darwin's required boundary).
+    ///
+
+    /// Format: `dst:reg, name_bytes:reg`
+    /// Returns: Maybe<Text>.
+    EnvGet = 0x88,
+
+    /// Set env var (name, value byte-slices). Returns Result<(), Text>.
+    ///
+
+    /// Format: `dst:reg, name_bytes:reg, value_bytes:reg`
+    EnvSet = 0x89,
+
+    /// Remove env var. Returns Result<(), Text>.
+    ///
+
+    /// Format: `dst:reg, name_bytes:reg`
+    EnvUnset = 0x8A,
+
     // =========================================================================
     // Mach Kernel Operations (macOS)
     // =========================================================================
@@ -6166,6 +6187,9 @@ impl SystemSubOpcode {
             0x85 => Some(Self::SysGetentropy),
             0x86 => Some(Self::ExecutionTier),
             0x87 => Some(Self::IsInterpreted),
+            0x88 => Some(Self::EnvGet),
+            0x89 => Some(Self::EnvSet),
+            0x8A => Some(Self::EnvUnset),
             // Mach Kernel Operations
             0x90 => Some(Self::MachVmAllocate),
             0x91 => Some(Self::MachVmDeallocate),
@@ -6341,6 +6365,9 @@ impl SystemSubOpcode {
             Self::SysGetentropy          => m!("SYS_GETENTROPY",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::ExecutionTier          => m!("EXECUTION_TIER",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::IsInterpreted          => m!("IS_INTERPRETED",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
+            Self::EnvGet                 => m!("FFI_ENV_GET",               SystemCallOperations,        call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::EnvSet                 => m!("FFI_ENV_SET",               SystemCallOperations,        call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::EnvUnset               => m!("FFI_ENV_UNSET",             SystemCallOperations,        call=false, marshal=false, alloc=true,  dealloc=false),
 
             // ===== Mach Kernel Operations (0x90-0x9F) =====
             // Allocation-vs-release tagging mirrors Linux mmap pair.

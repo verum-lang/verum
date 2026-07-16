@@ -34,6 +34,7 @@ use super::super::super::error::InterpreterResult;
 use super::heap_helpers::{
     alloc_byte_list, alloc_record_n_fields, extract_text_arg, wrap_in_variant,
 };
+use super::file_runtime::extract_byte_list_arg;
 use super::string_helpers::alloc_string_value;
 use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
@@ -65,6 +66,70 @@ pub(in super::super) fn try_intercept_env_runtime(
                 return Ok(None);
             }
             intercept_var(state, args_start_reg, caller_base)
+        }
+        // ENV-IMPL-TRIO-1 (#55): the LOW-level `@intrinsic` trio the
+        // stdlib bodies bottom out in. The high-level intercepts above
+        // are gated on a `base.env` QUALIFIER — but bare-resolved call
+        // sites (every core-tests/base/env test mounts the prelude and
+        // calls `set_var(...)` unqualified) never match the gate, fall
+        // through to the `*_impl` stubs, and those had NO registration
+        // in either tier: `set_var` was a silent no-op, `var()` always
+        // Err (93/97 of base/env red). These three names are globally
+        // unique — no qualifier needed — and catching them closes EVERY
+        // path (`var`/`var_opt`/`set_var`/`remove_var` all funnel here).
+        "get_env_impl" if arg_count == 1 => {
+            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
+            let key = String::from_utf8_lossy(&name_bytes).into_owned();
+            match std::env::var(&key) {
+                Ok(value) => {
+                    let text = alloc_string_value(state, &value)?;
+                    Ok(Some(wrap_in_variant(state, "Maybe", 1, &[text])?))
+                }
+                Err(_) => Ok(Some(wrap_in_variant(state, "Maybe", 0, &[])?)),
+            }
+        }
+        "set_env_impl" if arg_count == 2 => {
+            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
+            let value_bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base);
+            let key = String::from_utf8_lossy(&name_bytes).into_owned();
+            let value = String::from_utf8_lossy(&value_bytes).into_owned();
+            use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+            let tid = target_id_for(&key);
+            if state.check_permission(PermissionScope::Process, tid)
+                != PermissionDecision::Allow
+                && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+                    == PermissionDecision::Deny
+            {
+                let unit = Value::unit();
+                return Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?));
+            }
+            // SAFETY: single-threaded interpreter dispatch — same
+            // contract as intercept_set_var above.
+            unsafe {
+                std::env::set_var(&key, &value);
+            }
+            let unit = Value::unit();
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?))
+        }
+        "unset_env_impl" if arg_count == 1 => {
+            let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
+            let key = String::from_utf8_lossy(&name_bytes).into_owned();
+            use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+            let tid = target_id_for(&key);
+            if state.check_permission(PermissionScope::Process, tid)
+                != PermissionDecision::Allow
+                && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+                    == PermissionDecision::Deny
+            {
+                let unit = Value::unit();
+                return Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?));
+            }
+            // SAFETY: single-threaded interpreter dispatch.
+            unsafe {
+                std::env::remove_var(&key);
+            }
+            let unit = Value::unit();
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?))
         }
         "set_var" => {
             if arg_count != 2 || !is_env_qualified(func_name) {
