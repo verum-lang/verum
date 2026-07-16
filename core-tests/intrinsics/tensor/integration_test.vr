@@ -127,7 +127,6 @@ fn permute_reverses_matrix_axes() {
     assert(feq(tensor_get_scalar(p, 1), 4.0));
 }
 
-@ignore("TENSOR-BROADCAST-KERNEL-1 (T0199, 2026-07-16) — wire fixed under T0193, but the kernel returns None for the standard NumPy row-tile [1,2]->[2,2]; flips green with the kernel materialization.")
 @test
 fn broadcast_tiles_row_vector() {
     let x = tensor_from_slice([1.0, 2.0], [1, 2], DTYPE_F64);
@@ -278,7 +277,6 @@ fn cumulative_sum_and_prod() {
 // SECTION 5 — Linear algebra
 // -----------------------------------------------------------------------------
 
-@ignore("TENSOR-DET-TRACE-VALUE-1 (T0200, 2026-07-16) — Det arm returns 0.0 and Trace returns int-bits-as-double; value channel of the two scalar-returning arms.")
 @test
 fn det_and_trace_of_diag() {
     let d = tensor_from_slice([2.0, 0.0, 0.0, 3.0], [2, 2], DTYPE_F64);

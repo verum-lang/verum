@@ -137,7 +137,6 @@ pub mod ffi;
 /// - Direct opcodes: Zero overhead (add_i64 → AddI)
 /// - Inline sequences: Near-zero overhead (checked_add → Add + overflow check)
 /// - Library calls: Minimal overhead for complex operations
-#[cfg(feature = "codegen")]
 pub mod intrinsics;
 
 #[cfg(feature = "codegen")]

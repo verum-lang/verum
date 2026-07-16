@@ -41,10 +41,16 @@
 //! | atomic_load | 5 cycles | 3 cycles |
 //! | memcpy(64) | 20 cycles | 8 cycles |
 
+// The registry (pure static data over crate::instruction types) is
+// available in EVERY build: the bytecode decoder derives the
+// TensorExtended carrier gate from it (T0219 — one authority, no
+// hand-table drift). The MLIR lowering stays codegen-gated.
+#[cfg(feature = "codegen")]
 pub mod lowering;
 pub mod registry;
 pub mod signatures;
 
+#[cfg(feature = "codegen")]
 pub use lowering::IntrinsicLowering;
 pub use registry::{
     INTRINSIC_REGISTRY, Intrinsic, IntrinsicCategory, IntrinsicHint, IntrinsicRegistry,

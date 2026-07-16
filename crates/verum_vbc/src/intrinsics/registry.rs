@@ -1328,6 +1328,36 @@ impl Default for IntrinsicRegistry {
 // All intrinsics are defined as static constants for zero-cost lookup.
 
 /// Complete list of all intrinsics.
+/// Sub-op bytes of every `TensorExtended` intrinsic reachable from
+/// this registry (plain and WithMode strategies). The bytecode
+/// decoder consults this set to round-trip those instructions as the
+/// length-prefixed CARRIER — deriving it here kills the
+/// hand-maintained gate-table drift that corrupted archive
+/// round-trips whenever a strategy was re-pointed (T0193/T0219:
+/// BroadcastToShape was missing from the hand table, so the archive
+/// decode mis-split its operands and ate a byte of the following
+/// instruction — mounted tensor_broadcast returned nil while a
+/// locally-compiled wrapper worked).
+pub fn tensor_carrier_sub_ops() -> &'static std::collections::HashSet<u8> {
+    use std::sync::OnceLock;
+    static SET: OnceLock<std::collections::HashSet<u8>> = OnceLock::new();
+    SET.get_or_init(|| {
+        let mut set = std::collections::HashSet::new();
+        for intrinsic in ALL_INTRINSICS {
+            match intrinsic.strategy {
+                CodegenStrategy::TensorExtendedOpcode(op) => {
+                    set.insert(op as u8);
+                }
+                CodegenStrategy::TensorExtendedOpcodeWithMode(op, _) => {
+                    set.insert(op as u8);
+                }
+                _ => {}
+            }
+        }
+        set
+    })
+}
+
 static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Memory Intrinsics

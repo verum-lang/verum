@@ -4135,7 +4135,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             // (verified across `crates/verum_vbc/src/codegen/`) but
             // are preserved for backwards compatibility with archives
             // produced by tooling that may exercise them directly.
-            if registry_driven_tensor_arity(sub_opcode_byte).is_some() {
+            // Carrier gate = registry-DERIVED sub-op set (T0219:
+            // single source, no drift) UNION the legacy hand table
+            // (still covers InlineSequence-routed sub-ops that do
+            // not appear as registry strategies).
+            if crate::intrinsics::registry::tensor_carrier_sub_ops().contains(&sub_opcode_byte)
+                || registry_driven_tensor_arity(sub_opcode_byte).is_some()
+            {
                 let operands = decode_extended_operands(data, offset)?;
                 return Ok(Instruction::TensorExtended {
                     sub_op: sub_opcode_byte,
