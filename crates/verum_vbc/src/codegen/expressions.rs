@@ -20535,6 +20535,226 @@ impl VbcCodegen {
         self.ctx.pop_disambig_context(saved);
     }
 
+    /// PACKED-FIELD-INIT-DYNCOUNT-1 (#37): route a record field-init whose
+    /// DECLARED type is a fixed-size primitive array (`buffer: [Byte; SIZE]`)
+    /// to the packed `NewByteArray` / `NewTypedArray` allocation instead of
+    /// the generic heap `List` that `compile_array` would build.
+    ///
+    /// The element authority is the field DECLARATION
+    /// (`field_array_spec`); the element COUNT is taken from the field-init
+    /// value's array shape — a repeat count (`[0; SIZE]`, either an integer
+    /// literal or a const-generic param whose witness resolves at the call
+    /// frame) or a list length (`[a, b, c]`).  Returns `Some(reg)` when it
+    /// routed a packed array; `None` to fall back to `compile_expr` (nested
+    /// arrays, non-array values, or non-primitive elements).
+    fn try_compile_packed_array_field_value(
+        &mut self,
+        owner_type: &str,
+        field_name: &str,
+        value: &Expr,
+    ) -> CodegenResult<Option<Reg>> {
+        use verum_ast::ArrayExpr;
+
+        let (elem_size, is_float) = match self.field_array_spec(owner_type, field_name) {
+            Some(spec) => spec,
+            None => return Ok(None),
+        };
+        // Scope to BYTE arrays (`[Byte; N]`) — the task surface (#37) and
+        // the only shape whose element address (`&mut self.buffer[i] as
+        // *mut Byte`) is exercised by the packed path. Wider typed-array
+        // fields keep their existing generic heap-List representation so no
+        // downstream List consumer changes behaviour.
+        if elem_size != 1 {
+            return Ok(None);
+        }
+        let array = match &value.kind {
+            ExprKind::Array(a) => a,
+            _ => return Ok(None),
+        };
+        match array {
+            ArrayExpr::Repeat { value: init_expr, count } => {
+                let count_reg = self
+                    .compile_expr(count)?
+                    .or_internal("packed array field: repeat count has no value")?;
+                let reg = self.emit_packed_array_alloc(
+                    elem_size,
+                    is_float,
+                    count_reg,
+                    Some(&**init_expr),
+                    None,
+                )?;
+                self.ctx.free_temp(count_reg);
+                Ok(Some(reg))
+            }
+            ArrayExpr::List(elems) => {
+                let count_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: count_reg,
+                    value: elems.len() as i64,
+                });
+                let reg =
+                    self.emit_packed_array_alloc(elem_size, is_float, count_reg, None, Some(elems))?;
+                self.ctx.free_temp(count_reg);
+                Ok(Some(reg))
+            }
+        }
+    }
+
+    /// Emit a PACKED fixed-size primitive array allocation with a dynamic
+    /// element COUNT read from `count_reg` (`NewByteArray` for 1-byte
+    /// elements, `NewTypedArray` otherwise).  Backs
+    /// [`try_compile_packed_array_field_value`]: because the count is a
+    /// register, the SAME emit serves `[0; 256]` and `[0; SIZE]` (the
+    /// const-generic witness materialises the concrete size at the call
+    /// frame).
+    ///
+    /// `repeat_init` is the `[v; N]` fill value broadcast to every slot;
+    /// `list_elems` is a `[a, b, c]` literal stored positionally after a
+    /// zero alloc.  Exactly one is `Some`.
+    fn emit_packed_array_alloc(
+        &mut self,
+        elem_size: usize,
+        is_float: bool,
+        count_reg: Reg,
+        repeat_init: Option<&Expr>,
+        list_elems: Option<&verum_common::List<Expr>>,
+    ) -> CodegenResult<Reg> {
+        use crate::instruction::SystemSubOpcode;
+        let result = self.ctx.alloc_temp();
+
+        if elem_size == 1 {
+            // Byte array: NewByteArray fills every byte with `init_reg`.
+            let init_reg = match repeat_init {
+                Some(init) => self
+                    .compile_expr(init)?
+                    .or_internal("packed byte-array init has no value")?,
+                None => {
+                    let r = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI { dst: r, value: 0 });
+                    r
+                }
+            };
+            let operands = vec![result.0 as u8, count_reg.0 as u8, init_reg.0 as u8];
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: SystemSubOpcode::NewByteArray.to_byte(),
+                operands,
+            });
+            self.ctx.free_temp(init_reg);
+
+            if let Some(elems) = list_elems {
+                for (idx, elem) in elems.iter().enumerate() {
+                    let val_reg = self
+                        .compile_expr(elem)?
+                        .or_internal("packed byte-array element has no value")?;
+                    let idx_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: idx as i64,
+                    });
+                    let store = vec![result.0 as u8, idx_reg.0 as u8, val_reg.0 as u8];
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: SystemSubOpcode::ByteArrayStore.to_byte(),
+                        operands: store,
+                    });
+                    self.ctx.free_temp(idx_reg);
+                    self.ctx.free_temp(val_reg);
+                }
+            }
+        } else {
+            // Typed array (>1-byte element). NewTypedArray fills with an
+            // integer init; the 0x80 flag on the elem_size byte stamps the
+            // float-typed heap TypeId (TYPED-ARRAY-FLOAT-1, #28) so reads
+            // decode via `from_f64`.
+            let init_val: i64 = match repeat_init {
+                Some(init) => match &init.kind {
+                    ExprKind::Literal(lit) => match &lit.kind {
+                        verum_ast::literal::LiteralKind::Int(il) => il.value as i64,
+                        _ => 0,
+                    },
+                    _ => 0,
+                },
+                None => 0,
+            };
+            let init_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: init_reg,
+                value: init_val,
+            });
+            let elem_size_byte = if is_float {
+                (elem_size as u8) | 0x80
+            } else {
+                elem_size as u8
+            };
+            let operands = vec![
+                result.0 as u8,
+                count_reg.0 as u8,
+                elem_size_byte,
+                init_reg.0 as u8,
+            ];
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: SystemSubOpcode::NewTypedArray.to_byte(),
+                operands,
+            });
+            self.ctx.free_temp(init_reg);
+
+            if let Some(elems) = list_elems {
+                for (idx, elem) in elems.iter().enumerate() {
+                    let val_reg = self
+                        .compile_expr(elem)?
+                        .or_internal("packed typed-array element has no value")?;
+                    let idx_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: idx as i64,
+                    });
+                    let store = vec![
+                        result.0 as u8,
+                        idx_reg.0 as u8,
+                        val_reg.0 as u8,
+                        elem_size as u8,
+                    ];
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: SystemSubOpcode::TypedArrayStore.to_byte(),
+                        operands: store,
+                    });
+                    self.ctx.free_temp(idx_reg);
+                    self.ctx.free_temp(val_reg);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// The declared type name of the receiver in a `<recv>.<field>` field
+    /// access, for the packed-array field-declaration lookup.  Handles the
+    /// dominant `self.<field>` case (the tracked `self` type, or the
+    /// enclosing impl type) plus a plain local binding
+    /// (`local.<field>`).  `None` when the receiver type isn't tracked —
+    /// the caller keeps its generic path.
+    fn packed_field_receiver_type(&self, recv: &Expr) -> Option<String> {
+        use verum_ast::ty::PathSegment;
+        let ExprKind::Path(p) = &recv.kind else {
+            return None;
+        };
+        if p.segments.len() != 1 {
+            return None;
+        }
+        let is_self = matches!(p.segments.last(), Some(PathSegment::SelfValue))
+            || matches!(p.segments.last(), Some(PathSegment::Name(n)) if n.as_str() == "self");
+        if is_self {
+            return self
+                .ctx
+                .variable_type_names
+                .get("self")
+                .cloned()
+                .or_else(|| self.ctx.current_impl_type_name.clone());
+        }
+        if let Some(PathSegment::Name(n)) = p.segments.last() {
+            return self.ctx.variable_type_names.get(n.as_str()).cloned();
+        }
+        None
+    }
+
     /// Compiles a record (struct) creation.
     fn compile_record(
         &mut self,
@@ -21031,8 +21251,20 @@ impl VbcCodegen {
                 let saved_field_type = self.push_field_type_context(&type_name, &field.name.name);
 
                 let value_reg = if let Some(ref v) = field.value {
-                    self.compile_expr(v)?
-                        .or_internal("field value has no value")?
+                    // PACKED-FIELD-INIT-DYNCOUNT-1 (#37): a field DECLARED as
+                    // a fixed-size primitive array (`buffer: [Byte; SIZE]`)
+                    // initialised with an array literal/repeat must be a
+                    // packed `[Byte; N]` (so `&mut self.buffer[i] as *mut
+                    // Byte` yields a real byte pointer), not the generic heap
+                    // List `compile_array` would build.
+                    if let Some(reg) =
+                        self.try_compile_packed_array_field_value(&type_name, &field.name.name, v)?
+                    {
+                        reg
+                    } else {
+                        self.compile_expr(v)?
+                            .or_internal("field value has no value")?
+                    }
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
@@ -22442,6 +22674,22 @@ impl VbcCodegen {
             } else {
                 None
             }
+        } else if let ExprKind::Field { expr: recv, field } = &base.kind {
+            // PACKED-FIELD-INIT-DYNCOUNT-1 (#37): `&mut self.buffer[i] as
+            // *mut Byte` on a field DECLARED as a fixed-size primitive
+            // array. The array lives packed in the field slot (see the
+            // field-init routing in `compile_record`), so its element
+            // address must come from `ByteArrayElementAddr` /
+            // `TypedArrayElementAddr`, not the generic list-element ref.
+            self.packed_field_receiver_type(recv).and_then(|owner| {
+                // Byte-array fields only — matching the packed field-init
+                // routing in `compile_record` (typed-array fields stay
+                // heap-List, so a `TypedArrayElementAddr` on them would
+                // mismatch the runtime object type).
+                self.field_array_spec(&owner, field.name.as_str())
+                    .filter(|(sz, _)| *sz == 1)
+                    .map(|(sz, _)| sz)
+            })
         } else {
             None
         };

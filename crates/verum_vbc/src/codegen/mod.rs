@@ -17884,6 +17884,73 @@ impl VbcCodegen {
             .map(|s| s.as_str())
     }
 
+    /// If `field_name` on record `type_name` is declared with a
+    /// fixed-size array of a PRIMITIVE element (`[Byte; SIZE]`,
+    /// `[UInt64; N]`, `[Float; N]`, …), return `(elem_size, is_float)`.
+    ///
+    /// This is the DECLARATION authority behind PACKED-FIELD-INIT-DYNCOUNT-1
+    /// (#37): the field-init value `Self { buffer: [0; SIZE] }` carries no
+    /// element type (`0` is a bare int literal), so the decision to
+    /// allocate a packed `[Byte; N]` (`NewByteArray`) instead of a generic
+    /// heap `List` — and to address `&mut self.buffer[i] as *mut Byte`
+    /// through `ByteArrayElementAddr` — must read the field's own declared
+    /// type.  The const-generic length (`SIZE`) is statically unknown here
+    /// (archived / lowered as `length == 0`), so only the ELEMENT geometry
+    /// is returned; the element COUNT is taken from the field-init value's
+    /// repeat/list shape at the call site.
+    ///
+    /// Nested arrays (`[[Byte; N]; M]`) and compound / non-primitive
+    /// elements return `None` — the caller keeps the generic heap path.
+    fn field_array_spec(&self, type_name: &str, field_name: &str) -> Option<(usize, bool)> {
+        use crate::types::TypeRef;
+        // Mirror resolve_field_index_impl's key discipline: strip generic
+        // args, and re-key a non-authoritative simple name to its
+        // module-qualified registration before the descriptor lookup.
+        let stripped = match type_name.find('<') {
+            Some(i) => &type_name[..i],
+            None => type_name,
+        };
+        let rekeyed: Option<String> = if !stripped.contains('.')
+            && !self.record_key_is_authoritative(stripped)
+        {
+            self.resolve_record_type_key(stripped)
+        } else {
+            None
+        };
+        let key: &str = rekeyed.as_deref().unwrap_or(stripped);
+
+        let tid = *self.type_name_to_id.get(key)?;
+        let td = self.types.iter().find(|t| t.id == tid)?;
+        let fd = td.fields.iter().find(|fd| {
+            self.ctx
+                .strings
+                .get(fd.name.0 as usize)
+                .is_some_and(|s| s == field_name)
+        })?;
+        match &fd.type_ref {
+            TypeRef::Array { element, .. } => self.primitive_array_element_spec(element),
+            _ => None,
+        }
+    }
+
+    /// `(elem_size, is_float)` for a PRIMITIVE array-element `TypeRef`, or
+    /// `None` for compound / nested / non-primitive elements.  Resolves the
+    /// element's canonical name through `type_ref_to_field_name` (so a
+    /// `Concrete(U8)` and a named-`Byte` alias both land on `"Byte"`), then
+    /// sizes it through the shared `primitive_size_by_name` registry.
+    fn primitive_array_element_spec(
+        &self,
+        element: &crate::types::TypeRef,
+    ) -> Option<(usize, bool)> {
+        let name = self.type_ref_to_field_name(element)?;
+        let sz = verum_common::layout::primitive_size_by_name(&name)? as usize;
+        let is_float = matches!(
+            name.as_str(),
+            "Float" | "Float32" | "Float64" | "F32" | "F64" | "f32" | "f64"
+        );
+        Some((sz, is_float))
+    }
+
     /// Substitute the literal `Self` token in a textual type name with
     /// the concrete impl type — used during default-method
     /// monomorphisation to bind `Self`-typed params and returns to

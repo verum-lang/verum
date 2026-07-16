@@ -3028,6 +3028,55 @@ mod const_generic_value_carry_tests {
         );
     }
 
+    /// PACKED-FIELD-INIT-DYNCOUNT-1 (#37): a field DECLARED `[Byte; SIZE]`
+    /// and initialised `Self { buffer: [0; SIZE] }` must be a PACKED byte
+    /// array (`NewByteArray`), not the generic heap `List` that
+    /// `compile_array` builds — otherwise `&self.buffer[i] as *const Byte`
+    /// (the `StackAllocator.alloc`/`dealloc` shape) yields a non-contiguous
+    /// list-element ref instead of a real byte pointer.
+    ///
+    /// The probe returns `&self.buffer[3] - &self.buffer[0]` as `Int`: with
+    /// a packed byte array the element addresses are contiguous (stride 1),
+    /// so the difference is exactly 3.  On the pre-fix heap-List path this
+    /// address arithmetic is meaningless (and the field-based
+    /// `&self.buffer[i]` would take the list-element ref path, panicking on
+    /// the zero-length backing).  Exercises BOTH new legs: the field-init
+    /// routing in `compile_record` and the field-base recognition in
+    /// `try_compile_byte_array_element_addr`, with the count coming from the
+    /// const-generic `SIZE` witness.
+    #[test]
+    fn const_generic_packed_byte_buffer_field_addr_is_contiguous() {
+        assert_main_returns_int(
+            r#"
+            type SA<const SIZE: Int> is {
+                buffer: [Byte; SIZE],
+                top: Int,
+            };
+
+            implement<const SIZE: Int> SA<SIZE> {
+                public fn new() -> Self {
+                    Self {
+                        buffer: [0; SIZE],
+                        top: 0,
+                    }
+                }
+
+                public fn probe(&self) -> Int {
+                    let p0 = &self.buffer[0] as *const Byte as Int;
+                    let p3 = &self.buffer[3] as *const Byte as Int;
+                    p3 - p0
+                }
+            }
+
+            fn main() -> Int {
+                let a = SA<8>.new();
+                a.probe()
+            }
+            "#,
+            3,
+        );
+    }
+
     /// Alias of an instantiated const-generic target
     /// (`type Tiny is Alloc<1024>;`) — both the alias static call and the
     /// alias-typed receiver derive the target's const witnesses through
