@@ -5570,11 +5570,12 @@ pub enum SystemSubOpcode {
     /// detection MUST be resolved per tier, never folded into the
     /// shared VBC — one bytecode stream serves both tiers, so a
     /// compile-time constant is tier-incoherent by construction.
-    /// The interpreter answers 0; the LLVM lowering emits const 1.
+    /// The interpreter answers 0; the LLVM lowering emits const 3.
     ///
 
     /// Format: `dst:reg`
-    /// Returns: Int tier id (0 = interpreter, 1 = AOT).
+    /// Returns: Int tier id per the stdlib contract (tier.vr):
+    /// 0 = VBC interpreter, 1/2 = JIT tiers, 3 = AOT.
     ExecutionTier = 0x86,
 
     /// Interpreter-tier predicate (`is_interpreted`). Same per-tier

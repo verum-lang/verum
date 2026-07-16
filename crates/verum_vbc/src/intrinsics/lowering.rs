@@ -1332,12 +1332,14 @@ impl IntrinsicLowering {
 
             // Tier detection (TIER-DETECT-AOT-1): GPU kernels are
             // compiled ahead-of-time — the honest per-tier answer on
-            // this path is "not the interpreter" (tier 1 shape).
+            // this path is "not the interpreter". Wire code 3 = AOT
+            // per the stdlib contract (tier.vr: 0=interp, 1/2=JIT,
+            // 3=AOT).
             InlineSequenceId::ExecutionTier => self.emit(MlirOp {
                 name: "arith.constant".to_string(),
                 attrs: vec![MlirAttr {
                     name: "value".to_string(),
-                    value: MlirAttrValue::Integer(1),
+                    value: MlirAttrValue::Integer(3),
                 }],
                 result_types: vec![MlirType::I64],
                 operands: vec![],
