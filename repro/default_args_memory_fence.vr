@@ -1,0 +1,9 @@
+// T0121 verification — BAKED-DEFAULT-ARG-1 (6b98e5bc2): a baked stdlib fn
+// with a default parameter must be callable with zero args on BOTH tiers
+// (pre-fix: memory_fence() = E102 arity error / LoadI 0 hardcode).
+mount core.intrinsics.memory.{memory_fence};
+
+fn main() {
+    memory_fence();
+    print("DEFAULTS_OK");
+}
