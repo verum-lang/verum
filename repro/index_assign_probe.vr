@@ -1,0 +1,53 @@
+// T0157 (register C5) verification probe — compound index assignment.
+// VERDICT 2026-07-16 (isolated build at 58fd3947b~2):
+//   --interp : ALL 6 shapes below GREEN => the historical C5
+//              "compound index assignment breaks" constraint is DEAD at Tier-0.
+//   --aot    : 5/6 GREEN; the packed [Byte;N] shape FAILS (exit 255, no output)
+//              => minimal repro split out to repro/packed_byte_index_assign_aot.vr (T0172).
+// T0157 probe — C5 "compound index assignment" constraint verification.
+// Exercises every shape the 2026-07-16 stdlib scan found among the 1115 sites.
+
+type Slot is { id: Int, live: Bool };
+
+type Holder is { items: List<Int> };
+
+implement Holder {
+    fn set_at(&mut self, i: Int, v: Int) {
+        self.items[i] = v;                    // self-field list index assign
+    }
+}
+
+fn main() {
+    // 1) plain List index assign
+    let mut xs = [10, 20, 30];
+    xs[0] = 11;
+    assert_eq(xs[0], 11);
+
+    // 2) compound (read-modify-write) index assign
+    xs[1] = xs[1] + 5;
+    assert_eq(xs[1], 25);
+
+    // 3) xor-style byte mutation on a packed [Byte; N]
+    let mut buf: [Byte; 8] = [0; 8];
+    buf[4] = 9 as Byte;
+    buf[4] = buf[4] ^ (3 as Byte);
+    assert_eq(buf[4] as Int, 10);
+
+    // 4) bool flag array (reachable[0] = true shape)
+    let mut flags = [false, false, false];
+    flags[0] = true;
+    assert(flags[0]);
+
+    // 5) record value into an indexed slot (self.slots[i] = CursorSlot{..} shape)
+    let mut slots = [Slot { id: 0, live: false }, Slot { id: 1, live: false }];
+    slots[1] = Slot { id: 7, live: true };
+    assert_eq(slots[1].id, 7);
+    assert(slots[1].live);
+
+    // 6) through &mut self method
+    let mut h = Holder { items: [1, 2, 3] };
+    h.set_at(2, 99);
+    assert_eq(h.items[2], 99);
+
+    print("INDEX_ASSIGN_OK");
+}

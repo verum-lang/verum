@@ -1,0 +1,25 @@
+// T0172 PACKED-BYTE-INDEX-ASSIGN-AOT-1 — minimal repro (from T0157 bisect).
+// Tier-0: prints OK. Tier-1 (): exit 255 with NO output —
+// index assignment (or the read-back) on a packed [Byte;N] LOCAL goes wrong
+// natively. Sibling families: ffi-byte-buffer-contract packed buffers,
+// #37 packed field-init, GetE/SetE byte paths.
+// T0157 probe — C5 "compound index assignment" constraint verification.
+// Exercises every shape the 2026-07-16 stdlib scan found among the 1115 sites.
+
+type Slot is { id: Int, live: Bool };
+
+type Holder is { items: List<Int> };
+
+implement Holder {
+    fn set_at(&mut self, i: Int, v: Int) {
+        self.items[i] = v;                    // self-field list index assign
+    }
+}
+
+fn main() {
+    let mut buf: [Byte; 8] = [0; 8];
+    buf[4] = 9 as Byte;
+    buf[4] = buf[4] ^ (3 as Byte);
+    assert_eq(buf[4] as Int, 10);
+    print("OK");
+}
