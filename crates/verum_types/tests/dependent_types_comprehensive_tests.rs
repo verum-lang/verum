@@ -1332,12 +1332,74 @@ fn test_type_level_plus_function() {
 // Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Verifies that dependent types are checked via SMT
 // =============================================================================
 
+/// Post-cycle-break contract (T0169): `verum_types` owns only the
+/// `DependentTypeChecker` TRAIT; "enabling" dependent types = INJECTING an
+/// implementation via `set_dependent_checker` (the SMT-backed one lives in
+/// `verum_smt::dependent_backend`, out of this crate's dependency reach).
+/// This in-crate mock proves the injection contract without `verum_smt`.
+struct MockDependentChecker;
+
+impl verum_types::dependent_integration::DependentTypeChecker for MockDependentChecker {
+    fn verify_pi_type(
+        &mut self,
+        _param_name: Text,
+        _param_type: &verum_ast::Type,
+        _return_type: &verum_ast::Type,
+        _span: verum_ast::span::Span,
+    ) -> Result<
+        verum_types::refinement::VerificationResult,
+        verum_types::refinement::RefinementError,
+    > {
+        Ok(verum_types::refinement::VerificationResult::Valid)
+    }
+
+    fn verify_sigma_type(
+        &mut self,
+        _fst_name: Text,
+        _fst_type: &verum_ast::Type,
+        _snd_type: &verum_ast::Type,
+        _span: verum_ast::span::Span,
+    ) -> Result<
+        verum_types::refinement::VerificationResult,
+        verum_types::refinement::RefinementError,
+    > {
+        Ok(verum_types::refinement::VerificationResult::Valid)
+    }
+
+    fn verify_equality(
+        &mut self,
+        _value_type: &verum_ast::Type,
+        _lhs: &verum_ast::expr::Expr,
+        _rhs: &verum_ast::expr::Expr,
+        _span: verum_ast::span::Span,
+    ) -> Result<
+        verum_types::refinement::VerificationResult,
+        verum_types::refinement::RefinementError,
+    > {
+        Ok(verum_types::refinement::VerificationResult::Valid)
+    }
+
+    fn verify_fin_type(
+        &mut self,
+        _value: &verum_ast::expr::Expr,
+        _bound: &verum_ast::expr::Expr,
+        _span: verum_ast::span::Span,
+    ) -> Result<
+        verum_types::refinement::VerificationResult,
+        verum_types::refinement::RefinementError,
+    > {
+        Ok(verum_types::refinement::VerificationResult::Valid)
+    }
+}
+
 #[test]
-fn test_dependent_type_verification_enabled_with_smt() {
-    // Test that dependent type checking is automatically enabled when SMT is enabled
+fn test_dependent_type_checking_requires_injection_not_smt_flag() {
+    // Post-cycle-break contract: `enable_smt: true` alone CANNOT enable
+    // dependent-type checking inside verum_types — the SMT-backed checker
+    // lives in verum_smt and must be injected. (This test used to assert the
+    // pre-break auto-construction behavior; it was red at HEAD — T0169.)
     use verum_types::refinement::{RefinementChecker, RefinementConfig};
 
-    // Create checker with SMT enabled
     let config = RefinementConfig {
         enable_smt: true,
         timeout_ms: 1000,
@@ -1345,8 +1407,8 @@ fn test_dependent_type_verification_enabled_with_smt() {
     };
     let checker = RefinementChecker::new(config);
 
-    // Should have dependent type checking enabled
-    assert!(checker.has_dependent_types());
+    // No checker injected — dependent type checking stays disabled.
+    assert!(!checker.has_dependent_types());
 }
 
 #[test]
@@ -1366,8 +1428,9 @@ fn test_dependent_type_verification_disabled_without_smt() {
 }
 
 #[test]
-fn test_dependent_type_checker_can_be_manually_enabled() {
-    // Test that dependent type checking can be manually enabled
+fn test_dependent_type_checker_enabled_by_injection() {
+    // The legacy no-arg `enable_dependent_types()` is a documented
+    // backward-compat no-op; INJECTION is the enabling act.
     use verum_types::refinement::{RefinementChecker, RefinementConfig};
 
     let config = RefinementConfig {
@@ -1379,23 +1442,28 @@ fn test_dependent_type_checker_can_be_manually_enabled() {
     // Initially disabled
     assert!(!checker.has_dependent_types());
 
-    // Enable manually
+    // Legacy no-arg enable is a no-op (kept for API compatibility).
     checker.enable_dependent_types();
+    assert!(!checker.has_dependent_types());
 
-    // Now enabled
+    // Injecting an implementation enables it.
+    checker.set_dependent_checker(Box::new(MockDependentChecker));
     assert!(checker.has_dependent_types());
 }
 
 #[test]
 fn test_type_checker_dependent_type_methods() {
-    // Test that TypeChecker has the dependent type verification methods
+    // TypeChecker exposes the same injection surface (delegating to its
+    // RefinementChecker): legacy enable is a no-op, set_dependent_checker
+    // enables.
     use verum_types::infer::TypeChecker;
 
     let mut tc = TypeChecker::new();
 
-    // By default, dependent types may or may not be enabled depending on config
-    // We can enable them manually
-    tc.enable_dependent_types();
+    tc.enable_dependent_types(); // backward-compat stub — no-op
+    assert!(!tc.has_dependent_types());
+
+    tc.set_dependent_checker(Box::new(MockDependentChecker));
     assert!(tc.has_dependent_types());
 }
 
