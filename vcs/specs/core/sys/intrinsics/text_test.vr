@@ -287,6 +287,48 @@ fn test_text_parse_float() {
     print("text_parse_float tests passed");
 }
 
+// #39 PARSE-FLOAT-INF-NAN-PARITY-1 — differential (Tier-0 vs Tier-1).
+// Tier-0 `str.trim().parse::<f64>()` accepts inf/infinity/nan (±,
+// case-insensitive, full token); Tier-1's digit-gate used to return None.
+// Both tiers must now agree: Some for a real special token, None for a
+// partial like "infx".
+@test
+fn test_text_parse_float_inf_nan_parity() {
+    // Bare "inf" → Some(+Inf).
+    let t_inf = text_from_static("inf");
+    assert(text_parse_float(&t_inf) is Some(_));
+
+    // "INFINITY" (case-insensitive long form) → Some.
+    let t_infinity = text_from_static("INFINITY");
+    assert(text_parse_float(&t_infinity) is Some(_));
+
+    // "-inf" → Some(-Inf); verify the sign made it through.
+    match text_parse_float(&text_from_static("-inf")) {
+        Some(x) => assert(x < -1.0e308),
+        None => panic("expected Some(-inf)"),
+    }
+
+    // "nan" → Some(NaN); NaN is the only value not equal to itself.  This
+    // also checks the NaN is boxed to the canonical Value (NAN_NAN_HEADER),
+    // not the raw 0x7FF8 pattern that would collide with the pointer tag.
+    match text_parse_float(&text_from_static("nan")) {
+        Some(x) => assert(x != x),
+        None => panic("expected Some(nan)"),
+    }
+
+    // Full-token rule: trailing junk after "inf" is NOT special → None.
+    let t_infx = text_from_static("infx");
+    assert(text_parse_float(&t_infx) is None);
+
+    // Overflow still reaches +Inf through the numeric path (bounded scaling).
+    match text_parse_float(&text_from_static("1e400")) {
+        Some(x) => assert(x > 1.0e308),
+        None => panic("expected Some(+inf) for 1e400"),
+    }
+
+    print("text_parse_float inf/nan parity tests passed");
+}
+
 @test
 fn test_int_to_text() {
     // Positive numbers

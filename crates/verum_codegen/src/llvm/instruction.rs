@@ -726,9 +726,72 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     let plus_ch = i8_type.const_int(b'+' as u64, false);
     let minus_ch = i8_type.const_int(b'-' as u64, false);
 
-    // entry → skip_ws (i = 0)
+    // entry: #39 PARSE-FLOAT-INF-NAN-PARITY-1 — recognize inf/infinity/nan
+    // via the shared grammar authority BEFORE the numeric parse so Tier-1
+    // agrees with Tier-0 `parse::<f64>()`.  Non-special (0) falls through to
+    // the numeric skip_ws path unchanged.
+    //
+    // Representation note (NaN-boxing): the ParseFloat consumers bit-cast this
+    // f64 straight into the register/Maybe payload, so the returned f64's raw
+    // bits ARE the Value.  ±Inf (0x7FF0.../0xFFF0...) are ordinary non-NaN
+    // doubles and store raw — matching Tier-0 `Value::from_f64`.  A real NaN
+    // (0x7FF8...) would collide with the POINTER tag, so we return the
+    // pre-boxed NaN Value bits (NAN_NAN_HEADER = 0x7FFF_0000_0000_0000),
+    // exactly what `Value::from_f64(f64::NAN)` produces at Tier-0.
+    let special_dispatch = llvm_ctx.append_basic_block(func, "special_dispatch");
+    let special_sd2 = llvm_ctx.append_basic_block(func, "special_sd2");
+    let special_pinf = llvm_ctx.append_basic_block(func, "special_pinf");
+    let special_ninf = llvm_ctx.append_basic_block(func, "special_ninf");
+    let special_nan = llvm_ctx.append_basic_block(func, "special_nan");
     builder.position_at_end(entry);
-    builder.build_unconditional_branch(skip_ws).expect("→ skip_ws");
+    let special_fn = get_or_declare_internal_float_special(llvm_ctx, module);
+    let special = builder
+        .build_call(special_fn, &[nptr.into()], "strtod_special")
+        .expect("call special")
+        .try_as_basic_value()
+        .basic()
+        .expect("special i64")
+        .into_int_value();
+    let is_special = builder
+        .build_int_compare(IntPredicate::NE, special, zero_i64, "strtod_is_special")
+        .expect("c");
+    builder
+        .build_conditional_branch(is_special, special_dispatch, skip_ws)
+        .expect("→ special/skip_ws");
+    // special_dispatch: 1=+Inf, 2=-Inf, 3=NaN.
+    builder.position_at_end(special_dispatch);
+    let sp_is1 = builder
+        .build_int_compare(IntPredicate::EQ, special, one_i64, "sp_is1")
+        .expect("c");
+    builder
+        .build_conditional_branch(sp_is1, special_pinf, special_sd2)
+        .expect("b");
+    builder.position_at_end(special_sd2);
+    let sp_is2 = builder
+        .build_int_compare(IntPredicate::EQ, special, i64_type.const_int(2, false), "sp_is2")
+        .expect("c");
+    builder
+        .build_conditional_branch(sp_is2, special_ninf, special_nan)
+        .expect("b");
+    builder.position_at_end(special_pinf);
+    builder
+        .build_return(Some(&f64_type.const_float(f64::INFINITY)))
+        .expect("ret +inf");
+    builder.position_at_end(special_ninf);
+    builder
+        .build_return(Some(&f64_type.const_float(f64::NEG_INFINITY)))
+        .expect("ret -inf");
+    builder.position_at_end(special_nan);
+    // NAN_NAN_HEADER = 0x7FFF_0000_0000_0000 (pre-boxed NaN Value bits).
+    // Build via an integer→f64 bitcast so the exact bit pattern survives —
+    // a `const_float(NaN)` could be re-canonicalized by a later pass; a
+    // bitcast of a fixed integer constant cannot.
+    let nan_bits = i64_type.const_int(0x7FFF_0000_0000_0000, false);
+    let nan_f64 = builder
+        .build_bit_cast(nan_bits, f64_type, "nan_boxed")
+        .expect("bitcast")
+        .into_float_value();
+    builder.build_return(Some(&nan_f64)).expect("ret nan");
 
     // skip_ws: PHI(i); load nptr[i]; if ws → advance; else → after_ws
     builder.position_at_end(skip_ws);
@@ -1032,6 +1095,335 @@ pub(crate) fn get_or_declare_internal_strtod<'ctx>(
     // don't reference in the simplified flow.
     let _ = zero_f64;
 
+    func
+}
+
+/// Get or declare `verum_internal_float_special(nptr: ptr) -> i64` — the
+/// ONE authority for the `inf` / `infinity` / `nan` special-float grammar,
+/// shared by `verum_internal_strtod` (which turns a match into the ±Inf /
+/// NaN f64 value) and the ParseFloat None-gate (which accepts a match as a
+/// valid parse).  Keeping the grammar in a single function is what stops the
+/// value emitter and the accept gate from drifting apart (#39
+/// PARSE-FLOAT-INF-NAN-PARITY-1).
+///
+/// Full-token match of  `^[ws]* [+-]? (inf(inity)? | nan) [ws]* $`, ASCII
+/// case-insensitive (`byte | 0x20`).  The token must be followed only by
+/// whitespace + the NUL terminator, so `"infx"` / `"nano"` / `"infi"` are
+/// NOT special — matching Tier-0 `str.trim().parse::<f64>()`, which rejects
+/// them.  Byte reads are strictly sequential (each next byte is read only
+/// after the current one is confirmed non-NUL), so a short buffer such as
+/// `"i\0"` never over-reads past its terminator.
+///
+/// Returns: `0` = not special, `1` = +Inf, `2` = -Inf, `3` = NaN.  NaN
+/// carries no sign — `"-nan"` → 3, as Rust parses it.
+pub(crate) fn get_or_declare_internal_float_special<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_float_special";
+    let i8_type = llvm_ctx.i8_type();
+    let i64_type = llvm_ctx.i64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+    let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+    // Bodyless-gate (same as strtod / strtol): return an existing function
+    // only if it already has a body; a bodyless pre-declaration falls through
+    // and gets its body built here.
+    let func = match module.get_function(wrapper_name) {
+        Some(f) if f.count_basic_blocks() > 0 => return f,
+        Some(f) => f,
+        None => {
+            let f = module.add_function(wrapper_name, fn_type, None);
+            f.set_linkage(verum_llvm::module::Linkage::Internal);
+            f
+        }
+    };
+
+    let builder = llvm_ctx.create_builder();
+    let nptr = func.get_first_param().expect("nptr").into_pointer_value();
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let skip_ws = llvm_ctx.append_basic_block(func, "skip_ws");
+    let skip_ws_adv = llvm_ctx.append_basic_block(func, "skip_ws_adv");
+    let after_ws = llvm_ctx.append_basic_block(func, "after_ws");
+    let dispatch = llvm_ctx.append_basic_block(func, "dispatch");
+    let disp_n = llvm_ctx.append_basic_block(func, "disp_n");
+    let match_inf = llvm_ctx.append_basic_block(func, "match_inf");
+    let inf_n_ok = llvm_ctx.append_basic_block(func, "inf_n_ok");
+    let inf_matched = llvm_ctx.append_basic_block(func, "inf_matched");
+    let inity_c0 = llvm_ctx.append_basic_block(func, "inity_c0");
+    let inity_c1 = llvm_ctx.append_basic_block(func, "inity_c1");
+    let inity_c2 = llvm_ctx.append_basic_block(func, "inity_c2");
+    let inity_c3 = llvm_ctx.append_basic_block(func, "inity_c3");
+    let inity_c4 = llvm_ctx.append_basic_block(func, "inity_c4");
+    let match_nan = llvm_ctx.append_basic_block(func, "match_nan");
+    let nan_a_ok = llvm_ctx.append_basic_block(func, "nan_a_ok");
+    let nan_matched = llvm_ctx.append_basic_block(func, "nan_matched");
+    let tail_ws = llvm_ctx.append_basic_block(func, "tail_ws");
+    let tail_ws_adv = llvm_ctx.append_basic_block(func, "tail_ws_adv");
+    let tail_end = llvm_ctx.append_basic_block(func, "tail_end");
+    let ret_special = llvm_ctx.append_basic_block(func, "ret_special");
+    let ret0 = llvm_ctx.append_basic_block(func, "ret0");
+
+    let one_i64 = i64_type.const_int(1, false);
+
+    // Shared byte helpers (immutable borrows of `builder`).
+    let load_raw = |idx: IntValue<'ctx>, name: &str| -> IntValue<'ctx> {
+        let p = unsafe {
+            builder
+                .build_gep(i8_type, nptr, &[idx], &format!("{name}_p"))
+                .expect("gep")
+        };
+        builder
+            .build_load(i8_type, p, name)
+            .expect("ld")
+            .into_int_value()
+    };
+    let lower = |c: IntValue<'ctx>, name: &str| -> IntValue<'ctx> {
+        builder
+            .build_or(c, i8_type.const_int(0x20, false), name)
+            .expect("lower")
+    };
+    let eq8 = |c: IntValue<'ctx>, lit: u8, name: &str| -> IntValue<'ctx> {
+        builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                c,
+                i8_type.const_int(lit as u64, false),
+                name,
+            )
+            .expect("eq")
+    };
+    let is_ws = |c: IntValue<'ctx>, name: &str| -> IntValue<'ctx> {
+        let sp = eq8(c, 0x20, &format!("{name}_sp"));
+        let tb = eq8(c, 0x09, &format!("{name}_tb"));
+        let nl = eq8(c, 0x0a, &format!("{name}_nl"));
+        let cr = eq8(c, 0x0d, &format!("{name}_cr"));
+        let a = builder.build_or(sp, tb, &format!("{name}_a")).expect("o");
+        let b = builder.build_or(nl, cr, &format!("{name}_b")).expect("o");
+        builder.build_or(a, b, name).expect("o")
+    };
+    let load_i = |slot: PointerValue<'ctx>, name: &str| -> IntValue<'ctx> {
+        builder
+            .build_load(i64_type, slot, name)
+            .expect("li")
+            .into_int_value()
+    };
+    let add_i = |v: IntValue<'ctx>, k: u64, name: &str| -> IntValue<'ctx> {
+        builder
+            .build_int_add(v, i64_type.const_int(k, false), name)
+            .expect("add")
+    };
+
+    // entry: allocas + init.
+    builder.position_at_end(entry);
+    let i_slot = builder.build_alloca(i64_type, "fs_i").expect("a");
+    let neg_slot = builder.build_alloca(i8_type, "fs_neg").expect("a");
+    let res_slot = builder.build_alloca(i64_type, "fs_res").expect("a");
+    builder.build_store(i_slot, i64_type.const_zero()).expect("s");
+    builder.build_store(neg_slot, i8_type.const_zero()).expect("s");
+    builder.build_store(res_slot, i64_type.const_zero()).expect("s");
+    builder.build_unconditional_branch(skip_ws).expect("b");
+
+    // skip_ws: leading whitespace loop.
+    builder.position_at_end(skip_ws);
+    let i = load_i(i_slot, "sw_i");
+    let c = load_raw(i, "sw_c");
+    let ws = is_ws(c, "sw_ws");
+    builder
+        .build_conditional_branch(ws, skip_ws_adv, after_ws)
+        .expect("b");
+    builder.position_at_end(skip_ws_adv);
+    let i = load_i(i_slot, "swa_i");
+    let i1 = add_i(i, 1, "swa_i1");
+    builder.build_store(i_slot, i1).expect("s");
+    builder.build_unconditional_branch(skip_ws).expect("b");
+
+    // after_ws: optional sign.
+    builder.position_at_end(after_ws);
+    let i = load_i(i_slot, "aw_i");
+    let c = load_raw(i, "aw_c");
+    let is_plus = eq8(c, b'+', "aw_plus");
+    let is_minus = eq8(c, b'-', "aw_minus");
+    let is_sign = builder.build_or(is_plus, is_minus, "aw_sign").expect("o");
+    let neg_v = builder
+        .build_select(
+            is_minus,
+            i8_type.const_int(1, false),
+            i8_type.const_zero(),
+            "aw_neg",
+        )
+        .expect("sel")
+        .into_int_value();
+    builder.build_store(neg_slot, neg_v).expect("s");
+    let i1 = add_i(i, 1, "aw_i1");
+    let i_next = builder
+        .build_select(is_sign, i1, i, "aw_inext")
+        .expect("sel")
+        .into_int_value();
+    builder.build_store(i_slot, i_next).expect("s");
+    builder.build_unconditional_branch(dispatch).expect("b");
+
+    // dispatch: first significant byte → 'i' (inf) / 'n' (nan) / other.
+    builder.position_at_end(dispatch);
+    let i = load_i(i_slot, "d_i");
+    let c = load_raw(i, "d_c");
+    let cl = lower(c, "d_cl");
+    let is_i = eq8(cl, b'i', "d_isi");
+    builder
+        .build_conditional_branch(is_i, match_inf, disp_n)
+        .expect("b");
+    builder.position_at_end(disp_n);
+    let is_n = eq8(cl, b'n', "dn_isn");
+    builder
+        .build_conditional_branch(is_n, match_nan, ret0)
+        .expect("b");
+
+    // match_inf: nptr[i]='i' (confirmed non-NUL). Check "nf".
+    builder.position_at_end(match_inf);
+    let i = load_i(i_slot, "mi_i");
+    let c1 = load_raw(add_i(i, 1, "mi_i1"), "mi_c1");
+    let c1l = lower(c1, "mi_c1l");
+    let mi_isn = eq8(c1l, b'n', "mi_isn");
+    builder
+        .build_conditional_branch(mi_isn, inf_n_ok, ret0)
+        .expect("b");
+    builder.position_at_end(inf_n_ok); // nptr[i+1]='n' non-NUL
+    let i = load_i(i_slot, "ino_i");
+    let c2 = load_raw(add_i(i, 2, "ino_i2"), "ino_c2");
+    let c2l = lower(c2, "ino_c2l");
+    let ino_isf = eq8(c2l, b'f', "ino_isf");
+    builder
+        .build_conditional_branch(ino_isf, inf_matched, ret0)
+        .expect("b");
+    builder.position_at_end(inf_matched); // "inf" matched; nptr[i+2]='f' non-NUL
+    let i = load_i(i_slot, "im_i");
+    let neg = builder
+        .build_load(i8_type, neg_slot, "im_neg")
+        .expect("l")
+        .into_int_value();
+    let is_neg = builder
+        .build_int_compare(IntPredicate::NE, neg, i8_type.const_zero(), "im_isneg")
+        .expect("c");
+    let res = builder
+        .build_select(
+            is_neg,
+            i64_type.const_int(2, false),
+            i64_type.const_int(1, false),
+            "im_res",
+        )
+        .expect("sel");
+    builder.build_store(res_slot, res).expect("s");
+    let i3 = add_i(i, 3, "im_i3");
+    builder.build_store(i_slot, i3).expect("s");
+    builder.build_unconditional_branch(inity_c0).expect("b");
+
+    // inity_c0..c4: optional "inity" suffix (positions i+0..i+4, i = post-"inf"
+    // index). Any mismatch → tail_ws WITHOUT advancing, so the tail check sees
+    // the leftover byte and rejects a partial like "infi". Full match advances
+    // i_slot by 5 (past "inity").
+    builder.position_at_end(inity_c0);
+    let i = load_i(i_slot, "ic0_i");
+    let c = load_raw(i, "ic0_c");
+    let cl = lower(c, "ic0_cl");
+    let ic0 = eq8(cl, b'i', "ic0_is");
+    builder
+        .build_conditional_branch(ic0, inity_c1, tail_ws)
+        .expect("b");
+    builder.position_at_end(inity_c1);
+    let i = load_i(i_slot, "ic1_i");
+    let c = load_raw(add_i(i, 1, "ic1_i1"), "ic1_c");
+    let cl = lower(c, "ic1_cl");
+    let ic1 = eq8(cl, b'n', "ic1_is");
+    builder
+        .build_conditional_branch(ic1, inity_c2, tail_ws)
+        .expect("b");
+    builder.position_at_end(inity_c2);
+    let i = load_i(i_slot, "ic2_i");
+    let c = load_raw(add_i(i, 2, "ic2_i2"), "ic2_c");
+    let cl = lower(c, "ic2_cl");
+    let ic2 = eq8(cl, b'i', "ic2_is");
+    builder
+        .build_conditional_branch(ic2, inity_c3, tail_ws)
+        .expect("b");
+    builder.position_at_end(inity_c3);
+    let i = load_i(i_slot, "ic3_i");
+    let c = load_raw(add_i(i, 3, "ic3_i3"), "ic3_c");
+    let cl = lower(c, "ic3_cl");
+    let ic3 = eq8(cl, b't', "ic3_is");
+    builder
+        .build_conditional_branch(ic3, inity_c4, tail_ws)
+        .expect("b");
+    builder.position_at_end(inity_c4);
+    let i = load_i(i_slot, "ic4_i");
+    let c = load_raw(add_i(i, 4, "ic4_i4"), "ic4_c");
+    let cl = lower(c, "ic4_cl");
+    let ic4 = eq8(cl, b'y', "ic4_is");
+    // On full "inity" match, advance i_slot past all 5 chars.
+    let i5 = add_i(i, 5, "ic4_i5");
+    let i_after = builder
+        .build_select(ic4, i5, i, "ic4_inext")
+        .expect("sel")
+        .into_int_value();
+    builder.build_store(i_slot, i_after).expect("s");
+    builder.build_unconditional_branch(tail_ws).expect("b");
+
+    // match_nan: nptr[i]='n' (confirmed non-NUL). Check "an".
+    builder.position_at_end(match_nan);
+    let i = load_i(i_slot, "mn_i");
+    let c1 = load_raw(add_i(i, 1, "mn_i1"), "mn_c1");
+    let c1l = lower(c1, "mn_c1l");
+    let mn_isa = eq8(c1l, b'a', "mn_isa");
+    builder
+        .build_conditional_branch(mn_isa, nan_a_ok, ret0)
+        .expect("b");
+    builder.position_at_end(nan_a_ok); // nptr[i+1]='a' non-NUL
+    let i = load_i(i_slot, "na_i");
+    let c2 = load_raw(add_i(i, 2, "na_i2"), "na_c2");
+    let c2l = lower(c2, "na_c2l");
+    let na_isn = eq8(c2l, b'n', "na_isn");
+    builder
+        .build_conditional_branch(na_isn, nan_matched, ret0)
+        .expect("b");
+    builder.position_at_end(nan_matched);
+    let i = load_i(i_slot, "nm_i");
+    builder
+        .build_store(res_slot, i64_type.const_int(3, false))
+        .expect("s");
+    let i3 = add_i(i, 3, "nm_i3");
+    builder.build_store(i_slot, i3).expect("s");
+    builder.build_unconditional_branch(tail_ws).expect("b");
+
+    // tail_ws: trailing whitespace loop, then require NUL.
+    builder.position_at_end(tail_ws);
+    let i = load_i(i_slot, "tw_i");
+    let c = load_raw(i, "tw_c");
+    let ws = is_ws(c, "tw_ws");
+    builder
+        .build_conditional_branch(ws, tail_ws_adv, tail_end)
+        .expect("b");
+    builder.position_at_end(tail_ws_adv);
+    let i = load_i(i_slot, "twa_i");
+    let i1 = add_i(i, 1, "twa_i1");
+    builder.build_store(i_slot, i1).expect("s");
+    builder.build_unconditional_branch(tail_ws).expect("b");
+    builder.position_at_end(tail_end);
+    let i = load_i(i_slot, "te_i");
+    let c = load_raw(i, "te_c");
+    let is_nul = eq8(c, 0, "te_nul");
+    builder
+        .build_conditional_branch(is_nul, ret_special, ret0)
+        .expect("b");
+
+    // ret_special: the matched 1/2/3.  ret0: not special.
+    builder.position_at_end(ret_special);
+    let r = load_i(res_slot, "rs_r");
+    builder.build_return(Some(&r)).expect("ret");
+    builder.position_at_end(ret0);
+    builder
+        .build_return(Some(&i64_type.const_zero()))
+        .expect("ret");
+
+    let _ = one_i64;
     func
 }
 
@@ -21453,9 +21845,29 @@ fn lower_text_extended<'ctx>(
             ctx.builder().build_unconditional_branch(scan_check).or_llvm_err()?;
             ctx.builder().position_at_end(scan_done);
             let has_digit = ctx.builder().build_load(i8_ty2, has_slot, "pf_has_final").or_llvm_err()?.into_int_value();
+            let no_digit = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, has_digit, i8_ty2.const_zero(), "parse_float_no_digit")
+                .or_llvm_err()?;
+            // #39 PARSE-FLOAT-INF-NAN-PARITY-1: `inf`/`infinity`/`nan` is a valid
+            // parse even though it has no digit. Consult the SAME grammar
+            // authority the strtod value path uses, so the accept gate and the
+            // value never drift. None only when neither a digit nor a special
+            // token is present.
+            let special_fn = get_or_declare_internal_float_special(ctx.llvm_context(), &module);
+            let pf_special = ctx
+                .builder()
+                .build_call(special_fn, &[byte_ptr.into()], "pf_special")
+                .or_llvm_err()?
+                .basic_value_or("float_special returned void")?
+                .into_int_value();
+            let not_special = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, pf_special, i64_ty.const_zero(), "parse_float_not_special")
+                .or_llvm_err()?;
             let is_none = ctx
                 .builder()
-                .build_int_compare(IntPredicate::EQ, has_digit, i8_ty2.const_zero(), "parse_float_none")
+                .build_and(no_digit, not_special, "parse_float_none")
                 .or_llvm_err()?;
             // Float payload = raw f64 bits reinterpreted as i64.
             let bits = ctx
