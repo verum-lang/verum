@@ -61,6 +61,9 @@ fn type_ref_is_concrete(t: &TypeRef) -> bool {
             ..
         } => params.iter().all(type_ref_is_concrete) && type_ref_is_concrete(return_type),
         TypeRef::Rank2Function { .. } => true,
+        // A resolved const-generic VALUE is fully concrete by definition
+        // (CONST-GENERIC-VALUE-CARRY-1 witness channel, b0c79b174).
+        TypeRef::ConstValue(_) => true,
     }
 }
 
