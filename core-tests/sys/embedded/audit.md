@@ -9,7 +9,7 @@
   default user-space build via direct mount (`mount core.sys.embedded.X`)
   — this conformance suite exercises that surface.
 * Public API:
-  - `StackAllocator` — bump allocator over a fixed buffer.
+  - `BumpAllocator` — bump allocator over a fixed buffer.
   - `RingBuffer` — fixed-size circular buffer for MMIO/UART I/O.
   - `PanicAction` — 3-variant (Halt | Reset | Custom(fn() -> ())).
   - `set_panic_action(action: PanicAction)`, `embedded_panic()` —
@@ -30,7 +30,7 @@ primitives.
 
 ## 2. Action items landed in this branch
 
-1. `unit_test.vr` — 19 `@test`s pinning StackAllocator construction
+1. `unit_test.vr` — 19 `@test`s pinning BumpAllocator construction
    (capacity / used / remaining accessors at zero/full states),
    bump arithmetic (alignment rounding, sequential allocs sum),
    reset semantics, OOM sentinel (returns 0), and RingBuffer
@@ -44,7 +44,7 @@ primitives.
    RingBuffer empty/full/len/capacity bounds; 3-variant PanicAction
    exhaustive dispatch.
 3. `integration_test.vr` — 8 cross-stdlib scenarios composing
-   StackAllocator with Maybe<Int> OOM funnel, a struct-table
+   BumpAllocator with Maybe<Int> OOM funnel, a struct-table
    bootloader pattern (table + 4 descriptors), two-independent-
    allocators coexistence, RingBuffer state-machine invariants,
    PanicAction classification + Maybe<PanicAction> lift, and a

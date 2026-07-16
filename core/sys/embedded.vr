@@ -26,7 +26,7 @@ mount sys.mmio.{volatile_load, volatile_store};
 
 // Typical usage:
 //  let mut buf: [Int; 1024] = [0; 1024];
-//  let mut alloc = StackAllocator.new(@ptr_of(buf), 8192);
+//  let mut alloc = BumpAllocator.new(@ptr_of(buf), 8192);
 //  let ptr = alloc.alloc(64, 8); // 64 bytes, 8-byte aligned
 //
 
@@ -37,20 +37,20 @@ mount sys.mmio.{volatile_load, volatile_store};
 // Stack Allocator — bump allocator over a fixed buffer
 // =============================================================================
 
-type StackAllocator is {
+type BumpAllocator is {
     buffer_ptr: Int,
     capacity: Int,
     offset: Int,
 };
 
-implement StackAllocator {
+implement BumpAllocator {
     /// Create a new stack allocator over the given buffer.
     ///
 
     /// `buffer` must be a valid pointer to at least `size` bytes of memory.
     /// The caller is responsible for ensuring the buffer outlives the allocator.
-    public fn new(buffer: Int, size: Int) -> StackAllocator {
-        StackAllocator {
+    public fn new(buffer: Int, size: Int) -> BumpAllocator {
+        BumpAllocator {
             buffer_ptr: buffer,
             capacity: size,
             offset: 0,

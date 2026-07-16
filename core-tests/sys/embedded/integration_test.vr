@@ -3,14 +3,14 @@
 // =============================================================================
 //
 // Cross-stdlib integration tests for `core.sys.embedded`. Exercises
-// StackAllocator + RingBuffer + PanicAction in combination with the
+// BumpAllocator + RingBuffer + PanicAction in combination with the
 // rest of the standard library (List, Maybe, pattern matching).
 //
 // What this file pins:
 //
-//   * StackAllocator allocation sequences mirroring real embedded-
+//   * BumpAllocator allocation sequences mirroring real embedded-
 //     bootloader patterns (struct table + per-struct payload).
-//   * StackAllocator OOM funnel through Maybe<Int> (Maybe.Some(ptr) on
+//   * BumpAllocator OOM funnel through Maybe<Int> (Maybe.Some(ptr) on
 //     success; Maybe.None on the 0-sentinel).
 //   * Multi-allocator coexistence (independent bump pointers).
 //   * RingBuffer × List<Int> drained-iteration shape pin.
@@ -19,24 +19,24 @@
 
 mount core.prelude.*;
 mount core.sys.embedded.{
-    StackAllocator,
+    BumpAllocator,
     RingBuffer,
     PanicAction,
 };
 
 // =============================================================================
-// Section 1: StackAllocator × Maybe — OOM-funnel pattern
+// Section 1: BumpAllocator × Maybe — OOM-funnel pattern
 // =============================================================================
 
 @test
 fn integration_stack_allocator_alloc_funnel_through_maybe() {
     // Wrap alloc result in Maybe to make the OOM-vs-success branch
     // typesafe at the call site.
-    fn alloc_maybe(a: &mut StackAllocator, size: Int, align: Int) -> Maybe<Int> {
+    fn alloc_maybe(a: &mut BumpAllocator, size: Int, align: Int) -> Maybe<Int> {
         let p = a.alloc(size, align);
         if p == 0 { Maybe.None } else { Maybe.Some(p) }
     }
-    let mut a = StackAllocator.new(0x1000, 256);
+    let mut a = BumpAllocator.new(0x1000, 256);
     let ok  = alloc_maybe(&mut a, 128, 8);
     let oom = alloc_maybe(&mut a, 256, 8);
     match ok {
@@ -50,14 +50,14 @@ fn integration_stack_allocator_alloc_funnel_through_maybe() {
 }
 
 // =============================================================================
-// Section 2: StackAllocator — sequential bump pattern
+// Section 2: BumpAllocator — sequential bump pattern
 // =============================================================================
 
 @test
 fn integration_stack_allocator_struct_table_pattern() {
     // The canonical embedded-bootloader pattern: allocate a table of N
     // struct-descriptor pointers, then bump-allocate the descriptors.
-    let mut a = StackAllocator.new(0x2000, 2048);
+    let mut a = BumpAllocator.new(0x2000, 2048);
     // Table of 4 pointers (4 * 8 = 32 bytes, 8-aligned).
     let table = a.alloc(32, 8);
     // Four 64-byte descriptors.
@@ -83,8 +83,8 @@ fn integration_stack_allocator_struct_table_pattern() {
 @test
 fn integration_two_independent_allocators() {
     // Two allocators over disjoint buffers maintain independent state.
-    let mut a = StackAllocator.new(0x3000, 1024);
-    let mut b = StackAllocator.new(0x4000, 1024);
+    let mut a = BumpAllocator.new(0x3000, 1024);
+    let mut b = BumpAllocator.new(0x4000, 1024);
     let _ = a.alloc(128, 8);
     let _ = a.alloc(128, 8);
     let _ = b.alloc(64, 8);
@@ -157,14 +157,14 @@ fn integration_panic_action_via_maybe_some() {
 }
 
 // =============================================================================
-// Section 6: StackAllocator × List — collect allocation pointers
+// Section 6: BumpAllocator × List — collect allocation pointers
 // =============================================================================
 
 @test
 fn integration_stack_allocator_pointers_collect_into_list() {
     // Allocate N small blocks; collect their pointers into a List;
     // every pointer must be distinct (bump-allocator invariant).
-    let mut a = StackAllocator.new(0x6000, 2048);
+    let mut a = BumpAllocator.new(0x6000, 2048);
     let mut ptrs: List<Int> = [];
     let mut i: Int = 0;
     while i < 8 {

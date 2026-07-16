@@ -7,7 +7,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.sys.embedded.{StackAllocator, RingBuffer};
+mount core.sys.embedded.{BumpAllocator, RingBuffer};
 
 // =============================================================================
 // REGRESSION 1: Bump-allocator overflow path must NOT advance `offset`
@@ -21,7 +21,7 @@ mount core.sys.embedded.{StackAllocator, RingBuffer};
 
 @test
 fn regression_stack_allocator_oom_does_not_advance_offset() {
-    let mut a = StackAllocator.new(0x1000, 256);
+    let mut a = BumpAllocator.new(0x1000, 256);
     let _ = a.alloc(200, 8);
     let used_before_oom = a.used();
     let p = a.alloc(100, 8);   // 200 + 100 = 300 > 256 → OOM
@@ -49,7 +49,7 @@ fn regression_stack_allocator_oom_does_not_advance_offset() {
 @test
 fn regression_stack_allocator_alignment_relative_to_buffer() {
     // 0x1000 is 4096-aligned, which subsumes all alignments ≤ 4096.
-    let mut a = StackAllocator.new(0x1000, 1024);
+    let mut a = BumpAllocator.new(0x1000, 1024);
     let p8  = a.alloc(8, 8);
     let p16 = a.alloc(16, 16);
     let p32 = a.alloc(32, 32);

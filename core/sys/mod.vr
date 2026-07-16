@@ -225,7 +225,7 @@ public mount .interrupt.{
 
 @cfg(runtime = "embedded")
 public mount .embedded.{
-    StackAllocator,
+    BumpAllocator,
     RingBuffer,
     PanicAction,
     set_panic_action,
