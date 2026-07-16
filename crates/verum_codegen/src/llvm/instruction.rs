@@ -2744,6 +2744,30 @@ pub fn lower_instruction<'ctx>(
                 ctx.builder()
                     .build_int_compare(pred, cmp_int, zero_i32, "strcmp_cmp")
                     .or_llvm_err()?
+            } else if ctx.is_float_register(a.0) || ctx.is_float_register(b.0) {
+                // CMPI-FLOAT-NAN-TIER-1: the interpreter's Eq/Ne authority
+                // (deep_value_eq) is NaN-aware — NaN never equals anything,
+                // itself included — and its ordering handlers compare
+                // float-kinded values numerically. A CmpI that reaches a
+                // FLOAT-marked operand (the checker typed the expression
+                // Int — e.g. a Maybe<Float> payload binding) lowered to a
+                // raw integer icmp: `v != v` on NaN was FALSE at Tier-1
+                // while TRUE at Tier-0, and negative floats mis-ordered
+                // (sign-bit as MSB). Mirror CmpF's semantics: fcmp with
+                // ordered predicates (UNE for Ne so NaN != NaN holds).
+                let lhs = as_f64(ctx, ctx.get_register(a.0)?, "cmpi_f_lhs")?;
+                let rhs = as_f64(ctx, ctx.get_register(b.0)?, "cmpi_f_rhs")?;
+                let fpred = match op {
+                    CompareOp::Eq => FloatPredicate::OEQ,
+                    CompareOp::Ne => FloatPredicate::UNE,
+                    CompareOp::Lt => FloatPredicate::OLT,
+                    CompareOp::Le => FloatPredicate::OLE,
+                    CompareOp::Gt => FloatPredicate::OGT,
+                    CompareOp::Ge => FloatPredicate::OGE,
+                };
+                ctx.builder()
+                    .build_float_compare(fpred, lhs, rhs, "cmpi_fcmp")
+                    .or_llvm_err()?
             } else if matches!(op, CompareOp::Eq | CompareOp::Ne)
                 && (ctx.is_variant_register(a.0)
                     || ctx.is_variant_register(b.0)
