@@ -21294,6 +21294,23 @@ impl VbcCodegen {
                             Some(&id) => id,
                             None => {
                                 let id = self.user_xmod_band_next;
+                                // XMOD-FRESH-BAND-WINDOW-1: the fresh band is
+                                // a bounded window ([base, base+width)) pinned
+                                // against the stub stages and the
+                                // EXTERN_SENTINEL gate — silent overflow past
+                                // it would mint ids that NOTHING recognizes.
+                                // ~134M distinct unresolved names per compile
+                                // is far beyond any real program; fail LOUD.
+                                assert!(
+                                    crate::stub_ranges::in_xmod_fresh_band(id),
+                                    "user XMOD fresh band exhausted at id {:#x} \
+                                     (window [{:#x}, {:#x})) — see \
+                                     XMOD-FRESH-BAND-WINDOW-1",
+                                    id,
+                                    crate::stub_ranges::XMOD_FRESH_BAND_BASE,
+                                    crate::stub_ranges::XMOD_FRESH_BAND_BASE
+                                        + crate::stub_ranges::XMOD_FRESH_BAND_WIDTH,
+                                );
                                 self.user_xmod_band_next += 1;
                                 self.user_xmod_band_by_name.insert(name.clone(), id);
                                 id

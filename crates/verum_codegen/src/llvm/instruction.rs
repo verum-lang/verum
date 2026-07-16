@@ -3002,9 +3002,11 @@ pub fn lower_instruction<'ctx>(
             // AOT-STUB-SENTINEL-CHASE-1: stage-band stub sentinels are
             // by-name references too (SERIALIZE-STUB-IDENTITY-1 keeps
             // them in the stream) — chase them like XMOD-band ids.
-            let is_by_name_ref = (*func_id
-                >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
-                && *func_id < 0x4000_0000)
+            // XMOD-FRESH-BAND-WINDOW-1: the canonical predicate covers the
+            // emission band AND the merge-time fresh band (and excludes the
+            // dead gap between them, which the old `< 0x4000_0000` ad-hoc
+            // bound silently included).
+            let is_by_name_ref = verum_vbc::stub_ranges::is_xmod_name_reference(*func_id)
                 || verum_vbc::stub_ranges::is_stub_id(*func_id);
             let xmod_closure_fid = if is_by_name_ref {
                 vbc_mod
@@ -9334,10 +9336,11 @@ fn lower_call<'ctx>(
                 // (stub_ranges near u32::MAX) survive serialization since
                 // SERIALIZE-STUB-IDENTITY-1 — they are BY-NAME references
                 // exactly like XMOD-band ids and chase the same way.
-                let xmod_name: Option<&str> = if (func_id
-                    >= verum_vbc::module::XMOD_CALL_ID_BAND_BASE
-                    && func_id < 0x4000_0000)
-                    || verum_vbc::stub_ranges::is_stub_id(func_id)
+                // XMOD-FRESH-BAND-WINDOW-1: canonical name-reference
+                // predicate (emission band + fresh band, gap excluded).
+                let xmod_name: Option<&str> = if verum_vbc::stub_ranges::is_xmod_name_reference(
+                    func_id,
+                ) || verum_vbc::stub_ranges::is_stub_id(func_id)
                 {
                     vbc_mod
                         .external_function_names

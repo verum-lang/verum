@@ -127,6 +127,40 @@ pub fn in_xmod_call_band(id: u32) -> bool {
         && id < crate::module::XMOD_CALL_ID_BAND_BASE + 0x800_0000
 }
 
+/// FRESH user-band base — merge-time `band_redirect` targets for
+/// cross-archive names unresolvable at merge order
+/// (`codegen/mod.rs::user_xmod_band_next` starts here).  Distinct
+/// from the emission band above: fresh ids are minted during MERGE,
+/// carried with their names via `user_xmod_carry`, and re-homed into
+/// the emission band by `build_module`'s external pass.
+pub const XMOD_FRESH_BAND_BASE: u32 = crate::module::XMOD_CALL_ID_BAND_BASE + 0x1000_0000;
+
+/// Width of the fresh user band (`[0x3000_0000, 0x3800_0000)`).
+/// Kept below the `EXTERN_SENTINEL_THRESHOLD` (`u32::MAX / 4 =`
+/// `0x3FFF_FFFF`) gate that `build_module`'s external detection
+/// relies on — pinned by `xmod_ranges_disjoint_and_bounded`.
+pub const XMOD_FRESH_BAND_WIDTH: u32 = 0x0800_0000;
+
+/// Fresh-band membership (XMOD-FRESH-BAND-WINDOW-1).
+#[inline]
+pub fn in_xmod_fresh_band(id: u32) -> bool {
+    id >= XMOD_FRESH_BAND_BASE && id < XMOD_FRESH_BAND_BASE + XMOD_FRESH_BAND_WIDTH
+}
+
+/// The ONE "is this function id a BY-NAME cross-module reference?"
+/// predicate (XMOD-FRESH-BAND-WINDOW-1).  Pre-fix, consumers gated on
+/// `in_xmod_call_band` alone: a FRESH id (0x3000_0000+) was
+/// recognized as a band NOWHERE until `build_module` re-homed it —
+/// any path that saw one before/without re-home (a future
+/// EXTERN_SENTINEL/filter change, a diagnostic, an AOT chase) fell
+/// through to "not found" instead of chasing the carried name.  Every
+/// resolution boundary should gate on THIS predicate, not on the
+/// individual windows.
+#[inline]
+pub fn is_xmod_name_reference(id: u32) -> bool {
+    in_xmod_call_band(id) || in_xmod_fresh_band(id)
+}
+
 /// Which stage a stub id belongs to, if any.
 #[inline]
 pub fn stage_of(id: u32) -> Option<u8> {
@@ -187,6 +221,36 @@ mod tests {
         }
         assert_eq!(stage_of(0), None);
         assert_eq!(stage_of(STAGE5_BASE - STUB_RANGE_WIDTH - 1), None);
+    }
+
+    #[test]
+    fn xmod_ranges_disjoint_and_bounded() {
+        // XMOD-FRESH-BAND-WINDOW-1 pins:
+        // 1. Fresh band sits strictly ABOVE the emission band (no overlap).
+        assert_eq!(
+            XMOD_FRESH_BAND_BASE,
+            crate::module::XMOD_CALL_ID_BAND_BASE + 0x1000_0000
+        );
+        assert!(XMOD_FRESH_BAND_BASE >= crate::module::XMOD_CALL_ID_BAND_BASE + 0x800_0000);
+        // 2. Fresh band stays BELOW the EXTERN_SENTINEL_THRESHOLD gate
+        //    (u32::MAX / 4) that build_module's external detection uses —
+        //    a fresh id past that gate would silently skip re-homing.
+        assert!(XMOD_FRESH_BAND_BASE + XMOD_FRESH_BAND_WIDTH <= u32::MAX / 4);
+        // 3. Fresh band never classifies as a stub stage.
+        assert!(!is_stub_id(XMOD_FRESH_BAND_BASE));
+        assert!(!is_stub_id(XMOD_FRESH_BAND_BASE + XMOD_FRESH_BAND_WIDTH - 1));
+        // 4. The combined name-reference predicate covers BOTH windows
+        //    and nothing between/around them.
+        assert!(is_xmod_name_reference(crate::module::XMOD_CALL_ID_BAND_BASE));
+        assert!(is_xmod_name_reference(XMOD_FRESH_BAND_BASE));
+        assert!(is_xmod_name_reference(XMOD_FRESH_BAND_BASE + XMOD_FRESH_BAND_WIDTH - 1));
+        assert!(!is_xmod_name_reference(
+            crate::module::XMOD_CALL_ID_BAND_BASE + 0x800_0000
+        )); // the gap between the windows
+        assert!(!is_xmod_name_reference(XMOD_FRESH_BAND_BASE - 1));
+        assert!(!is_xmod_name_reference(
+            XMOD_FRESH_BAND_BASE + XMOD_FRESH_BAND_WIDTH
+        ));
     }
 
     #[test]
