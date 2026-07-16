@@ -1012,6 +1012,15 @@ pub enum InlineSequenceId {
     SysGetpid,
     /// sys_gettid: get thread ID
     SysGettid,
+    /// ENV-IMPL-TRIO-1 (#55): environment-variable kernel-boundary trio.
+    /// `@intrinsic("get_env_impl")` & co. had NO registry entries — the
+    /// codegen lowered every call to LoadNil (the C3 silent-nil class):
+    /// set_var was a no-op, var() always Err, base/env 94/97 red.
+    /// System sub-ops 0x88/0x89/0x8A; each tier answers itself
+    /// (interp → std::env, AOT → libSystem setenv/getenv/unsetenv).
+    EnvGetSeq,
+    EnvSetSeq,
+    EnvUnsetSeq,
     /// get_tier: execution-tier query — MUST stay a per-tier runtime
     /// answer (TIER-DETECT-AOT-1), never a compile-time constant.
     ExecutionTier,
@@ -5418,6 +5427,39 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::ExecutionTier),
         mlir_op: None,
         doc: "Get current execution tier (0 = interpreter, 1 = AOT)",
+    },
+    // =========================================================================
+    // Environment-variable intrinsics (ENV-IMPL-TRIO-1, #55)
+    // =========================================================================
+    Intrinsic {
+        name: "get_env_impl",
+        category: IntrinsicCategory::Tier,
+        hints: &[],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::EnvGetSeq),
+        mlir_op: None,
+        doc: "Read an environment variable (name: &[Byte]) -> Maybe<Text>",
+    },
+    Intrinsic {
+        name: "set_env_impl",
+        category: IntrinsicCategory::Tier,
+        hints: &[],
+        param_count: 2,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::EnvSetSeq),
+        mlir_op: None,
+        doc: "Set an environment variable (name, value: &[Byte]) -> Result<(), Text>",
+    },
+    Intrinsic {
+        name: "unset_env_impl",
+        category: IntrinsicCategory::Tier,
+        hints: &[],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::EnvUnsetSeq),
+        mlir_op: None,
+        doc: "Remove an environment variable (name: &[Byte]) -> Result<(), Text>",
     },
     // =========================================================================
     // Time Intrinsics
