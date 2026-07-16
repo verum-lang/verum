@@ -4423,11 +4423,37 @@ impl Unifier {
             (CapabilityRestricted { base, .. }, other)
             | (other, CapabilityRestricted { base, .. }) => self.unify_inner(base, other, span),
 
-            // Placeholder types: forward-declared recursive types have placeholder inner types
-            // that should unify with any concrete type until fully resolved.
+            // Placeholder types: forward-declared recursive types have placeholder inner
+            // types that must unify while the declaration resolves — but ONLY with their
+            // own named type (or a still-undetermined type). A leaked placeholder that
+            // unified with *everything* was unsound (tech-debt register A27, pool T0119).
             // Example: SegmentError { inner: <placeholder:SegmentError> } unifies with
             //  SegmentError { inner: MmapFailed(...) | MunmapFailed(...) | ... }
-            (Placeholder { .. }, _) | (_, Placeholder { .. }) => Ok(Substitution::new()),
+            (Placeholder { name, .. }, other) | (other, Placeholder { name, .. }) => {
+                let compatible = match other {
+                    // the forward-declared name itself (compare the path head name)
+                    Named { path, .. } => matches!(
+                        path.segments.last(),
+                        Some(verum_ast::ty::PathSegment::Name(ident))
+                            if ident.name.as_str() == name.as_str()
+                    ),
+                    Generic { name: n, .. } => n == name,
+                    // undetermined sides defer to later resolution
+                    Var(_) | Unknown => true,
+                    // two placeholders unify only for the same forward-declared name
+                    Placeholder { name: n2, .. } => n2 == name,
+                    _ => false,
+                };
+                if compatible {
+                    Ok(Substitution::new())
+                } else {
+                    Err(TypeError::Mismatch {
+                        expected: t2.to_text(),
+                        actual: t1.to_text(),
+                        span,
+                    })
+                }
+            }
 
             // Scalar ↔ Tensor coercion for math interoperability
             // In tensor libraries, scalar types (Float, Int, Bool) and their tensor
