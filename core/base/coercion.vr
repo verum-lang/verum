@@ -35,8 +35,20 @@
 //  produce values that unify against tuple types via this
 //  marker.
 //
+//  * BytewiseFfi — byte-buffer types whose values cross the FFI
+//  boundary as raw sockaddr-family bytes; lifts the former
+//  Sockaddr hardcode out of the Unifier.
+//
+//  * SizedNumeric — width-carrying numeric aliases (UInt32, ISize,
+//  Byte, ...) that participate in sized-integer coercion without
+//  per-name Unifier hardcodes.
+//
+//  * ArrayCoercible — container types whose values coerce to/from
+//  `[T; N]`/slice shapes; replaced the last ["List"] hardcodes in
+//  the Unifier.
+//
 
-// All four are MARKER protocols — they have no methods. The compiler
+// All seven are MARKER protocols — they have no methods. The compiler
 // only cares that the implement-block exists; the protocol body is
 // empty so users can opt in with a one-line declaration:
 //
@@ -47,7 +59,7 @@
 // ```
 //
 
-// Spec: docs/detailed/03-type-system.md §6.4 (coercion protocols),
+// Spec: type-system spec §6.4 (coercion protocols),
 //  crates/verum_types/src/CLAUDE.md (architectural rule:
 //  "NEVER hardcode stdlib/core type knowledge in the compiler").
 

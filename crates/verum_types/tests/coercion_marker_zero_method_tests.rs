@@ -9,12 +9,15 @@
 )]
 //! Marker-protocol zero-method invariant validator (#41).
 //!
-//! The four coercion-marker protocols defined in `core/base/coercion.vr`:
+//! The seven coercion-marker protocols defined in `core/base/coercion.vr`:
 //!
-//!   * `IntCoercible`  — `public type IntCoercible is protocol {};`
-//!   * `TensorLike`    — `public type TensorLike is protocol {};`
-//!   * `Indexable`     — `public type Indexable is protocol {};`
-//!   * `RangeLike`     — `public type RangeLike is protocol {};`
+//!   * `IntCoercible`   — `public type IntCoercible is protocol {};`
+//!   * `TensorLike`     — `public type TensorLike is protocol {};`
+//!   * `Indexable`      — `public type Indexable is protocol {};`
+//!   * `RangeLike`      — `public type RangeLike is protocol {};`
+//!   * `BytewiseFfi`    — `public type BytewiseFfi is protocol {};`
+//!   * `SizedNumeric`   — `public type SizedNumeric is protocol {};`
+//!   * `ArrayCoercible` — `public type ArrayCoercible is protocol {};`
 //!
 //! …are MARKER protocols.  They carry NO methods.  The compiler only cares
 //! that an `implement X for T {}` block exists; the protocol body must remain
@@ -183,24 +186,109 @@ fn range_like_body_has_no_fn() {
     );
 }
 
-// ── Cross-cutting: total marker count ────────────────────────────────────────
+// ── BytewiseFfi ───────────────────────────────────────────────────────────────
 
-/// Exactly 4 marker protocols exist in coercion.vr — no secret fifth marker.
 #[test]
-fn exactly_four_marker_protocols_in_coercion_vr() {
-    let count = count_occurrences(COERCION_VR, "is protocol {}");
-    assert_eq!(
-        count, 4,
-        "Expected exactly 4 marker protocol definitions in coercion.vr, got {count}"
+fn bytewise_ffi_is_protocol_declaration_present() {
+    assert!(
+        COERCION_VR.contains("public type BytewiseFfi is protocol"),
+        "BytewiseFfi must be declared as 'public type BytewiseFfi is protocol'"
     );
 }
 
-/// All four protocol names appear in the doc header section (lines 1-55).
+#[test]
+fn bytewise_ffi_declared_exactly_once() {
+    let count = count_occurrences(COERCION_VR, "public type BytewiseFfi is protocol");
+    assert_eq!(count, 1, "Expected exactly one declaration of BytewiseFfi, got {count}");
+}
+
+#[test]
+fn bytewise_ffi_body_has_no_fn() {
+    let body = extract_protocol_body(COERCION_VR, "public type BytewiseFfi is protocol");
+    assert!(
+        !body.contains("fn "),
+        "BytewiseFfi protocol body must contain no methods; found 'fn ' in: {body:?}"
+    );
+}
+
+// ── SizedNumeric ──────────────────────────────────────────────────────────────
+
+#[test]
+fn sized_numeric_is_protocol_declaration_present() {
+    assert!(
+        COERCION_VR.contains("public type SizedNumeric is protocol"),
+        "SizedNumeric must be declared as 'public type SizedNumeric is protocol'"
+    );
+}
+
+#[test]
+fn sized_numeric_declared_exactly_once() {
+    let count = count_occurrences(COERCION_VR, "public type SizedNumeric is protocol");
+    assert_eq!(count, 1, "Expected exactly one declaration of SizedNumeric, got {count}");
+}
+
+#[test]
+fn sized_numeric_body_has_no_fn() {
+    let body = extract_protocol_body(COERCION_VR, "public type SizedNumeric is protocol");
+    assert!(
+        !body.contains("fn "),
+        "SizedNumeric protocol body must contain no methods; found 'fn ' in: {body:?}"
+    );
+}
+
+// ── ArrayCoercible ────────────────────────────────────────────────────────────
+
+#[test]
+fn array_coercible_is_protocol_declaration_present() {
+    assert!(
+        COERCION_VR.contains("public type ArrayCoercible is protocol"),
+        "ArrayCoercible must be declared as 'public type ArrayCoercible is protocol'"
+    );
+}
+
+#[test]
+fn array_coercible_declared_exactly_once() {
+    let count = count_occurrences(COERCION_VR, "public type ArrayCoercible is protocol");
+    assert_eq!(count, 1, "Expected exactly one declaration of ArrayCoercible, got {count}");
+}
+
+#[test]
+fn array_coercible_body_has_no_fn() {
+    let body = extract_protocol_body(COERCION_VR, "public type ArrayCoercible is protocol");
+    assert!(
+        !body.contains("fn "),
+        "ArrayCoercible protocol body must contain no methods; found 'fn ' in: {body:?}"
+    );
+}
+
+// ── Cross-cutting: total marker count ────────────────────────────────────────
+
+/// Exactly 7 marker protocols exist in coercion.vr — no secret eighth marker.
+/// (4 original #41 markers + BytewiseFfi + SizedNumeric + ArrayCoercible from
+/// the 2026-07 Unifier de-hardcoding refactors 76d074d3e/931cfc337/ee2d89b43.)
+#[test]
+fn exactly_seven_marker_protocols_in_coercion_vr() {
+    let count = count_occurrences(COERCION_VR, "is protocol {}");
+    assert_eq!(
+        count, 7,
+        "Expected exactly 7 marker protocol definitions in coercion.vr, got {count}"
+    );
+}
+
+/// All seven protocol names appear in the doc header section.
 /// If one is removed from the header but kept as a live type, this catches it.
 #[test]
-fn all_four_markers_documented_in_header() {
-    let header_region = &COERCION_VR[..COERCION_VR.len().min(2500)];
-    for name in &["IntCoercible", "TensorLike", "Indexable", "RangeLike"] {
+fn all_seven_markers_documented_in_header() {
+    let header_region = &COERCION_VR[..COERCION_VR.len().min(4500)];
+    for name in &[
+        "IntCoercible",
+        "TensorLike",
+        "Indexable",
+        "RangeLike",
+        "BytewiseFfi",
+        "SizedNumeric",
+        "ArrayCoercible",
+    ] {
         assert!(
             header_region.contains(name),
             "Marker protocol {name} must be mentioned in the file header/doc region"
