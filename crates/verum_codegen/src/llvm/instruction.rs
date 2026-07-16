@@ -30037,24 +30037,26 @@ fn lower_ffi_extended<'ctx>(
                 .or_llvm_err()?;
             // Some: text = verum_text_from_cstr(raw); variant tag=1 payload
             ctx.builder().position_at_end(some_bb);
-            let from_cstr_ty = i8p.fn_type(&[i8p.into()], false);
+            let from_cstr_ty = i64_ty.fn_type(&[i8p.into()], false);
             let from_cstr = super::error::get_or_declare_function(
                 &module,
                 "verum_text_from_cstr",
                 from_cstr_ty,
             );
-            let text_p = ctx
+            // verum_text_from_cstr's canonical ABI is i64(ptr) — the
+            // NaN-boxed Text handle — at every other call site in
+            // this file. The ptr-returning read here aborted native
+            // codegen for ANY program whose bake includes the env
+            // wrapper (T0225; first-wins duplicate-declaration class
+            // T0208).
+            let text_i = ctx
                 .builder()
                 .build_call(from_cstr, &[raw.into()], "envget_text")
                 .or_llvm_err()?
                 .try_as_basic_value()
                 .basic()
-                .or_internal("from_cstr returns ptr")?
-                .into_pointer_value();
-            let text_i = ctx
-                .builder()
-                .build_ptr_to_int(text_p, i64_ty, "envget_text_i")
-                .or_llvm_err()?;
+                .or_internal("from_cstr returns i64 text handle")?
+                .into_int_value();
             let some_v = emit_env_variant(ctx, TypeId::MAYBE.0, 1, Some(text_i), "envget_s")?;
             let some_end = ctx.builder().get_insert_block().unwrap();
             ctx.builder()
@@ -34930,12 +34932,9 @@ fn lower_tensor_extended<'ctx>(
                 call_tensor_runtime_i64(ctx, "verum_tensor_stack", &[a, b, axis], "stack")?;
             ctx.set_register(dst_reg, result.into());
         }
-        Some(TensorSubOpcode::BroadcastToShape) => {
-            let tensor = get_arg(ctx, 0)?;
-            let shape = get_arg(ctx, 1)?;
-            let result = call_tensor_runtime_i64(ctx, "verum_tensor_clone", &[tensor], "bcast_s")?;
-            ctx.set_register(dst_reg, result.into());
-        }
+        // (BroadcastToShape is handled by the loud-stub arm above —
+        // the old arm here silently CLONED the tensor, ignoring the
+        // target shape.)
         Some(TensorSubOpcode::Squeeze) => {
             let tensor = get_arg(ctx, 0)?;
             let axis = get_arg(ctx, 1)?;
