@@ -1,7 +1,7 @@
 // =============================================================================
 // t30_composite_registry.vr — composite registry + named-field accessors
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.4 (typed wire / composite registry).
+// Spec: database spec §6.1.4 (typed wire / composite registry).
 // =============================================================================
 //
 // V0:

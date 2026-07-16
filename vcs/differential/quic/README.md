@@ -1,7 +1,7 @@
 # QUIC Differential Harness — scaffolding
 
 Cross-implementation QUIC wire-format parity harness per
-`internal/specs/tls-quic.md` §2.5 / §10.3.
+`tls-quic spec` §2.5 / §10.3.
 
 ## Planned scope
 

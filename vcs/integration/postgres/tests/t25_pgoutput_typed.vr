@@ -1,7 +1,7 @@
 // =============================================================================
 // t25_pgoutput_typed.vr — typed-tuple lift over async pgoutput
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.7 (logical replication / pgoutput),
+// Spec: database spec §6.1.7 (logical replication / pgoutput),
 //       §6.1.4 (typed wire).
 // =============================================================================
 //

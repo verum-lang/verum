@@ -2,7 +2,7 @@
 // core/database/postgres/pg_stream.vr — TCP / TLS unified stream for PG wire
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.2 (TLS), §8.13.1 (TLS posture)
+// Spec: database spec §6.1.2 (TLS), §8.13.1 (TLS posture)
 // =============================================================================
 //
 // Sum-type wrapper around `core.net.tcp.TcpStream` and

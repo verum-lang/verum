@@ -2,7 +2,7 @@
 // core/database/postgres/pgoutput.vr — pgoutput payload decoder (V0)
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.7 (logical replication
+// Spec: database spec §6.1.7 (logical replication
 //       payload format, ProtoVersion 1 from PG 10+).
 //       Reference: PG src/backend/replication/logical/proto.c.
 // =============================================================================

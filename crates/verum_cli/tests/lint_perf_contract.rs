@@ -7,9 +7,10 @@
 //! where someone reintroduces O(n²) behaviour.
 //!
 
-//! Targets are documented in
-//! `internal/website/docs/architecture/lint-engine.md` under
-//! "Performance contract".
+//! Targets (the published performance contract): full-repo lint of the
+//! stdlib-scale corpus stays within the wall-clock and allocation budgets
+//! asserted below; the same numbers are published on the website
+//! (architecture/lint-engine, "Performance contract").
 
 use std::path::PathBuf;
 use std::process::Command;

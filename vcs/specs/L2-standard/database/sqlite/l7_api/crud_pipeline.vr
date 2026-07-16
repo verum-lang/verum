@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: End-to-end CREATE + INSERT + SELECT through Database facade
 //
-// Spec: internal/specs/sqlite-native.md §16.1
+// Spec: sqlite-native spec §16.1
 //
 // Exercises the full facade loop:
 //   open_admin → execute CREATE → execute INSERT → query_all SELECT

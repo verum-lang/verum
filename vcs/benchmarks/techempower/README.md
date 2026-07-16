@@ -1,7 +1,7 @@
 # TechEmpower R23 benchmark rig — Verum / weft
 
 Six canonical TechEmpower scenarios run against the pure-Verum
-weft + warp stack. Closes `internal/specs/net-framework.md` §1.1
+weft + warp stack. Closes `net-framework spec` §1.1
 performance gates and §12 verification + benchmarks.
 
 ## Scenarios

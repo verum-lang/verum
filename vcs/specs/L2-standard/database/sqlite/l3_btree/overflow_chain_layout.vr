@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Overflow chain layout math + write-plan validation
 //
-// Spec: internal/specs/sqlite-native.md §10.6
+// Spec: sqlite-native spec §10.6
 
 mount core.*;
 mount collections.List;

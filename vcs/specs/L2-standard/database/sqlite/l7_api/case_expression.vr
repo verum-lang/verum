@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: CASE WHEN ... THEN ... ELSE ... END
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (CASE)
+// Spec: sqlite-native spec §14.2 (CASE)
 
 mount core.*;
 mount collections.List;

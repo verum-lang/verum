@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: integrity_check surface — check_page, check_tree, check_freelist
 //
-// Spec: internal/specs/sqlite-native.md §10.7
+// Spec: sqlite-native spec §10.7
 
 mount core.*;
 mount collections.List;

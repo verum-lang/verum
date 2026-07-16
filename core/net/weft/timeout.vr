@@ -2,7 +2,7 @@
 // core/net/weft/timeout.vr — TimeoutLayer
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §5.5
+// Spec: net-framework spec §5.5
 // =============================================================================
 //
 

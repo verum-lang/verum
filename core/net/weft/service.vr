@@ -2,7 +2,7 @@
 // core/net/weft/service.vr — Service / Permit / Layer / ServiceBuilder
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §5.1
+// Spec: net-framework spec §5.1
 // Spec: docs/architecture/weft-redteam-2026-05-01.md §7
 // =============================================================================
 //

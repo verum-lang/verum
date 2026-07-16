@@ -243,7 +243,7 @@ inequality, while a *strict* "incremented past" would be
 | 2 | Compiler silently accepts duplicate-name methods in impl block (language) | `crates/verum_types/src/infer/decls.rs` | New `check_no_duplicate_impl_items` helper called from `register_inherent_impl_methods` and `register_protocol_impl_methods`; emits `TypeError::Other` with a "duplicate {kind} '{name}' in impl block" diagnostic before the silent-overwrite path can fire. |
 | 3 | Missing `regression_test.vr` for `core-tests/base/memory/` | `core-tests/base/memory/regression_test.vr` | New file with §A duplicate-method post-fix shape, §B-D `Heap.new` / nested / `into_inner` round-trip pins. |
 | 4 | Missing `audit.md` for `core-tests/base/memory/` | `core-tests/base/memory/audit.md` | This file. |
-| 5 | Missing `docs/stdlib/memory.md` reference page | `internal/website/docs/stdlib/memory.md` | New page with the full public surface, status badge, and method-dispatch surface table. |
+| 5 | Missing `docs/stdlib/memory.md` reference page | `website:docs/stdlib/memory.md` | New page with the full public surface, status badge, and method-dispatch surface table. |
 
 ## Action items deferred
 

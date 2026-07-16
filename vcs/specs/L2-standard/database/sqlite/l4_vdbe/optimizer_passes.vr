@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Peephole passes — eliminate_noops, thread_jumps, optimize driver
 //
-// Spec: internal/specs/sqlite-native.md §11.5
+// Spec: sqlite-native spec §11.5
 
 mount core.*;
 mount core.database.sqlite.native.l4_vdbe.{

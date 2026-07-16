@@ -388,7 +388,7 @@ rebuild.
   `core-tests/base/ordering/regression_test.vr` (4 for §3.2 +
   4 for §3.3).
 * Updated INVENTORY row with `base/ordering` status.
-* Documentation updates in `internal/website/docs/stdlib/base.md`.
+* Documentation updates in `website:docs/stdlib/base.md`.
 
 ## Action items deferred
 

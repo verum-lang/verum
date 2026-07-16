@@ -438,7 +438,7 @@ implement VfsProtocol for PosixVfs {
         // entry point — bypasses the Tier-0 interpreter's broken
         // `&[Byte]` parameter coercion (closes the
         // RUNTIME-3-DEEPER blocker; see
-        // `internal/diag/sqlite-real/FINDINGS.md`). When the
+        // a local diagnostic note (not in repo)). When the
         // interpreter coerce path is fixed this falls back to
         // `sys_open(&cp, ...)` cleanly — keeping the buffer build
         // inline here costs nothing.

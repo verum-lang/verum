@@ -1,7 +1,7 @@
 // =============================================================================
 // t21_prepared_session.vr — sync + async PreparedSession LRU
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.4 (extended-query / prepared cache).
+// Spec: database spec §6.1.4 (extended-query / prepared cache).
 // =============================================================================
 //
 // V0:

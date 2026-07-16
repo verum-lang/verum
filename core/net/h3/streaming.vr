@@ -2,8 +2,8 @@
 // core/net/h3/streaming.vr — streaming response body primitives
 // =============================================================================
 // Layer: 5 (Network — HTTP/3)
-// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — streaming)
-//  internal/specs/tls-quic.md (warp stack)
+// Spec: net-framework spec §6.10 (Phase 4 — streaming)
+//  tls-quic spec (warp stack)
 // RFC: 9114 §4.1 — message framing on a request stream
 //  9114 §6.2.1 — control / request streams
 // =============================================================================

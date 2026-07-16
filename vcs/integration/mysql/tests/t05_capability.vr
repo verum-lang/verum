@@ -1,7 +1,7 @@
 // =============================================================================
 // t05_capability.vr — capability lattice positive end-to-end
 // =============================================================================
-// Spec: internal/specs/database.md §5.4 (capability types), §8.13.10
+// Spec: database spec §5.4 (capability types), §8.13.10
 //       (compile-time enforcement normative).
 // =============================================================================
 //

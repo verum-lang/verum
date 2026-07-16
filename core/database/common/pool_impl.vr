@@ -2,7 +2,7 @@
 // core/database/common/pool_impl.vr — concrete ConnectionPool<C>
 // =============================================================================
 // Layer: 3 (Database — common implementation)
-// Spec: internal/specs/database.md §4.3
+// Spec: database spec §4.3
 // =============================================================================
 //
 

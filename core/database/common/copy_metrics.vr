@@ -2,7 +2,7 @@
 // core/database/common/copy_metrics.vr — bulk-copy backpressure metrics
 // =============================================================================
 // Layer: 3 (Database — common helpers)
-// Spec: internal/specs/database.md §6.1.6 / §6.3.6.1 (async COPY metrics).
+// Spec: database spec §6.1.6 / §6.3.6.1 (async COPY metrics).
 // =============================================================================
 //
 // Cross-cutting metric counters for bulk-copy operations:

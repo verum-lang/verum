@@ -257,7 +257,7 @@ pub(in super::super) fn handle_ffi_extended(
             // ABI contract that the AOT path enforces.
             //
 
-            // Audit: `internal/specs/tls-quic-security-audit.md` §2
+            // Audit: `tls-quic-security-audit spec` §2
             // Action #2.
             let dst_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;

@@ -4,7 +4,7 @@ module sys.locking;
 // core/sys/locking/mod.vr — Byte-range advisory file locking (public API)
 // =============================================================================
 // Layer: 0 (Core)
-// Spec: internal/specs/sqlite-native.md §3.2 Gap 1
+// Spec: sqlite-native spec §3.2 Gap 1
 //
 
 // High-level, typed wrapper around the per-platform fcntl/LockFileEx

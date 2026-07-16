@@ -2,7 +2,7 @@
 // core/database/postgres/async_pool.vr — async connection pool
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.8 (async surface), §4.3 (pool).
+// Spec: database spec §6.1.8 (async surface), §4.3 (pool).
 // =============================================================================
 //
 // Channel-based bounded pool over `AsyncPgConnection`. `acquire().await`

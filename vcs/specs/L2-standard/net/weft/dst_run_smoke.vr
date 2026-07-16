@@ -9,7 +9,7 @@
 // First DST run-test for `core/net/weft/dst.vr`. Closes part of
 // task #9 — the И-axis (executable) gate for the DST sub-pillar.
 //
-// Spec: internal/specs/net-framework.md §8.15.
+// Spec: net-framework spec §8.15.
 //
 // Smoke-tests the *construction* path: every public DST type
 // (TestClock / SeededRng / SimNetworkConfig / SimConfig /

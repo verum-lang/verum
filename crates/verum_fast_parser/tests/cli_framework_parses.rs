@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo test -p verum_fast_parser --test cli_framework_parses`
 //!
-//! Spec: internal/specs/cli-framework.md
+//! Spec: cli-framework spec
 
 use std::fs;
 use std::path::{Path, PathBuf};

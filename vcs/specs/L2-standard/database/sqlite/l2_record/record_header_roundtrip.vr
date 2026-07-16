@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Record header encode/decode roundtrip per spec §6.3
 //
-// Spec: internal/specs/sqlite-native.md §6.3
+// Spec: sqlite-native spec §6.3
 
 mount core.*;
 mount collections.List;

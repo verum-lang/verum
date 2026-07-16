@@ -2,7 +2,7 @@
 // core/net/weft/io_uring_accept.vr — Multi-shot io_uring accept scaffold
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §6.17
+// Spec: net-framework spec §6.17
 // Task: #316.3 — V0 scaffold; V1 (#316.4) plugs in liburing FFI
 // =============================================================================
 //

@@ -2,7 +2,7 @@
 // core/database/postgres/notify.vr — high-level LISTEN/NOTIFY pub/sub API
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1 (LISTEN/NOTIFY scaling), §6.1.7
+// Spec: database spec §6.1 (LISTEN/NOTIFY scaling), §6.1.7
 //       (NOTIFY semantics)
 // =============================================================================
 //

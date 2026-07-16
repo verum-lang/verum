@@ -2,7 +2,7 @@
 // core/database/postgres/async_connection.vr — async wrapper over sync wire
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.8 (async surface).
+// Spec: database spec §6.1.8 (async surface).
 // =============================================================================
 //
 // Design — actor-per-connection pattern (matches `tokio_postgres`'s

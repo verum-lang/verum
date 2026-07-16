@@ -2,7 +2,7 @@
 // core/database/common/retry_run.vr — run_with_retry combinator
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §5.5
+// Spec: database spec §5.5
 // =============================================================================
 //
 

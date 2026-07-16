@@ -4,7 +4,7 @@ module sys.durability;
 // core/sys/durability.vr — Crash-safe persistence primitives (public API)
 // =============================================================================
 // Layer: 0 (Core)
-// Spec: internal/specs/sqlite-native.md §3.2 Gap 2
+// Spec: sqlite-native spec §3.2 Gap 2
 //
 
 // Thin, named re-export surface over the durability primitives already

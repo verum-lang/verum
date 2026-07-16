@@ -5,7 +5,7 @@
 // @timeout: 20000
 // @description: SELECT DISTINCT — sort + dedup adjacent pipeline
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (DISTINCT)
+// Spec: sqlite-native spec §14.2 (DISTINCT)
 
 mount core.*;
 mount collections.List;

@@ -23,7 +23,7 @@
 //!
 //!     cargo test -p verum_compiler --test cli_framework_smoke
 //!
-//! Spec: internal/specs/cli-framework.md
+//! Spec: cli-framework spec
 
 use std::fs;
 use std::path::{Path, PathBuf};

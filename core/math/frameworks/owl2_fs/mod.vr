@@ -4,7 +4,7 @@
 //
 
 // Verum's trusted boundary for OWL 2 Direct Semantics. Encodes the
-// 10 Shkotin 2019 (`internal/OWL2.DS2HOL.pdf`) tables verbatim as
+// 10 Shkotin 2019 (the DS2HOL paper) tables verbatim as
 // `@framework(owl2_fs, ...)` axioms — every operator the W3C OWL 2
 // Functional-Style Syntax recognises gets exactly one named axiom
 // in this package.
@@ -59,7 +59,7 @@
 
 // References:
 //  - VVA spec §21 — `docs/architecture/verification-architecture.md`
-//  - Shkotin 2019 — `internal/OWL2.DS2HOL.pdf`
+//  - Shkotin 2019 — the DS2HOL paper
 //  - W3C OWL 2 DS Rec — https://www.w3.org/TR/owl2-semantics/
 //  - W3C OWL 2 FS Rec — https://www.w3.org/TR/owl2-syntax/
 // =============================================================================

@@ -2,7 +2,7 @@
 // core/net/weft/handler.vr — Handler, WeftRequest, extractors
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §5.3
+// Spec: net-framework spec §5.3
 // =============================================================================
 
 @arch_module(
@@ -358,7 +358,7 @@ implement<F> Handler for ClosureHandler<F>
 // the runtime threads the chain through a per-request stack so each
 // middleware can be `&self` and the Service surface stays type-safe.
 //
-// Spec: internal/specs/net-framework.md §5.5 (middleware contract).
+// Spec: net-framework spec §5.5 (middleware contract).
 
 /// Opaque continuation passed to a `Middleware` invocation.  Calling
 /// `next.call(req).await` advances to the next middleware (or to the

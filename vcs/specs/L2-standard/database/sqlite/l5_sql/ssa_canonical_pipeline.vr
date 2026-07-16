@@ -7,7 +7,7 @@
 //               resolve_pending_phis → optimize_ssa → lower round
 //               trip + SsaBuilder direct emission (#156 closure).
 //
-// Spec: internal/specs/sqlite-native.md §4.4
+// Spec: sqlite-native spec §4.4
 
 mount core.*;
 mount collections.{List, Map};

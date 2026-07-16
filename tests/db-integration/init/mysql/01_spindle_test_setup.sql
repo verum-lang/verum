@@ -4,7 +4,7 @@
 -- Mounted into mysql:8.0 via docker-entrypoint-initdb.d. Runs exactly
 -- once on first container boot per volume.
 --
--- Spec: internal/specs/database.md §22.1 (integration baseline)
+-- Spec: database spec §22.1 (integration baseline)
 -- =============================================================================
 
 CREATE DATABASE IF NOT EXISTS spindle_test

@@ -2,7 +2,7 @@
 // core/net/weft/adaptive.vr — AdaptiveConcurrencyLayer (Vegas)
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §5.5 "Adaptive concurrency"
+// Spec: net-framework spec §5.5 "Adaptive concurrency"
 // =============================================================================
 //
 

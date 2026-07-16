@@ -9,7 +9,7 @@
 
 // The classic 32-bit cyclic redundancy check used by Ethernet, gzip, PNG,
 // zlib, and — crucially for us — SQLite's WAL frame headers (see
-// `internal/specs/sqlite-native.md` §6.5 and Gap 5 in §3.2).
+// `sqlite-native spec` §6.5 and Gap 5 in §3.2).
 //
 
 // This is NOT a cryptographic hash. It catches transmission errors cleanly

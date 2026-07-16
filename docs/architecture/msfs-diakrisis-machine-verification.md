@@ -13,8 +13,8 @@
 ### 0.1 Что у нас есть на входе
 
 **Верификационные артефакты**:
-- MSFS preprint: `internal/math-msfs/paper-en/paper.tex` (1692 LOC LaTeX, 41 page PDF, 27 theorem-environments).
-- Diakrisis corpus: `internal/diakrisis/docs/` (142 теоремы, 13 аксиом, ~120 markdown files).
+- MSFS preprint (not in this repo): 1692 LOC LaTeX, 41-page PDF, 27 theorem-environments.
+- Diakrisis corpus (not in this repo): 142 теоремы, 13 аксиом, ~120 markdown files.
 - VVA specification: 4336 LOC, описывает kernel + ladder + dual stdlib + VVA extensions.
 
 **Verum capabilities** (по VVA):
@@ -2133,7 +2133,7 @@ For Diakrisis-only extensions:
 @framework(
     name = "diakrisis_103T",
     citation = "Diakrisis Theorem 103.T (Diakrisis-only extension of MSFS Q1)",
-    source_doc = "internal/diakrisis/docs/06-limits/10-maximality-theorems.md",
+    source_doc = "diakrisis:06-limits/10-maximality-theorems",
     source_section = "§103.T",
     msfs_relation = "closes MSFS Open Question Q1",
     verified_in = "verum-msfs-corpus theorems/diakrisis/06_limits_maximality/theorem_103_T.vr"

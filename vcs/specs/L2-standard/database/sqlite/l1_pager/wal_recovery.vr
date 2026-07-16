@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: WAL recovery — header validation + torn-tail truncation
 //
-// Spec: internal/specs/sqlite-native.md §8.5
+// Spec: sqlite-native spec §8.5
 //
 // `wal_scan` returns a `RecoveryPlan` describing the last commit
 // frame's index, the resulting db_size, and the page→offset map.

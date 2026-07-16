@@ -2,7 +2,7 @@
 // core/net/weft/tls.vr — TLS termination + ALPN dispatch
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §6.7 / §6.11 / §6.13
+// Spec: net-framework spec §6.7 / §6.11 / §6.13
 // =============================================================================
 //
 

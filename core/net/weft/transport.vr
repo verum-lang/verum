@@ -2,7 +2,7 @@
 // core/net/weft/transport.vr — byte-duplex transport protocol
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §2 "Transport"
+// Spec: net-framework spec §2 "Transport"
 // =============================================================================
 //
 

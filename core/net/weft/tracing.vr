@@ -2,7 +2,7 @@
 // core/net/weft/tracing.vr — TracingLayer
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §7.1, §7.7 (OTLP)
+// Spec: net-framework spec §7.1, §7.7 (OTLP)
 // =============================================================================
 //
 

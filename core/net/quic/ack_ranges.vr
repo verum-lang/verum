@@ -2,7 +2,7 @@
 // net/quic/ack_ranges.vr — Refined ACK-ranges invariant (spec §4.6, V3)
 // =============================================================================
 // Layer: 5 (QUIC recovery)
-// Spec: internal/specs/tls-quic.md §4.6 + §9 Theorem V3
+// Spec: tls-quic spec §4.6 + §9 Theorem V3
 //  RFC 9000 §19.3 (ACK frame structure)
 // =============================================================================
 //

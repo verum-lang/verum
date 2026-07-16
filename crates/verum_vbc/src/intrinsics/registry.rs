@@ -266,7 +266,7 @@ pub enum InlineSequenceId {
     /// secure_zero: volatile memset(0) that survives optimisation —
     /// the cryptographic-zeroise primitive used to wipe key material
     /// before storage leaves scope. See
-    /// `internal/specs/tls-quic-security-audit.md` §2 Action #2.
+    /// `tls-quic-security-audit spec` §2 Action #2.
     SecureZero,
     /// memcmp: compare with early exit
     Memcmp,

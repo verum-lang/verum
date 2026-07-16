@@ -2,7 +2,7 @@
 // core/net/proxy/loadbalancer.vr — Request distribution strategies
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §9.3
+// Spec: net-framework spec §9.3
 // =============================================================================
 //
 

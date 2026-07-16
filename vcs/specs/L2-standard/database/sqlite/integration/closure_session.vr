@@ -8,7 +8,7 @@
 //               composing through the new architectural surfaces
 //               (#137/#139/#140/#141 closure).
 //
-// Spec: internal/specs/sqlite-native.md §4.4 + §7 + §8 + §10 + §11
+// Spec: sqlite-native spec §4.4 + §7 + §8 + §10 + §11
 
 mount core.*;
 mount collections.{List, Map};

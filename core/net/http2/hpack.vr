@@ -279,7 +279,7 @@ public fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
     if length > max_length || after_len + length > buf.len() {
         return Result.Err(HpackError.Truncated);
     }
-    // EXTSLICE-1 discipline (see internal/website defect-class-catalogue):
+    // EXTSLICE-1 discipline (see website:docs/stdlib/defect-class-catalogue):
     // sub-range slice expressions `&buf[a..b]` trip a codegen SIGSEGV when
     // this helper is instantiated at a user-test boundary. Materialise the
     // raw window with an indexed byte-copy into an owned List instead — the

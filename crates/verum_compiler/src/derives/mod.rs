@@ -128,7 +128,7 @@ impl DeriveRegistry {
         // record type to a CommandSpec factory function. Triggered by
         // the `@command(...)` attribute itself (see `extract_derive_names`)
         // or via explicit `@derive(Command)`. Spec:
-        // internal/specs/cli-framework.md §4.
+        // cli-framework spec §4.
         registry.register("Command", Box::new(DeriveCommand));
 
         registry

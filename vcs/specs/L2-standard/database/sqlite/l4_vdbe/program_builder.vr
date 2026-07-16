@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: VdbeProgram builder + ConstantPool + cursor declarations
 //
-// Spec: internal/specs/sqlite-native.md §11.1
+// Spec: sqlite-native spec §11.1
 
 mount core.*;
 mount core.database.sqlite.native.l4_vdbe.{

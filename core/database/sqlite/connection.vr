@@ -2,7 +2,7 @@
 // core/database/sqlite/connection.vr — Spindle SQLite connection façade
 // =============================================================================
 // Layer: 3 (Database — sqlite façade)
-// Spec: internal/specs/database.md §6.2
+// Spec: database spec §6.2
 // =============================================================================
 //
 

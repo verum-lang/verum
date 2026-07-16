@@ -2,7 +2,7 @@
 // core/database/common/pool.vr — Pool<C, M> protocol + PoolMode
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §4.3
+// Spec: database spec §4.3
 // =============================================================================
 //
 

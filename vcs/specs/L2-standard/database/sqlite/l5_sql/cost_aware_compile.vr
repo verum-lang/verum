@@ -7,7 +7,7 @@
 //               new compile_with_options(opts_cost_aware()) path
 //               that wires planner_cost/ into L5 (#142 foundation).
 //
-// Spec: internal/specs/sqlite-native.md §13.2..§13.5
+// Spec: sqlite-native spec §13.2..§13.5
 //
 // Asserts:
 //   * Cost annotation pipeline composes for SELECT/INSERT/DELETE

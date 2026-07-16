@@ -7,7 +7,7 @@
 //               smoke test through L5 codegen for AmIndexRangeScan
 //               and AmCoveringIndexScan dispatch paths.
 //
-// Spec: internal/specs/sqlite-native.md §11.2 (cursor opcodes) +
+// Spec: sqlite-native spec §11.2 (cursor opcodes) +
 //       sqlite-native.md §13.3 (access-method selection)
 
 mount core.*;

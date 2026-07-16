@@ -1,6 +1,6 @@
 # core/database/sqlite/native/ — loom
 
-Pure-Verum SQLite reimplementation. Spec: `internal/specs/sqlite-native.md`.
+Pure-Verum SQLite reimplementation: file format, pager/WAL journaling, btree, VDBE and session layers, built up as l0_vfs → l6_session (see the layer directories below).
 
 ## Status (2026-04-21, v0.1 scaffolding)
 

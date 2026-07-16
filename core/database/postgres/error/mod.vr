@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/postgres/error/mod.vr — translate PG ErrorResponse → DbError
 // =============================================================================
-// Spec: internal/specs/database.md §5.6 (DbError taxonomy),
+// Spec: database spec §5.6 (DbError taxonomy),
 //  postgresql.org/docs/16/errcodes-appendix.html
 //
 

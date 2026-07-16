@@ -2,7 +2,7 @@
 // core/net/weft/router.vr — Radix-tree HTTP router
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §5.4
+// Spec: net-framework spec §5.4
 // =============================================================================
 
 @arch_module(

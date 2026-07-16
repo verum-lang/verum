@@ -2,7 +2,7 @@
 // net/tls13/session/server.vr — Typed-state TLS 1.3 server session (spec §4.3)
 // =============================================================================
 // Layer: 7 (Session)
-// Spec: internal/specs/tls-quic.md §4.3 — typed state machines
+// Spec: tls-quic spec §4.3 — typed state machines
 //  RFC 8446 §4.2 (server handshake), §5 (record layer)
 // =============================================================================
 //

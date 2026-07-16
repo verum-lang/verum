@@ -6,7 +6,7 @@
 // @description: L3 B-tree foundation — comparator, seek, balance-apply,
 //               and btree_ops integration (#140 foundation).
 //
-// Spec: internal/specs/sqlite-native.md §10.3 .. §10.5
+// Spec: sqlite-native spec §10.3 .. §10.5
 //
 // Asserts the new B-tree surface composes:
 //   1. Comparator primitives (cmp_int64, cmp_bytes) match expected

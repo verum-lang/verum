@@ -9,7 +9,7 @@ module core.time.julian;
 // core/time/julian.vr — Julian Day <-> Unix / Gregorian conversions
 // =============================================================================
 // Layer: 3 (I/O adjacent)
-// Spec: internal/specs/sqlite-native.md §3.3 (nice-to-have for date/time)
+// Spec: sqlite-native spec §3.3 (nice-to-have for date/time)
 //
 
 // Julian Day (JD) is the continuous count of days (including fractional

@@ -2,7 +2,7 @@
 // core/database/common/error.vr — Spindle DbError taxonomy
 // =============================================================================
 // Layer: 3 (Database — common error surface)
-// Spec: internal/specs/database.md §5.6
+// Spec: database spec §5.6
 // =============================================================================
 //
 

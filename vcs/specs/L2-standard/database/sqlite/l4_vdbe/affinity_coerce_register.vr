@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: Register ↔ Value bridge + coerce_register affinity matrix
 //
-// Spec: internal/specs/sqlite-native.md §9.3, §11.6 (MakeRecord affinity p4)
+// Spec: sqlite-native spec §9.3, §11.6 (MakeRecord affinity p4)
 //
 // Validates the L4-side bridge that lets the VDBE apply L2's affinity
 // coercion table directly on `Register` values without the cursor

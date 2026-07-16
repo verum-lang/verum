@@ -2,7 +2,7 @@
 // core/net/weft/arena_pool.vr — Per-request arena pool
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §4.3 "CBGR-арены"
+// Spec: net-framework spec §4.3 "CBGR-арены"
 // =============================================================================
 //
 

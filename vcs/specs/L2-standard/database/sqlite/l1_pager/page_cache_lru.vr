@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: PageCache — get/put, LRU eviction, pin/unpin, generation bump
 //
-// Spec: internal/specs/sqlite-native.md §4.3 + §8.2
+// Spec: sqlite-native spec §4.3 + §8.2
 
 mount core.*;
 mount collections.List;

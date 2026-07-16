@@ -4,7 +4,7 @@
 // Layer: 5 (Network)
 // Dependencies: core.signal, core.async, core.net.tcp, core.net.unix,
 //  core.time, core.sync
-// Spec: internal/specs/net-framework.md §7.8
+// Spec: net-framework spec §7.8
 // =============================================================================
 //
 

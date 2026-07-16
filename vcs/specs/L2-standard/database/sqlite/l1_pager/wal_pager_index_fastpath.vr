@@ -29,7 +29,7 @@
 //               returns-None (fall-through to base pager), newest-
 //               frame-wins on rewrite collisions.
 //
-// Spec: internal/specs/sqlite-native.md §8.4 (multi-reader/single-writer)
+// Spec: sqlite-native spec §8.4 (multi-reader/single-writer)
 
 mount core.*;
 mount collections.{List, Map};

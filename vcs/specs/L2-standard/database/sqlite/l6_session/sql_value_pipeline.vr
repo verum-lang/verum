@@ -8,7 +8,7 @@
 //               type-class tagging, and every coercion path that sqlite3_column_*
 //               implements (int/double/text/text16/blob/bytes/bytes16).
 //
-// Spec: internal/specs/sqlite-native.md §17 (PreparedStatement column extraction)
+// Spec: sqlite-native spec §17 (PreparedStatement column extraction)
 
 mount core.*;
 mount collections.{List, Map};

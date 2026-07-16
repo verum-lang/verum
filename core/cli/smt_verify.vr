@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (CLI)
 // Dependencies: core, cli.{spec, sat, verify}
-// Spec: internal/specs/cli-framework.md §11
+// Spec: cli-framework spec §11
 // =============================================================================
 //
 

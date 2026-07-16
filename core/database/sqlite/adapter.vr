@@ -2,7 +2,7 @@
 // core/database/sqlite/adapter.vr — SqliteAdapter + SqliteConfig
 // =============================================================================
 // Layer: 3 (Database — sqlite façade)
-// Spec: internal/specs/database.md §6.2 (SQLite adapter)
+// Spec: database spec §6.2 (SQLite adapter)
 // =============================================================================
 //
 

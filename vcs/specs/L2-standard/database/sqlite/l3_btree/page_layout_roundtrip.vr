@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: B-tree page header roundtrip + page-kind taxonomy + local-payload math
 //
-// Spec: internal/specs/sqlite-native.md §6.2 + §10.1
+// Spec: sqlite-native spec §6.2 + §10.1
 
 mount core.*;
 mount collections.List;

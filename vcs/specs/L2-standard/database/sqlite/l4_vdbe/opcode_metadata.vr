@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Opcode metadata — name, falls_through, is_branch, has_external_effect
 //
-// Spec: internal/specs/sqlite-native.md §11.2
+// Spec: sqlite-native spec §11.2
 
 mount core.*;
 mount core.database.sqlite.native.l4_vdbe.{

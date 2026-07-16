@@ -2,7 +2,7 @@
 // core/database/sqlite/mod.vr — Spindle SQLite adapter
 // =============================================================================
 // Layer: 3 (Database — SQLite namespace)
-// Spec: internal/specs/sqlite-native.md (engine), internal/specs/database.md §6.2
+// Spec: sqlite-native spec (engine), database spec §6.2
 // =============================================================================
 //
 

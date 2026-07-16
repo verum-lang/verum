@@ -1,7 +1,7 @@
 # VCS Test Suite — Native SQLite (loom)
 
 Nо́рмативная test-suite для `core/database/sqlite/native/`. Спецификация:
-`internal/specs/sqlite-native.md`.
+`sqlite-native spec`.
 
 ## Layout
 
@@ -56,7 +56,7 @@ result». Runner в `vcs/runner/vtest/` поддерживает эту форм
 См. `vcs/fuzz/sqlite/` для SQL grammar fuzzer, file-format mutator,
 WAL-frame fuzzer.
 
-## Phase gates (из `internal/specs/sqlite-native.md` §22.7)
+## Phase gates (из `sqlite-native spec` §22.7)
 
 | Phase | L0 | L1 | L2 | L3 | Differential |
 |---|---|---|---|---|---|

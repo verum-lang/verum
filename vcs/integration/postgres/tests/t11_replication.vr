@@ -1,7 +1,7 @@
 // =============================================================================
 // t11_replication.vr — logical-replication V0 end-to-end
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.7 (streaming replication).
+// Spec: database spec §6.1.7 (streaming replication).
 // =============================================================================
 //
 // Flow:

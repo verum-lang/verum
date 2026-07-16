@@ -1,7 +1,7 @@
 // =============================================================================
 // t31_composite_introspect.vr — populate_from_pg_type live introspection
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.4 (typed wire / composite registry).
+// Spec: database spec §6.1.4 (typed wire / composite registry).
 // =============================================================================
 //
 // V0 closes the runtime composite-introspection gap declared in

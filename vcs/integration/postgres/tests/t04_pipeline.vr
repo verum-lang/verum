@@ -1,7 +1,7 @@
 // =============================================================================
 // t04_pipeline.vr — bounded pipeline + abort semantics against live PG
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.5 (pipelining + abort).
+// Spec: database spec §6.1.5 (pipelining + abort).
 // =============================================================================
 //
 // Three scenarios:

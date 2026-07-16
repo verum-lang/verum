@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Built-in collations + registry surface
 //
-// Spec: internal/specs/sqlite-native.md §9.5
+// Spec: sqlite-native spec §9.5
 
 mount core.*;
 mount core.base.ordering.Ordering;

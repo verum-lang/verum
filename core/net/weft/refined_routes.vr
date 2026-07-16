@@ -2,7 +2,7 @@
 // core/net/weft/refined_routes.vr — Refinement-checked path extractors
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §5.9 / §8.1 / §8.10
+// Spec: net-framework spec §5.9 / §8.1 / §8.10
 // =============================================================================
 //
 

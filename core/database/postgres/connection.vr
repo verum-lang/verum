@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/postgres/connection.vr — PgConnection state machine
 // =============================================================================
-// Spec: internal/specs/database.md §6.1, postgresql.org/docs/16/protocol.html
+// Spec: database spec §6.1, postgresql.org/docs/16/protocol.html
 //
 
 // Holds an open TcpStream (TLS lands when channel-binding wires up)

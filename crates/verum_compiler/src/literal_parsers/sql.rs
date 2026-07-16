@@ -34,7 +34,7 @@
 //! shape is left as `Unknown` for the caller to ascribe explicitly.
 //!
 
-//! Spec: internal/specs/database.md §5.1 (PreparedQuery), §5.3 (sql#).
+//! Spec: database spec §5.1 (PreparedQuery), §5.3 (sql#).
 
 use verum_ast::Span;
 use verum_common::Text;

@@ -1,8 +1,8 @@
 //! Severity precedence integration tests.
 //!
 
-//! Locks down the precedence stack documented in
-//! `internal/website/docs/reference/lint-configuration.md`:
+//! Locks down the severity precedence stack (published on the website:
+//! reference/lint-configuration):
 //!
 
 //!  1. per-file overrides (most specific glob wins)

@@ -5704,7 +5704,7 @@ pub enum SystemSubOpcode {
     /// Distinct from `CMemset` (0x44) because LLVM's non-volatile
     /// memset is dead-code-eliminated when the buffer is dead — a
     /// catastrophic security property. See audit
-    /// `internal/specs/tls-quic-security-audit.md` §2 (zeroise on
+    /// `tls-quic-security-audit spec` §2 (zeroise on
     /// drop) Action #2.
     CSecureZero = 0xA3,
 

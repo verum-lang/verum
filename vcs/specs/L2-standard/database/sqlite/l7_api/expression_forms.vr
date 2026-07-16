@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: IN (list) / BETWEEN / LIKE / NULLIF / COALESCE expression codegen
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (expressions)
+// Spec: sqlite-native spec §14.2 (expressions)
 
 mount core.*;
 mount collections.List;

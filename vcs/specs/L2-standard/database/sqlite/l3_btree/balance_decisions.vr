@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Balance planner — rotate / split / merge / grow-root / shrink-root
 //
-// Spec: internal/specs/sqlite-native.md §10.5
+// Spec: sqlite-native spec §10.5
 
 mount core.*;
 mount core.database.sqlite.native.l3_btree.{

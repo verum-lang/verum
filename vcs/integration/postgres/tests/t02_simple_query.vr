@@ -1,7 +1,7 @@
 // =============================================================================
 // t02_simple_query.vr — text-protocol round-trip against live Postgres
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.3 (Simple-Query Protocol).
+// Spec: database spec §6.1.3 (Simple-Query Protocol).
 // =============================================================================
 //
 // Exercises the text-protocol path that every other test depends

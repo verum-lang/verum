@@ -1,7 +1,7 @@
 // =============================================================================
 // t14_binlog_enum_set.vr — TABLE_MAP optional metadata + ENUM/SET decoders
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.7 (binlog row decode), §6.3.7.1
+// Spec: database spec §6.3.7 (binlog row decode), §6.3.7.1
 //       (TABLE_MAP optional metadata, MySQL 8.0+ binlog_row_metadata=FULL).
 // =============================================================================
 //

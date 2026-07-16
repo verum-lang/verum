@@ -2,7 +2,7 @@
 // net/tls13/session/mod.vr — Typed-state TLS 1.3 session facade (spec §4.3)
 // =============================================================================
 // Layer: 7 (Session)
-// Spec: internal/specs/tls-quic.md §4.3 — typed state machines
+// Spec: tls-quic spec §4.3 — typed state machines
 // =============================================================================
 //
 

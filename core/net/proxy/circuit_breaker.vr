@@ -2,7 +2,7 @@
 // core/net/proxy/circuit_breaker.vr — Hystrix-style circuit breaker
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §9.3
+// Spec: net-framework spec §9.3
 // =============================================================================
 //
 

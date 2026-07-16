@@ -2,7 +2,7 @@
 // core/database/mysql/async_prepared_session.vr — async LRU prepared session
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.3.4 (binary protocol prepared cache).
+// Spec: database spec §6.3.4 (binary protocol prepared cache).
 // =============================================================================
 //
 // Mirror of `core/database/postgres/pg_prepared_session.vr` for

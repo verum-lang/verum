@@ -1,7 +1,7 @@
 // =============================================================================
 // t01_handshake_scram.vr — SCRAM-SHA-256 startup against live Postgres
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.2 (SCRAM-SHA-256 startup),
+// Spec: database spec §6.1.2 (SCRAM-SHA-256 startup),
 //       §8.13.1 (TLS posture — loopback-only here pending TLS layer).
 // =============================================================================
 //

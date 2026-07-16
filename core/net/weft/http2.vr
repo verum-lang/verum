@@ -2,7 +2,7 @@
 // core/net/weft/http2.vr — HTTP/2 server adapter
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §6.2 / §6.16 (Rapid-Reset)
+// Spec: net-framework spec §6.2 / §6.16 (Rapid-Reset)
 // RFCs: 7540 (HTTP/2), 7541 (HPACK), 9113 (HTTP/2 refresh),
 //  CVE-2023-44487 mitigations built into defaults
 // =============================================================================

@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Savepoint stack — push / release / rollback_to / clear
 //
-// Spec: internal/specs/sqlite-native.md §8.6
+// Spec: sqlite-native spec §8.6
 
 mount core.*;
 mount core.database.sqlite.native.l1_pager.{

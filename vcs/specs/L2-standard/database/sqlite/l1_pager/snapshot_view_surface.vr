@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: SnapshotView — watermark / generation / lookup / staleness
 //
-// Spec: internal/specs/sqlite-native.md §4.3 + §20.6
+// Spec: sqlite-native spec §4.3 + §20.6
 
 mount core.*;
 mount collections.Map;

@@ -5,7 +5,7 @@
 // @timeout: 20000
 // @description: COUNT(*), COUNT(col), SUM, MIN, MAX aggregates through the facade
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (aggregate functions)
+// Spec: sqlite-native spec §14.2 (aggregate functions)
 
 mount core.*;
 mount collections.List;

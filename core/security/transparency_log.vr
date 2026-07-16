@@ -37,7 +37,7 @@
 //
 // **What this is NOT.** This module is the **log primitive**, not a
 // specific application. The Verum package registry's sumdb (per
-// `internal/registry/docs/spec.md` §9) layers application-specific
+// the registry spec §9) layers application-specific
 // fields (package-name, version, sha256 of source archive) on top of
 // this primitive — see `core/cog/sumdb.vr` (forthcoming).
 // =============================================================================

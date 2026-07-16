@@ -1,7 +1,7 @@
 // =============================================================================
 // t24_async_pgoutput_buffered.vr — buffered streamed-tx consumer V0
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.7 (logical replication, streaming-tx),
+// Spec: database spec §6.1.7 (logical replication, streaming-tx),
 //       §6.1.8 (async surface).
 // =============================================================================
 //

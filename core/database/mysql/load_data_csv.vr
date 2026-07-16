@@ -2,7 +2,7 @@
 // core/database/mysql/load_data_csv.vr — CSV/TSV row formatter for LOAD DATA
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.2 (mysql adapter / LOAD DATA).
+// Spec: database spec §6.2 (mysql adapter / LOAD DATA).
 // =============================================================================
 //
 // Closes the V0 follow-up declared in `async_load_data.vr` line 43:

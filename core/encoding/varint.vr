@@ -8,7 +8,7 @@
 
 // Unified home for variable-length integer codings used across the stdlib.
 // Right now this module ships SQLite-style varints only (the one needed by
-// `core.database.sqlite.native`, spec `internal/specs/sqlite-native.md`
+// `core.database.sqlite.native`, spec `sqlite-native spec`
 // §6.4 and Gap 4 in §3.2).
 //
 
@@ -54,7 +54,7 @@
 //  `FF FF FF FF FF FF FF FF FF` → -1 (full 9-byte form)
 //
 
-// See `internal/specs/sqlite-native.md` Appendix E.1 for canonical test
+// See `sqlite-native spec` Appendix E.1 for canonical test
 // vectors reproduced (and exhaustively tested) in
 // `vcs/specs/L2-standard/database/sqlite/l2_record/varint_roundtrip.vr`.
 //

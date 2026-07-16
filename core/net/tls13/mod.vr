@@ -4,7 +4,7 @@
 // Layer: 5 (Network)
 // Dependencies: core.security.{x509, hash, mac, kdf, aead, ecc, sig},
 //  core.encoding.der
-// Spec: internal/specs/tls-quic.md §6, §12 Phase 2
+// Spec: tls-quic spec §6, §12 Phase 2
 // =============================================================================
 //
 

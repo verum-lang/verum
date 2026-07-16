@@ -1153,7 +1153,7 @@ implement TcpListener {
     /// inet_pton+socket+setsockopt+bind+listen IR directly. The
     /// resulting fd is a real kernel fd in both modes — subsequent
     /// `accept`/`close`/`setsockopt` continue through libsystem
-    /// uniformly. See `internal/specs/net-framework.md` for the L1
+    /// uniformly. See `net-framework spec` for the L1
     /// transport-layer architectural commitment.
     fn bind_addr_with_backlog(addr: &SocketAddr, backlog: Int) -> Result<TcpListener, IoError> {
         // Stringify the host once; the intrinsic parses via inet_pton

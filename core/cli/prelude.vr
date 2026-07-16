@@ -2,7 +2,7 @@
 // cli/prelude.vr — Curated import surface for typical CLI scripts
 // =============================================================================
 // Layer: 5 (CLI)
-// Spec: internal/specs/cli-framework.md §4
+// Spec: cli-framework spec §4
 // =============================================================================
 //
 

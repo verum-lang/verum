@@ -1,7 +1,7 @@
 // =============================================================================
 // t15_async_copy.vr — async streaming COPY FROM / COPY TO
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.6 (COPY), §6.1.8 (async surface).
+// Spec: database spec §6.1.6 (COPY), §6.1.8 (async surface).
 // =============================================================================
 //
 // Two scenarios — proves the chunk-streaming pattern works

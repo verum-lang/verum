@@ -2,7 +2,7 @@
 // core/net/weft/json_extractor.vr — Json<T> handler-argument extractor
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §5.3 (Json<T>) + §11 (Phase 1
+// Spec: net-framework spec §5.3 (Json<T>) + §11 (Phase 1
 //  follow-up: "Полноценный JSON-extractor")
 // =============================================================================
 //

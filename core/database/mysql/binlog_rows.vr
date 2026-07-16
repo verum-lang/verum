@@ -2,7 +2,7 @@
 // core/database/mysql/binlog_rows.vr — TABLE_MAP + WRITE/UPDATE/DELETE_ROWS_V2
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.3.7 (binlog replication).
+// Spec: database spec §6.3.7 (binlog replication).
 // Refs:
 //   * MySQL src/sql/log_event.h (Table_map_log_event,
 //     Rows_log_event, type-specific decoders).

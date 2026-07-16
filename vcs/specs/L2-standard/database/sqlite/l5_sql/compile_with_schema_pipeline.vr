@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: Schema-aware compile — SELECT col FROM t works with pre-registered TableMeta
 //
-// Spec: internal/specs/sqlite-native.md §12–§14
+// Spec: sqlite-native spec §12–§14
 
 mount core.*;
 mount collections.List;

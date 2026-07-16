@@ -2,7 +2,7 @@
 // core/database/common/check_codegen.vr — refinement predicate → SQL CHECK
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §5.2 (refinement-as-CHECK), §9.7 (Z3-discharged)
+// Spec: database spec §5.2 (refinement-as-CHECK), §9.7 (Z3-discharged)
 // =============================================================================
 //
 // The bridge between Verum's refinement-type predicates and SQL DDL

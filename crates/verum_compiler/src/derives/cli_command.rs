@@ -1,7 +1,7 @@
 //! `@command` derive macro — lower a `@command`-decorated record type
 //! into a `core.cli.spec.CommandSpec` factory function.
 //!
-//! User contract (per `internal/specs/cli-framework.md` §4):
+//! User contract (per `cli-framework spec` §4):
 //!
 //! ```verum
 //! @command(name = "mytool", version = "1.0.0", about = "An example CLI")

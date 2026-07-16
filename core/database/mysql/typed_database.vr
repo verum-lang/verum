@@ -2,7 +2,7 @@
 // core/database/mysql/typed_database.vr — capability-bounded MySQL surface
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §5.4 (capability types), §6.3 (MySQL adapter)
+// Spec: database spec §5.4 (capability types), §6.3 (MySQL adapter)
 // =============================================================================
 //
 // Mirror of `core.database.postgres.typed_database` for the MySQL

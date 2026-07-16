@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: Resolver rewrites EColumn → EColumnRef; codegen emits TableScan
 //
-// Spec: internal/specs/sqlite-native.md §13.1 + §14
+// Spec: sqlite-native spec §13.1 + §14
 
 mount core.*;
 mount collections.List;

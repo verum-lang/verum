@@ -2,7 +2,7 @@
 // core/database/mysql/async_transaction.vr — affine async MySQL transaction
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §5.5 (affine Tx), §6.3.6 (async).
+// Spec: database spec §5.5 (affine Tx), §6.3.6 (async).
 // =============================================================================
 //
 // Mirror of `core/database/mysql/transaction.vr` over the async

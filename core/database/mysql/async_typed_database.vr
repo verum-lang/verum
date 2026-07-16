@@ -2,7 +2,7 @@
 // core/database/mysql/async_typed_database.vr — async Database<P,C> for MySQL
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §5.4 (capability lattice),
+// Spec: database spec §5.4 (capability lattice),
 //       §6.3.6 (async surface).
 // =============================================================================
 //

@@ -14,7 +14,7 @@
 //               reflects its role: SqlValue = SQLite-API surface,
 //               ExportValue = textual rendering surface.
 //
-// Spec: internal/specs/sqlite-native.md §22 (export tooling)
+// Spec: sqlite-native spec §22 (export tooling)
 
 mount core.*;
 mount collections.{List, Map};

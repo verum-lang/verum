@@ -2,7 +2,7 @@
 // net/h3/qpack/mod.vr — QPACK field compression for HTTP/3 (RFC 9204)
 // =============================================================================
 // Layer: 5 (Network — HTTP/3 / QPACK)
-// Spec: internal/specs/tls-quic.md §1.1 HTTP/3, §12 Phase 6
+// Spec: tls-quic spec §1.1 HTTP/3, §12 Phase 6
 // =============================================================================
 //
 

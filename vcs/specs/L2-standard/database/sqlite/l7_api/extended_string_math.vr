@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: Extended scalar functions — LTRIM/RTRIM/REPLACE/INSTR/ROUND/HEX/MIN/MAX scalar
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (built-in scalar functions)
+// Spec: sqlite-native spec §14.2 (built-in scalar functions)
 
 mount core.*;
 mount collections.List;

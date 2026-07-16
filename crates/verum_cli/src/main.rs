@@ -1359,7 +1359,7 @@ enum Commands {
  /// catalog, CVE-closure, end-to-end soundness witness) and
  /// reports stable RFC error codes ATS-V-AP-001..010 from the
  /// canonical anti-pattern catalog (10 patterns; 22
- /// remaining per `internal/specs/ats-v.md` §7).
+ /// discharge obligations remaining).
  /// Output: `target/audit-reports/arch-discharges.json`.
         #[clap(long = "arch-discharges")]
         arch_discharges: bool,

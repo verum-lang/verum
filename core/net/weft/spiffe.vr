@@ -2,7 +2,7 @@
 // core/net/weft/spiffe.vr — SPIFFE workload identity middleware
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §8.13
+// Spec: net-framework spec §8.13
 // =============================================================================
 //
 

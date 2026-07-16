@@ -2,7 +2,7 @@
 // net/tls13/session/state.vr — Typed state phantom tags (spec §4.3)
 // =============================================================================
 // Layer: 7 (Session)
-// Spec: internal/specs/tls-quic.md §4.3 — typed state machines
+// Spec: tls-quic spec §4.3 — typed state machines
 // =============================================================================
 //
 

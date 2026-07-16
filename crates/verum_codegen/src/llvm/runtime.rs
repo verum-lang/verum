@@ -9998,7 +9998,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// security-critical zeroise path.
     ///
 
-    /// See `internal/specs/no-libc-architecture.md` for the
+    /// See `docs/architecture/no-libc-architecture.md` for the
     /// architectural rule this method enforces.
     fn get_or_declare_memset(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         // The wrapper gets a Verum-internal name to avoid colliding

@@ -35,10 +35,10 @@ None. `core/net/cidr.vr` is pure Verum with no `@intrinsic` bridge.
 ## 3. Language-implementation gaps
 
 > **Defect-class catalogue**: CIDR-1 spans three catalogue entries —
-> [CLOSURE-RESULT-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#3-closure-via--chain-on-result--maybe),
-> [EXTSLICE-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv),
+> [CLOSURE-RESULT-1](website:docs/stdlib/defect-class-catalogue.md#3-closure-via--chain-on-result--maybe),
+> [EXTSLICE-1](website:docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv),
 > and cross-type variant-payload construction. CIDR-2 is the
-> [TRANSIENTMUT-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#5-transient-mut-self-propagation-through-nested-method-calls)
+> [TRANSIENTMUT-1](website:docs/stdlib/defect-class-catalogue.md#5-transient-mut-self-propagation-through-nested-method-calls)
 > pattern.
 
 ### §3.1 CIDR-1 — `cidr.parse(&Text)` SIGSEGV (CLOSED 2026-05-28)

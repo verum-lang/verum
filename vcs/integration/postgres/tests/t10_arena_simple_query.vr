@@ -1,7 +1,7 @@
 // =============================================================================
 // t10_arena_simple_query.vr — arena-backed simple_query end-to-end
 // =============================================================================
-// Spec: internal/specs/database.md §4.2 (per-connection arena),
+// Spec: database spec §4.2 (per-connection arena),
 //       §6.1.3 (simple-query protocol).
 // =============================================================================
 //

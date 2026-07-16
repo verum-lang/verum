@@ -2,7 +2,7 @@
 // core/net/quic/lb_cid.vr — QUIC-LB connection-ID rotation (draft-ietf-quic-load-balancers)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
-// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — QUIC-LB)
+// Spec: net-framework spec §6.10 (Phase 4 — QUIC-LB)
 //  draft-ietf-quic-load-balancers-19
 // =============================================================================
 //

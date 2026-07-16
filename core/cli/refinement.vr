@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (CLI)
 // Dependencies: core, cli.spec, cli.error, cli.types
-// Spec: internal/specs/cli-framework.md §4.3
+// Spec: cli-framework spec §4.3
 // Status: Phase 2 — predicate-handle plumbing; SMT-side coupling lands later
 // =============================================================================
 //

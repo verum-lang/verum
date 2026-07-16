@@ -2,7 +2,7 @@
 // core/database/mysql/json_binary.vr — MySQL binary-JSON decoder
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.3.7 (binlog row decode / JSON).
+// Spec: database spec §6.3.7 (binlog row decode / JSON).
 // Refs:
 //   * MySQL src/sql/json_binary.h + json_binary.cc.
 //   * MariaDB knowledge base "JSON Binary Format" — same wire.

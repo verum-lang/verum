@@ -35,7 +35,7 @@ boundary call is the only entry into Text construction.
 ## 3. Language-implementation gaps
 
 > **Defect-class catalogue**: IPV6CAN-1 is the
-> [BSTRLIT-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#2-bliteral-byte-string-literal-sigsegv)
+> [BSTRLIT-1](website:docs/stdlib/defect-class-catalogue.md#2-bliteral-byte-string-literal-sigsegv)
 > byte-string-literal class.
 
 ### §3.1 IPV6CAN-1 — `format_v4_mapped` precompile SIGSEGV (CLOSED 2026-05-28)

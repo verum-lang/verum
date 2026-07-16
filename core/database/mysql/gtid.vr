@@ -2,7 +2,7 @@
 // core/database/mysql/gtid.vr — GTID set algebra V1
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.2 (mysql adapter / binlog).
+// Spec: database spec §6.2 (mysql adapter / binlog).
 // =============================================================================
 //
 // Closes the V1 follow-up declared in `binlog.vr` line 56:

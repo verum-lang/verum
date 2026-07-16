@@ -2,7 +2,7 @@
 //!
 
 //! Closes Action #2 of the TLS/QUIC security audit
-//! (`internal/specs/tls-quic-security-audit.md` §2): "LLVM-IR audit
+//! (`tls-quic-security-audit spec` §2): "LLVM-IR audit
 //! of zeroise memset preservation — follow-up."
 //!
 

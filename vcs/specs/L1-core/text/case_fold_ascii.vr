@@ -9,7 +9,7 @@
 // path through Text / Char.to_ascii_lowercase on Unicode pass-through
 // enumerates all code points and times out past the per-test budget.
 //
-// Spec: internal/specs/sqlite-native.md §3.3 + §9.5 (NOCASE collation)
+// Spec: sqlite-native spec §3.3 + §9.5 (NOCASE collation)
 
 mount core.*;
 mount text.case_fold.{

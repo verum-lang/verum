@@ -1,7 +1,7 @@
 // =============================================================================
 // t17_async_replication.vr — async logical replication V0
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.7 (streaming replication),
+// Spec: database spec §6.1.7 (streaming replication),
 //       §6.1.8 (async surface).
 // =============================================================================
 //

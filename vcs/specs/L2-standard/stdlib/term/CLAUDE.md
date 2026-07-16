@@ -84,6 +84,6 @@ Every new public symbol in `core/term/` MUST have:
 1. **Surface test** — construction in the appropriate `layer{N}_*.vr`.
 2. **Behaviour test** (for stateful types) — state-machine paths in the
    corresponding sub-directory file.
-3. **Reference doc** — one of `internal/website/docs/stdlib/term/reference/*.md`.
+3. **Reference doc** — one of `website:docs/stdlib/term/reference/*.md`.
 
 CI gates all three — the build breaks if a public API ships without them.

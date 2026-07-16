@@ -42,7 +42,7 @@ layer behaviour would be decoration, which the suite charter forbids.
 
 ### §4.1 No runtime `Layer` builder type (the website doc advertises one that does not exist)
 
-`internal/website/docs/stdlib/context.md` shows a fluent runtime API —
+`website:docs/stdlib/context.md` shows a fluent runtime API —
 `Layer.new().with_singleton<T>(..).with_request<T>(..).merge(..).run(..)`
 — that has **no implementation** anywhere (`layer.vr` is doc-only; no
 `type Layer is { ... }` exists). This is doc drift: the page promises an

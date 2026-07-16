@@ -1,7 +1,7 @@
 # HTTP/3 + QPACK Differential Harness — scaffolding
 
 Cross-implementation HTTP/3 wire-format parity harness per
-`internal/specs/tls-quic.md` §2.5 / §10.3.
+`tls-quic spec` §2.5 / §10.3.
 
 ## Planned scope
 

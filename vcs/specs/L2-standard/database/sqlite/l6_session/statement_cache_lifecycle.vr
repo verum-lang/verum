@@ -6,7 +6,7 @@
 // @description: L6 session — statement cache + sqlite_schema parser +
 //               prepared-statement lifecycle (#143 closure).
 //
-// Spec: internal/specs/sqlite-native.md §16.2 + §17.2 + §17.3
+// Spec: sqlite-native spec §16.2 + §17.2 + §17.3
 
 mount core.*;
 mount collections.{List, Map};

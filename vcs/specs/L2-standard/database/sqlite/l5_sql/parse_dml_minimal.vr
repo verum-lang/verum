@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: DML parsers — INSERT / UPDATE / DELETE minimal shapes
 //
-// Spec: internal/specs/sqlite-native.md §12.2 + sqlite.org/lang_*.html
+// Spec: sqlite-native spec §12.2 + sqlite.org/lang_*.html
 
 mount core.*;
 mount collections.List;

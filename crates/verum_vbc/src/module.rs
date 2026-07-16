@@ -270,7 +270,7 @@ pub struct VbcModule {
     pub external_function_names: Vec<(FunctionId, StringId)>,
 
     /// Mount-rename alias table — Phase 1 of task #11 fundamental fix
-    /// (see `internal/specs/task11-mount-alias-aot-fix.md`).
+    /// (see `task11-mount-alias-aot-fix spec`).
     ///
     /// Each entry records a `mount X.{NAME as ALIAS}` rename that the
     /// module declared via a top-level `MountDecl`.  At precompile time

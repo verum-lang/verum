@@ -51,7 +51,7 @@ Data-surface tests pass; live frame codec round-trips are at
 L2 specs.
 
 > **Defect-class catalogue**: WS-6 is the
-> [CHAINMETHOD-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#6-chained-wrapping_add-on-primitive-types)
+> [CHAINMETHOD-1](website:docs/stdlib/defect-class-catalogue.md#6-chained-wrapping_add-on-primitive-types)
 > chained-`.wrapping_add(...)` class — chain-break workaround applied
 > in `Sha1.compress_block` / `Sha256.compress_block` / `Sha512.compress_block`
 > but defect persists in a different code path within `finalize`.

@@ -2,7 +2,7 @@
 // cli/derive_example.vr — End-to-end demo of the @command derive macro
 // =============================================================================
 // Layer: 5 (CLI)
-// Spec: internal/specs/cli-framework.md §4
+// Spec: cli-framework spec §4
 // =============================================================================
 //
 

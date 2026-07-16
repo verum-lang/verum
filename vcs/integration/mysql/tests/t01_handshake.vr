@@ -1,7 +1,7 @@
 // =============================================================================
 // t01_handshake.vr — caching_sha2_password handshake against live MySQL
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.2 (caching_sha2_password).
+// Spec: database spec §6.3.2 (caching_sha2_password).
 // =============================================================================
 
 mount conn_config.{

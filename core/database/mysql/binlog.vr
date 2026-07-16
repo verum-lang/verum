@@ -2,7 +2,7 @@
 // core/database/mysql/binlog.vr — binlog replication wire (V0)
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.3.7 (binlog replication).
+// Spec: database spec §6.3.7 (binlog replication).
 // Refs:
 //   * MySQL src/sql/log_event.h  — event header + canonical events.
 //   * MariaDB knowledge base "Binlog Event Header" — same wire.

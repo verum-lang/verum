@@ -251,7 +251,7 @@ implement ReplayCache {
     /// `ReplayCache.new_at(cfg, origin)` and drive `try_admit` with
     /// their own monotonic clock — the two entry points together
     /// close the wall-clock-dependence gap flagged in
-    /// `internal/specs/tls-quic-security-audit.md §5`.
+    /// `tls-quic-security-audit spec §5`.
     public fn new(cfg: ReplayConfig) -> ReplayCache {
         ReplayCache.new_at(cfg, Instant.now())
     }

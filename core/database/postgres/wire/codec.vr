@@ -2,7 +2,7 @@
 // core/database/postgres/wire/codec.vr — Postgres binary codec
 // =============================================================================
 // Layer: 3 (Database — postgres adapter, wire layer)
-// Spec: internal/specs/database.md §6.1.4 (binary codec register),
+// Spec: database spec §6.1.4 (binary codec register),
 //       §18.5 (canonical OID table), §18.10 (codec test vectors).
 // =============================================================================
 //

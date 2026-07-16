@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 3 (Database — native SQLite implementation)
 // Dependencies: core, collections, encoding, security, async, sync, mem, runtime
-// Spec: internal/specs/sqlite-native.md
+// Spec: sqlite-native spec
 // Codename: loom
 // =============================================================================
 //

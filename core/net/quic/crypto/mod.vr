@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core.security.{kdf, aead, cipher}, core.net.tls13.keyschedule
-// Spec: internal/specs/tls-quic.md §7.4, §12 Phase 3
+// Spec: tls-quic spec §7.4, §12 Phase 3
 // =============================================================================
 //
 

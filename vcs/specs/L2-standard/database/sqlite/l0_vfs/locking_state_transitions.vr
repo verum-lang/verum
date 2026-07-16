@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: 5-state SQLite locking — state-machine typecheck surface.
 //
-// Spec: internal/specs/sqlite-native.md §7.4 (5-state locking protocol)
+// Spec: sqlite-native spec §7.4 (5-state locking protocol)
 //
 // Runtime exercise of the state machine requires a real fd, which in
 // turn needs the PosixVfs (L0.6). This test pins the public API + byte

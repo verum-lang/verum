@@ -2,7 +2,7 @@
 // core/net/weft/h3_priority.vr — RFC 9218 priority extractor for Weft
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §6.10 (RFC 9218 priority)
+// Spec: net-framework spec §6.10 (RFC 9218 priority)
 // RFC: 9218 — Extensible Prioritization Scheme for HTTP
 // =============================================================================
 //

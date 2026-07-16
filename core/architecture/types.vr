@@ -603,7 +603,7 @@ public type CveClosure is {
 // CVE-architecture spec primitives — operationalisation of cve-architecture.md
 // =============================================================================
 //
-// The CVE-architecture spec (`internal/cve/docs/cve-architecture.md`)
+// The CVE-architecture spec (internal CVE-architecture study, not in repo)
 // declares a set of load-bearing concepts that ATS-V must operationalise:
 //
 //   * `ExecutabilitySense`   — §2.3.0: three senses of the E axis

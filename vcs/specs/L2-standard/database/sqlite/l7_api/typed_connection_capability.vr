@@ -6,7 +6,7 @@
 // @description: TypedConnection<C> capability surface — every cap implements
 //               the protocols required by its tier of the lattice.
 //
-// Spec: internal/specs/sqlite-native.md §4.8 (Connection<Read|Write|Admin>
+// Spec: sqlite-native spec §4.8 (Connection<Read|Write|Admin>
 //        — capability at the type level, not runtime checks)
 //
 // This test asserts the typed surface composes:

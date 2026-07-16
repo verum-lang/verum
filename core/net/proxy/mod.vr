@@ -2,7 +2,7 @@
 // core/net/proxy/mod.vr — L7 reverse-proxy toolkit
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §6, §9.3
+// Spec: net-framework spec §6, §9.3
 // =============================================================================
 //
 

@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/postgres/auth/mod.vr — Postgres authentication
 // =============================================================================
-// Spec: internal/specs/database.md §6.1 (TLS / SCRAM-SHA-256 — only
+// Spec: database spec §6.1 (TLS / SCRAM-SHA-256 — only
 //  supported method without explicit @allow_legacy_auth opt-in)
 //
 

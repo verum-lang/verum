@@ -1,7 +1,7 @@
 // =============================================================================
 // t19_typed_aggr.vr — typed array + range binary round-trip
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.4 (typed wire), §6.1.5 (codecs).
+// Spec: database spec §6.1.4 (typed wire), §6.1.5 (codecs).
 // =============================================================================
 //
 // Verifies that the typed wire correctly handles aggregate types

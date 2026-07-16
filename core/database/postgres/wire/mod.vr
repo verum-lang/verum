@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/postgres/wire/mod.vr — Postgres v3 wire layer
 // =============================================================================
-// Spec: internal/specs/database.md §6.1, postgresql.org/docs/16/protocol.html
+// Spec: database spec §6.1, postgresql.org/docs/16/protocol.html
 //
 
 // Postgres v3 message frame:

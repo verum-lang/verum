@@ -9,7 +9,7 @@ module core.text.case_fold;
 // core/text/case_fold.vr — Case-folded comparison primitives
 // =============================================================================
 // Layer: 2 (text)
-// Spec: internal/specs/sqlite-native.md §3.3 + §9.5
+// Spec: sqlite-native spec §3.3 + §9.5
 //
 
 // SQLite's built-in `NOCASE` collation is documented as ASCII-only:

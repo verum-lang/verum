@@ -182,7 +182,7 @@ public module runtime;
 
 // Async wrappers for OS signals — ctrl_c, terminate, shutdown_signals,
 // signal_stream. Backed by self-pipe-pattern over core.sys.signal flags.
-// Spec: internal/specs/net-framework.md §7.8 (graceful shutdown)
+// Spec: net-framework spec §7.8 (graceful shutdown)
 public module signal;
 
 // =============================================================================
@@ -352,12 +352,12 @@ public module diagnostics;
 
 // Verum Shell Scripting Framework — sh#"..." executor, type-safe escape,
 // streaming, structured concurrency, typed command DSLs, CBGR resources.
-// Spec: internal/specs/shell-scripting.md
+// Spec: shell-scripting spec
 public module shell;
 
 // Verum CLI Framework — declarative argv parsing, refinement-typed args,
 // adaptive help, completion / manpage emitters, typed dispatch.
-// Spec: internal/specs/cli-framework.md
+// Spec: cli-framework spec
 public module cli;
 
 // =============================================================================

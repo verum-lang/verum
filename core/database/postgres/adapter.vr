@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/postgres/adapter.vr — Spindle Postgres adapter façade
 // =============================================================================
-// Spec: internal/specs/database.md §6.1
+// Spec: database spec §6.1
 //
 
 // Vendor-side identity layer over the wire / auth / connection stack.

@@ -30,7 +30,7 @@ None. Pure-Verum byte arithmetic.
 ## 3. Language-implementation gaps
 
 > **Defect-class catalogue**: HTTPCACHE-1 is the
-> [EXTSLICE-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv)
+> [EXTSLICE-1](website:docs/stdlib/defect-class-catalogue.md#1-extend_from_slice-intrinsic-chain-sigsegv)
 > intrinsic-chain class.
 
 ### §3.1 HTTPCACHE-1 — `parse` / `current_age` / `freshness_lifetime_sec` / `decide` SIGSEGV (CLOSED 2026-05-28)

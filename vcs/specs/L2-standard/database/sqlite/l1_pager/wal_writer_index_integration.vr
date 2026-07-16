@@ -20,7 +20,7 @@
 // backend regression resolves, a follow-up spec adds the full
 // writer→index round-trip.
 //
-// Spec: internal/specs/sqlite-native.md §8.2 (multi-reader/single-writer)
+// Spec: sqlite-native spec §8.2 (multi-reader/single-writer)
 
 mount core.*;
 mount collections.{List, Map};

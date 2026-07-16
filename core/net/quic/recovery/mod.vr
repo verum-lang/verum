@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (Network — QUIC)
 // Dependencies: core, core.time, quic.{frame, recovery}
-// Spec: internal/specs/tls-quic.md §7.2, §7.3, §12 Phase 4
+// Spec: tls-quic spec §7.2, §7.3, §12 Phase 4
 // =============================================================================
 //
 

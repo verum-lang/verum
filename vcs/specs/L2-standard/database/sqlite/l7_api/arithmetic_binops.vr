@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: Arithmetic binops — +, -, *, /, %, bitwise, shifts — routing through emit_binary
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (arithmetic)
+// Spec: sqlite-native spec §14.2 (arithmetic)
 
 mount core.*;
 mount collections.List;

@@ -2,7 +2,7 @@
 // core/net/weft/dst.vr — Deterministic Simulation Testing framework
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §8.15
+// Spec: net-framework spec §8.15
 // =============================================================================
 //
 

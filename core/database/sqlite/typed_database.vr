@@ -2,7 +2,7 @@
 // core/database/sqlite/typed_database.vr — capability-bounded SQLite surface
 // =============================================================================
 // Layer: 3 (Database — sqlite façade)
-// Spec: internal/specs/database.md §5.4 (capability types), §6.2 (SQLite)
+// Spec: database spec §5.4 (capability types), §6.2 (SQLite)
 // =============================================================================
 //
 // Mirror of `core.database.postgres.typed_database` and

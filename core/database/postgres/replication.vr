@@ -2,7 +2,7 @@
 // core/database/postgres/replication.vr — streaming replication wire (V0)
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.7 (streaming replication).
+// Spec: database spec §6.1.7 (streaming replication).
 // =============================================================================
 //
 // PostgreSQL streaming replication is a sub-protocol of wire v3 entered

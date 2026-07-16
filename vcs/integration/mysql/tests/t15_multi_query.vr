@@ -1,7 +1,7 @@
 // =============================================================================
 // t15_multi_query.vr — sync + async MySQL multi-statement query
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.3 (COM_QUERY multi-statement).
+// Spec: database spec §6.3.3 (COM_QUERY multi-statement).
 // =============================================================================
 //
 // V0:

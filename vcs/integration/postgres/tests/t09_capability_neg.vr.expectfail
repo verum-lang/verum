@@ -1,7 +1,7 @@
 // =============================================================================
 // t09_capability_neg.vr.expectfail — capability lattice rejection (negative)
 // =============================================================================
-// Spec: internal/specs/database.md §5.4 (capability types).
+// Spec: database spec §5.4 (capability types).
 // =============================================================================
 //
 // THIS FILE MUST FAIL `verum check`. It calls `execute_simple` on

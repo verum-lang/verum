@@ -2,7 +2,7 @@
 // core/net/weft/metrics_otlp.vr — OTLP/HTTP push exporter
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §11 (Phase 2 follow-up)
+// Spec: net-framework spec §11 (Phase 2 follow-up)
 // Refs: https://opentelemetry.io/docs/specs/otlp/ (OTLP/HTTP §3.4)
 //  https://github.com/open-telemetry/opentelemetry-proto
 // =============================================================================

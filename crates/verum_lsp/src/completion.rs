@@ -1346,7 +1346,7 @@ const FORMAT_TAGS: &[(&str, &str, &str)] = &[
     ("ipv6", "IPv6 address", "ipv6#\"::1\""),
     ("jwt", "JWT token", "jwt#\"eyJhbGciOiJIUzI1NiJ9...\""),
     // Shell command literal — auto-escapes ${expr} interpolations through
-    // ShellEscape::shell_quote. See `internal/specs/shell-scripting.md`.
+    // ShellEscape::shell_quote. See `the shell-scripting spec`.
     (
         "sh",
         "Shell command (auto-escaped interpolation)",

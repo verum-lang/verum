@@ -24,7 +24,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Posit
 
 /// One issue line emitted by `verum lint --format json`. Mirrors
 /// the documented schema in
-/// `internal/website/docs/reference/lint-configuration.md`.
+/// the website page reference/lint-configuration.
 #[derive(Debug, Deserialize)]
 struct LintIssueWire {
     schema_version: u32,

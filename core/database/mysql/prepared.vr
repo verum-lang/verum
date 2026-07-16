@@ -2,7 +2,7 @@
 // core/database/mysql/prepared.vr — high-level cached prepared API
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.3.3 (prepared statements),
+// Spec: database spec §6.3.3 (prepared statements),
 //       §6.3 (binary protocol over the modern caching_sha2 path)
 // =============================================================================
 //

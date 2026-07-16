@@ -29,7 +29,7 @@
 // optimiser the call is observable, and every pass preserves it.
 //
 
-// Audit: `internal/specs/tls-quic-security-audit.md` §2 (zeroise on
+// Audit: `tls-quic-security-audit spec` §2 (zeroise on
 // drop) Action #2. The companion regression harness in
 // `crates/verum_codegen/tests/secure_zero_preservation.rs`
 // (T1.5 follow-up) compiles a tiny program using `secure_zero` at

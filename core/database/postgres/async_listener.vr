@@ -2,7 +2,7 @@
 // core/database/postgres/async_listener.vr — async LISTEN/NOTIFY V0
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.6 (LISTEN/NOTIFY),
+// Spec: database spec §6.1.6 (LISTEN/NOTIFY),
 //       §6.1.8 (async surface).
 // =============================================================================
 //

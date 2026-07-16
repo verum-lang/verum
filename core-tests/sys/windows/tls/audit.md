@@ -104,5 +104,5 @@ ASCII bytes `V E R U M _ T C` (`0x56 0x45 0x52 0x55 0x4D 0x5F 0x54 0x43`).
 This is why the typo'd tests were silently *failing* (wrapped value ≠
 real `TCB_MAGIC`) instead of erroring at compile time. Tracked as
 **INTLIT-OVERFLOW-1** in
-`internal/website/docs/stdlib/defect-class-catalogue.md §11`; fix is a
+`website:docs/stdlib/defect-class-catalogue.md §11`; fix is a
 parse/type-check range guard on suffixed integer literals.

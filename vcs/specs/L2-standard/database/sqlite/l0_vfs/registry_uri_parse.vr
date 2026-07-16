@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: VFS registry + URI parser surface exercise
 //
-// Spec: internal/specs/sqlite-native.md §7.7 (VFS registry)
+// Spec: sqlite-native spec §7.7 (VFS registry)
 //       + sqlite.org/uri.html (URI path rules)
 
 mount core.*;

@@ -2,7 +2,7 @@
 // core/net/weft/websocket.vr — WebSocket (RFC 6455) handler wrapper
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §6.4
+// Spec: net-framework spec §6.4
 // =============================================================================
 //
 

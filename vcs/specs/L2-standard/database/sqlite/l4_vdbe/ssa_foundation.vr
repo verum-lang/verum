@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: SSA IR foundation per spec §4.4 — types compose, lift round-trips
 //
-// Spec: internal/specs/sqlite-native.md §4.4 (VDBE как SSA IR)
+// Spec: sqlite-native spec §4.4 (VDBE как SSA IR)
 //
 // Asserts the SSA module surface compiles and lifting passes accept
 // real `VdbeProgram` inputs.  Does NOT yet assert semantic equivalence

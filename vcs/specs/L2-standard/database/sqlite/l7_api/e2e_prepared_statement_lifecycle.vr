@@ -12,7 +12,7 @@
 //               Complements `e2e_create_insert_select.vr` which
 //               drives the high-level execute/query_* facade.
 //
-// Spec: internal/specs/sqlite-native.md §17 (PreparedStatement)
+// Spec: sqlite-native spec §17 (PreparedStatement)
 
 mount core.*;
 mount collections.{List, Map};

@@ -2,7 +2,7 @@
 // net/quic/transport/mod.vr — UDP transport abstraction + connection pump
 // =============================================================================
 // Layer: 5 (Network — QUIC)
-// Spec: internal/specs/tls-quic.md §1.1 Phase 7, §12 end-to-end wire-up
+// Spec: tls-quic spec §1.1 Phase 7, §12 end-to-end wire-up
 // =============================================================================
 //
 

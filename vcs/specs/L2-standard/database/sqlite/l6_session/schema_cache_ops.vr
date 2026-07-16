@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: SchemaCache — register/lookup/drop/invalidate
 //
-// Spec: internal/specs/sqlite-native.md §16.4
+// Spec: sqlite-native spec §16.4
 
 mount core.*;
 mount collections.List;

@@ -37,7 +37,7 @@
 //               patches now reference rid_reg instead of the seek
 //               key.
 //
-// Spec: internal/specs/sqlite-native.md §11.4 (codegen)
+// Spec: sqlite-native spec §11.4 (codegen)
 
 mount core.*;
 mount collections.List;

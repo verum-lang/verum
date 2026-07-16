@@ -8,7 +8,7 @@
 //               limit_pushdown_unsorted, unwrap_distinct_unique
 //               + the run_plan_passes runner (#159 closure).
 //
-// Spec: internal/specs/sqlite-native.md §13.5
+// Spec: sqlite-native spec §13.5
 
 mount core.*;
 mount collections.{List, Map};

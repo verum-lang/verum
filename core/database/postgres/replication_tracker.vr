@@ -2,7 +2,7 @@
 // core/database/postgres/replication_tracker.vr — LSN tracker + PositionStore
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.7 (replication) + §6.1.8 (async).
+// Spec: database spec §6.1.7 (replication) + §6.1.8 (async).
 // =============================================================================
 //
 // Production-grade LSN tracker for logical-replication consumers.

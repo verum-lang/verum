@@ -1,7 +1,7 @@
 // =============================================================================
 // t09_capability.vr — capability lattice compile-time rejection (positive)
 // =============================================================================
-// Spec: internal/specs/database.md §5.4 (capability types), §8.13.10
+// Spec: database spec §5.4 (capability types), §8.13.10
 //       (compile-time enforcement normative).
 // =============================================================================
 //

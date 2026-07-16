@@ -1,7 +1,7 @@
 // =============================================================================
 // t27_async_copy_metrics.vr — copy metrics + cancellation token
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.6 (COPY metrics + cancellation).
+// Spec: database spec §6.1.6 (COPY metrics + cancellation).
 // =============================================================================
 //
 // V0:

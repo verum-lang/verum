@@ -1,7 +1,7 @@
 // =============================================================================
 // t11_typed_row.vr — MysqlTypedRow + NEWDECIMAL binlog row decode
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.7 (binlog row decode / typed lift).
+// Spec: database spec §6.3.7 (binlog row decode / typed lift).
 // =============================================================================
 //
 // V0 covers two pieces in one round trip:

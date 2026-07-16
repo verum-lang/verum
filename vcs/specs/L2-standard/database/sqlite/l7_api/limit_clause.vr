@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: SELECT ... LIMIT codegen — early exit via counter + Ge-patch
 //
-// Spec: internal/specs/sqlite-native.md §14.2.5 (LIMIT)
+// Spec: sqlite-native spec §14.2.5 (LIMIT)
 
 mount core.*;
 mount collections.List;

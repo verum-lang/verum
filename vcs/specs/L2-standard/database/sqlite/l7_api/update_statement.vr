@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: UPDATE codegen — full-scan + WHERE + multi-column SET through the facade
 //
-// Spec: internal/specs/sqlite-native.md §14.3 (UPDATE) + §16.3 (facade)
+// Spec: sqlite-native spec §14.3 (UPDATE) + §16.3 (facade)
 
 mount core.*;
 mount collections.List;

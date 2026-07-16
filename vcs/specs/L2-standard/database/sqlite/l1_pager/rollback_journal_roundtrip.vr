@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Rollback journal header + record serialise/parse + replay
 //
-// Spec: internal/specs/sqlite-native.md §8.7
+// Spec: sqlite-native spec §8.7
 
 mount core.*;
 mount collections.List;

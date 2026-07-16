@@ -2,7 +2,7 @@
 // core/database/postgres/typed_row.vr — TypedRow protocol + scalar decoders
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.4 (extended-query / typed result).
+// Spec: database spec §6.1.4 (extended-query / typed result).
 // =============================================================================
 //
 // `execute_prepared_typed` returns `PgTypedQueryResult` whose rows

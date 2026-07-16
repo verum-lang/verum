@@ -1,7 +1,7 @@
 # X.509 Differential Harness — scaffolding
 
 Cross-implementation X.509 DER parser parity harness per
-`internal/specs/tls-quic.md` §2.5.
+`tls-quic spec` §2.5.
 
 ## Planned scope
 

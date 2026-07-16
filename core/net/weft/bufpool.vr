@@ -2,7 +2,7 @@
 // core/net/weft/bufpool.vr — Registered I/O buffer pool
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §4.2.1 / §6.17
+// Spec: net-framework spec §4.2.1 / §6.17
 // =============================================================================
 //
 

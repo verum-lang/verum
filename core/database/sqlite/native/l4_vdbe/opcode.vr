@@ -28,7 +28,7 @@ module core.database.sqlite.native.l4_vdbe.opcode;
 //
 
 // Not a full bijection with C-SQLite opcodes; missing ones are
-// tracked in internal/specs/sqlite-opcodes.md as they land.
+// tracked in sqlite-opcodes spec as they land.
 // =============================================================================
 
 mount core.*;

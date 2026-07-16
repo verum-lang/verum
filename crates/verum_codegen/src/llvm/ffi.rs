@@ -225,8 +225,9 @@ impl<'ctx> FfiLowering<'ctx> {
     /// including `-O3` with full LTO.
     ///
 
-    /// Audit: `internal/specs/tls-quic-security-audit.md` §2 (zeroise
-    /// on drop) Action #2. The corresponding regression harness in
+    /// Security requirement (TLS/QUIC audit, zeroise-on-drop): key
+    /// material MUST be zeroised before release, and the zeroise MUST
+    /// survive every optimisation level. The regression harness in
     /// `crates/verum_codegen/tests/secure_zero_preservation.rs`
     /// compiles a tiny Verum program using this opcode at -O3 and
     /// asserts the volatile memset survives in the optimised IR.

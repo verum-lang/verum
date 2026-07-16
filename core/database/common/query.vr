@@ -2,7 +2,7 @@
 // core/database/common/query.vr — PreparedQuery<R, P> handle
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §5.1, §5.3
+// Spec: database spec §5.1, §5.3
 // =============================================================================
 //
 

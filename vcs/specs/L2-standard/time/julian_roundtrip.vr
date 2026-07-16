@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Julian-day converter — typecheck-level exercise.
 //
-// Spec: internal/specs/sqlite-native.md §3.3 (Julian-day converter)
+// Spec: sqlite-native spec §3.3 (Julian-day converter)
 //
 // Runtime exercise is deferred: the interpreter's Float64 arithmetic
 // path on the `(delta * 86400000.0)` expression hits a slow enumerator

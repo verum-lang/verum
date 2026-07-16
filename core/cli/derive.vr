@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (CLI)
 // Dependencies: core, cli.spec, cli.builder
-// Spec: internal/specs/cli-framework.md §4
+// Spec: cli-framework spec §4
 // Status: Phase 1 — semantic-only, scaffolding for the meta1 macro pass
 // =============================================================================
 //

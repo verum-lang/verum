@@ -2,7 +2,7 @@
 // core/database/sqlite/native/window_frame_api/mod.vr
 // =============================================================================
 // Window-function frame specification — ROWS / RANGE / GROUPS + EXCLUDE clause.
-// Spec: internal/specs/sqlite-native.md §13.7 — window function planning
+// Spec: sqlite-native spec §13.7 — window function planning
 //
 
 // Covers SQLite 3.28+ window-function grammar:

@@ -7,7 +7,7 @@
 //
 // CRC-32 / IEEE 802.3 test vectors. Cross-validated against zlib's
 // reference `crc32` implementation. Covers Gap 5 in
-// `internal/specs/sqlite-native.md` §3.2.
+// `sqlite-native spec` §3.2.
 //
 // Runtime under the VBC interpreter: ~16 s for 8 micro-tests. The hot
 // path is `TABLE[idx]` fixed-size-array indexing + UInt32 bitops per

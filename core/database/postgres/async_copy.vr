@@ -2,7 +2,7 @@
 // core/database/postgres/async_copy.vr — async COPY FROM / COPY TO V0
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.8 (async surface), §6.1.6 (COPY).
+// Spec: database spec §6.1.8 (async surface), §6.1.6 (COPY).
 // =============================================================================
 //
 // Adds true streaming COPY to the async surface. The actor pattern

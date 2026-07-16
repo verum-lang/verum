@@ -1,7 +1,7 @@
 // =============================================================================
 // t18_typed_prepared.vr — binary-format prepared params + TypedRow decode
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.4 (extended-query / typed result).
+// Spec: database spec §6.1.4 (extended-query / typed result).
 // =============================================================================
 //
 // V0 covers:

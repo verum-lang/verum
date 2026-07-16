@@ -60,7 +60,7 @@ on L2 specs.
 ### §3.2 H3-2 — H3 vs http3 duplication
 
 Two parallel implementations of HTTP/3. Roadmap is to subsume
-`http3` into `h3`. Tracking via internal/specs/tls-quic.md.
+`http3` into `h3`. Tracked in the tls-quic consolidation plan (task pool).
 
 ### §3.3 Extended CONNECT (RFC 9220) — WebSockets over HTTP/3
 

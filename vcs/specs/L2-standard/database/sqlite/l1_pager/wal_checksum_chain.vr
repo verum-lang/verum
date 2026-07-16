@@ -11,7 +11,7 @@
 //               the platform Vfs instead of accepting deterministic
 //               salts.
 //
-// Spec: internal/specs/sqlite-native.md §6.4 (WAL frame format) +
+// Spec: sqlite-native spec §6.4 (WAL frame format) +
 //                                       §8.4 (checkpoint salt rotation)
 
 mount core.*;

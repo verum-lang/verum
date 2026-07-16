@@ -1092,7 +1092,7 @@ public fn set_errno(err: Int) {
 /// VBC interpreter recursion side-step: `path_buf[..len].copy_from_slice
 /// (&path[..len])` triggers a depth-16384 stack overflow in the
 /// Tier-0 interpreter (proven by bisect at
-/// `internal/diag/sqlite-real/probe_slice.vr` — manual byte copy
+/// a local diagnostic note (not in repo) — manual byte copy
 /// works, slice-indexed `copy_from_slice` does not). Manual loop
 /// here so every `safe_*` path-taking syscall wrapper can run
 /// real-file workloads under the interpreter.
@@ -1422,7 +1422,7 @@ public fn safe_clock_gettime(clock_id: Int) -> Result<DarwinTimespec, OSError> {
 /// path-via-`&[Byte]` argument coercion recurses to depth 16384 —
 /// the slice-typed parameter triggers a slice-on-array dispatch
 /// chain that is broken in the Tier-0 interpreter (proven by bisect
-/// at `internal/diag/sqlite-real/probe_safe_open_empty.vr`: even an
+/// at a local diagnostic note (not in repo): even an
 /// empty-list argument overflows). Sidestep: pass a raw `&Byte`
 /// instead.
 public fn safe_open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, OSError> {

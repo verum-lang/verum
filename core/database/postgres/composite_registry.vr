@@ -2,7 +2,7 @@
 // core/database/postgres/composite_registry.vr — composite schema registry
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.4 (typed wire / composite registry).
+// Spec: database spec §6.1.4 (typed wire / composite registry).
 // =============================================================================
 //
 // TypedComposite carries POSITIONAL fields only — the binary wire

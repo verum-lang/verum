@@ -3255,7 +3255,7 @@ pub enum MemIntrinsicKind {
     Memset,
     /// Volatile memset(0) — survives LLVM optimisation passes.
     /// Used for cryptographic-zeroise of secret material before
-    /// scope exit. See `internal/specs/tls-quic-security-audit.md`
+    /// scope exit. See `tls-quic-security-audit spec`
     /// §2 Action #2.
     SecureZero,
 }

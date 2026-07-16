@@ -80,7 +80,7 @@ docker compose -f vcs/integration/postgres/docker-compose.yml down -v
 
 ## Future
 
-Test list per `internal/specs/database.md` follow-up:
+Test list per `database spec` follow-up:
 
 - `t01_handshake_scram.vr` — SCRAM-SHA-256 startup
 - `t02_simple_query.vr` — text protocol round-trip

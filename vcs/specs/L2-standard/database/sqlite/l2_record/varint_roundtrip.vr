@@ -9,7 +9,7 @@
 // encode then decode produces the original value, and the length reported
 // by sqlite_encoded_len matches the actual bytes produced.
 //
-// Covers Gap 4 from internal/specs/sqlite-native.md §3.2 and the canonical
+// Covers Gap 4 from sqlite-native spec §3.2 and the canonical
 // test vectors in Appendix E.1.
 
 mount core.encoding.varint.{sqlite_encode, sqlite_encoded_len, sqlite_decode};

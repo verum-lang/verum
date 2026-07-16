@@ -14,7 +14,7 @@
 )]
 //! Unit tests for the `@command` derive macro.
 //!
-//! Spec: internal/specs/cli-framework.md §4
+//! Spec: cli-framework spec §4
 //!
 //! These tests exercise the derive in isolation — given a constructed
 //! `TypeDecl`, what `Item` does `DeriveCommand::expand` produce? Tests

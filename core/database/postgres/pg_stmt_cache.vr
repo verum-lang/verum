@@ -2,7 +2,7 @@
 // core/database/postgres/pg_stmt_cache.vr — LRU prepared-statement cache
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.4 (extended-query / prepared cache).
+// Spec: database spec §6.1.4 (extended-query / prepared cache).
 // =============================================================================
 //
 // Per-connection LRU cache of (sql_fingerprint → PgPreparedStatement)

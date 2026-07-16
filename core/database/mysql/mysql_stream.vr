@@ -2,7 +2,7 @@
 // core/database/mysql/mysql_stream.vr — TCP / TLS unified stream for MySQL wire
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.3 (TLS), §8.13.1 (TLS posture).
+// Spec: database spec §6.3 (TLS), §8.13.1 (TLS posture).
 // =============================================================================
 //
 // Mirror of `core.database.postgres.pg_stream` for MySQL. Sum-type

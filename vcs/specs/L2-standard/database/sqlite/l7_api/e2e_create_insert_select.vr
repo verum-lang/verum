@@ -13,7 +13,7 @@
 //               the L7 Database facade so every test mirrors what
 //               an end-user application would write.
 //
-// Spec: internal/specs/sqlite-native.md §13 (compile pipeline) +
+// Spec: sqlite-native spec §13 (compile pipeline) +
 //       sqlite-native.md §17 (PreparedStatement) +
 //       sqlite-native.md §19 (Database facade)
 

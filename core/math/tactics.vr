@@ -2,7 +2,7 @@
 // tactics.vr — Comprehensive Tactic Library for the Verum Proof System
 // =============================================================================
 // Layer: Foundations / Meta
-// Spec: internal/verum-ext.md §3.3 (Tactic DSL)
+// Spec: verum-ext spec §3.3 (Tactic DSL)
 //
 
 // This module provides the complete tactic infrastructure for Verum proofs:

@@ -13,7 +13,7 @@
 //               most-restrictive), per-kind active count, and
 //               cross-kind unregister rejection.
 //
-// Spec: internal/specs/sqlite-native.md §13.6 (hooks) +
+// Spec: sqlite-native spec §13.6 (hooks) +
 //       SQLite C API (sqlite3_update_hook / commit_hook / wal_hook /
 //                     etc.)
 

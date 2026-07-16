@@ -19,7 +19,7 @@
 //! "stdlib protocol" meaning.
 //!
 
-//! Spec: see `internal/specs/sqlite-native.md` and
+//! Spec: see `sqlite-native spec` and
 //! `memory/feedback_explicit_mount_glob_shadow.md` for prior incidents.
 
 use std::fs;

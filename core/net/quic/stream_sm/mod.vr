@@ -2,7 +2,7 @@
 // net/quic/stream_sm/mod.vr — QUIC stream state machines + flow control
 // =============================================================================
 // Layer: 5 (Network — QUIC)
-// Spec: internal/specs/tls-quic.md §7, §12 Phase 4
+// Spec: tls-quic spec §7, §12 Phase 4
 // =============================================================================
 //
 

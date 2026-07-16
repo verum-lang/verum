@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 3 (X509Certificate layer — sits above encoding.der + security.{sig, ecc})
 // Dependencies: core, collections, encoding.der, security.{sig, hash, ecc}
-// Spec: internal/specs/tls-quic.md §6.5, §12 Phase 1
+// Spec: tls-quic spec §6.5, §12 Phase 1
 // =============================================================================
 //
 

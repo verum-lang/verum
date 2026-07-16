@@ -1,7 +1,7 @@
 // =============================================================================
 // t14_physical_replication.vr — physical replication + BASE_BACKUP V0
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.7 (streaming replication).
+// Spec: database spec §6.1.7 (streaming replication).
 // =============================================================================
 //
 // V0 surface check — proves the physical-mode replication wire is

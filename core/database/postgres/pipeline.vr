@@ -2,7 +2,7 @@
 // core/database/postgres/pipeline.vr — bounded pipeline + adaptive batching
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.5 (pipelining: normative queue
+// Spec: database spec §6.1.5 (pipelining: normative queue
 //       discipline), §6.1.6 (ErrorResponse → PipelineAborted)
 // =============================================================================
 //

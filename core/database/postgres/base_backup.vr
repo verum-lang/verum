@@ -2,7 +2,7 @@
 // core/database/postgres/base_backup.vr — BASE_BACKUP wire (V0)
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.7 (streaming replication),
+// Spec: database spec §6.1.7 (streaming replication),
 //       PG src/backend/replication/basebackup_copy.c.
 // =============================================================================
 //

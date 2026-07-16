@@ -1,7 +1,7 @@
 // =============================================================================
 // t18_async_prepared.vr — async prepared statements + PreparedSession LRU
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.4 (binary protocol prepared cache).
+// Spec: database spec §6.3.4 (binary protocol prepared cache).
 // =============================================================================
 //
 // V0:

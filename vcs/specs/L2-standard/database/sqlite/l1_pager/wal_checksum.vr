@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: SQLite WAL running checksum — additive (NOT xor) per wal.c
 //
-// Spec: internal/specs/sqlite-native.md §8.3, sqlite.org/walformat.html
+// Spec: sqlite-native spec §8.3, sqlite.org/walformat.html
 //
 // Pins the additive form of `walChecksumBytes` from the SQLite source:
 //

@@ -27,7 +27,7 @@
 // recover_state honours, exactly mirroring the post-condition the
 // recovery seam implements.
 //
-// Spec: internal/specs/sqlite-native.md §8.2 (recovery)
+// Spec: sqlite-native spec §8.2 (recovery)
 //                                     + §8.4 (multi-reader/single-writer)
 
 mount core.*;

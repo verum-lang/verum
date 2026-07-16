@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Btree constructor + cursor path manipulation surface
 //
-// Spec: internal/specs/sqlite-native.md §10.2 + §10.3
+// Spec: sqlite-native spec §10.2 + §10.3
 
 mount core.*;
 mount core.database.sqlite.native.l3_btree.{

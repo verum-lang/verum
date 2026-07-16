@@ -78,7 +78,7 @@ completing. **CONFIRMED reproducible in isolation.**
 **Closure-dependence (important):** the simpler `a.add(b).as_millis()` form
 does NOT reproduce — it passes in a small import closure. The defect is
 import-closure / collection-retrieval-sensitive (see
-`internal/website/docs/stdlib/defect-class-catalogue.md §12`): an isolated
+`website:docs/stdlib/defect-class-catalogue.md §12`): an isolated
 1–3-test probe under-counts method candidates and can give a misleading PASS;
 the genuine failure shows up under the full conformance closure (`verum test
 --filter wx_`). This is why `wx_time_int_map_values_sum` failed in the full run

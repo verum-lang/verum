@@ -2,7 +2,7 @@
 // core/database/mysql/wkb_decoder.vr — WKB → GeoJSON decoder
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §6.3.7 (binlog row / GEOMETRY).
+// Spec: database spec §6.3.7 (binlog row / GEOMETRY).
 // Refs: OGC 06-103r4 (Simple Features Common Architecture);
 //       MySQL src/sql/spatial.cc (Geometry.create_from_wkb).
 // =============================================================================

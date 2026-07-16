@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Pager actor surface — Read/Write/Commit/Checkpoint requests
 //
-// Spec: internal/specs/sqlite-native.md §4.3 + §8.1
+// Spec: sqlite-native spec §4.3 + §8.1
 
 mount core.*;
 mount collections.List;

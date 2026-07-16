@@ -1,6 +1,6 @@
 # QUIC Interop Runner — scaffold
 
-Release-gate matrix per `internal/specs/tls-quic.md` §10.4. Warp must
+Release-gate matrix per `tls-quic spec` §10.4. Warp must
 pass the green square on every scenario × every peer implementation
 before v1 release.
 

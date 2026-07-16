@@ -7,7 +7,7 @@
 //               round trip + Split/Merge/Rotate cell preservation
 //               (#146 closure).
 //
-// Spec: internal/specs/sqlite-native.md §10.5
+// Spec: sqlite-native spec §10.5
 
 mount core.*;
 mount collections.{List, Map};

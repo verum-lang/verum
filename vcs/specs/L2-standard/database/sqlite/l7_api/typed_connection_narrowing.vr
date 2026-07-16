@@ -8,7 +8,7 @@
 //               surface, plus that demote_to_read is not callable
 //               on a read-only connection.
 //
-// Spec: internal/specs/sqlite-native.md §4.8
+// Spec: sqlite-native spec §4.8
 //
 // NOTE: Full bound enforcement on `<C: CanWrite>` impl methods is a
 // Verum compiler feature in flight (separately tracked).  This test

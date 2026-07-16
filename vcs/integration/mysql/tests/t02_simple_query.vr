@@ -1,7 +1,7 @@
 // =============================================================================
 // t02_simple_query.vr — text-protocol round-trip against live MySQL
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.3 (COM_QUERY text resultset).
+// Spec: database spec §6.3.3 (COM_QUERY text resultset).
 // =============================================================================
 //
 // Exercises the text-protocol path that every other test depends

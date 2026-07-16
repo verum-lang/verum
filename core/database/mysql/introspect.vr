@@ -2,7 +2,7 @@
 // core/database/mysql/introspect.vr — MySQL SchemaSnapshot extractor
 // =============================================================================
 // Layer: 3 (Database — mysql adapter)
-// Spec: internal/specs/database.md §5.3 (verum db:introspect)
+// Spec: database spec §5.3 (verum db:introspect)
 // =============================================================================
 //
 

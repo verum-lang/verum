@@ -5,7 +5,7 @@
 // @timeout: 20000
 // @description: SELECT ... ORDER BY codegen — materialize + in-place sort
 //
-// Spec: internal/specs/sqlite-native.md §14.2.4 (ORDER BY)
+// Spec: sqlite-native spec §14.2.4 (ORDER BY)
 
 mount core.*;
 mount collections.List;

@@ -2,7 +2,7 @@
 // core/database/sqlite/error.vr — translate loom DbError → common.DbError
 // =============================================================================
 // Layer: 3 (Database — sqlite façade)
-// Spec: internal/specs/database.md §5.6, §6.2
+// Spec: database spec §5.6, §6.2
 // =============================================================================
 //
 

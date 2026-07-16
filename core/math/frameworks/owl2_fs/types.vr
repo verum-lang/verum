@@ -3,7 +3,7 @@
 // =============================================================================
 //
 
-// Shkotin 2019 (`internal/OWL2.DS2HOL.pdf`) §Notation: the DS2HOL
+// Shkotin 2019 (the DS2HOL paper) §Notation: the DS2HOL
 // translation rests on two carrier sorts and one metric:
 //
 

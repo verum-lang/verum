@@ -2,7 +2,7 @@
 // core/net/weft/wasm_filter.vr — WASI / Proxy-Wasm filter sandbox
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §8.14
+// Spec: net-framework spec §8.14
 // =============================================================================
 //
 

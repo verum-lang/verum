@@ -3,7 +3,7 @@
 // =============================================================================
 // Layer: 5 (CLI)
 // Dependencies: core, base.env, io.path, cli.spec
-// Spec: internal/specs/cli-framework.md §12
+// Spec: cli-framework spec §12
 // =============================================================================
 //
 

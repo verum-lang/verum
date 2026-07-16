@@ -1,7 +1,7 @@
 // =============================================================================
 // t20_gtid_algebra.vr — GTID set algebra V1 (text + wire round-trip + ops)
 // =============================================================================
-// Spec: internal/specs/database.md §6.2 (mysql adapter / binlog).
+// Spec: database spec §6.2 (mysql adapter / binlog).
 // =============================================================================
 //
 // V0 closes the binlog.vr line 56 follow-up "GTID set algebra (we

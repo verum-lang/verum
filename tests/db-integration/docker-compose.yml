@@ -1,7 +1,7 @@
 # =============================================================================
 # tests/db-integration/docker-compose.yml — Spindle integration test rig
 # =============================================================================
-# Spec: internal/specs/database.md §22 (DST + integration testing)
+# Spec: database spec §22 (DST + integration testing)
 #
 # Brings up the database servers Spindle's Postgres / MySQL adapters
 # need for full end-to-end testing. SQLite is in-process and needs no

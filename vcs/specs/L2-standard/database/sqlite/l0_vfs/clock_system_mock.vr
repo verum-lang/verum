@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Clock protocol — SystemClock + MockClock conformance, Timestamp helpers
 //
-// Spec: internal/specs/sqlite-native.md §7.1 + §4.10 DST harness
+// Spec: sqlite-native spec §7.1 + §4.10 DST harness
 
 mount core.*;
 mount core.database.sqlite.native.l0_vfs.{

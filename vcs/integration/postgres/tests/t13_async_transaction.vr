@@ -1,7 +1,7 @@
 // =============================================================================
 // t13_async_transaction.vr — async typed database + affine transaction
 // =============================================================================
-// Spec: internal/specs/database.md §5.4 (capability lattice),
+// Spec: database spec §5.4 (capability lattice),
 //       §5.5 (affine Tx), §6.1.8 (async surface).
 // =============================================================================
 //

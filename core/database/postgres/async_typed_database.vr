@@ -2,7 +2,7 @@
 // core/database/postgres/async_typed_database.vr — async Database<P,C> surface
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §5.4 (capability lattice),
+// Spec: database spec §5.4 (capability lattice),
 //       §6.1.8 (async surface).
 // =============================================================================
 //

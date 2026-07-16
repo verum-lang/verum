@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Checkpointer mode predicates + run_checkpoint policy
 //
-// Spec: internal/specs/sqlite-native.md §8.4
+// Spec: sqlite-native spec §8.4
 
 mount core.*;
 mount core.database.sqlite.native.l1_pager.{

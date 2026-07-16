@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: String operations — concat (||), SUBSTR, TRIM, logical AND/OR
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (string functions + operators)
+// Spec: sqlite-native spec §14.2 (string functions + operators)
 
 mount core.*;
 mount collections.List;

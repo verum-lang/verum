@@ -1673,7 +1673,7 @@ impl MacroExpansionPhase {
     /// `@derive(Command)` separately. The `@command` attribute carries
     /// the configuration args (name, version, about, ...); the derive
     /// itself reads those via `type_decl.attributes`. Spec:
-    /// internal/specs/cli-framework.md §4.
+    /// cli-framework spec §4.
     fn extract_derive_names(&self, attributes: &[Attribute]) -> List<Text> {
         let mut derives = List::new();
         let mut saw_command = false;

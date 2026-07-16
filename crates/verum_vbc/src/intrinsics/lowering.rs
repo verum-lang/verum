@@ -826,7 +826,7 @@ impl IntrinsicLowering {
                 // The `isVolatile = true` attribute on `llvm.intr.memset`
                 // tells the LLVM dialect lowering to emit
                 // `llvm.memset.p0.i64(..., i1 true)`, which the optimiser
-                // cannot DCE. See `internal/specs/tls-quic-security-audit.md`
+                // cannot DCE. See `tls-quic-security-audit spec`
                 // §2 Action #2.
                 self.emit(MlirOp {
                     name: "llvm.intr.memset".to_string(),

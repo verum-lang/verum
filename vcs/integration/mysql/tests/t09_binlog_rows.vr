@@ -1,7 +1,7 @@
 // =============================================================================
 // t09_binlog_rows.vr — TABLE_MAP + WRITE/UPDATE/DELETE_ROWS_V2 decoder
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.7 (binlog replication, ROW events).
+// Spec: database spec §6.3.7 (binlog replication, ROW events).
 // =============================================================================
 //
 // V0 row-event chain:

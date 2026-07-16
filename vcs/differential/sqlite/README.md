@@ -3,7 +3,7 @@
 Сравнительная test-suite, проверяющая что Verum native SQLite (loom) даёт
 идентичные результаты с reference C-SQLite на произвольных SQL-сценариях.
 
-Нормативный обзор — `internal/specs/sqlite-native.md` §2.5 и §22.4.
+Нормативный обзор — `sqlite-native spec` §2.5 и §22.4.
 
 ## Layout
 

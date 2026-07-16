@@ -1,7 +1,7 @@
 // =============================================================================
 // t03_prepared_codec.vr — binary-protocol round-trip via PreparedSession
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.4 (binary protocol).
+// Spec: database spec §6.3.4 (binary protocol).
 // =============================================================================
 //
 // Exercises COM_STMT_PREPARE / COM_STMT_EXECUTE through the LRU

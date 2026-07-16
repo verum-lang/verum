@@ -2,7 +2,7 @@
 // core/database/common/db_handle.vr — Database<P, C> capability-typed handle
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §5.4 (capability types), §15.1 (handler use)
+// Spec: database spec §5.4 (capability types), §15.1 (handler use)
 // =============================================================================
 //
 // `Database<P, C>` is the capability-typed front door every handler

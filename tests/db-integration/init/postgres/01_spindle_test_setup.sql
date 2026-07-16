@@ -6,7 +6,7 @@
 -- volume; later runs of the container reuse the prepared state. The
 -- adapter test corpus assumes this baseline exists.
 --
--- Spec: internal/specs/database.md §22.1 (integration baseline)
+-- Spec: database spec §22.1 (integration baseline)
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;

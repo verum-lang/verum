@@ -2,7 +2,7 @@
 // core/net/weft/http3.vr — HTTP/3 (QUIC) server adapter
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §6.3 / §6.10 / §6.11
+// Spec: net-framework spec §6.3 / §6.10 / §6.11
 // RFCs: 9114 (HTTP/3), 9204 (QPACK), 9221 (QUIC datagrams),
 //  9218 (H3 extensible priorities), 9297 (H3 datagrams),
 //  draft-ietf-webtrans-http3-15 (WebTransport)

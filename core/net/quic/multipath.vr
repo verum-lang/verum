@@ -2,7 +2,7 @@
 // core/net/quic/multipath.vr — Multipath QUIC (draft-ietf-quic-multipath-21)
 // =============================================================================
 // Layer: 5 (Network — QUIC)
-// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — Multipath)
+// Spec: net-framework spec §6.10 (Phase 4 — Multipath)
 //  draft-ietf-quic-multipath-21
 // =============================================================================
 //

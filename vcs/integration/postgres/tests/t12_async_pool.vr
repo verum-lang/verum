@@ -1,7 +1,7 @@
 // =============================================================================
 // t12_async_pool.vr — async actor + pool fan-out
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.8 (async surface), §4.3 (pool).
+// Spec: database spec §6.1.8 (async surface), §4.3 (pool).
 // =============================================================================
 //
 // Proves the async PG actor is genuinely parallel:

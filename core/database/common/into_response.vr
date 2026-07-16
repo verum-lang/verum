@@ -2,7 +2,7 @@
 // core/database/common/into_response.vr — DbError → HTTP Response bridge
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §5.6, internal/specs/net-framework.md §5.6
+// Spec: database spec §5.6, net-framework spec §5.6
 // =============================================================================
 //
 // Wires `core.database.common.error.DbError` into the Weft framework's

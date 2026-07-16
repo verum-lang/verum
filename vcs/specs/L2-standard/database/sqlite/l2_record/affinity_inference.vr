@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: Affinity inference rules per SQLite §9.2
 //
-// Spec: internal/specs/sqlite-native.md §9.2
+// Spec: sqlite-native spec §9.2
 
 mount core.*;
 mount core.database.sqlite.native.l2_record.{Affinity, infer_affinity};

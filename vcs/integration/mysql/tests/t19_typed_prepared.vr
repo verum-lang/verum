@@ -1,7 +1,7 @@
 // =============================================================================
 // t19_typed_prepared.vr — typed prepared-row decoder + MysqlTypedRow
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.4 (binary protocol prepared cache).
+// Spec: database spec §6.3.4 (binary protocol prepared cache).
 // =============================================================================
 //
 // V0:

@@ -1,7 +1,7 @@
 // =============================================================================
 // t06_pool.vr — pool acquire/release accounting
 // =============================================================================
-// Spec: internal/specs/database.md §4.3 (pool), §4.2 (arena reset).
+// Spec: database spec §4.3 (pool), §4.2 (arena reset).
 // =============================================================================
 //
 // Single-threaded for v1 — concurrency-fan-out variant lands once

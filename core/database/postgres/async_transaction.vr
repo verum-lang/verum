@@ -2,7 +2,7 @@
 // core/database/postgres/async_transaction.vr — affine async transaction
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §5.5 (affine Tx), §6.1.8 (async).
+// Spec: database spec §5.5 (affine Tx), §6.1.8 (async).
 // =============================================================================
 //
 // Mirror of `core/database/postgres/transaction.vr` over the

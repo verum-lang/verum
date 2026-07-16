@@ -2,7 +2,7 @@
 // core/net/proxy/upstream_pool.vr — Upstream connection pool
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §9.3, §8.9
+// Spec: net-framework spec §9.3, §8.9
 // =============================================================================
 //
 

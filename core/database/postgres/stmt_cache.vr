@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/postgres/stmt_cache.vr — per-connection prepared-stmt cache
 // =============================================================================
-// Spec: internal/specs/database.md §6.1 (extended-query protocol)
+// Spec: database spec §6.1 (extended-query protocol)
 //
 
 // Postgres caches a parsed plan keyed by named statement on the

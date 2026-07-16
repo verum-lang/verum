@@ -10066,7 +10066,7 @@ pub(super) fn dispatch_array_method(
     // VBC interpreter pre-fix had no entry for them and panicked
     // "method 'List.as_slice' not found on value" — broke every
     // call site passing a Verum-built buffer to a C-ABI syscall.
-    // Closes RUNTIME-2 from `internal/diag/sqlite-real/FINDINGS.md`.
+    // Closes RUNTIME-2 from a local diagnostic note (not in repo).
     if method == "as_slice" || method == "as_mut_slice" {
         // SLICE-REP-UNIFY-1 (#51): the identity cast leaked raw LIST
         // pointers into slice positions, forking the slice

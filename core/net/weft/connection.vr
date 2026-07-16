@@ -2,7 +2,7 @@
 // core/net/weft/connection.vr — Per-connection HTTP/1.1 pipeline
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §4.4, §6.1
+// Spec: net-framework spec §4.4, §6.1
 // =============================================================================
 
 @arch_module(

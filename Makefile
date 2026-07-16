@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers
+.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -32,3 +32,6 @@ check-markers: ## Gate: landed-markers fence (docs/architecture/landed-markers.t
 
 check-vr-syntax: ## Gate: no Rust-style `::` in .vr sources (grammar/verum.ebnf uses `.`)
 	python3 vcs/scripts/check_no_double_colon.py --check
+
+check-internal-refs: ## Gate: no references to the internal/ directory in tracked files
+	bash scripts/ci/check_no_internal_refs.sh

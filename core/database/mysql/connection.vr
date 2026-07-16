@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/mysql/connection.vr — MysqlConnection state machine
 // =============================================================================
-// Spec: internal/specs/database.md §6.3, dev.mysql.com/doc/dev/mysql-server/
+// Spec: database spec §6.3, dev.mysql.com/doc/dev/mysql-server/
 //  latest/page_protocol_basic_packets.html
 //
 

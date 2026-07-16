@@ -2,7 +2,7 @@
 // core/net/weft/app.vr — WeftApp builder
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §9.1 (Хellо-Workld), §4.5 (Supervisor)
+// Spec: net-framework spec §9.1 (Хellо-Workld), §4.5 (Supervisor)
 // =============================================================================
 //
 

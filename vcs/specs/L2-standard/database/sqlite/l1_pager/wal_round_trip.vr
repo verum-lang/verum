@@ -6,7 +6,7 @@
 // @description: WAL round-trip — exercises the new WalWriter +
 //               WalReader + WalPager pipeline (#139 foundation).
 //
-// Spec: internal/specs/sqlite-native.md §8 (WAL mode)
+// Spec: sqlite-native spec §8 (WAL mode)
 //
 // Asserts the WAL surface composes:
 //   1. WalWriter create on a MemDb backend with explicit salts

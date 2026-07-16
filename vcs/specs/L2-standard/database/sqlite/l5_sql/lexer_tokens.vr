@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: SQL lexer — keyword + identifier + literal + operator shape
 //
-// Spec: internal/specs/sqlite-native.md §12.1
+// Spec: sqlite-native spec §12.1
 
 mount core.*;
 mount collections.List;

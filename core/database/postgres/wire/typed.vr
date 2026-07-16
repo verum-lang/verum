@@ -2,7 +2,7 @@
 // core/database/postgres/wire/typed.vr — TypedValue ADT + codec dispatch
 // =============================================================================
 // Layer: 3 (Database — postgres adapter, wire layer)
-// Spec: internal/specs/database.md §6.1.4 (binary codec register)
+// Spec: database spec §6.1.4 (binary codec register)
 // =============================================================================
 //
 // The unified type-aware codec front-end. `core.database.postgres.wire.codec`

@@ -2,7 +2,7 @@
 // core/net/weft/health.vr — /_health/live and /_health/ready
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §7.4
+// Spec: net-framework spec §7.4
 // =============================================================================
 //
 

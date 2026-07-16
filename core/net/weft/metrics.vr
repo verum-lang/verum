@@ -2,7 +2,7 @@
 // core/net/weft/metrics.vr — MetricsLayer + Prometheus-style registry
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §7.2
+// Spec: net-framework spec §7.2
 // =============================================================================
 //
 

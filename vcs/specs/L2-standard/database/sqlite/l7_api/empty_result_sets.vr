@@ -5,7 +5,7 @@
 // @timeout: 15000
 // @description: Empty-table / no-rows path coverage for SELECT / WHERE / ORDER BY / aggregates
 //
-// Spec: internal/specs/sqlite-native.md §14.2 (result-set edge cases)
+// Spec: sqlite-native spec §14.2 (result-set edge cases)
 
 mount core.*;
 mount collections.List;

@@ -1,7 +1,7 @@
 // =============================================================================
 // t05_listen_notify.vr — LISTEN/NOTIFY pub/sub via NotifyDispatcher
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.7 (LISTEN/NOTIFY).
+// Spec: database spec §6.1.7 (LISTEN/NOTIFY).
 // =============================================================================
 //
 // Two connections — A subscribes to channel `t05_ch`, B emits a

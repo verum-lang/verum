@@ -2,7 +2,7 @@
 // core/database/common/arena.vr — Spindle four-level arena hierarchy
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §4.2
+// Spec: database spec §4.2
 // =============================================================================
 //
 // The hot-path memory model for Spindle. Every hand-allocated database

@@ -2,7 +2,7 @@
 // core/net/h3/webtransport.vr — WebTransport over HTTP/3
 // =============================================================================
 // Layer: 5 (Network — HTTP/3)
-// Spec: internal/specs/net-framework.md §6.10 (Phase 4 — WebTransport)
+// Spec: net-framework spec §6.10 (Phase 4 — WebTransport)
 //  draft-ietf-webtrans-http3-15
 //  RFC 9114 §4.4 (extended CONNECT method)
 //  RFC 9220 (Bootstrapping WebSockets with HTTP/3 — same CONNECT shape)

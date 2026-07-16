@@ -1,7 +1,7 @@
 // =============================================================================
 // t12_binlog_json.vr — MySQL binary JSON decoder via binlog ROW event
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.7 (binlog row decode / JSON).
+// Spec: database spec §6.3.7 (binlog row decode / JSON).
 // =============================================================================
 //
 // V0:

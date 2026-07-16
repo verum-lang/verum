@@ -1,7 +1,7 @@
 // =============================================================================
 // t03_codec_roundtrip.vr — Phase-2 / Phase-3 binary codec round-trip
 // =============================================================================
-// Spec: internal/specs/database.md §6.1.4 (binary codec register).
+// Spec: database spec §6.1.4 (binary codec register).
 // =============================================================================
 //
 // SELECT every supported scalar type from the `phase_codec_smoke`

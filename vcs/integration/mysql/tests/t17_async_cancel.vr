@@ -1,7 +1,7 @@
 // =============================================================================
 // t17_async_cancel.vr — server-side KILL QUERY from async MySQL
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.6 (async surface),
+// Spec: database spec §6.3.6 (async surface),
 //       §6.3.9 (KILL QUERY server-side cancellation).
 // =============================================================================
 //

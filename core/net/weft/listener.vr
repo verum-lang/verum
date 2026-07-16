@@ -2,7 +2,7 @@
 // core/net/weft/listener.vr — TCP listener + shared accept loop
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec: internal/specs/net-framework.md §4.2, §4.4, §7.8
+// Spec: net-framework spec §4.2, §4.4, §7.8
 // =============================================================================
 //
 

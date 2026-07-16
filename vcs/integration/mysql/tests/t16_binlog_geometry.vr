@@ -1,7 +1,7 @@
 // =============================================================================
 // t16_binlog_geometry.vr — WKB → GeoJSON decoder for binlog GEOMETRY columns
 // =============================================================================
-// Spec: internal/specs/database.md §6.3.7 (binlog row / GEOMETRY).
+// Spec: database spec §6.3.7 (binlog row / GEOMETRY).
 // =============================================================================
 //
 // V0:

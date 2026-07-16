@@ -5,7 +5,7 @@
 // @timeout: 10000
 // @description: MockVfs fault-injection surface — crash/partial-write/disk-full
 //
-// Spec: internal/specs/sqlite-native.md §7.6 + §22.5
+// Spec: sqlite-native spec §7.6 + §22.5
 
 mount core.*;
 mount collections.List;

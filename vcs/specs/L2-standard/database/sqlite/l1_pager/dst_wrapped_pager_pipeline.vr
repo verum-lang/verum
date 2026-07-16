@@ -10,7 +10,7 @@
 //               injected-fault observability log, and reopen-after-
 //               crash recovery seam.
 //
-// Spec: internal/specs/sqlite-native.md §22.5 (DST) +
+// Spec: sqlite-native spec §22.5 (DST) +
 //       sqlite-native.md §4.10 (VFS injection)
 
 mount core.*;

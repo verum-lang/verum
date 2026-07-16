@@ -7,7 +7,7 @@
 //               sort-with-schema — exercises BINARY / NOCASE / RTRIM /
 //               UserDefined dispatch end-to-end (#157).
 //
-// Spec: internal/specs/sqlite-native.md §10.4 (key ordering) + §9.5 (collation)
+// Spec: sqlite-native spec §10.4 (key ordering) + §9.5 (collation)
 //
 // Note: this test uses the `cmp_byte_records` back-compat shim that
 // returns `Ordering` directly (no Result wrapper) — callers that need

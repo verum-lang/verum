@@ -15,7 +15,7 @@
 //               comparator surface directly so range-scan
 //               termination is provably bound-driven.
 //
-// Spec: internal/specs/sqlite-native.md §11.3 (index range scan)
+// Spec: sqlite-native spec §11.3 (index range scan)
 
 mount core.*;
 mount collections.{List, Map};

@@ -721,7 +721,7 @@ implement TlsStream {
 // Readiness waits go through the underlying TcpStream reactor; the @intrinsic
 // layer does the TLS record decode/encode. A real backend (rustls/OpenSSL/HACL*)
 // is wired via `verum.tls.*` symbols in the runtime — see backend abstraction
-// notes in internal/website/docs/stdlib/net.md.
+// notes in website:docs/stdlib/net.md.
 
 implement AsyncRead for TlsStream {
     fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Byte>) -> Poll<Result<Int, IoError>> {

@@ -318,8 +318,13 @@ Memory overhead:   < 5%
 ### Documentation
 ```rust
 // SAFETY: [reason] - required for unsafe blocks
-// Spec: XX-name.md#section - for spec-tied code
+// Spec: <spec-name> §section - for spec-tied code (logical name, never a path)
 ```
+
+**Public-file hygiene (STANDING)**: tracked files must NEVER reference the
+`internal/` directory — state the requirement in place, or cite a public doc
+(`docs/architecture/*.md`, `grammar/verum.ebnf`, `website:docs/...`).
+Gate: `make check-internal-refs`.
 
 ### Commits
 ```
@@ -346,15 +351,14 @@ perf(crate): Optimize by X%
 | **Verum Grammar** | `grammar/verum.ebnf` |
 | **Live status / debt** | `docs/architecture/tech-debt-register.md` (LIVING) + `core-tests/INVENTORY.md` (per-module conformance truth) |
 | **Multi-session task pool** | `docs/architecture/multi-session-taskpool.md` + `scripts/taskpool/tp` |
-| Type System | `internal/docs/detailed/03-type-system.md` (local-only, `internal/` is not in git) + `docs/architecture/unified-type-theory.md` |
-| Syntax | `internal/docs/detailed/05-syntax-grammar.md` (local-only) + `docs/by-example/` |
-| Context System | `internal/docs/detailed/16-context-system.md` (local-only) + `docs/by-example/16-context-system/` |
-| CBGR | `internal/docs/detailed/cbgr-implementation.md` (local-only) + `docs/by-example/14-cbgr-references/` |
+| Type System | `docs/architecture/unified-type-theory.md`; the implementation is `crates/verum_types/src/infer/` |
+| Syntax | `grammar/verum.ebnf` (the ONLY source of truth) + `docs/by-example/` |
+| Context System | specified in place in this file (§ Context System vs Computational Properties) + `docs/by-example/16-context-system/` |
+| CBGR | specified in place in this file (§ Three-Tier Reference Model) + `docs/by-example/14-cbgr-references/` |
 | **Intrinsic Dispatch Contract** | `docs/architecture/intrinsic-dispatch-contract.md` — body `@intrinsic` vs table authority, LLVM-canonical alias requirements, `static mut` cell-backed address-of, CBGR-ref bound-check, three-tier reference dispatch. Pinned rules with regression-test references. |
 | **FFI Byte-Buffer Contract** | `docs/architecture/ffi-byte-buffer-contract.md` — how byte buffers cross the Verum↔C ABI: packed `[Byte;N]` (`TypeId::U8`) vs NaN-boxed `List`; reserved-stride `FatRef`; `.as_mut_ptr()` on a subslice param (never a raw array, never `transmute`); per-platform `sockaddr` layout. Root of the B1 net-stack cascade; the `&arr`-vs-`&arr[..]` coercion footgun (task #24). |
-| Cog Distribution | `internal/docs/detailed/15-cog-distribution-architecture.md` (local-only) |
-| Cog Management | `internal/docs/detailed/15-cog-management.md` (local-only) |
-| Roadmap | `internal/docs/detailed/28-implementation-roadmap.md` — **STALE (2025-12-21): claims Tier-1 "100% production-ready", contradicted by the tech-debt register. Trust the register.** |
+| Cog system | `crates/verum_modules/` (loader/resolver) + `docs/by-example/10-mount-system/` |
+| Roadmap / status | there is NO trusted roadmap document — implementation status truth is `docs/architecture/tech-debt-register.md` + `core-tests/INVENTORY.md` |
 | SMT backend examples | `experiments/smt.rs/` |
 | verum_llvm fork  | `crates/llvm/verum_llvm/` (in-tree LLVM bindings; do NOT use `inkwell`) |
 

@@ -2,7 +2,7 @@
 // core/database/common/types.vr — Spindle wire-data types
 // =============================================================================
 // Layer: 3 (Database — common surface)
-// Spec: internal/specs/database.md §4.1, §5.1
+// Spec: database spec §4.1, §5.1
 // =============================================================================
 //
 

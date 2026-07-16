@@ -2,7 +2,7 @@
 // core/database/postgres/async_pgoutput.vr — async pgoutput consumer V0
 // =============================================================================
 // Layer: 3 (Database — postgres adapter)
-// Spec: internal/specs/database.md §6.1.7 (logical replication / pgoutput),
+// Spec: database spec §6.1.7 (logical replication / pgoutput),
 //       §6.1.8 (async surface).
 // =============================================================================
 //

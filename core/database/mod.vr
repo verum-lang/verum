@@ -2,7 +2,7 @@
 // core/database/mod.vr — Spindle (Verum database client framework)
 // =============================================================================
 // Layer: 3 (Database)
-// Spec: internal/specs/database.md
+// Spec: database spec
 // Codename: spindle
 // =============================================================================
 //
@@ -18,16 +18,16 @@
 //
 
 //  * `core.database.sqlite` — pure-Verum SQLite implementation
-//  (loom: spec internal/specs/sqlite-native.md).
+//  (loom: spec sqlite-native spec).
 //
 
 //  * `core.database.postgres` — pure-Verum Postgres v3 wire driver
-//  (alpha — see internal/specs/database.md
+//  (alpha — see database spec
 //  §6.1 for the surface).
 //
 
 //  * `core.database.mysql` — pure-Verum MySQL 8 binary driver
-//  (alpha — see internal/specs/database.md
+//  (alpha — see database spec
 //  §6.3 for the surface).
 //
 

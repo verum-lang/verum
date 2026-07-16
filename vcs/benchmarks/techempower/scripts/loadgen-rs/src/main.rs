@@ -5,7 +5,7 @@
 // A closed-loop HTTP/1.1 load generator that hits a single URL with N
 // concurrent workers for a fixed duration and reports throughput +
 // latency percentiles. Designed for the TechEmpower R23 acceptance
-// gates in `internal/specs/net-framework.md` §1.1.
+// gates in `net-framework spec` §1.1.
 //
 // Pure Rust + tokio + hyper — no external load-gen binary required, so
 // it runs identically in CI, on a developer laptop, or inside the

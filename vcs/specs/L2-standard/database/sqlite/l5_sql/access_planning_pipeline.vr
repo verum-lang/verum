@@ -8,7 +8,7 @@
 //               annotate_with_cost_schema, codegen_annotated +
 //               compile_with_options(cost-aware) end-to-end (#148).
 //
-// Spec: internal/specs/sqlite-native.md §13.3
+// Spec: sqlite-native spec §13.3
 
 mount core.*;
 mount collections.{List, Map};

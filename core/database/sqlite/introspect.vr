@@ -2,7 +2,7 @@
 // core/database/sqlite/introspect.vr — SQLite schema introspector
 // =============================================================================
 // Layer: 3 (Database — sqlite façade)
-// Spec: internal/specs/database.md §5.3 (verum db:introspect)
+// Spec: database spec §5.3 (verum db:introspect)
 // =============================================================================
 //
 

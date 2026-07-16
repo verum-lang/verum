@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @description: sys.durability re-exports full_fsync / sync_directory / pread / pwrite
 //
-// Spec: internal/specs/sqlite-native.md §3.2 Gap 2
+// Spec: sqlite-native spec §3.2 Gap 2
 //
 // Ensures the dedicated durability module is wired and callable via
 // the intent-named surface. Runtime behaviour is covered in
