@@ -101,6 +101,28 @@ fn main() {
     collect_vr_files(&core_dir, &core_dir, &mut files);
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
+    // Drop files backing `@cfg(runtime = "embedded"|"none")` module
+    // declarations from the DEFAULT bake (task #44 —
+    // CFG-RUNTIME-PRECOMPILE-FILTER-1).  Filtering here — the single file
+    // list every downstream derivation (source archive, mount dep-graph,
+    // symbol manifest, prelude seeds) reads from — keeps all four artefacts
+    // consistent.  The twin authority
+    // `module_utils::runtime_gated_modules` filters the VBC-compilation
+    // walk in `core_compiler::discover_modules`; the standalone copy below
+    // mirrors it (build scripts cannot import crate code).  `target_os` /
+    // `target_arch` gates are intentionally NOT filtered — those modules
+    // are needed for cross-target codegen.
+    let runtime_excluded = runtime_gated_module_files(&core_dir);
+    if !runtime_excluded.is_empty() {
+        let before = files.len();
+        files.retain(|(rel, _)| !runtime_excluded.excludes(rel));
+        println!(
+            "cargo:warning=Stdlib default bake: excluded {} runtime-gated file(s) ({})",
+            before - files.len(),
+            runtime_excluded.excluded_paths().join(", "),
+        );
+    }
+
     // Build uncompressed archive
     let archive = build_archive(&files);
 
@@ -1025,6 +1047,125 @@ fn write_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
 }
 
+// === Runtime-gated module filter (task #44) ============================
+//
+// Standalone mirror of `crate::module_utils::runtime_gated_modules` — the
+// two MUST stay in lockstep so the embedded source archive (this file) and
+// the VBC-compilation walk (`core_compiler::discover_modules`) drop exactly
+// the same set of files.  Build scripts cannot `use` crate code, so the
+// logic is duplicated here (same pattern as `file_to_module`, which mirrors
+// `stdlib_index::file_path_to_module_path`).
+//
+// Only `runtime = "embedded"` / `"none"` module declarations are filtered;
+// `target_os` / `target_arch` gates are kept for cross-target codegen.
+const DEFAULT_EXCLUDED_RUNTIMES: [&str; 2] = ["embedded", "none"];
+
+#[derive(Default)]
+struct RuntimeGatedFiles {
+    files: std::collections::HashSet<String>,
+    dirs: Vec<String>,
+}
+
+impl RuntimeGatedFiles {
+    fn excludes(&self, rel_path: &str) -> bool {
+        self.files.contains(rel_path)
+            || self.dirs.iter().any(|d| rel_path.starts_with(d.as_str()))
+    }
+    fn is_empty(&self) -> bool {
+        self.files.is_empty() && self.dirs.is_empty()
+    }
+    fn excluded_paths(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.files.iter().cloned().collect();
+        v.extend(self.dirs.iter().cloned());
+        v.sort();
+        v.dedup();
+        v
+    }
+}
+
+fn runtime_gated_module_files(core_root: &Path) -> RuntimeGatedFiles {
+    let mut out = RuntimeGatedFiles::default();
+    collect_runtime_gates(core_root, core_root, &mut out);
+    out
+}
+
+fn collect_runtime_gates(core_root: &Path, dir: &Path, out: &mut RuntimeGatedFiles) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_dir() {
+            if name.starts_with('.') || name.starts_with('_') || name == "target" {
+                continue;
+            }
+            collect_runtime_gates(core_root, &path, out);
+        } else if name == "mod.vr" {
+            if let Ok(content) = fs::read_to_string(&path) {
+                let rel_dir = dir
+                    .strip_prefix(core_root)
+                    .ok()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                scan_mod_vr_runtime_gates(&content, &rel_dir, out);
+            }
+        }
+    }
+}
+
+fn scan_mod_vr_runtime_gates(content: &str, rel_dir: &str, out: &mut RuntimeGatedFiles) {
+    let mut pending_gate = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+        if let Some(value) = parse_runtime_cfg_value(trimmed) {
+            pending_gate = DEFAULT_EXCLUDED_RUNTIMES.contains(&value.as_str());
+            continue;
+        }
+        if pending_gate {
+            if let Some(name) = parse_module_decl_name(trimmed) {
+                let base = if rel_dir.is_empty() {
+                    name
+                } else {
+                    format!("{}/{}", rel_dir, name)
+                };
+                out.files.insert(format!("{}.vr", base));
+                out.dirs.push(format!("{}/", base));
+            }
+        }
+        pending_gate = false;
+    }
+}
+
+fn parse_runtime_cfg_value(trimmed: &str) -> Option<String> {
+    let inner = trimmed.strip_prefix("@cfg(")?.strip_suffix(')')?;
+    let rest = inner.trim().strip_prefix("runtime")?.trim();
+    let rest = rest.strip_prefix('=')?.trim();
+    Some(rest.trim_matches('"').to_string())
+}
+
+fn parse_module_decl_name(trimmed: &str) -> Option<String> {
+    let rest = trimmed.strip_prefix("public ").unwrap_or(trimmed).trim_start();
+    let rest = rest.strip_prefix("module ")?;
+    if !rest.contains(';') || rest.trim_start().starts_with('{') {
+        return None;
+    }
+    let head = rest
+        .split(&['{', ';', '/', ' ', '\t'][..])
+        .next()
+        .unwrap_or("")
+        .trim();
+    if head.is_empty() {
+        None
+    } else {
+        Some(head.to_string())
+    }
+}
+
 fn collect_vr_files(dir: &Path, root: &Path, files: &mut Vec<(String, Vec<u8>)>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -1359,7 +1500,7 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
 const PRECOMPILE_SCHEMA_VERSION: &str =
-    "v23-2026-07-16-const_param_shadow_retname_subst";
+    "v26-2026-07-16-cfg_runtime_precompile_filter";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].

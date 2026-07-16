@@ -622,6 +622,12 @@ pub struct StdlibModuleResolver {
     modules: HashMap<String, StdlibModule>,
     /// Compilation order (topologically sorted)
     compilation_order: Vec<String>,
+    /// Files backing `@cfg(runtime = "embedded"|"none")` module declarations,
+    /// excluded from the default (full-runtime) bake (task #44). Populated at
+    /// `discover()` from the shared `module_utils::runtime_gated_modules`
+    /// authority so this VBC-compilation walk drops exactly the files that
+    /// `build.rs` drops from the embedded source archive.
+    runtime_excluded: module_utils::RuntimeGatedModules,
 }
 
 impl StdlibModuleResolver {
@@ -631,12 +637,14 @@ impl StdlibModuleResolver {
             stdlib_path: stdlib_path.into(),
             modules: HashMap::new(),
             compilation_order: Vec::new(),
+            runtime_excluded: module_utils::RuntimeGatedModules::default(),
         }
     }
 
     /// Discovers all modules in the stdlib directory
     pub fn discover(&mut self) -> Result<(), CompilationError> {
         let stdlib_path = self.stdlib_path.clone();
+        self.runtime_excluded = module_utils::runtime_gated_modules(&stdlib_path);
         self.discover_modules(&stdlib_path, "")?;
         self.resolve_dependencies()?;
         self.compute_compilation_order()?;
@@ -687,6 +695,21 @@ impl StdlibModuleResolver {
                     subdirs.push((path, name));
                 }
             } else if path.extension().map_or(false, |e| e == "vr") {
+                // Drop files backing `@cfg(runtime = "embedded"|"none")`
+                // module declarations from the default bake (task #44).
+                // These are file-submodules (e.g. `sys/embedded.vr`) swept
+                // into the parent directory's module; without this guard
+                // their symbols land in the default `runtime.vbca` and
+                // collide with the full-runtime types (#41 dup-type class).
+                let rel = path
+                    .strip_prefix(&self.stdlib_path)
+                    .ok()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"));
+                if let Some(rel) = &rel {
+                    if self.runtime_excluded.excludes(rel) {
+                        continue;
+                    }
+                }
                 vr_files.push(path);
             }
         }
@@ -735,6 +758,18 @@ impl StdlibModuleResolver {
             } else {
                 format!("{}.{}", prefix, name)
             };
+
+            // Skip an entire subtree backing a `@cfg(runtime="embedded"|"none")`
+            // module declaration (task #44 — directory-submodule form).
+            let subdir_rel = subdir
+                .strip_prefix(&self.stdlib_path)
+                .ok()
+                .map(|p| format!("{}/", p.to_string_lossy().replace('\\', "/")));
+            if let Some(subdir_rel) = &subdir_rel {
+                if self.runtime_excluded.excludes(subdir_rel) {
+                    continue;
+                }
+            }
 
             // Check for module-level @cfg in mod.vr
             // If @cfg evaluates to false, skip this entire module directory

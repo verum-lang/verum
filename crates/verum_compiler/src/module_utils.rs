@@ -402,6 +402,173 @@ pub fn derive_submodule_path(module_name: &str, file_path: &Path) -> String {
     }
 }
 
+// =============================================================================
+// RUNTIME-GATED MODULE FILTERING (task #44 — CFG-RUNTIME-PRECOMPILE-FILTER-1)
+// =============================================================================
+
+/// Runtime-profile cfg values whose file-submodules are EXCLUDED from the
+/// default (full-runtime) stdlib bake.  A `mod.vr` line like
+///
+/// ```text
+/// @cfg(runtime = "embedded")
+/// public module embedded;
+/// ```
+///
+/// declares `embedded.vr` (or an `embedded/` subtree) as belonging to a
+/// reduced runtime that the default archive must not carry — baking it
+/// pollutes `runtime.vbca` with symbols like `core.sys.embedded.BumpAllocator`
+/// that then collide with the real (full-runtime) types (the #41 dup-type
+/// class) and inflate the archive.  Only these reduced runtimes are filtered;
+/// `runtime = "full"` / `"single_thread"` etc. stay in the default bake, and
+/// `target_os` / `target_arch` module gates are NEVER filtered here (they are
+/// needed for cross-target codegen and handled by `check_module_cfg`).
+pub const DEFAULT_EXCLUDED_RUNTIMES: [&str; 2] = ["embedded", "none"];
+
+/// The set of stdlib source files excluded from the default bake because
+/// they back a `@cfg(runtime = "embedded"|"none")` module declaration.
+///
+/// Paths are stored relative to the `core/` root, forward-slash normalised
+/// (e.g. `"sys/embedded.vr"`), matching the keys used by `build.rs`'s
+/// `collect_vr_files` and derivable from the absolute paths walked by
+/// `core_compiler::discover_modules`.
+#[derive(Debug, Default, Clone)]
+pub struct RuntimeGatedModules {
+    /// Exact excluded file paths, e.g. `"sys/embedded.vr"`.
+    files: std::collections::HashSet<String>,
+    /// Excluded directory prefixes (trailing `/`), e.g. `"sys/embedded/"`,
+    /// for the case where the gated submodule is a directory with its own
+    /// `mod.vr` rather than a single file.
+    dirs: Vec<String>,
+}
+
+impl RuntimeGatedModules {
+    /// True if `rel_path` (core-relative, forward-slash) is a runtime-gated
+    /// file that must be dropped from the default bake.
+    pub fn excludes(&self, rel_path: &str) -> bool {
+        self.files.contains(rel_path)
+            || self.dirs.iter().any(|d| rel_path.starts_with(d.as_str()))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty() && self.dirs.is_empty()
+    }
+
+    pub fn excluded_paths(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.files.iter().cloned().collect();
+        v.extend(self.dirs.iter().cloned());
+        v.sort();
+        v.dedup();
+        v
+    }
+}
+
+/// Walk `core_root` for every `mod.vr` and collect the files backing
+/// module declarations gated to a reduced runtime (see
+/// [`DEFAULT_EXCLUDED_RUNTIMES`]).  This is the single authority consulted
+/// by both the source-embed walk (`build.rs`, via a mirrored standalone copy)
+/// and the VBC-compilation walk (`core_compiler::discover_modules`) so the two
+/// tiers agree on exactly which files leave the default archive.
+///
+/// The scan is deliberately line-oriented (no full parse) — the same
+/// regex-light discipline `build_dep_graph` uses — because it runs inside a
+/// build script that must not drag in `verum_fast_parser`.
+pub fn runtime_gated_modules(core_root: &Path) -> RuntimeGatedModules {
+    let mut out = RuntimeGatedModules::default();
+    collect_runtime_gates(core_root, core_root, &mut out);
+    out
+}
+
+fn collect_runtime_gates(core_root: &Path, dir: &Path, out: &mut RuntimeGatedModules) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_dir() {
+            // Skip build-artefact / hidden trees, mirroring the walkers.
+            if name.starts_with('.') || name.starts_with('_') || name == "target" {
+                continue;
+            }
+            collect_runtime_gates(core_root, &path, out);
+        } else if name == "mod.vr" {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let rel_dir = dir
+                    .strip_prefix(core_root)
+                    .ok()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                scan_mod_vr_runtime_gates(&content, &rel_dir, out);
+            }
+        }
+    }
+}
+
+/// Parse one `mod.vr` for `@cfg(runtime = "…")` attributes that guard a
+/// file-submodule declaration (`[public] module NAME;`), recording the
+/// backing file / subtree under `rel_dir` (core-relative).  Inline module
+/// blocks (`module NAME { … }`) and item-level cfgs are ignored — only the
+/// terminating-`;` file form names a whole file.
+fn scan_mod_vr_runtime_gates(content: &str, rel_dir: &str, out: &mut RuntimeGatedModules) {
+    let mut pending_gate = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+        if let Some(value) = parse_runtime_cfg_value(trimmed) {
+            pending_gate = DEFAULT_EXCLUDED_RUNTIMES.contains(&value.as_str());
+            continue;
+        }
+        if pending_gate {
+            if let Some(name) = parse_module_decl_name(trimmed) {
+                let base = if rel_dir.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}/{}", rel_dir, name)
+                };
+                out.files.insert(format!("{}.vr", base));
+                out.dirs.push(format!("{}/", base));
+            }
+        }
+        // Any declaration line consumes the pending gate; a duplicate
+        // decl (e.g. `no_runtime` guarded by two runtimes) re-arms via its
+        // own preceding `@cfg` line.
+        pending_gate = false;
+    }
+}
+
+/// Extract `V` from a `@cfg(runtime = "V")` attribute line, if present.
+fn parse_runtime_cfg_value(trimmed: &str) -> Option<String> {
+    let inner = trimmed.strip_prefix("@cfg(")?.strip_suffix(')')?;
+    let rest = inner.trim().strip_prefix("runtime")?.trim();
+    let rest = rest.strip_prefix('=')?.trim();
+    Some(rest.trim_matches('"').to_string())
+}
+
+/// Extract `NAME` from a `[public] module NAME;` file-submodule declaration.
+/// Returns `None` for inline blocks (`module NAME { … }`) or non-module lines.
+fn parse_module_decl_name(trimmed: &str) -> Option<String> {
+    let rest = trimmed.strip_prefix("public ").unwrap_or(trimmed).trim_start();
+    let rest = rest.strip_prefix("module ")?;
+    // Cut off a trailing comment / decl body so only the name token remains.
+    let head = rest
+        .split(&['{', ';', '/', ' ', '\t'][..])
+        .next()
+        .unwrap_or("")
+        .trim();
+    // File-submodule form must terminate in `;` (inline blocks open a `{`).
+    if !rest.contains(';') || rest.trim_start().starts_with('{') {
+        return None;
+    }
+    if head.is_empty() {
+        None
+    } else {
+        Some(head.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
