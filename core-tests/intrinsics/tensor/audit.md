@@ -40,9 +40,14 @@ surface. Of ~70 wrappers in `core/intrinsics/tensor.vr`, only the
 
 ## Tier contract
 
-- `unit_test.vr` — core surface with REAL Tier-1 IR bodies (new/
-  fill/from_slice/get/set/binop/unop/matmul/reduce/reshape/
-  transpose/softmax/clone/contiguous): green BOTH tiers.
+- `unit_test.vr` — core surface whose Tier-1 IR bodies EXIST
+  (new/fill/from_slice/get/set/binop/unop/matmul/reduce/reshape/
+  transpose/softmax/clone/contiguous). Interp green; AOT 1/20 —
+  the bodies are value-SHALLOW (from_slice's IR writes one element,
+  reduce/softmax ignore axis): T0179/T0201 staging. The
+  reduce_all double-vs-i64 signature abort that killed every AOT
+  compile is fixed (mode 1 routes through verum_tensor_reduce
+  with axis −1).
 - `integration_test.vr` — factories/indexing/decomp/einsum/conv/norm:
   green on `--interp`; at Tier-1 each op is a LOUD `verum_panic`
   stub ("no Tier-1 lowering yet", tensor_ir.rs `emit_panic_stub`)
