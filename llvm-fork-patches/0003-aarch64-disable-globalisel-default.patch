@@ -1,0 +1,50 @@
+From 6d616ca01f31f94c5c02b533e4c1df2e35dabe70 Mon Sep 17 00:00:00 2001
+From: old8man <oldman@gst.st>
+Date: Sun, 12 Jul 2026 10:56:27 +0300
+Subject: [PATCH] [VERUM] AArch64: disable GlobalISel by default
+ (EnableGlobalISelAtO -1)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+At OptLevel::None the upstream default (cl::init(0)) enables GlobalISel,
+whose AArch64 register-bank/instruction-select path null-derefs on
+valid IR Verum emits (RegBankSelect, KERN_INVALID_ADDRESS at 0x0).
+SelectionDAG is the mature backend and the only selector Verum targets;
+-1 disables GlobalISel at every opt level, so None uses SelectionDAG +
+the linear-scan RegAllocFast — proven crash-free standalone (llc -O0
+8/8 on the exact IR). This is the true root of the generate_native
+'crash onion': the None->Less clamp only traded the GlobalISel bug for
+the RegAllocGreedy/SplitEditor bug; both are avoided by staying at None
+with GlobalISel off.
+---
+ llvm/lib/Target/AArch64/AArch64TargetMachine.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp b/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp
+index 95eab1651..12ab12f30 100644
+--- a/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp
++++ b/llvm/lib/Target/AArch64/AArch64TargetMachine.cpp
+@@ -157,10 +157,18 @@ static cl::opt<bool>
+                            cl::desc("Enable the loop data prefetch pass"),
+                            cl::init(true));
+ 
++// VERUM: default GlobalISel OFF. At OptLevel::None (0) the upstream
++// default (cl::init(0)) enables GlobalISel, whose AArch64 register-bank
++// / instruction-select path null-derefs on valid IR that Verum's
++// codegen emits (KERN_INVALID_ADDRESS at 0x0 in RegBankSelect;
++// task #21). SelectionDAG is the mature, robust backend and is the
++// ONLY selector Verum targets; -1 disables GlobalISel at every level
++// so None uses SelectionDAG + the linear-scan RegAllocFast — the
++// combination proven crash-free standalone (llc -O0 -global-isel=false).
+ static cl::opt<int> EnableGlobalISelAtO(
+     "aarch64-enable-global-isel-at-O", cl::Hidden,
+     cl::desc("Enable GlobalISel at or below an opt level (-1 to disable)"),
+-    cl::init(0));
++    cl::init(-1));
+ 
+ static cl::opt<bool>
+     EnableSVEIntrinsicOpts("aarch64-enable-sve-intrinsic-opts", cl::Hidden,
+-- 
+2.50.1 (Apple Git-155)
+
