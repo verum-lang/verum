@@ -390,13 +390,22 @@ fn main() {
                     if published {
                         let _ = std::fs::create_dir_all(checksum_path.parent().unwrap());
                         let _ = std::fs::write(&checksum_path, &current_hash);
+                        // T0219: record WHICH wire schema produced the
+                        // published pair so a later failed rebake can
+                        // tell "stale but compatible" from "stale and
+                        // wire-incompatible".
+                        let _ = std::fs::write(
+                            checksum_path.with_extension("schema"),
+                            PRECOMPILE_SCHEMA_VERSION,
+                        );
                         println!(
                             "cargo:warning=Stdlib precompile refreshed; checksum updated to {}",
                             &current_hash[..16]
                         );
                     } else {
+                        assert_last_good_schema_compatible(&checksum_path);
                         println!(
-                            "cargo:warning=Stdlib precompile staging publish FAILED (missing or unrenameable staged artefacts at {}) — continuing with last-good artefacts",
+                            "cargo:warning=Stdlib precompile staging publish FAILED (missing or unrenameable staged artefacts at {}) — continuing with last-good artefacts (same wire schema)",
                             staging_dir.display()
                         );
                     }
@@ -404,17 +413,19 @@ fn main() {
                 }
                 Ok(s) => {
                     let _ = std::fs::remove_dir_all(&staging_dir);
+                    assert_last_good_schema_compatible(&checksum_path);
                     println!(
                         "cargo:warning=verum_stdlib_precompiler exited with {} — \
-                         continuing with stale artefacts (typecheck/codegen will use last-good)",
+                         continuing with stale artefacts (same wire schema)",
                         s
                     );
                 }
                 Err(e) => {
                     let _ = std::fs::remove_dir_all(&staging_dir);
+                    assert_last_good_schema_compatible(&checksum_path);
                     println!(
                         "cargo:warning=verum_stdlib_precompiler invocation failed: {} — \
-                         continuing with stale artefacts",
+                         continuing with stale artefacts (same wire schema)",
                         e
                     );
                 }
@@ -1626,6 +1637,33 @@ fn is_target_triple_dir(name: &str) -> bool {
 /// `runtime.core_metadata` artefact pair — when this digest matches
 /// the stored value beside the archive, the artefacts are reused
 /// without invoking `verum_stdlib_precompiler`.
+
+/// T0219 — a FAILED rebake may only fall back to the last-good
+/// archive when that archive was produced under the CURRENT wire
+/// schema. Falling back across a schema change embeds bytecode the
+/// new decoder mis-parses (the 2026-07-16 incident: a flaky bake —
+/// T0170 — silently reused a pre-re-point archive; the mounted
+/// tensor_broadcast wrapper then round-tripped corrupt and returned
+/// nil while locally-compiled code worked). Loud build failure beats
+/// a silently wrong stdlib.
+fn assert_last_good_schema_compatible(checksum_path: &Path) {
+    let schema_path = checksum_path.with_extension("schema");
+    let last_good = std::fs::read_to_string(&schema_path).unwrap_or_default();
+    let last_good = last_good.trim();
+    if !last_good.is_empty() && last_good == PRECOMPILE_SCHEMA_VERSION {
+        return; // compatible — the stale-but-same-wire fallback is safe
+    }
+    panic!(
+        "stdlib precompile FAILED and the last-good archive was baked under \
+         schema '{}' (current: '{}'). Continuing would embed a wire-\
+         incompatible stdlib (silent bytecode corruption at runtime). \
+         Fix the bake failure above (registration-order flake? see T0170) \
+         or clear target/precompiled-stdlib and rebuild.",
+        if last_good.is_empty() { "<unrecorded>" } else { last_good },
+        PRECOMPILE_SCHEMA_VERSION,
+    );
+}
+
 fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
     let _ = core_dir;
     let mut hasher = blake3::Hasher::new();
