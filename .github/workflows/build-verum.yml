@@ -1,0 +1,148 @@
+name: Build Verum (reusable matrix)
+
+# Reusable build matrix shared by `dev-release.yml` (rolling `dev` tag) and
+# `release.yml` (versioned `v*` tags). One authority for the platform set,
+# build flags, packaging, and asset naming:
+#
+#   verum-<version>-<triple>.tar.gz   (Linux / macOS)
+#   verum-<version>-<triple>.zip      (Windows)
+#   + a matching `.sha256` per asset
+#
+# `<version>` is the caller-supplied `artifact-version` input (`dev` for the
+# rolling release, the tag name for versioned releases) — the same pattern
+# `packaging/homebrew/verum.rb` consumes.
+#
+# Host platforms == every OS/arch pair GitHub provides hosted runners for.
+# The single `verum` binary then cross-compiles user programs to the full
+# target matrix (see `llvm/llvm.toml` targets), so host coverage — not
+# target coverage — is what this matrix defines. FreeBSD has no hosted
+# runner; FreeBSD hosts stay on source builds for now.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-version:
+        description: "Version string baked into asset names (`dev` or the tag, e.g. `v0.2.0`)"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.triple }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    # `experimental` platforms may fail without failing the release.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            experimental: false
+          - triple: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            experimental: false
+          # Intel macOS: macos-13 was retired; macos-15-intel is the
+          # current Intel-hosted runner label.
+          - triple: x86_64-apple-darwin
+            runner: macos-15-intel
+            experimental: false
+          - triple: aarch64-apple-darwin
+            runner: macos-latest
+            experimental: false
+          - triple: x86_64-pc-windows-msvc
+            runner: windows-latest
+            experimental: false
+          # windows-11-arm hosted runners are newer and the Windows/ARM64
+          # LLVM prebuilt lands last — keep experimental until proven green.
+          - triple: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # rust-toolchain.toml pins the nightly channel (edition 2024 +
+      # #![feature(pattern)]); let rustup pick it up, just make sure the
+      # cross target's std is present.
+      - name: Install Rust toolchain (nightly per rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          targets: ${{ matrix.triple }}
+          components: rustfmt, clippy, rust-src
+
+      # MSVC env (cl/link/LIB/INCLUDE) is needed by cc/cmake build scripts
+      # (z3-sys bundled) and by lld-link for the CRT import libs.
+      - name: Load MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.triple == 'aarch64-pc-windows-msvc' && 'arm64' || 'x64' }}
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
+      # .cargo/config.toml selects `lld-link` (shipped in llvm/install/bin)
+      # as the linker for every MSVC crate — it must be on PATH before the
+      # first cargo invocation (same constraint build-windows.ps1 documents).
+      - name: Put llvm/install/bin on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "${GITHUB_WORKSPACE}/llvm/install/bin" >> "$GITHUB_PATH"
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.triple }}
+
+      - name: Build verum
+        shell: bash
+        run: cargo build --release --locked -p verum_cli --target ${{ matrix.triple }}
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.triple }}/release/verum"
+          [[ "${RUNNER_OS}" == "Windows" ]] && BIN="${BIN}.exe"
+          "${BIN}" --version
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="verum-${{ inputs.artifact-version }}-${{ matrix.triple }}"
+          mkdir -p dist/stage
+          cp LICENSE README.md dist/stage/
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            cp "target/${{ matrix.triple }}/release/verum.exe" dist/stage/
+            ASSET="${NAME}.zip"
+            (cd dist/stage && 7z a "../${ASSET}" .)
+          else
+            cp "target/${{ matrix.triple }}/release/verum" dist/stage/
+            chmod +x dist/stage/verum
+            ASSET="${NAME}.tar.gz"
+            tar czf "dist/${ASSET}" -C dist/stage verum LICENSE README.md
+          fi
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${ASSET}" > "${ASSET}.sha256"
+          else
+            shasum -a 256 "${ASSET}" > "${ASSET}.sha256"
+          fi
+          rm -rf stage
+          ls -lh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verum-${{ matrix.triple }}
+          path: dist/*
+          if-no-files-found: error
