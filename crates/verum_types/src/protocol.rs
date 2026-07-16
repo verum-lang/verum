@@ -7158,49 +7158,14 @@ impl ProtocolChecker {
         }
     }
 
-    /// Check structural typing: does a type have the required methods?
-    ///
-
-    /// This allows duck typing - if a type has the right methods, it can be used
-    /// even without an explicit implementation.
-    /// Spec: Protocol system - Structural typing support
-    ///
-
-    /// Checks if a type structurally implements a protocol by verifying
-    /// that it has all required methods with compatible signatures.
-    pub fn check_structural(&self, ty: &Type, _required_methods: &Map<Text, Type>) -> bool {
-        // For primitive types, we check if they have standard methods
-        match ty {
-            Type::Int | Type::Float | Type::Bool | Type::Text | Type::Char => {
-                // Primitive types implement standard protocols:
-                // - Eq: equality comparison
-                // - Show: string representation
-                // - Ord (for numeric types): comparison
-                // For structural checking, verify required methods are minimal
-                true
-            }
-            Type::Unit => {
-                // Unit type implements Eq and Show trivially
-                true
-            }
-            Type::Array { .. } | Type::Tuple { .. } | Type::Record { .. } => {
-                // Collection types implement Eq and Show if elements do
-                // For now, assume they do
-                true
-            }
-            Type::Named { .. } => {
-                // For named types, structural checking would require
-                // querying the type definition for available methods
-                // For now, return true (full implementation would introspect)
-                true
-            }
-            _ => {
-                // Other types (functions, references, etc.) don't have
-                // standard methods for structural checking
-                false
-            }
-        }
-    }
+    // NOTE (T0117, register A25): a public `check_structural` "duck typing"
+    // method used to live here. It IGNORED its required-methods argument and
+    // returned `true` for every Named/Record/primitive type — an unsound
+    // conformance oracle. It also had ZERO callers workspace-wide, so per the
+    // redundancy-elimination directive the lying dead API was REMOVED rather
+    // than speculatively implemented. If structural conformance ever becomes
+    // a real language feature, write it against the protocol registry's
+    // method tables (and a spec) — never a blanket `true`.
 
     /// Generate VTable for protocol implementation
     ///
