@@ -29,6 +29,7 @@ mount mem.{Layout, AllocError};
 // Section 1: StackAllocator — construction + static accounting
 // =============================================================================
 
+@ignore  // CONST-GENERIC-AOT-ARCHIVE-LEG: interp GREEN (r38, 477/0) — Tier-1 mono does not yet specialize ARCHIVE const-generic bodies (LoadT{Generic} null); un-pin with the AOT leg
 @test
 fn test_stack_new_is_empty() {
     let a = StackAllocator<256>.new();
@@ -39,6 +40,7 @@ fn test_stack_new_is_empty() {
     assert_eq(a.alloc_count(), 0);
 }
 
+@ignore  // CONST-GENERIC-AOT-ARCHIVE-LEG: interp GREEN (r38, 477/0) — Tier-1 mono does not yet specialize ARCHIVE const-generic bodies (LoadT{Generic} null); un-pin with the AOT leg
 @test
 fn test_stack_preset_alias_capacity() {
     // `TinyStackAllocator` is `StackAllocator<1024>` — the alias must
@@ -190,6 +192,7 @@ fn test_restore_then_realloc_reuses_space() {
 // Section 5: ArenaAllocator — chunked accounting
 // =============================================================================
 
+@ignore  // CONST-GENERIC-AOT-ARCHIVE-LEG: interp GREEN (r38, 477/0) — Tier-1 mono does not yet specialize ARCHIVE const-generic bodies (LoadT{Generic} null); un-pin with the AOT leg
 @test
 fn test_arena_new_accounting() {
     let a = ArenaAllocator<1024, 4>.new();
@@ -223,6 +226,7 @@ fn test_arena_savepoint_restore() {
 // Section 6: PoolAllocator — fixed-block accounting
 // =============================================================================
 
+@ignore  // CONST-GENERIC-AOT-ARCHIVE-LEG: interp GREEN (r38, 477/0) — Tier-1 mono does not yet specialize ARCHIVE const-generic bodies (LoadT{Generic} null); un-pin with the AOT leg
 @test
 fn test_pool_new_accounting() {
     let p = PoolAllocator<64, 8>.new();
