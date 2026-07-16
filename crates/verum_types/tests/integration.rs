@@ -470,6 +470,29 @@ fn test_unify_functions() {
 
 #[test]
 fn test_occurs_check() {
+    // The occurs check fires where NO cycle-breaking arm applies (T0171).
+    // Function/Reference cycles break deliberately (see the companion test);
+    // a tuple cycle has no such arm and must stay an InfiniteType error.
+    let mut unifier = Unifier::new();
+    let span = Span::dummy();
+
+    let v = TypeVar::fresh();
+    let ty = Type::Tuple(List::from(vec![Type::Var(v), Type::int()]));
+
+    let result = unifier.unify(&Type::Var(v), &ty, span);
+    assert!(
+        matches!(result, Err(TypeError::InfiniteType { .. })),
+        "tuple-shaped cycle must be InfiniteType, got {result:?}"
+    );
+}
+
+#[test]
+fn test_function_cycle_breaks_instead_of_infinite_type() {
+    // #115 contract (bind_var cycle-breaking): binding v against a FUNCTION
+    // type containing v replaces the recursive occurrence with a fresh hole
+    // instead of erroring — real conflicts surface later as Mismatch at the
+    // call site. This test pinned Err(InfiniteType) before #115 and was the
+    // third masked-red target in the B9 fail-fast chain (T0171).
     let mut unifier = Unifier::new();
     let span = Span::dummy();
 
@@ -477,7 +500,10 @@ fn test_occurs_check() {
     let ty = Type::function(List::from(vec![Type::Var(v)]), Type::int());
 
     let result = unifier.unify(&Type::Var(v), &ty, span);
-    assert!(matches!(result, Err(TypeError::InfiniteType { .. })));
+    assert!(
+        result.is_ok(),
+        "function-shaped cycle must break with fresh holes, got {result:?}"
+    );
 }
 
 // ============================================================================
