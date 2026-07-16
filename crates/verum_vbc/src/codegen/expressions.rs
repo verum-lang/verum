@@ -5227,6 +5227,69 @@ impl VbcCodegen {
             }
         };
 
+        // SCALAR-DEBUG-STATIC-1: `f"{n:?}"` on a STATICALLY-primitive
+        // argument is Display-identical by the interpreter's canon
+        // (format_value_for_print's dedicated Int/Float/Bool branches) —
+        // and Tier-1's dyn fmt_debug RTS-SCALAR-GUARD default returns 0
+        // for scalars, so `{int:?}` printed nothing at AOT. Compile the
+        // INNER expression (skip the desugar's `&`) and emit ToString —
+        // one bytecode shape, both tiers agree by construction.
+        if (func_name == "format_debug" || func_name.ends_with(".format_debug"))
+            && args.len() == 1
+        {
+            let inner: &Expr = match &args[0].kind {
+                ExprKind::Unary {
+                    op: verum_ast::expr::UnOp::Ref,
+                    expr,
+                } => expr,
+                _ => &args[0],
+            };
+            // Path-variable primitives are authoritative in VarTypeKind
+            // (variable_type_names is not always populated for simple
+            // let-bindings — the 11818 dispatch comment documents the
+            // same gap); fall back to the name channels for the rest.
+            let kind_scalar = if let ExprKind::Path(path) = &inner.kind {
+                path.as_ident()
+                    .map(|id| {
+                        use crate::codegen::context::VarTypeKind;
+                        matches!(
+                            self.ctx.get_variable_type(&id.name),
+                            VarTypeKind::Int
+                                | VarTypeKind::Float
+                                | VarTypeKind::Bool
+                                | VarTypeKind::Byte
+                                | VarTypeKind::Int32
+                                | VarTypeKind::UInt64
+                        )
+                    })
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            let t = self
+                .extract_expr_type_name(inner)
+                .or_else(|| self.infer_expr_type_name(inner));
+            let is_scalar = kind_scalar
+                || t
+                    .as_deref()
+                    .map(|n| {
+                        let n = n.trim();
+                        verum_common::well_known_types::type_names::is_primitive_value_type(n)
+                            && n != "Char"
+                            && n != "char"
+                    })
+                    .unwrap_or(false);
+            if is_scalar {
+                let src = self
+                    .compile_expr(inner)?
+                    .or_internal("format_debug scalar arg has no value")?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::ToString { dst, src });
+                self.ctx.free_temp(src);
+                return Ok(Some(dst));
+            }
+        }
+
         // TEXT-DEBUG-STATIC-1: `f"{x:?}"` desugars (in the parser, which
         // has no type info) to the GENERIC `format_debug(&x)`. For a
         // STATICALLY-Text argument, rewrite to the concrete
