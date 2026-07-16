@@ -685,6 +685,23 @@ pub struct VbcCodegen {
     /// it — locals shadow imports (LOCAL-TYPE-SHADOW-1).
     archive_claimed_type_ids: std::collections::HashSet<u32>,
 
+    /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): bare simple type name → the
+    /// module-qualified key of its FIRST archive registrant.  Lets
+    /// `register_archive_type_qualified` recognise when a SECOND,
+    /// distinct module registers the same leaf name (two different
+    /// qualified keys, same leaf) and demote the bare slot to
+    /// `ambiguous_bare_type_names`.  Keyed by qualified key rather than
+    /// numeric id so an idempotent re-registration of the SAME type
+    /// (identical qualified key) never spuriously flips to ambiguous.
+    type_name_first_qualifier: std::collections::HashMap<String, String>,
+
+    /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): bare simple type names that
+    /// two or more DISTINCT modules registered.  The body-merge remap
+    /// (`merge_archive_function_bodies`) must NOT trust the first-wins
+    /// bare slot for these — it resolves them deterministically by
+    /// module-qualified key instead (min-by-qualified-name, ARCH-P2).
+    ambiguous_bare_type_names: std::collections::HashSet<String>,
+
     /// Archive-wide function-name → user-side FunctionId index (task #12).
     /// Populated by `archive_ctx_loader::record_archive_function_name`
     /// during archive load.  Used by Tier-2 cross-module Call resolution
@@ -1762,6 +1779,8 @@ impl VbcCodegen {
             // ast_type_to_type_ref and type_ref_for_type_kind can do a single lookup
             // instead of hardcoded match arms.
             archive_claimed_type_ids: std::collections::HashSet::new(),
+            type_name_first_qualifier: std::collections::HashMap::new(),
+            ambiguous_bare_type_names: std::collections::HashSet::new(),
             sibling_impl_counters: std::collections::HashMap::new(),
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
@@ -4975,6 +4994,27 @@ impl VbcCodegen {
             .filter(|p| !p.is_empty())
             .map(|p| format!("{}.{}", p, simple_name));
         if let Some(q) = qualified_key.clone() {
+            // TYPE-REMAP-QUALIFIED-ONLY-1 (#45): a bare simple name is a
+            // safe body-merge remap anchor ONLY while a single module
+            // owns it.  Record the first qualified owner; when a SECOND,
+            // distinct qualified key claims the same leaf, demote the
+            // bare slot to ambiguous so `merge_archive_function_bodies`
+            // stops trusting the first-wins bare entry (whose winner is
+            // registration-order-dependent — the map-walk non-determinism
+            // that seated an r33 const-generic record on Text) and
+            // switches to deterministic module-qualified resolution.
+            // Keyed on the qualified key, not the numeric id, so an
+            // idempotent re-registration of the SAME type never trips it.
+            match self.type_name_first_qualifier.get(&simple_name) {
+                None => {
+                    self.type_name_first_qualifier
+                        .insert(simple_name.clone(), q.clone());
+                }
+                Some(first) if first != &q => {
+                    self.ambiguous_bare_type_names.insert(simple_name.clone());
+                }
+                Some(_) => {}
+            }
             self.type_name_to_id.entry(q).or_insert(ty.id);
         }
         // Field layout cache for `field_type_name` consumers.  Uses
@@ -5049,6 +5089,53 @@ impl VbcCodegen {
                 .or_insert(names);
         }
         self.push_type_dedupe(ty);
+    }
+
+    /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): deterministically resolve a
+    /// bare simple type name to a codegen `TypeId` when the exact
+    /// module-qualified key is unavailable.  Collects every
+    /// module-qualified registration whose leaf equals `simple`
+    /// (`"<module>.<simple>"`) and picks the min by qualified key —
+    /// the ARCH-P2 determinism discipline (min-by-key, never a HashMap
+    /// first-match walk).  Returns `None` when no qualified candidate
+    /// exists, so callers can distinguish "ambiguous, pick a stable
+    /// winner" from "genuinely unknown".
+    fn resolve_bare_type_name_deterministic(
+        &self,
+        simple: &str,
+    ) -> Option<crate::types::TypeId> {
+        let suffix = format!(".{}", simple);
+        self.type_name_to_id
+            .iter()
+            .filter(|(k, _)| k.ends_with(&suffix))
+            .min_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()))
+            .map(|(_, id)| *id)
+    }
+
+    /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): when the body-merge remap
+    /// finds no target for an archive-local type id, `map_type_id`
+    /// falls back to IDENTITY — using the module-local id as-is in the
+    /// user namespace.  That is safe for genuinely-unimported types
+    /// (they resolve later by name), but a MISCOMPILE when the id is
+    /// already owned by a DIFFERENT, live user-side type: the archive
+    /// body's instructions would then dispatch against a foreign type
+    /// (the Text(4)-class incident).  Returns `Some(foreign_name)` when
+    /// leaving archive type `simple` (module-local id `id`) to identity
+    /// would alias such a foreign type — deterministically the min-named
+    /// offender — and `None` when identity is safe (below the user band,
+    /// unclaimed, or claimed only by same-leaf registrations).
+    fn identity_remap_alias(&self, simple: &str, id: u32) -> Option<String> {
+        if id < crate::types::TypeId::FIRST_USER {
+            return None;
+        }
+        let suffix = format!(".{}", simple);
+        self.type_name_to_id
+            .iter()
+            .filter(|(_, tid)| tid.0 == id)
+            .map(|(nm, _)| nm)
+            .filter(|nm| nm.as_str() != simple && !nm.ends_with(&suffix))
+            .min_by(|a, b| a.as_str().cmp(b.as_str()))
+            .cloned()
     }
 
     /// Resolve a [`TypeRef`] to its canonical AST-style field-type
@@ -21324,10 +21411,48 @@ impl VbcCodegen {
             let qualified_tid = (!archive_module.name.is_empty())
                 .then(|| format!("{}.{}", archive_module.name, archive_name))
                 .and_then(|q| self.type_name_to_id.get(&q).copied());
-            if let Some(codegen_tid) =
-                qualified_tid.or_else(|| self.type_name_to_id.get(archive_name).copied())
-            {
-                type_id_remap.insert(ty.id.0, codegen_tid.0);
+            // TYPE-REMAP-QUALIFIED-ONLY-1 (#45): the exact per-module
+            // qualified key is authoritative.  When it misses, the bare
+            // simple name is a safe fallback ONLY while it is
+            // unambiguous (a single module owns it).  For a leaf that
+            // TWO modules registered, the first-wins bare slot points at
+            // a registration-order-dependent winner — resolve it
+            // deterministically by min-qualified-name instead so the
+            // remap is stable across bakes and never seats this module's
+            // bodies on a foreign same-named type.
+            let resolved = qualified_tid.or_else(|| {
+                if self.ambiguous_bare_type_names.contains(archive_name) {
+                    self.resolve_bare_type_name_deterministic(archive_name)
+                } else {
+                    self.type_name_to_id.get(archive_name).copied()
+                }
+            });
+            match resolved {
+                Some(codegen_tid) => {
+                    type_id_remap.insert(ty.id.0, codegen_tid.0);
+                }
+                None => {
+                    // No remap target: `map_type_id` will fall back to
+                    // IDENTITY.  Refuse to do that SILENTLY when the
+                    // archive-local id aliases a DIFFERENT live user type
+                    // — that is the Text(4)-class miscompile.  Genuinely
+                    // unimported types (id unclaimed in the user
+                    // namespace) still resolve later by name, so those
+                    // stay quiet.
+                    if let Some(foreign) =
+                        self.identity_remap_alias(archive_name, ty.id.0)
+                    {
+                        tracing::error!(
+                            target: "vbc_codegen::type_remap",
+                            "TYPE-REMAP-QUALIFIED-ONLY-1: archive type '{}' \
+                             (module '{}', local id {}) has no qualified remap \
+                             target and its id aliases live user type '{}' — \
+                             refusing silent identity remap (would miscompile \
+                             this module's bodies onto a foreign type)",
+                            archive_name, archive_module.name, ty.id.0, foreign,
+                        );
+                    }
+                }
             }
         }
 
@@ -23024,6 +23149,125 @@ mod tests {
         // But the name-vs-id check is silent because both names are
         // claimed against the same id.
         assert_eq!(report.duplicate_names_with_different_ids.len(), 0);
+    }
+
+    /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): two modules registering the
+    /// same simple type name must each resolve to their OWN id via the
+    /// module-qualified key, the bare leaf must be flagged ambiguous,
+    /// and the deterministic fallback must pick the min-by-qualified-name
+    /// candidate (never a registration-order-dependent first-wins).
+    #[test]
+    fn test_type_remap_qualified_only_ambiguous_bare_and_deterministic() {
+        use crate::types::{StringId, TypeDescriptor, TypeId, TypeKind};
+        let mut codegen = VbcCodegen::new();
+        let mk = |id: u32| TypeDescriptor {
+            id: TypeId(id),
+            name: StringId(0),
+            kind: TypeKind::Unit,
+            ..Default::default()
+        };
+        // "Group" registered by two DISTINCT modules with distinct ids.
+        // zz.tokens registers FIRST so that first-wins (the OLD, unsafe
+        // behaviour) would have seated the bare leaf on the zz id — the
+        // deterministic resolver must instead pick the min-named module.
+        codegen.register_archive_type_qualified(
+            mk(1301),
+            "Group".to_string(),
+            Some("zz.tokens"),
+            None,
+        );
+        codegen.register_archive_type_qualified(
+            mk(1300),
+            "Group".to_string(),
+            Some("aa.algebra"),
+            None,
+        );
+
+        // Each qualified key resolves to its own module's id.
+        let aa = codegen
+            .type_name_to_id
+            .get("aa.algebra.Group")
+            .copied()
+            .expect("aa.algebra.Group qualified key registered");
+        let zz = codegen
+            .type_name_to_id
+            .get("zz.tokens.Group")
+            .copied()
+            .expect("zz.tokens.Group qualified key registered");
+        assert_ne!(aa.0, zz.0, "distinct modules must keep distinct ids");
+
+        // The bare leaf is flagged ambiguous — no first-wins trust.
+        assert!(
+            codegen.ambiguous_bare_type_names.contains("Group"),
+            "second distinct-module registration must mark the bare leaf ambiguous",
+        );
+
+        // Deterministic fallback picks the MIN qualified key
+        // ("aa.algebra.Group" < "zz.tokens.Group"), independent of the
+        // registration order above.
+        let resolved = codegen
+            .resolve_bare_type_name_deterministic("Group")
+            .expect("ambiguous leaf still resolves deterministically");
+        assert_eq!(
+            resolved.0, aa.0,
+            "deterministic resolution must pick min-by-qualified-name (aa.algebra)",
+        );
+    }
+
+    /// TYPE-REMAP-QUALIFIED-ONLY-1 (#45): the identity-remap alias guard
+    /// fires ONLY when leaving an archive type to identity would seat it
+    /// on a DIFFERENT, live user-side type — the Text(4)-class hazard.
+    /// It stays silent for below-user-band ids, for a type's own
+    /// same-leaf registrations, and for unclaimed ids.
+    #[test]
+    fn test_type_remap_identity_alias_guard() {
+        use crate::types::{StringId, TypeDescriptor, TypeId, TypeKind};
+        let mut codegen = VbcCodegen::new();
+        let mk = |id: u32| TypeDescriptor {
+            id: TypeId(id),
+            name: StringId(0),
+            kind: TypeKind::Unit,
+            ..Default::default()
+        };
+        codegen.register_archive_type_qualified(
+            mk(1400),
+            "Bar".to_string(),
+            Some("m.core"),
+            None,
+        );
+        let bar = codegen
+            .type_name_to_id
+            .get("m.core.Bar")
+            .copied()
+            .expect("Bar registered")
+            .0;
+
+        // An unrelated archive type "Foo" whose module-local id happens
+        // to equal Bar's user id — identity would alias Bar. Flagged.
+        assert_eq!(
+            codegen.identity_remap_alias("Foo", bar),
+            Some("Bar".to_string()),
+            "identity onto a foreign live user type must be flagged",
+        );
+        // Bar's OWN id is not a foreign alias for Bar (bare + same-leaf
+        // qualified registrations are excluded).
+        assert_eq!(
+            codegen.identity_remap_alias("Bar", bar),
+            None,
+            "a type's own registrations must not be treated as a foreign alias",
+        );
+        // Below the user band (primitive/semantic ids), identity is safe.
+        assert_eq!(
+            codegen.identity_remap_alias("Foo", TypeId::FIRST_USER - 1),
+            None,
+            "below-user-band ids never trip the alias guard",
+        );
+        // An unclaimed user-band id is safe (resolves later by name).
+        assert_eq!(
+            codegen.identity_remap_alias("Foo", 999_999),
+            None,
+            "an unclaimed user-band id is not an alias",
+        );
     }
 
     /// `alloc_user_type_id` must skip reserved ranges (#170).
