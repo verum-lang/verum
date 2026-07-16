@@ -36,6 +36,46 @@
 module core.intrinsics.tensor;
 
 // =============================================================================
+// SECTION 0: Element dtype identifiers
+// =============================================================================
+// Canonical dtype ids accepted by tensor_new / tensor_fill /
+// tensor_from_slice / tensor_cast. These mirror the runtime DType
+// byte encoding (verum_vbc::dtype::DType::from_byte) — id 0 is F32,
+// id 1 is F64. Passing a raw integer works but reads wrong at the
+// call-site; use the named constants.
+
+/// 32-bit IEEE-754 float element type
+public const DTYPE_F32: Int = 0;
+/// 64-bit IEEE-754 float element type (the interpreter's canonical lane)
+public const DTYPE_F64: Int = 1;
+/// 16-bit IEEE-754 half-precision float
+public const DTYPE_F16: Int = 2;
+/// bfloat16 (truncated f32) element type
+public const DTYPE_BF16: Int = 3;
+/// 64-bit signed integer element type
+public const DTYPE_I64: Int = 4;
+/// 32-bit signed integer element type
+public const DTYPE_I32: Int = 5;
+/// 16-bit signed integer element type
+public const DTYPE_I16: Int = 6;
+/// 8-bit signed integer element type
+public const DTYPE_I8: Int = 7;
+/// 64-bit unsigned integer element type
+public const DTYPE_U64: Int = 8;
+/// 32-bit unsigned integer element type
+public const DTYPE_U32: Int = 9;
+/// 16-bit unsigned integer element type
+public const DTYPE_U16: Int = 10;
+/// 8-bit unsigned integer element type
+public const DTYPE_U8: Int = 11;
+/// Boolean element type (one byte per element)
+public const DTYPE_BOOL: Int = 12;
+/// Complex of two f32 components
+public const DTYPE_COMPLEX64: Int = 13;
+/// Complex of two f64 components
+public const DTYPE_COMPLEX128: Int = 14;
+
+// =============================================================================
 // SECTION 1: Tensor Creation
 // =============================================================================
 
@@ -95,7 +135,7 @@ public fn tensor_squeeze(t: Int) -> Int { @intrinsic("TENSOR_SQUEEZE", t) }
 /// Add dimension of size 1
 public fn tensor_unsqueeze(t: Int, dim: Int) -> Int { @intrinsic("TENSOR_UNSQUEEZE", t, dim) }
 
-/// Repeat tensor along dimensions
+/// Repeat the whole tensor `repeats` times (flat tiling)
 public fn tensor_repeat<R>(t: Int, repeats: R) -> Int { @intrinsic("TENSOR_REPEAT", t, repeats) }
 
 /// Make tensor contiguous in memory
@@ -117,13 +157,15 @@ public fn tensor_index_select<I>(t: Int, dim: Int, indices: I) -> Int { @intrins
 /// Gather elements along axis
 public fn tensor_gather(t: Int, dim: Int, indices: Int) -> Int { @intrinsic("TENSOR_GATHER", t, dim, indices) }
 
-/// Concatenate tensors along axis
-public fn tensor_concat(tensors: Int, dim: Int) -> Int { @intrinsic("TENSOR_CONCAT", tensors, dim) }
+/// Concatenate tensors along axis. `tensors` is a List of handles
+/// (a single bare handle is also accepted).
+public fn tensor_concat<T>(tensors: T, dim: Int) -> Int { @intrinsic("TENSOR_CONCAT", tensors, dim) }
 
-/// Stack tensors along new axis
-public fn tensor_stack(tensors: Int, dim: Int) -> Int { @intrinsic("TENSOR_STACK", tensors, dim) }
+/// Stack tensors along a new axis. `tensors` is a List of handles.
+public fn tensor_stack<T>(tensors: T, dim: Int) -> Int { @intrinsic("TENSOR_STACK", tensors, dim) }
 
-/// Split tensor into chunks
+/// Split tensor into `chunks` equal parts along `dim`.
+/// Returns a List of chunk handles.
 public fn tensor_split(t: Int, chunks: Int, dim: Int) -> Int { @intrinsic("TENSOR_SPLIT", t, chunks, dim) }
 
 /// Broadcast tensor to target shape
@@ -186,22 +228,24 @@ public fn tensor_einsum<E>(expr: E, tensors: Int) -> Int { @intrinsic("TENSOR_EI
 // SECTION 7: Matrix Decomposition
 // =============================================================================
 
-/// Singular Value Decomposition
+/// Singular Value Decomposition — returns the singular-value
+/// vector S (descending). Full U/S/Vh surface: T0179 epic.
 public fn tensor_svd(t: Int) -> Int { @intrinsic("TENSOR_SVD", t) }
 
-/// QR Decomposition
+/// QR Decomposition — returns the orthogonal factor Q.
 public fn tensor_qr(t: Int) -> Int { @intrinsic("TENSOR_QR", t) }
 
-/// LU Decomposition
+/// LU Decomposition — returns the upper factor U.
 public fn tensor_lu(t: Int) -> Int { @intrinsic("TENSOR_LU", t) }
 
 /// Cholesky Decomposition
 public fn tensor_cholesky(t: Int) -> Int { @intrinsic("TENSOR_CHOLESKY", t) }
 
-/// Eigenvalue decomposition
+/// Eigenvalue decomposition — returns the eigenvalue vector.
 public fn tensor_eig(t: Int) -> Int { @intrinsic("TENSOR_EIG", t) }
 
-/// Symmetric eigenvalue decomposition
+/// Symmetric eigenvalue decomposition — returns the eigenvalue
+/// vector (ascending).
 public fn tensor_eigh(t: Int) -> Int { @intrinsic("TENSOR_EIGH", t) }
 
 // =============================================================================
@@ -211,7 +255,8 @@ public fn tensor_eigh(t: Int) -> Int { @intrinsic("TENSOR_EIGH", t) }
 /// Solve linear system Ax = b
 public fn tensor_solve(a: Int, b: Int) -> Int { @intrinsic("TENSOR_SOLVE", a, b) }
 
-/// Solve triangular linear system
+/// Solve triangular linear system (lower-triangular A, no
+/// transpose, non-unit diagonal).
 public fn tensor_tri_solve(a: Int, b: Int) -> Int { @intrinsic("TENSOR_TRI_SOLVE", a, b) }
 
 /// Matrix inverse
@@ -233,10 +278,12 @@ public fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_
 /// Reduce all elements (op: 0=sum, 1=mean, 2=max, 3=min, 4=prod)
 public fn tensor_reduce_all(t: Int, op: Int) -> Int { @intrinsic("TENSOR_REDUCE_ALL", t, op) }
 
-/// Argmax along axis
+/// Argmax along axis — returns an I64 index tensor. axis < 0
+/// gives a 1-element tensor holding the flat global argmax.
 public fn tensor_argmax(t: Int, axis: Int) -> Int { @intrinsic("TENSOR_ARGMAX", t, axis) }
 
-/// Top-k values and indices along axis
+/// Top-k along axis — returns the VALUES tensor (sorted,
+/// largest first). Paired-indices surface: T0179 epic.
 public fn tensor_topk(t: Int, k: Int, axis: Int) -> Int { @intrinsic("TENSOR_TOPK", t, k, axis) }
 
 /// Cumulative operation along axis (op: 0=sum, 1=prod)
@@ -252,10 +299,11 @@ public fn tensor_softmax(t: Int, axis: Int) -> Int { @intrinsic("TENSOR_SOFTMAX"
 /// Log-softmax activation along axis
 public fn tensor_log_softmax(t: Int, axis: Int) -> Int { @intrinsic("TENSOR_LOG_SOFTMAX", t, axis) }
 
-/// Layer normalization
+/// Layer normalization over the LAST axis (eps 1e-5).
+/// `normalized_shape` is accepted for API parity and ignored.
 public fn tensor_layer_norm(t: Int, normalized_shape: Int, weight: Int, bias: Int) -> Int { @intrinsic("TENSOR_LAYER_NORM", t, normalized_shape, weight, bias) }
 
-/// Batch normalization
+/// Batch normalization (inference mode, running stats, eps 1e-5)
 public fn tensor_batch_norm(t: Int, mean: Int, var_t: Int, weight: Int, bias: Int) -> Int { @intrinsic("TENSOR_BATCH_NORM", t, mean, var_t, weight, bias) }
 
 /// RMS normalization
@@ -265,20 +313,23 @@ public fn tensor_rms_norm(t: Int, weight: Int) -> Int { @intrinsic("TENSOR_RMS_N
 // SECTION 11: Scalar Access
 // =============================================================================
 
-/// Get scalar value from tensor at index
-public fn tensor_get_scalar(t: Int, idx: Int) -> Int { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
+/// Get scalar value from tensor at flat index (dtype-converted to Float)
+public fn tensor_get_scalar(t: Int, idx: Int) -> Float { @intrinsic("TENSOR_GET_SCALAR", t, idx) }
 
-/// Set scalar value in tensor at index
-public fn tensor_set_scalar(t: Int, idx: Int, value: Int) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
+/// Set scalar value in tensor at flat index (returns a new tensor).
+/// `value` accepts Int or Float and is converted into the tensor's dtype.
+public fn tensor_set_scalar<V>(t: Int, idx: Int, value: V) -> Int { @intrinsic("TENSOR_SET_SCALAR", t, idx, value) }
 
 // =============================================================================
 // SECTION 12: Convolution
 // =============================================================================
 
-/// 1D Convolution
+/// 1-D convolution (valid padding, stride 1). 1-D operands are
+/// wrapped to NCHW internally.
 public fn tensor_conv(input: Int, kernel: Int) -> Int { @intrinsic("TENSOR_CONV", input, kernel) }
 
-/// 2D Convolution
+/// 2-D convolution (NCHW input, OIHW kernel, valid padding,
+/// stride 1).
 public fn tensor_conv2d(input: Int, kernel: Int) -> Int { @intrinsic("TENSOR_CONV2D", input, kernel) }
 
 // =============================================================================
@@ -294,7 +345,7 @@ public fn tensor_nonzero(t: Int) -> Int { @intrinsic("TENSOR_NONZERO", t) }
 /// One-hot encoding
 public fn tensor_one_hot(indices: Int, num_classes: Int) -> Int { @intrinsic("TENSOR_ONE_HOT", indices, num_classes) }
 
-/// Fast Fourier Transform
+/// Fast Fourier Transform (forward; interleaved re/im output)
 public fn tensor_fft(t: Int) -> Int { @intrinsic("TENSOR_FFT", t) }
 
 /// Flash attention

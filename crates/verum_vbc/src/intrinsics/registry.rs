@@ -9891,9 +9891,9 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_RAND",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 3, // shape, key, device
+        param_count: 1, // shape (List register)
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Rand),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Rand, 0),
         mlir_op: Some("verum.tensor_rand"),
         doc: "Create tensor with uniform random values in [0, 1)",
     },
@@ -9984,7 +9984,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, indices
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Index),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Index, 0),
         mlir_op: Some("verum.tensor_index"),
         doc: "Index into tensor",
     },
@@ -9994,7 +9994,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // tensor, axis, indices
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Index),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Index, 1),
         mlir_op: Some("verum.tensor_index_select"),
         doc: "Select indices along axis",
     },
@@ -10044,7 +10044,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, shape
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Broadcast),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::BroadcastToShape),
         mlir_op: Some("verum.tensor_broadcast"),
         doc: "Broadcast tensor to shape",
     },
@@ -10054,7 +10054,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, new_shape
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Broadcast),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::BroadcastToShape),
         mlir_op: Some("verum.tensor_expand"),
         doc: "Expand tensor to new shape",
     },
@@ -10256,7 +10256,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // input, weight, params
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Conv),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Conv, 0),
         mlir_op: Some("verum.tensor_conv"),
         doc: "Convolution operation",
     },
@@ -10266,7 +10266,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 5, // input, weight, stride, padding, dilation
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Conv),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Conv, 1),
         mlir_op: Some("verum.tensor_conv2d"),
         doc: "2D convolution operation with explicit stride, padding, and dilation",
     },
@@ -10419,7 +10419,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // tensor, op, axis
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReduceFromArgs),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::ReduceFromArgs, 0),
         mlir_op: Some("verum.tensor_reduce"),
         doc: "Reduce tensor along axis",
     },
@@ -10429,7 +10429,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, op
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReduceFromArgs),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::ReduceFromArgs, 1),
         mlir_op: Some("verum.tensor_reduce_all"),
         doc: "Reduce tensor over all elements",
     },
@@ -10439,7 +10439,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 3, // tensor, op, axis
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ReduceFromArgs),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::ReduceFromArgs, 2),
         mlir_op: Some("verum.tensor_reduce_keepdim"),
         doc: "Reduce tensor keeping dimension",
     },
@@ -10480,7 +10480,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // tensor, axis
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Softmax),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Softmax, 0),
         mlir_op: Some("verum.tensor_softmax"),
         doc: "Softmax activation",
     },
@@ -11006,7 +11006,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Pure],
         param_count: 1, // x
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::TensorNorm),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Norm),
         mlir_op: Some("verum.tensor_norm"),
         doc: "Compute tensor norm (L2 by default)",
     },
@@ -11541,22 +11541,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // Additional Tensor Operations
     // =========================================================================
     Intrinsic {
-        name: "TENSOR_SIGMOID",
-        category: IntrinsicCategory::Tensor,
-        hints: &[IntrinsicHint::Pure],
-        param_count: 1, // x
-        return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::UnopFromArgs),
-        mlir_op: Some("verum.tensor_sigmoid"),
-        doc: "Element-wise sigmoid activation",
-    },
-    Intrinsic {
         name: "TENSOR_BROADCAST_TO",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure],
         param_count: 2, // x, target_shape
         return_count: 1,
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Broadcast),
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::BroadcastToShape),
         mlir_op: Some("verum.tensor_broadcast_to"),
         doc: "Broadcast tensor to target shape",
     },
@@ -11586,7 +11576,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Alloc],
         param_count: 2,  // grad_output, weight
         return_count: 1, // grad_input
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Conv),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Conv, 1),
         mlir_op: Some("verum.tensor_conv2d_backward_input"),
         doc: "Backward pass for Conv2D w.r.t. input",
     },
@@ -11596,7 +11586,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::Alloc],
         param_count: 2,  // grad_output, input
         return_count: 1, // grad_weight
-        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Conv),
+        strategy: CodegenStrategy::TensorExtendedOpcodeWithMode(TensorSubOpcode::Conv, 1),
         mlir_op: Some("verum.tensor_conv2d_backward_weight"),
         doc: "Backward pass for Conv2D w.r.t. weight",
     },

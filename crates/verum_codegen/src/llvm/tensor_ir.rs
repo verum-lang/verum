@@ -3453,6 +3453,76 @@ impl<'ctx> TensorIR<'ctx> {
     // Extern stubs: declare all remaining functions
     // ========================================================================
 
+
+    /// T0193: a declared-but-bodyless runtime helper is a lie — the
+    /// binary either fails to link or a zero-stub silently returns 0.
+    /// Every not-yet-implemented tensor helper gets a REAL body that
+    /// panics loudly with the helper's name (DYN-MISS-LOUD), so a
+    /// Tier-1 program reaching it fails diagnosably at the call
+    /// site. Real IR bodies land per-op under the T0179 epic.
+    fn emit_panic_stub(
+        &self,
+        module: &Module<'ctx>,
+        name: &str,
+        fn_type: FunctionType<'ctx>,
+    ) -> Result<()> {
+        let Some(func) = self.get_or_declare_new(module, name, fn_type) else {
+            // A real body already exists — never overwrite it.
+            return Ok(());
+        };
+        let ctx = self.context;
+        let entry = ctx.append_basic_block(func, "entry");
+        let builder = ctx.create_builder();
+        builder.position_at_end(entry);
+
+        // verum_panic canonical 4-param ABI: void(ptr, i64, ptr, i32)
+        let void_type = ctx.void_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
+        let i64_type = ctx.i64_type();
+        let i32_type = ctx.i32_type();
+        let panic_ty = void_type.fn_type(
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i32_type.into(),
+            ],
+            false,
+        );
+        let panic_fn = module
+            .get_function("verum_panic")
+            .unwrap_or_else(|| module.add_function("verum_panic", panic_ty, None));
+
+        let text = format!("{}: no Tier-1 lowering yet (T0193/T0179)", name);
+        let msg = builder
+            .build_global_string_ptr(&text, &format!("{}_stub_msg", name))
+            .or_llvm_err()?;
+        builder
+            .build_call(
+                panic_fn,
+                &[
+                    msg.as_pointer_value().into(),
+                    i64_type.const_int(text.len() as u64, false).into(),
+                    ptr_type.const_null().into(),
+                    i32_type.const_zero().into(),
+                ],
+                "",
+            )
+            .or_llvm_err()?;
+        // Keep IR well-formed: the panic never returns, but the block
+        // still needs a terminator with the declared return type.
+        match fn_type.get_return_type() {
+            Some(rt) => {
+                let zero = rt.const_zero();
+                builder.build_return(Some(&zero)).or_llvm_err()?;
+            }
+            None => {
+                builder.build_return(None).or_llvm_err()?;
+            }
+        }
+        Ok(())
+    }
+
     fn emit_extern_stubs(&self, module: &Module<'ctx>) -> Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -3469,7 +3539,7 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_tensor_rank",
         ];
         for name in stubs_i64_i64 {
-            self.get_or_declare(module, name, i64_i64);
+            self.emit_panic_stub(module, name, i64_i64)?;
         }
 
         // i64(i64, i64) signatures
@@ -3515,7 +3585,7 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_tensor_tokenizer_decode",
         ];
         for name in stubs_i64_2 {
-            self.get_or_declare(module, name, i64_i64_i64);
+            self.emit_panic_stub(module, name, i64_i64_i64)?;
         }
 
         // i64(i64, i64, i64)
@@ -3536,9 +3606,11 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_tensor_masked_fill_i",
             "verum_tensor_arange_i",
             "verum_tensor_linspace_i",
+            "verum_tensor_reduce_keepdim",
+            "verum_tensor_broadcast_to",
         ];
         for name in stubs_i64_3 {
-            self.get_or_declare(module, name, i64_3);
+            self.emit_panic_stub(module, name, i64_3)?;
         }
 
         // i64(i64, i64, i64, i64)
@@ -3557,7 +3629,7 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_tensor_conv2d",
         ];
         for name in stubs_i64_4 {
-            self.get_or_declare(module, name, i64_4);
+            self.emit_panic_stub(module, name, i64_4)?;
         }
 
         // f64(i64) signatures
@@ -3568,7 +3640,7 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_tensor_frobenius_norm",
         ];
         for name in stubs_f64_1 {
-            self.get_or_declare(module, name, f64_i64);
+            self.emit_panic_stub(module, name, f64_i64)?;
         }
 
         // f64(i64, i64) signatures
@@ -3581,21 +3653,21 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_tensor_cond",
         ];
         for name in stubs_f64_2 {
-            self.get_or_declare(module, name, f64_i64_2);
+            self.emit_panic_stub(module, name, f64_i64_2)?;
         }
 
         // Special signatures
         let fn_identity = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        self.get_or_declare(module, "verum_tensor_identity", fn_identity);
+        self.emit_panic_stub(module, "verum_tensor_identity", fn_identity)?;
 
         let fn_rand = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        self.get_or_declare(module, "verum_tensor_rand", fn_rand);
+        self.emit_panic_stub(module, "verum_tensor_rand", fn_rand)?;
 
         let fn_one_hot = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        self.get_or_declare(module, "verum_tensor_one_hot", fn_one_hot);
+        self.emit_panic_stub(module, "verum_tensor_one_hot", fn_one_hot)?;
 
         let fn_from_array = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-        self.get_or_declare(module, "verum_tensor_from_array", fn_from_array);
+        self.emit_panic_stub(module, "verum_tensor_from_array", fn_from_array)?;
 
         // Batch norm: i64(i64, i64, i64, i64, i64, f64, f64, i32)
         let fn_bn = i64_type.fn_type(
@@ -3611,11 +3683,11 @@ impl<'ctx> TensorIR<'ctx> {
             ],
             false,
         );
-        self.get_or_declare(module, "verum_tensor_batch_norm", fn_bn);
+        self.emit_panic_stub(module, "verum_tensor_batch_norm", fn_bn)?;
 
         // RMS norm
         let fn_rms = i64_type.fn_type(&[i64_type.into(), i64_type.into(), f64_type.into()], false);
-        self.get_or_declare(module, "verum_tensor_rms_norm", fn_rms);
+        self.emit_panic_stub(module, "verum_tensor_rms_norm", fn_rms)?;
 
         // Flash attention
         let fn_fa = i64_type.fn_type(
@@ -3629,7 +3701,7 @@ impl<'ctx> TensorIR<'ctx> {
             ],
             false,
         );
-        self.get_or_declare(module, "verum_tensor_flash_attention", fn_fa);
+        self.emit_panic_stub(module, "verum_tensor_flash_attention", fn_fa)?;
 
         // Scatter
         let fn_scatter = i64_type.fn_type(
@@ -3641,7 +3713,7 @@ impl<'ctx> TensorIR<'ctx> {
             ],
             false,
         );
-        self.get_or_declare(module, "verum_tensor_scatter", fn_scatter);
+        self.emit_panic_stub(module, "verum_tensor_scatter", fn_scatter)?;
 
         // ML stubs
         let fn_ml_grad = i64_type.fn_type(&[i64_type.into()], false);
@@ -3657,11 +3729,11 @@ impl<'ctx> TensorIR<'ctx> {
             "verum_regex_find_all",
             "verum_regex_split",
         ] {
-            self.get_or_declare(module, name, fn_regex_2);
+            self.emit_panic_stub(module, name, fn_regex_2)?;
         }
         let fn_regex_3 =
             i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-        self.get_or_declare(module, "verum_regex_replace_all", fn_regex_3);
+        self.emit_panic_stub(module, "verum_regex_replace_all", fn_regex_3)?;
 
         // GPU runtime stubs
         self.emit_gpu_stubs(module)?;

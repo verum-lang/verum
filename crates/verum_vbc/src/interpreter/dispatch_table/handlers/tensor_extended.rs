@@ -38,7 +38,14 @@ pub(in super::super) fn handle_tensor_extended(
     // operand bytes without knowing per-intrinsic arity, since the
     // same sub_op byte is shared by intrinsics with different param
     // counts (TENSOR_UNOP vs TENSOR_SIGMOID, etc.).
-    let _operand_byte_count = read_varint(state)?;
+    // T0193 hardening: the envelope is AUTHORITATIVE for stream
+    // advance. After the sub-op arm runs, the dispatcher repositions
+    // pc to `operands_start + operand_byte_count` — an arm that
+    // reads fewer or more bytes than the emitter packed can produce
+    // a wrong value, but can no longer desync the instruction
+    // stream (the GPU-memset SIGSEGV mechanism of T0177).
+    let operand_byte_count = read_varint(state)?;
+    let operands_start = state.pc();
     // `0xFF`-marker dispatch: `emit_intrinsic_tensor_ext_extended` emits
     // `TensorExtended { sub_op: 0xFF, operands: [ext_sub_op, dst, ...] }`
     // for entry-point intrinsics (regex_find / regex_replace /
@@ -114,7 +121,7 @@ pub(in super::super) fn handle_tensor_extended(
         tensor_softmax, tensor_topk,
     };
 
-    match sub_op {
+    let result = match sub_op {
         Some(TensorSubOpcode::Pool) => {
             let op_byte = read_u8(state)?;
             let dst = read_reg(state)?;
@@ -208,15 +215,10 @@ pub(in super::super) fn handle_tensor_extended(
             let dtype = DType::from_type_id(dtype_val);
 
             if let Some(mut tensor) = TensorHandle::zeros(&shape, dtype) {
-                // Fill all elements with the value
-                let data_ptr = tensor.data_ptr_f64_mut();
-                if !data_ptr.is_null() {
-                    for i in 0..tensor.numel {
-                        unsafe {
-                            *data_ptr.add(i) = fill_val;
-                        }
-                    }
-                }
+                // Dtype-converting fill (T0176 root: the old
+                // `data_ptr_f64_mut` loop was null for any dtype
+                // other than F64 — F32/int fills silently no-op'd).
+                tensor.fill_f64(fill_val);
                 let ptr = Box::into_raw(Box::new(tensor));
                 state.set_reg(dst, Value::from_ptr(ptr));
             } else {
@@ -238,14 +240,10 @@ pub(in super::super) fn handle_tensor_extended(
             let data_values = extract_f64_list_from_register(state, data_reg)?;
 
             if let Some(mut tensor) = TensorHandle::zeros(&shape, dtype) {
-                let data_ptr = tensor.data_ptr_f64_mut();
-                if !data_ptr.is_null() {
-                    let copy_len = data_values.len().min(tensor.numel);
-                    for (i, &val) in data_values.iter().enumerate().take(copy_len) {
-                        unsafe {
-                            *data_ptr.add(i) = val;
-                        }
-                    }
+                // Dtype-converting copy (T0176/T0193).
+                let copy_len = data_values.len().min(tensor.numel);
+                for (i, &val) in data_values.iter().enumerate().take(copy_len) {
+                    tensor.set_element_f64(i, val);
                 }
                 let ptr = Box::into_raw(Box::new(tensor));
                 state.set_reg(dst, Value::from_ptr(ptr));
@@ -336,27 +334,40 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::ReduceFromArgs) => {
-            // tensor_reduce(tensor, op, axis)
+            // Moded registry wire (T0193): [dst][mode][...]
+            //   mode 0 → tensor_reduce(t, op, axis)   (axis<0 = all)
+            //   mode 1 → tensor_reduce_all(t, op)     (no axis reg)
+            //   mode 2 → tensor_reduce_keepdim(t, op, axis) — the
+            //            reduced dimension is re-inserted as size 1.
             let dst = read_reg(state)?;
+            let mode = read_u8(state)?;
             let src_reg = read_reg(state)?;
-            let op_reg = read_reg(state)?;
-            let axis_reg = read_reg(state)?;
-
-            let op_val = state.get_reg(op_reg).as_i64() as u8;
+            let op_val = read_operand_i64(state)? as u8;
             let op = TensorReduceOp::from_byte(op_val);
-            let axis_val = state.get_reg(axis_reg).as_i64();
-            // axis -1 means reduce all
-            let axis = if axis_val < 0 {
+
+            let axis = if mode == 1 {
                 None
             } else {
-                Some(axis_val as usize)
+                let axis_val = read_operand_i64(state)?;
+                if axis_val < 0 {
+                    None
+                } else {
+                    Some(axis_val as usize)
+                }
             };
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
 
             if !src_ptr.is_null() {
                 let src = unsafe { &*src_ptr };
-                if let Some(result) = super::super::super::tensor::tensor_reduce(src, axis, op) {
+                let reduced = super::super::super::tensor::tensor_reduce(src, axis, op);
+                let result = match (mode, axis, reduced) {
+                    (2, Some(a), Some(r)) => {
+                        super::super::super::tensor::tensor_unsqueeze(&r, a as i32)
+                    }
+                    (_, _, r) => r,
+                };
+                if let Some(result) = result {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -489,12 +500,8 @@ pub(in super::super) fn handle_tensor_extended(
             if !src_ptr.is_null() {
                 let src = unsafe { &*src_ptr };
                 if let Some(mut result) = super::super::super::tensor::tensor_clone(src) {
-                    let data_ptr = result.data_ptr_f64_mut();
-                    if !data_ptr.is_null() && index < result.numel {
-                        unsafe {
-                            *data_ptr.add(index) = value;
-                        }
-                    }
+                    // Dtype-converting write (T0176/T0193).
+                    result.set_element_f64(index, value);
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -555,10 +562,12 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Gather) => {
+            // Registry wire (T0193): tensor_gather(t, dim, indices)
+            // — .vr argument order; dim arrives in a register.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
+            let axis = read_operand_i64(state)? as i8;
             let index_reg = read_reg(state)?;
-            let axis = read_u8(state)? as i8;
 
             let src_val = state.get_reg(src_reg);
             let index_val = state.get_reg(index_reg);
@@ -581,13 +590,11 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Permute) => {
+            // Registry wire (T0193): tensor_permute(t, perm) — the
+            // permutation arrives as a List register.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let axes_len = read_varint(state)? as usize;
-            let mut axes = Vec::with_capacity(axes_len);
-            for _ in 0..axes_len {
-                axes.push(read_u8(state)? as usize);
-            }
+            let axes = read_operand_shape(state)?;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -606,70 +613,55 @@ pub(in super::super) fn handle_tensor_extended(
             Ok(DispatchResult::Continue)
         }
 
+        // Decompositions on the registry wire (T0193): the .vr
+        // surface returns ONE handle, so each op returns its
+        // documented PRIMARY factor — QR → Q, SVD → singular
+        // values, LU → U, Eig/Eigh → eigenvalues. The full
+        // multi-factor surface is tracked under the T0179 epic.
         Some(TensorSubOpcode::QR) => {
-            let q_reg = read_reg(state)?;
-            let r_reg = read_reg(state)?;
+            let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let _mode = read_u8(state)?;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some((q, r)) = dispatch_qr(src_handle) {
+                if let Some((q, _r)) = dispatch_qr(src_handle) {
                     let q_ptr = Box::into_raw(Box::new(q));
-                    let r_ptr = Box::into_raw(Box::new(r));
-                    state.set_reg(q_reg, Value::from_ptr(q_ptr));
-                    state.set_reg(r_reg, Value::from_ptr(r_ptr));
+                    state.set_reg(dst, Value::from_ptr(q_ptr));
                 } else {
-                    state.set_reg(q_reg, Value::nil());
-                    state.set_reg(r_reg, Value::nil());
+                    state.set_reg(dst, Value::nil());
                 }
             } else {
-                state.set_reg(q_reg, Value::nil());
-                state.set_reg(r_reg, Value::nil());
+                state.set_reg(dst, Value::nil());
             }
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::SVD) => {
-            let u_reg = read_reg(state)?;
-            let s_reg = read_reg(state)?;
-            let vh_reg = read_reg(state)?;
+            let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let _full_matrices = read_u8(state)? != 0;
-            let _compute_uv = read_u8(state)? != 0;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some((u, s, vh)) = dispatch_svd(src_handle) {
-                    let u_ptr = Box::into_raw(Box::new(u));
+                if let Some((_u, s, _vh)) = dispatch_svd(src_handle) {
                     let s_ptr = Box::into_raw(Box::new(s));
-                    let vh_ptr = Box::into_raw(Box::new(vh));
-                    state.set_reg(u_reg, Value::from_ptr(u_ptr));
-                    state.set_reg(s_reg, Value::from_ptr(s_ptr));
-                    state.set_reg(vh_reg, Value::from_ptr(vh_ptr));
+                    state.set_reg(dst, Value::from_ptr(s_ptr));
                 } else {
-                    state.set_reg(u_reg, Value::nil());
-                    state.set_reg(s_reg, Value::nil());
-                    state.set_reg(vh_reg, Value::nil());
+                    state.set_reg(dst, Value::nil());
                 }
             } else {
-                state.set_reg(u_reg, Value::nil());
-                state.set_reg(s_reg, Value::nil());
-                state.set_reg(vh_reg, Value::nil());
+                state.set_reg(dst, Value::nil());
             }
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::LU) => {
-            let p_reg = read_reg(state)?;
-            let l_reg = read_reg(state)?;
-            let u_reg = read_reg(state)?;
+            let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
 
             let src_val = state.get_reg(src_reg);
@@ -677,57 +669,47 @@ pub(in super::super) fn handle_tensor_extended(
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some((p, l, u)) = dispatch_lu(src_handle) {
-                    let p_ptr = Box::into_raw(Box::new(p));
-                    let l_ptr = Box::into_raw(Box::new(l));
+                if let Some((_p, _l, u)) = dispatch_lu(src_handle) {
                     let u_ptr = Box::into_raw(Box::new(u));
-                    state.set_reg(p_reg, Value::from_ptr(p_ptr));
-                    state.set_reg(l_reg, Value::from_ptr(l_ptr));
-                    state.set_reg(u_reg, Value::from_ptr(u_ptr));
+                    state.set_reg(dst, Value::from_ptr(u_ptr));
                 } else {
-                    state.set_reg(p_reg, Value::nil());
-                    state.set_reg(l_reg, Value::nil());
-                    state.set_reg(u_reg, Value::nil());
+                    state.set_reg(dst, Value::nil());
                 }
             } else {
-                state.set_reg(p_reg, Value::nil());
-                state.set_reg(l_reg, Value::nil());
-                state.set_reg(u_reg, Value::nil());
+                state.set_reg(dst, Value::nil());
             }
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::Eig) => {
-            let eigenvalues_reg = read_reg(state)?;
-            let eigenvectors_reg = read_reg(state)?;
+            let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let _compute_v = read_u8(state)? != 0;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some((eigenvalues, eigenvectors)) = dispatch_eig(src_handle) {
+                if let Some((eigenvalues, _eigenvectors)) = dispatch_eig(src_handle) {
                     let ev_ptr = Box::into_raw(Box::new(eigenvalues));
-                    let evec_ptr = Box::into_raw(Box::new(eigenvectors));
-                    state.set_reg(eigenvalues_reg, Value::from_ptr(ev_ptr));
-                    state.set_reg(eigenvectors_reg, Value::from_ptr(evec_ptr));
+                    state.set_reg(dst, Value::from_ptr(ev_ptr));
                 } else {
-                    state.set_reg(eigenvalues_reg, Value::nil());
-                    state.set_reg(eigenvectors_reg, Value::nil());
+                    state.set_reg(dst, Value::nil());
                 }
             } else {
-                state.set_reg(eigenvalues_reg, Value::nil());
-                state.set_reg(eigenvectors_reg, Value::nil());
+                state.set_reg(dst, Value::nil());
             }
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::Softmax) => {
+            // Moded registry wire (T0193): [dst][mode][t][axis-reg]
+            //   mode 0 → softmax, mode 1 → log-softmax.
+            // axis < 0 normalizes over all elements.
             let dst = read_reg(state)?;
+            let mode = read_u8(state)?;
             let src_reg = read_reg(state)?;
-            let axis = read_u8(state)? as i8;
+            let axis = read_operand_i64(state)?;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -735,7 +717,12 @@ pub(in super::super) fn handle_tensor_extended(
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some(result) = tensor_softmax(src_handle, axis_opt) {
+                let result = if mode == 1 {
+                    super::super::super::tensor::tensor_log_softmax(src_handle, axis_opt)
+                } else {
+                    tensor_softmax(src_handle, axis_opt)
+                };
+                if let Some(result) = result {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -748,12 +735,17 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::LayerNorm) => {
+            // Registry wire (T0193):
+            // tensor_layer_norm(t, normalized_shape, weight, bias).
+            // `normalized_shape` is accepted and ignored — the
+            // kernel always normalizes the last axis (documented in
+            // core/intrinsics/tensor.vr). eps is the standard 1e-5.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
+            let _normalized_shape = read_reg(state)?;
             let gamma_reg = read_reg(state)?;
             let beta_reg = read_reg(state)?;
-            let eps = read_f64(state)?;
-            let _axis = read_u8(state)?; // Read but ignore axis (function normalizes last axis)
+            let eps = 1e-5f64;
 
             let src_val = state.get_reg(src_reg);
             let gamma_val = state.get_reg(gamma_reg);
@@ -787,13 +779,16 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::BatchNorm) => {
+            // Registry wire (T0193):
+            // tensor_batch_norm(t, mean, var, weight, bias) — the
+            // .vr argument order; eps is the standard 1e-5.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let gamma_reg = read_reg(state)?;
-            let beta_reg = read_reg(state)?;
             let mean_reg = read_reg(state)?;
             let var_reg = read_reg(state)?;
-            let eps = read_f64(state)?;
+            let gamma_reg = read_reg(state)?;
+            let beta_reg = read_reg(state)?;
+            let eps = 1e-5f64;
 
             let src_val = state.get_reg(src_reg);
             let gamma_val = state.get_reg(gamma_reg);
@@ -845,51 +840,59 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Conv) => {
+            // Moded registry wire (T0193): [dst][mode][input][kernel]
+            //   mode 0 → tensor_conv (1-D inputs are viewed as
+            //            NCHW (1,1,1,L) / (1,1,1,K) and the result
+            //            squeezed back to 1-D)
+            //   mode 1 → tensor_conv2d (NCHW input, OIHW kernel)
+            // stride (1,1), padding (0,0), dilation (1,1), groups 1.
             let dst = read_reg(state)?;
+            let mode = read_u8(state)?;
             let input_reg = read_reg(state)?;
             let weight_reg = read_reg(state)?;
-            let bias_reg = read_reg(state)?;
-            let stride_len = read_varint(state)? as usize;
-            let mut stride = Vec::with_capacity(stride_len);
-            for _ in 0..stride_len {
-                stride.push(read_u8(state)? as usize);
-            }
-            let padding_len = read_varint(state)? as usize;
-            let mut padding = Vec::with_capacity(padding_len);
-            for _ in 0..padding_len {
-                padding.push(read_u8(state)? as usize);
-            }
 
             let input_val = state.get_reg(input_reg);
             let weight_val = state.get_reg(weight_reg);
-            let bias_val = state.get_reg(bias_reg);
 
             let input_ptr = input_val.as_ptr::<TensorHandle>();
             let weight_ptr = weight_val.as_ptr::<TensorHandle>();
-            let bias_ptr = bias_val.as_ptr::<TensorHandle>();
 
             if !input_ptr.is_null() && !weight_ptr.is_null() {
                 let input_handle = unsafe { &*input_ptr };
                 let weight_handle = unsafe { &*weight_ptr };
-                let bias = if bias_ptr.is_null() {
-                    None
-                } else {
-                    Some(unsafe { &*bias_ptr })
-                };
-                let sh = stride.first().copied().unwrap_or(1);
-                let sw = stride.get(1).copied().unwrap_or(sh);
-                let ph = padding.first().copied().unwrap_or(0);
-                let pw = padding.get(1).copied().unwrap_or(ph);
 
-                if let Some(result) = tensor_conv2d(
-                    input_handle,
-                    weight_handle,
-                    bias,
-                    (sh, sw),
-                    (ph, pw),
-                    (1, 1),
-                    1,
-                ) {
+                let result = if mode == 0 && input_handle.ndim == 1 && weight_handle.ndim == 1 {
+                    // 1-D convolution via the 2-D kernel.
+                    let l = input_handle.shape[0];
+                    let k = weight_handle.shape[0];
+                    let input4 =
+                        super::super::super::tensor::tensor_reshape(input_handle, &[1, 1, 1, l]);
+                    let weight4 =
+                        super::super::super::tensor::tensor_reshape(weight_handle, &[1, 1, 1, k]);
+                    match (input4, weight4) {
+                        (Some(i4), Some(w4)) => {
+                            tensor_conv2d(&i4, &w4, None, (1, 1), (0, 0), (1, 1), 1).and_then(
+                                |out| {
+                                    let n = out.numel;
+                                    super::super::super::tensor::tensor_reshape(&out, &[n])
+                                },
+                            )
+                        }
+                        _ => None,
+                    }
+                } else {
+                    tensor_conv2d(
+                        input_handle,
+                        weight_handle,
+                        None,
+                        (1, 1),
+                        (0, 0),
+                        (1, 1),
+                        1,
+                    )
+                };
+
+                if let Some(result) = result {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -927,10 +930,15 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Argmax) => {
+            // Registry wire (T0193): tensor_argmax(t, axis) → I64
+            // index TENSOR (axis < 0 → 1-element tensor with the
+            // flat global argmax; axis ≥ 0 → per-lane indices with
+            // that dimension removed). Uniform handle return keeps
+            // the .vr `-> handle` contract composable with
+            // tensor_get_scalar on both tiers.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let axis = read_u8(state)? as i8;
-            let _keepdim = read_u8(state)? != 0;
+            let axis = read_operand_i64(state)?;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -938,8 +946,11 @@ pub(in super::super) fn handle_tensor_extended(
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some((idx, _val)) = tensor_argmax(src_handle, axis_opt) {
-                    state.set_reg(dst, Value::from_i64(idx as i64));
+                if let Some(result) =
+                    super::super::super::tensor::tensor_argmax_tensor(src_handle, axis_opt)
+                {
+                    let ptr = Box::into_raw(Box::new(result));
+                    state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -950,12 +961,14 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Topk) => {
-            let values_reg = read_reg(state)?;
-            let indices_reg = read_reg(state)?;
+            // Registry wire (T0193): tensor_topk(t, k, axis) — the
+            // single-dst contract returns the VALUES tensor (sorted,
+            // largest-first). The paired indices tensor needs a
+            // multi-output surface — tracked under the T0179 epic.
+            let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let k = read_varint(state)? as usize;
-            let axis = read_u8(state)? as i8;
-            let largest = read_u8(state)? != 0;
+            let k = read_operand_i64(state)?.max(0) as usize;
+            let axis = read_operand_i64(state)?;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -963,20 +976,16 @@ pub(in super::super) fn handle_tensor_extended(
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                // sorted=true by default for topk
-                if let Some((values, indices)) = tensor_topk(src_handle, k, axis_opt, largest, true)
+                if let Some((values, _indices)) =
+                    tensor_topk(src_handle, k, axis_opt, true, true)
                 {
                     let values_ptr = Box::into_raw(Box::new(values));
-                    let indices_ptr = Box::into_raw(Box::new(indices));
-                    state.set_reg(values_reg, Value::from_ptr(values_ptr));
-                    state.set_reg(indices_reg, Value::from_ptr(indices_ptr));
+                    state.set_reg(dst, Value::from_ptr(values_ptr));
                 } else {
-                    state.set_reg(values_reg, Value::nil());
-                    state.set_reg(indices_reg, Value::nil());
+                    state.set_reg(dst, Value::nil());
                 }
             } else {
-                state.set_reg(values_reg, Value::nil());
-                state.set_reg(indices_reg, Value::nil());
+                state.set_reg(dst, Value::nil());
             }
             Ok(DispatchResult::Continue)
         }
@@ -1113,11 +1122,12 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::TriSolve) => {
+            // Registry wire (T0193): tensor_tri_solve(a, b) — lower
+            // triangular, no transpose, non-unit diagonal (flags 0).
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            // Flags packed as: bit 0 = upper, bit 1 = trans, bit 2 = unit_diag
-            let flags = read_u8(state)?;
+            let flags = 0u8;
 
             let a_val = state.get_reg(a_reg);
             let b_val = state.get_reg(b_reg);
@@ -1143,8 +1153,8 @@ pub(in super::super) fn handle_tensor_extended(
         // Matrix Decompositions (0x40-0x5F)
         // ====================================================================
         Some(TensorSubOpcode::EigSymmetric) => {
-            let eigenvalues_reg = read_reg(state)?;
-            let eigenvectors_reg = read_reg(state)?;
+            // Registry wire (T0193): single-dst → eigenvalues.
+            let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
 
             let src_val = state.get_reg(src_reg);
@@ -1152,18 +1162,14 @@ pub(in super::super) fn handle_tensor_extended(
 
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some((eigenvalues, eigenvectors)) = dispatch_eig_symmetric(src_handle) {
+                if let Some((eigenvalues, _eigenvectors)) = dispatch_eig_symmetric(src_handle) {
                     let ev_ptr = Box::into_raw(Box::new(eigenvalues));
-                    let evec_ptr = Box::into_raw(Box::new(eigenvectors));
-                    state.set_reg(eigenvalues_reg, Value::from_ptr(ev_ptr));
-                    state.set_reg(eigenvectors_reg, Value::from_ptr(evec_ptr));
+                    state.set_reg(dst, Value::from_ptr(ev_ptr));
                 } else {
-                    state.set_reg(eigenvalues_reg, Value::nil());
-                    state.set_reg(eigenvectors_reg, Value::nil());
+                    state.set_reg(dst, Value::nil());
                 }
             } else {
-                state.set_reg(eigenvalues_reg, Value::nil());
-                state.set_reg(eigenvectors_reg, Value::nil());
+                state.set_reg(dst, Value::nil());
             }
             Ok(DispatchResult::Continue)
         }
@@ -1240,10 +1246,12 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Norm) => {
+            // Registry wire (T0193): tensor_norm(t, p, dim) — order
+            // and axis arrive in registers; dim < 0 → whole tensor.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let ord = read_f64(state)?;
-            let axis = read_u8(state)? as i8;
+            let ord = read_operand_f64(state)?;
+            let axis = read_operand_i64(state)? as i8;
             let axis_opt = if axis < 0 { None } else { Some(axis) };
 
             let src_val = state.get_reg(src_reg);
@@ -1667,9 +1675,11 @@ pub(in super::super) fn handle_tensor_extended(
         // Extended Tensor Operations (0x80-0x8F)
         // ====================================================================
         Some(TensorSubOpcode::Repeat) => {
+            // Registry wire (T0193): tensor_repeat(t, repeats) —
+            // a scalar register (whole-tensor repeat count).
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let times = read_varint(state)? as usize;
+            let times = read_operand_i64(state)?.max(0) as usize;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -1731,13 +1741,10 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::FromArray) => {
+            // Registry wire (T0193): tensor_from_array(data) — the
+            // data arrives as a List register; result is 1-D F64.
             let dst = read_reg(state)?;
-            let len = read_varint(state)? as usize;
-            let mut values = Vec::with_capacity(len);
-            for _ in 0..len {
-                let val = read_f64(state)?;
-                values.push(val);
-            }
+            let values = read_operand_f64_list(state)?;
 
             if let Some(result) = dispatch_from_array(&values, DType::F64) {
                 let ptr = Box::into_raw(Box::new(result));
@@ -1888,10 +1895,11 @@ pub(in super::super) fn handle_tensor_extended(
                     vec![]
                 };
                 if let Some(text) = dispatch_tokenizer_decode(tokenizer, &tokens) {
-                    // Store string in string table and return ID
-                    // For now, return nil (would need module mutation to add new string)
-                    state.set_reg(dst, Value::nil());
-                    let _ = text; // Suppress unused warning
+                    // T0140: runtime strings allocate on the heap —
+                    // no module mutation involved (the old comment
+                    // predated `alloc_string_value`).
+                    let text_val = alloc_string_value(state, &text)?;
+                    state.set_reg(dst, text_val);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -2124,9 +2132,10 @@ pub(in super::super) fn handle_tensor_extended(
             let value_reg = read_reg(state)?;
 
             let value = state.get_reg(value_reg);
-            let _formatted = dispatch_format_value(&value);
-            // Store string would need module mutation
-            state.set_reg(dst, Value::nil());
+            let formatted = dispatch_format_value(&value);
+            // T0140: heap-allocated runtime string, not nil.
+            let text_val = alloc_string_value(state, &formatted)?;
+            state.set_reg(dst, text_val);
             Ok(DispatchResult::Continue)
         }
 
@@ -2221,9 +2230,10 @@ pub(in super::super) fn handle_tensor_extended(
 
         Some(TensorSubOpcode::GenerateRequestId) => {
             let dst = read_reg(state)?;
-            let _request_id = dispatch_generate_request_id();
-            // Store string would need module mutation
-            state.set_reg(dst, Value::nil());
+            let request_id = dispatch_generate_request_id();
+            // T0140: heap-allocated runtime string, not nil.
+            let text_val = alloc_string_value(state, &request_id)?;
+            state.set_reg(dst, text_val);
             Ok(DispatchResult::Continue)
         }
 
@@ -3085,20 +3095,19 @@ pub(in super::super) fn handle_tensor_extended(
         // Shape Manipulation Operations
         // ====================================================================
         Some(TensorSubOpcode::Squeeze) => {
+            // Registry wire (T0193): tensor_squeeze(t) — squeeze
+            // every size-1 dimension (the .vr surface takes no dim).
             use super::super::super::tensor::tensor_squeeze;
 
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let axis = read_u8(state)? as i8;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
 
             if !src_ptr.is_null() {
                 let src = unsafe { &*src_ptr };
-                // axis of -1 means squeeze all, otherwise squeeze specific dim
-                let dim = if axis < 0 { None } else { Some(axis as usize) };
-                if let Some(result) = tensor_squeeze(src, dim) {
+                if let Some(result) = tensor_squeeze(src, None) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -3111,18 +3120,20 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Unsqueeze) => {
+            // Registry wire (T0193): tensor_unsqueeze(t, dim) — dim
+            // arrives in a register, not as an inline byte.
             use super::super::super::tensor::tensor_unsqueeze;
 
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let dim = read_u8(state)? as i8;
+            let dim = read_operand_i64(state)? as i32;
 
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
 
             if !src_ptr.is_null() {
                 let src = unsafe { &*src_ptr };
-                if let Some(result) = tensor_unsqueeze(src, dim as i32) {
+                if let Some(result) = tensor_unsqueeze(src, dim) {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -3135,12 +3146,14 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Cmp) => {
+            // Registry wire (T0193): tensor_cmp(a, b, op) — op code
+            // (0=eq 1=ne 2=lt 3=le 4=gt 5=ge) arrives in a register.
             use super::super::super::tensor::{CompareOp, tensor_cmp};
 
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let op_byte = read_u8(state)?;
+            let op_byte = read_operand_i64(state)? as u8;
 
             let op = match op_byte {
                 0x00 => CompareOp::Eq,
@@ -3243,11 +3256,14 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Cast) => {
+            // Registry wire (T0193): tensor_cast(t, dtype) — the
+            // dtype id arrives in a register (see DTYPE_* constants
+            // in core/intrinsics/tensor.vr).
             use super::super::super::tensor::tensor_cast;
 
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let dtype_byte = read_u8(state)?;
+            let dtype_byte = read_operand_i64(state)? as u8;
 
             let dtype = DType::from_type_id(dtype_byte);
             let src_val = state.get_reg(src_reg);
@@ -3289,11 +3305,15 @@ pub(in super::super) fn handle_tensor_extended(
             Ok(DispatchResult::Continue)
         }
 
+        // Registry wire ([dst][arg-regs]; T0193): values come from
+        // registers, never from inline immediates — the emitter
+        // packs the .vr call's argument registers verbatim.
         Some(TensorSubOpcode::Arange) => {
+            // tensor_arange(start, end, step)
             let dst = read_reg(state)?;
-            let start = read_f64(state)?;
-            let end = read_f64(state)?;
-            let step = read_f64(state)?;
+            let start = read_operand_f64(state)?;
+            let end = read_operand_f64(state)?;
+            let step = read_operand_f64(state)?;
             if let Some(result) =
                 super::super::super::tensor::tensor_arange(start, end, step, DType::F64)
             {
@@ -3306,10 +3326,11 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Linspace) => {
+            // tensor_linspace(start, end, steps)
             let dst = read_reg(state)?;
-            let start = read_f64(state)?;
-            let end = read_f64(state)?;
-            let steps = read_varint(state)? as usize;
+            let start = read_operand_f64(state)?;
+            let end = read_operand_f64(state)?;
+            let steps = read_operand_i64(state)?.max(0) as usize;
             if let Some(result) =
                 super::super::super::tensor::tensor_linspace(start, end, steps, DType::F64)
             {
@@ -3322,8 +3343,9 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Identity) => {
+            // tensor_eye(n)
             let dst = read_reg(state)?;
-            let n = read_varint(state)? as usize;
+            let n = read_operand_i64(state)?.max(0) as usize;
             if let Some(result) = super::super::super::tensor::tensor_identity(n, DType::F64) {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
@@ -3334,13 +3356,29 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Rand) => {
+            // Moded random factory: [dst][mode][args...]
+            //   mode 0 → tensor_rand(shape)      uniform [0,1)
+            //   mode 1 → tensor_randn(shape)     standard normal
+            //   mode 2 → tensor_randint(low, high, shape)
             let dst = read_reg(state)?;
-            let ndim = read_varint(state)? as usize;
-            let mut shape = Vec::with_capacity(ndim);
-            for _ in 0..ndim {
-                shape.push(read_varint(state)? as usize);
-            }
-            if let Some(result) = super::super::super::tensor::tensor_rand(&shape, DType::F64) {
+            let mode = read_u8(state)?;
+            let result = match mode {
+                1 => {
+                    let shape = read_operand_shape(state)?;
+                    super::super::super::tensor::tensor_randn(&shape, DType::F64)
+                }
+                2 => {
+                    let low = read_operand_i64(state)?;
+                    let high = read_operand_i64(state)?;
+                    let shape = read_operand_shape(state)?;
+                    super::super::super::tensor::tensor_randint(low, high, &shape, DType::I64)
+                }
+                _ => {
+                    let shape = read_operand_shape(state)?;
+                    super::super::super::tensor::tensor_rand(&shape, DType::F64)
+                }
+            };
+            if let Some(result) = result {
                 let ptr = Box::into_raw(Box::new(result));
                 state.set_reg(dst, Value::from_ptr(ptr));
             } else {
@@ -3396,10 +3434,12 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Lerp) => {
+            // Registry wire (T0193): tensor_lerp(a, b, weight) —
+            // the weight arrives in a register.
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let t = read_f64(state)?;
+            let t = read_operand_f64(state)?;
             let a_val = state.get_reg(a_reg);
             let b_val = state.get_reg(b_reg);
             let a_ptr = a_val.as_ptr::<TensorHandle>();
@@ -3456,13 +3496,14 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::BroadcastToShape) => {
+            // Registry wire (T0193): tensor_broadcast(t, shape) —
+            // the target shape arrives as a List register. This is
+            // where TENSOR_BROADCAST / TENSOR_EXPAND /
+            // TENSOR_BROADCAST_TO point now (they used to hit the
+            // DISTRIBUTED collective-broadcast arm).
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let ndim = read_varint(state)? as usize;
-            let mut shape = Vec::with_capacity(ndim);
-            for _ in 0..ndim {
-                shape.push(read_varint(state)? as usize);
-            }
+            let shape = read_operand_shape(state)?;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3501,9 +3542,11 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::ToDevice) => {
+            // Registry wire (T0193): tensor_to_device(t, device) —
+            // device id in a register; the CPU interpreter clones.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let _device = read_varint(state)?;
+            let _device = read_reg(state)?;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3521,22 +3564,15 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Concat) => {
+            // Registry wire (T0193): tensor_concat(tensors, dim) —
+            // `tensors` is a List of handles (a single bare handle
+            // also works); dim arrives in a register.
             let dst = read_reg(state)?;
-            let count = read_varint(state)? as usize;
-            let mut tensor_regs = Vec::with_capacity(count);
-            for _ in 0..count {
-                tensor_regs.push(read_reg(state)?);
-            }
-            let axis = read_varint(state)? as usize;
-            let mut handles: Vec<*const TensorHandle> = Vec::with_capacity(count);
-            for &reg in &tensor_regs {
-                let val = state.get_reg(reg);
-                let ptr = val.as_ptr::<TensorHandle>();
-                if ptr.is_null() {
-                    state.set_reg(dst, Value::nil());
-                    return Ok(DispatchResult::Continue);
-                }
-                handles.push(ptr);
+            let handles = read_operand_tensor_list(state)?;
+            let axis = read_operand_i64(state)?.max(0) as usize;
+            if handles.is_empty() {
+                state.set_reg(dst, Value::nil());
+                return Ok(DispatchResult::Continue);
             }
             let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
             if let Some(result) = super::super::super::tensor::tensor_concat(&refs, axis) {
@@ -3549,22 +3585,13 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Stack) => {
+            // Registry wire (T0193): tensor_stack(tensors, dim).
             let dst = read_reg(state)?;
-            let count = read_varint(state)? as usize;
-            let mut tensor_regs = Vec::with_capacity(count);
-            for _ in 0..count {
-                tensor_regs.push(read_reg(state)?);
-            }
-            let axis = read_varint(state)? as usize;
-            let mut handles: Vec<*const TensorHandle> = Vec::with_capacity(count);
-            for &reg in &tensor_regs {
-                let val = state.get_reg(reg);
-                let ptr = val.as_ptr::<TensorHandle>();
-                if ptr.is_null() {
-                    state.set_reg(dst, Value::nil());
-                    return Ok(DispatchResult::Continue);
-                }
-                handles.push(ptr);
+            let handles = read_operand_tensor_list(state)?;
+            let axis = read_operand_i64(state)?.max(0) as usize;
+            if handles.is_empty() {
+                state.set_reg(dst, Value::nil());
+                return Ok(DispatchResult::Continue);
             }
             let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
             if let Some(result) = super::super::super::tensor::tensor_stack(&refs, axis) {
@@ -3577,25 +3604,27 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Cumulative) => {
+            // Registry wire (T0193): tensor_cumulative(t, op, axis)
+            // — .vr argument order (op: 0=sum 1=prod; axis < 0
+            // walks the flattened tensor).
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let axis = read_u8(state)? as i8;
-            let op_byte = read_u8(state)?;
+            let op_byte = read_operand_i64(state)? as u8;
+            let axis = read_operand_i64(state)?;
             let op = match op_byte {
                 0 => super::super::super::tensor::CumulativeOp::Sum,
                 1 => super::super::super::tensor::CumulativeOp::Prod,
                 2 => super::super::super::tensor::CumulativeOp::Max,
                 _ => super::super::super::tensor::CumulativeOp::Min,
             };
+            let axis_opt = if axis < 0 { None } else { Some(axis as i32) };
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
                 let src_handle = unsafe { &*src_ptr };
-                if let Some(result) = super::super::super::tensor::tensor_cumulative(
-                    src_handle,
-                    op,
-                    Some(axis as i32),
-                ) {
+                if let Some(result) =
+                    super::super::super::tensor::tensor_cumulative(src_handle, op, axis_opt)
+                {
                     let ptr = Box::into_raw(Box::new(result));
                     state.set_reg(dst, Value::from_ptr(ptr));
                 } else {
@@ -3608,14 +3637,14 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Split) => {
+            // Registry wire (T0193): tensor_split(t, chunks, dim) —
+            // chunk count and dim arrive in registers; the result is
+            // a List of chunk handles.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let count = read_varint(state)? as usize;
-            let mut sizes = Vec::with_capacity(count);
-            for _ in 0..count {
-                sizes.push(read_varint(state)? as usize);
-            }
-            let axis = read_varint(state)? as usize;
+            let chunks = read_operand_i64(state)?.max(1) as usize;
+            let axis = read_operand_i64(state)?.max(0) as usize;
+            let sizes = vec![chunks];
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3640,11 +3669,12 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::SplitAt) => {
-            let dst1 = read_reg(state)?;
-            let dst2 = read_reg(state)?;
+            // Registry wire (T0193): tensor_split_at(t, pos, dim) —
+            // single dst holding a 2-element List [left, right].
+            let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let pos = read_varint(state)? as usize;
-            let axis = read_varint(state)? as usize;
+            let pos = read_operand_i64(state)?.max(0) as usize;
+            let axis = read_operand_i64(state)?.max(0) as usize;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3652,23 +3682,26 @@ pub(in super::super) fn handle_tensor_extended(
                 if let Some((a, b)) =
                     super::super::super::tensor::tensor_split_at(src_handle, pos, axis)
                 {
-                    state.set_reg(dst1, Value::from_ptr(Box::into_raw(Box::new(a))));
-                    state.set_reg(dst2, Value::from_ptr(Box::into_raw(Box::new(b))));
+                    let values = vec![
+                        Value::from_ptr(Box::into_raw(Box::new(a))),
+                        Value::from_ptr(Box::into_raw(Box::new(b))),
+                    ];
+                    let list = alloc_list_from_values(state, values)?;
+                    state.set_reg(dst, list);
                 } else {
-                    state.set_reg(dst1, Value::nil());
-                    state.set_reg(dst2, Value::nil());
+                    state.set_reg(dst, Value::nil());
                 }
             } else {
-                state.set_reg(dst1, Value::nil());
-                state.set_reg(dst2, Value::nil());
+                state.set_reg(dst, Value::nil());
             }
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::Diag) => {
+            // Registry wire (T0193): diag(t, k) — k in a register.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let offset = read_u8(state)? as i8 as i32;
+            let offset = read_operand_i64(state)? as i32;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3686,9 +3719,10 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Triu) => {
+            // Registry wire (T0193): triu(t, k) — k in a register.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let offset = read_u8(state)? as i8 as i32;
+            let offset = read_operand_i64(state)? as i32;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3706,9 +3740,10 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Tril) => {
+            // Registry wire (T0193): tril(t, k) — k in a register.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let offset = read_u8(state)? as i8 as i32;
+            let offset = read_operand_i64(state)? as i32;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3745,27 +3780,16 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Einsum) => {
+            // Registry wire (T0193): tensor_einsum(expr, tensors) —
+            // the equation is a runtime Text register, the operands
+            // a List of handles (or one bare handle).
             let dst = read_reg(state)?;
-            let subscripts_id = read_varint(state)? as u32;
-            let count = read_varint(state)? as usize;
-            let mut tensor_regs = Vec::with_capacity(count);
-            for _ in 0..count {
-                tensor_regs.push(read_reg(state)?);
-            }
-            let equation = state
-                .module
-                .get_string(crate::types::StringId(subscripts_id))
-                .unwrap_or("")
-                .to_string();
-            let mut handles: Vec<*const TensorHandle> = Vec::with_capacity(count);
-            for &reg in &tensor_regs {
-                let val = state.get_reg(reg);
-                let ptr = val.as_ptr::<TensorHandle>();
-                if ptr.is_null() {
-                    state.set_reg(dst, Value::nil());
-                    return Ok(DispatchResult::Continue);
-                }
-                handles.push(ptr);
+            let expr_reg = read_reg(state)?;
+            let handles = read_operand_tensor_list(state)?;
+            let equation = extract_string(&state.get_reg(expr_reg), state);
+            if handles.is_empty() || equation.is_empty() {
+                state.set_reg(dst, Value::nil());
+                return Ok(DispatchResult::Continue);
             }
             let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
             if let Some(result) = dispatch_einsum(&equation, &refs) {
@@ -3778,10 +3802,12 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::MaskedFill) => {
+            // Registry wire (T0193): tensor_masked_fill(t, mask,
+            // value) — the fill value arrives in a register.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let mask_reg = read_reg(state)?;
-            let value = read_f64(state)?;
+            let value = read_operand_f64(state)?;
             let src_val = state.get_reg(src_reg);
             let mask_val = state.get_reg(mask_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -3844,9 +3870,11 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::OneHot) => {
+            // Registry wire (T0193): tensor_one_hot(indices,
+            // num_classes) — class count arrives in a register.
             let dst = read_reg(state)?;
             let indices_reg = read_reg(state)?;
-            let num_classes = read_varint(state)? as usize;
+            let num_classes = read_operand_i64(state)?.max(0) as usize;
             let idx_val = state.get_reg(indices_reg);
             let idx_ptr = idx_val.as_ptr::<TensorHandle>();
             if !idx_ptr.is_null() {
@@ -3912,10 +3940,19 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::Index) => {
+            // Moded registry wire (T0193): [dst][mode][...]
+            //   mode 0 → tensor_index(t, indices):        select
+            //            along axis 0 by an index tensor
+            //   mode 1 → tensor_index_select(t, dim, indices)
             let dst = read_reg(state)?;
+            let mode = read_u8(state)?;
             let src_reg = read_reg(state)?;
-            let index_reg = read_reg(state)?;
-            let axis = read_varint(state)? as usize;
+            let (axis, index_reg) = if mode == 1 {
+                let dim = read_operand_i64(state)?.max(0) as usize;
+                (dim, read_reg(state)?)
+            } else {
+                (0usize, read_reg(state)?)
+            };
             let src_val = state.get_reg(src_reg);
             let idx_val = state.get_reg(index_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -3936,9 +3973,11 @@ pub(in super::super) fn handle_tensor_extended(
         }
 
         Some(TensorSubOpcode::LeakyRelu) => {
+            // Registry wire (T0193): leaky_relu(t, slope) — the
+            // slope arrives in a register.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let alpha = read_f64(state)?;
+            let alpha = read_operand_f64(state)?;
             let src_val = state.get_reg(src_reg);
             let src_ptr = src_val.as_ptr::<TensorHandle>();
             if !src_ptr.is_null() {
@@ -3989,17 +4028,13 @@ pub(in super::super) fn handle_tensor_extended(
             let ext_op = TensorExtSubOpcode::from_byte(sub_op_byte);
             match ext_op {
                 Some(TensorExtSubOpcode::RmsNorm) => {
-                    // RMS normalization: dst, input, gamma (optional), eps (f32)
+                    // Registry wire (T0193): tensor_rms_norm(t, weight)
+                    // — weight is a plain register (nil ptr → no gamma);
+                    // eps is the standard 1e-5.
                     let dst = read_reg(state)?;
                     let input_reg = read_reg(state)?;
-                    let gamma_flag = read_u8(state)?;
-                    let gamma_reg = if gamma_flag != 0 {
-                        Some(read_reg(state)?)
-                    } else {
-                        None
-                    };
-                    let eps_bits = read_u32(state)?;
-                    let eps = f32::from_bits(eps_bits) as f64;
+                    let gamma_reg = Some(read_reg(state)?);
+                    let eps = 1e-5f64;
 
                     let input_val = state.get_reg(input_reg);
                     let input_ptr = input_val.as_ptr::<TensorHandle>();
@@ -4034,25 +4069,31 @@ pub(in super::super) fn handle_tensor_extended(
                 }
 
                 Some(TensorExtSubOpcode::FlashAttention) => {
-                    // Flash attention: dst, q, k, v, mask (optional), scale, causal
-                    // Scaled dot-product attention: softmax(Q*K^T * scale) * V
+                    // Registry wire (T0193):
+                    // tensor_flash_attention(q, k, v) — scaled
+                    // dot-product attention softmax(Q·Kᵀ/√d_k)·V,
+                    // non-causal, no mask (the extended surface is
+                    // tracked under the T0179 epic).
                     let dst = read_reg(state)?;
                     let q_reg = read_reg(state)?;
                     let k_reg = read_reg(state)?;
                     let v_reg = read_reg(state)?;
-                    let mask_flag = read_u8(state)?;
-                    let _mask_reg = if mask_flag != 0 {
-                        Some(read_reg(state)?)
-                    } else {
-                        None
-                    };
-                    let scale_reg = read_reg(state)?;
-                    let causal = read_u8(state)? != 0;
+                    let _mask_reg: Option<crate::instruction::Reg> = None;
+                    let causal = false;
 
                     let q_val = state.get_reg(q_reg);
                     let k_val = state.get_reg(k_reg);
                     let v_val = state.get_reg(v_reg);
-                    let scale_val = state.get_reg(scale_reg).as_f64();
+                    let scale_val = {
+                        let q_probe = q_val.as_ptr::<TensorHandle>();
+                        if q_probe.is_null() {
+                            1.0
+                        } else {
+                            let q = unsafe { &*q_probe };
+                            let d_k = if q.ndim > 1 { q.shape[1] } else { 1 };
+                            1.0 / (d_k.max(1) as f64).sqrt()
+                        }
+                    };
 
                     let q_ptr = q_val.as_ptr::<TensorHandle>();
                     let k_ptr = k_val.as_ptr::<TensorHandle>();
@@ -4161,11 +4202,11 @@ pub(in super::super) fn handle_tensor_extended(
                 }
 
                 Some(TensorExtSubOpcode::Fft) => {
-                    // FFT: dst, src, dim (i8), inverse (bool)
+                    // Registry wire (T0193): tensor_fft(t) — forward
+                    // transform over the (last) dimension.
                     let dst = read_reg(state)?;
                     let src_reg = read_reg(state)?;
-                    let _dim = read_u8(state)? as i8;
-                    let inverse = read_u8(state)? != 0;
+                    let inverse = false;
 
                     let src_val = state.get_reg(src_reg);
                     let src_ptr = src_val.as_ptr::<TensorHandle>();
@@ -4199,13 +4240,15 @@ pub(in super::super) fn handle_tensor_extended(
                 }
 
                 Some(TensorExtSubOpcode::Scatter) => {
-                    // Scatter: dst, src, index, values, axis (i8), mode (u8)
+                    // Registry wire (T0193):
+                    // tensor_scatter(t, dim, indices, src) — the .vr
+                    // argument order; assign mode.
                     let dst = read_reg(state)?;
                     let src_reg = read_reg(state)?;
+                    let axis = read_operand_i64(state)?.max(0) as u8;
                     let index_reg = read_reg(state)?;
                     let values_reg = read_reg(state)?;
-                    let axis = read_u8(state)?;
-                    let _mode = read_u8(state)?; // 0=assign, 1=add, 2=mul
+                    let _mode = 0u8; // 0=assign, 1=add, 2=mul
 
                     let src_val = state.get_reg(src_reg);
                     let index_val = state.get_reg(index_reg);
@@ -4557,5 +4600,132 @@ pub(in super::super) fn handle_tensor_extended(
                 }),
             }
         }
+    };
+    // Envelope-authoritative advance (see the header comment): the
+    // arm's reads no longer decide where the next instruction
+    // begins. Error results skip this — the frame unwinds anyway.
+    state.set_pc(operands_start.wrapping_add(operand_byte_count as u32));
+    result
+}
+
+// ============================================================================
+// Register-operand helpers (T0193)
+// ============================================================================
+// The registry emitter packs `[dst][arg-regs...]` — every value an
+// arm needs lives in a register. These helpers read them with the
+// NaN-box-tolerant conversions the FromArgs arms already used
+// inline, so re-shaped arms stay small.
+
+/// Reads the next operand register from the stream, then its Value
+/// as f64. (Two steps because `read_reg` needs `&mut state`.)
+fn read_operand_f64(state: &mut InterpreterState) -> InterpreterResult<f64> {
+    let r = read_reg(state)?;
+    Ok(reg_f64(state, r))
+}
+
+/// Reads the next operand register, then its Value as i64.
+fn read_operand_i64(state: &mut InterpreterState) -> InterpreterResult<i64> {
+    let r = read_reg(state)?;
+    Ok(reg_i64(state, r))
+}
+
+/// Reads the next operand register, then extracts a shape list.
+fn read_operand_shape(state: &mut InterpreterState) -> InterpreterResult<Vec<usize>> {
+    let r = read_reg(state)?;
+    extract_shape_from_register(state, r)
+}
+
+/// Reads the next operand register, then extracts an f64 list.
+fn read_operand_f64_list(state: &mut InterpreterState) -> InterpreterResult<Vec<f64>> {
+    let r = read_reg(state)?;
+    extract_f64_list_from_register(state, r)
+}
+
+/// Reads the next operand register, then extracts tensor handles.
+fn read_operand_tensor_list(
+    state: &mut InterpreterState,
+) -> InterpreterResult<Vec<*mut super::super::super::tensor::TensorHandle>> {
+    let r = read_reg(state)?;
+    Ok(reg_tensor_list(state, r))
+}
+
+/// Reads a register's Value as f64 (accepts Float, Int, Bool).
+fn reg_f64(state: &InterpreterState, reg: crate::instruction::Reg) -> f64 {
+    let v = state.get_reg(reg);
+    if v.is_float() {
+        v.as_f64()
+    } else if v.is_bool() {
+        v.as_bool() as i64 as f64
+    } else {
+        v.as_i64() as f64
     }
+}
+
+/// Reads a register's Value as i64 (accepts Int, Float, Bool).
+fn reg_i64(state: &InterpreterState, reg: crate::instruction::Reg) -> i64 {
+    let v = state.get_reg(reg);
+    if v.is_float() {
+        v.as_f64() as i64
+    } else if v.is_bool() {
+        v.as_bool() as i64
+    } else {
+        v.as_i64()
+    }
+}
+
+/// Reads a register as a raw `*mut TensorHandle` (null when the
+/// register does not hold a pointer value).
+fn reg_tensor(
+    state: &InterpreterState,
+    reg: crate::instruction::Reg,
+) -> *mut super::super::super::tensor::TensorHandle {
+    state
+        .get_reg(reg)
+        .as_ptr::<super::super::super::tensor::TensorHandle>()
+}
+
+/// Extracts the tensor handles stored in a `List` register (for
+/// concat / stack / einsum whose .vr surface passes a list of
+/// handles). Non-pointer elements are skipped; an empty vec means
+/// the register held no usable list.
+fn reg_tensor_list(
+    state: &InterpreterState,
+    reg: crate::instruction::Reg,
+) -> Vec<*mut super::super::super::tensor::TensorHandle> {
+    use super::super::super::heap::{OBJECT_HEADER_SIZE, ObjectHeader};
+    use crate::types::TypeId;
+
+    let val = state.get_reg(reg);
+    let mut out = Vec::new();
+
+    if val.is_ptr() {
+        let ptr = val.as_ptr::<u8>();
+        if ptr.is_null() {
+            return out;
+        }
+        let header = unsafe { &*(ptr as *const ObjectHeader) };
+        if header.type_id == TypeId::LIST {
+            let data_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) as *const Value };
+            let len = unsafe { (*data_ptr).as_i64() } as usize;
+            let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+            if !backing_ptr.is_null() {
+                let backing_header = unsafe { &*(backing_ptr as *const ObjectHeader) };
+                let elem_ptr = unsafe { backing_ptr.add(OBJECT_HEADER_SIZE) as *const Value };
+                let max_len = len.min(backing_header.size as usize / std::mem::size_of::<Value>());
+                for i in 0..max_len {
+                    let elem = unsafe { *elem_ptr.add(i) };
+                    if elem.is_ptr() {
+                        let t = elem.as_ptr::<super::super::super::tensor::TensorHandle>();
+                        if !t.is_null() {
+                            out.push(t);
+                        }
+                    }
+                }
+                return out;
+            }
+        }
+        // A single bare tensor handle also works: treat as 1-list.
+        out.push(ptr as *mut super::super::super::tensor::TensorHandle);
+    }
+    out
 }
