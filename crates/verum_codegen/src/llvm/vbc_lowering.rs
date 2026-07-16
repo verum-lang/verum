@@ -1494,7 +1494,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // sockets (libc)
                     | "socket" | "bind" | "listen" | "accept" | "connect"
                     | "send" | "recv" | "sendto" | "recvfrom" | "setsockopt"
-                    | "getaddrinfo" | "freeaddrinfo" | "inet_pton"
+                    | "inet_pton"
                     // mmap family
                     | "mmap" | "munmap" | "mprotect" | "madvise"
                     // pthread

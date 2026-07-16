@@ -32,6 +32,15 @@ mount core.intrinsics.runtime.os.{
     __udp_close_raw,
 };
 
+// Hostname resolution for `RawTcpStream.connect`. The `tcp_connect`
+// intrinsic is IP-literal-only (libc-free `inet_pton`, no
+// `getaddrinfo`) — turning a hostname into an IP is this layer's job.
+// `lookup_host` short-circuits IP literals with zero network I/O and
+// consults the static host DB (localhost, /etc/hosts) before any DNS
+// query. Task #43 (last getaddrinfo member of the no-libc class).
+mount core.net.dns.lookup_host;
+mount core.net.addr.{IpAddr, Ipv4Addr, V4};
+
 // =============================================================================
 // TCP
 // =============================================================================
@@ -61,8 +70,38 @@ public type RawTcpListener is {
 
 implement RawTcpStream {
     /// Connect to a remote host:port.
+    ///
+    /// `host` may be a hostname or an IP literal. It is resolved to an
+    /// IPv4 literal HERE (via `lookup_host`) before reaching the
+    /// `tcp_connect` intrinsic, which is IP-literal-only and libc-free
+    /// (no `getaddrinfo`). `lookup_host` fast-paths IP literals with no
+    /// network I/O, so the common `connect("127.0.0.1", ...)` call
+    /// stays a straight parse. Task #43.
+    ///
+    /// IPv4-only: the intrinsic speaks `AF_INET` (`inet_pton`), so IPv6
+    /// hosts/literals (e.g. `"::1"`, AAAA-only names) return `None`
+    /// here — use `core.net.tcp.TcpStream` for dual-stack.
     public fn connect(host: Text, port: Int) -> Maybe<RawTcpStream> {
-        let fd = __tcp_connect_raw(host, port);
+        let addrs = match lookup_host(&host) {
+            Result.Ok(list) => list,
+            Result.Err(_) => return Maybe.None,
+        };
+        // The intrinsic speaks IPv4 (AF_INET) only — select the first
+        // V4 result and hand it over as a dotted-quad literal. `f"{v4}"`
+        // routes through `Ipv4Addr`'s Display (one formatting authority,
+        // same idiom as dns.vr's `A(ip) => f"{ip}"`).
+        let mut ip: Maybe<Text> = Maybe.None;
+        for addr in addrs {
+            if let V4(v4) = addr {
+                ip = Maybe.Some(f"{v4}");
+                break;
+            }
+        }
+        let ip_text = match ip {
+            Maybe.Some(t) => t,
+            Maybe.None => return Maybe.None,
+        };
+        let fd = __tcp_connect_raw(ip_text, port);
         if fd < 0 {
             Maybe.None
         } else {

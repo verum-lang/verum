@@ -10452,33 +10452,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module.add_function("setsockopt", fn_type, None)
     }
 
-    fn get_or_declare_getaddrinfo(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("getaddrinfo") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(
-            &[
-                ptr_type.into(),
-                ptr_type.into(),
-                ptr_type.into(),
-                ptr_type.into(),
-            ],
-            false,
-        );
-        module.add_function("getaddrinfo", fn_type, None)
-    }
-
-    fn get_or_declare_freeaddrinfo(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("freeaddrinfo") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        module.add_function("freeaddrinfo", fn_type, None)
-    }
-
     /// Get or declare a libc-free `inet_pton(af, src, dst) -> i32` wrapper.
     ///
 
@@ -10917,8 +10890,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let recv_fn_libc = self.get_or_declare_recv_libc(module);
         let close_fn = self.get_or_declare_close(module);
         let setsockopt_fn = self.get_or_declare_setsockopt(module);
-        let getaddrinfo_fn = self.get_or_declare_getaddrinfo(module);
-        let freeaddrinfo_fn = self.get_or_declare_freeaddrinfo(module);
         let inet_pton_fn = self.get_or_declare_inet_pton(module);
         let sendto_fn_libc = self.get_or_declare_sendto(module);
         let recvfrom_fn_libc = self.get_or_declare_recvfrom(module);
@@ -10949,10 +10920,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 verum_common::posix_sockets::linux::SO_REUSEADDR as u64,
             )
         };
-
-        // ai_addr offset within struct addrinfo (differs macOS vs Linux).
-        // Same TARGET-triple discipline.
-        let addrinfo_ai_addr_off: u64 = if target_is_darwin(module) { 32 } else { 24 };
 
         let neg1 = i64_type.const_int(u64::MAX, true); // -1
 
@@ -11474,7 +11441,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null_host");
                 let resolve_bb = self.context.append_basic_block(func, "resolve");
-                let gai_fail = self.context.append_basic_block(func, "gai_fail");
+                let pton_fail = self.context.append_basic_block(func, "pton_fail");
                 let do_sock = self.context.append_basic_block(func, "do_sock");
                 let sock_fail = self.context.append_basic_block(func, "sock_fail");
                 let do_conn = self.context.append_basic_block(func, "do_conn");
@@ -11522,96 +11489,97 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 b.build_return(Some(&neg1)).or_llvm_err()?;
 
                 b.position_at_end(resolve_bb);
-                // Zero 48-byte addrinfo hints
-                let hints = b
-                    .build_alloca(i8_type.array_type(48), "hints")
-                    .or_llvm_err()?;
+                // IP-literal-only path. Hostname resolution is the .vr
+                // caller's job (core/sys/net_ops.vr → core.net.dns.
+                // lookup_host BEFORE this intrinsic); here `host` is an
+                // IPv4 literal parsed by the libc-free
+                // verum_internal_inet_pton wrapper. This closes the last
+                // getaddrinfo member of the no-libc class — see
+                // docs/architecture/no-libc-architecture.md. Mirrors the
+                // sockaddr_in build in verum_udp_send_to below.
+                //
+                // Build a 16-byte sockaddr_in, then inet_pton the addr.
+                let sa = b.build_alloca(i8_type.array_type(16), "sa").or_llvm_err()?;
                 b.build_call(
                     memset_fn,
                     &[
-                        hints.into(),
+                        sa.into(),
                         i32_type.const_zero().into(),
-                        i64_type.const_int(48, false).into(),
+                        i64_type.const_int(16, false).into(),
                     ],
                     "",
                 )
                 .or_llvm_err()?;
-                // hints.ai_family (offset 4) = AF_INET=2
-                // SAFETY: GEP at offset 4 within a struct of known layout; the offset is within the allocation
-                let p = unsafe {
-                    b.build_gep(i8_type, hints, &[i32_type.const_int(4, false)], "af")
+                // sockaddr_in family field — Darwin: sin_len byte +
+                // sin_family byte; Linux: sin_family i16. TARGET-triple
+                // dispatch keeps cross builds correct.
+                if target_is_darwin(module) {
+                    // SAFETY: GEP at offset 0 within a struct of known layout; the offset is within the allocation
+                    let p0 = unsafe {
+                        b.build_gep(i8_type, sa, &[i32_type.const_int(0, false)], "sl")
+                            .or_llvm_err()?
+                    };
+                    b.build_store(p0, i8_type.const_int(16, false))
+                        .or_llvm_err()?;
+                    // SAFETY: GEP at offset 1 within a struct of known layout; the offset is within the allocation
+                    let p1 = unsafe {
+                        b.build_gep(i8_type, sa, &[i32_type.const_int(1, false)], "sf")
+                            .or_llvm_err()?
+                    };
+                    b.build_store(p1, i8_type.const_int(2, false))
+                        .or_llvm_err()?;
+                } else {
+                    b.build_store(sa, i16_type.const_int(2, false))
+                        .or_llvm_err()?;
+                }
+                // sin_port (offset 2), network byte order.
+                // SAFETY: GEP at offset 2 within a struct of known layout; the offset is within the allocation
+                let sp = unsafe {
+                    b.build_gep(i8_type, sa, &[i32_type.const_int(2, false)], "sp")
                         .or_llvm_err()?
                 };
-                b.build_store(p, i32_type.const_int(2, false))
-                    .or_llvm_err()?;
-                // hints.ai_socktype (offset 8) = SOCK_STREAM=1
-                // SAFETY: GEP at offset 8 within a struct of known layout; the offset is within the allocation
-                let p = unsafe {
-                    b.build_gep(i8_type, hints, &[i32_type.const_int(8, false)], "st")
+                let np = self.build_htons(&b, port)?;
+                b.build_store(sp, np).or_llvm_err()?;
+                // sin_addr (offset 4) via inet_pton(AF_INET=2, host, ...).
+                // SAFETY: GEP into sockaddr/network struct at a platform-defined field offset; the struct size matches the system ABI
+                let sin = unsafe {
+                    b.build_gep(i8_type, sa, &[i32_type.const_int(4, false)], "sin")
                         .or_llvm_err()?
                 };
-                b.build_store(p, i32_type.const_int(1, false))
-                    .or_llvm_err()?;
-
-                let res_ptr = b.build_alloca(ptr_type, "rp").or_llvm_err()?;
-                let null_ptr = ptr_type.const_null();
-                let gai = self.build_libc_call(
+                let pr = self.build_libc_call(
                     &b,
-                    getaddrinfo_fn,
-                    &[host.into(), null_ptr.into(), hints.into(), res_ptr.into()],
-                    "gai",
+                    inet_pton_fn,
+                    &[i32_type.const_int(2, false).into(), host.into(), sin.into()],
+                    "pr",
                 )?;
-                let gai_nz = b
+                // inet_pton returns 1 on success, 0 for a malformed
+                // literal, -1 on an unsupported family. Anything <= 0 is a
+                // parse failure → the honest connect-fail sentinel (-1),
+                // NOT a silent success.
+                let ple = b
                     .build_int_compare(
-                        verum_llvm::IntPredicate::NE,
-                        gai,
+                        verum_llvm::IntPredicate::SLE,
+                        pr,
                         i64_type.const_zero(),
-                        "gnz",
+                        "ple",
                     )
                     .or_llvm_err()?;
-                b.build_conditional_branch(gai_nz, gai_fail, do_sock)
+                b.build_conditional_branch(ple, pton_fail, do_sock)
                     .or_llvm_err()?;
 
-                b.position_at_end(gai_fail);
+                b.position_at_end(pton_fail);
                 b.build_return(Some(&neg1)).or_llvm_err()?;
 
                 b.position_at_end(do_sock);
-                let res = b
-                    .build_load(ptr_type, res_ptr, "res")
-                    .or_llvm_err()?
-                    .into_pointer_value();
-                // res->ai_family(4), ai_socktype(8), ai_protocol(12)
-                // SAFETY: GEP into sockaddr/network struct at a platform-defined field offset; the struct size matches the system ABI
-                let fam_p = unsafe {
-                    b.build_gep(i8_type, res, &[i32_type.const_int(4, false)], "fp")
-                        .or_llvm_err()?
-                };
-                let ai_fam = b
-                    .build_load(i32_type, fam_p, "fam")
-                    .or_llvm_err()?
-                    .into_int_value();
-                // SAFETY: GEP into sockaddr/network struct at a platform-defined field offset; the struct size matches the system ABI
-                let st_p = unsafe {
-                    b.build_gep(i8_type, res, &[i32_type.const_int(8, false)], "stp")
-                        .or_llvm_err()?
-                };
-                let ai_st = b
-                    .build_load(i32_type, st_p, "skt")
-                    .or_llvm_err()?
-                    .into_int_value();
-                // SAFETY: GEP into sockaddr/network struct at a platform-defined field offset; the struct size matches the system ABI
-                let pr_p = unsafe {
-                    b.build_gep(i8_type, res, &[i32_type.const_int(12, false)], "prp")
-                        .or_llvm_err()?
-                };
-                let ai_pr = b
-                    .build_load(i32_type, pr_p, "proto")
-                    .or_llvm_err()?
-                    .into_int_value();
+                // socket(AF_INET=2, SOCK_STREAM=1, 0)
                 let fd = self.build_libc_call(
                     &b,
                     socket_fn,
-                    &[ai_fam.into(), ai_st.into(), ai_pr.into()],
+                    &[
+                        i32_type.const_int(2, false).into(),
+                        i32_type.const_int(1, false).into(),
+                        i32_type.const_zero().into(),
+                    ],
                     "fd",
                 )?;
                 let fd_neg = b
@@ -11626,48 +11594,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     .or_llvm_err()?;
 
                 b.position_at_end(sock_fail);
-                b.build_call(freeaddrinfo_fn, &[res.into()], "")
-                    .or_llvm_err()?;
                 b.build_return(Some(&neg1)).or_llvm_err()?;
 
                 b.position_at_end(do_conn);
-                // Set port in res->ai_addr->sin_port
-                // SAFETY: GEP to access the 'aap' field at a fixed offset within a struct of known layout
-                let addr_p = unsafe {
-                    b.build_gep(
-                        i8_type,
-                        res,
-                        &[i64_type.const_int(addrinfo_ai_addr_off, false)],
-                        "aap",
-                    )
-                    .or_llvm_err()?
-                };
-                let ai_addr = b
-                    .build_load(ptr_type, addr_p, "aa")
-                    .or_llvm_err()?
-                    .into_pointer_value();
-                // SAFETY: GEP at offset 2 within a struct of known layout; the offset is within the allocation
-                let sp = unsafe {
-                    b.build_gep(i8_type, ai_addr, &[i32_type.const_int(2, false)], "sp")
-                        .or_llvm_err()?
-                };
-                let np = self.build_htons(&b, port)?;
-                b.build_store(sp, np).or_llvm_err()?;
-                // ai_addrlen at offset 16
-                // SAFETY: GEP into sockaddr/network struct at a platform-defined field offset; the struct size matches the system ABI
-                let al_p = unsafe {
-                    b.build_gep(i8_type, res, &[i32_type.const_int(16, false)], "alp")
-                        .or_llvm_err()?
-                };
-                let addrlen = b
-                    .build_load(i32_type, al_p, "al")
-                    .or_llvm_err()?
-                    .into_int_value();
                 let fd32 = b.build_int_truncate(fd, i32_type, "fd32").or_llvm_err()?;
                 let cr = self.build_libc_call(
                     &b,
                     connect_fn_libc,
-                    &[fd32.into(), ai_addr.into(), addrlen.into()],
+                    &[
+                        fd32.into(),
+                        sa.into(),
+                        i32_type.const_int(16, false).into(),
+                    ],
                     "cr",
                 )?;
                 let cn = b
@@ -11683,13 +11621,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 b.position_at_end(conn_fail);
                 self.build_libc_call_void(&b, close_fn, &[fd32.into()], "")?;
-                b.build_call(freeaddrinfo_fn, &[res.into()], "")
-                    .or_llvm_err()?;
                 b.build_return(Some(&neg1)).or_llvm_err()?;
 
                 b.position_at_end(done);
-                b.build_call(freeaddrinfo_fn, &[res.into()], "")
-                    .or_llvm_err()?;
                 b.build_return(Some(&fd)).or_llvm_err()?;
             }
         }
