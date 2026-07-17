@@ -1,0 +1,79 @@
+// @test: run
+// @expected-stdout: scale=2.5\nscaled=7.5\nlogged=recorded:hello
+// @tier: 0
+// @level: L2
+// @tags: contexts, using, module-level, method-call, vbc, runtime
+// @description: Module-level `using [...]` reaches VBC codegen — context method calls emit CtxGet and consult the provided value (MODULE-USING-DESUGAR-1, T0229)
+
+// Pins the E2E-CONTEXT-FLOAT-VALUE-1 class: a module-level `using [Ctx]`
+// clause (its ONLY per-function source — no postfix `using` on any fn
+// below) must make `Ctx.method(...)` compile as CtxGet + dyn CallM on
+// the PROVIDED value. The historical failure compiled these calls
+// through static name resolution instead; with a name-colliding free
+// function (stdlib math `log`) the call was silently hijacked —
+// `Logger.log(msg)` computed a natural logarithm of the Text pointer
+// (as_f64 debug-assert 'Expected float, got Some(0)' under debug
+// builds, silent NaN in release). Both methods here return values the
+// hijack cannot produce, and `log` deliberately collides with the
+// stdlib math function.
+
+context Scaler {
+    fn factor() -> Float;
+}
+
+context Logger {
+    fn log(message: Text) -> Text;
+}
+
+type TestScaler is {
+    value: Float,
+};
+
+implement Scaler for TestScaler {
+    fn factor(&self) -> Float {
+        self.value
+    }
+}
+
+type RecordingLogger is {};
+
+implement Logger for RecordingLogger {
+    fn log(&self, message: Text) -> Text {
+        f"recorded:{message}"
+    }
+}
+
+using [Scaler, Logger]
+
+// No postfix `using` anywhere below: the module-level clause above is
+// the only thing that can make these context calls resolve.
+
+fn read_factor() -> Float {
+    Scaler.factor()
+}
+
+fn scale_three() -> Float {
+    // Float context value crossing provide/using and arithmetic: 3.0 * 2.5
+    // must survive as 7.5 — a non-integral product cannot come out of an
+    // integer mis-path, and a NaN-boxed pointer cannot format as 7.5.
+    3.0 * Scaler.factor()
+}
+
+fn record(message: Text) -> Text {
+    // `log` collides with the stdlib math logarithm — the hijack shape.
+    Logger.log(message)
+}
+
+mount core.prelude.*;
+
+fn main() {
+    let scaler = TestScaler { value: 2.5 };
+    let logger = RecordingLogger {};
+    provide Scaler = scaler;
+    provide Logger = logger;
+
+    println(f"scale={read_factor()}");
+    println(f"scaled={scale_three()}");
+    let logged = record("hello");
+    println(f"logged={logged}");
+}

@@ -181,6 +181,11 @@ impl<'a> RecursiveParser<'a> {
             items.push(self.synthesize_script_main(script_stmts, script_start));
         }
 
+        // MODULE-USING-DESUGAR-1 (T0229): fold module-level `using [...]`
+        // into each function's own contexts list before the AST leaves the
+        // parser — see `distribute_module_level_contexts`.
+        Self::distribute_module_level_contexts(&mut items);
+
         // Root fix for Issue #5 (parser error duplication):
         //
 
@@ -5527,6 +5532,9 @@ impl<'a> RecursiveParser<'a> {
             }
 
             self.stream.expect(TokenKind::RBrace)?;
+            // MODULE-USING-DESUGAR-1 (T0229): a `using [...]` inside this
+            // module body scopes to this body's functions only.
+            Self::distribute_module_level_contexts(&mut module_items);
             Maybe::Some(module_items)
         } else {
             self.stream.expect(TokenKind::Semicolon)?;
@@ -6727,6 +6735,86 @@ impl<'a> RecursiveParser<'a> {
             }),
             span,
         ))
+    }
+
+    /// MODULE-USING-DESUGAR-1 (T0229): distribute module-level `using [...]`
+    /// requirements into every function of the item list they appear in.
+    ///
+    /// A module-level `using [Ctx]` parses as a synthetic ContextGroup named
+    /// `__module_contexts__` (see `parse_module_context_requirement`). Each
+    /// `FunctionDecl.contexts` list is the declaration-side truth consumed by
+    /// the type checker, the VBC codegen `required_contexts` set (the
+    /// CTX-SHADOWS-ALL-1 context-first dispatch guard), and Tier-1 lowering
+    /// downstream of VBC. A requirement that lives only in the group item is
+    /// invisible to codegen, which then resolves `Logger.log(msg)` through the
+    /// static rungs — observed binding it to the math intrinsic `log` and
+    /// feeding it a Text pointer (`value.rs` `as_f64` debug-assert in debug,
+    /// silent NaN in release). Desugaring here, where the item list is
+    /// assembled, makes the parser the ONE authority for the "applies to all
+    /// functions in the module" rule; the former type-checker-side merge in
+    /// `verum_types::infer::modules` is retired against this.
+    ///
+    /// Scope rules:
+    /// - Lexical: applies to the item list the group appears in. A nested
+    ///   `module { ... }` body runs its own pass over its own items and does
+    ///   not inherit the enclosing file's module-level contexts.
+    /// - Covers top-level functions and `implement`-block methods. Skips meta
+    ///   functions (compile-time evaluated, no runtime DI) and bodyless
+    ///   declarations (extern/FFI signatures have no body to require DI for).
+    /// - A function that already names the context path — positively or as a
+    ///   negative `using [!Ctx]` opt-out — keeps its own entry unchanged.
+    /// - The group item itself stays in the list: named-group registration
+    ///   and meta round-tripping continue to see it.
+    fn distribute_module_level_contexts(items: &mut [Item]) {
+        let mut module_reqs: Vec<ContextRequirement> = Vec::new();
+        for item in items.iter() {
+            if let ItemKind::ContextGroup(group) = &item.kind
+                && group.name.name.as_str() == "__module_contexts__"
+            {
+                for req in group.contexts.iter() {
+                    let key = format!("{}", req.path);
+                    if !module_reqs
+                        .iter()
+                        .any(|existing| format!("{}", existing.path) == key)
+                    {
+                        module_reqs.push(req.clone());
+                    }
+                }
+            }
+        }
+        if module_reqs.is_empty() {
+            return;
+        }
+
+        fn merge_into_fn(func: &mut FunctionDecl, module_reqs: &[ContextRequirement]) {
+            if func.is_meta || func.body.is_none() {
+                return;
+            }
+            for req in module_reqs {
+                let key = format!("{}", req.path);
+                let already_mentioned = func
+                    .contexts
+                    .iter()
+                    .any(|own| format!("{}", own.path) == key);
+                if !already_mentioned {
+                    func.contexts.push(req.clone());
+                }
+            }
+        }
+
+        for item in items.iter_mut() {
+            match &mut item.kind {
+                ItemKind::Function(func) => merge_into_fn(func, &module_reqs),
+                ItemKind::Impl(impl_decl) => {
+                    for impl_item in impl_decl.items.iter_mut() {
+                        if let ImplItemKind::Function(func) = &mut impl_item.kind {
+                            merge_into_fn(func, &module_reqs);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Parse a context layer declaration.

@@ -9190,35 +9190,27 @@ impl TypeChecker {
         // Context group expansion: resolving context group names to their constituent contexts recursively — Context group expansion
         //
 
-        // Module-level `using [Ctx]` clauses at the top of a file are parsed
-        // as a synthetic context group named `__module_contexts__`. Its
-        // contents should be implicitly added to every function's required
-        // contexts, so callers don't have to repeat `using [Ctx]` on every
-        // function in a file that already declares it at module scope.
-        let module_level_contexts = match self.context_resolver.get_group("__module_contexts__") {
-            verum_common::Maybe::Some(g) => g.contexts.clone(),
-            verum_common::Maybe::None => List::new(),
-        };
-
-        let context_requirement = if !func.contexts.is_empty() || !module_level_contexts.is_empty()
-        {
+        // MODULE-USING-DESUGAR-1 (T0229): module-level `using [Ctx]` clauses
+        // are folded into each `FunctionDecl.contexts` by the parser
+        // (`distribute_module_level_contexts` in verum_fast_parser), so the
+        // AST list is the ONE declaration-side truth here. The former
+        // side-merge that read the `__module_contexts__` group registry at
+        // this point is retired: it was invisible to VBC codegen (which reads
+        // `func.contexts`), so `Logger.log(...)` under a module-level clause
+        // type-checked as a context call but compiled as a static name
+        // lookup — the E2E-CONTEXT-FLOAT-VALUE-1 hijack onto the math `log`
+        // intrinsic. Routing the desugared entries through
+        // `resolve_requirement` also gives module-level contexts the same
+        // validation as hand-written clauses.
+        let context_requirement = if !func.contexts.is_empty() {
             // Convert Vec to List for the resolver
             let contexts_list: List<_> = func.contexts.iter().cloned().collect();
 
             // Expand context groups and validate all contexts
-            let mut requirement = if !contexts_list.is_empty() {
+            Some(
                 self.context_resolver
-                    .resolve_requirement(&contexts_list, func.span)?
-            } else {
-                crate::di::requirement::ContextRequirement::empty()
-            };
-
-            // Merge in module-level contexts.
-            for ctx in module_level_contexts.iter() {
-                requirement.add_context(ctx.clone());
-            }
-
-            Some(requirement)
+                    .resolve_requirement(&contexts_list, func.span)?,
+            )
         } else {
             None
         };

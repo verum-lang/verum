@@ -492,10 +492,26 @@ fn test_cbgr_unsafe_references() {
 
 #[test]
 fn test_context_system_e2e() {
-    // Goal: Test the context system (dependency injection) through full pipeline
+    // Goal: dependency injection through the full pipeline, with the context
+    // requirement declared MODULE-LEVEL (`using [Logger]` at item position).
+    //
+    // Pins MODULE-USING-DESUGAR-1 (T0229): the module-level clause must reach
+    // VBC codegen's required_contexts so `Logger.log(...)` compiles to
+    // CtxGet + CallM on the PROVIDED value. The regression compiled it as a
+    // static name lookup instead, where the stdlib math `log` intrinsic
+    // hijacked the call and read the Text argument as a float
+    // (value.rs as_f64: "Expected float, got Some(0)").
     let source = r#"
         context Logger {
             fn log(msg: Text) -> ();
+        }
+
+        type ConsoleLogger is {};
+
+        implement Logger for ConsoleLogger {
+            fn log(&self, msg: Text) -> () {
+                print(msg);
+            }
         }
 
         using [Logger]
@@ -505,28 +521,24 @@ fn test_context_system_e2e() {
         }
 
         fn main() {
-            // Future: provide Logger with ConsoleLogger { ... }
+            provide Logger = ConsoleLogger {};
             let result = process();
             result
         }
     "#;
 
     let result = compile_source(source);
-
-    // Context system is a key Verum feature
-    match result {
-        Ok(_) => {
-            println!("Context system compiled successfully");
-        }
-        Err(e) => {
-            println!("Context system error: {}", e);
-            // Context implementation may be in progress
-        }
-    }
+    assert!(
+        result.is_ok(),
+        "module-level `using [Logger]` must compile and run through the provided context: {}",
+        result.unwrap_err()
+    );
 }
 
 #[test]
 fn test_context_multiple_dependencies() {
+    // Same MODULE-USING-DESUGAR-1 pin with two module-level contexts; the
+    // `log` method name deliberately collides with the stdlib math function.
     let source = r#"
         context Database {
             fn query(sql: Text) -> List<Text>;
@@ -536,6 +548,24 @@ fn test_context_multiple_dependencies() {
             fn log(msg: Text) -> ();
         }
 
+        type MemoryDb is {};
+
+        implement Database for MemoryDb {
+            fn query(&self, sql: Text) -> List<Text> {
+                let mut rows: List<Text> = List.new();
+                rows.push(sql);
+                rows
+            }
+        }
+
+        type ConsoleLogger is {};
+
+        implement Logger for ConsoleLogger {
+            fn log(&self, msg: Text) -> () {
+                print(msg);
+            }
+        }
+
         using [Database, Logger]
         fn fetch_users() -> List<Text> {
             Logger.log("Fetching users...");
@@ -543,24 +573,39 @@ fn test_context_multiple_dependencies() {
         }
 
         fn main() {
+            provide Database = MemoryDb {};
+            provide Logger = ConsoleLogger {};
             let users = fetch_users();
             users
         }
     "#;
 
     let result = compile_source(source);
-
-    match result {
-        Ok(_) => println!("Multiple contexts compiled"),
-        Err(e) => println!("Multiple contexts error: {}", e),
-    }
+    assert!(
+        result.is_ok(),
+        "module-level `using [Database, Logger]` must compile and run through the provided contexts: {}",
+        result.unwrap_err()
+    );
 }
 
 #[test]
 fn test_context_provide_block() {
+    // `provide Ctx = value in { ... }` block form (grammar/verum.ebnf
+    // provide_stmt). The pre-T0229 version of this test used a
+    // `provide Config with { fn get(...) {...} }` shape that has never been
+    // in the grammar — it failed to parse, and the match-and-print body hid
+    // that as a green test.
     let source = r#"
         context Config {
             fn get(key: Text) -> Text;
+        }
+
+        type AppConfig is {};
+
+        implement Config for AppConfig {
+            fn get(&self, key: Text) -> Text {
+                "MyApp"
+            }
         }
 
         using [Config]
@@ -569,11 +614,7 @@ fn test_context_provide_block() {
         }
 
         fn main() {
-            provide Config with {
-                fn get(key: Text) -> Text {
-                    "MyApp"
-                }
-            } {
+            provide Config = AppConfig {} in {
                 let name = app_name();
                 name
             }
@@ -581,11 +622,11 @@ fn test_context_provide_block() {
     "#;
 
     let result = compile_source(source);
-
-    match result {
-        Ok(_) => println!("Context provide block compiled"),
-        Err(e) => println!("Context provide error: {}", e),
-    }
+    assert!(
+        result.is_ok(),
+        "provide-block over a module-level `using [Config]` must compile and run: {}",
+        result.unwrap_err()
+    );
 }
 
 // ============================================================================

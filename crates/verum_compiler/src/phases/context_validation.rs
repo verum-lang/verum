@@ -629,6 +629,14 @@ impl ContextValidationPhase {
         // Separate positive (required) and negative (excluded) context constraints
         let mut declared_contexts: HashSet<String> = HashSet::new();
         let mut excluded_contexts: HashSet<String> = HashSet::new();
+        // MODULE-USING-DESUGAR-1 (T0229): requirements folded in from a
+        // module-level `using [...]` keep the module clause's span, which
+        // lies outside the function's own span. They apply to every
+        // function by design, so a function that happens not to touch one
+        // must not draw the per-function "declared but never used" warning
+        // (its help text — "remove it from the 'using' clause" — would
+        // point at a clause the function does not have).
+        let mut module_inherited: HashSet<String> = HashSet::new();
 
         // `pure fn` implies exclusion of all impure computational properties.
         // Grammar (line 551): "pure - Compiler-verified no side effects"
@@ -661,6 +669,10 @@ impl ContextValidationPhase {
 
             if context_name.is_empty() {
                 continue;
+            }
+
+            if ctx.span.start < func.span.start || ctx.span.end > func.span.end {
+                module_inherited.insert(context_name.clone());
             }
 
             // Conditional context: skip if compile-time condition evaluates to false.
@@ -867,7 +879,10 @@ impl ContextValidationPhase {
             warnings.push(diag);
         }
         for declared in &declared_contexts {
-            if !used_contexts.contains(declared) && !declared.as_str().is_empty() {
+            if !used_contexts.contains(declared)
+                && !declared.as_str().is_empty()
+                && !module_inherited.contains(declared)
+            {
                 let diag = DiagnosticBuilder::warning()
                     .message(format!(
                         "Context '{}' declared in 'using' clause but never used in function '{}'",
