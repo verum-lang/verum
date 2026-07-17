@@ -593,6 +593,30 @@ pub struct UnresolvedGenericCall {
     pub caller: String,
     /// What could not be resolved (fn-id, dispatch token, or other detail).
     pub detail: String,
+    /// Whether the enclosing function is reachable from the program's
+    /// roots per the `verum_vbc::reachability` walk (conservatively
+    /// `true` when no walk was installed).
+    pub reachable: bool,
+}
+
+/// Reachable-function name set for the current lowering run (T0103).
+/// Set once by `VbcToLlvmLowering::lower_module` from the
+/// `verum_vbc::reachability` walk; consulted at record time so every
+/// unresolved-call record carries whether its enclosing function can
+/// actually execute. Dead-carry degradations (unreachable baked
+/// archive bodies) are real lowering facts but not miscompiles of
+/// THIS program — the report and the strict gate treat the two
+/// classes differently.
+fn reachable_names_cell() -> &'static Mutex<Option<std::collections::HashSet<String>>> {
+    static CELL: OnceLock<Mutex<Option<std::collections::HashSet<String>>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
+/// Install the reachable-function name set for this lowering run.
+/// Passing `None` clears it (records then default to reachable=true —
+/// the conservative direction for the strict gate).
+pub fn set_reachable_function_names(names: Option<std::collections::HashSet<String>>) {
+    *reachable_names_cell().lock().unwrap() = names;
 }
 
 fn unresolved_generic_call_registry() -> &'static Mutex<Vec<UnresolvedGenericCall>> {
@@ -604,10 +628,17 @@ fn unresolved_generic_call_registry() -> &'static Mutex<Vec<UnresolvedGenericCal
 /// lowering.  Public so the instruction lowerer (a different module) can
 /// report into the process-global registry.
 pub fn record_unresolved_generic_call(caller: &str, detail: String) {
+    // Reachability tag (T0103): conservative default is `true` when no
+    // walk was installed — the strict gate must never under-count.
+    let reachable = match reachable_names_cell().lock() {
+        Ok(g) => g.as_ref().map(|set| set.contains(caller)).unwrap_or(true),
+        Err(_) => true,
+    };
     if let Ok(mut g) = unresolved_generic_call_registry().lock() {
         g.push(UnresolvedGenericCall {
             caller: caller.to_string(),
             detail,
+            reachable,
         });
     }
 }
@@ -638,18 +669,32 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
         .iter()
         .filter(|c| seen.insert((c.caller.clone(), c.detail.clone())))
         .collect();
+    let reachable_count = unique.iter().filter(|c| c.reachable).count();
+    let dead_count = unique.len() - reachable_count;
     // Cap the per-entry list so the warning stays readable on a large
     // stdlib build (the strict gate still counts every unique site).
+    // REACHABLE sites list first — they are the ones that can actually
+    // compute wrong results in THIS program.
     const MAX_SHOWN: usize = 15;
     let mut lines: Vec<String> = Vec::with_capacity(MAX_SHOWN + 3);
     lines.push(format!(
         "{} unresolved call(s) degraded to a const-zero stub during AOT \
-         lowering — the target could not be pinned to a concrete function \
-         (wrong-result or SIGSEGV at runtime):",
-        unique.len()
+         lowering ({} in REACHABLE code, {} in dead/unreached baked bodies) \
+         — an unresolved target in reachable code is a wrong-result or \
+         SIGSEGV at runtime:",
+        unique.len(),
+        reachable_count,
+        dead_count
     ));
-    for c in unique.iter().take(MAX_SHOWN) {
-        lines.push(format!("  in `{}`: {}", c.caller, c.detail));
+    let mut ordered: Vec<&&UnresolvedGenericCall> = unique.iter().collect();
+    ordered.sort_by_key(|c| !c.reachable);
+    for c in ordered.iter().take(MAX_SHOWN) {
+        lines.push(format!(
+            "  in `{}`{}: {}",
+            c.caller,
+            if c.reachable { "" } else { " [dead]" },
+            c.detail
+        ));
     }
     if unique.len() > MAX_SHOWN {
         lines.push(format!("  … and {} more", unique.len() - MAX_SHOWN));
@@ -665,11 +710,45 @@ pub fn check_no_unresolved_generic_calls() -> Result<()> {
             .to_string(),
     );
     let message = lines.join("\n");
-    if std::env::var_os("VERUM_STRICT_MONO").is_some() {
-        Err(LlvmLoweringError::Internal(message.into()))
-    } else {
-        eprintln!("[codegen-warn] {}", message);
-        Ok(())
+    // Full-list report channel for the strict-mono campaign (T0103):
+    // the console warning caps at MAX_SHOWN for readability, but
+    // classification work needs every unique site. When
+    // VERUM_MONO_REPORT names a path, the complete list is written
+    // there as `caller\tdetail` lines (best-effort — a write failure
+    // must not change compilation semantics).
+    if let Some(path) = std::env::var_os("VERUM_MONO_REPORT") {
+        let mut body = String::with_capacity(unique.len() * 96);
+        for c in unique.iter() {
+            body.push_str(c.caller.as_str());
+            body.push('\t');
+            body.push_str(if c.reachable { "reachable" } else { "dead" });
+            body.push('\t');
+            body.push_str(c.detail.as_str());
+            body.push('\n');
+        }
+        if let Err(e) = std::fs::write(&path, body) {
+            eprintln!(
+                "[codegen-warn] VERUM_MONO_REPORT write to {:?} failed: {}",
+                path, e
+            );
+        }
+    }
+    // Strict-gate semantics (T0103): the gate exists to keep silent
+    // wrong results out of programs that RUN. `VERUM_STRICT_MONO=1`
+    // therefore hard-errors when any REACHABLE site degraded;
+    // `VERUM_STRICT_MONO=all` extends the error to dead-carry sites
+    // (the archive-hygiene bar). Anything else warns.
+    match std::env::var("VERUM_STRICT_MONO") {
+        Ok(v) if v == "all" => Err(LlvmLoweringError::Internal(message.into())),
+        Ok(_) if reachable_count > 0 => Err(LlvmLoweringError::Internal(message.into())),
+        Ok(_) => {
+            eprintln!("[codegen-warn] {}", message);
+            Ok(())
+        }
+        Err(_) => {
+            eprintln!("[codegen-warn] {}", message);
+            Ok(())
+        }
     }
 }
 
@@ -742,5 +821,39 @@ mod meta_consolidation_pins {
         // at error-severity flow through the typed
         // `LlvmLoweringError` instead.
         assert!(LoweringSeverity::from_str("error").is_none());
+    }
+}
+
+#[cfg(test)]
+mod unresolved_reachability_tests {
+    use super::*;
+
+    /// One test owns the process-global registry + reachable cell —
+    /// splitting these assertions across #[test] fns would race on the
+    /// shared state under the parallel test runner.
+    #[test]
+    fn records_tag_reachability_from_installed_set() {
+        let mut set = std::collections::HashSet::new();
+        set.insert("live_fn".to_string());
+        set_reachable_function_names(Some(set));
+        record_unresolved_generic_call("live_fn", "d1".to_string());
+        record_unresolved_generic_call("dead_fn", "d2".to_string());
+        set_reachable_function_names(None);
+        // No walk installed → conservative default (true): the strict
+        // gate must never under-count.
+        record_unresolved_generic_call("anything", "d3".to_string());
+
+        let recs = take_unresolved_generic_calls();
+        let by: std::collections::HashMap<&str, bool> = recs
+            .iter()
+            .map(|r| (r.caller.as_str(), r.reachable))
+            .collect();
+        assert_eq!(by["live_fn"], true);
+        assert_eq!(by["dead_fn"], false);
+        assert_eq!(by["anything"], true);
+        assert!(
+            take_unresolved_generic_calls().is_empty(),
+            "take drains the registry"
+        );
     }
 }

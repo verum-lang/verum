@@ -9817,8 +9817,14 @@ fn lower_call<'ctx>(
                 } else {
                     None
                 };
+                // Ranked resolution (T0103 LEG-2a): exact, then
+                // head-strip, then ranked qualified-suffix — the same
+                // discipline the interpreter's merge path applies, so
+                // `Mutex.new` recorded against a table that registers
+                // `core.sync.mutex.Mutex.new` resolves instead of
+                // degrading to a const-zero stub.
                 let xmod_recovered = xmod_name
-                    .and_then(|name| vbc_mod.find_function_by_name(name))
+                    .and_then(|name| vbc_mod.resolve_function_by_name_ranked(name))
                     .and_then(|fid| vbc_mod.get_function(fid));
                 match xmod_recovered {
                     Some(d) => d,
@@ -9886,13 +9892,32 @@ fn lower_call<'ctx>(
                             }
                         }
                         let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+                        // Classification note for the strict-mono campaign
+                        // (T0103): say WHY the name chase failed, not just
+                        // that the table lookup missed — the three causes
+                        // have three different fixes (name-table gap vs
+                        // absent target vs non-band id).
+                        let chase_note = match xmod_name {
+                            Some(n) => format!(
+                                "name-chase: '{}' named but absent from the module",
+                                n
+                            ),
+                            None if verum_vbc::stub_ranges::is_xmod_name_reference(func_id)
+                                || verum_vbc::stub_ranges::is_stub_id(func_id) =>
+                            {
+                                "name-chase: no external_function_names entry for this id"
+                                    .to_string()
+                            }
+                            None => "id outside XMOD/stub name-reference bands".to_string(),
+                        };
                         super::error::record_unresolved_generic_call(
                             &cur_fn,
                             format!(
-                                "Call fn-id {} (base {} + {}) missing in the VBC module table",
+                                "Call fn-id {} (base {} + {}) missing in the VBC module table ({})",
                                 resolved_id,
                                 ctx.func_id_base(),
-                                func_id
+                                func_id,
+                                chase_note
                             ),
                         );
                         if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {

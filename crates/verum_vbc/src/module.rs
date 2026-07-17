@@ -748,6 +748,104 @@ impl VbcModule {
         self.find_function_by_name(name)
     }
 
+    /// Ranked qualified-name resolution over THIS module's function
+    /// table (T0103 LEG-2a) — the module-level twin of the loader's
+    /// `ArchiveBodyRemap::qualified_suffix_chase` (codegen/mod.rs), so
+    /// the AOT lowering's band-id name chase resolves with the same
+    /// power the interpreter's merge path has. Order:
+    ///
+    ///  1. exact name (`find_function_by_name` — bodied beats stub);
+    ///  2. progressive head-strip: leading lower-case module segments
+    ///     may be spelled in the recorded name but absent from the
+    ///     registration key (`core.time.Instant.now` recorded,
+    ///     `Instant.now` registered) — exact probe per stripped level,
+    ///     at least two segments kept;
+    ///  3. ranked `.suffix` scan for the inverse shape (`Mutex.new`
+    ///     recorded, `core.sync.mutex.Mutex.new` registered): bodied
+    ///     beats stub, then fewest dots, then module-parent before
+    ///     type-parent, then lexicographic — the stable tie-break
+    ///     every ranked resolver in the toolchain uses.
+    ///
+    /// NOTE: the loader chase ranks over PRE-merge ctx/archive
+    /// indexes; this one ranks over the merged table. Unifying those
+    /// universes is T0144's resolution-map work — keep the ranking
+    /// DISCIPLINE identical when touching either.
+    pub fn resolve_function_by_name_ranked(&self, name: &str) -> Option<FunctionId> {
+        if let Some(fid) = self.find_function_by_name(name) {
+            return Some(fid);
+        }
+        if !name.contains('.') {
+            return None;
+        }
+        // Step 2: progressive head-strip of module-shaped segments.
+        let segs: Vec<&str> = name.split('.').collect();
+        for k in 1..segs.len().saturating_sub(1) {
+            if !segs[k - 1]
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_lowercase())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            let stripped = segs[k..].join(".");
+            if let Some(fid) = self.find_function_by_name(&stripped) {
+                return Some(fid);
+            }
+        }
+        // Step 3: ranked suffix scan (also try the `core.`-stripped
+        // spelling as the suffix floor, mirroring the loader).
+        let target: &str = match name.strip_prefix("core.") {
+            Some(stripped) if stripped.contains('.') => stripped,
+            _ => name,
+        };
+        let suffix = format!(".{}", target);
+        let has_body = |desc: &crate::module::FunctionDescriptor| -> bool {
+            desc.bytecode_length > 0
+                || desc
+                    .instructions
+                    .as_ref()
+                    .map(|i| !i.is_empty())
+                    .unwrap_or(false)
+        };
+        let parent_is_module = |k: &str| -> bool {
+            let ks: Vec<&str> = k.split('.').collect();
+            ks.len() >= 2
+                && ks[ks.len() - 2]
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_lowercase())
+                    .unwrap_or(false)
+        };
+        let mut best: Option<(bool, usize, bool, &str, FunctionId)> = None;
+        for desc in self.functions.iter() {
+            if crate::stub_ranges::is_stub_id(desc.id.0) {
+                continue;
+            }
+            let Some(key) = self.get_string(desc.name) else {
+                continue;
+            };
+            if !key.ends_with(&suffix) {
+                continue;
+            }
+            let cand = (
+                !has_body(desc),          // bodied first (false < true)
+                key.matches('.').count(), // fewest dots
+                !parent_is_module(key),   // module-parent first
+                key,                      // lexicographic
+                desc.id,
+            );
+            let better = match &best {
+                None => true,
+                Some(b) => (cand.0, cand.1, cand.2, cand.3) < (b.0, b.1, b.2, b.3),
+            };
+            if better {
+                best = Some(cand);
+            }
+        }
+        best.map(|(_, _, _, _, fid)| fid)
+    }
+
     pub fn find_function_by_name(&self, name: &str) -> Option<FunctionId> {
         // ARCH-P2 step 0b (dispatch tie-break determinism): among
         // SAME-NAMED entries the winner used to be "lowest id" — an

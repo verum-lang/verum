@@ -945,6 +945,24 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             vbc_module,
         )));
 
+        // Phase 1.55 (T0103): reachability walk. Tags every
+        // unresolved-call record with whether its enclosing function
+        // can actually execute, so the strict-mono gate errors on
+        // degradations in REACHABLE code instead of counting the
+        // dead carry of unreached baked archive bodies. One
+        // O(total-instructions) pass; cleared at the end of
+        // `lower_module` so a stale set never leaks into another run.
+        {
+            let reach = verum_vbc::reachability::analyze(vbc_module);
+            tracing::debug!(
+                "reachability: {} of {} functions reachable ({} CallM method names)",
+                reach.reachable_ids.len(),
+                vbc_module.functions.len(),
+                reach.called_method_names.len()
+            );
+            super::error::set_reachable_function_names(Some(reach.reachable_names));
+        }
+
         // Phase 1.6: Create coverage counter array if coverage is enabled.
         // Global array: i64[N] where N = number of functions.
         // Each function increments its counter on entry.
@@ -1389,6 +1407,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // un-monomorphized generic protocol dispatch).  Warning by default;
             // hard error under VERUM_STRICT_MONO=1.
             super::error::check_no_unresolved_generic_calls()?;
+            // The reachable-name set is per-lowering-run state — clear
+            // it so a later lower_module in the same process starts
+            // from the conservative default instead of a stale walk.
+            super::error::set_reachable_function_names(None);
         }
 
         // Phase 3.6 (#106 Path A.2): final-pass safety net — for any
