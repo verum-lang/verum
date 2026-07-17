@@ -94,25 +94,46 @@ pub struct CoreMetadata {
 
     /// Re-export chains captured at precompile time, indexed by the
     /// **enclosing** module path. Each entry is a list of
-    /// `(local_name, source_module_path)` pairs that describe items
-    /// the module re-exports via `public mount .other.{name}` or
+    /// `(local_name, true_name, source_module_path)` triples that
+    /// describe items the module re-exports via `public mount
+    /// .other.{name}` or `public mount .other.{name as alias}` or
     /// `public mount .other.*`.
+    ///
+    /// `local_name` is the alias if the mount renamed the item
+    /// (`LayoutConstraint as Constraint`), else the same as
+    /// `true_name`. `true_name` is always the item's OWN declared
+    /// name in `source_module_path` — the key that actually resolves
+    /// there in `metadata.types` / `metadata.functions` / `metadata.
+    /// protocols`. Un-aliased re-exports carry `local_name ==
+    /// true_name` (the common case).
     ///
     /// Consumed by `infer::modules::resolve_function_via_metadata_reexports`
     /// to traverse re-export chains during type resolution when the
     /// AST-based walker can't see them (archive-driven stdlib loads
     /// only carry a synthetic empty AST — the type info lives in
-    /// `functions` and the re-export chains live HERE).
+    /// `functions` and the re-export chains live HERE), and by
+    /// `import_type_export`'s archive-loaded fallback (T0244) to build
+    /// a proper alias redirect (`Type::Named{true_name}`) for a
+    /// renamed type re-export instead of a meaningless self-referential
+    /// placeholder under the alias name.
     ///
     /// Layout example for `core/base/mod.vr`'s
     /// `public mount .memory.{replace};`:
-    ///   `"core.base" → [("replace", "core.base.memory")]`
+    ///   `"core.base" → [("replace", "replace", "core.base.memory")]`
+    ///
+    /// Layout example for `core/term/layout/mod.vr`'s
+    /// `public mount .constraint.{LayoutConstraint as Constraint};`:
+    ///   `"core.term.layout" → [("Constraint", "LayoutConstraint", "core.term.layout.constraint")]`
     ///
     /// `serde(default)` so older sidecars without this field continue
     /// to deserialise; the typechecker's re-export resolver degrades
-    /// to a no-op when the map is empty.
+    /// to a no-op when the map is empty. The triple arity is a wire
+    /// format change from the prior `(local_name, source_module_path)`
+    /// pair — bump `PRECOMPILE_SCHEMA_VERSION` alongside any change
+    /// here so stale cached archives rebake instead of failing to
+    /// deserialise this field.
     #[serde(default)]
-    pub module_reexports: OrderedMap<Text, List<(Text, Text)>>,
+    pub module_reexports: OrderedMap<Text, List<(Text, Text, Text)>>,
 }
 
 /// Descriptor for a type definition in stdlib

@@ -1160,7 +1160,10 @@ impl TypeChecker {
             }
         };
         push_with_ancestors(canonical_module, &mut prefixes);
-        if let Some(source_module) =
+        // T0244: `reexport_source_module_for` now also returns the
+        // item's true (pre-rename) name; this call site only needs
+        // the source module for the ancestor-prefix walk below.
+        if let Some((_true_name, source_module)) =
             self.reexport_source_module_for(canonical_module, name)
         {
             push_with_ancestors(source_module.as_str(), &mut prefixes);

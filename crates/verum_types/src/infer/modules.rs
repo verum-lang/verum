@@ -2237,12 +2237,13 @@ impl TypeChecker {
             let probed_name_text: Text = item_name.to_string().into();
             if std::env::var("VERUM_TRACE_TASK21").is_ok() {
                 eprintln!(
-                    "[task21] gate: mod='{}' item='{}' exports_len={} export_hit={} span={}",
+                    "[task21] gate: mod='{}' item='{}' exports_len={} export_hit={} span={} raw_kind={:?}",
                     module_path.as_str(),
                     item_name,
                     probed_module_info.exports.len(),
                     probed_module_info.exports.get(&probed_name_text).is_some(),
                     import_span.is_some(),
+                    probed_module_info.exports.get(&probed_name_text).map(|e| e.kind),
                 );
             }
             if probed_module_info.exports.get(&probed_name_text).is_none() {
@@ -2552,9 +2553,19 @@ impl TypeChecker {
                             // descriptor without any source-walk.
                             // T0231: guarded (see insert_fn_scheme_guarded).
                             self.insert_fn_scheme_guarded(register_name, scheme);
-                        } else if let Some(source_module) = self
+                        } else if let Some((true_name, source_module)) = self
                             .reexport_source_module_for(resolved_module_path.as_str(), item_name)
-                            .filter(|s| s.as_str() != resolved_module_path.as_str())
+                            // T0244: recursing is worthwhile when EITHER the
+                            // source module differs OR the true name differs
+                            // from what we asked for — the archive collapses
+                            // some per-file submodules into their parent
+                            // directory module, so a rename alias declared
+                            // one file over can still report
+                            // `source_module == resolved_module_path` while
+                            // `true_name != item_name`.
+                            .filter(|(t, s)| {
+                                s.as_str() != resolved_module_path.as_str() || t.as_str() != item_name
+                            })
                         {
                             // D1 — umbrella re-export of a free function whose
                             // descriptor is ABSENT from `metadata.functions`
@@ -2568,18 +2579,25 @@ impl TypeChecker {
                             // "AST direct" path a `mount <source>.{item}` uses.
                             // Cycle-guarded by `imports_in_progress` on the
                             // distinct (source_module, item) key.
+                            //
+                            // T0244: recurse by `true_name` — the source
+                            // module never declared anything under a rename
+                            // alias — but always bind the result under THIS
+                            // level's `register_name`, since that (not
+                            // `true_name`) is what the caller asked for.
                             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                                 eprintln!(
-                                    "[task20] registry recurse: mod='{}' item='{}' -> source='{}'",
+                                    "[task20] registry recurse: mod='{}' item='{}' -> true_name='{}' source='{}'",
                                     resolved_module_path.as_str(),
                                     item_name,
+                                    true_name.as_str(),
                                     source_module.as_str(),
                                 );
                             }
                             let _ = self.import_item_from_module_inner(
                                 &source_module,
-                                item_name,
-                                local_name,
+                                true_name.as_str(),
+                                Some(register_name),
                                 registry,
                                 import_span,
                             );
@@ -2603,22 +2621,40 @@ impl TypeChecker {
                         // direct `mount <source>.{Type}` uses, which carries the
                         // full impl block. Idempotent (type re-registration is a
                         // no-op overwrite); cycle-guarded by `imports_in_progress`.
-                        if let Some(source_module) = self
+                        // T0244: recurse by `true_name`, bind under
+                        // `register_name` — see the analogous function-branch
+                        // fix above. This is the leg that lets an
+                        // archive-loaded rename-alias (`mount .constraint.
+                        // {LayoutConstraint as Constraint}`, whose enclosing
+                        // module's AST is a synthetic empty stub) reach the
+                        // source module's OWN direct export entry
+                        // (`LayoutConstraint`, Type) instead of asking the
+                        // source for something it never declared
+                        // (`Constraint`) and falling back to a
+                        // self-referential placeholder.
+                        if let Some((true_name, source_module)) = self
                             .reexport_source_module_for(resolved_module_path.as_str(), item_name)
-                            .filter(|s| s.as_str() != resolved_module_path.as_str())
+                            // T0244: see the analogous function-branch filter
+                            // above — archive module collapsing can make
+                            // `source_module == resolved_module_path` even
+                            // when `true_name != item_name`.
+                            .filter(|(t, s)| {
+                                s.as_str() != resolved_module_path.as_str() || t.as_str() != item_name
+                            })
                         {
                             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                                 eprintln!(
-                                    "[task20] type registry recurse: mod='{}' item='{}' -> source='{}'",
+                                    "[task20] type registry recurse: mod='{}' item='{}' -> true_name='{}' source='{}'",
                                     resolved_module_path.as_str(),
                                     item_name,
+                                    true_name.as_str(),
                                     source_module.as_str(),
                                 );
                             }
                             let _ = self.import_item_from_module_inner(
                                 &source_module,
-                                item_name,
-                                local_name,
+                                true_name.as_str(),
+                                Some(register_name),
                                 registry,
                                 import_span,
                             );
@@ -3118,11 +3154,17 @@ impl TypeChecker {
                     self.ctx.env.insert(bind_name, scheme);
                     return Ok(());
                 }
-                if let Some(src) = self
+                if let Some((true_name, src)) = self
                     .reexport_source_module_for(module_path.as_str(), item_name)
-                    .filter(|s| s.as_str() != module_path.as_str())
+                    // T0244: see the function-branch filter in
+                    // `import_item_from_module_body` — archive module
+                    // collapsing can make `src == module_path` even when
+                    // `true_name != item_name`.
+                    .filter(|(t, s)| {
+                        s.as_str() != module_path.as_str() || t.as_str() != item_name
+                    })
                     && let Some(scheme) =
-                        self.resolve_function_via_metadata_reexports(src.as_str(), item_name)
+                        self.resolve_function_via_metadata_reexports(src.as_str(), true_name.as_str())
                 {
                     self.ctx.env.insert(bind_name, scheme);
                     return Ok(());
@@ -3303,6 +3345,39 @@ impl TypeChecker {
                                 // resolved_module_path.as_str()
                                 // );
                                 registered_successfully = true;
+
+                                // ALIASED-TYPE-IMPORT-1 (T0244): `register_type_declaration`
+                                // binds the type under its OWN declared name
+                                // (`type_decl.name`) — it has no notion of a local
+                                // rename. `register_name` differs from that TRUE
+                                // name exactly when this import resolved through a
+                                // `mount X as Y` re-export chain (directly here, or
+                                // transitively via `find_type_declaration_with_source_module`
+                                // matching a `tree.alias` upstream — e.g. `Constraint`
+                                // resolving to `core.term.layout.constraint`'s
+                                // `LayoutConstraint`). Bind the alias as a `Type::Named`
+                                // redirect so later lookups of `register_name` — type
+                                // annotations, `is`/`match` patterns, and qualified
+                                // variant construction (`Constraint.Length(10)`) —
+                                // resolve through to the real type instead of finding
+                                // nothing. Mirrors the redirect shape
+                                // `process_import_aliases` registers for the
+                                // source-driven global-pass pipeline; this is the
+                                // counterpart for the per-file archive/lazy-loader
+                                // path that an ordinary `verum run`/`verum test`
+                                // compile actually uses.
+                                let true_name = type_decl.name.name.as_str();
+                                if register_name != true_name {
+                                    use verum_ast::ty::{Ident, Path};
+                                    let alias_target = Type::Named {
+                                        path: Path::single(Ident::new(true_name, Span::dummy())),
+                                        args: List::new(),
+                                    };
+                                    self.ctx.define_type(
+                                        verum_common::Text::from(register_name),
+                                        alias_target,
+                                    );
+                                }
 
                                 // CRITICAL FIX: Also import implement block methods for the type.
                                 // This enables cross-file method resolution for calls like
@@ -3524,8 +3599,24 @@ impl TypeChecker {
 
                             if should_register_fallback {
                                 use verum_ast::ty::{Ident, Path};
-                                // Use register_name for the fallback type reference
-                                let ident = Ident::new(register_name, Span::dummy());
+                                // T0244: the placeholder must point at
+                                // `item_name` (the item's OWN name in
+                                // THIS resolution step), not `register_name`
+                                // (the binding key). They differ exactly
+                                // when this import renamed the item (`mount
+                                // X as Y` — directly, or via the "type
+                                // registry recurse" leg above passing the
+                                // rename's true name down as `item_name`).
+                                // `Type::Named{item_name}` is a lazy
+                                // resolve-via-`core_metadata`-later marker
+                                // (see `try_resolve_variant_constructor_
+                                // with_arity_for` et al., which look types
+                                // up by their CANONICAL declared name) — a
+                                // self-referential `Named{register_name}`
+                                // under an alias can never resolve, since
+                                // `core_metadata.types` is keyed by the
+                                // canonical name only.
+                                let ident = Ident::new(item_name, Span::dummy());
                                 let type_ref = Type::Named {
                                     path: Path::single(ident),
                                     args: List::new(),
@@ -5752,12 +5843,36 @@ impl TypeChecker {
                     continue;
                 }
 
-                // Check if this import re-exports our type
-                let source_module_path: Option<String> = match &import_decl.tree.kind {
+                // Check if this import re-exports our type. Resolves to
+                // (source module path, TRUE declared name to search for
+                // inside it) — the two differ when `type_name` was
+                // matched via a `mount X as Y` rename-alias (T0244):
+                // `public mount .constraint.{LayoutConstraint as
+                // Constraint, ...}` re-exports "Constraint" as a NEW
+                // local spelling for "LayoutConstraint". The alias lives
+                // on `tree.alias`, never in the path segments, so
+                // matching only the pre-alias name can never find such a
+                // re-export when searching BY the alias — every qualified
+                // construction through the alias (`Constraint.Length(10)`)
+                // then fell through to a spurious self-referential
+                // `Type::Named` stub instead of the real variant type.
+                // Once matched, the recursive search must still look for
+                // the TRUE name in the source module, since that module
+                // never declared anything under the alias spelling.
+                let source_module_path: Option<(String, String)> = match &import_decl.tree.kind {
                     MountTreeKind::Path(path) => {
                         // Single import: `pub import .errors.RegistryError`
+                        // (optionally `as Foo` — the alias sits on
+                        // `import_decl.tree.alias`, the same tree as
+                        // this Path since there's only one item here).
                         if let Some(PathSegment::Name(last_ident)) = path.segments.last() {
-                            if last_ident.name.as_str() == type_name {
+                            let true_name = last_ident.name.as_str();
+                            let alias_matches = import_decl
+                                .tree
+                                .alias
+                                .as_ref()
+                                .is_some_and(|a| a.name.as_str() == type_name);
+                            if true_name == type_name || alias_matches {
                                 let has_relative = is_relative(path);
                                 let module_segments: Vec<&str> = path
                                     .segments
@@ -5769,13 +5884,14 @@ impl TypeChecker {
                                     })
                                     .collect();
                                 let module_path = module_segments.join(".");
-                                if has_relative && !module_path.is_empty() {
+                                let resolved_module_path = if has_relative && !module_path.is_empty() {
                                     Some(resolve_relative_path(&module_path))
                                 } else if !module_path.is_empty() {
                                     Some(module_path)
                                 } else {
                                     None
-                                }
+                                };
+                                resolved_module_path.map(|m| (m, true_name.to_string()))
                             } else {
                                 None
                             }
@@ -5785,19 +5901,29 @@ impl TypeChecker {
                     }
                     MountTreeKind::Nested { prefix, trees } => {
                         // Nested import: `pub import .package.{Package, PackageVersion}`
-                        let type_found = trees.iter().any(|tree| {
+                        // (any entry optionally `as Alias`, per-tree).
+                        let found_true_name: Option<String> = trees.iter().find_map(|tree| {
                             if let MountTreeKind::Path(path) = &tree.kind {
                                 if let Some(PathSegment::Name(ident)) = path.segments.first() {
-                                    ident.name.as_str() == type_name
+                                    let true_name = ident.name.as_str();
+                                    let alias_matches = tree
+                                        .alias
+                                        .as_ref()
+                                        .is_some_and(|a| a.name.as_str() == type_name);
+                                    if true_name == type_name || alias_matches {
+                                        Some(true_name.to_string())
+                                    } else {
+                                        None
+                                    }
                                 } else {
-                                    false
+                                    None
                                 }
                             } else {
-                                false
+                                None
                             }
                         });
 
-                        if type_found {
+                        if let Some(true_name) = found_true_name {
                             let has_relative = is_relative(prefix);
                             let module_segments: Vec<&str> = prefix
                                 .segments
@@ -5808,13 +5934,14 @@ impl TypeChecker {
                                 })
                                 .collect();
                             let module_path = module_segments.join(".");
-                            if has_relative && !module_path.is_empty() {
+                            let resolved_module_path = if has_relative && !module_path.is_empty() {
                                 Some(resolve_relative_path(&module_path))
                             } else if !module_path.is_empty() {
                                 Some(module_path)
                             } else {
                                 None
-                            }
+                            };
+                            resolved_module_path.map(|m| (m, true_name))
                         } else {
                             None
                         }
@@ -5822,7 +5949,7 @@ impl TypeChecker {
                     _ => None,
                 };
 
-                if let Some(ref source_path) = source_module_path {
+                if let Some((ref source_path, ref true_name)) = source_module_path {
                     // Look up the source module and find the type there
                     // Use path aliases since "core.io.path" may be stored as "std.io.path"
                     if let Some(source_module) =
@@ -5831,10 +5958,13 @@ impl TypeChecker {
                         // Recursively search (handles chains of re-exports).
                         // Thread the visited-set so ring-shaped re-exports
                         // terminate with None rather than blowing the stack.
+                        // Search for `true_name` (T0244), not `type_name`
+                        // — the source module never declared anything
+                        // under the alias spelling.
                         if let Some((decl, final_path)) = self
                             .find_type_declaration_with_source_module_inner(
                                 &source_module.ast,
-                                type_name,
+                                true_name,
                                 &verum_common::Text::from(source_path.as_str()),
                                 registry,
                                 visited,
@@ -5862,9 +5992,10 @@ impl TypeChecker {
                             {
                                 // Search for the type in the parent module's AST.
                                 // The type might be declared in one of the sibling files
-                                // (like ops.vr within core/base/).
+                                // (like ops.vr within core/base/). Uses `true_name`
+                                // (T0244) for the same reason as the recursive call above.
                                 if let Some(decl) = self
-                                    .find_type_declaration_in_module(&parent_module.ast, type_name)
+                                    .find_type_declaration_in_module(&parent_module.ast, true_name)
                                 {
                                     return Some((decl, verum_common::Text::from(parent_path)));
                                 }
@@ -6121,24 +6252,29 @@ impl TypeChecker {
             None
         } else {
             let leaves_opt = metadata.module_reexports.get(&Text::from(module_path));
+            // T0244: probe by the item's TRUE declared name, not the
+            // (possibly aliased) search key — `metadata.functions` is
+            // keyed by what the source module itself calls the item,
+            // which differs from `item_name` exactly when this leaf
+            // came from a `mount X as Y` rename.
             let src_opt = leaves_opt.and_then(|leaves| {
                 leaves
                     .iter()
-                    .find(|(local, _)| local == &item_text)
-                    .map(|(_, src)| src.clone())
+                    .find(|(local, _, _)| local == &item_text)
+                    .map(|(_, true_name, src)| (true_name.clone(), src.clone()))
             });
             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                 eprintln!(
-                    "[task20] metadata_reexport: mod='{}' item='{}' reexport_key_present={} leaf_count={} src={:?}",
+                    "[task20] metadata_reexport: mod='{}' item='{}' reexport_key_present={} leaf_count={} true_name_src={:?}",
                     module_path,
                     item_name,
                     leaves_opt.is_some(),
                     leaves_opt.map(|l| l.len()).unwrap_or(0),
-                    src_opt.as_ref().map(|s| s.as_str().to_string()),
+                    src_opt.as_ref().map(|(t, s)| format!("{}@{}", t.as_str(), s.as_str())),
                 );
             }
-            src_opt.and_then(|source_module| {
-                let qualified = format!("{}.{}", source_module.as_str(), item_name);
+            src_opt.and_then(|(true_name, source_module)| {
+                let qualified = format!("{}.{}", source_module.as_str(), true_name.as_str());
                 let q_hit = metadata.functions.get(&Text::from(qualified.as_str()));
                 if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                     eprintln!(
@@ -6147,7 +6283,7 @@ impl TypeChecker {
                         q_hit.is_some(),
                     );
                 }
-                q_hit.or_else(|| metadata.functions.get(&item_text))
+                q_hit.or_else(|| metadata.functions.get(&Text::from(true_name.as_str())))
             })
         };
 
@@ -6321,7 +6457,14 @@ impl TypeChecker {
     /// e.g. `pure` leaf functions), the caller recurses into this source
     /// module against the live `ModuleRegistry`, whose AST carries the real
     /// declaration — the same path a direct `mount <source>.{item}` takes.
-    pub(super) fn reexport_source_module_for(&self, module_path: &str, item_name: &str) -> Option<Text> {
+    /// Returns `(true_name, source_module)` — `true_name` is the
+    /// item's OWN declared name at `source_module` (T0244), which
+    /// differs from the queried `item_name` exactly when the
+    /// re-export renamed it (`mount X as Y`). Callers that recurse
+    /// into `source_module` must search it for `true_name`, not
+    /// `item_name` — the source module never declared anything under
+    /// the alias spelling.
+    pub(super) fn reexport_source_module_for(&self, module_path: &str, item_name: &str) -> Option<(Text, Text)> {
         let metadata = match &self.core_metadata {
             Maybe::Some(m) => m,
             Maybe::None => return None,
@@ -6333,8 +6476,8 @@ impl TypeChecker {
             .and_then(|leaves| {
                 leaves
                     .iter()
-                    .find(|(local, _)| local == &item_text)
-                    .map(|(_, src)| src.clone())
+                    .find(|(local, _, _)| local == &item_text)
+                    .map(|(_, true_name, src)| (true_name.clone(), src.clone()))
             })
     }
 
@@ -6796,11 +6939,27 @@ impl TypeChecker {
                     continue;
                 }
 
-                // Check if this import re-exports our item
-                let source_module_path: Option<String> = match &import_decl.tree.kind {
+                // Check if this import re-exports our item. Resolves to
+                // (source module path, TRUE declared name to search for
+                // inside it) — the two differ when `item_name` was
+                // matched via a `mount X as Y` rename-alias (T0244, same
+                // defect class as `find_type_declaration_with_source_
+                // module_inner`): matching only the pre-alias path
+                // segment can never find a re-export reached BY its
+                // alias, which left aliased sum-type re-exports
+                // (`Constraint` for `LayoutConstraint`) misclassified —
+                // falling through to the `else { exported.kind }` branch
+                // at the call site instead of being confirmed as `Type`.
+                let source_module_path: Option<(String, String)> = match &import_decl.tree.kind {
                     MountTreeKind::Path(path) => {
                         if let Some(PathSegment::Name(last_ident)) = path.segments.last() {
-                            if last_ident.name.as_str() == item_name {
+                            let true_name = last_ident.name.as_str();
+                            let alias_matches = import_decl
+                                .tree
+                                .alias
+                                .as_ref()
+                                .is_some_and(|a| a.name.as_str() == item_name);
+                            if true_name == item_name || alias_matches {
                                 let has_relative = is_relative(path);
                                 let module_segments: Vec<&str> = path
                                     .segments
@@ -6812,13 +6971,14 @@ impl TypeChecker {
                                     })
                                     .collect();
                                 let module_path = module_segments.join(".");
-                                if has_relative && !module_path.is_empty() {
+                                let resolved_module_path = if has_relative && !module_path.is_empty() {
                                     Some(resolve_relative_path(&module_path))
                                 } else if !module_path.is_empty() {
                                     Some(module_path)
                                 } else {
                                     None
-                                }
+                                };
+                                resolved_module_path.map(|m| (m, true_name.to_string()))
                             } else {
                                 None
                             }
@@ -6827,19 +6987,28 @@ impl TypeChecker {
                         }
                     }
                     MountTreeKind::Nested { prefix, trees } => {
-                        let item_found = trees.iter().any(|tree| {
+                        let found_true_name: Option<String> = trees.iter().find_map(|tree| {
                             if let MountTreeKind::Path(path) = &tree.kind {
                                 if let Some(PathSegment::Name(ident)) = path.segments.first() {
-                                    ident.name.as_str() == item_name
+                                    let true_name = ident.name.as_str();
+                                    let alias_matches = tree
+                                        .alias
+                                        .as_ref()
+                                        .is_some_and(|a| a.name.as_str() == item_name);
+                                    if true_name == item_name || alias_matches {
+                                        Some(true_name.to_string())
+                                    } else {
+                                        None
+                                    }
                                 } else {
-                                    false
+                                    None
                                 }
                             } else {
-                                false
+                                None
                             }
                         });
 
-                        if item_found {
+                        if let Some(true_name) = found_true_name {
                             let has_relative = is_relative(prefix);
                             let module_segments: Vec<&str> = prefix
                                 .segments
@@ -6850,13 +7019,14 @@ impl TypeChecker {
                                 })
                                 .collect();
                             let module_path = module_segments.join(".");
-                            if has_relative && !module_path.is_empty() {
+                            let resolved_module_path = if has_relative && !module_path.is_empty() {
                                 Some(resolve_relative_path(&module_path))
                             } else if !module_path.is_empty() {
                                 Some(module_path)
                             } else {
                                 None
-                            }
+                            };
+                            resolved_module_path.map(|m| (m, true_name))
                         } else {
                             None
                         }
@@ -6864,13 +7034,15 @@ impl TypeChecker {
                     _ => None,
                 };
 
-                if let Some(ref source_path) = source_module_path {
+                if let Some((ref source_path, ref true_name)) = source_module_path {
                     // Look up the source module and get the actual ExportKind
                     if let Some(source_module) = registry.get_by_path(source_path) {
-                        // First check the export table of the source module
+                        // First check the export table of the source module.
+                        // Uses `true_name` (T0244) — the source module
+                        // never exported anything under the alias spelling.
                         if let Some(exported) = source_module
                             .exports
-                            .get(&verum_common::Text::from(item_name.to_string()))
+                            .get(&verum_common::Text::from(true_name.to_string()))
                         {
                             // If the source's kind is also Type, we may need to recurse
                             // (in case of chained re-exports)
@@ -6883,7 +7055,7 @@ impl TypeChecker {
                                 if let Some(actual_kind) = self
                                     .resolve_export_kind_with_reexports_inner(
                                         &source_module.ast,
-                                        item_name,
+                                        true_name,
                                         &source_path_text,
                                         registry,
                                         visited,
@@ -6898,7 +7070,7 @@ impl TypeChecker {
                         let source_path_text = verum_common::Text::from(source_path.clone());
                         if let Some(kind) = self.resolve_export_kind_with_reexports_inner(
                             &source_module.ast,
-                            item_name,
+                            true_name,
                             &source_path_text,
                             registry,
                             visited,
@@ -8248,18 +8420,25 @@ impl TypeChecker {
         // discipline at lines 7660-7677).
         if let Maybe::Some(metadata) = &self.core_metadata.clone() {
             if let Some(leaves) = metadata.module_reexports.get(module_path) {
-                for (local_name, source_module) in leaves.iter() {
+                for (local_name, true_name, source_module) in leaves.iter() {
                     let local_name = local_name.clone();
+                    let true_name = true_name.clone();
                     let source_module = source_module.clone();
-                    if let Err(e) = self.import_item_from_module(
+                    // T0244: search `source_module` for `true_name` — its
+                    // own declared name — but register under `local_name`
+                    // so a rename alias (`mount X as Y`) still binds `Y`
+                    // in this module's scope.
+                    if let Err(e) = self.import_item_from_module_with_alias(
                         &source_module,
-                        local_name.as_str(),
+                        true_name.as_str(),
+                        Some(local_name.as_str()),
                         registry,
                     ) {
                         tracing::debug!(
-                            "import_all_from_module: metadata-driven re-export {}.{} (source {}) failed: {:?}",
+                            "import_all_from_module: metadata-driven re-export {}.{} (true_name {}, source {}) failed: {:?}",
                             module_path.as_str(),
                             local_name.as_str(),
+                            true_name.as_str(),
                             source_module.as_str(),
                             e
                         );
@@ -13888,6 +14067,47 @@ impl TypeChecker {
         }
     }
 
+    /// Resolve a bare receiver type-name through `mount X as Y`
+    /// import-alias redirects to the canonical DECLARED name that
+    /// owns its variant constructors (T0244).
+    ///
+    /// `process_import_aliases` (see `decls.rs`) registers a re-exported
+    /// alias — e.g. `public mount .constraint.{LayoutConstraint as
+    /// Constraint, ...}` — as `ctx.type_defs["Constraint"] =
+    /// Type::Named{"LayoutConstraint"}`, a single-hop redirect. That
+    /// redirect never reaches `variant_constructor_parents`: that table
+    /// is keyed by the type's own declaration name only (set once,
+    /// where the `type ... is Variant | ...` body is registered).
+    /// Qualified variant construction (`Constraint.Length(10)`) names
+    /// the receiver by the alias, so comparing it directly against
+    /// `variant_constructor_parents` always misses — the call fell
+    /// through to ordinary method dispatch and reported a spurious
+    /// `no method named 'Length' found for type 'Constraint'`.
+    ///
+    /// Follows the `type_defs` redirect chain (bounded + cycle-safe)
+    /// until it reaches a name that is no longer a plain-rename
+    /// `Type::Named` pointing elsewhere. Returns the input unchanged
+    /// when it isn't an alias at all, so callers can compare BOTH the
+    /// original and canonical name and this is always safe to call
+    /// speculatively.
+    fn canonical_alias_target(&self, name: &str) -> Text {
+        let mut current: Text = Text::from(name);
+        let mut seen = std::collections::HashSet::new();
+        while seen.insert(current.clone()) {
+            let redirect = match self.ctx.lookup_type(current.as_str()) {
+                Some(Type::Named { path, args }) if args.is_empty() => {
+                    path.as_ident().map(|id| Text::from(id.name.as_str()))
+                }
+                _ => None,
+            };
+            match redirect {
+                Some(next) if next != current => current = next,
+                _ => break,
+            }
+        }
+        current
+    }
+
     /// Replace every `Type::Named { path: name, args: [] }` whose
     /// `name` matches a key in `subst` with the corresponding
     /// substitution type. Recurses into Generic / Tuple / Function /
@@ -14859,18 +15079,28 @@ impl TypeChecker {
             && let verum_ast::ty::PathSegment::Name(type_ident) = &path.segments[0]
         {
             let recv_type_name = type_ident.name.as_str();
+            // Alias-transparent: `recv_type_name` may be a local
+            // `mount X as Y` re-export of the type that actually owns
+            // the variant (T0244) — canonicalize once and accept
+            // either spelling below.
+            let canonical_recv_type_name = self.canonical_alias_target(recv_type_name);
             let variant_text = verum_common::Text::from(method.name.as_str());
             let is_variant_of_recv = self
                 .variant_constructor_parents
                 .get(&variant_text)
-                .map(|parents| parents.iter().any(|p| p.as_str() == recv_type_name))
+                .map(|parents| {
+                    parents.iter().any(|p| {
+                        p.as_str() == recv_type_name
+                            || p.as_str() == canonical_recv_type_name.as_str()
+                    })
+                })
                 .unwrap_or(false);
             if is_variant_of_recv
                 && let Some(ctor_ty) = self
                     .try_resolve_variant_constructor_with_arity_for(
                         method.name.as_str(),
                         Some(args.len()),
-                        Some(recv_type_name),
+                        Some(canonical_recv_type_name.as_str()),
                     )
             {
                 let (params_opt, return_type) = match &ctor_ty {
@@ -14887,9 +15117,15 @@ impl TypeChecker {
                 let parent_matches = match &return_type {
                     Type::Named { path, .. } => path
                         .as_ident()
-                        .map(|id| id.name.as_str() == recv_type_name)
+                        .map(|id| {
+                            id.name.as_str() == recv_type_name
+                                || id.name.as_str() == canonical_recv_type_name.as_str()
+                        })
                         .unwrap_or(false),
-                    Type::Generic { name, .. } => name.as_str() == recv_type_name,
+                    Type::Generic { name, .. } => {
+                        name.as_str() == recv_type_name
+                            || name.as_str() == canonical_recv_type_name.as_str()
+                    }
                     _ => false,
                 };
                 if parent_matches {

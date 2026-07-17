@@ -1231,12 +1231,12 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         // Task #20 — fold every captured `public mount X.{...}` chain
-        // into the function-export shard of the re-exporting module
-        // BEFORE we materialise ExportTables.  `module_reexports` is
-        // keyed by the re-exporting module's dotted path; values are
-        // `(local_name, source_module_path)` pairs.  This lets the
-        // user-side resolver find `core.base.replace` even though the
-        // function itself lives in `core.base.memory`.
+        // into the re-exporting module's shards BEFORE we materialise
+        // ExportTables.  `module_reexports` is keyed by the
+        // re-exporting module's dotted path; values are `(local_name,
+        // source_module_path)` pairs.  This lets the user-side resolver
+        // find `core.base.replace` even though the function itself
+        // lives in `core.base.memory`.
         //
         // Task #26 — also fold variant-constructor sub-exports when
         // the re-exported leaf is a sum type.  Pre-fix,
@@ -1252,29 +1252,69 @@ impl<'s> CompilationPipeline<'s> {
         // re-exporting module's Type shard so pattern matching
         // resolves at the use site.
         //
-        // Spurious Type-named entries in the Function shard are
-        // harmless because resolution still goes through
-        // `metadata.functions.get(name)` for codegen.
+        // T0244: every leaf here used to land in the Function shard
+        // UNCONDITIONALLY, on the reasoning that "spurious Type-named
+        // entries in the Function shard are harmless because resolution
+        // still goes through `metadata.functions.get(name)` for
+        // codegen". That's true for VALUE resolution, but this shard
+        // ALSO seeds `ExportKind::Function` in the ExportTable below
+        // (the loop over `fns`), and the type checker branches directly
+        // on that kind (`import_item_from_module_body`'s `match
+        // actual_kind`). A `mount X as Y` rename-alias of a TYPE —
+        // `public mount .constraint.{LayoutConstraint as Constraint}`
+        // — has no entry in `metadata.functions` and no bare-name hit
+        // in `metadata.types` (keyed by the TRUE name "LayoutConstraint",
+        // not the alias), so nothing ever corrected it: `Y.Variant(args)`
+        // routed through function-call resolution instead of
+        // `import_type_export`, surfacing as a spurious "no method named
+        // `Variant` found for type `Y`" (the archive-loaded module's AST
+        // is a synthetic empty stub, so the AST-driven reclassification
+        // `resolve_export_kind_with_reexports` also never gets a chance
+        // to fix it up afterward). Probe the qualified
+        // `<source_module>.<local_name>` key — the same lookup
+        // `resolve_function_via_metadata_reexports` uses at type-check
+        // time to resolve THIS EXACT shape of re-export — to confirm a
+        // real function before committing to the Function shard;
+        // otherwise default to the Type shard, mirroring the "default
+        // re-exports to Type" convention `verum_modules::exports::
+        // add_reexports_from_link` already uses for the source-driven
+        // pipeline.
         for (reexporting_mp_text, leaves) in metadata.module_reexports.iter() {
             let reexporting_mp = reexporting_mp_text.as_str();
             let shard = module_map.entry(reexporting_mp.to_string()).or_default();
-            for (local_name, _source_module) in leaves.iter() {
-                shard.2.push(local_name.as_str().to_string());
-                // Variant-constructor propagation: when the leaf is a
-                // declared sum type, expose every case name on the
-                // re-exporting module as well.  Looking up by simple
-                // name matches the existing convention at
+            for (local_name, true_name, source_module) in leaves.iter() {
+                // Probe by `true_name` — the item's own declared name —
+                // not `local_name`, which differs exactly when this leaf
+                // came from a `mount X as Y` rename (T0244).
+                let qualified = format!("{}.{}", source_module.as_str(), true_name.as_str());
+                let qualified_stripped = source_module
+                    .as_str()
+                    .strip_prefix("core.")
+                    .map(|stripped| format!("{}.{}", stripped, true_name.as_str()));
+                let is_function = metadata.functions.contains_key(&Text::from(qualified.as_str()))
+                    || qualified_stripped
+                        .as_ref()
+                        .is_some_and(|k| metadata.functions.contains_key(&Text::from(k.as_str())))
+                    || metadata.functions.contains_key(true_name);
+                if is_function {
+                    shard.2.push(local_name.as_str().to_string());
+                } else {
+                    shard.0.push(local_name.as_str().to_string());
+                }
+                // Variant-constructor CASE propagation: when the leaf is
+                // a declared sum type, expose every case name on the
+                // re-exporting module as well.  Looking up by TRUE name
+                // matches the existing convention at
                 // `metadata.types.iter()` above (the type's
-                // module_path lives on the descriptor).
-                if let Some(td) = metadata.types.get(local_name)
+                // module_path lives on the descriptor). The type name
+                // itself is already in the Type shard above when
+                // `!is_function`; only the case list needs folding in
+                // here — the pattern-resolver consults the Type shard
+                // for `match e { T.Variant => ... }` style patterns.
+                if let Some(td) = metadata.types.get(true_name)
                     && let verum_types::core_metadata::TypeDescriptorKind::Variant { cases } =
                         &td.kind
                 {
-                    // Add the type itself to the re-exporting module's
-                    // Type shard (not just Function).  The
-                    // pattern-resolver consults the Type shard for
-                    // `match e { T.Variant => ... }` style patterns.
-                    shard.0.push(local_name.as_str().to_string());
                     for case in cases.iter() {
                         shard.0.push(case.name.as_str().to_string());
                     }

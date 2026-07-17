@@ -484,6 +484,14 @@ fn scan_module_reexports(
         /// Locally-visible name (the alias if present, else the
         /// final path segment).
         local_name: String,
+        /// The item's OWN declared name in `source_module` — the key
+        /// that actually resolves there in `metadata.types` /
+        /// `metadata.functions` / `metadata.protocols`. Same as
+        /// `local_name` unless this leaf came from a `mount X as Y`
+        /// rename (T0244) — e.g. `LayoutConstraint as Constraint`
+        /// carries `local_name="Constraint"`, `true_name=
+        /// "LayoutConstraint"`.
+        true_name: String,
         /// Absolute dotted module path of the source.
         source_module: String,
         /// The module that RE-EXPORTS this leaf — the file's own
@@ -609,7 +617,8 @@ fn scan_module_reexports(
                 {
                     if let Some(item_name) = item {
                         out.push(ReexportLeaf {
-                            local_name: alias_name.unwrap_or(item_name),
+                            local_name: alias_name.unwrap_or_else(|| item_name.clone()),
+                            true_name: item_name,
                             source_module: module_path,
                             reexporting_module: current_module.to_string(),
                         });
@@ -652,10 +661,13 @@ fn scan_module_reexports(
         }
     }
 
+    // `local_name -> (true_name, source_module)`. `true_name` is the
+    // item's own declared name at `source_module` — same as the key
+    // unless the leaf came from a `mount X as Y` rename (T0244).
     fn visit_dir(
         root: &Path,
         dir: &Path,
-        accum: &mut BTreeMap<String, BTreeMap<String, String>>,
+        accum: &mut BTreeMap<String, BTreeMap<String, (String, String)>>,
         glob_pairs: &mut Vec<(String, String)>,
         files_visited: &mut usize,
         files_parsed: &mut usize,
@@ -760,12 +772,12 @@ fn scan_module_reexports(
                 // iteration order is reproducible across runs.
                 bucket
                     .entry(leaf.local_name)
-                    .or_insert(leaf.source_module);
+                    .or_insert((leaf.true_name, leaf.source_module));
             }
         }
     }
 
-    let mut accum: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut accum: BTreeMap<String, BTreeMap<String, (String, String)>> = BTreeMap::new();
     let mut glob_pairs: Vec<(String, String)> = Vec::new();
     let mut files_visited = 0usize;
     let mut files_parsed = 0usize;
@@ -834,16 +846,17 @@ fn scan_module_reexports(
             if !glob_matches(source_prefix, td.module_path.as_str()) {
                 continue;
             }
-            bucket
-                .entry(name.as_str().to_string())
-                .or_insert_with(|| td.module_path.as_str().to_string());
+            // Glob expansion never renames — true_name == local_name.
+            bucket.entry(name.as_str().to_string()).or_insert_with(|| {
+                (name.as_str().to_string(), td.module_path.as_str().to_string())
+            });
             // Also surface variant constructors so pattern matches
             // through globbed prelude work.
             if let verum_types::core_metadata::TypeDescriptorKind::Variant { cases } = &td.kind {
                 for case in cases.iter() {
-                    bucket
-                        .entry(case.name.as_str().to_string())
-                        .or_insert_with(|| td.module_path.as_str().to_string());
+                    bucket.entry(case.name.as_str().to_string()).or_insert_with(|| {
+                        (case.name.as_str().to_string(), td.module_path.as_str().to_string())
+                    });
                 }
             }
         }
@@ -920,17 +933,19 @@ fn scan_module_reexports(
                 }
                 name.as_str().to_string()
             };
+            // Glob expansion never renames — true_name == local_name
+            // (`leaf_name` here, the leaf extracted from the metadata key).
             bucket
-                .entry(leaf_name)
-                .or_insert_with(|| fd.module_path.as_str().to_string());
+                .entry(leaf_name.clone())
+                .or_insert_with(|| (leaf_name, fd.module_path.as_str().to_string()));
         }
         for (name, pd) in metadata.protocols.iter() {
             if !glob_matches(source_prefix, pd.module_path.as_str()) {
                 continue;
             }
-            bucket
-                .entry(name.as_str().to_string())
-                .or_insert_with(|| pd.module_path.as_str().to_string());
+            bucket.entry(name.as_str().to_string()).or_insert_with(|| {
+                (name.as_str().to_string(), pd.module_path.as_str().to_string())
+            });
         }
     }
 
@@ -1026,11 +1041,16 @@ fn scan_module_reexports(
     let mut canonicalised = 0usize;
     let mut unresolved: Vec<(String, String)> = Vec::new();
     for items in accum.values_mut() {
-        for (local, source) in items.iter_mut() {
-            if leaf_resolves(local.as_str(), source.as_str()) {
+        for (local, (true_name, source)) in items.iter_mut() {
+            // Probe/canonicalise by `true_name` — the metadata tables
+            // are keyed by the item's OWN declared name, which for a
+            // `mount X as Y` rename-alias (T0244) differs from `local`
+            // (the alias key). Un-aliased leaves have `true_name ==
+            // local`, so this is a no-op change for the common case.
+            if leaf_resolves(true_name.as_str(), source.as_str()) {
                 continue;
             }
-            match canonical_source(local.as_str(), source.as_str()) {
+            match canonical_source(true_name.as_str(), source.as_str()) {
                 Some(fixed) => {
                     if fixed != *source {
                         *source = fixed;
@@ -1064,9 +1084,13 @@ fn scan_module_reexports(
 
     let mut total_leaves = 0usize;
     for (reexporting_mp, items) in accum {
-        let mut list: List<(Text, Text)> = List::new();
-        for (local, source) in items {
-            list.push((Text::from(local.as_str()), Text::from(source.as_str())));
+        let mut list: List<(Text, Text, Text)> = List::new();
+        for (local, (true_name, source)) in items {
+            list.push((
+                Text::from(local.as_str()),
+                Text::from(true_name.as_str()),
+                Text::from(source.as_str()),
+            ));
             total_leaves += 1;
         }
         metadata
@@ -2580,7 +2604,7 @@ version = "0.1.0"
             .expect("core.prelude bucket must exist");
         let names: Vec<String> = bucket
             .iter()
-            .map(|(local, _)| local.as_str().to_string())
+            .map(|(local, _, _)| local.as_str().to_string())
             .collect();
         eprintln!("core.prelude leaves: {}", names.len());
         for probe in [
@@ -2594,18 +2618,18 @@ version = "0.1.0"
             "sin",
             "range",
         ] {
-            let hit = bucket.iter().find(|(l, _)| l.as_str() == probe);
+            let hit = bucket.iter().find(|(l, _, _)| l.as_str() == probe);
             eprintln!(
                 "  {probe}: {:?}",
-                hit.map(|(_, s)| s.as_str().to_string())
+                hit.map(|(_, _, s)| s.as_str().to_string())
             );
         }
         assert!(
-            bucket.iter().any(|(l, _)| l.as_str() == "format_debug"),
+            bucket.iter().any(|(l, _, _)| l.as_str() == "format_debug"),
             "concrete prelude mount format_debug must be captured"
         );
         assert!(
-            bucket.iter().any(|(l, _)| l.as_str() == "sin"),
+            bucket.iter().any(|(l, _, _)| l.as_str() == "sin"),
             "nested-brace prelude mount sin must be captured"
         );
     }

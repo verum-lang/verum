@@ -8,7 +8,13 @@
 //   * Flex 5-variant (Start/Center/End/SpaceBetween/SpaceAround)
 // =============================================================================
 
-mount core.term.layout.constraint.{Constraint, Direction, Flex};
+// `Constraint` is `LayoutConstraint`'s public alias (see
+// `core/term/layout/mod.vr`'s "public term surface" re-export comment
+// — the bare `Constraint` name collided across three domains, so
+// `constraint.vr` declares the type as `LayoutConstraint` and the
+// alias is only visible through the re-exporting parent module, not
+// through a direct file-level mount).
+mount core.term.layout.{Constraint, Direction, Flex};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
