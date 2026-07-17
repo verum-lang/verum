@@ -525,6 +525,10 @@ impl<'s> CompilationPipeline<'s> {
         // itself so archive-encoding paths never serialize
         // synthesized bodies.
         let wrapper_count = vbc_module.synthesize_intrinsic_band_wrappers();
+        // T0106: precompute dyn-carrier protocol dispatch on this
+        // execution assembly (same discipline — an execution module,
+        // kept out of build_module so encoding paths never see it).
+        let _ = vbc_module.resolve_protocol_dispatch();
         if wrapper_count > 0 {
             tracing::debug!(
                 target: "compile_ast_to_vbc",
@@ -593,6 +597,7 @@ impl<'s> CompilationPipeline<'s> {
                     // path above).
                     let _ = merged.resolve_external_bands();
                     let _ = merged.synthesize_intrinsic_band_wrappers();
+                    let _ = merged.resolve_protocol_dispatch();
                     return Ok(std::sync::Arc::new(merged));
                 }
             }

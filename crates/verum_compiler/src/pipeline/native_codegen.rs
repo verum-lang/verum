@@ -183,6 +183,9 @@ impl<'s> CompilationPipeline<'s> {
                     // clone and re-resolve by exact name; this covers
                     // names the mono reassembly newly orphaned).
                     let _ = mono_module.synthesize_intrinsic_band_wrappers();
+                    // T0106: precompute (concrete tid, method) → fid for
+                    // dyn-carrier dispatch on the FINAL mono table.
+                    let _ = mono_module.resolve_protocol_dispatch();
                     std::sync::Arc::new(mono_module)
                 }
                 Err(diagnostics) => {
