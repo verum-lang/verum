@@ -2326,7 +2326,11 @@ mod format_tests {
     #[test]
     fn simple_apply_takes_precedence_over_core_proof() {
         // M0.D path matches user intent better than V2 structural lift —
-        // when BOTH are populated, SimpleApply wins.
+        // when BOTH are populated, SimpleApply wins. Lean 4 rejects
+        // forward references, so precedence is observable only when
+        // the referenced lemma is ALREADY EMITTED in this file — the
+        // pre-e9f7850d1 fixture used an empty emitted set and pinned
+        // an output that would not typecheck under Lean (T0233).
         let d = Declaration {
             kind: "theorem",
             name: Text::from("foo"),
@@ -2339,10 +2343,23 @@ mod format_tests {
             }),
             core_proof: Some(id_lam_core()),
         };
-        let body = lean_body_for_decl(&d, &std::collections::HashSet::new());
+        let mut emitted = std::collections::HashSet::new();
+        emitted.insert("trivial".to_string());
+        let body = lean_body_for_decl(&d, &emitted);
         assert_eq!(body, ":= trivial");
         // Make sure the V2 lambda did NOT leak through.
         assert!(!body.contains("fun"));
+
+        // Forward-reference discipline: the SAME decl against an
+        // empty emitted set must degrade to sorry-with-provenance —
+        // never a bare forward reference (invalid Lean), and still
+        // never the V2 lambda (SimpleApply owns the decision).
+        let fwd = lean_body_for_decl(&d, &std::collections::HashSet::new());
+        assert_eq!(
+            fwd,
+            ":= sorry -- via trivial (forward reference at statement level)"
+        );
+        assert!(!fwd.contains("fun"));
     }
 
     #[test]
