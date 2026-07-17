@@ -294,7 +294,9 @@ fn test_eq_cross_variant_inequality() {
 // includes the field) but `.contains("not found")` fails. Was GREEN in
 // May; current binary regressed Display-interpolation dispatch for
 // record-variant ADTs (per-variant inconsistent — see property_test §5).
-// @ignore'd until the codegen Display-dispatch fix + rebuild.
+// Display-dispatch through f-string interpolation is LIVE (T0158): a
+// record-style variant's `implement Display` routes correctly on both
+// tiers. These pins guard the fix.
 @test
 fn test_display_not_found_via_format_literal() {
     let err = ContextError.NotFound { context_name: "Cache".clone() };
