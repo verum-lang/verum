@@ -9457,6 +9457,24 @@ impl VbcCodegen {
         None
     }
 
+    /// **T0106** — extract the protocol name from a receiver type-name
+    /// that carries a `dyn` fact, or `None` when it is a plain type.
+    /// Handles the shapes `extract_type_name_from_ast` produces for
+    /// dyn-carrying types: bare `"dyn:Debug"`, carrier-wrapped
+    /// `"Heap<dyn:Debug>"` / `"Shared<dyn:Debug>"`, and multi-bound
+    /// `"dyn:Debug+Clone"` (the FIRST bound wins — the runtime resolves
+    /// the concrete implementor from the receiver's TypeId regardless of
+    /// which protocol names the vtable slot). Returns the substring so
+    /// the caller can build `dyn:<proto>.<method>` without allocating.
+    fn dyn_protocol_of(type_name: &str) -> Option<&str> {
+        let after = &type_name[type_name.find("dyn:")? + 4..];
+        let end = after
+            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+            .unwrap_or(after.len());
+        let proto = &after[..end];
+        (!proto.is_empty()).then_some(proto)
+    }
+
     fn compile_method_call(
         &mut self,
         receiver: &Expr,
@@ -12092,10 +12110,19 @@ impl VbcCodegen {
                                 // route by receiver kind. Classifier shared
                                 // with verum_types so both layers agree on
                                 // what counts as a type param.
-                                let is_type_param =
-                                    verum_common::well_known_types::looks_like_type_param(type_name);
-
-                                if is_type_param {
+                                // T0106: carrier<dyn P> / bare `dyn P` — the
+                                // receiver's static type still spells the protocol
+                                // as `dyn:P` (extract_type_name_from_ast renders
+                                // DynProtocol → "dyn:P" and Generic preserves it,
+                                // e.g. "Heap<dyn:Debug>"). Route through
+                                // `dyn:P.method` so runtime CallM recovers the
+                                // concrete implementor via resolved_protocol_dispatch
+                                // instead of eroding to `Heap.method` at the
+                                // strip_generic_args branch below (T0106 dyn-carrier
+                                // dispatch erasure).
+                                if let Some(proto) = Self::dyn_protocol_of(type_name) {
+                                    format!("dyn:{}.{}", proto, method.name)
+                                } else if verum_common::well_known_types::looks_like_type_param(type_name) {
                                     // Generic type parameter — runtime
                                     // dispatch routes by receiver kind.
                                     //
