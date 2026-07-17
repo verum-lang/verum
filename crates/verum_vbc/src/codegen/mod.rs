@@ -21728,10 +21728,15 @@ impl VbcCodegen {
                                 // it would mint ids that NOTHING recognizes.
                                 // ~134M distinct unresolved names per compile
                                 // is far beyond any real program; fail LOUD.
+                                // The window's TOP slot is reserved:
+                                // REMAP_POISON_ID (T0144) must never be
+                                // minted as a real carried name.
                                 assert!(
-                                    crate::stub_ranges::in_xmod_fresh_band(id),
+                                    crate::stub_ranges::in_xmod_fresh_band(id)
+                                        && !crate::stub_ranges::is_remap_poison(id),
                                     "user XMOD fresh band exhausted at id {:#x} \
-                                     (window [{:#x}, {:#x})) — see \
+                                     (window [{:#x}, {:#x}), top slot reserved \
+                                     for REMAP_POISON_ID) — see \
                                      XMOD-FRESH-BAND-WINDOW-1",
                                     id,
                                     crate::stub_ranges::XMOD_FRESH_BAND_BASE,
@@ -22748,12 +22753,36 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
         } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
             eprintln!("[remap-fallback] tier3 IDENTITY archive_id={} not in archive_id_to_name (Tier1 misses too)", src.0);
         }
-        // Tier 3: identity fallback. Reserved for ids the archive
-        // serialiser intentionally leaves opaque (kernel intrinsic
-        // dispatch tags, FFI sentinels). A miss here surfaces at
-        // runtime as `FunctionNotFound` rather than silent
-        // miscompile.
-        src
+        // Tier 3 (REMAP-POISON-1, T0144): identity passthrough ONLY
+        // for ids the archive serialiser intentionally leaves opaque —
+        // variant-ctor tags and FFI extern sentinels all live at or
+        // above the EXTERN_SENTINEL_THRESHOLD gate — plus stub/band
+        // ranges the tiers above already own by name. An ORDINARY-
+        // range id reaching this point has no remap entry and no name
+        // anywhere (its producing sibling was pruned from the merge
+        // set): identity would land the call on whatever unrelated
+        // user function occupies the raw number (the
+        // `Deque.reallocate → AdjacencyList.add_edge` misroute
+        // class). Substitute the poison sentinel instead — it dies
+        // LOUD at dispatch with a dedicated diagnostic, and the AOT
+        // lowering records it as an unresolved site for the
+        // strict-mono gate.
+        const EXTERN_SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+        if src.0 >= EXTERN_SENTINEL_THRESHOLD
+            || crate::stub_ranges::is_stub_id(src.0)
+            || crate::stub_ranges::is_xmod_name_reference(src.0)
+        {
+            return src;
+        }
+        if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+            eprintln!(
+                "[remap-fallback] tier3 POISON archive_id={} — ordinary-range id \
+                 with no remap and no name (pruned sibling?); poisoned instead \
+                 of identity-misroute",
+                src.0
+            );
+        }
+        crate::module::FunctionId(crate::stub_ranges::REMAP_POISON_ID)
     }
     fn map_type_id(&self, src: crate::types::TypeId) -> crate::types::TypeId {
         self.types

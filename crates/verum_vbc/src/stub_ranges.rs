@@ -141,6 +141,25 @@ pub const XMOD_FRESH_BAND_BASE: u32 = crate::module::XMOD_CALL_ID_BAND_BASE + 0x
 /// relies on — pinned by `xmod_ranges_disjoint_and_bounded`.
 pub const XMOD_FRESH_BAND_WIDTH: u32 = 0x0800_0000;
 
+/// **REMAP-POISON-1 (T0144)** — the single sentinel
+/// `ArchiveBodyRemap::map_function` substitutes for an ORDINARY-range
+/// archive-local id that reached the Tier-3 fallback with no remap
+/// entry and no name anywhere (its producing sibling was pruned from
+/// the merge set). Identity-passing such an id would land the call on
+/// whatever unrelated user function occupies the raw number — the
+/// silent-misroute class this task exists to kill. The poison value
+/// sits at the top of the fresh band (never minted by the allocator:
+/// the exhaustion assert fires a full slot earlier), is recognised by
+/// `is_xmod_name_reference` (band member), and dies LOUD at dispatch
+/// with a dedicated diagnostic instead of calling garbage.
+pub const REMAP_POISON_ID: u32 = XMOD_FRESH_BAND_BASE + XMOD_FRESH_BAND_WIDTH - 1;
+
+/// Recognise the remap poison sentinel.
+#[inline]
+pub fn is_remap_poison(id: u32) -> bool {
+    id == REMAP_POISON_ID
+}
+
 /// Fresh-band membership (XMOD-FRESH-BAND-WINDOW-1).
 #[inline]
 pub fn in_xmod_fresh_band(id: u32) -> bool {
@@ -221,6 +240,24 @@ mod tests {
         }
         assert_eq!(stage_of(0), None);
         assert_eq!(stage_of(STAGE5_BASE - STUB_RANGE_WIDTH - 1), None);
+    }
+
+    #[test]
+    fn remap_poison_pins() {
+        // REMAP-POISON-1 (T0144) pins:
+        // 1. The poison sentinel occupies the fresh band's TOP slot —
+        //    recognised by the band predicates (so serialization /
+        //    external detection treat it like a name reference and it
+        //    can never silently escape the discipline)...
+        assert!(is_remap_poison(REMAP_POISON_ID));
+        assert!(in_xmod_fresh_band(REMAP_POISON_ID));
+        assert!(is_xmod_name_reference(REMAP_POISON_ID));
+        assert!(!is_stub_id(REMAP_POISON_ID));
+        // 2. ...and exactly ONE value is poison.
+        assert!(!is_remap_poison(REMAP_POISON_ID - 1));
+        assert!(!is_remap_poison(REMAP_POISON_ID + 1));
+        // 3. Below the extern-sentinel gate, like the rest of the band.
+        assert!(u64::from(REMAP_POISON_ID) < u64::from(u32::MAX / 4));
     }
 
     #[test]
