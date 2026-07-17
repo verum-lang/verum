@@ -2715,6 +2715,13 @@ impl TypeChecker {
             type_params,
         } = &method_ty
         {
+            if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
+                eprintln!(
+                    "[inst-mtp] type_params={} ret={:?}",
+                    type_params.len(),
+                    return_type,
+                );
+            }
             if type_params.is_empty() {
                 // No type parameters to instantiate - return as-is
                 // But if type_args were provided, that's an error
@@ -4740,23 +4747,93 @@ impl TypeChecker {
 
                 // Build type parameter substitution map for generic types
                 // This maps type param names to concrete args: e.g., { T -> Int } for Pair<Int>
-                let build_param_subst = || -> indexmap::IndexMap<verum_common::Text, Type> {
+                //
+                // Takes the underlying (unsubstituted) type definition so it can
+                // fall back to positional TypeVar matching -- see the T0246 note
+                // below.
+                let build_param_subst =
+                    |underlying: &Type| -> indexmap::IndexMap<verum_common::Text, Type> {
                     if args.is_empty() {
                         return indexmap::IndexMap::new();
                     }
                     let type_params_key = format!("__type_params_{}", type_name);
-                    let type_params: List<verum_common::Text> =
+                    let params_map: indexmap::IndexMap<verum_common::Text, Type> =
                         match self.ctx.lookup_type(type_params_key.as_str()) {
-                            Maybe::Some(Type::Record(params_map)) => {
-                                params_map.keys().cloned().collect()
-                            }
-                            _ => List::new(),
+                            Maybe::Some(Type::Record(params_map)) => params_map.clone(),
+                            _ => indexmap::IndexMap::new(),
                         };
 
                     let mut param_subst: indexmap::IndexMap<verum_common::Text, Type> =
                         indexmap::IndexMap::new();
-                    for (param_name, arg_ty) in type_params.iter().zip(args.iter()) {
+                    for (param_name, arg_ty) in params_map.keys().zip(args.iter()) {
                         param_subst.insert(param_name.clone(), arg_ty.clone());
+                    }
+                    // T0246: the entries above are keyed by declared param
+                    // NAME ("T"), but `__type_params_<Name>`'s stored VALUES
+                    // are a placeholder sentinel -- `decls.rs`'s variant
+                    // registration inserts a hardcoded `Type::Int` for every
+                    // param regardless of its real type, since historically
+                    // only the map's KEYS were read. That means name-keying
+                    // alone never helps `substitute_type_params` (below),
+                    // whose `Type::Var(tv)` arm looks up a `"T{tv.id()}"`-
+                    // keyed entry: a metadata-driven Variant payload (e.g.
+                    // `Maybe`'s `Some(T)`) spells its generic param as a
+                    // fixed `Type::Var`, minted ONCE when the type was first
+                    // loaded (`register_variant_signature_for_lazy`), and
+                    // without a var-id-keyed substitution entry that Var is
+                    // NEVER replaced -- it leaks into every later use of
+                    // e.g. `Maybe<X>` for the life of the process (two
+                    // sibling `.and_then` calls on a `Maybe` share that one
+                    // payload var and conflict once their closures return
+                    // different concrete types).
+                    //
+                    // Fix: recover the declared params' REAL TypeVars and match
+                    // them positionally against `args`.
+                    //
+                    // Primary source: `__type_var_order_<Name>` -- populated by
+                    // `register_variant_signature_for_lazy` in DECLARATION order
+                    // (authoritative: `ast_to_generic_type`, ~types.rs:1571,
+                    // already relies on this same registry for the identical
+                    // substitution problem on the AST-annotation path). This is
+                    // immune to the "phantom type param unused in any payload"
+                    // hazard a structural free-var scan can't see.
+                    //
+                    // Fallback (registry absent): the underlying definition's
+                    // OWN free TypeVars, sorted by id (declaration order ==
+                    // ascending var id, since vars are minted in one monotonic
+                    // pass at registration) -- mirrors what
+                    // `expand_generic_to_variant` (modules.rs) already does for
+                    // the identical reason. Either way this sidesteps the
+                    // `__type_params_<Name>` sentinel entirely rather than
+                    // trying to fix its stored value.
+                    let order_key = format!("__type_var_order_{}", type_name);
+                    let ordered_vars: Vec<TypeVar> = match self.ctx.lookup_type(order_key.as_str())
+                    {
+                        Maybe::Some(Type::Tuple(type_vars)) => {
+                            let vars: Vec<TypeVar> = type_vars
+                                .iter()
+                                .filter_map(|t| match t {
+                                    Type::Var(tv) => Some(*tv),
+                                    _ => None,
+                                })
+                                .collect();
+                            if vars.is_empty() {
+                                None
+                            } else {
+                                Some(vars)
+                            }
+                        }
+                        _ => None,
+                    }
+                    .unwrap_or_else(|| {
+                        let mut free_vars: Vec<TypeVar> =
+                            underlying.free_vars().into_iter().collect();
+                        free_vars.sort_by_key(|tv| tv.id());
+                        free_vars
+                    });
+                    for (tv, arg_ty) in ordered_vars.iter().zip(args.iter()) {
+                        let var_key: verum_common::Text = format!("T{}", tv.id()).into();
+                        param_subst.entry(var_key).or_insert_with(|| arg_ty.clone());
                     }
                     param_subst
                 };
@@ -4791,7 +4868,7 @@ impl TypeChecker {
                             args: normalized_args,
                         };
                     }
-                    let param_subst = build_param_subst();
+                    let param_subst = build_param_subst(underlying_alias_ty);
                     let substituted_ty = if param_subst.is_empty() {
                         underlying_alias_ty.clone()
                     } else {
@@ -4835,7 +4912,7 @@ impl TypeChecker {
                     // CRITICAL FIX: Apply type parameter substitution before normalizing
                     // This handles generic types like Maybe<Maybe<Int>> where we need to
                     // substitute T -> Maybe<Int> in the variant definition
-                    let param_subst = build_param_subst();
+                    let param_subst = build_param_subst(underlying_ty);
                     let substituted_ty = if param_subst.is_empty() {
                         underlying_ty.clone()
                     } else {
