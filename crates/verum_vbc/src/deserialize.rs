@@ -433,6 +433,7 @@ impl<'a> Deserializer<'a> {
  name,
  strings,
  resolved_band_map: std::collections::HashMap::new(),
+ resolved_protocol_dispatch: std::collections::HashMap::new(),
  types,
  functions,
  constants,

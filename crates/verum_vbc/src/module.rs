@@ -285,6 +285,27 @@ pub struct VbcModule {
     #[serde(skip)]
     pub resolved_band_map: std::collections::HashMap<u32, FunctionId>,
 
+    /// **T0106 — resolved protocol dispatch** (carried-fact, twin of
+    /// [`Self::resolved_band_map`]): `(concrete TypeId, bare-method
+    /// StringId) → concrete FunctionId`, computed ONCE per assembled
+    /// module by [`Self::resolve_protocol_dispatch`] and consulted
+    /// FIRST by both tiers when dispatching a method on a `dyn P`
+    /// carrier whose static type erased the concrete implementor.
+    ///
+    /// Codegen strips `Heap<dyn P>`/`Shared<dyn P>` to the wrapper
+    /// spellings `Heap.m`/`Shared.m`, destroying the dyn fact: Tier-0
+    /// then panics (`FunctionNotFound`) and Tier-1 silently zeroes the
+    /// default arm — the two tiers miss in OPPOSITE directions. This
+    /// map restores the fact at the ONE point it survives: the runtime
+    /// receiver's concrete TypeId. Both tiers peel the carrier cell,
+    /// read the concrete tid, and look up `(tid, method)` here before
+    /// any name chase; an AOT miss traps LOUDLY instead of zeroing.
+    ///
+    /// NOT serialized: like the band map it is a fact about the FINAL
+    /// merged table, not the wire module.
+    #[serde(skip)]
+    pub resolved_protocol_dispatch: std::collections::HashMap<(u32, u32), FunctionId>,
+
     /// Mount-rename alias table — Phase 1 of task #11 fundamental fix
     /// (see `task11-mount-alias-aot-fix spec`).
     ///
@@ -445,6 +466,7 @@ impl VbcModule {
             discharge_receipts: Vec::new(),
             external_function_names: Vec::new(),
             resolved_band_map: std::collections::HashMap::new(),
+            resolved_protocol_dispatch: std::collections::HashMap::new(),
             mount_aliases: Vec::new(),
             type_idx_by_id: std::sync::OnceLock::new(),
         }
@@ -804,6 +826,103 @@ impl VbcModule {
     #[inline]
     pub fn resolve_band_id(&self, id: u32) -> Option<FunctionId> {
         self.resolved_band_map.get(&id).copied()
+    }
+
+    /// **T0106** — consult the carried-fact protocol dispatch. Returns
+    /// the concrete FunctionId implementing `bare_method` for the
+    /// runtime receiver's concrete `type_id`, when
+    /// [`Self::resolve_protocol_dispatch`] resolved it.
+    #[inline]
+    pub fn resolve_protocol_method(&self, type_id: u32, method: StringId) -> Option<FunctionId> {
+        self.resolved_protocol_dispatch
+            .get(&(type_id, method.0))
+            .copied()
+    }
+
+    /// **T0106** — build the carried-fact protocol-dispatch map
+    /// `(concrete TypeId, bare-method StringId) → concrete FunctionId`
+    /// for every method reachable on every concrete type through its
+    /// protocol impls (impl-block override) and the protocols' default
+    /// methods. This is the precomputed form of the by-name walk in
+    /// [`Self::find_type_method_or_protocol_default`] (the private
+    /// resolver above), keyed on the ONE fact a `dyn P` carrier still
+    /// carries at runtime — the receiver's concrete TypeId — so both
+    /// tiers can restore protocol dispatch that codegen erased to the
+    /// `Heap.m`/`Shared.m` wrapper spellings.
+    ///
+    /// Deterministic: iterates the type + function tables in id order
+    /// and interns each bare method name once (bake-nondeterminism
+    /// discipline — the map itself is `#[serde(skip)]`, never baked).
+    /// Impl-block overrides win over protocol defaults (inserted first,
+    /// `entry(..).or_insert` keeps them). Call after
+    /// [`Self::resolve_external_bands`] on an EXECUTION assembly.
+    ///
+    /// Kill switch: `VERUM_DISABLE_PROTOCOL_DISPATCH=1`.
+    /// Trace: `VERUM_TRACE_PROTOCOL_DISPATCH=1`.
+    pub fn resolve_protocol_dispatch(&mut self) -> usize {
+        if std::env::var_os("VERUM_DISABLE_PROTOCOL_DISPATCH").is_some() {
+            return 0;
+        }
+        let trace = std::env::var_os("VERUM_TRACE_PROTOCOL_DISPATCH").is_some();
+        // (tid, bare-name) → fid; collect into a plain map first so the
+        // borrow of `self.types`/`self.functions` stays immutable while
+        // we intern names (intern needs `&mut self`).
+        let mut pending: Vec<(u32, String, u32)> = Vec::new();
+        for descriptor in self.types.iter() {
+            let tid = descriptor.id.0;
+            for protocol_impl in descriptor.protocols.iter() {
+                // Impl-block overrides first (they win).
+                for raw in protocol_impl.methods.iter().copied() {
+                    if let Some(fdesc) = self.functions.get(raw as usize)
+                        && let Some(fname) = self.get_string(fdesc.name)
+                    {
+                        let bare = fname.rsplit('.').next().unwrap_or(fname).to_string();
+                        pending.push((tid, bare, raw));
+                    }
+                }
+                // Protocol default methods (declared on the protocol
+                // type itself) — only fill gaps the impl left open.
+                let proto_methods: Vec<(String, u32)> = self
+                    .types
+                    .iter()
+                    .find(|t| t.id.0 == protocol_impl.protocol.0)
+                    .map(|t| {
+                        t.protocols
+                            .iter()
+                            .flat_map(|pi| pi.methods.iter().copied())
+                            .filter_map(|raw| {
+                                self.functions.get(raw as usize).and_then(|fd| {
+                                    self.get_string(fd.name).map(|n| {
+                                        (n.rsplit('.').next().unwrap_or(n).to_string(), raw)
+                                    })
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for (bare, raw) in proto_methods {
+                    pending.push((tid, bare, raw));
+                }
+            }
+        }
+        // Sort by (tid, name, fid) so intern order is deterministic.
+        pending.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        let mut map: std::collections::HashMap<(u32, u32), FunctionId> =
+            std::collections::HashMap::with_capacity(pending.len());
+        for (tid, bare, raw) in pending {
+            let sid = self.intern_string(&bare);
+            // First insert wins: the pre-sort pushes impl-block
+            // overrides before defaults for a given (tid, name) only
+            // within one protocol_impl; the sort collapses that, so use
+            // or_insert to keep the lowest-fid (deterministic) binding.
+            map.entry((tid, sid.0)).or_insert(FunctionId(raw));
+        }
+        let count = map.len();
+        if trace {
+            eprintln!("[protocol-dispatch] resolved {count} (tid,method) bindings");
+        }
+        self.resolved_protocol_dispatch = map;
+        count
     }
 
     /// **T0103 LEG-2b** — materialize registry-intrinsic wrapper bodies
