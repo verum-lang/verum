@@ -1227,7 +1227,23 @@ pub(in super::super) fn handle_call_method(
         let ptr = receiver.as_ptr::<u8>();
         // Check if this is a Shared object by reading the type_id from ObjectHeader
         let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-        if header.type_id == TypeId::SHARED {
+        // HEAP-CARRIER-PEEL-1 (T0106 leg-2c): `Heap(x)` and `Heap.new(x)`
+        // are bytecode-IDENTICAL (both compile to `CallM{"Heap","new"}` —
+        // see codegen's `is_allocating_wrapper` arm), and allocate a CBGR
+        // cell: [32-byte AllocationHeader][value: Value]. `ptr` here is
+        // that cell's DATA pointer, NOT a standard ObjectHeader-prefixed
+        // Object — the `header` read above is only meaningful for a real
+        // Object; against a CBGR cell it reads out-of-bounds garbage past
+        // the 8-byte payload, so its `type_id` must never be trusted to
+        // classify this receiver. Detect the CBGR shape precisely via the
+        // same live-allocation membership test the `into_inner`/
+        // `into_raw`/`generation` intercepts use below (in
+        // `dispatch_primitive_method`), instead of the garbage header
+        // comparison.
+        let is_heap_cbgr_cell = state.cbgr_allocations.contains(
+            &(ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
+        );
+        if !is_heap_cbgr_cell && header.type_id == TypeId::SHARED {
             // Shared layout: [ObjectHeader][refcount: i64][value: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
@@ -1345,6 +1361,56 @@ pub(in super::super) fn handle_call_method(
                                 // needed.
                             }
                         }
+                    }
+                }
+            }
+        } else if is_heap_cbgr_cell {
+            // HEAP-CARRIER-PEEL-1 (T0106 leg-2c), continued: any method
+            // reaching here was NOT one of the CBGR-specific accessors
+            // (into_inner / into_raw / generation / stored_generation /
+            // header_* / epoch* / capabilities / can_read / can_write) —
+            // those are tried unconditionally earlier via
+            // `dispatch_primitive_method` (line ~1000) and return before
+            // this point when matched. A method that falls through this
+            // far is meant for the WRAPPED value's own type — mirror the
+            // Shared<T> auto-deref immediately above: peel to the inner
+            // Value (no refcount slot here; unlike Shared, Heap is a
+            // unique owner with no clone/strong_count surface) and
+            // re-qualify `method_name` to `<InnerType>.<method>` so the
+            // qualified-lookup walkers below resolve the receiver's REAL
+            // concrete type instead of falling to the bare-suffix scan.
+            //
+            // Pre-fix: `Heap<dyn Speaker>.sound()` read `header.type_id`
+            // off the wrong bytes (see the out-of-bounds note above),
+            // found no protocol impl, and fell to the bare-suffix scan —
+            // which silently bound to whichever same-named method the
+            // function table iterated to last (observed: both
+            // `Heap<Dog>` and `Shared<Cat>` printed "meow").
+            let inner = unsafe { *(ptr as *const Value) };
+            dispatch_receiver = inner;
+            // `receiver` stays the Heap CBGR pointer, mirroring the
+            // Shared arm's identity-preservation comment above.
+            if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+                let inner_ptr = dispatch_receiver.as_ptr::<u8>();
+                if !inner_ptr.is_null()
+                    && (inner_ptr as usize)
+                        .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                {
+                    // SAFETY: alignment verified; heap objects begin
+                    // with an ObjectHeader.
+                    let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
+                    if let Some(td) = state.module.get_type(inner_header.type_id)
+                        && let Some(inner_type_name) = state.module.strings.get(td.name)
+                        && !inner_type_name.is_empty()
+                    {
+                        let base_method: String = if let Some(idx) = method_name.rfind('.') {
+                            method_name[idx + 1..].to_string()
+                        } else if let Some(idx) = method_name.rfind("::") {
+                            method_name[idx + 2..].to_string()
+                        } else {
+                            method_name.clone()
+                        };
+                        method_name = format!("{}.{}", inner_type_name, base_method);
                     }
                 }
             }

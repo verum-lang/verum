@@ -12105,6 +12105,9 @@ impl VbcCodegen {
                             // This enables correct method dispatch for user-defined struct types
                             // like MapFlags and MemProt which both have to_unix_flags() methods.
                             if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
+                                if std::env::var("VERUM_TRACE_DYN").is_ok() {
+                                    eprintln!("[dyn-detect] var={} type_name={:?} method={}", var_name, type_name, method.name);
+                                }
                                 // Generic type parameter (`T`, `Tk`, …) —
                                 // skip the prefix and let runtime dispatch
                                 // route by receiver kind. Classifier shared
