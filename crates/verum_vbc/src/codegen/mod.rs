@@ -14960,6 +14960,29 @@ impl VbcCodegen {
                     .unwrap_or_else(|| "T".to_string());
                 Some(format!("[{}]", inner_name))
             }
+            // T0106: render `dyn P` (+ `dyn P + Q`) as the canonical
+            // `dyn:P` token so a carrier annotation `Heap<dyn Speaker>`
+            // records "Heap<dyn:Speaker>" (not the erased "Heap"), and
+            // carrier<dyn P> method calls route through `dyn:P.method`.
+            // Mirrors the same rendering in extract_type_name_from_ast
+            // (mod.rs DynProtocol arm) — one dyn spelling, both authorities.
+            TypeKind::DynProtocol { bounds, .. } => {
+                let names: Vec<String> = bounds
+                    .iter()
+                    .filter_map(|b| {
+                        if let verum_ast::ty::TypeBoundKind::Protocol(path) = &b.kind {
+                            path.as_ident().map(|id| id.name.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if names.is_empty() {
+                    None
+                } else {
+                    Some(format!("dyn:{}", names.join("+")))
+                }
+            }
             _ => None,
         }
     }
