@@ -16,7 +16,7 @@
 //
 // ## Canonical adjunctions (the four spec-stable recognisers)
 //
-// | Forward (F)  | Backward (G)  | Shape-delta recogniser           |
+// | Forward (F)  | Backward (G)  | ModuleShape-delta recogniser           |
 // |--------------|---------------|----------------------------------|
 // | Inline       | Extract       | `composition_degree` decreases   |
 // | Specialise   | Generalise    | foundation / stratum stable      |
@@ -55,7 +55,7 @@
 module core.architecture.adjunction;
 
 mount core.prelude.{Bool, Int, List, Text};
-mount super.types.Shape;
+mount super.types.ModuleShape;
 mount super.mtac.{AdjunctionWitness, ArchProposition};
 
 // =============================================================================
@@ -94,8 +94,8 @@ public type RefactoringDirection is
 public type Refactoring is {
     name: Text,
     direction: RefactoringDirection,
-    before_shape: Shape,
-    after_shape: Shape,
+    before_shape: ModuleShape,
+    after_shape: ModuleShape,
     witness: AdjunctionWitness,
 };
 

@@ -9,7 +9,7 @@
 //               "only the committed writes survived". Core correctness
 //               invariant for crash-safety (sqlite-native.md §21.4).
 
-mount core.database.sqlite.native.{Connection};
+mount core.database.sqlite.native.{SqliteConnection};
 mount core.database.sqlite.native.l0_vfs.{MockVfs, CrashPoint};
 mount core.context.{provide};
 
@@ -17,7 +17,7 @@ mount core.context.{provide};
 @main
 public async fn main() using [MockVfs] -> Result<(), Error> {
     // Open WAL-mode DB:
-    let conn = Connection.open("/virt/db").await?;
+    let conn = SqliteConnection.open("/virt/db").await?;
     conn.execute(sql#"PRAGMA journal_mode = WAL"#).await?;
     conn.execute(sql#"CREATE TABLE t (x INT)"#).await?;
 
@@ -35,7 +35,7 @@ public async fn main() using [MockVfs] -> Result<(), Error> {
     MockVfs.power_cycle();
 
     // Reopen; recovery must reconcile committed frames.
-    let conn2 = Connection.open("/virt/db").await?;
+    let conn2 = SqliteConnection.open("/virt/db").await?;
     let rows: List<Int> = conn2
         .query(sql#"SELECT x FROM t ORDER BY x"#)
         .collect()

@@ -1,5 +1,5 @@
 // =============================================================================
-// observability/registry.vr — per-Connection MetricRegistry
+// observability/registry.vr — per-SqliteConnection MetricRegistry
 // =============================================================================
 // Spec: sqlite-native.md §22 (operational tooling)
 //
@@ -10,7 +10,7 @@
 // counters accumulate across the connection's lifetime.
 //
 
-// Built-in metrics for every Connection (set up in `register_defaults`):
+// Built-in metrics for every SqliteConnection (set up in `register_defaults`):
 //
 
 //  counters: queries_total, queries_failed, rows_read, rows_written,

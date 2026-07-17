@@ -9,7 +9,7 @@
 // implementation of its protocol(s).
 
 mount core.database.sqlite.native.testing.dst.{
-    MockClock, StepClock, step_clock,
+    AdvanceableClock, StepClock, step_clock,
     MockScheduler, RoundRobin, round_robin,
     SeededScheduler, seeded_scheduler,
     FaultInjector, FaultKind, Fault,

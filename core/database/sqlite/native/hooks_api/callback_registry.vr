@@ -35,7 +35,7 @@ module core.database.sqlite.native.hooks_api.callback_registry;
 // returned typed decision.  Falls back to the FFI opaque-handle
 // path when no Verum callback is registered.
 //
-// Concurrency: HookCallbacks is owned by Connection (single-writer
+// Concurrency: HookCallbacks is owned by SqliteConnection (single-writer
 // per connection — same model as the legacy HookRegistration
 // surface).  Safe for direct mutation through `&mut` references.
 // =============================================================================

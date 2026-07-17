@@ -59,7 +59,7 @@ public type DemoCli is {
 };
 
 // =============================================================================
-// Handler bound to the generated spec — runtime calls this after parsing
+// CliHandler bound to the generated spec — runtime calls this after parsing
 // =============================================================================
 
 public fn demo_handler(ctx: &HandlerContext) -> ExitCode {

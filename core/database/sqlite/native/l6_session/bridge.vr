@@ -7,7 +7,7 @@ module core.database.sqlite.native.l6_session.bridge;
 
 // =============================================================================
 // l6_session/bridge.vr — seed / writeback between PreparedStatement cursors
-//  and the Connection's persistent row store
+//  and the SqliteConnection's persistent row store
 // =============================================================================
 // Layer: 6
 // Spec: sqlite-native.md §16.3 + §17
@@ -32,12 +32,12 @@ mount core.database.sqlite.native.l4_vdbe.interpreter.{
 mount core.database.sqlite.native.ext.hooks.{
     ExtUpdateOp, UoInsert, UoUpdate, UoDelete,
 };
-mount core.database.sqlite.native.l6_session.connection.Connection;
+mount core.database.sqlite.native.l6_session.connection.SqliteConnection;
 mount core.database.sqlite.native.l6_session.statement.PreparedStatement;
 
 public fn seed_cursors_from_connection(
     stmt: &mut PreparedStatement,
-    conn: &Connection,
+    conn: &SqliteConnection,
 ) {
     let n = stmt.program_ref().cursor_count();
     let mut i: Int = 0;
@@ -69,7 +69,7 @@ public fn seed_cursors_from_connection(
 
 public fn writeback_cursors_to_connection(
     stmt: &PreparedStatement,
-    conn: &mut Connection,
+    conn: &mut SqliteConnection,
 ) {
     let n = stmt.program_ref().cursor_count();
     let mut i: Int = 0;
@@ -104,7 +104,7 @@ public fn writeback_cursors_to_connection(
 /// Separated from writeback so callers that want write-through-
 /// without-hook semantics (e.g. internal schema bootstrap) can
 /// invoke the row apply step alone.
-public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut Connection) {
+public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut SqliteConnection) {
     // Bail out of the hot path before grabbing the hook reference.
     if !conn.registry_view().has_update_hook() {
         return;

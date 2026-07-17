@@ -32,7 +32,7 @@
 // │ Kernel Execution │
 // ├─────────────────────────────────────────────────────────────────────────┤
 // │ LaunchConfig: grid, block, shared memory │
-// │ Stream: async execution context │
+// │ GpuStream: async execution context │
 // │ GpuEvent: timing and synchronization │
 // └─────────────────────────────────────────────────────────────────────────┘
 // ```
@@ -1066,7 +1066,7 @@ public fn memcpy_async<T: Copy>(
     dst: &mut GPUBuffer<T>,
     src: &GPUBuffer<T>,
     size: USize,
-    stream: &Stream,
+    stream: &GpuStream,
 ) {
     assert(size <= dst.size && size <= src.size, "memcpy_async size exceeds buffer bounds");
     @vbc(GPU_MEMCPY_ASYNC, dst.ptr, src.ptr, size * T.size, stream.handle)
@@ -1084,7 +1084,7 @@ public fn memset<T: Copy>(buffer: &mut GPUBuffer<T>, value: U8) {
 }
 
 // Async memset on stream
-public fn memset_async<T: Copy>(buffer: &mut GPUBuffer<T>, value: U8, stream: &Stream) {
+public fn memset_async<T: Copy>(buffer: &mut GPUBuffer<T>, value: U8, stream: &GpuStream) {
     @vbc(GPU_MEMSET_ASYNC, buffer.ptr, value, buffer.size * T.size, stream.handle)
 }
 
@@ -1185,7 +1185,7 @@ implement LaunchConfig {
     }
 
     // Set execution stream
-    public fn with_stream(self, stream: &Stream) -> Self {
+    public fn with_stream(self, stream: &GpuStream) -> Self {
         LaunchConfig { stream: Some(stream.handle), ..self }
     }
 
@@ -1196,26 +1196,26 @@ implement LaunchConfig {
 }
 
 // =============================================================================
-// Stream Handle
+// GpuStream Handle
 // =============================================================================
 
 // Opaque stream handle
 public type StreamHandle is (U64);
 
 // =============================================================================
-// CUDA/HIP Stream
+// CUDA/HIP GpuStream
 // =============================================================================
 
 // GPU execution stream for async operations
-public type Stream is {
+public type GpuStream is {
     handle: StreamHandle,
     device: DeviceId,
 };
 
-implement Stream {
+implement GpuStream {
     // Create new stream on current device
     public fn new() -> Self {
-        Stream {
+        GpuStream {
             handle: @vbc(GPU_STREAM_CREATE),
             device: current_device(),
         }
@@ -1224,7 +1224,7 @@ implement Stream {
     // Create new stream on specific device
     public fn on_device(device: DeviceId) -> Self {
         with_device(device, || {
-            Stream {
+            GpuStream {
                 handle: @vbc(GPU_STREAM_CREATE),
                 device,
             }
@@ -1233,7 +1233,7 @@ implement Stream {
 
     // Create stream with priority (-1 = high, 0 = default)
     public fn with_priority(priority: Int) -> Self {
-        Stream {
+        GpuStream {
             handle: @vbc(GPU_STREAM_CREATE_PRIO, priority),
             device: current_device(),
         }
@@ -1255,7 +1255,7 @@ implement Stream {
     }
 }
 
-implement Drop for Stream {
+implement Drop for GpuStream {
     fn drop(&mut self) {
         @vbc(GPU_STREAM_DESTROY, self.handle)
     }
@@ -1305,7 +1305,7 @@ implement GpuEvent {
     }
 
     // Record event on stream
-    public fn record(&self, stream: &Stream) {
+    public fn record(&self, stream: &GpuStream) {
         @vbc(GPU_EVENT_RECORD, self.handle, stream.handle)
     }
 
@@ -1366,7 +1366,7 @@ public fn launch_cooperative<K: GPUKernel>(config: LaunchConfig, kernel: K, args
 
 // Profile a GPU operation and return result with elapsed time
 public fn profile<T>(name: &Text, f: fn() -> T) -> (T, Float) {
-    let stream = Stream.new();
+    let stream = GpuStream.new();
     let start = GpuEvent.new();
     let end = GpuEvent.new();
 
@@ -1417,12 +1417,12 @@ implement CudaGraph {
     }
 
     // Begin capture on stream
-    public fn begin_capture(stream: &Stream) {
+    public fn begin_capture(stream: &GpuStream) {
         @vbc(GPU_GRAPH_BEGIN, stream.handle)
     }
 
     // End capture and return graph
-    public fn end_capture(stream: &Stream) -> Self {
+    public fn end_capture(stream: &GpuStream) -> Self {
         let handle = @vbc(GPU_GRAPH_END, stream.handle);
         CudaGraph {
             handle,
@@ -1436,7 +1436,7 @@ implement CudaGraph {
     }
 
     // Launch instantiated graph
-    public fn launch(&self, stream: &Stream) {
+    public fn launch(&self, stream: &GpuStream) {
         assert(self.exec_handle != 0, "Graph not instantiated");
         @vbc(GPU_GRAPH_LAUNCH, self.exec_handle, stream.handle)
     }
@@ -1458,7 +1458,7 @@ implement Drop for CudaGraph {
 
 // Capture operations to graph
 public fn capture_graph<T>(f: fn() -> T) -> (CudaGraph, T) {
-    let stream = Stream.new();
+    let stream = GpuStream.new();
     CudaGraph.begin_capture(&stream);
     let result = f();
     let mut graph = CudaGraph.end_capture(&stream);

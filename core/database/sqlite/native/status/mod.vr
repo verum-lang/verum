@@ -11,7 +11,7 @@
 
 //  * `process` — process-global (memory_used / page_cache_used /
 //  scratch / pager / lookaside)
-//  * `database`— per-Connection (cache_used / schema_used / lookaside_used / …)
+//  * `database`— per-SqliteConnection (cache_used / schema_used / lookaside_used / …)
 //  * `stmt` — per-PreparedStatement (full_scan / sort / autoindex / vm_step)
 //
 

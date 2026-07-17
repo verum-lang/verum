@@ -9,13 +9,13 @@ module core.database.sqlite.native.column_origin_name_api.trace;
 
 mount base.{Bool, Text};
 
-public type Field is
+public type OriginField is
     | FDatabase       // sqlite3_column_database_name
     | FTable          // sqlite3_column_table_name
     | FOrigin         // sqlite3_column_origin_name
     ;
 
-public fn field_name(f: &Field) -> Text {
+public fn field_name(f: &OriginField) -> Text {
     match f {
         FDatabase => "database".clone(),
         FTable    => "table".clone(),
@@ -84,7 +84,7 @@ public type FieldResult is
 public fn lookup(
     src: &Source,
     md: &ColumnOriginMetadata,
-    field: &Field,
+    field: &OriginField,
     build_has_metadata: Bool,
 ) -> FieldResult {
     if !build_has_metadata { return OkNullDisabled; }

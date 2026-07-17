@@ -23,7 +23,7 @@
 // Submodules:
 //  * `cipher` — PageCipher protocol + 3 built-in impls
 //  * `kdf` — KeyDerivation protocol + PBKDF2 / Argon2-like
-//  * `key_ring` — per-Connection key management
+//  * `key_ring` — per-SqliteConnection key management
 //  * `policy` — per-page policy (encrypt all / encrypt user
 //  pages only / null cipher for testing)
 // =============================================================================

@@ -1,10 +1,10 @@
 // =============================================================================
-// ext/registry.vr — per-Connection function & hook registry
+// ext/registry.vr — per-SqliteConnection function & hook registry
 // =============================================================================
 // Spec: sqlite-native.md §19.1, §19.5
 //
 
-// Stores everything an extension can attach to a Connection:
+// Stores everything an extension can attach to a SqliteConnection:
 //
 
 //  * scalar functions (Heap<dyn ScalarFn>)

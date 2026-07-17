@@ -5,7 +5,7 @@
 // `core/architecture/composition.vr` — ATS-V composition algebra surface.
 //
 // Surface tested (pure-data subset):
-//   * CompositionResult 2-variant (Composed(Shape) / Rejected(List<…>))
+//   * CompositionResult 2-variant (Composed(ModuleShape) / Rejected(List<…>))
 //   * composition_result_is_composed
 //   * composition_result_tag
 //   * composition_result_violation_count
@@ -22,7 +22,7 @@ mount core.architecture.composition.{
 };
 
 // =============================================================================
-// Section 1: CompositionResult — Rejected variant (testable without Shape)
+// Section 1: CompositionResult — Rejected variant (testable without ModuleShape)
 // =============================================================================
 
 @test

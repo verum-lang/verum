@@ -12,7 +12,7 @@
 
 // Submodules:
 //  * `metric` — Counter / Gauge / Histogram primitives
-//  * `registry` — per-Connection MetricRegistry
+//  * `registry` — per-SqliteConnection MetricRegistry
 //  * `span` — TracingSpan record + Span protocol
 //  * `exporter` — protocol with Prometheus + OTLP-shaped impls
 // =============================================================================

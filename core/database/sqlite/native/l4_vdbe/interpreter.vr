@@ -65,7 +65,7 @@ public type RowMutationKind is RmkInsert | RmkUpdate | RmkDelete;
 
 /// One row-level mutation observed during a single VDBE program run.
 /// The bridge replays these in original order, resolves
-/// `cursor_id` → `(schema, table)` via `Connection.schema`, and
+/// `cursor_id` → `(schema, table)` via `SqliteConnection.schema`, and
 /// invokes the per-connection `update_hook` (when set).
 public type RowMutation is {
     kind: RowMutationKind,

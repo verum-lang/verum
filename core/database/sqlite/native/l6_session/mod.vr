@@ -8,7 +8,7 @@ module core.database.sqlite.native.l6_session;
 // =============================================================================
 // core/database/sqlite/native/l6_session/mod.vr — Session layer (L6)
 // =============================================================================
-// Layer: 6 — the Connection / SchemaCache / PreparedStatement surface.
+// Layer: 6 — the SqliteConnection / SchemaCache / PreparedStatement surface.
 // Dependencies: l4_vdbe, l5_sql, l1_pager
 // =============================================================================
 
@@ -28,7 +28,7 @@ public mount .schema_cache.{
 };
 
 public mount .connection.{
-    ConnectionMode, TxMode, TxState, Connection, ConnectionError,
+    ConnectionMode, TxMode, TxState, SqliteConnection, ConnectionError,
     tx_state_autocommit,
     open_memory, open_readonly_memory, open_readwrite_memory, open_admin_memory,
     open_file,

@@ -7,7 +7,7 @@
 
 mount core.shell.dsl.kubectl.{
     KubectlCmd, KubeName, KubeNamespace, KubeOutput, KubeResource,
-    Pod, Deployment, Service, ConfigMap, Namespace,
+    Pod, Deployment, K8sService, ConfigMap, Namespace,
 };
 mount core.shell.result.{ShellError};
 mount core.io.path.{PathBuf};
@@ -29,7 +29,7 @@ fn exercise_apply() -> Result<Text, ShellError> {
 }
 
 fn exercise_get() -> Result<Text, ShellError> {
-    let cmd: KubectlCmd<Service> = KubectlCmd.Get {
+    let cmd: KubectlCmd<K8sService> = KubectlCmd.Get {
         name:           Some(KubeName.parse("api".into())?),
         namespace:      Some(KubeNamespace.parse("default".into())?),
         output:         KubeOutput.Json,

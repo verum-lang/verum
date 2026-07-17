@@ -127,7 +127,7 @@ public type Decision is {
 ///   * `EndUser`     — public-interface view
 ///   * `PeerCog`     — composition partners + boundary capabilities
 ///   * `Stakeholder` — deployment-level concerns
-///   * `Auditor`     — full Shape projection (strictest observer)
+///   * `Auditor`     — full ModuleShape projection (strictest observer)
 ///   * `Adversary`   — attack surface = exposes + outbound traffic
 public type Observer is
     | EndUser(Text)         // kind

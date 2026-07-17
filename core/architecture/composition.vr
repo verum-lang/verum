@@ -5,7 +5,7 @@
 // **Verum-native mirror of `verum_kernel.arch_composition`.**
 //
 // Composition is a **typed operation**: `compose(A, B)` either
-// yields a new `Shape` for the composed unit, or rejects with one
+// yields a new `ModuleShape` for the composed unit, or rejects with one
 // or more structured `AntiPatternViolation`s.  The compiler
 // refuses incompatible compositions at type-check time, never at
 // runtime.
@@ -25,7 +25,7 @@
 //      boundary closure), the meet stratum is admissible.
 //   5. **No dependency cycle** — composition graph stays acyclic.
 //
-// ## Resulting Shape semantics
+// ## Resulting ModuleShape semantics
 //
 //   * `exposes`       = `A.exposes ∪ B.exposes` minus capabilities
 //                       B consumed from A (those become internal
@@ -60,7 +60,7 @@
 module core.architecture.composition;
 
 mount core.prelude.{Bool, Int, List, Text};
-mount super.types.Shape;
+mount super.types.ModuleShape;
 mount super.anti_patterns.AntiPatternViolation;
 
 // =============================================================================
@@ -70,7 +70,7 @@ mount super.anti_patterns.AntiPatternViolation;
 /// Outcome of composing two Shapes.  Mirrors
 /// `verum_kernel.arch_composition.CompositionResult`.
 public type CompositionResult is
-    | Composed(Shape)
+    | Composed(ModuleShape)
     | Rejected(List<AntiPatternViolation>);
 
 /// True iff composition succeeded.
@@ -122,7 +122,7 @@ public axiom kernel_arch_composition_engine() -> Bool
 /// proof requires the kernel-side property test over the entire
 /// triple-product space (RT1.5 refinement); cannot be discharged
 /// at ATS-V phase alone.
-@framework(ats_v, "ATS-V composition associativity — pairwise-compatible triples agree on the result regardless of bracketing: (A⊗B)⊗C ≡ A⊗(B⊗C). Witness: kernel proptest harness in crates/verum_kernel/src/arch_composition.rs randomly samples valid Shape triples and asserts left-fold ≡ right-fold over the entire input space.")
+@framework(ats_v, "ATS-V composition associativity — pairwise-compatible triples agree on the result regardless of bracketing: (A⊗B)⊗C ≡ A⊗(B⊗C). Witness: kernel proptest harness in crates/verum_kernel/src/arch_composition.rs randomly samples valid ModuleShape triples and asserts left-fold ≡ right-fold over the entire input space.")
 @kernel_discharge("kernel_arch_composition_associative")
 public axiom kernel_arch_composition_associative() -> Bool
     ensures true;

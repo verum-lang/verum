@@ -19,7 +19,7 @@
 //  phrase .= IDENT (' ' IDENT)*
 //
 
-// The executor runs the AST against an `Index`, returning a
+// The executor runs the AST against an `Fts5Index`, returning a
 // ranked list of `RowMatch` records (rowid + relevance score via BM25).
 // =============================================================================
 
@@ -34,7 +34,7 @@ mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.segment.{Fts5SegmentPosting, Fts5SegmentPostingList};
-mount core.database.sqlite.native.vtabs.fts5.index.{Index};
+mount core.database.sqlite.native.vtabs.fts5.index.{Fts5Index};
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
     Fts5VtabTokenizer, Token, options_default,
 };
@@ -279,12 +279,12 @@ public type RowMatch is {
     score: Float64,
 };
 
-public fn execute(expr: &MatchExpr, idx: &Index) -> List<RowMatch> {
+public fn execute(expr: &MatchExpr, idx: &Fts5Index) -> List<RowMatch> {
     let postings = eval(expr, idx);
     rank_bm25(&postings, idx)
 }
 
-fn eval(expr: &MatchExpr, idx: &Index) -> Fts5SegmentPostingList {
+fn eval(expr: &MatchExpr, idx: &Fts5Index) -> Fts5SegmentPostingList {
     match expr {
         MeTerm(t)      => idx.lookup(t),
         MePhrase(words) => eval_phrase(words, idx),
@@ -306,7 +306,7 @@ fn eval(expr: &MatchExpr, idx: &Index) -> Fts5SegmentPostingList {
     }
 }
 
-fn eval_phrase(words: &List<Text>, idx: &Index) -> Fts5SegmentPostingList {
+fn eval_phrase(words: &List<Text>, idx: &Fts5Index) -> Fts5SegmentPostingList {
     if words.len() == 0 {
         return core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
     }
@@ -435,7 +435,7 @@ fn near(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList, dist: Int) -> Ft
 // length into docstore.
 // =============================================================================
 
-public fn rank_bm25(pl: &Fts5SegmentPostingList, idx: &Index) -> List<RowMatch> {
+public fn rank_bm25(pl: &Fts5SegmentPostingList, idx: &Fts5Index) -> List<RowMatch> {
     let n_docs: Int = idx.segment_count();
     if n_docs == 0 { return List.new(); }
     let n_docs_f = n_docs as Float64;

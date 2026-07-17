@@ -1,5 +1,5 @@
 // =============================================================================
-// concurrency/thread_safety.vr — Connection thread-safety mode tagging
+// concurrency/thread_safety.vr — SqliteConnection thread-safety mode tagging
 // =============================================================================
 // Spec: sqlite-native.md §20.1
 //
@@ -15,7 +15,7 @@
 //  (default — uses actor-based pager arbitration)
 //
 
-// We expose this as a phantom-typed marker on `Connection<T, S>`,
+// We expose this as a phantom-typed marker on `SqliteConnection<T, S>`,
 // where `S: ThreadSafetyMode`. The marker constrains the Send/Sync
 // impls so misuse is a type error rather than a runtime panic.
 // =============================================================================

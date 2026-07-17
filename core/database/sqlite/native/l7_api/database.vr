@@ -12,7 +12,7 @@ module core.database.sqlite.native.l7_api.database;
 // Spec: sqlite-native.md §16.1 + §Appendix D (error-code map)
 //
 
-// `Database` is what end-user code holds. It wraps a Connection at L6,
+// `Database` is what end-user code holds. It wraps a SqliteConnection at L6,
 // translates L6's strongly-typed ConnectionError / StmtError into a
 // single `SqliteApiDbError` tagged with SQLSTATE-style codes, and exposes the
 // idiomatic open / prepare / execute / close API.
@@ -49,7 +49,7 @@ mount core.database.sqlite.native.l5_sql.{
     parse_one,
 };
 mount core.database.sqlite.native.l6_session.{
-    Connection, ConnectionMode, ConnectionError, TxMode,
+    SqliteConnection, ConnectionMode, ConnectionError, TxMode,
     PreparedStatement, StmtError, IndexMeta,
     open_memory, open_file, prepare, prepare_with_schema,
     mode_can_write, mode_can_ddl,
@@ -189,7 +189,7 @@ public fn db_error_from_conn(e: ConnectionError) -> SqliteApiDbError {
 // -----------------------------------------------------------------------------
 
 public type Database is {
-    conn: Connection,
+    conn: SqliteConnection,
 };
 
 /// Open an in-memory database with the given capability.
@@ -267,7 +267,7 @@ implement Database {
     /// Borrow the connection's function & hook registry. Used by the
     /// `l7_api.hooks` surface to expose `set_commit_hook` /
     /// `set_rollback_hook` / etc. as method-style sugar on Database
-    /// without leaking the underlying Connection through the public
+    /// without leaking the underlying SqliteConnection through the public
     /// API.
     public fn registry_view(&self) -> &FnRegistry { self.conn.registry_view() }
     public fn registry_mut(&mut self) -> &mut FnRegistry { self.conn.registry_mut() }
@@ -277,12 +277,12 @@ implement Database {
     public fn pragma_cfg_view(&self) -> &PragmaConfig { self.conn.pragma_cfg_view() }
     public fn pragma_cfg_mut(&mut self) -> &mut PragmaConfig { self.conn.pragma_cfg_mut() }
 
-    /// Borrow the underlying L6 Connection. Required by
+    /// Borrow the underlying L6 SqliteConnection. Required by
     /// `l7_api.blob` so it can talk to the schema cache + table store
     /// + blob engine in one logical pass. Other L7 modules should
     /// prefer the narrower accessors above.
-    public fn conn_view_for_blob(&self) -> &Connection { &self.conn }
-    public fn conn_mut_for_blob(&mut self) -> &mut Connection { &mut self.conn }
+    public fn conn_view_for_blob(&self) -> &SqliteConnection { &self.conn }
+    public fn conn_mut_for_blob(&mut self) -> &mut SqliteConnection { &mut self.conn }
 
     // -------------------------------------------------------------------------
     // Prepare / execute / query

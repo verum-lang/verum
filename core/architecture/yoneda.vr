@@ -21,7 +21,7 @@
 // | EndUser     | exposes + lifecycle (public-interface view)             |
 // | PeerCog     | composes_with membership + boundary capabilities        |
 // | Stakeholder | tier + foundation + lifecycle + persistence caps        |
-// | Auditor     | full Shape projection (strictest observer)              |
+// | Auditor     | full ModuleShape projection (strictest observer)              |
 // | Adversary   | attack_surface = exposes + outbound network/exec        |
 //
 // ## Engine guarantee
@@ -56,7 +56,7 @@ mount super.mtac.Observer;
 // ShapeObservation — what an observer sees
 // =============================================================================
 
-/// Projection of a `Shape` from a single `Observer`'s viewpoint.
+/// Projection of a `ModuleShape` from a single `Observer`'s viewpoint.
 /// Variants are per-observer-kind so each carries only the fields
 /// that observer is sensitive to.  Equality of two observations
 /// implies the observer cannot distinguish the two underlying

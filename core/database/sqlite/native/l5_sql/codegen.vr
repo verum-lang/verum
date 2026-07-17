@@ -2506,7 +2506,7 @@ fn emit_transaction(st: &mut CgState, action: &TxAction) -> Result<(), CodegenEr
 fn emit_pragma(st: &mut CgState, _name: &Text, _value: &Maybe<Expr>) -> Result<(), CodegenError> {
     // Pragma dispatch happens at the L6 API layer — the VDBE program
     // for a PRAGMA is typically a single `Halt(0)` plus a side-effect
-    // registered on the Connection. Emit the empty program.
+    // registered on the SqliteConnection. Emit the empty program.
     let _ = st;
     Result.Ok(())
 }

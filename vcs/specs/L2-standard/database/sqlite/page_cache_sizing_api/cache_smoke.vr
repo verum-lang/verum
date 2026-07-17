@@ -7,7 +7,7 @@
 
 mount core.database.sqlite.native.page_cache_sizing_api.cache_size.{
     default_value,
-    Interpretation, InPages, InKib,
+    CacheSizeInterpretation, InPages, InKib,
     classify, interp_name,
     effective_page_count, is_unlimited,
     min_pages, is_below_minimum,

@@ -26,7 +26,7 @@
 // Built-in aggregates (sum/avg/min/max/count) live in
 // `core.database.sqlite.native.builtins.aggregate_fns` as concrete
 // types whose `AggregateFn` impl plugs into this protocol — the
-// `Connection.register_aggregate_fn` call uses dynamic dispatch on
+// `SqliteConnection.register_aggregate_fn` call uses dynamic dispatch on
 // the protocol vtable.
 // =============================================================================
 

@@ -4,7 +4,7 @@
 // Spec: sqlite-native.md §22 (operational tooling — quotas)
 //
 
-// `LimitTracker` is a per-Connection accumulator that the L4
+// `LimitTracker` is a per-SqliteConnection accumulator that the L4
 // interpreter, L1 pager, and L7 façade all bump as work progresses.
 // On `check(dimension, current_value)`:
 //

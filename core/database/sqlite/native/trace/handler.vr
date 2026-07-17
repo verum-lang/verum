@@ -5,7 +5,7 @@
 //
 
 // `TraceHandler` is the user-facing protocol. The L7 façade installs
-// at most one handler per Connection but the catalogue lets the host
+// at most one handler per SqliteConnection but the catalogue lets the host
 // chain handlers via `compose` so multiple subscribers (audit, EXPLAIN
 // ANALYZE collector, REPL echo) can coexist.
 // =============================================================================

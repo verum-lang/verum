@@ -4,7 +4,7 @@
 // Spec: sqlite-native.md §16.2 — fts5/index.vr
 //
 
-// An `Index` is a stack of segments organised into levels (level-N
+// An `Fts5Index` is a stack of segments organised into levels (level-N
 // segments are the result of merging level-(N-1) segments). Reads
 // scan every segment + union the postings; writes append a fresh
 // level-0 segment.
@@ -43,22 +43,22 @@ public type Fts5VtabSegmentLevel is {
 public fn level_new(n: Int) -> Fts5VtabSegmentLevel { Fts5VtabSegmentLevel { level: n, segments: List.new() } }
 
 // -----------------------------------------------------------------------------
-// Index
+// Fts5Index
 // -----------------------------------------------------------------------------
 
-public type Index is {
+public type Fts5Index is {
     levels: List<Fts5VtabSegmentLevel>,
     /// Level-0 segments above this count trigger a merge.
     merge_threshold: Int,
 };
 
-public fn index_new() -> Index {
+public fn index_new() -> Fts5Index {
     let mut levels: List<Fts5VtabSegmentLevel> = List.new();
     levels.push(level_new(0));
-    Index { levels: levels, merge_threshold: 4 }
+    Fts5Index { levels: levels, merge_threshold: 4 }
 }
 
-implement Index {
+implement Fts5Index {
     /// Append a new level-0 segment.
     public fn add_segment(&mut self, seg: Fts5VtabSegment) {
         self.ensure_level(0);

@@ -11,7 +11,7 @@
 // under which discipline* — from prose into the type system.
 // Eight primitives carry the load: Capability, Boundary,
 // Composition, Lifecycle, Foundation, Tier, MsfsStratum,
-// CveClosure.  Their aggregate is `Shape`, the typed fingerprint
+// CveClosure.  Their aggregate is `ModuleShape`, the typed fingerprint
 // of every cog.
 //
 // ## Reuse-over-invention principle
@@ -23,7 +23,7 @@
 //   * `type X is | A | B` — sum types carry Capability /
 //     Lifecycle / Foundation / Tier / MsfsStratum / etc.
 //   * `type X is { ... }` — records carry Boundary / CveClosure /
-//     Shape / CapabilitySchema / etc.
+//     ModuleShape / CapabilitySchema / etc.
 //   * `@arch_module(...)` typed attribute — exactly one new
 //     attribute name, parsed by the existing attribute mechanism.
 //   * `@kernel_discharge(<intrinsic>)` axioms — bridge to kernel
@@ -1097,7 +1097,7 @@ public fn fixpoint_class_is_canonical(f: FixpointClass) -> Bool {
 }
 
 /// Self-reference witness, per cve-architecture spec §16. A cog
-/// whose `Shape` exhibits a self-referential pattern (self in
+/// whose `ModuleShape` exhibits a self-referential pattern (self in
 /// `composes_with`, capability targeting the cog's own holon,
 /// requires citing the cog itself) MUST declare this witness.
 /// Absence triggers AP-040 `SelfReferenceWithoutOperator`.
@@ -1134,7 +1134,7 @@ public fn self_reference_witness_unspecified() -> SelfReferenceWitness {
 
 // ----- ShapeDeclarations — spec-load-bearing optional declarations -----
 
-/// Optional declarations packaged into a `Shape`. Carries the
+/// Optional declarations packaged into a `ModuleShape`. Carries the
 /// CVE-architecture spec concepts that are not yet load-bearing in
 /// the canonical primitives but ARE load-bearing in the
 /// architectural law: declared purpose (terminates audit), declared
@@ -1143,7 +1143,7 @@ public fn self_reference_witness_unspecified() -> SelfReferenceWitness {
 /// default), declared executability sense (`StructuralReadiness`
 /// by default), declared self-reference witness (operator + fixed
 /// point + fixpoint class, per spec §16; required when the cog's
-/// `Shape` exhibits self-referential patterns).
+/// `ModuleShape` exhibits self-referential patterns).
 ///
 /// All five are `Maybe<...>` so `@arch_module(...)` need not declare
 /// them explicitly; absent declarations default per the helpers
@@ -1173,11 +1173,11 @@ public fn shape_declarations_empty() -> ShapeDeclarations {
 }
 
 // =============================================================================
-// Shape — main carrier of @arch_module(...)
+// ModuleShape — main carrier of @arch_module(...)
 // =============================================================================
 
 /// Main carrier of `@arch_module(...)` — the typed architectural
-/// fingerprint of a cog.  The compiler builds a `Shape` from each
+/// fingerprint of a cog.  The compiler builds a `ModuleShape` from each
 /// `@arch_module(...)` declaration; the ATS-V phase (Phase 6.5,
 /// between type inference and VBC codegen) consumes it during
 /// architectural type checking and produces the per-module
@@ -1203,7 +1203,7 @@ public fn shape_declarations_empty() -> ShapeDeclarations {
 ///                          declarations (purpose, substrate,
 ///                          anchoring, e_sense). Per spec §1.5,
 ///                          §2.3.0, §4.5, §14.6.
-public type Shape is {
+public type ModuleShape is {
     exposes: List<Capability>,
     requires: List<Capability>,
     preserves: List<BoundaryInvariant>,
@@ -1498,14 +1498,14 @@ public fn capability_tag(c: Capability) -> Text {
     }
 }
 
-// ----- Shape -----
+// ----- ModuleShape -----
 
 /// Default shape for cogs without `@arch_module` per spec §6.1
 /// (smart default inference).  Soft-mode trivial — vacuously
 /// passes every anti-pattern check.  Mirrors
-/// `verum_kernel.arch.Shape.default_for_unannotated`.
-public fn shape_default_for_unannotated() -> Shape {
-    Shape {
+/// `verum_kernel.arch.ModuleShape.default_for_unannotated`.
+public fn shape_default_for_unannotated() -> ModuleShape {
+    ModuleShape {
         exposes: [],
         requires: [],
         preserves: [],

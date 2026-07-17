@@ -13,7 +13,7 @@
 //
 
 //  L7 API — Database, Statement, Transaction, Row (public surface)
-//  L6 Session — Connection<Mode>, schema cache, function registry
+//  L6 Session — SqliteConnection<Mode>, schema cache, function registry
 //  L5 SQL compiler — lexer, parser, resolver, planner, codegen
 //  L4 VDBE — register-SSA bytecode virtual machine
 //  L3 B-tree — cursors, pages, balance, integrity
@@ -81,7 +81,7 @@ public module l4_vdbe;
 // Layer 5: SQL (lexer, AST, parser, planner, codegen)
 public module l5_sql;
 
-// Layer 6: Session (Connection, SchemaCache, PreparedStatement)
+// Layer 6: Session (SqliteConnection, SchemaCache, PreparedStatement)
 public module l6_session;
 
 // Layer 7: public API (Database facade, DbError)
@@ -137,7 +137,7 @@ public module vacuum;
 public module session;
 // - index_variants: IndexKind taxonomy (Plain/Unique/Partial/Expression/Covering) (§13.3)
 public module index_variants;
-// - stmt_cache: per-Connection LRU prepared-statement cache (§11.1)
+// - stmt_cache: per-SqliteConnection LRU prepared-statement cache (§11.1)
 public module stmt_cache;
 // - migrations: versioned schema migrations + DAG-toposort runner
 public module migrations;
@@ -149,7 +149,7 @@ public module alter;
 public module encryption;
 // - replication: WAL streaming primary→replica, role transitions, lag tracking (§22)
 public module replication;
-// - limits: per-Connection resource quotas with soft/strict enforcement (§22)
+// - limits: per-SqliteConnection resource quotas with soft/strict enforcement (§22)
 public module limits;
 // - profiler: EXPLAIN ANALYZE-shaped per-opcode + per-plan-node stats (§22)
 public module profiler;

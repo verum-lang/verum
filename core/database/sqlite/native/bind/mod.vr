@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/sqlite/native/bind/mod.vr
 // =============================================================================
-// Layer: 6 (per-Connection — sqlite3_bind_* surface)
+// Layer: 6 (per-SqliteConnection — sqlite3_bind_* surface)
 // Spec: SQLite C API — `sqlite3_bind_int64`, `sqlite3_bind_text`,
 // `sqlite3_bind_blob`, `sqlite3_bind_zeroblob`, `sqlite3_bind_null`,
 // `sqlite3_bind_value`, `sqlite3_bind_parameter_count`,

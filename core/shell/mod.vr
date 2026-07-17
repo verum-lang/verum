@@ -138,7 +138,7 @@ public mount .dsl.docker.{
 };
 public mount .dsl.kubectl.{
     KubectlCmd, KubeName, KubeNamespace, KubeOutput, KubeResource,
-    Pod, Deployment, Service, ConfigMap, Secret, Namespace,
+    Pod, Deployment, K8sService, ConfigMap, Secret, Namespace,
     kubectl,
 };
 

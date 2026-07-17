@@ -5,13 +5,13 @@
 // @level: L1
 // @tier: 0
 // @tags: async, executor, runtime, config, sleep, timeout, builder
-// @description: Tests for RuntimeConfig, AsyncRuntime, RuntimeBuilder,
+// @description: Tests for AsyncRuntimeConfig, AsyncRuntime, RuntimeBuilder,
 //               Sleep, ExecutorTimeoutError, Timeout, AsyncExecutionEnv types,
 //               builder patterns, and configuration presets
 // =============================================================================
 
 mount core.async.executor.{
-    RuntimeConfig, AsyncRuntime, RuntimeBuilder,
+    AsyncRuntimeConfig, AsyncRuntime, RuntimeBuilder,
     Sleep, ExecutorTimeoutError, Timeout,
     AsyncExecutionEnv,
     sleep_ms, sleep_secs,
@@ -26,12 +26,12 @@ mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
-// Section 1: RuntimeConfig Default Preset
+// Section 1: AsyncRuntimeConfig Default Preset
 // =============================================================================
 
 @test
 fn test_runtime_config_default() {
-    let config: RuntimeConfig = RuntimeConfig.default();
+    let config: AsyncRuntimeConfig = AsyncRuntimeConfig.default();
     assert_eq(config.max_tasks, 10000);
     assert(config.enable_work_stealing);
     assert(config.enable_io);
@@ -40,17 +40,17 @@ fn test_runtime_config_default() {
 
 @test
 fn test_runtime_config_default_stack_size() {
-    let config = RuntimeConfig.default();
+    let config = AsyncRuntimeConfig.default();
     assert_eq(config.task_stack_size, 1024 * 1024);
 }
 
 // =============================================================================
-// Section 2: RuntimeConfig CPU-Bound Preset
+// Section 2: AsyncRuntimeConfig CPU-Bound Preset
 // =============================================================================
 
 @test
 fn test_runtime_config_cpu_bound() {
-    let config: RuntimeConfig = RuntimeConfig.cpu_bound();
+    let config: AsyncRuntimeConfig = AsyncRuntimeConfig.cpu_bound();
     assert_eq(config.max_tasks, 1000);
     assert(config.enable_work_stealing);
     assert(!config.enable_io);
@@ -59,17 +59,17 @@ fn test_runtime_config_cpu_bound() {
 
 @test
 fn test_runtime_config_cpu_bound_stack_size() {
-    let config = RuntimeConfig.cpu_bound();
+    let config = AsyncRuntimeConfig.cpu_bound();
     assert_eq(config.task_stack_size, 512 * 1024);
 }
 
 // =============================================================================
-// Section 3: RuntimeConfig IO-Bound Preset
+// Section 3: AsyncRuntimeConfig IO-Bound Preset
 // =============================================================================
 
 @test
 fn test_runtime_config_io_bound() {
-    let config: RuntimeConfig = RuntimeConfig.io_bound();
+    let config: AsyncRuntimeConfig = AsyncRuntimeConfig.io_bound();
     assert_eq(config.max_tasks, 100000);
     assert(config.enable_work_stealing);
     assert(config.enable_io);
@@ -78,38 +78,38 @@ fn test_runtime_config_io_bound() {
 
 @test
 fn test_runtime_config_io_bound_stack_size() {
-    let config = RuntimeConfig.io_bound();
+    let config = AsyncRuntimeConfig.io_bound();
     assert_eq(config.task_stack_size, 256 * 1024);
 }
 
 // =============================================================================
-// Section 4: RuntimeConfig Builder Methods
+// Section 4: AsyncRuntimeConfig Builder Methods
 // =============================================================================
 
 @test
 fn test_runtime_config_max_tasks_builder() {
-    let config = RuntimeConfig.default()
+    let config = AsyncRuntimeConfig.default()
         .max_tasks(500);
     assert_eq(config.max_tasks, 500);
 }
 
 @test
 fn test_runtime_config_task_stack_size_builder() {
-    let config = RuntimeConfig.default()
+    let config = AsyncRuntimeConfig.default()
         .task_stack_size(8192);
     assert_eq(config.task_stack_size, 8192);
 }
 
 @test
 fn test_runtime_config_work_stealing_builder() {
-    let config = RuntimeConfig.default()
+    let config = AsyncRuntimeConfig.default()
         .work_stealing(false);
     assert(!config.enable_work_stealing);
 }
 
 @test
 fn test_runtime_config_chained_builder() {
-    let config = RuntimeConfig.default()
+    let config = AsyncRuntimeConfig.default()
         .max_tasks(1000)
         .task_stack_size(8192)
         .work_stealing(true);
@@ -282,7 +282,7 @@ fn test_runtime_new() {
 
 @test
 fn test_runtime_with_config() {
-    let config = RuntimeConfig.cpu_bound();
+    let config = AsyncRuntimeConfig.cpu_bound();
     let rt: AsyncRuntime = AsyncRuntime.with_config(config);
     assert_eq(rt.task_count(), 0);
     assert(!rt.is_running());
@@ -311,24 +311,24 @@ fn test_execution_env_with_parent() {
 }
 
 // =============================================================================
-// Section 11: RuntimeConfig IO SQ Entries
+// Section 11: AsyncRuntimeConfig IO SQ Entries
 // =============================================================================
 
 @test
 fn test_runtime_config_default_io_sq_entries() {
-    let config = RuntimeConfig.default();
+    let config = AsyncRuntimeConfig.default();
     assert(config.io_sq_entries > 0);
 }
 
 @test
 fn test_runtime_config_cpu_bound_minimal_io() {
-    let config = RuntimeConfig.cpu_bound();
+    let config = AsyncRuntimeConfig.cpu_bound();
     assert_eq(config.io_sq_entries, 64);
 }
 
 @test
 fn test_runtime_config_io_bound_large_sq() {
-    let config = RuntimeConfig.io_bound();
+    let config = AsyncRuntimeConfig.io_bound();
     assert_eq(config.io_sq_entries, 1024);
 }
 
@@ -429,21 +429,21 @@ fn test_runtime_config_accessible() {
 
 @test
 fn test_runtime_cpu_bound_config() {
-    let rt = AsyncRuntime.with_config(RuntimeConfig.cpu_bound());
+    let rt = AsyncRuntime.with_config(AsyncRuntimeConfig.cpu_bound());
     assert_eq(rt.config.max_tasks, 1000);
     assert(!rt.config.enable_io);
     assert(!rt.config.enable_time);
 }
 
 // =============================================================================
-// Section 16: RuntimeConfig Presets Comparison
+// Section 16: AsyncRuntimeConfig Presets Comparison
 // =============================================================================
 
 @test
 fn test_config_presets_differ() {
-    let def = RuntimeConfig.default();
-    let cpu = RuntimeConfig.cpu_bound();
-    let io = RuntimeConfig.io_bound();
+    let def = AsyncRuntimeConfig.default();
+    let cpu = AsyncRuntimeConfig.cpu_bound();
+    let io = AsyncRuntimeConfig.io_bound();
 
     // Different max_tasks
     assert(def.max_tasks != cpu.max_tasks);
@@ -457,9 +457,9 @@ fn test_config_presets_differ() {
 
 @test
 fn test_config_presets_stack_sizes() {
-    let def = RuntimeConfig.default();
-    let cpu = RuntimeConfig.cpu_bound();
-    let io = RuntimeConfig.io_bound();
+    let def = AsyncRuntimeConfig.default();
+    let cpu = AsyncRuntimeConfig.cpu_bound();
+    let io = AsyncRuntimeConfig.io_bound();
 
     // Default has largest stack
     assert(def.task_stack_size > cpu.task_stack_size);
@@ -467,12 +467,12 @@ fn test_config_presets_stack_sizes() {
 }
 
 // =============================================================================
-// Section 17: RuntimeConfig Custom Construction
+// Section 17: AsyncRuntimeConfig Custom Construction
 // =============================================================================
 
 @test
 fn test_runtime_config_custom_all_fields() {
-    let config = RuntimeConfig {
+    let config = AsyncRuntimeConfig {
         max_tasks: 5000,
         enable_work_stealing: false,
         task_stack_size: 2048,
@@ -490,7 +490,7 @@ fn test_runtime_config_custom_all_fields() {
 
 @test
 fn test_runtime_config_minimal_custom() {
-    let config = RuntimeConfig {
+    let config = AsyncRuntimeConfig {
         max_tasks: 1,
         enable_work_stealing: false,
         task_stack_size: 4096,
@@ -507,7 +507,7 @@ fn test_runtime_config_minimal_custom() {
 
 @test
 fn test_runtime_config_large_max_tasks() {
-    let config = RuntimeConfig.default()
+    let config = AsyncRuntimeConfig.default()
         .max_tasks(1_000_000);
     assert_eq(config.max_tasks, 1_000_000);
 }
@@ -572,7 +572,7 @@ fn test_runtime_builder_all_options() {
 
 @test
 fn test_runtime_with_io_bound_config() {
-    let rt = AsyncRuntime.with_config(RuntimeConfig.io_bound());
+    let rt = AsyncRuntime.with_config(AsyncRuntimeConfig.io_bound());
     assert_eq(rt.config.max_tasks, 100000);
     assert(rt.config.enable_io);
     assert(rt.config.enable_time);
@@ -582,7 +582,7 @@ fn test_runtime_with_io_bound_config() {
 
 @test
 fn test_runtime_with_custom_config() {
-    let config = RuntimeConfig.default()
+    let config = AsyncRuntimeConfig.default()
         .max_tasks(42)
         .task_stack_size(999)
         .work_stealing(false);
@@ -596,7 +596,7 @@ fn test_runtime_with_custom_config() {
 fn test_runtime_multiple_instances() {
     let rt1 = AsyncRuntime.new();
     let rt2 = AsyncRuntime.new();
-    let rt3 = AsyncRuntime.with_config(RuntimeConfig.cpu_bound());
+    let rt3 = AsyncRuntime.with_config(AsyncRuntimeConfig.cpu_bound());
     assert_eq(rt1.task_count(), 0);
     assert_eq(rt2.task_count(), 0);
     assert_eq(rt3.task_count(), 0);

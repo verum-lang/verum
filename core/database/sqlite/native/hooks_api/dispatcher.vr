@@ -74,7 +74,7 @@ mount core.database.sqlite.native.hooks_api.engine.{
 
 /// `ExtendedHooksEngine` carries the 4 additional hook slots not
 /// covered by the legacy `HooksEngine` (authorizer / busy /
-/// progress / trace).  Connection holds BOTH engines side-by-side
+/// progress / trace).  SqliteConnection holds BOTH engines side-by-side
 /// — clean separation of the legacy 6-hook surface from the
 /// audit-/observability-/concurrency-control hooks landed here.
 public type ExtendedHooksEngine is {
@@ -272,7 +272,7 @@ public fn fire_trace_hook(engine: &ExtendedHooksEngine, ctx: TraceHookCtx) {
 // -----------------------------------------------------------------------------
 
 /// `ConnectionHooks` bundles both engines for connection-side
-/// storage.  Single field on `Connection` carries the full hook
+/// storage.  Single field on `SqliteConnection` carries the full hook
 /// surface.
 public type ConnectionHooks is {
     legacy: HooksEngine,

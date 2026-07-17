@@ -9,10 +9,10 @@ module core.database.sqlite.native.l7_api.capability;
 // l7_api/capability.vr — Capability marker types + protocol bounds
 // =============================================================================
 // Layer: 7
-// Spec: sqlite-native.md §4.8 ("Connection<Read>, Connection<Write>,
-//        Connection<Admin> — capability at the type level")
+// Spec: sqlite-native.md §4.8 ("SqliteConnection<Read>, SqliteConnection<Write>,
+//        SqliteConnection<Admin> — capability at the type level")
 //
-// Pre-fix: `Connection` is a single concrete type with a runtime
+// Pre-fix: `SqliteConnection` is a single concrete type with a runtime
 // `mode: ConnectionMode` field, and L7 dispatch calls `ensure_writable
 // /ensure_admin` runtime guards.  Every accidental
 // `readonly.execute(INSERT ...)` is a runtime SQLITE_READONLY rather

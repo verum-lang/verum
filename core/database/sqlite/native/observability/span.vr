@@ -9,7 +9,7 @@
 // any subscribed `SpanSink` (Jaeger / OTLP / println-style).
 //
 
-// `TraceCtx` is the per-Connection trace context — carries the
+// `TraceCtx` is the per-SqliteConnection trace context — carries the
 // trace ID + parent span ID so spans across thread / RPC boundaries
 // remain correlated.
 // =============================================================================

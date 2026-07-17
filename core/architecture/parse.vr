@@ -5,7 +5,7 @@
 // **Verum-native mirror of `verum_kernel.arch_parse`.**
 //
 // The parser converts the AST representation of `@arch_module(...)`
-// named-args into a canonical `Shape`.  This cog mirrors only the
+// named-args into a canonical `ModuleShape`.  This cog mirrors only the
 // **error type** — the actual parser operates over the AST
 // expression representation which is kernel-internal.
 //

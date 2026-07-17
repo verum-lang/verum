@@ -28,7 +28,7 @@ mount base.{Text, Maybe, Bool};
 mount collections.List;
 
 public type Snapshot is {
-    /// Connection-local opaque ID — used for "is this snapshot ours?".
+    /// SqliteConnection-local opaque ID — used for "is this snapshot ours?".
     id: Int64,
     /// Frame index up to which reads see committed pages.
     frame_count: Int,

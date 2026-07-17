@@ -9,7 +9,7 @@
 // adversarial scheduling:
 //
 
-//  * `MockClock` — caller-controlled monotonic time
+//  * `AdvanceableClock` — caller-controlled monotonic time
 //  * `MockScheduler` — deterministic task-priority + interleave
 //  * `FaultInjector` — hooks for power-loss, partial-write, fsync-loss
 //
@@ -31,10 +31,10 @@ mount base.{Text, Bool, Maybe};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// MockClock protocol
+// AdvanceableClock protocol
 // -----------------------------------------------------------------------------
 
-public type MockClock is protocol {
+public type AdvanceableClock is protocol {
     fn now_ns(&self) -> Int64;
     /// Advance the clock by `delta_ns`. Returns the new `now_ns`.
     fn advance(&mut self, delta_ns: Int64) -> Int64;
@@ -46,7 +46,7 @@ public fn step_clock(start_ns: Int64) -> StepClock {
     StepClock { ns: start_ns }
 }
 
-implement MockClock for StepClock {
+implement AdvanceableClock for StepClock {
     fn now_ns(&self) -> Int64 { self.ns }
     fn advance(&mut self, delta_ns: Int64) -> Int64 {
         self.ns = self.ns + delta_ns;

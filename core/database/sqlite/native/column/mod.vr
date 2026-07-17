@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/sqlite/native/column/mod.vr
 // =============================================================================
-// Layer: 6 (per-Connection — sqlite3_column_* surface)
+// Layer: 6 (per-SqliteConnection — sqlite3_column_* surface)
 // Spec: SQLite C API — `sqlite3_column_int64`, `sqlite3_column_text`,
 // `sqlite3_column_blob`, `sqlite3_column_type`, `sqlite3_column_count`,
 // `sqlite3_column_name`, `sqlite3_column_decltype`,

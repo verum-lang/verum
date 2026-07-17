@@ -184,7 +184,7 @@ public fn apply_engine() -> ApplyEngine { ApplyEngine { unit: true } }
 /// conflicts but never persisted any change, leaving the
 /// "applied" counter incremented while storage saw nothing. Now
 /// the storage adapter receives both probes; production callers
-/// pass `Connection.set_rows_at`-shaped closures, tests pass
+/// pass `SqliteConnection.set_rows_at`-shaped closures, tests pass
 /// in-memory mock probes.
 ///
 
@@ -192,7 +192,7 @@ public fn apply_engine() -> ApplyEngine { ApplyEngine { unit: true } }
 /// storage impl — tests and production code share the same
 /// dispatch. The companion `apply_to_connection` (in
 /// `l7_api/session_apply.vr`, follow-up) wires both callbacks to
-/// a real `Connection`.
+/// a real `SqliteConnection`.
 public fn apply(
     cs: &ChangeSet,
     resolver: &mut Heap<dyn ConflictResolver>,

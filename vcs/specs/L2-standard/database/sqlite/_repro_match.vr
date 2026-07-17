@@ -4,7 +4,7 @@
 // @timeout: 10000
 // @expected-exit: 0
 
-mount core.database.sqlite.native.l6_session.{Connection, ConnectionMode, open_memory};
+mount core.database.sqlite.native.l6_session.{SqliteConnection, ConnectionMode, open_memory};
 mount base.{Result, Ok, Err};
 
 fn main() {

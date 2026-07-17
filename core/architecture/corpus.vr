@@ -129,7 +129,7 @@ public fn corpus_report_is_load_bearing(r: CorpusReport) -> Bool {
 /// **Corpus-level architectural verification.**
 ///
 /// Discharges `verum_kernel.arch_corpus.verify_corpus` —
-/// walks every (cog_name, Shape) pair through all 4 baseline
+/// walks every (cog_name, ModuleShape) pair through all 4 baseline
 /// invariants and aggregates structured violations.
 ///
 /// **Soundness contract** (spec §11.3): if `verify_corpus` returns

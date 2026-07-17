@@ -29,7 +29,7 @@ mount core.database.sqlite.native.vtabs.fts5.segment.{
     Fts5VtabSegment, segment_merge, segment_empty,
 };
 mount core.database.sqlite.native.vtabs.fts5.index.{
-    Index, Fts5VtabSegmentLevel, level_new,
+    Fts5Index, Fts5VtabSegmentLevel, level_new,
 };
 
 // -----------------------------------------------------------------------------
@@ -51,7 +51,7 @@ public fn merger_report_zero() -> MergerReport {
 // the threshold.
 // -----------------------------------------------------------------------------
 
-public fn compact_step(idx: &mut Index) -> MergerReport {
+public fn compact_step(idx: &mut Fts5Index) -> MergerReport {
     let mut report = merger_report_zero();
     let mut l: Int = 0;
     while l < idx.level_count() {
@@ -74,13 +74,13 @@ public fn compact_step(idx: &mut Index) -> MergerReport {
     report
 }
 
-fn ensure_level(idx: &mut Index, level: Int) {
+fn ensure_level(idx: &mut Fts5Index, level: Int) {
     while idx.levels.len() <= level {
         idx.levels.push(level_new(idx.levels.len()));
     }
 }
 
-fn merge_level(idx: &Index, level: Int) -> Fts5VtabSegment {
+fn merge_level(idx: &Fts5Index, level: Int) -> Fts5VtabSegment {
     if level >= idx.level_count() { return segment_empty(); }
     let segs = &idx.levels[level].segments;
     if segs.len() == 0 { return segment_empty(); }
@@ -103,7 +103,7 @@ fn clone_segment(s: &Fts5VtabSegment) -> Fts5VtabSegment {
 // or `max_steps` is reached.
 // -----------------------------------------------------------------------------
 
-public fn compact_to_fixpoint(idx: &mut Index, max_steps: Int) -> MergerReport {
+public fn compact_to_fixpoint(idx: &mut Fts5Index, max_steps: Int) -> MergerReport {
     let mut total = merger_report_zero();
     let mut step: Int = 0;
     let cap: Int = if max_steps <= 0 { 16 } else { max_steps };

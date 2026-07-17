@@ -56,7 +56,7 @@ mount super.tensor.{
 mount super.autodiff.{GradientTape, GradientScope, checkpoint, stop_gradient, with_no_grad};
 mount super.gpu.{
     ComputeDevice, GPUBackend, GPUKernel, LaunchConfig, Dim3,
-    Stream, GpuEvent, CudaGraph,
+    GpuStream, GpuEvent, CudaGraph,
 };
 mount super.nn.{Module, Parameter, Trainable};
 mount super.linalg.Numeric;
@@ -620,11 +620,11 @@ public fn profile_cbgr<T, F: Fn() -> T>(label: Text, sample_rate: Float, f: F) -
 }
 
 // =============================================================================
-// Stream and Event Management
+// GpuStream and Event Management
 // =============================================================================
 
 // Execute operations on a specific stream
-public fn with_stream<T, F: Fn() -> T>(stream: &Stream, f: F) -> T
+public fn with_stream<T, F: Fn() -> T>(stream: &GpuStream, f: F) -> T
     using [ComputeDevice]
 {
     @vbc(STREAM_PUSH, stream);

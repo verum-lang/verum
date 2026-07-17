@@ -50,16 +50,16 @@ public fn bit_name(bit: Int64) -> Text {
 }
 
 // LRU-eviction policy: persistent stmts skip the cache eviction list.
-public type EvictionPolicy is
+public type StmtEvictability is
     | EpEvictable
     | EpPinned
     ;
 
-public fn eviction_for(fl: Int64) -> EvictionPolicy {
+public fn eviction_for(fl: Int64) -> StmtEvictability {
     if is_persistent(fl) { EpPinned } else { EpEvictable }
 }
 
-public fn policy_name(p: &EvictionPolicy) -> Text {
+public fn policy_name(p: &StmtEvictability) -> Text {
     match p {
         EpEvictable => "evictable".clone(),
         EpPinned    => "pinned".clone(),

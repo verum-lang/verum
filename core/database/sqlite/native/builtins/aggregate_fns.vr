@@ -6,7 +6,7 @@
 //
 
 // All aggregates implement the (init, step, final) protocol. Each is
-// represented by a `AggregateState` instance carried in a register.
+// represented by a `BuiltinAggregateState` instance carried in a register.
 // The L4 interpreter holds the per-group state and calls `step` for
 // each input row, then `final` once when the group flushes.
 //
@@ -34,10 +34,10 @@ mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
 
 // -----------------------------------------------------------------------------
-// AggregateState — single-cell working storage shared by all aggregates
+// BuiltinAggregateState — single-cell working storage shared by all aggregates
 // -----------------------------------------------------------------------------
 
-public type AggregateState is {
+public type BuiltinAggregateState is {
     // Discriminator: 0=count 1=sum 2=avg 3=min 4=max 5=total 6=group_concat
     kind: Int,
     count: Int64,
@@ -50,8 +50,8 @@ public type AggregateState is {
     sep: Text,
 };
 
-public fn agg_new(kind: Int) -> AggregateState {
-    AggregateState {
+public fn agg_new(kind: Int) -> BuiltinAggregateState {
+    BuiltinAggregateState {
         kind: kind,
         count: 0 as Int64,
         sum_int: 0 as Int64,
@@ -68,7 +68,7 @@ public fn agg_new(kind: Int) -> AggregateState {
 // Step: feed one row's contribution
 // -----------------------------------------------------------------------------
 
-public fn agg_step(st: &mut AggregateState, value: &Register) {
+public fn agg_step(st: &mut BuiltinAggregateState, value: &Register) {
     match st.kind {
         // COUNT(*) — count regardless of NULL.
         0 => { st.count = st.count + 1_i64; }
@@ -95,7 +95,7 @@ public fn agg_step(st: &mut AggregateState, value: &Register) {
     }
 }
 
-fn agg_step_sum(st: &mut AggregateState, value: &Register) {
+fn agg_step_sum(st: &mut BuiltinAggregateState, value: &Register) {
     match value {
         RInt(x) => {
             if st.use_real {
@@ -115,7 +115,7 @@ fn agg_step_sum(st: &mut AggregateState, value: &Register) {
     }
 }
 
-fn agg_step_minmax(st: &mut AggregateState, value: &Register, want_min: Bool) {
+fn agg_step_minmax(st: &mut BuiltinAggregateState, value: &Register, want_min: Bool) {
     let is_null = match value { RNull => true, _ => false };
     if is_null { return; }
     if !st.has_value {
@@ -131,7 +131,7 @@ fn agg_step_minmax(st: &mut AggregateState, value: &Register, want_min: Bool) {
     if replace { st.min_max = clone_register(value); }
 }
 
-fn agg_step_concat(st: &mut AggregateState, value: &Register, want_sep_required: Bool) {
+fn agg_step_concat(st: &mut BuiltinAggregateState, value: &Register, want_sep_required: Bool) {
     let _ = want_sep_required;
     match value {
         RText(s) => {
@@ -145,7 +145,7 @@ fn agg_step_concat(st: &mut AggregateState, value: &Register, want_sep_required:
     }
 }
 
-public fn agg_set_separator(st: &mut AggregateState, sep: &Text) {
+public fn agg_set_separator(st: &mut BuiltinAggregateState, sep: &Text) {
     st.sep = sep.clone();
 }
 
@@ -153,7 +153,7 @@ public fn agg_set_separator(st: &mut AggregateState, sep: &Text) {
 // Final: produce the result register
 // -----------------------------------------------------------------------------
 
-public fn agg_final(st: &AggregateState) -> Register {
+public fn agg_final(st: &BuiltinAggregateState) -> Register {
     match st.kind {
         0 => RInt(st.count),
         1 => {

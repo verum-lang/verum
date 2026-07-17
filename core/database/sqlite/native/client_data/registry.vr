@@ -73,7 +73,7 @@ implement ClientDataRegistry {
         true
     }
 
-    /// Connection-close path — fire every remaining destructor and
+    /// SqliteConnection-close path — fire every remaining destructor and
     /// drop all slots.
     public fn close(&mut self) {
         let mut fired: Int64 = 0 as Int64;

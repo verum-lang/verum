@@ -4,7 +4,7 @@
 // @tags: sqlite, native, l7_api, capability, phantom-types
 // @timeout: 15000
 // @description: Phantom-type capability narrowing — verifies the
-//               TypedConnection<C> ↔ inner Connection accessor
+//               TypedConnection<C> ↔ inner SqliteConnection accessor
 //               surface, plus that demote_to_read is not callable
 //               on a read-only connection.
 //
@@ -25,17 +25,17 @@ mount core.database.sqlite.native.l7_api.{
     ReadCap, WriteCap, AdminCap,
 };
 mount core.database.sqlite.native.l6_session.connection.{
-    Connection, mode_can_write, mode_can_ddl,
+    SqliteConnection, mode_can_write, mode_can_ddl,
 };
 
 // -----------------------------------------------------------------------------
-// 1. As-untyped escape hatch — proves the inner Connection is reachable
+// 1. As-untyped escape hatch — proves the inner SqliteConnection is reachable
 // -----------------------------------------------------------------------------
 
 fn read_only_inner_mode() {
     match open_memory_readonly() {
         Ok(c) => {
-            let inner: &Connection = c.as_untyped();
+            let inner: &SqliteConnection = c.as_untyped();
             // Inner mode is CmRead → mode_can_write is false.
             assert(!mode_can_write(inner.mode));
             assert(!mode_can_ddl(inner.mode));
@@ -47,7 +47,7 @@ fn read_only_inner_mode() {
 fn write_inner_mode() {
     match open_memory_readwrite() {
         Ok(c) => {
-            let inner: &Connection = c.as_untyped();
+            let inner: &SqliteConnection = c.as_untyped();
             assert(mode_can_write(inner.mode));
             assert(!mode_can_ddl(inner.mode));
         }
@@ -58,7 +58,7 @@ fn write_inner_mode() {
 fn admin_inner_mode() {
     match open_memory_admin() {
         Ok(c) => {
-            let inner: &Connection = c.as_untyped();
+            let inner: &SqliteConnection = c.as_untyped();
             assert(mode_can_write(inner.mode));
             assert(mode_can_ddl(inner.mode));
         }

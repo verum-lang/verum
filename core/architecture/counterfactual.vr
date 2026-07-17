@@ -6,7 +6,7 @@
 //
 // ## What the counterfactual engine does
 //
-// The engine evaluates a cog's architectural Shape under base +
+// The engine evaluates a cog's architectural ModuleShape under base +
 // alternative decisions WITHOUT actually switching the
 // implementation.  Both decisions remain types; the engine
 // performs comparative metric extraction at type level so a cog
@@ -16,7 +16,7 @@
 // ## Pipeline
 //
 //   1. Caller supplies `(CounterfactualPair, base_shape, alt_shape)`.
-//   2. `extract_metric` projects each Shape to typed `MetricValue`s
+//   2. `extract_metric` projects each ModuleShape to typed `MetricValue`s
 //      via the canonical 11-metric catalog (ExposedCapabilityCount,
 //      ReadCapabilityCount, NetworkCapabilityCount, etc.).
 //   3. `evaluate_invariant` walks each `ArchProposition` against
@@ -56,7 +56,7 @@ mount super.mtac.{ArchProposition, CounterfactualPair};
 // ArchMetric — canonical metric set
 // =============================================================================
 
-/// Architectural metric projectable from a `Shape`.  Baseline
+/// Architectural metric projectable from a `ModuleShape`.  Baseline
 /// set of 11 metrics; extending the catalog requires an ATS-V
 /// RFC + a kernel-side `ArchMetric` enum bump + the cross-side
 /// pin-test bump.  Stability versioning: existing variants never
@@ -80,7 +80,7 @@ public type ArchMetric is
 // MetricValue — projection target
 // =============================================================================
 
-/// Result of projecting an `ArchMetric` from a `Shape`.
+/// Result of projecting an `ArchMetric` from a `ModuleShape`.
 public type MetricValue is
     | IntegerMetric(Int)
     | FloatMetric(Float)

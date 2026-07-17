@@ -4,7 +4,7 @@
 // Spec: sqlite-native.md §20.3
 //
 
-// Connection pool that respects the capability tag on Connection<Mode>.
+// SqliteConnection pool that respects the capability tag on SqliteConnection<Mode>.
 // Read-mode pool serves cheap snapshot readers; Write-mode pool serves
 // the (single) writer; Admin-mode is reserved for schema operations.
 //
@@ -77,7 +77,7 @@ implement Eq for PoolError {
 }
 
 // -----------------------------------------------------------------------------
-// Connection slot — opaque ID + sequence number for ABA protection
+// SqliteConnection slot — opaque ID + sequence number for ABA protection
 // -----------------------------------------------------------------------------
 
 public type SlotId is { id: Int };

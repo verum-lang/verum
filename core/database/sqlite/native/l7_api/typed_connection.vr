@@ -6,12 +6,12 @@
 module core.database.sqlite.native.l7_api.typed_connection;
 
 // =============================================================================
-// l7_api/typed_connection.vr — Phantom-typed Connection<C>
+// l7_api/typed_connection.vr — Phantom-typed SqliteConnection<C>
 // =============================================================================
 // Layer: 7
 // Spec: sqlite-native.md §4.8
 //
-// `TypedConnection<C>` wraps the existing untyped `Connection` and
+// `TypedConnection<C>` wraps the existing untyped `SqliteConnection` and
 // surfaces capability at the type level via the marker types
 // `ReadCap` / `WriteCap` / `AdminCap` from `capability.vr`.
 //
@@ -20,11 +20,11 @@ module core.database.sqlite.native.l7_api.typed_connection;
 // is a compile-time error — no `ensure_writable` runtime check is
 // performed on the typed surface.
 //
-// The legacy `Connection` (with runtime `mode: ConnectionMode`)
+// The legacy `SqliteConnection` (with runtime `mode: ConnectionMode`)
 // remains for backward compatibility; `TypedConnection<C>` carries
 // it internally and exposes `as_untyped()` for legacy interop.
 // New code SHOULD use `TypedConnection`; the runtime mode field on
-// the inner `Connection` is preserved only for back-compat
+// the inner `SqliteConnection` is preserved only for back-compat
 // diagnostics.
 //
 // Constructors:
@@ -49,7 +49,7 @@ module core.database.sqlite.native.l7_api.typed_connection;
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l6_session.connection.{
-    Connection, ConnectionError, ConnectionMode,
+    SqliteConnection, ConnectionError, ConnectionMode,
     CmRead, CmWrite, CmAdmin,
     open_memory, open_file,
 };
@@ -62,16 +62,16 @@ mount core.database.sqlite.native.l7_api.capability.{
 // TypedConnection<C>
 // -----------------------------------------------------------------------------
 
-/// Capability-typed wrapper around the legacy `Connection`.  `C` is
+/// Capability-typed wrapper around the legacy `SqliteConnection`.  `C` is
 /// the phantom marker type carried for compile-time enforcement;
 /// the inner `mode: ConnectionMode` is left in place for back-compat
 /// but the typed methods don't consult it.
 ///
-/// `affine` because the underlying `Connection` is — handing the
+/// `affine` because the underlying `SqliteConnection` is — handing the
 /// same `TypedConnection` to two threads simultaneously is unsound
 /// (the pager's actor model requires single-owner serialisation).
 public type affine TypedConnection<C> is {
-    inner: Connection,
+    inner: SqliteConnection,
     _phantom: C,
 };
 
@@ -136,14 +136,14 @@ public fn open_memory_admin() -> Result<TypedConnection<AdminCap>, ConnectionErr
 // -----------------------------------------------------------------------------
 
 implement<C: Capability> TypedConnection<C> {
-    /// Access the underlying untyped `Connection` for legacy code
+    /// Access the underlying untyped `SqliteConnection` for legacy code
     /// paths.  ESCAPE HATCH — typed callers should not need this.
-    public fn as_untyped(&self) -> &Connection { &self.inner }
+    public fn as_untyped(&self) -> &SqliteConnection { &self.inner }
 
     /// Mutable escape hatch — needed by legacy methods that mutate
     /// the inner connection (PRAGMA dispatch, hook registration).
     /// Prefer the typed equivalents where they exist.
-    public fn as_untyped_mut(&mut self) -> &mut Connection { &mut self.inner }
+    public fn as_untyped_mut(&mut self) -> &mut SqliteConnection { &mut self.inner }
 
     /// Database file path / `:memory:`.
     public fn path_text(&self) -> &Text { self.inner.path_text() }

@@ -1,5 +1,5 @@
 // =============================================================================
-// triggers/store.vr — per-Connection trigger storage
+// triggers/store.vr — per-SqliteConnection trigger storage
 // =============================================================================
 // Layer: 6
 // Spec: sqlite-native.md §17.1

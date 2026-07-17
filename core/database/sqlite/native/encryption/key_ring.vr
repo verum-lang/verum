@@ -1,5 +1,5 @@
 // =============================================================================
-// encryption/key_ring.vr — per-Connection key management
+// encryption/key_ring.vr — per-SqliteConnection key management
 // =============================================================================
 // Spec: sqlite-native.md §23 (security)
 //

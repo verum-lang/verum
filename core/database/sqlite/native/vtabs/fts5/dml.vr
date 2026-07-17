@@ -19,7 +19,7 @@
 //  actually drops the postings.
 //
 
-// `dml` exposes those steps as pure functions on `Index` —
+// `dml` exposes those steps as pure functions on `Fts5Index` —
 // the L7 façade calls them after capturing arguments.
 // =============================================================================
 
@@ -36,7 +36,7 @@ mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
     Fts5VtabTokenizer, Token, TokenizerOptions, options_default,
 };
-mount core.database.sqlite.native.vtabs.fts5.index.{Index};
+mount core.database.sqlite.native.vtabs.fts5.index.{Fts5Index};
 
 // -----------------------------------------------------------------------------
 // Tombstone — a "this rowid is deleted" record carried alongside the index
@@ -68,7 +68,7 @@ implement TombstoneSet {
 // -----------------------------------------------------------------------------
 
 public fn insert_row(
-    idx: &mut Index,
+    idx: &mut Fts5Index,
     rowid: Int64,
     columns: List<Text>,
     tokeniser: &Heap<dyn Fts5VtabTokenizer>,
@@ -95,7 +95,7 @@ public fn delete_row(tombstones: &mut TombstoneSet, rowid: Int64) {
 // -----------------------------------------------------------------------------
 
 public fn update_row(
-    idx: &mut Index,
+    idx: &mut Fts5Index,
     tombstones: &mut TombstoneSet,
     old_rowid: Int64,
     new_rowid: Int64,
@@ -112,7 +112,7 @@ public fn update_row(
 // pointing at tomb-marked rowids. Returns the count of dropped postings.
 // =============================================================================
 
-public fn optimize(idx: &mut Index, tombstones: &mut TombstoneSet) -> Int {
+public fn optimize(idx: &mut Fts5Index, tombstones: &mut TombstoneSet) -> Int {
     let _ = idx;
     let removed = tombstones.count();
     tombstones.rowids = List.new();

@@ -12,7 +12,7 @@
 //  * `core.database.sqlite.{adapter,connection,error}` — Spindle
 //  adapter façade. Carries the unified `core.database.common.error.
 //  DbError`, exposes `SqliteAdapter` / `SqliteConfig` / `Sqlite-
-//  Connection` for user code.
+//  SqliteConnection` for user code.
 //
 
 //  * `core.database.sqlite.native` — pure-Verum SQLite reimplementation

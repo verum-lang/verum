@@ -175,7 +175,7 @@ implement SqliteCapability {
 // -----------------------------------------------------------------------------
 
 /// A live SQLite connection. Wraps a loom `Database` (which itself
-/// wraps a session-layer `Connection`); all errors crossing this
+/// wraps a session-layer `SqliteConnection`); all errors crossing this
 /// boundary get translated into the common `DbError`.
 public type SqliteConnection is {
     inner: core.database.sqlite.native.l7_api.database.Database,

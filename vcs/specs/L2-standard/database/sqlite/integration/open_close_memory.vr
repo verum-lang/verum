@@ -11,12 +11,12 @@
 // WIP: blocks on landing of core.database.sqlite.native.l0_vfs.memdb_vfs
 // and core.database.sqlite.native.l7_api.database.
 
-mount core.database.sqlite.native.{Connection, ConnectionMode};
+mount core.database.sqlite.native.{SqliteConnection, ConnectionMode};
 
 @main
 public async fn main() -> Result<(), Error> {
-    let conn = Connection.open_memory().await?;
-    // Connection is affine — must be closed explicitly or dropped by scope.
+    let conn = SqliteConnection.open_memory().await?;
+    // SqliteConnection is affine — must be closed explicitly or dropped by scope.
     conn.close().await?;
     Ok(())
 }

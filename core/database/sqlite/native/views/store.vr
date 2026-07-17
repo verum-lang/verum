@@ -1,5 +1,5 @@
 // =============================================================================
-// views/store.vr — per-Connection view storage
+// views/store.vr — per-SqliteConnection view storage
 // =============================================================================
 // Layer: 6
 // Spec: sqlite-native.md §17.2

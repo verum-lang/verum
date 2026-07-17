@@ -38,8 +38,8 @@ module core.database.sqlite.native.l7_api.hook_registry;
 //      behaviour — pre-3.43 was last-subscriber-wins; recent
 //      versions support fan-out).
 //
-// Architecture: pure data — no I/O, no dependency on Connection.
-// The registry is owned by Connection (via a `HookHandleRegistry`
+// Architecture: pure data — no I/O, no dependency on SqliteConnection.
+// The registry is owned by SqliteConnection (via a `HookHandleRegistry`
 // field); fire-events are method calls on the registry.  Sum-type
 // `HookSlot` discriminator + integer-keyed `List<Maybe<HookSlot>>`
 // store gives O(1) dispatch on the active handles for a given
@@ -130,7 +130,7 @@ public fn hook_handle_is_valid(h: &HookHandle) -> Bool {
 /// `sqlite3_update_hook` — fired by L4 VDBE Insert/Update/Delete.
 public type UpdateHookFn = fn(ExtUpdateOp, &Text, &Text, Int64);
 
-/// `sqlite3_commit_hook` — fired by Connection.commit_tx BEFORE the
+/// `sqlite3_commit_hook` — fired by SqliteConnection.commit_tx BEFORE the
 /// actual COMMIT.  Returns `true` to veto (turns commit into
 /// rollback); `false` allows the commit to proceed.
 public type CommitHookFn = fn() -> Bool;
@@ -193,7 +193,7 @@ fn hook_slot_kind(s: &HookSlot) -> HookKind {
 }
 
 // -----------------------------------------------------------------------------
-// HookHandleRegistry — owned by Connection, fired from event sites
+// HookHandleRegistry — owned by SqliteConnection, fired from event sites
 // -----------------------------------------------------------------------------
 
 /// Slot-vector indexed by handle ID.  `slots[id] = Maybe.None` marks an

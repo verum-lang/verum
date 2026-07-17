@@ -13,7 +13,7 @@ type size_t is usize;
 type VerumRuntime is { handle: *mut c_void };
 
 /// Runtime configuration
-type RuntimeConfig is {
+type AsyncRuntimeConfig is {
     heap_size: size_t,
     stack_size: size_t,
     gc_enabled: Bool,
@@ -25,7 +25,7 @@ type ModuleHandle is { handle: *mut c_void };
 /// Runtime API - exported for host embedding
 ffi verum_runtime_api {
     @extern("C")
-    fn verum_runtime_create(config: *const RuntimeConfig) -> *mut c_void;
+    fn verum_runtime_create(config: *const AsyncRuntimeConfig) -> *mut c_void;
     @extern("C")
     fn verum_runtime_destroy(runtime: *mut c_void);
     @extern("C")
@@ -38,9 +38,9 @@ ffi verum_runtime_api {
 
 /// Safe wrapper for embedded runtime
 implement VerumRuntime {
-    fn create(config: &RuntimeConfig) -> Maybe<VerumRuntime> {
+    fn create(config: &AsyncRuntimeConfig) -> Maybe<VerumRuntime> {
         let handle = unsafe {
-            verum_runtime_api.verum_runtime_create(config as *const RuntimeConfig)
+            verum_runtime_api.verum_runtime_create(config as *const AsyncRuntimeConfig)
         };
         if handle.is_null() {
             None
@@ -95,7 +95,7 @@ type RuntimeCallback is extern "C" fn(event_type: c_int, data: *const c_void);
 
 fn main() {
     // Embedding runtime test
-    let config = RuntimeConfig {
+    let config = AsyncRuntimeConfig {
         heap_size: 1024 * 1024,
         stack_size: 64 * 1024,
         gc_enabled: true,

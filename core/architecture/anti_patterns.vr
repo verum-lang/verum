@@ -72,13 +72,13 @@
 //   AP-036 ObserverImpersonation      observer role mismatches assertion
 //                                     register (L6 register collision)
 //   AP-037 BoundlessAudit             strict-mode audit invocation
-//                                     against a Shape with no declared
+//                                     against a ModuleShape with no declared
 //                                     Purpose (§14.6 termination)
 //   AP-038 ImplicitSubstrate          [T] in strict mode without declared
 //                                     CognitiveSubstrate (§1.5 self-disclosure)
 //   AP-039 AnchoringOverextension     formal claim outside CHL domain
 //                                     without declared FormalAnchoring (§4.5)
-//   AP-040 SelfReferenceWithoutOperator   self-referential Shape pattern
+//   AP-040 SelfReferenceWithoutOperator   self-referential ModuleShape pattern
 //                                     (self ∈ composes_with / capability target)
 //                                     without declared SelfReferenceWitness
 //                                     (§16 articulation hygiene; closes
@@ -634,7 +634,7 @@ public axiom kernel_arch_observer_impersonation_check() -> Bool
     ensures true;
 
 /// **AP-037 closure**: a strict-mode audit invocation against a
-/// `Shape` that has `declarations: Maybe.None` or `declarations.purpose: Maybe.None`.
+/// `ModuleShape` that has `declarations: Maybe.None` or `declarations.purpose: Maybe.None`.
 /// Per spec §14.6, the audit terminates relative to a declared
 /// purpose; without one the audit has no halting criterion and
 /// degenerates into infinite polishing.  This discharge requires
@@ -652,7 +652,7 @@ public axiom kernel_arch_boundless_audit_check() -> Bool
 /// and does not masquerade as a universal neutral apparatus.  The
 /// default substrate (`AnalyticDecompositional`) MUST be either
 /// declared explicitly or accepted by the cog explicitly via
-/// `Shape.declarations = Maybe.Some(_)` even with substrate omitted; a
+/// `ModuleShape.declarations = Maybe.Some(_)` even with substrate omitted; a
 /// fully `Maybe.None` declarations field on a strict `[T]` cog is the
 /// implicit-substrate defect.
 @framework(ats_v, "ATS-V implicit-substrate closure (cve-architecture spec §1.5 cognitive substrate disclosure). A strict-mode `[T]` cog must declare its operational mode; absence is operationally indistinguishable from a vacuous claim of universality.")
@@ -675,7 +675,7 @@ public axiom kernel_arch_implicit_substrate_check() -> Bool
 public axiom kernel_arch_anchoring_overextension_check() -> Bool
     ensures true;
 
-/// **AP-040 closure**: a self-referential `Shape` pattern (self in
+/// **AP-040 closure**: a self-referential `ModuleShape` pattern (self in
 /// `composes_with`, capability target containing the cog's own
 /// path, or `Capability.Custom` tag mentioning self) without a
 /// declared `SelfReferenceWitness` in its `ShapeDeclarations`.
@@ -685,7 +685,7 @@ public axiom kernel_arch_anchoring_overextension_check() -> Bool
 /// self-X assertion is operationally indistinguishable from a
 /// Russell-paradox construction; this discharge rejects it before
 /// deployment. Closes the architectural-revision open invariant R4.
-@framework(ats_v, "ATS-V self-reference-without-operator closure (cve-architecture spec §16 articulation hygiene). A bare 'self-X' assertion in a cog's Shape (self ∈ composes_with / capability target / requires) admits a Russell-paradox construction unless re-articulated as (operator T_X, fixed point Fix(T_X)) with a cited fixpoint-class theorem (Banach contracting / Tarski monotone / Adamek continuous / custom). AP-040 catches the bare assertion; the SelfReferenceWitness type makes the legitimate articulation first-class.")
+@framework(ats_v, "ATS-V self-reference-without-operator closure (cve-architecture spec §16 articulation hygiene). A bare 'self-X' assertion in a cog's ModuleShape (self ∈ composes_with / capability target / requires) admits a Russell-paradox construction unless re-articulated as (operator T_X, fixed point Fix(T_X)) with a cited fixpoint-class theorem (Banach contracting / Tarski monotone / Adamek continuous / custom). AP-040 catches the bare assertion; the SelfReferenceWitness type makes the legitimate articulation first-class.")
 @kernel_discharge("kernel_arch_self_reference_check")
 public axiom kernel_arch_self_reference_check() -> Bool
     ensures true;

@@ -63,7 +63,7 @@ public fn row_payload(stmt_id: Int64, row_index: Int64) -> RowPayload {
 }
 
 // -----------------------------------------------------------------------------
-// ClosePayload — fired on Connection close
+// ClosePayload — fired on SqliteConnection close
 // -----------------------------------------------------------------------------
 
 public type ClosePayload is { connection_id: Int64 }

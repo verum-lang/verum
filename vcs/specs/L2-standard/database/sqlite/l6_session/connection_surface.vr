@@ -3,13 +3,13 @@
 // @tier: 0
 // @tags: sqlite, native, session, connection, capability
 // @timeout: 15000
-// @description: Connection — open/mode/capability checks/transaction state
+// @description: SqliteConnection — open/mode/capability checks/transaction state
 //
 // Spec: sqlite-native spec §4.8 + §16
 
 mount core.*;
 mount core.database.sqlite.native.l6_session.{
-    Connection, ConnectionMode, ConnectionError, TxMode,
+    SqliteConnection, ConnectionMode, ConnectionError, TxMode,
     open_memory, open_readonly_memory, open_readwrite_memory, open_admin_memory,
     mode_can_write, mode_can_ddl, mode_name,
 };

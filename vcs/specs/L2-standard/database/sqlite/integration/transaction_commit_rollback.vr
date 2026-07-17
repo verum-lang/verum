@@ -8,11 +8,11 @@
 //               .rollback(). Double-commit is a compile-error by type. Test
 //               verifies transactional atomicity at runtime.
 
-mount core.database.sqlite.native.{Connection, Transaction};
+mount core.database.sqlite.native.{SqliteConnection, Transaction};
 
 @main
 public async fn main() -> Result<(), Error> {
-    let conn = Connection.open_memory().await?;
+    let conn = SqliteConnection.open_memory().await?;
     conn.execute(sql#"CREATE TABLE t (x INT)"#).await?;
 
     // Committed transaction:

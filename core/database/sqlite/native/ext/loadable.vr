@@ -10,7 +10,7 @@
 //
 
 //  @extension_entry
-//  public fn my_init(db: &mut Connection<Admin>) -> Result<(), DbError> {
+//  public fn my_init(db: &mut SqliteConnection<Admin>) -> Result<(), DbError> {
 //  db.register_scalar(my_scalar_fn())?;
 //  db.set_busy_handler(constant_busy(50))?;
 //  Result.Ok(())
@@ -19,7 +19,7 @@
 
 // The host application links the cog at build time (or via the
 // dynamic-cog mechanism described in the cog distribution spec).
-// `Connection.load_extension(entry)` simply runs the entry function
+// `SqliteConnection.load_extension(entry)` simply runs the entry function
 // inside an Admin-mode session — it does NOT shell out to dlopen.
 //
 
@@ -95,7 +95,7 @@ public fn extension_info(name: Text, version: Text, description: Text) -> Extens
 }
 
 // -----------------------------------------------------------------------------
-// LoadGate — per-Connection master switch
+// LoadGate — per-SqliteConnection master switch
 // -----------------------------------------------------------------------------
 
 public type LoadGate is { enabled: Bool, loaded: List<ExtensionInfo> };

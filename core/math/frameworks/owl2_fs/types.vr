@@ -8,14 +8,14 @@
 //
 
 //  o — Individual (the carrier of the OWL 2 universe ΔᴵO)
-//  d — Literal (the carrier of typed data values)
+//  d — OwlLiteral (the carrier of typed data values)
 //  # — quantifier of quantity (count_o)
 //
 
 // We surface these as Verum types so every framework axiom in
 // `core.math.frameworks.owl2_fs.*` can name them by the canonical
 // Shkotin spelling. The types are *abstract* — concrete encodings
-// (IRI for Individual, RDF literal-shape for Literal) live at
+// (IRI for Individual, RDF literal-shape for OwlLiteral) live at
 // `core.math.frameworks.owl2_fs.encoding` .
 //
 
@@ -37,7 +37,7 @@ public type Individual is protocol {
 /// The carrier sort `d` of OWL 2 data values (Literals). Shkotin's
 /// "d" sort; concrete RDF literals factor through the lexical-form +
 /// datatype-IRI representation.
-public type Literal is protocol {
+public type OwlLiteral is protocol {
     fn datatype_iri(self) -> Text;
     fn lexical_form(self) -> Text;
 };
@@ -96,7 +96,7 @@ public axiom count_o_spec<I: Individual>(
 //  • OPE → 𝒫(ΔᴵO × ΔᴵO) (§3.1, "object-property interpretation")
 //  • DPE → 𝒫(ΔᴵO × Δᴵᴰ) (§3.1, "data-property interpretation")
 //  • DR / DT → 𝒫(Δᴵᴰ) (§3.1, "data-range interpretation")
-//  • Literal → Δᴵᴰ (§3.1, "literal interpretation")
+//  • OwlLiteral → Δᴵᴰ (§3.1, "literal interpretation")
 //
 
 // Every assertion / class / property axiom of OWL 2 DS is a Boolean
@@ -143,7 +143,7 @@ public type Interpretation is protocol {
 
     /// `(a^I, lt^I) ∈ ⟦DPE⟧^I`: pair (a, lt) is in the DPE relation under I.
     fn data_property_pair<P: DataPropertyExpression>(
-        self, dpe: P, a: Individual, lt: Literal,
+        self, dpe: P, a: Individual, lt: OwlLiteral,
     ) -> Bool;
 
     /// `a^I = b^I`: individuals a and b denote the same element of ΔᴵO.
@@ -322,7 +322,7 @@ public type Interpretation is protocol {
     /// ⟦DataOneOf(lt)⟧^I = { lt^I }.
     /// ships the singleton; n-ary enumerations via Verum-level fold.
     fn data_one_of<R: DataRange>(
-        self, result: R, lt: Literal,
+        self, result: R, lt: OwlLiteral,
     ) -> Bool;
 
     /// W3C §3.4 DatatypeRestriction:
@@ -331,7 +331,7 @@ public type Interpretation is protocol {
     /// ships a single-facet form `(DT, facet_iri, value)`; n-ary
     /// facet conjunction via Verum-level fold.
     fn datatype_restriction<R: DataRange>(
-        self, result: R, base: R, facet: Text, value: Literal,
+        self, result: R, base: R, facet: Text, value: OwlLiteral,
     ) -> Bool;
 
     // ─── Class-expression constructor predicates (§3.2) ──────────
@@ -421,7 +421,7 @@ public type Interpretation is protocol {
 
     /// W3C §3.3 DataHasValue: ⟦…⟧^I = { x : (x, lt^I) ∈ ⟦DPE⟧^I }.
     fn class_data_has_value<C: ClassExpression, D: DataPropertyExpression>(
-        self, result: C, dpe: D, lt: Literal,
+        self, result: C, dpe: D, lt: OwlLiteral,
     ) -> Bool;
 
     /// W3C §3.3 DataMinCardinality / DataMaxCardinality /

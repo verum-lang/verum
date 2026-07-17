@@ -39,7 +39,7 @@ module core.database.sqlite.native.l7_api.transaction;
 // Defence-in-depth fields:
 //
 
-//  * `started_at_depth` — snapshot of `Connection.tx_depth()` when
+//  * `started_at_depth` — snapshot of `SqliteConnection.tx_depth()` when
 //  `begin_tx` fired. `commit_tx` / `rollback_tx` cross-check the
 //  current depth before issuing the underlying VDBE COMMIT /
 //  ROLLBACK so accidentally pairing a Tx with the wrong nested

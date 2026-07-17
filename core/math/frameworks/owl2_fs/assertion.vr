@@ -24,7 +24,7 @@
 
 mount core.math.frameworks.owl2_fs.types.{
     Individual,
-    Literal,
+    OwlLiteral,
     ClassExpression,
     ObjectPropertyExpression,
     DataPropertyExpression,
@@ -122,7 +122,7 @@ public axiom DataPropertyAssertion<I: Interpretation, D: DataPropertyExpression>
     interp: I,
     dpe:    D,
     a:      Individual,
-    lt:     Literal,
+    lt:     OwlLiteral,
 ) -> Bool
     ensures interp.data_property_pair(dpe, a, lt);
 
@@ -135,6 +135,6 @@ public axiom NegativeDataPropertyAssertion<I: Interpretation, D: DataPropertyExp
     interp: I,
     dpe:    D,
     a:      Individual,
-    lt:     Literal,
+    lt:     OwlLiteral,
 ) -> Bool
     ensures !interp.data_property_pair(dpe, a, lt);

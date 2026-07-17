@@ -10,7 +10,7 @@ mount core.database.sqlite.native.prepare_v3_flags_api.flags.{
     well_known_mask, well_known_bit_count,
     is_set, set, clear, is_known_only,
     is_persistent, forbids_vtab, suppresses_logging, bit_name,
-    EvictionPolicy, EpEvictable, EpPinned,
+    StmtEvictability, EpEvictable, EpPinned,
     eviction_for, policy_name,
 };
 mount base.{Bool, Int64};

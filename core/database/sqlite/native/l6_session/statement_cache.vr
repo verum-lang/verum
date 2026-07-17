@@ -34,7 +34,7 @@ module core.database.sqlite.native.l6_session.statement_cache;
 //
 // ## Concurrency
 //
-// The cache is owned by `Connection` (single-writer per connection).
+// The cache is owned by `SqliteConnection` (single-writer per connection).
 // Inter-connection sharing is intentionally NOT supported — each
 // connection has its own pager + schema view, and SQLite's WAL
 // reader-snapshot semantics require statement state to remain

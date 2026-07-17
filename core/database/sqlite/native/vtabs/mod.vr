@@ -7,7 +7,7 @@
 
 // Virtual-table protocol + module registry. Every virtual table
 // implementation supplies a `VtabModule` instance and is mounted
-// into a `VtabRegistry` per Connection.
+// into a `VtabRegistry` per SqliteConnection.
 //
 
 // Built-in virtual tables shipped with loom v0.1:

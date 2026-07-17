@@ -12,7 +12,7 @@ module core.database.sqlite.native.l6_session.connection;
 // Spec: sqlite-native.md §4.8 + §16
 //
 
-// A `Connection` is what user code holds to talk to loom. It bundles:
+// A `SqliteConnection` is what user code holds to talk to loom. It bundles:
 //
 
 //  * Mode — Read / Write / Admin capability marker
@@ -110,7 +110,7 @@ public fn tx_state_autocommit() -> TxState {
 }
 
 // -----------------------------------------------------------------------------
-// Connection
+// SqliteConnection
 // -----------------------------------------------------------------------------
 
 public type ConnectionError is
@@ -157,7 +157,7 @@ implement Eq for ConnectionError {
     }
 }
 
-public type Connection is {
+public type SqliteConnection is {
     mode: ConnectionMode,
     pager: Pager,
     schema: SchemaCache,
@@ -166,7 +166,7 @@ public type Connection is {
     next_root_page: Int,         // bump-allocator for CREATE TABLE / CREATE INDEX
                                   // (first user table starts at page 2; page 1 is
                                   // the main DB header + sqlite_schema root).
-    // Connection-scoped persistent row-store. Maps each table's
+    // SqliteConnection-scoped persistent row-store. Maps each table's
     // `root_page` to its current row list. A prepared statement's
     // CursorTable is per-statement (lives inside VdbeState), but
     // OpenRead / OpenWrite seed the cursor slot from this map before
@@ -197,12 +197,12 @@ public type Connection is {
 
 /// Open an in-memory connection with the given mode. All three modes
 /// work on `:memory:` — there's no file-permission layer to honour.
-public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionError> {
+public fn open_memory(mode: ConnectionMode) -> Result<SqliteConnection, ConnectionError> {
     let pager = match pager_open_memory() {
         Result.Ok(p)  => p,
         Result.Err(_) => { return Result.Err(IoError("pager_open_memory failed".clone())); }
     };
-    Result.Ok(Connection {
+    Result.Ok(SqliteConnection {
         mode: mode,
         pager: pager,
         schema: schema_cache_new(),
@@ -216,21 +216,21 @@ public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionErro
     })
 }
 
-public fn open_readonly_memory() -> Result<Connection, ConnectionError> {
+public fn open_readonly_memory() -> Result<SqliteConnection, ConnectionError> {
     open_memory(CmRead)
 }
 
-public fn open_readwrite_memory() -> Result<Connection, ConnectionError> {
+public fn open_readwrite_memory() -> Result<SqliteConnection, ConnectionError> {
     open_memory(CmWrite)
 }
 
-public fn open_admin_memory() -> Result<Connection, ConnectionError> {
+public fn open_admin_memory() -> Result<SqliteConnection, ConnectionError> {
     open_memory(CmAdmin)
 }
 
 /// Open a file-backed connection. The capability mode determines
 /// whether the underlying pager opens read-only or read/write/create.
-public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, ConnectionError> {
+public fn open_file(path: &Text, mode: ConnectionMode) -> Result<SqliteConnection, ConnectionError> {
     let pager = match mode {
         CmRead => match pager_open_file_ro(path) {
             Result.Ok(p)  => p,
@@ -241,7 +241,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, Con
             Result.Err(_) => { return Result.Err(IoError("pager_open_file_rwc failed".clone())); }
         },
     };
-    Result.Ok(Connection {
+    Result.Ok(SqliteConnection {
         mode: mode,
         pager: pager,
         schema: schema_cache_new(),
@@ -255,7 +255,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, Con
     })
 }
 
-implement Connection {
+implement SqliteConnection {
     public fn mode(&self) -> ConnectionMode { self.mode }
     public fn path_text(&self) -> &Text { &self.path }
     public fn schema_generation(&self) -> Int { self.schema.gen() }

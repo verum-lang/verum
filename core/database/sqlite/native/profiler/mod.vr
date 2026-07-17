@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/sqlite/native/profiler/mod.vr
 // =============================================================================
-// Layer: 6 (per-Connection)
+// Layer: 6 (per-SqliteConnection)
 // Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
 //
 

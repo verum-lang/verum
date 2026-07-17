@@ -1,12 +1,12 @@
 // =============================================================================
-// vtabs/registry.vr — per-Connection virtual-table module registry
+// vtabs/registry.vr — per-SqliteConnection virtual-table module registry
 // =============================================================================
 // Layer: 6
 // Spec: sqlite-native.md §16.5
 //
 
 // Carries the set of `name → factory` bindings registered with a
-// Connection. CREATE VIRTUAL TABLE foo USING module(...) looks up
+// SqliteConnection. CREATE VIRTUAL TABLE foo USING module(...) looks up
 // `module` here, calls `factory.create(...)`, stores the resulting
 // schema in the SchemaCache, and links the cursor-open callback so
 // the L4 interpreter can stream rows on SELECT.

@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/sqlite/native/stmt_cache/mod.vr
 // =============================================================================
-// Layer: 6 (per-Connection)
+// Layer: 6 (per-SqliteConnection)
 // Spec: sqlite-native.md §11.1, §22 (operational tooling)
 //
 

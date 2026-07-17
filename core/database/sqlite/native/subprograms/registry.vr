@@ -1,5 +1,5 @@
 // =============================================================================
-// subprograms/registry.vr — per-Connection sub-program table
+// subprograms/registry.vr — per-SqliteConnection sub-program table
 // =============================================================================
 // Spec: sqlite-native.md §11.4
 //

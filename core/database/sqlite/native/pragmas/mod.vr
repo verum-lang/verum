@@ -1,7 +1,7 @@
 // =============================================================================
 // core/database/sqlite/native/pragmas/mod.vr
 // =============================================================================
-// Layer: 6 (Connection-mode dispatch) / 5 (parser visibility)
+// Layer: 6 (SqliteConnection-mode dispatch) / 5 (parser visibility)
 // Spec: sqlite-native.md §18, Appendix F
 //
 

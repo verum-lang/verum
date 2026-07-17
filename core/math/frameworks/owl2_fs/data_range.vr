@@ -13,7 +13,7 @@
 
 mount core.math.frameworks.owl2_fs.types.{
     DataRange,
-    Literal,
+    OwlLiteral,
     Interpretation,
 };
 
@@ -61,7 +61,7 @@ public axiom DataComplementOf<I: Interpretation, R: DataRange>(
 public axiom DataOneOf<I: Interpretation, R: DataRange>(
     interp: I,
     result: R,
-    lt:     Literal,
+    lt:     OwlLiteral,
 ) -> Bool
     ensures interp.data_one_of(result, lt);
 
@@ -75,6 +75,6 @@ public axiom DatatypeRestriction<I: Interpretation, R: DataRange>(
     result: R,
     base:   R,
     facet:  Text,
-    value:  Literal,
+    value:  OwlLiteral,
 ) -> Bool
     ensures interp.datatype_restriction(result, base, facet, value);

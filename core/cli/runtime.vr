@@ -107,21 +107,21 @@ implement HandlerContext {
 }
 
 // =============================================================================
-// Handler signature
+// CliHandler signature
 // =============================================================================
 
 /// Synchronous handler signature. Returns an `ExitCode` directly so
-/// the runtime can emit it as the process exit status. Handler errors
+/// the runtime can emit it as the process exit status. CliHandler errors
 /// are surfaced as non-zero `ExitCode` values; richer error reporting
 /// goes through `eprintln` from inside the handler.
-public type Handler is fn(&HandlerContext) -> ExitCode;
+public type CliHandler is fn(&HandlerContext) -> ExitCode;
 
 // =============================================================================
 // HandlerRegistry — name → fn pointer
 // =============================================================================
 
 public type HandlerRegistry is {
-    handlers: Map<Text, Handler>,
+    handlers: Map<Text, CliHandler>,
 };
 
 implement HandlerRegistry {
@@ -129,12 +129,12 @@ implement HandlerRegistry {
         HandlerRegistry { handlers: Map.new() }
     }
 
-    public fn register(mut self, name: Text, h: Handler) -> HandlerRegistry {
+    public fn register(mut self, name: Text, h: CliHandler) -> HandlerRegistry {
         self.handlers.insert(name, h);
         self
     }
 
-    public fn lookup(&self, name: &Text) -> Maybe<Handler> {
+    public fn lookup(&self, name: &Text) -> Maybe<CliHandler> {
         self.handlers.get(name.clone())
     }
 }
@@ -162,7 +162,7 @@ implement App {
 
     /// Register a named handler. The name must match a `HandlerRef.NamedHandler`
     /// somewhere in the spec.
-    public fn register(mut self, name: Text, h: Handler) -> App {
+    public fn register(mut self, name: Text, h: CliHandler) -> App {
         self.registry = self.registry.register(name, h);
         self
     }
@@ -345,7 +345,7 @@ fn render_error(e: &ParseError) -> Text {
 
 /// Convenience: build an `App`, register one handler, run it.
 /// Useful for tiny scripts where the whole CLI is one command.
-public fn dispatch(spec: CommandSpec, h: Handler) -> ! {
+public fn dispatch(spec: CommandSpec, h: CliHandler) -> ! {
     let app = App.from_spec(spec).register("root".to_text(), h);
     app.run_or_exit()
 }

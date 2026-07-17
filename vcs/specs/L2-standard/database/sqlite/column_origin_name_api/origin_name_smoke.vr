@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 mount core.database.sqlite.native.column_origin_name_api.trace.{
-    Field, FDatabase, FTable, FOrigin,
+    OriginField, FDatabase, FTable, FOrigin,
     field_name, well_known_field_count, requires_compile_flag,
     Source, SrcSimpleColumn, SrcAlias, SrcExpression, SrcLiteral, SrcAggregate,
     source_name, yields_origin_metadata,

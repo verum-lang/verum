@@ -144,10 +144,9 @@ public type AsyncRuntimeConfig is {
 };
 
 /// Public alias — short canonical name; conformance tests
-/// `mount core.async.executor.{RuntimeConfig}` for the async
-/// runtime config (distinct from the protocol-typed `RuntimeConfig`
+/// `mount core.async.executor.{AsyncRuntimeConfig}` for the async
+/// runtime config (distinct from the protocol-typed `AsyncRuntimeConfig`
 /// in core.runtime.config — those are different abstractions).
-public type RuntimeConfig is AsyncRuntimeConfig;
 
 // Manifest→runtime bridge (#261). Each getter loads from a
 // const-initialised LLVM global emitted by

@@ -15,7 +15,7 @@
 // This module is the data-layer source of truth — the AST/codegen
 // path will route through it once the SCreateTrigger AST node lands
 // in `l5_sql/ast.vr`. Until then, the catalogue is exercisable
-// directly from L7 API as `Connection.add_trigger(spec)`.
+// directly from L7 API as `SqliteConnection.add_trigger(spec)`.
 // =============================================================================
 
 @arch_module(

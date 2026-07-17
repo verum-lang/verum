@@ -6,7 +6,7 @@
 
 // `sqlite_temp_master` has the same shape as `sqlite_master`, but is
 // scoped to the TEMP database (created by `CREATE TEMP TABLE`,
-// `CREATE TEMP VIEW`, etc.) and dropped on Connection close.
+// `CREATE TEMP VIEW`, etc.) and dropped on SqliteConnection close.
 // =============================================================================
 
 @arch_module(
@@ -44,7 +44,7 @@ implement TempMasterTable {
 
     public fn by_kind(&self, kind: &MasterRowKind) -> List<MasterRow> { self.inner.by_kind(kind) }
 
-    /// Empty the table — called on Connection close.
+    /// Empty the table — called on SqliteConnection close.
     public fn clear(&mut self) { self.inner = master_table_new(); }
 }
 

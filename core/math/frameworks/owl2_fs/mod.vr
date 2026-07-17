@@ -13,7 +13,7 @@
 // Sub-modules (Shkotin 2019 §X.Y / Table Z):
 //
 
-//  types — primitive sorts (Individual=o, Literal=d) +
+//  types — primitive sorts (Individual=o, OwlLiteral=d) +
 //  count_o quantifier-of-quantity primitive
 //  object_property — §2.2.1 Table 1: ObjectInverseOf
 //  data_range — §2.2.2 Table 3: 5 data-range constructors

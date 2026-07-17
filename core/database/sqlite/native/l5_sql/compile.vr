@@ -12,7 +12,7 @@ module core.database.sqlite.native.l5_sql.compile;
 // Spec: sqlite-native.md §12 (overview)
 //
 
-// The entry point the L6 Connection.prepare() eventually calls:
+// The entry point the L6 SqliteConnection.prepare() eventually calls:
 //
 
 //  compile(sql: &Text) -> Result<VdbeProgram, CompileError>

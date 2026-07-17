@@ -6,7 +6,7 @@
 module core.database.sqlite.native.l7_api.hooks;
 
 // =============================================================================
-// l7_api/hooks.vr — register Connection-level observation hooks
+// l7_api/hooks.vr — register SqliteConnection-level observation hooks
 // =============================================================================
 // Layer: 7 — public API.
 // Spec: sqlite-native.md §13.6 (hooks); database.md §15.x (audit context);
@@ -40,18 +40,18 @@ module core.database.sqlite.native.l7_api.hooks;
 // Hooks fire from these sites:
 //
 
-//  * commit_hook — Connection.commit_tx, BEFORE the actual COMMIT.
+//  * commit_hook — SqliteConnection.commit_tx, BEFORE the actual COMMIT.
 //  Veto (`CdAbort(msg)`) turns the commit into a
 //  forced rollback returning the message.
 //
 
-//  * rollback_hook — Connection.rollback_tx, AFTER state transition.
+//  * rollback_hook — SqliteConnection.rollback_tx, AFTER state transition.
 //  Observation only — no veto.
 //
 
 //  * update_hook — fired by the L4 VDBE Insert / Update / Delete
 //  opcodes (separate task — wiring lands when the
-//  opcode handlers learn about the Connection's
+//  opcode handlers learn about the SqliteConnection's
 //  registry).
 //
 

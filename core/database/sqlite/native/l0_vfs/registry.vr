@@ -24,7 +24,7 @@ module core.database.sqlite.native.l0_vfs.registry;
 // uses a closed sum type `VfsBackend` over the in-tree implementations
 // (MemDbVfs, PosixVfs). Extending this requires recompiling the
 // registry, which matches SQLite's C practice anyway — VFS
-// registration at runtime is opened up via `Connection.register_vfs`
+// registration at runtime is opened up via `SqliteConnection.register_vfs`
 // at the API layer, not through a first-class dyn protocol here.
 // =============================================================================
 
@@ -203,7 +203,7 @@ public fn platform_default() -> VfsKind { Win32 }
 // -----------------------------------------------------------------------------
 
 /// Lookup table: `vfs_name` → `VfsKind`. Seeded at construct-time with
-/// the built-in backends; `Connection.register_vfs` extends it at run-time.
+/// the built-in backends; `SqliteConnection.register_vfs` extends it at run-time.
 public type VfsRegistry is {
     entries: Map<Text, VfsKind>,
     default_kind: VfsKind,

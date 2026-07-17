@@ -808,7 +808,7 @@ public mount .gpu.{
     Dim3,
     LaunchConfig,
     // Streams and events
-    Stream,
+    GpuStream,
     Event,
     StreamHandle,
     EventHandle,

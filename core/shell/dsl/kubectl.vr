@@ -53,8 +53,8 @@ implement KubeResource for Deployment {
     fn supports_exec() -> Bool { false }
 }
 
-public type Service is ();
-implement KubeResource for Service {
+public type K8sService is ();
+implement KubeResource for K8sService {
     fn resource_name() -> Text { "services".into() }
     fn supports_logs() -> Bool { false }
     fn supports_exec() -> Bool { false }

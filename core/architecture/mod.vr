@@ -29,7 +29,7 @@
 //
 //   1. `types.vr` — canonical primitives (Capability / Boundary /
 //      Composition / Lifecycle / Foundation / Tier / MsfsStratum /
-//      CveClosure / Shape / CapabilitySchema) + pure-data helpers.
+//      CveClosure / ModuleShape / CapabilitySchema) + pure-data helpers.
 //   2. `capability_ontology.vr` — registered Custom capability names.
 //   3. `anti_patterns.vr` — full 32-pattern roster (AntiPatternCode /
 //      AntiPatternViolation / Severity / DiagnosticContext) + 12
@@ -73,7 +73,7 @@ mount super.types.{
     MsfsStratum,
     CveClosure,
     VerifyStrategy,
-    Shape,
+    ModuleShape,
     ExecutabilitySense,
     CognitiveSubstrate,
     FormalAnchoring,

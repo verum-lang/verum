@@ -127,7 +127,7 @@ public fn table_stats_default(name: Text, n_rows: Int64) -> TableStats {
 }
 
 // -----------------------------------------------------------------------------
-// StatsRegistry — per-Connection / per-Database stats container
+// StatsRegistry — per-SqliteConnection / per-Database stats container
 // -----------------------------------------------------------------------------
 
 public type StatsRegistry is {

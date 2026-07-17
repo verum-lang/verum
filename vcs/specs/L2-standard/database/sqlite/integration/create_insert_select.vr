@@ -8,12 +8,12 @@
 //               verify shape + contents. Exercises L5 parser + L5 planner
 //               + L4 VDBE + L3 btree + L1 pager + L0 vfs end-to-end.
 
-mount core.database.sqlite.native.{Connection};
+mount core.database.sqlite.native.{SqliteConnection};
 mount core.collections.List;
 
 @main
 public async fn main() -> Result<(), Error> {
-    let conn = Connection.open_memory().await?;
+    let conn = SqliteConnection.open_memory().await?;
 
     conn.execute(sql#"
         CREATE TABLE users (

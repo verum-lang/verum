@@ -21,7 +21,7 @@ module core.database.sqlite.native.l1_pager.wal_actor_bridge;
 // single-writer + snapshot-reader semantics.
 //
 // Both actors satisfy the same request/reply protocol so the upper
-// layers (L6 Connection, L4 cursor opcodes) can dispatch through
+// layers (L6 SqliteConnection, L4 cursor opcodes) can dispatch through
 // either backend uniformly.  The differentiation is at construction
 // time: `actor_new(pager, cache_pages)` for legacy main-only pager;
 // `wal_actor_new(wal_pager)` for WAL-mode operation.

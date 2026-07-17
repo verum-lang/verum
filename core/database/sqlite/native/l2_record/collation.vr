@@ -24,7 +24,7 @@ module core.database.sqlite.native.l2_record.collation;
 //
 
 // User-defined collations land in the `CollationRegistry` exposed here
-// and are driven by `Connection.register_collation` at the API layer
+// and are driven by `SqliteConnection.register_collation` at the API layer
 // once that lands.
 // =============================================================================
 
