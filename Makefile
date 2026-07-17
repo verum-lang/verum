@@ -33,5 +33,8 @@ check-markers: ## Gate: landed-markers fence (docs/architecture/landed-markers.t
 check-vr-syntax: ## Gate: no Rust-style `::` in .vr sources (grammar/verum.ebnf uses `.`)
 	python3 vcs/scripts/check_no_double_colon.py --check
 
+check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean files stay clean, proved counts never fall
+	python3 scripts/ci/proof_gate.py
+
 check-internal-refs: ## Gate: no references to the internal/ directory in tracked files
 	bash scripts/ci/check_no_internal_refs.sh
