@@ -2316,7 +2316,10 @@ mod format_tests {
         assert_eq!(lean_body_for_decl(&d, &std::collections::HashSet::new()), ":= sorry");
         assert_eq!(coq_body_for_decl(&d, &std::collections::HashSet::new()), "Admitted.");
         assert_eq!(agda_body_for_decl(&d), "= ?");
-        assert_eq!(dedukti_body_for_decl(&d), "");
+        assert_eq!(
+            dedukti_body_for_decl(&d, &std::collections::HashSet::new()),
+            ""
+        );
         assert_eq!(metamath_body_for_decl(&d), "");
     }
 
@@ -2362,7 +2365,10 @@ mod format_tests {
         assert_eq!(lean_body_for_decl(&d, &std::collections::HashSet::new()), ":= sorry");
         assert_eq!(coq_body_for_decl(&d, &std::collections::HashSet::new()), "Admitted.");
         assert_eq!(agda_body_for_decl(&d), "= ?");
-        assert_eq!(dedukti_body_for_decl(&d), "");
+        assert_eq!(
+            dedukti_body_for_decl(&d, &std::collections::HashSet::new()),
+            ""
+        );
         assert_eq!(metamath_body_for_decl(&d), "");
     }
 }
