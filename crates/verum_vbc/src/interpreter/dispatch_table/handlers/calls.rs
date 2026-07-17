@@ -85,6 +85,20 @@ pub(in super::super) fn handle_call(
         .module
         .resolve_band_id(func_id.0)
         .unwrap_or(func_id);
+    // REMAP-POISON-1 (T0144): a poisoned id marks a call whose
+    // archive-local target had no remap entry and no name at merge —
+    // the alternative was a silent misroute onto whatever function
+    // occupies the raw id. Die loud with the recovery path.
+    if crate::stub_ranges::is_remap_poison(func_id.0) {
+        return Err(InterpreterError::Panic {
+            message: "[remap-poison] call target was an archive-local id with no \
+                      remap entry and no name (REMAP-POISON-1/T0144): the callee's \
+                      producing module was pruned from the merge set. Re-run with \
+                      VERUM_TRACE_REMAP_FALLBACK=1 to see the original archive id \
+                      at merge time."
+                .to_string(),
+        });
+    }
     let stub_stage = crate::stub_ranges::stage_of(func_id.0);
 
     // Get function descriptor — extract needed fields to release borrow.
@@ -566,6 +580,20 @@ pub(in super::super) fn handle_call_generic(
         .module
         .resolve_band_id(func_id.0)
         .unwrap_or(func_id);
+    // REMAP-POISON-1 (T0144): a poisoned id marks a call whose
+    // archive-local target had no remap entry and no name at merge —
+    // the alternative was a silent misroute onto whatever function
+    // occupies the raw id. Die loud with the recovery path.
+    if crate::stub_ranges::is_remap_poison(func_id.0) {
+        return Err(InterpreterError::Panic {
+            message: "[remap-poison] call target was an archive-local id with no \
+                      remap entry and no name (REMAP-POISON-1/T0144): the callee's \
+                      producing module was pruned from the merge set. Re-run with \
+                      VERUM_TRACE_REMAP_FALLBACK=1 to see the original archive id \
+                      at merge time."
+                .to_string(),
+        });
+    }
     let stub_stage = crate::stub_ranges::stage_of(func_id.0);
 
     // Get function descriptor — extract needed fields to release borrow

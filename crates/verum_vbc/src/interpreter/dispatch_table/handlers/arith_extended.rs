@@ -1169,8 +1169,11 @@ mod tests {
         assert_eq!(fc, 1, "Some has one payload field");
         assert_eq!(
             type_id,
-            0x8000 + maybe_success_tag(),
-            "synthetic TypeId must follow `0x8000 + tag` formula",
+            crate::types::TypeId::MAYBE.0,
+            "canonical builders stamp the well-known Maybe TypeId — the \
+             synthetic 0x8000+tag fallback made type-id-scoped variant \
+             rendering pick the first tag-matching descriptor \
+             (the JfAccessor(0) class)",
         );
     }
 
@@ -1189,8 +1192,9 @@ mod tests {
         assert_eq!(fc, 0, "None is unit-shaped (no payload)");
         assert_eq!(
             type_id,
-            0x8000 + maybe_none_tag(),
-            "synthetic TypeId must follow `0x8000 + tag` formula",
+            crate::types::TypeId::MAYBE.0,
+            "canonical builders stamp the well-known Maybe TypeId (see \
+             the Some-case pin for the rationale)",
         );
     }
 
@@ -1246,9 +1250,23 @@ mod tests {
             a_fc, b_fc,
             "arith and MakeVariant paths must agree on field_count",
         );
+        // Type identity DIFFERS by design: the arith path routes
+        // through the canonical builders (well-known Maybe TypeId);
+        // the MakeVariant WIRE op carries no type operand, so its
+        // handler can only stamp the synthetic 0x8000+tag fallback.
+        // Dispatch equivalence rests on (tag, field_count) — pattern
+        // matching reads the tag. Migrating MakeVariant sites to real
+        // ids is the MakeVariantTyped wire op's job (#146 Phase 3),
+        // not a bit-equality this test can force.
         assert_eq!(
-            a_tid, b_tid,
-            "arith and MakeVariant paths must agree on synthetic TypeId",
+            a_tid,
+            crate::types::TypeId::MAYBE.0,
+            "arith path must stamp the canonical Maybe TypeId",
+        );
+        assert_eq!(
+            b_tid,
+            0x8000 + maybe_success_tag(),
+            "type-blind MakeVariant path stays on the synthetic fallback",
         );
     }
 

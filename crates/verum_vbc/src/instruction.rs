@@ -6324,18 +6324,18 @@ impl SystemSubOpcode {
             // ===== Callback Support (0x50-0x5F) =====
             Self::CreateCallback         => m!("FFI_CREATE_CALLBACK",        CallbackSupport,          call=false, marshal=false, alloc=true,  dealloc=false),
             Self::FreeCallback           => m!("FFI_FREE_CALLBACK",          CallbackSupport,          call=false, marshal=false, alloc=false, dealloc=true),
-            Self::StaticMutAddr          => m!("FFI_STATIC_MUT_ADDR",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::RawLoadU8          => m!("RAW_LOAD_U8",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::RawStoreU8          => m!("RAW_STORE_U8",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::RawLoadI32          => m!("RAW_LOAD_I32",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::RawStoreI32          => m!("RAW_STORE_I32",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::RawLoadI64          => m!("RAW_LOAD_I64",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::RawStoreI64          => m!("RAW_STORE_I64",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::TlsSlotGetF          => m!("TLS_SLOT_GET",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::TlsSlotSetF          => m!("TLS_SLOT_SET",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::TlsSlotHasF          => m!("TLS_SLOT_HAS",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::TlsSlotClearF          => m!("TLS_SLOT_CLEAR",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::TlsGetBaseF          => m!("TLS_GET_BASE",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::StaticMutAddr          => m!("FFI_STATIC_MUT_ADDR",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::RawLoadU8          => m!("RAW_LOAD_U8",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::RawStoreU8          => m!("RAW_STORE_U8",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::RawLoadI32          => m!("RAW_LOAD_I32",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::RawStoreI32          => m!("RAW_STORE_I32",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::RawLoadI64          => m!("RAW_LOAD_I64",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::RawStoreI64          => m!("RAW_STORE_I64",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::TlsSlotGetF          => m!("TLS_SLOT_GET",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::TlsSlotSetF          => m!("TLS_SLOT_SET",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::TlsSlotHasF          => m!("TLS_SLOT_HAS",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::TlsSlotClearF          => m!("TLS_SLOT_CLEAR",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::TlsGetBaseF          => m!("TLS_GET_BASE",        MemoryOperations,         call=false, marshal=false, alloc=false,  dealloc=false),
 
             // ===== Raw Pointer Operations (0x60-0x6F) =====
             Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),
@@ -6365,9 +6365,9 @@ impl SystemSubOpcode {
             Self::SysGetentropy          => m!("SYS_GETENTROPY",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::ExecutionTier          => m!("EXECUTION_TIER",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
             Self::IsInterpreted          => m!("IS_INTERPRETED",             SystemCallOperations,     call=false, marshal=false, alloc=false, dealloc=false),
-            Self::EnvGet                 => m!("FFI_ENV_GET",               SystemCallOperations,        call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::EnvSet                 => m!("FFI_ENV_SET",               SystemCallOperations,        call=false, marshal=false, alloc=true,  dealloc=false),
-            Self::EnvUnset               => m!("FFI_ENV_UNSET",             SystemCallOperations,        call=false, marshal=false, alloc=true,  dealloc=false),
+            Self::EnvGet                 => m!("FFI_ENV_GET",               SystemCallOperations,        call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::EnvSet                 => m!("FFI_ENV_SET",               SystemCallOperations,        call=false, marshal=false, alloc=false,  dealloc=false),
+            Self::EnvUnset               => m!("FFI_ENV_UNSET",             SystemCallOperations,        call=false, marshal=false, alloc=false,  dealloc=false),
 
             // ===== Mach Kernel Operations (0x90-0x9F) =====
             // Allocation-vs-release tagging mirrors Linux mmap pair.
@@ -17024,8 +17024,8 @@ mod tests {
         // landed and the corresponding meta() arm is in place.
         let mut count = 0;
         for_every_math_sub_opcode(|_| count += 1);
-        assert_eq!(count, 80,
-            "MathSubOpcode variant count drift: expected 80, got {}",
+        assert_eq!(count, 84,
+            "MathSubOpcode variant count drift: expected 84, got {}",
             count);
     }
 
@@ -17100,8 +17100,8 @@ mod tests {
         // corresponding meta() arm is in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 77,
-            "SystemSubOpcode variant count drift: expected 77, got {}",
+        assert_eq!(count, 110,
+            "SystemSubOpcode variant count drift: expected 110, got {}",
             count);
     }
 
@@ -17112,27 +17112,67 @@ mod tests {
         // agrees with the encoding bands so renumbering a variant
         // either keeps it in the same band or surfaces a test
         // failure.
+        // WIRE-LANDED band exceptions: the 0x52-0x5E memory annex
+        // that spilled out of the full 0x40 memory window
+        // (static-mut cells, the mem_raw load/store family, the
+        // TLS-slot family, TypedArrayStore). These bytes shipped in
+        // baked archives before the band discipline. Renumbering
+        // them is a wire-schema break — the CATEGORY is the semantic
+        // truth, the byte is the frozen accident. ADDING an entry
+        // here requires the same conscious decision as bumping a
+        // count pin: new variants land INSIDE their band; this list
+        // only ever shrinks (via a schema bump).
+        let band_exceptions: &[(u8, SystemCategory)] = &[
+            (0x52, SystemCategory::MemoryOperations),          // StaticMutAddr
+            (0x53, SystemCategory::MemoryOperations),          // RawLoadU8
+            (0x54, SystemCategory::MemoryOperations),          // RawStoreU8
+            (0x55, SystemCategory::MemoryOperations),          // RawLoadI32
+            (0x56, SystemCategory::MemoryOperations),          // RawStoreI32
+            (0x57, SystemCategory::MemoryOperations),          // RawLoadI64
+            (0x58, SystemCategory::MemoryOperations),          // RawStoreI64
+            (0x59, SystemCategory::MemoryOperations),          // TlsSlotGetF
+            (0x5A, SystemCategory::MemoryOperations),          // TlsSlotSetF
+            (0x5B, SystemCategory::MemoryOperations),          // TlsSlotHasF
+            (0x5C, SystemCategory::MemoryOperations),          // TlsSlotClearF
+            (0x5D, SystemCategory::MemoryOperations),          // TlsGetBaseF
+            (0x5E, SystemCategory::MemoryOperations),          // TypedArrayStore
+        ];
+        let mut exceptions_hit = 0usize;
         for_every_system_sub_opcode(|op| {
-            let expected = match op.to_byte() {
-                0x00..=0x0F => SystemCategory::SymbolResolution,
-                0x10..=0x1F => SystemCategory::CallingConvention,
-                0x20..=0x2F => SystemCategory::Marshalling,
-                0x30..=0x3F => SystemCategory::ErrorHandling,
-                0x40..=0x4F => SystemCategory::MemoryOperations,
-                0x50..=0x5F => SystemCategory::CallbackSupport,
-                0x60..=0x6F => SystemCategory::RawPointerOperations,
-                0x70..=0x7F => SystemCategory::TimeOperations,
-                0x80..=0x8F => SystemCategory::SystemCallOperations,
-                0x90..=0x9F => SystemCategory::MachKernelOperations,
-                0xA0..=0xAF => SystemCategory::CbgrMemoryOperations,
-                0xB0..=0xBF => SystemCategory::SynchronizationPrimitives,
-                _ => unreachable!("undefined byte {:#04x}", op.to_byte()),
+            let byte = op.to_byte();
+            let expected = if let Some((_, cat)) =
+                band_exceptions.iter().find(|(b, _)| *b == byte)
+            {
+                exceptions_hit += 1;
+                *cat
+            } else {
+                match byte {
+                    0x00..=0x0F => SystemCategory::SymbolResolution,
+                    0x10..=0x1F => SystemCategory::CallingConvention,
+                    0x20..=0x2F => SystemCategory::Marshalling,
+                    0x30..=0x3F => SystemCategory::ErrorHandling,
+                    0x40..=0x4F => SystemCategory::MemoryOperations,
+                    0x50..=0x5F => SystemCategory::CallbackSupport,
+                    0x60..=0x6F => SystemCategory::RawPointerOperations,
+                    0x70..=0x7F => SystemCategory::TimeOperations,
+                    0x80..=0x8F => SystemCategory::SystemCallOperations,
+                    0x90..=0x9F => SystemCategory::MachKernelOperations,
+                    0xA0..=0xAF => SystemCategory::CbgrMemoryOperations,
+                    0xB0..=0xBF => SystemCategory::SynchronizationPrimitives,
+                    _ => unreachable!("undefined byte {:#04x}", byte),
+                }
             };
             assert_eq!(op.meta().category, expected,
                 "{:?} (byte {:#04x}): meta category {:?} disagrees with byte-range band {:?}",
-                op, op.to_byte(), op.meta().category, expected);
+                op, byte, op.meta().category, expected);
             assert_eq!(op.category(), expected.as_str());
         });
+        // Every exception entry must correspond to a live variant —
+        // a schema bump that renumbers one of these must delete its
+        // row here in the same change.
+        assert_eq!(exceptions_hit, band_exceptions.len(),
+            "stale band-exception rows: {} listed, {} matched live variants",
+            band_exceptions.len(), exceptions_hit);
     }
 
     #[test]
@@ -17175,20 +17215,29 @@ mod tests {
         // must call to reclaim memory.  The pairing is implicit (by
         // operation family) so we list the expected count of each:
         // CAlloc/CRealloc/CreateCallback/NewByteArray/NewTypedArray/
-        // SysMmap/MachVmAllocate/MachSemCreate/CbgrAlloc/CbgrAllocZeroed
-        // = 10 allocators.  CFree/FreeCallback/SysMunmap/
-        // MachVmDeallocate/MachSemDestroy/CbgrDealloc = 6
-        // deallocators (CRealloc + AllocZeroed share CFree/CbgrDealloc;
-        // NewByteArray/NewTypedArray are CBGR-tracked and use
-        // CbgrDealloc).  Pin both counts.
+        // SysMmap/MachVmAllocate/MachSemCreate/CbgrAlloc/
+        // CbgrAllocZeroed/CbgrRealloc/CbgrAllocateUser/CbgrReallocUser
+        // = 13 allocators.  CFree/FreeCallback/SysMunmap/
+        // MachVmDeallocate/MachSemDestroy/CbgrDealloc/CbgrDeallocUser
+        // = 7 deallocators (realloc + zeroed variants share their
+        // family's free; NewByteArray/NewTypedArray are CBGR-tracked
+        // and use CbgrDealloc).  Pin both counts.
+        //
+        // NOT allocators by this contract (alloc=false in meta):
+        // StaticMutAddr (process-lifetime cell, no reclaim pair by
+        // design), the RawLoad/RawStore family and TlsSlot* family
+        // (pure loads/stores over existing memory), and EnvGet/EnvSet/
+        // EnvUnset (results are CBGR-tracked values, not paired-
+        // reclaim resources) — a copy-paste alloc=true stamp on those
+        // rows is exactly the drift this pin exists to catch.
         let mut alloc = 0;
         let mut dealloc = 0;
         for_every_system_sub_opcode(|op| {
             if op.allocates()   { alloc += 1; }
             if op.deallocates() { dealloc += 1; }
         });
-        assert_eq!(alloc, 10, "allocator count drift");
-        assert_eq!(dealloc, 6, "deallocator count drift");
+        assert_eq!(alloc, 13, "allocator count drift");
+        assert_eq!(dealloc, 7, "deallocator count drift");
     }
 
     #[test]
@@ -17202,7 +17251,7 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 77);
+        assert_eq!(seen.len(), 110);
     }
 
     // ========================================================================
@@ -17510,8 +17559,8 @@ mod tests {
     fn arith_meta_count_pinned_at_fifty_eight() {
         let mut count = 0;
         for_every_arith_sub_opcode(|_| count += 1);
-        assert_eq!(count, 58,
-            "ArithSubOpcode variant count drift: expected 58, got {}", count);
+        assert_eq!(count, 63,
+            "ArithSubOpcode variant count drift: expected 63, got {}", count);
     }
 
     #[test]
@@ -17601,7 +17650,7 @@ mod tests {
 
     #[test]
     fn arith_meta_operand_count_unary_set_pinned() {
-        // The set of unary (1-operand) variants — 22 total after
+        // The set of unary (1-operand) variants — 23 total after
         // closing the legacy 13-variant default-to-2 gap.  Pinning
         // the set as a whole means a regression on any of these
         // surfaces here as a count mismatch.
@@ -17618,6 +17667,7 @@ mod tests {
             ArithSubOpcode::PolySignum,
             // Wrapping unary
             ArithSubOpcode::WrappingNeg,
+            ArithSubOpcode::WrappingAbs,
             // Checked unary — closes legacy gap
             ArithSubOpcode::CheckedNeg,
             ArithSubOpcode::CheckedAbs,
@@ -17650,13 +17700,19 @@ mod tests {
 
     #[test]
     fn arith_meta_operand_count_ternary_set_pinned() {
-        // Only PolyClamp is ternary.
+        // Ternary (3-operand) variants: PolyClamp plus the funnel
+        // shifts (fshl/fshr take a, b, and the shift amount).
         let mut ternary_count = 0;
         for_every_arith_sub_opcode(|op| {
             if op.operand_count() == 3 { ternary_count += 1; }
         });
-        assert_eq!(ternary_count, 1, "ternary count drift: expected 1 (PolyClamp)");
+        assert_eq!(
+            ternary_count, 3,
+            "ternary count drift: expected 3 (PolyClamp, FunnelShiftLeft, FunnelShiftRight)"
+        );
         assert_eq!(ArithSubOpcode::PolyClamp.operand_count(), 3);
+        assert_eq!(ArithSubOpcode::FunnelShiftLeft.operand_count(), 3);
+        assert_eq!(ArithSubOpcode::FunnelShiftRight.operand_count(), 3);
     }
 
     #[test]
@@ -17684,7 +17740,7 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 58);
+        assert_eq!(seen.len(), 63);
     }
 
     // ========================================================================
@@ -17828,8 +17884,8 @@ mod tests {
     fn cbgr_meta_count_pinned_at_forty_four() {
         let mut count = 0;
         for_every_cbgr_sub_opcode(|_| count += 1);
-        assert_eq!(count, 44,
-            "CbgrSubOpcode variant count drift: expected 44, got {}", count);
+        assert_eq!(count, 46,
+            "CbgrSubOpcode variant count drift: expected 46, got {}", count);
     }
 
     #[test]
@@ -17948,7 +18004,7 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 43);
+        assert_eq!(seen.len(), 46);
     }
 
     // ========================================================================
