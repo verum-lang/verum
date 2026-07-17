@@ -806,6 +806,171 @@ impl VbcModule {
         self.resolved_band_map.get(&id).copied()
     }
 
+    /// **T0103 LEG-2b** — materialize registry-intrinsic wrapper bodies
+    /// for band names that [`Self::resolve_external_bands`] could NOT
+    /// resolve against the function table.
+    ///
+    /// Cross-module calls to intrinsic fn-forms are recorded under the
+    /// MOUNTING module's spelling (`core.base.primitives.eq` for
+    /// `core.intrinsics.arithmetic.eq`), which shares only the bare
+    /// last segment with the defining registration — outside ranked
+    /// suffix resolution by design (a bare-name rank would be the
+    /// shadowing hazard of T0231). When such a name's bare segment IS a
+    /// registered intrinsic, the registry is the semantic authority
+    /// (intrinsic-dispatch-contract §1): synthesize a wrapper body via
+    /// [`crate::intrinsics::expand::expand_intrinsic_wrapper`], append
+    /// it to the function table, and bind the band id to it. Both
+    /// tiers then execute/lower the same body — the AOT const-zero
+    /// degrade and the Tier-0 `FunctionNotFound` panic for this class
+    /// disappear together.
+    ///
+    /// Scope guards, each load-bearing:
+    /// * only `core.`-rooted names — a user function that happens to
+    ///   end in `.eq` can never be hijacked;
+    /// * only names ranked resolution MISSED — a real body (user or
+    ///   stdlib, template or specialization) always wins;
+    /// * only registry-covered bare names with a synthesizable
+    ///   strategy — everything else stays loudly unresolved for the
+    ///   absent-bodies policy (T0103 LEG-3).
+    ///
+    /// Call after [`Self::resolve_external_bands`] on an EXECUTION
+    /// assembly (interp module, AOT pre-lowering module). Deliberately
+    /// NOT part of `resolve_external_bands` itself so archive
+    /// *encoding* paths never serialize synthesized bodies (bake
+    /// byte-identity, defect-class §40).
+    ///
+    /// Kill switch: `VERUM_DISABLE_INTRINSIC_WRAPPERS=1`.
+    /// Trace: `VERUM_TRACE_BAND_WRAPPER=1`.
+    pub fn synthesize_intrinsic_band_wrappers(&mut self) -> usize {
+        if std::env::var_os("VERUM_DISABLE_INTRINSIC_WRAPPERS").is_some() {
+            return 0;
+        }
+        // Snapshot unresolved (band_id, name) pairs; sort by (name, id)
+        // so appended FunctionIds are deterministic across runs
+        // (bake-nondeterminism discipline).
+        let mut pending: Vec<(u32, String)> = self
+            .external_function_names
+            .iter()
+            .filter(|(fid, _)| !self.resolved_band_map.contains_key(&fid.0))
+            .filter_map(|(fid, sid)| self.get_string(*sid).map(|n| (fid.0, n.to_string())))
+            .collect();
+        pending.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+
+        let trace = std::env::var_os("VERUM_TRACE_BAND_WRAPPER").is_some();
+        // Wrappers register under a DOTLESS technical name
+        // (`__band_wrapper$core$base$primitives$eq`): the only route to
+        // a wrapper is the band map. A dotted registration would join
+        // the `find_function_by_name` suffix-scan universe (`…ends_with
+        // (".primitives.eq")`) and could silently capture OTHER
+        // modules' re-export spellings — the loud-to-wrong inversion
+        // this leg must never introduce.
+        let mangle = |name: &str| format!("__band_wrapper${}", name.replace('.', "$"));
+        // Idempotence across map recomputes: the post-mono
+        // `resolve_external_bands` wipes the map, and mangled names are
+        // deliberately invisible to ranked resolution — reuse an
+        // already-synthesized wrapper instead of appending a duplicate.
+        let mut synthesized_by_name: std::collections::HashMap<String, FunctionId> =
+            std::collections::HashMap::new();
+        for (idx, desc) in self.functions.iter().enumerate() {
+            if let Some(n) = self.get_string(desc.name)
+                && n.starts_with("__band_wrapper$")
+            {
+                synthesized_by_name.insert(n.to_string(), FunctionId(idx as u32));
+            }
+        }
+        let mut bound = 0usize;
+        for (band_id, name) in pending {
+            if !name.starts_with("core.") {
+                continue;
+            }
+            let mangled = mangle(&name);
+            let fid = if let Some(&fid) = synthesized_by_name.get(&mangled) {
+                fid
+            } else {
+                let bare = name.rsplit('.').next().unwrap_or(name.as_str());
+                let Some(info) = crate::intrinsics::lookup_intrinsic(bare) else {
+                    continue;
+                };
+                let Some(body) =
+                    crate::intrinsics::expand::expand_intrinsic_wrapper(info.intrinsic)
+                else {
+                    continue;
+                };
+                let bytecode_offset = self.bytecode.len() as u32;
+                let bytecode_length =
+                    crate::bytecode::encode_instructions(&body.instructions, &mut self.bytecode)
+                        as u32;
+                let name_id = self.intern_string(&mangled);
+                let params: smallvec::SmallVec<[ParamDescriptor; 4]> = (0..info
+                    .intrinsic
+                    .param_count)
+                    .map(|_| ParamDescriptor {
+                        name: StringId::EMPTY,
+                        type_ref: crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                        is_mut: false,
+                        default: None,
+                    })
+                    .collect();
+                let desc = FunctionDescriptor {
+                    id: FunctionId(self.functions.len() as u32),
+                    name: name_id,
+                    parent_type: None,
+                    type_params: smallvec::SmallVec::new(),
+                    params,
+                    return_type: crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                    contexts: smallvec::SmallVec::new(),
+                    properties: crate::types::PropertySet::default(),
+                    bytecode_offset,
+                    bytecode_length,
+                    locals_count: 0,
+                    register_count: body.register_count,
+                    max_stack: 0,
+                    is_inline_candidate: true,
+                    is_generic: false,
+                    visibility: crate::types::Visibility::Public,
+                    is_generator: false,
+                    yield_type: None,
+                    suspend_point_count: 0,
+                    calling_convention: Default::default(),
+                    optimization_hints: Default::default(),
+                    instructions: Some(body.instructions),
+                    func_id_base: 0,
+                    debug_variables: Vec::new(),
+                    is_test: false,
+                    is_gpu_only: false,
+                    intrinsic_name: None,
+                    is_const: false,
+                    register_type_hints: Vec::new(),
+                    return_type_name: None,
+                };
+                let fid = self.add_function(desc);
+                if trace {
+                    eprintln!(
+                        "[band-wrapper] synthesized `{}` (bare `{}`, registered `{}`) as fn#{} ({} instrs, {} regs)",
+                        name,
+                        bare,
+                        mangled,
+                        fid.0,
+                        self.functions[fid.0 as usize]
+                            .instructions
+                            .as_ref()
+                            .map(|i| i.len())
+                            .unwrap_or(0),
+                        self.functions[fid.0 as usize].register_count,
+                    );
+                }
+                synthesized_by_name.insert(mangled, fid);
+                fid
+            };
+            self.resolved_band_map.insert(band_id, fid);
+            bound += 1;
+            if trace {
+                eprintln!("[band-wrapper] band id {:#x} -> fn#{}", band_id, fid.0);
+            }
+        }
+        bound
+    }
+
     /// Ranked qualified-name resolution over THIS module's function
     /// table (T0103 LEG-2a) — the module-level twin of the loader's
     /// `ArchiveBodyRemap::qualified_suffix_chase` (codegen/mod.rs), so
@@ -2832,6 +2997,82 @@ mod precompile_extension_tests {
         assert!(m.discharge_receipts.is_empty());
         assert!(m.framework_provenance.citations.is_empty());
         assert!(m.framework_provenance.translations.is_empty());
+    }
+
+    /// T0103 LEG-2b: an unresolved band reference whose recorded name
+    /// is a re-export spelling of a registry intrinsic fn-form gets a
+    /// synthesized wrapper body bound in the band map; a runtime-raw
+    /// bodyless decl (no registry entry) and a non-core name stay
+    /// unresolved.
+    #[test]
+    fn band_wrapper_synthesis_binds_registry_intrinsics_only() {
+        let mut m = make_module();
+        let eq_band = XMOD_CALL_ID_BAND_BASE;
+        let raw_band = XMOD_CALL_ID_BAND_BASE + 1;
+        let user_band = XMOD_CALL_ID_BAND_BASE + 2;
+        let eq_sid = m.intern_string("core.base.primitives.eq");
+        let raw_sid = m.intern_string("core.intrinsics.runtime.io.__async_read_raw");
+        let user_sid = m.intern_string("myapp.util.eq");
+        m.external_function_names.push((FunctionId(eq_band), eq_sid));
+        m.external_function_names.push((FunctionId(raw_band), raw_sid));
+        m.external_function_names.push((FunctionId(user_band), user_sid));
+
+        let unresolved = m.resolve_external_bands();
+        assert_eq!(unresolved.len(), 3, "empty module resolves nothing");
+
+        let bound = m.synthesize_intrinsic_band_wrappers();
+        assert_eq!(bound, 1, "exactly the registry-covered core name binds");
+
+        let wrapper = m
+            .resolve_band_id(eq_band)
+            .expect("eq band id bound to a wrapper");
+        let desc = m.get_function(wrapper).expect("wrapper descriptor exists");
+        assert_eq!(
+            m.get_string(desc.name),
+            Some("__band_wrapper$core$base$primitives$eq"),
+            "wrapper registered under the dotless technical name — the \
+             band map is its ONLY route"
+        );
+        assert!(desc.bytecode_length > 0, "wrapper has a real encoded body");
+        assert_eq!(desc.register_count, 3, "eq wrapper: r0, r1 params + r2 dest");
+        let instrs = desc.instructions.as_ref().expect("decoded body attached");
+        assert!(
+            matches!(instrs.last(), Some(crate::instruction::Instruction::Ret { .. })),
+            "wrapper body ends in Ret"
+        );
+
+        // The dotless registration must be invisible to every by-name
+        // scan (exact, `.suffix`, ranked) — a dotted registration would
+        // let OTHER re-export spellings silently capture the wrapper.
+        assert!(m.find_function_by_name("core.base.primitives.eq").is_none());
+        assert!(m.find_function_by_name("primitives.eq").is_none());
+        assert!(m.find_function_by_name("eq").is_none());
+        assert!(
+            m.resolve_function_by_name_ranked("core.other.primitives.eq")
+                .is_none(),
+            "a sibling re-export spelling must NOT ranked-resolve onto the wrapper"
+        );
+
+        // The runtime-raw decl and the user-spelled name must stay out.
+        assert!(m.resolve_band_id(raw_band).is_none());
+        assert!(m.resolve_band_id(user_band).is_none());
+
+        // Idempotence: a second pass binds nothing new and appends no
+        // duplicate wrapper functions.
+        let fn_count = m.functions.len();
+        assert_eq!(m.synthesize_intrinsic_band_wrappers(), 0);
+        assert_eq!(m.functions.len(), fn_count);
+
+        // Post-mono shape: `resolve_external_bands` recomputes (wipes)
+        // the map; the mangled wrapper is invisible to ranked
+        // resolution, so the eq entry reads unresolved again — the
+        // re-synthesis pass must REBIND to the existing wrapper, never
+        // append a duplicate.
+        let unresolved2 = m.resolve_external_bands();
+        assert_eq!(unresolved2.len(), 3, "map recompute cannot see the wrapper");
+        assert_eq!(m.synthesize_intrinsic_band_wrappers(), 1);
+        assert_eq!(m.functions.len(), fn_count, "wrapper reused, not duplicated");
+        assert_eq!(m.resolve_band_id(eq_band), Some(wrapper));
     }
 
     #[test]

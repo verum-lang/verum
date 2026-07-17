@@ -45,6 +45,7 @@
 // available in EVERY build: the bytecode decoder derives the
 // TensorExtended carrier gate from it (T0219 — one authority, no
 // hand-table drift). The MLIR lowering stays codegen-gated.
+pub mod expand;
 #[cfg(feature = "codegen")]
 pub mod lowering;
 pub mod registry;

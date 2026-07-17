@@ -516,6 +516,23 @@ impl<'s> CompilationPipeline<'s> {
         };
         vbc_module.source_dir = source_dir;
 
+        // T0103 LEG-2b: this is an EXECUTION assembly (the module the
+        // interpreter runs and the AOT pipeline lowers) — materialize
+        // registry-intrinsic wrapper bodies for band names the ranked
+        // resolution in `build_module` could not bind (re-export
+        // spellings of intrinsic fn-forms like
+        // `core.base.primitives.eq`). Kept out of `build_module`
+        // itself so archive-encoding paths never serialize
+        // synthesized bodies.
+        let wrapper_count = vbc_module.synthesize_intrinsic_band_wrappers();
+        if wrapper_count > 0 {
+            tracing::debug!(
+                target: "compile_ast_to_vbc",
+                "T0103: bound {} band reference(s) to synthesized intrinsic wrappers",
+                wrapper_count
+            );
+        }
+
         // Phase 6d: optional linker-merge with the embedded
         // precompiled stdlib archive. Gated on
         // `VERUM_LINKER_MERGE=1` for opt-in testing — production
@@ -561,7 +578,7 @@ impl<'s> CompilationPipeline<'s> {
                         e
                     );
                 } else {
-                    let merged = linker.finalize();
+                    let mut merged = linker.finalize();
                     tracing::info!(
                         target: "compile_ast_to_vbc",
                         "VERUM_LINKER_MERGE: merged {} stdlib modules + user module — {} functions, {} types",
@@ -569,6 +586,13 @@ impl<'s> CompilationPipeline<'s> {
                         merged.functions.len(),
                         merged.types.len(),
                     );
+                    // T0103 LEG-2b: the linker-merged module is a fresh
+                    // assembly — recompute the band map on the final
+                    // table, then synthesize intrinsic wrappers for the
+                    // residue (same discipline as the source-driven
+                    // path above).
+                    let _ = merged.resolve_external_bands();
+                    let _ = merged.synthesize_intrinsic_band_wrappers();
                     return Ok(std::sync::Arc::new(merged));
                 }
             }

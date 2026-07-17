@@ -178,6 +178,11 @@ impl<'s> CompilationPipeline<'s> {
                     // AOT lowering resolves cross-module band ids
                     // against the FINAL table.
                     let _ = mono_module.resolve_external_bands();
+                    // T0103 LEG-2b: re-bind any residue to synthesized
+                    // intrinsic wrappers (pre-mono wrappers survive the
+                    // clone and re-resolve by exact name; this covers
+                    // names the mono reassembly newly orphaned).
+                    let _ = mono_module.synthesize_intrinsic_band_wrappers();
                     std::sync::Arc::new(mono_module)
                 }
                 Err(diagnostics) => {
