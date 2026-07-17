@@ -87,6 +87,30 @@ P3 nice-to-have.
      what is LANDED on main, not to another session's unstaged state.
    * Never run two AOT suites concurrently on this machine (known
      harness constraint) — `tp note` that you are starting one.
+6. **Absolute paths or `git -C` — always** (the 2026-07-17 lesson,
+   hit independently by three sessions in one day): the harness may
+   reset a shell's cwd into a DIFFERENT worktree between commands
+   (e.g. `.claude/worktrees/<other-task>`). A relative-path
+   `git status` / test run / file edit then reads or writes a foreign
+   tree — a clean foreign checkout at HEAD is indistinguishable from
+   "all my uncommitted work was erased", and a relative-path commit
+   lands on a foreign branch. Discipline:
+   * every git command names its tree: `git -C <abs-checkout> …`;
+   * every file edit and test invocation uses absolute paths (or an
+     explicit `--manifest-path`);
+   * before ANY conclusion about tree state — and before destructive
+     recovery based on such a conclusion — run `pwd` +
+     `git rev-parse --show-toplevel` and check they name the tree you
+     think you are in.
+7. **Parallel-session edit isolation**: concurrent sessions/agents
+   edit ONLY inside their own `git worktree` (branch per task); the
+   main checkout is a commit/integration zone. Never run
+   state-changing git (`checkout -f`, `restore`, `clean`, `stash`,
+   branch switches) against a tree another session may be editing —
+   if a shared tree looks wedged (conflict markers, stale locks),
+   post a `tp note`, wait, and only then recover the MINIMAL scope
+   with the owner's work preserved (a conflicted stash-pop keeps its
+   stash entry — restoring the two conflicted files loses nothing).
 6. **Task files are append-mostly**: fix typos freely in your own
    claimed task, but never rewrite another session's journal; never
    delete task files (the ID space depends on them).
