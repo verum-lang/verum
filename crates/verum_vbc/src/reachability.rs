@@ -25,8 +25,12 @@
 //!  * `CallM` dispatches by NAME at runtime (with runtime type
 //!  switches over every same-name candidate), so every function
 //!  whose bare method name matches a called method name is kept —
-//!  this is exactly the candidate set AOT's
-//!  `build_runtime_type_switch` can reach.
+//!  narrowed by type evidence: a RECORD type's methods are excluded
+//!  while no `New`/`NewG` of that type appears in reachable code
+//!  (variants, newtypes, primitives, and well-known builtins stay
+//!  conservatively included). A type becoming reachable also pulls
+//!  its implicit edges — drop glue, clone glue, protocol
+//!  dispatch-table methods.
 //!  * Function references materialised as VALUES (`Constant::Function`
 //!  entries, `FfiExtended::CreateCallback` payloads) are roots —
 //!  anything that can flow into an indirect call stays.
@@ -56,6 +60,11 @@ pub struct Reachability {
     /// Method names invoked via `CallM` anywhere in reachable code —
     /// used for the conservative by-name candidate closure.
     pub called_method_names: HashSet<String>,
+    /// Type ids whose instances are constructed in reachable code
+    /// (`New` / `NewG`). Marking a type reachable also pulls its
+    /// implicit function edges: `drop_fn`, `clone_fn`, and protocol
+    /// dispatch-table methods.
+    pub reachable_type_ids: HashSet<u32>,
 }
 
 /// Compute the conservative reachable set for `module`.
@@ -94,6 +103,12 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
         .iter()
         .filter_map(|(fid, sid)| module.strings.get(*sid).map(|s| (fid.0, s)))
         .collect();
+
+    // Type table index (types are also positionally indexed by the
+    // `New`/`NewG` type-table operand, but the descriptor's own id is
+    // the authority the rest of the toolchain keys on).
+    let type_by_id: HashMap<u32, &crate::types::TypeDescriptor> =
+        module.types.iter().map(|t| (t.id.0, t)).collect();
 
     let mut out = Reachability::default();
     let mut queue: VecDeque<u32> = VecDeque::new();
@@ -163,6 +178,26 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
                         }
                     }
                 }
+                Instruction::New { type_id, .. } | Instruction::NewG { type_id, .. } => {
+                    if out.reachable_type_ids.insert(*type_id) {
+                        // Implicit function edges of a live type:
+                        // drop glue, clone glue, and protocol
+                        // dispatch-table methods can all be invoked
+                        // without a textual call site.
+                        if let Some(td) = type_by_id.get(type_id) {
+                            for f in td
+                                .drop_fn
+                                .iter()
+                                .chain(td.clone_fn.iter())
+                                .chain(td.protocols.iter().flat_map(|p| p.methods.iter()))
+                            {
+                                if out.reachable_ids.insert(*f) {
+                                    queue.push_back(*f);
+                                }
+                            }
+                        }
+                    }
+                }
                 Instruction::CallM { method_id, .. } => {
                     if let Some(name) = module.strings.get(crate::types::StringId(*method_id)) {
                         // Dispatch tokens like `dyn:Proto.method` and
@@ -208,12 +243,42 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
     // function whose bare name matches a called method name becomes
     // reachable (its body may introduce new direct edges and new
     // method names — iterate to a fixed point).
+    // A by-name candidate is kept unless we can PROVE its receiver
+    // type cannot exist: methods of RECORD types whose construction
+    // (`New`/`NewG`) never appears in reachable code are excluded.
+    // Non-record parents (variants materialise via `MakeVariant`
+    // with no type operand; newtypes/aliases/primitives via
+    // conversions) and well-known builtin containers (instances come
+    // from dedicated instructions / runtime helpers) stay
+    // conservatively included.
+    let candidate_possible = |fid: u32, out: &Reachability| -> bool {
+        let Some(&pos) = by_id.get(&fid) else {
+            return true;
+        };
+        match module.functions[pos].parent_type {
+            None => true,
+            Some(tid) => {
+                out.reachable_type_ids.contains(&tid.0)
+                    || match type_by_id.get(&tid.0) {
+                        Some(td) => {
+                            td.kind != crate::types::TypeKind::Record
+                                || module
+                                    .strings
+                                    .get(td.name)
+                                    .map(verum_common::well_known_types::WellKnownType::is_well_known)
+                                    .unwrap_or(true)
+                        }
+                        None => true,
+                    }
+            }
+        }
+    };
     loop {
         let mut newly: Vec<u32> = Vec::new();
         for (bare, ids) in &by_bare_name {
             if out.called_method_names.contains(*bare) {
                 for id in ids {
-                    if !out.reachable_ids.contains(id) {
+                    if !out.reachable_ids.contains(id) && candidate_possible(*id, &out) {
                         newly.push(*id);
                     }
                 }
@@ -312,6 +377,82 @@ mod tests {
             "candidate body edges followed"
         );
         assert!(!r.reachable_ids.contains(&4), "dead stays dead");
+    }
+
+    #[test]
+    fn record_method_candidates_gated_on_type_construction() {
+        use crate::types::{TypeDescriptor, TypeId, TypeKind};
+        // main CallM's "tick"; Gadget.tick is a RECORD-parented method.
+        // Without a New{Gadget} in reachable code the candidate is
+        // excluded; adding the New pulls it in.
+        let build = |construct: bool| {
+            let mut m = module_with(vec![("main", vec![]), ("Gadget.tick", vec![])]);
+            let tname = m.intern_string("Gadget");
+            let mut td = TypeDescriptor::default();
+            td.id = TypeId(7);
+            td.name = tname;
+            td.kind = TypeKind::Record;
+            m.types.push(td);
+            m.functions[1].parent_type = Some(TypeId(7));
+            let mid = m.intern_string("tick");
+            let instrs = m.functions[0].instructions.as_mut().unwrap();
+            if construct {
+                instrs.push(Instruction::New {
+                    dst: crate::instruction::Reg(0),
+                    type_id: 7,
+                    field_count: 0,
+                });
+            }
+            instrs.push(Instruction::CallM {
+                dst: crate::instruction::Reg(0),
+                receiver: crate::instruction::Reg(0),
+                method_id: mid.0,
+                args: crate::instruction::RegRange {
+                    start: crate::instruction::Reg(0),
+                    count: 0,
+                },
+            });
+            m
+        };
+        let without = analyze(&build(false));
+        assert!(
+            !without.reachable_ids.contains(&1),
+            "record method excluded while its type is never constructed"
+        );
+        let with = analyze(&build(true));
+        assert!(
+            with.reachable_ids.contains(&1),
+            "record method included once New{{Gadget}} is reachable"
+        );
+    }
+
+    #[test]
+    fn reachable_type_pulls_drop_glue() {
+        use crate::types::{TypeDescriptor, TypeId, TypeKind};
+        let mut m = module_with(vec![
+            (
+                "main",
+                vec![Instruction::New {
+                    dst: crate::instruction::Reg(0),
+                    type_id: 3,
+                    field_count: 0,
+                }],
+            ),
+            ("Gadget.drop", vec![]),
+        ]);
+        let tname = m.intern_string("Gadget");
+        let mut td = TypeDescriptor::default();
+        td.id = TypeId(3);
+        td.name = tname;
+        td.kind = TypeKind::Record;
+        td.drop_fn = Some(1);
+        m.types.push(td);
+        let r = analyze(&m);
+        assert!(
+            r.reachable_ids.contains(&1),
+            "drop glue of a constructed type is an implicit edge"
+        );
+        assert!(r.reachable_type_ids.contains(&3));
     }
 
     #[test]
