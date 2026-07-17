@@ -7439,6 +7439,56 @@ impl VbcCodegen {
                 Ok(Some(None))
             }
 
+            // T0231 (PRINT-POLY-PRELUDE-SHADOW-1): the stderr twins are
+            // polymorphic at the type level (`fn<T>(T) -> Unit`, same
+            // as print/println) but their stdlib bodies take `&Text`
+            // and write fd 2. Lower a non-Text argument through the
+            // ONE value→text conversion authority, then call the real
+            // stdlib function so stderr semantics live in exactly one
+            // place. A Text argument falls through to the ordinary
+            // call path unchanged. A non-Text argument with NO stdlib
+            // body in scope is a structural contradiction (the poly
+            // typecheck acceptance implies the prelude bound the name)
+            // — fail LOUDLY rather than fall through to a call that
+            // would hand a non-Text value to a `&Text` body.
+            "eprint" | "eprintln" if args.len() == 1 => {
+                let is_text_arg = matches!(
+                    self.infer_expr_type_kind(&args[0]),
+                    Some(verum_ast::ty::TypeKind::Text)
+                );
+                let stdlib_fn = self.ctx.lookup_function(name).map(|f| f.id);
+                match (is_text_arg, stdlib_fn) {
+                    (false, Some(fn_id)) => {
+                        let arg_reg = self
+                            .compile_expr(&args[0])?
+                            .or_internal("eprint arg has no value")?;
+                        let text_reg = self.ctx.alloc_temp();
+                        self.emit_value_to_text(&args[0], arg_reg, text_reg)?;
+                        self.ctx.free_temp(arg_reg);
+                        let dst = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::Call {
+                            dst,
+                            func_id: fn_id.0,
+                            args: crate::instruction::RegRange {
+                                start: text_reg,
+                                count: 1,
+                            },
+                        });
+                        self.ctx.free_temp(text_reg);
+                        self.ctx.free_temp(dst);
+                        Ok(Some(None))
+                    }
+                    (false, None) => Err(CodegenError::internal(format!(
+                        "{}: polymorphic print-family builtin lowered with a \
+                         non-Text argument but no stdlib body in scope — \
+                         prelude missing? (typecheck accepted the call, so \
+                         the name must be bound)",
+                        name
+                    ))),
+                    (true, _) => Ok(None),
+                }
+            }
+
             // FLOAT-AOT-FNEG-1: `fneg`/`fabs` are always-float intrinsics whose
             // stdlib bodies route through the polymorphic PolyNeg/PolyAbs, whose
             // AOT lowering integer-ops the float bit pattern (type erased to i64
@@ -37429,6 +37479,57 @@ impl VbcCodegen {
     }
 
     /// Compiles interpolated string: f"Hello {name}"
+    /// **ONE value→text conversion authority** for codegen (T0231).
+    /// Type-directed: Text passes through, Char/Float take their typed
+    /// conversions (the Float leg carries the decision in the bytecode
+    /// so AOT formats correctly without register marks — task #36),
+    /// a user `Display` impl dispatches, and everything else falls
+    /// back to the runtime formatter via `ToString`. Shared by the
+    /// f-string interpolation path and the print-family builtin
+    /// lowering — duplicating this switch is the drift class the
+    /// redundancy directive bans.
+    fn emit_value_to_text(
+        &mut self,
+        expr: &Expr,
+        expr_reg: Reg,
+        str_reg: Reg,
+    ) -> CodegenResult<()> {
+        let expr_type = self.infer_expr_type_kind(expr);
+        let type_name = match &expr_type {
+            Some(verum_ast::ty::TypeKind::Char) => "Char",
+            Some(verum_ast::ty::TypeKind::Text) => "Text",
+            Some(verum_ast::ty::TypeKind::Float) => "Float",
+            Some(verum_ast::ty::TypeKind::Path(path)) => {
+                match path.as_ident().map(|id| id.name.as_str()) {
+                    Some("Char") => "Char",
+                    Some("Text") => "Text",
+                    Some("Float") | Some("Float64") | Some("Float32") => "Float",
+                    _ => "",
+                }
+            }
+            _ => "",
+        };
+        if type_name == "Text" {
+            self.ctx.emit(Instruction::Mov {
+                dst: str_reg,
+                src: expr_reg,
+            });
+        } else if type_name == "Char" {
+            self.ctx.emit(Instruction::CharToStr {
+                dst: str_reg,
+                src: expr_reg,
+            });
+        } else if type_name == "Float" {
+            self.emit_intrinsic_library_call("verum_float_to_text", &[expr_reg], str_reg)?;
+        } else if !self.try_emit_display_dispatch(expr, expr_reg, str_reg)? {
+            self.ctx.emit(Instruction::ToString {
+                dst: str_reg,
+                src: expr_reg,
+            });
+        }
+        Ok(())
+    }
+
     fn compile_interpolated_string(
         &mut self,
         _handler: &verum_common::Text,
@@ -37471,57 +37572,7 @@ impl VbcCodegen {
                 .or_internal("interpolation expr has no value")?;
 
             let str_reg = self.ctx.alloc_temp();
-
-            // Check expression type to choose the right string conversion
-            let expr_type = self.infer_expr_type_kind(expr);
-            let type_name = match &expr_type {
-                Some(verum_ast::ty::TypeKind::Char) => "Char",
-                Some(verum_ast::ty::TypeKind::Text) => "Text",
-                // task #36: a concrete Float payload (e.g. from a generic
-                // `Maybe<Float>` match, now that #36 resolves the generic return
-                // type) uses the typed float→text conversion — the runtime
-                // ToString relies on register marks that an unmarked i64 payload
-                // lacks under AOT, so it would print raw float bits.
-                Some(verum_ast::ty::TypeKind::Float) => "Float",
-                Some(verum_ast::ty::TypeKind::Path(path)) => {
-                    match path.as_ident().map(|id| id.name.as_str()) {
-                        Some("Char") => "Char",
-                        Some("Text") => "Text",
-                        Some("Float") | Some("Float64") | Some("Float32") => "Float",
-                        _ => "",
-                    }
-                }
-                _ => "",
-            };
-
-            if type_name == "Text" {
-                // Text is already a string — just copy the register directly
-                self.ctx.emit(Instruction::Mov {
-                    dst: str_reg,
-                    src: expr_reg,
-                });
-            } else if type_name == "Char" {
-                self.ctx.emit(Instruction::CharToStr {
-                    dst: str_reg,
-                    src: expr_reg,
-                });
-            } else if type_name == "Float" {
-                // Typed float→text — carries the type decision in the bytecode so
-                // both tiers format correctly regardless of runtime register marks.
-                self.emit_intrinsic_library_call("verum_float_to_text", &[expr_reg], str_reg)?;
-            } else if !self.try_emit_display_dispatch(expr, expr_reg, str_reg)? {
-                // No user-defined Display impl for `expr`'s static type
-                // (or the type is non-introspectable) — fall back to the
-                // runtime Debug-style formatter via `ToString`.  This
-                // preserves the existing behaviour for primitives
-                // (Int / Float / Bool / Byte / Int32 / UInt64 / …)
-                // which have dedicated branches inside
-                // `format_value_for_print`.
-                self.ctx.emit(Instruction::ToString {
-                    dst: str_reg,
-                    src: expr_reg,
-                });
-            }
+            self.emit_value_to_text(expr, expr_reg, str_reg)?;
             self.ctx.free_temp(expr_reg);
 
             // Concatenate

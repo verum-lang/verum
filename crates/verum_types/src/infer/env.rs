@@ -6457,6 +6457,50 @@ pub const IO_AND_NUMERIC_BUILTIN_NAMES: &[&str] = &[
 
 impl TypeChecker {
 
+    /// **ONE-authority guarded function-scheme insert** (T0231 /
+    /// PRINT-POLY-PRELUDE-SHADOW-1). Every channel that can bind a
+    /// function scheme into the env by NAME must route through here —
+    /// the protection that keeps a polymorphic compiler intrinsic
+    /// (`print: fn<T>(T) -> Unit`) from being DOWNGRADED by a concrete
+    /// stdlib re-registration (`core/io/stdio.vr print(&Text)`) used
+    /// to live only in `register_function_signature`, while the
+    /// implicit-prelude import replay
+    /// (`import_item_from_module_body`) inserted unconditionally and
+    /// clobbered the scheme — every bare `print(42)` then failed with
+    /// a false E400 on BOTH tiers even though the runtime intrinsic
+    /// accepts any value.
+    ///
+    /// Rules (byte-identical to the historical `decls.rs` logic):
+    ///  * META_REFLECTION builtins: never overwritten once present.
+    ///  * IO_AND_NUMERIC builtins: a strictly LESS generic scheme
+    ///    never replaces a more generic one (mono-vs-mono untouched —
+    ///    the numerics overload story is tracked separately).
+    ///  * Everything else: plain insert.
+    ///
+    /// Returns whether the insert happened.
+    pub(crate) fn insert_fn_scheme_guarded(
+        &mut self,
+        name: &str,
+        scheme: crate::context::TypeScheme,
+    ) -> bool {
+        let should_skip = if META_REFLECTION_BUILTIN_NAMES.contains(&name) {
+            self.ctx.env.lookup(name).is_some()
+        } else if IO_AND_NUMERIC_BUILTIN_NAMES.contains(&name) {
+            match self.ctx.env.lookup(name) {
+                Some(existing) => {
+                    !existing.vars.is_empty() && scheme.vars.len() < existing.vars.len()
+                }
+                None => false,
+            }
+        } else {
+            false
+        };
+        if !should_skip {
+            self.ctx.env.insert(verum_common::Text::from(name), scheme);
+        }
+        !should_skip
+    }
+
     /// Register true compiler intrinsics that cannot be defined in stdlib.
     /// These require compiler-level support (source location, never-return, polymorphic output, etc.)
     fn register_intrinsics(&mut self) {
@@ -6484,6 +6528,29 @@ impl TypeChecker {
         self.ctx
             .env
             .insert(verum_common::Text::from("println"), println_scheme);
+
+        // eprint / eprintln: fn<T>(T) -> Unit — the stderr twins of
+        // print/println (T0231/T0235). Their poly registration is only
+        // sound because VBC codegen carries the tier-coherence leg:
+        // print/println lower to `DebugPrint` (format-anything on both
+        // tiers), while eprint/eprintln lower a non-Text argument
+        // through `emit_value_to_text` (the ONE value→text conversion
+        // authority shared with f-string interpolation) and then Call
+        // the real stdlib `eprint(&Text)` body — so Tier 0's by-name
+        // intercept (stdio_runtime.rs `intercept_write`) and Tier 1's
+        // compiled stdlib body both receive a genuine Text. Do NOT
+        // register additional print-family names poly without wiring
+        // the codegen leg first — a poly scheme without a lowering is
+        // a false-accept that miscompiles under AOT.
+        for io_name in ["eprint", "eprintln"] {
+            let t = TypeVar::fresh();
+            let params = List::from_iter([Type::Var(t)]);
+            let ty = Type::function(params, Type::unit());
+            let scheme = TypeScheme::poly(List::from_iter([t]), ty);
+            self.ctx
+                .env
+                .insert(verum_common::Text::from(io_name), scheme);
+        }
 
         // Register format function: fn<T>(Text, ...) -> Text
         // Verum's format() takes a format string and variadic args
@@ -12660,7 +12727,11 @@ mod builtin_protection_pin_tests {
     fn io_polymorphic_intrinsics_present() {
         let mut checker = TypeChecker::new();
         checker.register_builtins();
-        for name in ["print", "println"] {
+        // eprint/eprintln ride on the VBC codegen tier-coherence leg
+        // (`emit_value_to_text` + the eprint lowering arm) — see the
+        // registration comment in `register_intrinsics` before adding
+        // more names here.
+        for name in ["print", "println", "eprint", "eprintln"] {
             let scheme = checker.ctx.env.lookup(name).unwrap_or_else(|| {
                 panic!(
                     "expected '{}' to be registered as a polymorphic compiler intrinsic",
@@ -12674,5 +12745,73 @@ mod builtin_protection_pin_tests {
                 name,
             );
         }
+    }
+
+    /// T0231 / PRINT-POLY-PRELUDE-SHADOW-1 regression pin.  The
+    /// protection rule used to live only in
+    /// `register_function_signature`; the implicit-prelude import
+    /// replay (`import_item_from_module_body`) inserted the concrete
+    /// stdlib `print(&Text)` descriptor into the env UNGUARDED and
+    /// clobbered the polymorphic intrinsic — every bare `print(42)`
+    /// then failed with a false E400 on check/run/build.  This pins
+    /// the ONE-authority helper (`insert_fn_scheme_guarded`) that all
+    /// registration channels now route through: a strictly less
+    /// generic scheme must NOT replace a protected polymorphic one,
+    /// while unlisted names keep plain last-write-wins semantics.
+    #[test]
+    fn io_polymorphic_intrinsics_survive_concrete_reregistration() {
+        let mut checker = TypeChecker::new();
+        checker.register_builtins();
+
+        let mono_text_sig = || {
+            TypeScheme::mono(Type::function(
+                List::from_iter([Type::Reference {
+                    inner: Box::new(Type::text()),
+                    mutable: false,
+                }]),
+                Type::unit(),
+            ))
+        };
+
+        // The concrete stdlib re-registration (what the prelude replay
+        // delivers for `core.io.stdio.print`) must be refused.
+        for name in ["print", "println", "eprint", "eprintln"] {
+            let inserted = checker.insert_fn_scheme_guarded(name, mono_text_sig());
+            assert!(
+                !inserted,
+                "guarded insert must REFUSE downgrading the polymorphic '{}' \
+                 intrinsic to a concrete fn(&Text) -> Unit",
+                name,
+            );
+            let scheme = checker
+                .ctx
+                .env
+                .lookup(name)
+                .unwrap_or_else(|| panic!("'{}' vanished from the env", name));
+            assert!(
+                !scheme.vars.is_empty(),
+                "'{}' must still be polymorphic after a refused concrete \
+                 re-registration",
+                name,
+            );
+        }
+
+        // Negative control: names OUTSIDE the protected lists keep the
+        // ordinary import semantics (later registration wins).
+        let control = "t0231_unprotected_control_fn";
+        assert!(
+            checker.insert_fn_scheme_guarded(control, mono_text_sig()),
+            "unlisted names must insert freely",
+        );
+        assert!(
+            checker.insert_fn_scheme_guarded(control, mono_text_sig()),
+            "unlisted names must remain overwritable",
+        );
+
+        // Meta reflection builtins: never overwritten once present.
+        assert!(
+            !checker.insert_fn_scheme_guarded("type_name", mono_text_sig()),
+            "meta builtin 'type_name' must never be overwritten",
+        );
     }
 }
