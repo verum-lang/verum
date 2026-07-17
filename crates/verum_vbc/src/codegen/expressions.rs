@@ -646,6 +646,74 @@ impl VbcCodegen {
     /// took at registration), so the caller can wire it through
     /// `emit_make_variant`'s typed-form gate which keys off
     /// `type_name_to_id`.
+    /// **BARE-VARIANT-FIELD-1 (T0170).** Position of `field_name` in a
+    /// record-style variant named `variant_name`, resolved WITHOUT a
+    /// parent qualifier by scanning every type descriptor. Returns the
+    /// position ONLY when every type that declares such a variant
+    /// agrees on it — the same soundness bar the qualified
+    /// `find_variant_in_type_descriptors` path enforces per parent.
+    ///
+    /// A record-variant destructured through a `match` binding reaches
+    /// the field resolver as the bare variant name (`Pi`, not
+    /// `CoreTerm.Pi`); this recovers its authoritative layout so the
+    /// access emits a positional `GetF` instead of tripping the
+    /// FIELD-GUESS-HARD-1 diagnostic and degrading to the by-name
+    /// door. Disagreement across sibling sum types (the
+    /// `AllocationFailed { code }` vs `{ code, size }` collision class)
+    /// returns `None`, leaving the caller's guess — and thus the
+    /// runtime by-name resolution — intact.
+    pub(super) fn unique_variant_field_position(
+        &self,
+        variant_name: &str,
+        field_name: &str,
+    ) -> Option<u32> {
+        // GUARD (regression fix): only treat `variant_name` as a
+        // bare VARIANT when it is NOT itself a registered type name.
+        // A record type `Foo` (fields [a, b, c]) can coexist with a
+        // same-named record-style VARIANT `Foo` in an unrelated sum
+        // type (fields [x]); when `Foo`'s own descriptor is
+        // momentarily unregistered (the registration-order window
+        // this whole class lives in), scanning variants would return
+        // the VARIANT's slot for a `Foo` RECORD field access — the
+        // exact mis-resolution the record-descriptor path above exists
+        // to prevent. If the name resolves to a real type descriptor,
+        // that path already owns it (or its by-name door does);
+        // never let the variant scan shadow a nominal type.
+        if self.type_name_to_id.contains_key(variant_name) {
+            return None;
+        }
+        let mut agreed: Option<u32> = None;
+        for type_desc in self.types.iter() {
+            for variant in type_desc.variants.iter() {
+                let vn = match self.ctx.strings.get(variant.name.0 as usize) {
+                    Some(s) => s.as_str(),
+                    None => continue,
+                };
+                if vn != variant_name {
+                    continue;
+                }
+                let pos = variant.fields.iter().position(|fd| {
+                    self.ctx
+                        .strings
+                        .get(fd.name.0 as usize)
+                        .is_some_and(|s| s == field_name)
+                });
+                match pos {
+                    // This declaration has no such field — irrelevant.
+                    None => {}
+                    Some(p) => match agreed {
+                        None => agreed = Some(p as u32),
+                        // Two declarations disagree — ambiguous, bail
+                        // to the by-name door.
+                        Some(prev) if prev != p as u32 => return None,
+                        Some(_) => {}
+                    },
+                }
+            }
+        }
+        agreed
+    }
+
     pub(super) fn find_variant_in_type_descriptors(
         &self,
         parent_path: &str,

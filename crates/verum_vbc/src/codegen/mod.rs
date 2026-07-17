@@ -17578,6 +17578,26 @@ impl VbcCodegen {
                     return (pos as u32, false);
                 }
             }
+            // **BARE-VARIANT-FIELD-1 (T0170).** A record-style variant
+            // destructured through a `match` binding
+            // (`match t { CoreTerm.Pi { domain, body } => …body… }`)
+            // reaches the resolver as the BARE variant name `Pi` — not
+            // `CoreTerm.Pi` — so the qualified arm above misses, `Pi`
+            // is not itself a Record type, and the access fell through
+            // to a guess (loud FIELD-GUESS-HARD-1 + by-name fallback:
+            // correct at runtime, but a false alarm and a slower path).
+            // The variant name pins the layout unambiguously when
+            // EVERY type declaring a variant `tn` agrees on the
+            // position of `field_name` — the same soundness bar the
+            // qualified arm relies on. Disagreement (the
+            // `AllocationFailed { code }` vs `{ code, size }` sibling-
+            // collision class) leaves the guess intact so the by-name
+            // door still resolves it exactly at runtime.
+            if !tn.contains('.')
+                && let Some(pos) = self.unique_variant_field_position(tn, field_name)
+            {
+                return (pos, false);
+            }
             // Try exact match first
             if let Some(fields) = self.type_field_layouts.get(tn)
                 && let Some(pos) = fields.iter().position(|f| f == field_name)
