@@ -2501,7 +2501,9 @@ impl TypeChecker {
                             } else {
                                 TypeScheme::poly(type_vars, func_type)
                             };
-                            self.ctx.env.insert(register_name, scheme);
+                            // T0231: guarded — a prelude/mount import
+                            // must not downgrade a builtin's poly scheme.
+                            self.insert_fn_scheme_guarded(register_name, scheme);
                         } else if let Some((func_type, type_vars, _source_path)) = self
                             .find_function_with_source_module(
                                 &module_info.ast,
@@ -2519,7 +2521,9 @@ impl TypeChecker {
                             } else {
                                 TypeScheme::poly(type_vars, func_type)
                             };
-                            self.ctx.env.insert(register_name, scheme);
+                            // T0231: guarded — a prelude/mount import
+                            // must not downgrade a builtin's poly scheme.
+                            self.insert_fn_scheme_guarded(register_name, scheme);
                         } else if let Some(scheme) = {
                             let s = self.resolve_function_via_metadata_reexports(
                                 resolved_module_path.as_str(),
@@ -2546,7 +2550,8 @@ impl TypeChecker {
                             // `metadata.functions` (keyed by the source
                             // module's qualified name) it surfaces the
                             // descriptor without any source-walk.
-                            self.ctx.env.insert(register_name, scheme);
+                            // T0231: guarded (see insert_fn_scheme_guarded).
+                            self.insert_fn_scheme_guarded(register_name, scheme);
                         } else if let Some(source_module) = self
                             .reexport_source_module_for(resolved_module_path.as_str(), item_name)
                             .filter(|s| s.as_str() != resolved_module_path.as_str())
@@ -2892,7 +2897,8 @@ impl TypeChecker {
                                 } else {
                                     TypeScheme::poly(type_vars, func_type)
                                 };
-                                self.ctx.env.insert(register_name, scheme);
+                                // T0231: guarded (see insert_fn_scheme_guarded).
+                                self.insert_fn_scheme_guarded(register_name, scheme);
                                 found = true;
                             } else if let Some((type_decl, _source)) = self
                                 .find_type_declaration_with_source_module(
@@ -3074,7 +3080,8 @@ impl TypeChecker {
                                     } else {
                                         TypeScheme::poly(type_vars, func_type)
                                     };
-                                    self.ctx.env.insert(register_name, scheme);
+                                    // T0231: guarded (see insert_fn_scheme_guarded).
+                                    self.insert_fn_scheme_guarded(register_name, scheme);
                                 }
                                 return Ok(());
                             }
@@ -9321,8 +9328,12 @@ impl TypeChecker {
         // Don't register impl block methods as standalone functions in the environment.
         // Methods like `Drop.drop(&mut self)` would otherwise overwrite builtins like
         // the polymorphic `drop: ∀T. fn(T) -> Unit`.
+        // T0231: guarded — the body-check self-registration was the
+        // stdlib-source-mode twin of the prelude clobber (the signature
+        // pass skipped the concrete `print(&Text)` but this insert put
+        // it right back). Same ONE authority as every other channel.
         if !self.in_impl_block {
-            self.ctx.env.insert(func.name.name.as_str(), scheme);
+            self.insert_fn_scheme_guarded(func.name.name.as_str(), scheme);
         }
 
         // Type check body
@@ -10543,7 +10554,8 @@ impl TypeChecker {
             )
         };
         if !self.in_impl_block {
-            self.ctx.env.insert(func.name.name.as_str(), final_scheme);
+            // T0231: guarded — see the initial-scheme twin above.
+            self.insert_fn_scheme_guarded(func.name.name.as_str(), final_scheme);
         }
 
         // Validate postconditions (ensures clauses) via SMT

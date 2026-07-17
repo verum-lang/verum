@@ -6652,32 +6652,14 @@ impl TypeChecker {
         // drift is pinned by the `meta_reflection_builtins_all_registered`
         // and `io_and_numeric_builtins_pinned` tests.
         let func_name = func.name.name.as_str();
-        let should_skip_registration = {
-            // Meta reflection builtins: ALWAYS protect.  The compiler registers
-            // fn<T>(T) -> Bool / fn<T>(T) -> Int for compile-time type
-            // inspection; any stdlib re-declaration is a less-correct stub.
-            let is_meta_builtin = crate::infer::env::META_REFLECTION_BUILTIN_NAMES
-                .contains(&func_name);
-            if is_meta_builtin {
-                self.ctx.env.lookup(func_name).is_some()
-            } else {
-                // I/O and arithmetic builtins: protect when existing is MORE generic.
-                let is_potentially_protected = crate::infer::env::IO_AND_NUMERIC_BUILTIN_NAMES
-                    .contains(&func_name);
-                if is_potentially_protected {
-                    if let Some(existing) = self.ctx.env.lookup(func_name) {
-                        !existing.vars.is_empty() && scheme.vars.len() < existing.vars.len()
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-        };
-        if !should_skip_registration {
-            self.ctx.env.insert(func.name.name.as_str(), scheme);
-        }
+        // T0231: the predicate lives in ONE place now —
+        // `TypeChecker::insert_fn_scheme_guarded` (env.rs, next to the
+        // canonical name lists) — because this registration path was
+        // only ONE of the channels that bind fn schemes by name; the
+        // prelude import replay (`import_item_from_module_body`)
+        // bypassed the inline copy of the rule and clobbered the
+        // polymorphic print/println intrinsics.
+        let should_skip_registration = !self.insert_fn_scheme_guarded(func_name, scheme);
 
         // Calculate required params (those without default values)
         // Default params must come after required params, so find first default
