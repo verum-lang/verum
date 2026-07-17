@@ -269,6 +269,22 @@ pub struct VbcModule {
     #[serde(default)]
     pub external_function_names: Vec<(FunctionId, StringId)>,
 
+    /// **CROSS-MODULE-CALL-STRINGID (T0144)** — carried-fact band
+    /// resolution: `band/stub FunctionId → concrete merged-table
+    /// FunctionId`, computed ONCE per assembled module by
+    /// [`Self::resolve_external_bands`] and consulted FIRST by every
+    /// consumer (Tier-0 Call dispatch, AOT band-id lowering) before
+    /// any per-consumer name chase. NOT serialized: the map is a fact
+    /// about the FINAL merged function table, not about the wire
+    /// module (the same archive merges into different user tables).
+    ///
+    /// Bytecode is deliberately NOT rewritten — band-id varints are
+    /// wider than concrete ids and re-encoding would shift every
+    /// branch offset (the envelope-pc lesson); a lookup table keeps
+    /// the id spaces disjoint and the resolution single-sourced.
+    #[serde(skip)]
+    pub resolved_band_map: std::collections::HashMap<u32, FunctionId>,
+
     /// Mount-rename alias table — Phase 1 of task #11 fundamental fix
     /// (see `task11-mount-alias-aot-fix spec`).
     ///
@@ -428,6 +444,7 @@ impl VbcModule {
             framework_provenance: FrameworkProvenance::default(),
             discharge_receipts: Vec::new(),
             external_function_names: Vec::new(),
+            resolved_band_map: std::collections::HashMap::new(),
             mount_aliases: Vec::new(),
             type_idx_by_id: std::sync::OnceLock::new(),
         }
@@ -746,6 +763,47 @@ impl VbcModule {
             }
         }
         self.find_function_by_name(name)
+    }
+
+    /// **T0144** — compute the carried-fact band-resolution map for
+    /// this ASSEMBLED module: every `(band/stub id, qualified name)`
+    /// entry in [`Self::external_function_names`] is resolved against
+    /// the final function table via
+    /// [`Self::resolve_function_by_name_ranked`] (exact → head-strip
+    /// → ranked qualified-suffix). Call ONCE after the module reaches
+    /// its final shape (post archive/mono merge); consumers then use
+    /// [`Self::resolve_band_id`]. Returns the entries that did NOT
+    /// resolve — callers surface them loudly (they are calls whose
+    /// target body is genuinely absent from the module).
+    pub fn resolve_external_bands(&mut self) -> Vec<(u32, String)> {
+        let mut unresolved: Vec<(u32, String)> = Vec::new();
+        let mut resolved: std::collections::HashMap<u32, FunctionId> =
+            std::collections::HashMap::with_capacity(self.external_function_names.len());
+        let entries: Vec<(u32, String)> = self
+            .external_function_names
+            .iter()
+            .filter_map(|(fid, sid)| {
+                self.get_string(*sid).map(|n| (fid.0, n.to_string()))
+            })
+            .collect();
+        for (band_id, name) in entries {
+            match self.resolve_function_by_name_ranked(&name) {
+                Some(target) if target.0 != band_id => {
+                    resolved.insert(band_id, target);
+                }
+                _ => unresolved.push((band_id, name)),
+            }
+        }
+        self.resolved_band_map = resolved;
+        unresolved
+    }
+
+    /// **T0144** — consult the carried-fact band resolution. Returns
+    /// the concrete merged-table id for a band/stub reference id, when
+    /// [`Self::resolve_external_bands`] resolved it.
+    #[inline]
+    pub fn resolve_band_id(&self, id: u32) -> Option<FunctionId> {
+        self.resolved_band_map.get(&id).copied()
     }
 
     /// Ranked qualified-name resolution over THIS module's function

@@ -20579,6 +20579,21 @@ impl VbcCodegen {
             }
         }
 
+        // T0144: compute the carried-fact band-resolution map on the
+        // assembled module (external_function_names → final function
+        // table, ranked). Consumers (Tier-0 dispatch, AOT lowering)
+        // consult it FIRST; entries that stay unresolved keep their
+        // band encoding and surface through the existing loud paths.
+        let unresolved_bands = module.resolve_external_bands();
+        if !unresolved_bands.is_empty() {
+            tracing::debug!(
+                "T0144 band resolution: {} of {} external references remain unresolved (first: {:?})",
+                unresolved_bands.len(),
+                module.external_function_names.len(),
+                unresolved_bands.first().map(|(_, n)| n.as_str())
+            );
+        }
+
         Ok(module)
     }
 

@@ -9782,7 +9782,17 @@ fn lower_call<'ctx>(
     // above.  Pre-fix every transitively-cross-module Call whose target
     // lives in an unmounted archive module aborted the entire AOT lowering
     // of the enclosing function, cascading into ~50+ skipped fn warnings.
-    let func_desc = match vbc_mod.get_function(FunctionId(resolved_id)) {
+    // T0144: carried-fact band resolution first — computed once at
+    // module assembly; a hit yields the FINAL merged-table id (no
+    // func_id_base rebase applies). Misses fall through to the legacy
+    // per-site chase unchanged.
+    let func_desc = if let Some(d) = vbc_mod
+        .resolve_band_id(func_id)
+        .and_then(|fid| vbc_mod.get_function(fid))
+    {
+        d
+    } else {
+        match vbc_mod.get_function(FunctionId(resolved_id)) {
         Some(d) => d,
         None => match vbc_mod.get_function(FunctionId(func_id)) {
             Some(d) => d,
@@ -9935,6 +9945,7 @@ fn lower_call<'ctx>(
                 }
             }
         },
+        }
     };
     let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
     // AOT-INTRINSIC-QUALIFIED-NAME-1: descriptor names arrive

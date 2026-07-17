@@ -76,6 +76,15 @@ pub(in super::super) fn handle_call(
     // for the case where even that fallback misses (e.g. the producing
     // module failed to compile, the unique-name index has no real-body
     // entry, or the body lives only in a still-unloaded archive).
+    //
+    // T0144: the carried-fact band-resolution map (computed once at
+    // module assembly) is consulted FIRST — one resolution point for
+    // cross-module band/stub references instead of per-dispatch
+    // chases. Misses fall through to the loud paths unchanged.
+    let func_id = state
+        .module
+        .resolve_band_id(func_id.0)
+        .unwrap_or(func_id);
     let stub_stage = crate::stub_ranges::stage_of(func_id.0);
 
     // Get function descriptor — extract needed fields to release borrow.
@@ -551,6 +560,12 @@ pub(in super::super) fn handle_call_generic(
     // `handle_call` — a stub-range id surviving to CallG dispatch is
     // an unresolved BY-NAME reference and must die LOUD with its
     // stage/class, never the bare `Function N not found`.
+    //
+    // T0144: carried-fact band resolution first (see handle_call).
+    let func_id = state
+        .module
+        .resolve_band_id(func_id.0)
+        .unwrap_or(func_id);
     let stub_stage = crate::stub_ranges::stage_of(func_id.0);
 
     // Get function descriptor — extract needed fields to release borrow

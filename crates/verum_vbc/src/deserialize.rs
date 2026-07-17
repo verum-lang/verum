@@ -74,7 +74,14 @@ struct ExtensionsData {
 /// edited by hand).
 pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
  let mut deserializer = Deserializer::new(data);
- deserializer.deserialize()
+ let mut module = deserializer.deserialize()?;
+ // T0144: the carried-fact band-resolution map is serde(skip) — a
+ // deserialized module (script cache, cog artifacts) recomputes it
+ // here so Tier-0 dispatch and AOT lowering resolve band ids the
+ // same way a freshly-assembled module does. Unresolved leftovers
+ // stay band-encoded and surface through the existing loud paths.
+ let _unresolved = module.resolve_external_bands();
+ Ok(module)
 }
 
 /// Deserializes a VBC module from binary data **and** runs the
@@ -425,6 +432,7 @@ impl<'a> Deserializer<'a> {
  header,
  name,
  strings,
+ resolved_band_map: std::collections::HashMap::new(),
  types,
  functions,
  constants,

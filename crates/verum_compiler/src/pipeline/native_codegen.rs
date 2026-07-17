@@ -168,11 +168,16 @@ impl<'s> CompilationPipeline<'s> {
             };
             let mut mono = mono;
             match mono.monomorphize(&vbc_module) {
-                Ok(mono_module) => {
+                Ok(mut mono_module) => {
                     info!(
                         "  Monomorphization complete: {} functions",
                         mono_module.functions.len()
                     );
+                    // T0144: the mono merge reassembles the function
+                    // table — recompute the carried-fact band map so
+                    // AOT lowering resolves cross-module band ids
+                    // against the FINAL table.
+                    let _ = mono_module.resolve_external_bands();
                     std::sync::Arc::new(mono_module)
                 }
                 Err(diagnostics) => {
