@@ -98,6 +98,14 @@ impl std::fmt::Display for FloatLiteral {
 pub struct InterpolatedStringLiteral {
     pub prefix: Text,
     pub content: Text,
+    /// Whether the literal segments are RAW (no escape decoding) —
+    /// true for the triple-quoted form `f"""…"""` (symmetric with the
+    /// plain `"""…"""` raw string), false for the single-quoted
+    /// `f"…"` (T0151: its literal parts decode escapes exactly like a
+    /// plain `"…"`; before this flag every f-string part was pushed
+    /// verbatim, so `f"\x1b[{n}A"` emitted the four chars `\x1b`
+    /// instead of ESC — 121 core/ sites, ANSI/JSON-`\u`/Windows-paths).
+    pub raw: bool,
 }
 
 impl std::fmt::Display for InterpolatedStringLiteral {
@@ -2451,7 +2459,12 @@ fn parse_interpolated_string(
                     let content = Text::from(&remainder[..i]);
                     // Bump past the content and closing quote
                     lex.bump(i + 1);
-                    return Some(InterpolatedStringLiteral { prefix, content });
+                    // Single-quoted `f"…"`: literal parts decode escapes.
+                    return Some(InterpolatedStringLiteral {
+                        prefix,
+                        content,
+                        raw: false,
+                    });
                 } else {
                     // We're inside an interpolation expression - this is a nested string literal
                     // Skip this string literal entirely
@@ -2593,7 +2606,13 @@ fn parse_interpolated_multiline_string(
                 let literal_quotes = count - 3;
                 let content = Text::from(&remainder[..start + literal_quotes]);
                 lex.bump(i);
-                return Some(InterpolatedStringLiteral { prefix, content });
+                // Triple-quoted `f"""…"""`: RAW literal segments,
+                // symmetric with the plain `"""…"""` raw string.
+                return Some(InterpolatedStringLiteral {
+                    prefix,
+                    content,
+                    raw: true,
+                });
             }
             // 1-2 quotes at brace_depth 0: just content, continue
             continue;

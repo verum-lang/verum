@@ -501,6 +501,14 @@ pub enum SerializedTokenKind {
         prefix: String,
         /// String content with interpolation placeholders.
         content: String,
+        /// Whether the literal segments are raw (triple-quoted
+        /// `f"""…"""`). `serde(default)` = false decodes pre-T0151
+        /// caches as single-quoted (their escapes decode) — safe: the
+        /// script-cache wire version (T0197/T0219) bumps on any real
+        /// behavioural change, and a stale-but-single-quoted decode
+        /// only re-decodes escapes a re-lex would have decoded anyway.
+        #[serde(default)]
+        raw: bool,
     },
     /// Tagged literal (e.g., `sql"SELECT ..."`).
     TaggedLiteral {
@@ -726,6 +734,7 @@ impl SerializedTokenKind {
             TokenKind::InterpolatedString(lit) => SerializedTokenKind::InterpolatedString {
                 prefix: lit.prefix.to_string(),
                 content: lit.content.to_string(),
+                raw: lit.raw,
             },
             TokenKind::TaggedLiteral(lit) => SerializedTokenKind::TaggedLiteral {
                 tag: lit.tag.to_string(),
@@ -915,12 +924,15 @@ impl SerializedTokenKind {
             SerializedTokenKind::Error => TokenKind::Error,
 
             // Interpolation
-            SerializedTokenKind::InterpolatedString { prefix, content } => {
-                TokenKind::InterpolatedString(InterpolatedStringLiteral {
-                    prefix: Text::from(prefix.as_str()),
-                    content: Text::from(content.as_str()),
-                })
-            }
+            SerializedTokenKind::InterpolatedString {
+                prefix,
+                content,
+                raw,
+            } => TokenKind::InterpolatedString(InterpolatedStringLiteral {
+                prefix: Text::from(prefix.as_str()),
+                content: Text::from(content.as_str()),
+                raw: *raw,
+            }),
             SerializedTokenKind::TaggedLiteral { tag, content } => {
                 TokenKind::TaggedLiteral(TaggedLiteralData {
                     tag: Text::from(tag.as_str()),

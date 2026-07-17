@@ -3461,17 +3461,28 @@ impl<'a> RecursiveParser<'a> {
         use verum_lexer::InterpolatedStringLiteral;
 
         // Extract values first before calling parse_interpolated_content
-        let (prefix, content, span, file_id) = match self.stream.advance() {
+        let (prefix, content, raw, span, file_id) = match self.stream.advance() {
             Some(Token {
-                kind: TokenKind::InterpolatedString(InterpolatedStringLiteral { prefix, content }),
+                kind:
+                    TokenKind::InterpolatedString(InterpolatedStringLiteral {
+                        prefix,
+                        content,
+                        raw,
+                    }),
                 span,
-            }) => (prefix.clone(), content.clone(), *span, span.file_id),
+            }) => (prefix.clone(), content.clone(), *raw, *span, span.file_id),
             _ => unreachable!(),
         };
 
-        // Parse the interpolated content to extract parts and expressions
-        let (parts, exprs) =
-            crate::safe_interpolation::parse_interpolated_content(self, content.as_str(), file_id)?;
+        // Parse the interpolated content to extract parts and expressions.
+        // `raw` (triple-quoted `f"""…"""`) suppresses escape decoding of
+        // the literal segments (T0151).
+        let (parts, exprs) = crate::safe_interpolation::parse_interpolated_content(
+            self,
+            content.as_str(),
+            file_id,
+            raw,
+        )?;
 
         // Create an InterpolatedString expression with parsed parts and expressions
         Ok(Expr::new(

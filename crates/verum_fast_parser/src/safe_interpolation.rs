@@ -35,9 +35,26 @@ pub fn parse_interpolated_content(
     parser: &mut RecursiveParser,
     content: &str,
     file_id: verum_ast::FileId,
+    raw: bool,
 ) -> ParseResult<(Vec<Text>, Vec<Expr>)> {
     let mut parts = Vec::new();
     let mut exprs = Vec::new();
+
+    // T0151: a literal segment decodes escapes exactly like a plain
+    // `"…"` string (single-quoted f-strings), UNLESS the whole literal
+    // is raw (triple-quoted `f"""…"""`). The split-then-decode order
+    // is load-bearing: the content is scanned for `{`/`}` FIRST — over
+    // the raw source spelling — so a `\x7b` cannot fabricate an
+    // interpolation brace, and only after a part is fully collected do
+    // we resolve its escapes. Unknown escapes are preserved verbatim
+    // by `unescape_string` (rx-style `\d` etc.), so no new rejections.
+    let finish_part = |p: &str| -> Text {
+        if raw {
+            Text::from(p)
+        } else {
+            verum_lexer::token::unescape_string(p)
+        }
+    };
 
     let mut current_part = String::new();
     let mut chars = content.chars().peekable();
@@ -57,8 +74,8 @@ pub fn parse_interpolated_content(
                 }
 
                 // Start of interpolation
-                // Save the current part
-                parts.push(Text::from(current_part.as_str()));
+                // Save the current part (escape-decoded unless raw).
+                parts.push(finish_part(&current_part));
                 current_part.clear();
 
                 // Extract the expression between { and }
@@ -121,8 +138,8 @@ pub fn parse_interpolated_content(
         }
     }
 
-    // Add the final part
-    parts.push(Text::from(current_part.as_str()));
+    // Add the final part (escape-decoded unless raw).
+    parts.push(finish_part(&current_part));
 
     Ok((parts, exprs))
 }
@@ -621,7 +638,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -637,7 +654,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
 
             assert_eq!(parts.len(), 4);
             assert_eq!(exprs.len(), 3);
@@ -655,7 +672,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -671,7 +688,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -688,7 +705,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -705,7 +722,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
 
             assert_eq!(parts.len(), 2);
             assert_eq!(exprs.len(), 1);
@@ -721,7 +738,7 @@ mod tests {
 
         with_parser("", |parser| {
             let (parts, exprs) =
-                parse_interpolated_content(parser, content, file_id).expect("should parse");
+                parse_interpolated_content(parser, content, file_id, false).expect("should parse");
 
             assert_eq!(parts.len(), 1);
             assert_eq!(exprs.len(), 0);
@@ -735,7 +752,7 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let result = parse_interpolated_content(parser, content, file_id);
+            let result = parse_interpolated_content(parser, content, file_id, false);
             assert!(result.is_err());
         });
     }
@@ -746,7 +763,7 @@ mod tests {
         let file_id = FileId::new(0);
 
         with_parser("", |parser| {
-            let result = parse_interpolated_content(parser, content, file_id);
+            let result = parse_interpolated_content(parser, content, file_id, false);
             assert!(result.is_err());
         });
     }
