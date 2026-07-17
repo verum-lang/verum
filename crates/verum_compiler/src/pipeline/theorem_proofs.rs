@@ -79,7 +79,7 @@ impl<'s> CompilationPipeline<'s> {
                         debug!(
                             "Closure cache enabled at {} (kernel={})",
                             root.display(),
-                            verum_verification::closure_cache::KERNEL_VERSION
+                            verum_verification::closure_cache::KERNEL_VERSION.as_str()
                         );
                         Some(s)
                     }
@@ -213,7 +213,7 @@ impl<'s> CompilationPipeline<'s> {
                 }
                 let cite_refs: Vec<&str> = citations.iter().map(String::as_str).collect();
                 let fp = ClosureFingerprint::compute(
-                    verum_verification::closure_cache::KERNEL_VERSION,
+                    verum_verification::closure_cache::KERNEL_VERSION.as_str(),
                     signature_payload.as_bytes(),
                     body_payload.as_bytes(),
                     &cite_refs,
@@ -240,8 +240,12 @@ impl<'s> CompilationPipeline<'s> {
                                 cert.steps.len(),
                                 cert.total_duration.as_secs_f64() * 1000.0
                             );
+                            if cert.has_incomplete_steps {
+                                self.emit_admitted_proof_warning(thm, kind_name);
+                            }
                             CachedVerdict::Ok {
                                 elapsed_ms: elapsed,
+                                admitted: cert.has_incomplete_steps,
                             }
                         }
                         ProofVerificationResult::Failed { unproved, .. } => {
@@ -258,6 +262,7 @@ impl<'s> CompilationPipeline<'s> {
                                     debug!("    hint: {}", s);
                                 }
                             }
+                            self.emit_theorem_proof_failure(thm, kind_name, &unproved);
                             CachedVerdict::Failed {
                                 reason: verum_common::Text::from(format!(
                                     "{} unproved goal(s)",
@@ -275,6 +280,16 @@ impl<'s> CompilationPipeline<'s> {
                     if let CachedCheckOutcome::Hit { cached, .. } = &outcome {
                         cache_hits += 1;
                         verified_count += 1; // Cached Ok counts as verified.
+                        // An admitted proof stays loud on every
+                        // compilation — the cache carries the flag so
+                        // hits re-emit the warning without SMT work.
+                        if let verum_verification::closure_cache::CachedVerdict::Ok {
+                            admitted: true,
+                            ..
+                        } = &cached.verdict
+                        {
+                            self.emit_admitted_proof_warning(thm, kind_name);
+                        }
                         debug!(
                             "✓ {} '{}' cached (hit, recorded_at={})",
                             kind_name, thm.name.name, cached.recorded_at,
@@ -301,6 +316,9 @@ impl<'s> CompilationPipeline<'s> {
                                 cert.steps.len(),
                                 cert.total_duration.as_secs_f64() * 1000.0
                             );
+                            if cert.has_incomplete_steps {
+                                self.emit_admitted_proof_warning(thm, kind_name);
+                            }
                         }
                         ProofVerificationResult::Failed { unproved, .. } => {
                             failed_count += 1;
@@ -316,6 +334,7 @@ impl<'s> CompilationPipeline<'s> {
                                     debug!("    hint: {}", s);
                                 }
                             }
+                            self.emit_theorem_proof_failure(thm, kind_name, &unproved);
                         }
                     }
                 }
@@ -351,6 +370,58 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         Ok(())
+    }
+
+    /// E0319 — a written proof that does not discharge is a compile
+    /// error, exactly like a type error (PROOF-TACTIC-ACCEPT-1 /
+    /// T0105). Before this gate the outcome was a `tracing` warn —
+    /// invisible at default log levels — and the build proceeded, so
+    /// invalid proofs passed silently. The in-language escape hatches
+    /// stay available and explicit: drop the proof body (axiom) or
+    /// admit it (`proof by admit` → W0319 warning).
+    fn emit_theorem_proof_failure(
+        &self,
+        thm: &verum_ast::decl::TheoremDecl,
+        kind_name: &str,
+        unproved: &verum_common::List<crate::phases::proof_verification::UnprovedSubgoal>,
+    ) {
+        let mut message = format!(
+            "{} '{}' proof failed verification: {} unproved goal(s)",
+            kind_name,
+            thm.name.name,
+            unproved.len()
+        );
+        for goal in unproved.iter().take(3) {
+            message.push_str(&format!("\n  unproved: {}", goal.goal));
+            if let Some(hint) = goal.suggestions.iter().next() {
+                message.push_str(&format!("\n    hint: {}", hint));
+            }
+        }
+        if unproved.len() > 3 {
+            message.push_str(&format!("\n  … and {} more", unproved.len() - 3));
+        }
+        self.session
+            .emit_diagnostic(verum_diagnostics::Diagnostic::new_error(
+                message,
+                self.session.convert_span(thm.span),
+                "E0319",
+            ));
+    }
+
+    /// W0319 — an admitted proof (`admit` / `sorry` anywhere in the
+    /// proof body) compiles but stays loud on EVERY compilation,
+    /// including closure-cache hits: the proposition is unverified
+    /// and downstream reasoning must not trust it.
+    fn emit_admitted_proof_warning(&self, thm: &verum_ast::decl::TheoremDecl, kind_name: &str) {
+        self.session
+            .emit_diagnostic(verum_diagnostics::Diagnostic::new_warning(
+                format!(
+                    "{} '{}' proof is admitted (admit/sorry) — the proposition is UNVERIFIED",
+                    kind_name, thm.name.name
+                ),
+                self.session.convert_span(thm.span),
+                "W0319",
+            ));
     }
 }
 

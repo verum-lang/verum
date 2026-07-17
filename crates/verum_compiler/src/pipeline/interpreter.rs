@@ -856,6 +856,12 @@ impl<'s> CompilationPipeline<'s> {
             self.phase_ffi_validation(&module)?;
         }
 
+        // Diagnostic gate (T0105): phases above emit error diagnostics
+        // without returning Err (e.g. E0319 proof-verification
+        // failures) — they must stop the build BEFORE LLVM codegen,
+        // and accumulated warnings (W0319 admitted-proof) must render.
+        self.diagnostic_gate()?;
+
         // Phase 5c: rayon fence before LLVM codegen.
         //
 

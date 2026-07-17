@@ -178,7 +178,12 @@ impl<'s> VerifyCommand<'s> {
             .load_file(&input)
             .with_context(|| format!("Failed to load: {}", input.display()))?;
 
-        // Parse and type check
+        // Parse and type check. The check-only pre-pass must NOT run
+        // the pipeline's own SMT verification phase — this command IS
+        // the verifier and re-runs every obligation below with richer
+        // reporting; leaving the default mode would verify each
+        // theorem twice and emit duplicate diagnostics.
+        self.session.options_mut().verify_mode = crate::options::VerifyMode::Runtime;
         let mut pipeline = CompilationPipeline::new(self.session);
         pipeline.run_check_only()?;
 

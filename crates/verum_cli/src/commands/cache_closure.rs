@@ -196,8 +196,11 @@ fn emit_entry_plain(e: &CacheEntry) {
     );
     println!("Verdict:");
     match &e.verdict {
-        CachedVerdict::Ok { elapsed_ms } => {
-            println!("  status  : ok");
+        CachedVerdict::Ok {
+            elapsed_ms,
+            admitted,
+        } => {
+            println!("  status  : ok{}", if *admitted { " (admitted)" } else { "" });
             println!("  elapsed : {}ms", elapsed_ms);
         }
         CachedVerdict::Failed { reason } => {
@@ -239,10 +242,13 @@ fn emit_entry_json(e: &CacheEntry) {
     out.push_str("  },\n");
     out.push_str("  \"verdict\": ");
     match &e.verdict {
-        CachedVerdict::Ok { elapsed_ms } => {
+        CachedVerdict::Ok {
+            elapsed_ms,
+            admitted,
+        } => {
             out.push_str(&format!(
-                "{{ \"status\": \"ok\", \"elapsed_ms\": {} }}\n",
-                elapsed_ms
+                "{{ \"status\": \"ok\", \"elapsed_ms\": {}, \"admitted\": {} }}\n",
+                elapsed_ms, admitted
             ));
         }
         CachedVerdict::Failed { reason } => {
@@ -319,7 +325,7 @@ fn emit_decision_plain(d: &CacheDecision, fp: &ClosureFingerprint, theorem: &str
         CacheDecision::Skip { cached } => {
             println!("Decision : skip   (cache hit)");
             println!("  cached_at      : {}", cached.recorded_at);
-            if let CachedVerdict::Ok { elapsed_ms } = &cached.verdict {
+            if let CachedVerdict::Ok { elapsed_ms, .. } = &cached.verdict {
                 println!("  cached_elapsed : {}ms", elapsed_ms);
             }
         }
@@ -407,8 +413,14 @@ fn emit_decision_json(d: &CacheDecision, fp: &ClosureFingerprint, theorem: &str)
 
 fn verdict_json(v: &CachedVerdict) -> String {
     match v {
-        CachedVerdict::Ok { elapsed_ms } => {
-            format!("{{ \"status\": \"ok\", \"elapsed_ms\": {} }}", elapsed_ms)
+        CachedVerdict::Ok {
+            elapsed_ms,
+            admitted,
+        } => {
+            format!(
+                "{{ \"status\": \"ok\", \"elapsed_ms\": {}, \"admitted\": {} }}",
+                elapsed_ms, admitted
+            )
         }
         CachedVerdict::Failed { reason } => format!(
             "{{ \"status\": \"failed\", \"reason\": \"{}\" }}",
@@ -464,7 +476,7 @@ mod tests {
             .put(&CacheEntry {
                 theorem_name: Text::from(name),
                 fingerprint: make_fp(),
-                verdict: CachedVerdict::Ok { elapsed_ms: 10 },
+                verdict: CachedVerdict::Ok { elapsed_ms: 10, admitted: false },
                 recorded_at: 0,
             })
             .unwrap();
@@ -567,7 +579,7 @@ mod tests {
             .put(&CacheEntry {
                 theorem_name: Text::from("thm.x"),
                 fingerprint: fp,
-                verdict: CachedVerdict::Ok { elapsed_ms: 5 },
+                verdict: CachedVerdict::Ok { elapsed_ms: 5, admitted: false },
                 recorded_at: 0,
             })
             .unwrap();

@@ -1129,15 +1129,21 @@ impl<'s> CompilationPipeline<'s> {
 
         let num_to_verify = functions_to_verify.len();
 
+        // NOTE (T0105): no early return when zero functions carry
+        // refinement types — Phase 4b (theorem/lemma/corollary proofs)
+        // and Phase 4c (implement-site axiom discharge) below must run
+        // regardless. The old `return Ok(())` here silently skipped
+        // ALL theorem verification in any module without a
+        // refinement-typed function — the common case for proof-only
+        // files — so invalid proofs passed every tier of the pipeline.
         if num_to_verify == 0 {
             debug!("No functions with refinement types found");
-            return Ok(());
+        } else {
+            info!(
+                "Verifying {} function(s) with refinement types",
+                num_to_verify
+            );
         }
-
-        info!(
-            "Verifying {} function(s) with refinement types",
-            num_to_verify
-        );
 
         // ───────────────────────────────────────────────────────────
         // Parallel per-function verification (#100, Z3 + CVC5).

@@ -66,10 +66,23 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
 
-/// The kernel version stamped into every cache fingerprint. Re-export
-/// so consumer crates that don't depend on `verum_kernel` directly can
-/// still reach the canonical value through the verification crate.
-pub use verum_kernel::VVA_VERSION as KERNEL_VERSION;
+/// Verdict-schema revision, folded into [`KERNEL_VERSION`] and thereby
+/// into every fingerprint. Bump when the [`CachedVerdict`] payload
+/// gains semantics that entries recorded before the change cannot
+/// express — rev 2: `Ok::admitted` (an admitted proof must keep
+/// emitting its unverified-proposition warning on cache hits; a stale
+/// `admitted: false` serde default would silence it forever).
+const VERDICT_SCHEMA_REV: u32 = 2;
+
+/// The version string stamped into every cache fingerprint: the
+/// kernel's `VVA_VERSION` (any kernel-rule edit changes the trust
+/// boundary) composed with this module's verdict-schema revision
+/// (any verdict-payload semantics change invalidates recorded
+/// verdicts). Consumer crates reach the canonical value through this
+/// static without depending on `verum_kernel` directly.
+pub static KERNEL_VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!("{}+vs{}", verum_kernel::VVA_VERSION, VERDICT_SCHEMA_REV)
+});
 
 // =============================================================================
 // ClosureFingerprint — the cache key
@@ -156,6 +169,15 @@ pub enum CachedVerdict {
     Ok {
         /// Wall time consumed during the recorded check (ms).
         elapsed_ms: u64,
+        /// Whether the proof was accepted via `admit` / `sorry` —
+        /// the proposition is UNVERIFIED and every compilation that
+        /// serves this verdict (hit or miss) must re-emit the
+        /// admitted-proof warning. `serde(default)` only exists for
+        /// decode robustness; entries recorded before this field are
+        /// unreachable because [`VERDICT_SCHEMA_REV`] participates in
+        /// the fingerprint.
+        #[serde(default)]
+        admitted: bool,
     },
     /// Kernel rejected the theorem. Stored so the cache can short-
     /// circuit obviously-broken obligations under
@@ -954,7 +976,7 @@ mod tests {
         CacheEntry {
             theorem_name: Text::from(name),
             fingerprint: fp,
-            verdict: CachedVerdict::Ok { elapsed_ms: 42 },
+            verdict: CachedVerdict::Ok { elapsed_ms: 42, admitted: false },
             recorded_at: now_secs(),
         }
     }
@@ -1323,7 +1345,7 @@ mod tests {
         let calls = std::cell::Cell::new(0);
         let outcome = cached_check(&s, "thm.x", &fp, || {
             calls.set(calls.get() + 1);
-            CachedVerdict::Ok { elapsed_ms: 7 }
+            CachedVerdict::Ok { elapsed_ms: 7, admitted: false }
         });
         assert_eq!(calls.get(), 1, "verify closure must run on miss");
         assert!(!outcome.was_hit());
@@ -1351,18 +1373,18 @@ mod tests {
         // Warm the cache.
         cached_check(&s, "thm.x", &fp, || {
             calls.set(calls.get() + 1);
-            CachedVerdict::Ok { elapsed_ms: 7 }
+            CachedVerdict::Ok { elapsed_ms: 7, admitted: false }
         });
         // Second call must hit cache.
         let outcome = cached_check(&s, "thm.x", &fp, || {
             calls.set(calls.get() + 1);
-            CachedVerdict::Ok { elapsed_ms: 99 }
+            CachedVerdict::Ok { elapsed_ms: 99, admitted: false }
         });
         assert_eq!(calls.get(), 1, "verify closure must NOT run on hit");
         assert!(outcome.was_hit());
         // The hit's verdict is the *cached* one (elapsed_ms=7), not
         // whatever the (un-run) closure would have returned.
-        if let CachedVerdict::Ok { elapsed_ms } = outcome.verdict() {
+        if let CachedVerdict::Ok { elapsed_ms, .. } = outcome.verdict() {
             assert_eq!(*elapsed_ms, 7);
         } else {
             panic!("expected Ok verdict");
@@ -1376,13 +1398,13 @@ mod tests {
         let calls = std::cell::Cell::new(0);
         cached_check(&s, "thm.x", &fp_old, || {
             calls.set(calls.get() + 1);
-            CachedVerdict::Ok { elapsed_ms: 1 }
+            CachedVerdict::Ok { elapsed_ms: 1, admitted: false }
         });
         // Bump kernel version → must miss with KernelVersionChanged.
         let fp_new = fp_v("2.7.0");
         let outcome = cached_check(&s, "thm.x", &fp_new, || {
             calls.set(calls.get() + 1);
-            CachedVerdict::Ok { elapsed_ms: 2 }
+            CachedVerdict::Ok { elapsed_ms: 2, admitted: false }
         });
         assert_eq!(calls.get(), 2, "kernel-version drift must re-run");
         match outcome {
@@ -1410,7 +1432,7 @@ mod tests {
         });
         let outcome = cached_check(&s, "thm.x", &fp, || {
             calls.set(calls.get() + 1);
-            CachedVerdict::Ok { elapsed_ms: 1 }
+            CachedVerdict::Ok { elapsed_ms: 1, admitted: false }
         });
         assert_eq!(
             calls.get(),
@@ -1450,7 +1472,7 @@ mod tests {
         }
         let s = FailingStore;
         let fp = fp_v("2.6.0");
-        let outcome = cached_check(&s, "thm.x", &fp, || CachedVerdict::Ok { elapsed_ms: 5 });
+        let outcome = cached_check(&s, "thm.x", &fp, || CachedVerdict::Ok { elapsed_ms: 5, admitted: false });
         match outcome {
             CachedCheckOutcome::Miss {
                 verdict,
@@ -1557,7 +1579,7 @@ mod tests {
         assert!(CachedVerdictKind::Ok.is_ok());
         assert!(!CachedVerdictKind::Failed.is_ok());
         // Cross-pin: CachedVerdict::is_ok agrees with kind().is_ok.
-        let v_ok = CachedVerdict::Ok { elapsed_ms: 100 };
+        let v_ok = CachedVerdict::Ok { elapsed_ms: 100, admitted: false };
         let v_failed = CachedVerdict::Failed {
             reason: Text::from("dummy"),
         };

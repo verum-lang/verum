@@ -2859,6 +2859,20 @@ impl ProofBody {
     pub fn is_directly_constructive(&self) -> bool {
         self.is_term()
     }
+
+    /// Whether an `admit` / `sorry` occurs anywhere in this proof body
+    /// — the flag behind "proof admitted, proposition unverified"
+    /// diagnostics. Term proofs carry no tactics and always report
+    /// `false`. See [`TacticExpr::contains_unsafe`] for the
+    /// conservative-over-approximation contract.
+    pub fn contains_unsafe(&self) -> bool {
+        match self {
+            ProofBody::Term(_) => false,
+            ProofBody::Tactic(tactic) => tactic.contains_unsafe(),
+            ProofBody::Structured(structure) => structure.contains_unsafe(),
+            ProofBody::ByMethod(method) => method.contains_unsafe(),
+        }
+    }
 }
 
 /// A structured proof with intermediate steps.
@@ -3265,6 +3279,163 @@ impl TacticExpr {
     /// Check if this tactic is unsafe (leaves goals unproven)
     pub fn is_unsafe(&self) -> bool {
         matches!(self, TacticExpr::Admit | TacticExpr::Sorry)
+    }
+
+    /// Recursively check whether an `admit` / `sorry` occurs anywhere
+    /// in this tactic's combinator tree (`seq`, `try`, `first`,
+    /// `match`, `if`, …). This is the single authority behind
+    /// "the proof is admitted" — [`ProofBody::contains_unsafe`] and
+    /// every certificate builder derive their incomplete flag from it.
+    ///
+    /// Conservative over-approximation: `first [trivial, admit]`
+    /// reports `true` even though proof search may close the goal via
+    /// `trivial` alone — an admitted alternative written in the source
+    /// is still an unverified escape hatch worth surfacing. False
+    /// negatives are the defect class this method exists to kill: the
+    /// previous detector string-matched lowercase `"admit"` against a
+    /// `Debug` render that produces `"Admit"`, so structured and
+    /// method proofs never reported incompleteness at all.
+    ///
+    /// `Named` tactics are opaque here (their bodies resolve later in
+    /// the engine); an admit inside a user tactic body is accounted
+    /// for when that body is checked, not at the call site.
+    pub fn contains_unsafe(&self) -> bool {
+        match self {
+            // The escape hatches themselves.
+            TacticExpr::Admit | TacticExpr::Sorry => true,
+
+            // Single-child combinators.
+            TacticExpr::Try(inner)
+            | TacticExpr::Repeat(inner)
+            | TacticExpr::AllGoals(inner)
+            | TacticExpr::Focus(inner) => inner.contains_unsafe(),
+
+            TacticExpr::TryElse { body, fallback } => {
+                body.contains_unsafe() || fallback.contains_unsafe()
+            }
+
+            // Multi-child combinators.
+            TacticExpr::Seq(tactics) | TacticExpr::Alt(tactics) => {
+                tactics.iter().any(|t| t.contains_unsafe())
+            }
+
+            TacticExpr::Match { arms, .. } => arms.iter().any(|arm| arm.body.contains_unsafe()),
+
+            TacticExpr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                then_branch.contains_unsafe()
+                    || matches!(else_branch, Maybe::Some(e) if e.contains_unsafe())
+            }
+
+            // Leaf tactics — every variant listed explicitly so a new
+            // combinator fails compilation here instead of silently
+            // defaulting to "not admitted".
+            TacticExpr::Trivial
+            | TacticExpr::Assumption
+            | TacticExpr::Reflexivity
+            | TacticExpr::Done
+            | TacticExpr::Contradiction
+            | TacticExpr::Intro(_)
+            | TacticExpr::Apply { .. }
+            | TacticExpr::Rewrite { .. }
+            | TacticExpr::Simp { .. }
+            | TacticExpr::Ring
+            | TacticExpr::Field
+            | TacticExpr::Omega
+            | TacticExpr::Auto { .. }
+            | TacticExpr::Blast
+            | TacticExpr::Smt { .. }
+            | TacticExpr::Split
+            | TacticExpr::Left
+            | TacticExpr::Right
+            | TacticExpr::Exists(_)
+            | TacticExpr::CasesOn(_)
+            | TacticExpr::InductionOn(_)
+            | TacticExpr::Exact(_)
+            | TacticExpr::Unfold(_)
+            | TacticExpr::Compute
+            | TacticExpr::Named { .. }
+            | TacticExpr::Let { .. }
+            | TacticExpr::Fail { .. } => false,
+        }
+    }
+}
+
+impl ProofStructure {
+    /// Whether any step or the conclusion of this structured proof
+    /// contains an `admit` / `sorry`. See [`TacticExpr::contains_unsafe`].
+    pub fn contains_unsafe(&self) -> bool {
+        self.steps.iter().any(|s| s.contains_unsafe())
+            || matches!(&self.conclusion, Maybe::Some(c) if c.contains_unsafe())
+    }
+}
+
+impl ProofStep {
+    /// Whether this proof step contains an `admit` / `sorry` in any
+    /// justification or nested sub-proof. See
+    /// [`TacticExpr::contains_unsafe`].
+    pub fn contains_unsafe(&self) -> bool {
+        self.kind.contains_unsafe()
+    }
+}
+
+impl ProofStepKind {
+    /// Recursive admit/sorry detection over step payloads. Every
+    /// variant is listed explicitly so a new step kind fails
+    /// compilation here instead of silently defaulting.
+    pub fn contains_unsafe(&self) -> bool {
+        match self {
+            ProofStepKind::Have { justification, .. }
+            | ProofStepKind::Show { justification, .. }
+            | ProofStepKind::Suffices { justification, .. } => justification.contains_unsafe(),
+
+            ProofStepKind::Let { .. } | ProofStepKind::Obtain { .. } => false,
+
+            ProofStepKind::Calc(chain) => chain.contains_unsafe(),
+
+            ProofStepKind::Cases { cases, .. } => cases.iter().any(|c| c.contains_unsafe()),
+
+            ProofStepKind::Focus { steps, .. } => steps.iter().any(|s| s.contains_unsafe()),
+
+            ProofStepKind::Tactic(tactic) => tactic.contains_unsafe(),
+        }
+    }
+}
+
+impl CalculationChain {
+    /// Whether any calculation-step justification contains an
+    /// `admit` / `sorry`. See [`TacticExpr::contains_unsafe`].
+    pub fn contains_unsafe(&self) -> bool {
+        self.steps.iter().any(|s| s.justification.contains_unsafe())
+    }
+}
+
+impl ProofCase {
+    /// Whether this case's sub-proof contains an `admit` / `sorry`.
+    /// See [`TacticExpr::contains_unsafe`].
+    pub fn contains_unsafe(&self) -> bool {
+        self.proof.iter().any(|s| s.contains_unsafe())
+    }
+}
+
+impl ProofMethod {
+    /// Whether any case or sub-proof of this proof method contains an
+    /// `admit` / `sorry`. Every variant is listed explicitly so a new
+    /// method fails compilation here instead of silently defaulting.
+    pub fn contains_unsafe(&self) -> bool {
+        match self {
+            ProofMethod::Induction { cases, .. }
+            | ProofMethod::Cases { cases, .. }
+            | ProofMethod::StrongInduction { cases, .. }
+            | ProofMethod::WellFoundedInduction { cases, .. } => {
+                cases.iter().any(|c| c.contains_unsafe())
+            }
+
+            ProofMethod::Contradiction { proof, .. } => proof.iter().any(|s| s.contains_unsafe()),
+        }
     }
 }
 

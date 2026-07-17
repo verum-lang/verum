@@ -223,7 +223,17 @@ pub mod observational_equality; // OTT: type-directed equality
 pub mod pi_calculus; // π-calculus process algebra
 pub mod poly_kinds; // Polymorphic kinds: kind variables + unification
 pub mod projection; // Associated type projection resolution (Associated type bounds: constraining associated types in where clauses (where T.Item: Display)
-pub mod proof_checker; // Proof type checker (Formal proof system (future v2.0+): machine-checkable proofs with tactics (simp, ring, omega, blast, induction), theorem/lemma/corollary statements — )
+// NOTE (T0105 / PROOF-TACTIC-ACCEPT-1): a `proof_checker` module used
+// to live here — a second, never-wired proof checker whose tactic
+// arms were `Ok(())` "for now, accept" (it would have passed any
+// invalid proof). It had ZERO callers workspace-wide; per the
+// redundancy-elimination directive the lying duplicate was REMOVED
+// rather than speculatively implemented. The live proof-checking
+// authority is `verum_compiler::phases::proof_verification` (AST →
+// `verum_smt::ProofSearchEngine` discharge, orchestrated by
+// `pipeline::theorem_proofs::verify_theorem_proofs`, surfaced as
+// E0319/W0319 diagnostics). Any future type-level proof checking
+// must integrate with that path, not resurrect a parallel one.
 pub mod proof_obligations; // T1-R phase 2: model-theoretic discharge of protocol axioms
 pub mod protocol;
 pub mod references; // Deref protocol implementations for reference types
@@ -324,7 +334,6 @@ pub use module_context::{
     DependencyGraph, FunctionTypeInfo, InferenceState, ModuleContext, ModuleInferenceMetrics,
     ModuleTypeInference, TypeSource,
 };
-pub use proof_checker::ProofChecker;
 pub use subtype::Subtyping;
 pub use ty::{
     // Dependent Types (Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — )

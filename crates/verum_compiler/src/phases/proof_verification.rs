@@ -1245,6 +1245,14 @@ fn verify_proof_steps_accumulating_ctx(
                 // "ambient" goal is. Since structured proofs thread goals
                 // implicitly, we create a trivial goal and execute the tactic
                 // for its side-effects on the hypothesis context.
+                //
+                // Soundness: this step can neither close nor corrupt the
+                // theorem's goal — the primary goal is discharged
+                // independently by the conclusion tactic / implicit `Auto`
+                // closer in `verify_structured_proof`, and an `admit`/`sorry`
+                // written here is surfaced through the AST-level
+                // `ProofStructure::contains_unsafe` walk, not through this
+                // execution.
                 let tactic = convert_tactic(tactic_expr);
                 let trivial_goal = ProofGoal::with_hypotheses(
                     Expr::new(
@@ -1814,7 +1822,10 @@ pub fn verify_proof_body_with_aliases_and_graph(
 
             match result {
                 Ok(()) => {
-                    let has_incomplete = tactic_expr.is_unsafe();
+                    // Recursive: `try admit` / `first [admit, …]` are
+                    // admitted proofs too, not just a bare top-level
+                    // `admit`/`sorry`.
+                    let has_incomplete = tactic_expr.contains_unsafe();
                     let mut steps = List::new();
                     steps.push(VerifiedStep {
                         description: Text::from(format!("tactic: {:?}", tactic_expr)),
@@ -1864,9 +1875,10 @@ pub fn verify_proof_body_with_aliases_and_graph(
         ProofBody::ByMethod(method) => {
             match verify_proof_method(engine, smt_ctx, method, &primary_goal) {
                 Ok(steps) => {
-                    let has_incomplete = steps.iter().any(|s| {
-                        s.tactic_used.contains("admit") || s.tactic_used.contains("sorry")
-                    });
+                    // AST-level authority: the previous detector
+                    // string-matched lowercase "admit" against a Debug
+                    // render that produces "Admit" and never fired.
+                    let has_incomplete = method.contains_unsafe();
                     ProofVerificationResult::Verified(ProofCertificate {
                         theorem_name,
                         steps,
@@ -2010,9 +2022,11 @@ fn verify_structured_proof(
                 }
             }
 
-            let has_incomplete = verified_steps
-                .iter()
-                .any(|s| s.tactic_used.contains("admit") || s.tactic_used.contains("sorry"));
+            // AST-level authority (the old string sniff compared
+            // lowercase "admit" with the Debug render "Admit" and was
+            // dead); covers step justifications, nested cases, calc
+            // chains, and the conclusion tactic.
+            let has_incomplete = structure.contains_unsafe();
 
             ProofVerificationResult::Verified(ProofCertificate {
                 theorem_name: theorem_name.clone(),

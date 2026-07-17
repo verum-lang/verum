@@ -412,7 +412,7 @@ fn enforcement_simple_refinement_rejected() {
         }
         fn main() {
             let r = requires_pos(0);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, err_count, _) = check(source);
@@ -432,7 +432,7 @@ fn enforcement_simple_refinement_accepted() {
         }
         fn main() {
             let r = requires_pos(5);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);
@@ -448,7 +448,7 @@ fn enforcement_valid_dependent_call_accepted() {
         }
         fn main() {
             let r = safe_get(10, 3);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);
@@ -480,7 +480,7 @@ fn dependent_refinement_out_of_bounds_rejected() {
         }
         fn main() {
             let r = safe_get(5, 10);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, err_count, _) = check(source);
@@ -506,7 +506,7 @@ fn dependent_refinement_negative_index_rejected() {
         }
         fn main() {
             let r = safe_get(5, -1);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, err_count, _) = check(source);
@@ -532,9 +532,9 @@ fn dependent_refinement_valid_calls_accepted() {
             let r1 = safe_get(10, 0);
             let r2 = safe_get(10, 9);
             let r3 = safe_get(100, 42);
-            print(r1);
-            print(r2);
-            print(r3);
+            print(f"{r1}");
+            print(f"{r2}");
+            print(f"{r3}");
         }
     "#;
     let (ok, err_count, _) = check(source);
@@ -557,7 +557,7 @@ fn dependent_refinement_arithmetic_bound_accepted() {
         fn main() {
             // src_len=10, offset=2, count=3 — 3 <= 10 - 2 = 8 ✓
             let r = slice(10, 2, 3);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);
@@ -582,7 +582,7 @@ fn dependent_refinement_arithmetic_bound_rejected() {
         fn main() {
             // src_len=10, offset=5, count=6 — count exceeds src_len-offset=5
             let r = slice(10, 5, 6);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);
@@ -606,7 +606,7 @@ fn dependent_refinement_multi_param_rejected() {
         fn main() {
             // lo=5, hi=10, x=3 — 3 < lo=5, violates `x >= lo`
             let r = between(5, 10, 3);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);
@@ -625,7 +625,7 @@ fn dependent_refinement_multi_param_accepted() {
         }
         fn main() {
             let r = between(5, 10, 7);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);
@@ -643,7 +643,7 @@ fn dependent_refinement_multiplication_bound_rejected() {
         }
         fn main() {
             let r = scaled(3, 31);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);
@@ -663,7 +663,7 @@ fn dependent_refinement_multiplication_bound_accepted() {
         }
         fn main() {
             let r = scaled(3, 25);
-            print(r);
+            print(f"{r}");
         }
     "#;
     let (ok, _, _) = check(source);

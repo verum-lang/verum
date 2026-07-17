@@ -2068,6 +2068,12 @@ fn build_stdlib_test_module(test: &Test) -> CachedModule {
         let options = CompilerOptions {
             input: check_input,
             output_format: OutputFormat::Human,
+            // The preflight is a fast-fail TYPE check. Proof
+            // obligations are verified once at execution time
+            // (`validate_module` → `phase_verify` in the run
+            // pipeline); running SMT here too would verify every
+            // theorem twice per test file.
+            verify_mode: verum_compiler::VerifyMode::Runtime,
             ..Default::default()
         };
         let mut session = Session::new(options);

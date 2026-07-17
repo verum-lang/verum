@@ -84,12 +84,30 @@ impl<'s> CompilationPipeline<'s> {
         // Phase 5: CBGR analysis
         self.phase_cbgr_analysis(&module)?;
 
+        self.diagnostic_gate()?;
+
         // Phase 6: Interpretation
         self.phase_interpret(&module)?;
 
         let elapsed = start.elapsed();
         info!("Compilation completed in {:.2}s", elapsed.as_secs_f64());
 
+        Ok(())
+    }
+
+    /// Post-compile diagnostic gate: error diagnostics become the
+    /// command verdict (abort), and accumulated warnings render once.
+    /// Phases emit diagnostics without returning Err (E0319 proof-
+    /// verification failures, W0319 admitted-proof warnings, W05xx
+    /// lints); every execution path must pass this gate between
+    /// "compile phases done" and "execute / write artifact" —
+    /// otherwise emitted errors let the program run anyway (the
+    /// silent-acceptance class in pipeline form, T0105).
+    pub(super) fn diagnostic_gate(&self) -> Result<()> {
+        self.session.abort_if_errors()?;
+        if self.session.warning_count() > 0 {
+            let _ = self.session.display_diagnostics();
+        }
         Ok(())
     }
 
@@ -206,13 +224,27 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // SMT verification phase — refinement obligations, contracts,
+        // and theorem/lemma/corollary proofs (E0319 / W0319).
+        // `verum check`'s purpose is "validate without executing", and
+        // proof obligations ARE validation: before T0105 this phase
+        // simply never ran in check-only mode, so a false theorem
+        // passed `verum check` while the same file failed `verum
+        // build`. check ⊆ build must hold for verdicts. Callers that
+        // verify separately afterwards (`verum verify`, the
+        // `verum test` preflight) opt out via `VerifyMode::Runtime`.
+        if self.session.options().verify_mode.use_smt() {
+            let r = self.phase_verify(&module);
+            self.session.collect_phase_error("verify", r)?;
+        }
+
         // Dependency analysis (validates against target constraints)
         self.phase_dependency_analysis(&module)?;
 
         let elapsed = start.elapsed();
         info!("Type checking completed in {:.2}s", elapsed.as_secs_f64());
 
-        Ok(())
+        self.diagnostic_gate()
     }
 
     /// Run parse only (no type checking, for VCS parse-pass tests)
@@ -363,6 +395,8 @@ impl<'s> CompilationPipeline<'s> {
             self.phase_cbgr_analysis(&module)?;
             if trace { eprintln!("[run_interpreter] phase_cbgr_analysis: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0); }
         }
+
+        self.diagnostic_gate()?;
 
         // Interpret and execute the module
         info!("Executing program...");
