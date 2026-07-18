@@ -37,7 +37,7 @@ fn core_base_reexports_env_functions() {
         .get(&verum_common::Text::from("core.base"))
         .expect("core.base should appear as a re-exporting module");
 
-    let mut names: Vec<&str> = core_base.iter().map(|(n, _)| n.as_str()).collect();
+    let mut names: Vec<&str> = core_base.iter().map(|(n, _, _)| n.as_str()).collect();
     names.sort();
     names.dedup();
     eprintln!("core.base re-exports {} leaves: {:?}", names.len(), names);
@@ -76,11 +76,11 @@ fn core_base_memory_reexport_source_resolves() {
 
     let replace = core_base
         .iter()
-        .find(|(n, _)| n.as_str() == "replace")
+        .find(|(n, _, _)| n.as_str() == "replace")
         .expect("`replace` must be a re-export leaf in core.base");
 
     assert_eq!(
-        replace.1.as_str(),
+        replace.2.as_str(),
         "core.base.memory",
         "`replace` should resolve to its declaring module core.base.memory"
     );

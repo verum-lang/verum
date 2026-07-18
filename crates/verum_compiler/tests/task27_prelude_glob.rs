@@ -15,7 +15,7 @@ fn core_prelude_reexports_iterator_free_fns() {
         .module_reexports
         .get(&verum_common::Text::from("core.prelude"))
         .expect("core.prelude must be in module_reexports after #27 glob expansion");
-    let names: Vec<&str> = prelude.iter().map(|(n, _)| n.as_str()).collect();
+    let names: Vec<&str> = prelude.iter().map(|(n, _, _)| n.as_str()).collect();
     eprintln!("core.prelude re-exports {} leaves", names.len());
     let missing: Vec<&str> = ["range", "repeat", "take", "swap", "replace", "args_count"]
         .iter()

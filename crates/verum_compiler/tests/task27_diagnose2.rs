@@ -99,7 +99,7 @@ fn dump_simple_fn_keys() {
     let prelude_key = verum_common::Text::from("core.prelude");
     if let Some(leaves) = m.module_reexports.get(&prelude_key) {
         eprintln!("=== core.prelude leaves count: {} ===", leaves.len());
-        for (local, source) in leaves.iter().filter(|(l, _)|
+        for (local, _, source) in leaves.iter().filter(|(l, _, _)|
             ["set_var", "home_dir", "range", "count_from", "replace", "Maybe", "Some", "None"].contains(&l.as_str())
         ) {
             eprintln!("  ({}, {})", local.as_str(), source.as_str());
@@ -112,7 +112,7 @@ fn dump_simple_fn_keys() {
     let cb_key = verum_common::Text::from("core.base");
     if let Some(leaves) = m.module_reexports.get(&cb_key) {
         eprintln!("  total leaves: {}", leaves.len());
-        for (local, source) in leaves.iter() {
+        for (local, _, source) in leaves.iter() {
             let l = local.as_str();
             if l == "arg" || l == "args" || l == "args_count" || l == "var" {
                 eprintln!("  ({}, {})", l, source.as_str());
