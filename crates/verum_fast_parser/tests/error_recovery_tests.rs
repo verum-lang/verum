@@ -437,3 +437,70 @@ fn test_suggests_closing_delimiter() {
         }
     }
 }
+
+// ============================================================================
+// Rust-macro (`ident!`) recovery — one E0E2 per occurrence (T0270)
+// ============================================================================
+//
+// T0270 tracked a report that a stray `!` (Rust-style `assert!(...)` / bang,
+// which Verum forbids — error code E0E2) duplicated its diagnostic: one stray
+// `!` surfaced E0E2 twice. The root fix already landed in commit 26b52781a
+// ("Root fix for Issue #5"), which closed two compounding causes:
+//   (a) `parse_macro_call` returned Err WITHOUT consuming the offending
+//       `ident! (...)` tokens, so the recovery loop re-entered at the same
+//       offset and re-emitted the diagnostic; it now advances past the macro
+//       (`expr.rs` — advance ident + `!` + `skip_balanced_macro_args`).
+//   (b) `parse_module` returned `Err(self.errors.first().clone())` on a
+//       non-empty error list, which the caller re-appended — duplicating the
+//       first diagnostic; it now returns `Ok(items)` and lets the caller's
+//       `errors.is_empty()` check be the single failure gate (`decl.rs`).
+// These tests pin the invariant at the unit level so a future recovery-path
+// regression fails fast: exactly one E0E2 per stray `!`, no more and no less.
+
+/// Count how many accumulated errors carry a given error code.
+fn count_error_code(errors: &[ParseError], code: &str) -> usize {
+    errors.iter().filter(|e| e.error_code() == code).count()
+}
+
+#[test]
+fn t0270_single_bang_emits_exactly_one_e0e2() {
+    // Regression: one stray `!` must yield exactly one E0E2 (was two).
+    let errors = parse_and_get_errors("fn main() {\n    assert!(x);\n}\n");
+    assert_eq!(
+        count_error_code(&errors, "E0E2"),
+        1,
+        "one stray `!` must emit exactly one E0E2 diagnostic, got: {:?}",
+        errors.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn t0270_consecutive_bangs_emit_one_e0e2_each() {
+    // Recovery must resynchronise between consecutive offenders: three stray
+    // `!` lines yield exactly three E0E2 diagnostics — no duplicates, and none
+    // swallowed.
+    let errors = parse_and_get_errors(
+        "fn main() {\n    assert!(a);\n    assert!(b);\n    assert!(c);\n}\n",
+    );
+    assert_eq!(
+        count_error_code(&errors, "E0E2"),
+        3,
+        "three consecutive stray `!` lines must emit exactly three E0E2, got: {:?}",
+        errors.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn t0270_distinct_bang_sites_are_not_over_deduplicated() {
+    // Guard the other direction: two genuinely-distinct `!` sites must still
+    // yield two diagnostics — the fix must not collapse separate mistakes.
+    let errors = parse_and_get_errors(
+        "fn main() {\n    assert!(x);\n    println!(y);\n}\n",
+    );
+    assert_eq!(
+        count_error_code(&errors, "E0E2"),
+        2,
+        "two distinct stray `!` sites must emit two E0E2 diagnostics, got: {:?}",
+        errors.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+    );
+}
