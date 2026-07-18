@@ -146,8 +146,22 @@ impl std::fmt::Display for CacheKey {
 /// ++ b"\x00" ++ flag2 ++ ...` — null bytes between fields prevent
 /// length-extension collisions where, e.g., `("a", "bc")` and `("ab",
 /// "c")` would otherwise hash identically.
+/// Bytecode-wire schema version mixed into every script-cache key. **BUMP THIS**
+/// whenever the VBC bytecode wire format or an interpreter dispatch handler's
+/// operand layout changes. Without it, a `~/.verum/script-cache` entry produced
+/// by an older binary is silently reused by a newer interpreter that re-parses
+/// the same bytes differently — the 2026-07-16 stale-cache incident where a
+/// probe cached at one wire schema ran its bytecode against re-shaped handler
+/// arms and SIGSEGV'd, masquerading as a code regression (T0197). Keep in
+/// lockstep with the stdlib bake schema (see T0219 BAKE-CACHE-COMPILER-IDENTITY).
+pub const WIRE_SCHEMA_VERSION: u32 = 1;
+
 pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKey {
     let mut hasher = blake3::Hasher::new();
+    // Wire-schema component FIRST: a bump invalidates every cached script,
+    // so re-shaped bytecode is never re-run against a mismatched interpreter.
+    hasher.update(&WIRE_SCHEMA_VERSION.to_le_bytes());
+    hasher.update(&[0]);
     hasher.update(source);
     hasher.update(&[0]);
     hasher.update(compiler_version.as_bytes());
