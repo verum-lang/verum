@@ -514,6 +514,44 @@ fn test_parse_ipv6_compressed_middle() {
     }
 }
 
+@test
+fn test_parse_ipv6_v4_mapped_dotted() {
+    // RFC 4291 §2.5.5.2 IPv4-mapped form: the dotted-decimal quad is
+    // packed into the low 32 bits behind an ffff group. (T0342 —
+    // was Err before the Text-literal-separator fix in Ipv6Addr.parse.)
+    let s = "::ffff:1.2.3.4".clone();
+    match Ipv6Addr.parse(&s) {
+        Ok(a) => {
+            let (s0, s1, s2, s3, s4, s5, s6, s7) = a.segments();
+            assert_eq(s0, 0);
+            assert_eq(s1, 0);
+            assert_eq(s2, 0);
+            assert_eq(s3, 0);
+            assert_eq(s4, 0);
+            assert_eq(s5, 0xffff);
+            assert_eq(s6, 0x0102);
+            assert_eq(s7, 0x0304);
+        }
+        Err(_) => panic("::ffff:1.2.3.4 should parse"),
+    }
+}
+
+@test
+fn test_parse_ipv6_v4_compatible_dotted() {
+    // Deprecated IPv4-compatible dotted form — low 32 bits carry the
+    // quad, no ffff group. (T0342)
+    let s = "::1.2.3.4".clone();
+    match Ipv6Addr.parse(&s) {
+        Ok(a) => {
+            let (_, _, _, _, _, s5, s6, s7) = a.segments();
+            assert_eq(s5, 0);
+            assert_eq(s6, 0x0102);
+            assert_eq(s7, 0x0304);
+        }
+        Err(_) => panic("::1.2.3.4 should parse"),
+    }
+}
+
 // =============================================================================
 // Section 15: Ipv6Addr.parse — error paths
 // =============================================================================

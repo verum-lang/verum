@@ -331,12 +331,20 @@ implement Ipv6Addr {
             return Result.Err(AddrParseError.InvalidFormat);
         }
 
-        // Check for IPv4-mapped address (.ffff:x.x.x.x or .x.x.x.x)
-        if let Maybe.Some(idx) = s.rfind('.') {
+        // Check for an IPv4-mapped/-compatible tail (dotted-decimal
+        // IPv4 in the final group). Text-literal separators "." / ":"
+        // are REQUIRED here — char-literal needles ('.'/':') auto-
+        // promote through a VBC interpreter codegen branch that returns
+        // Maybe.None for non-empty strings (same root-cause as the
+        // rsplit_once note in SocketAddr.parse below), which silently
+        // killed this whole fast-path so the IPv4-mapped form parsed as
+        // Err. Explicit &ipv4_part for the matching auto-borrow reason.
+        // (T0342)
+        if let Maybe.Some(idx) = s.rfind(".") {
             // Contains a dot - might be IPv4 suffix
-            if let Maybe.Some(colon_idx) = s.rfind(':') {
+            if let Maybe.Some(colon_idx) = s.rfind(":") {
                 let ipv4_part = s.slice(colon_idx + 1, s.len());
-                if let Result.Ok(ipv4) = Ipv4Addr.parse(ipv4_part) {
+                if let Result.Ok(ipv4) = Ipv4Addr.parse(&ipv4_part) {
                     let prefix = s.slice(0, colon_idx);
                     let mut segments = [0; 8];
 
