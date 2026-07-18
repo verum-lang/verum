@@ -225,7 +225,7 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
     let unwrapped = if is_cbgr_ref(&v) {
-        let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
     } else {
         v
@@ -422,7 +422,7 @@ pub(super) fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: 
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
     let mut unwrapped = if is_cbgr_ref(&v) {
-        let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
     } else {
         v
@@ -440,7 +440,7 @@ pub(super) fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: 
 /// before any heap-shape probe of an `&self`/`&mut self` receiver.
 pub(super) fn unwrap_ref(state: &InterpreterState, v: Value) -> Value {
     let mut cur = if is_cbgr_ref(&v) {
-        let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
     } else {
         v

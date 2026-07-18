@@ -33,7 +33,7 @@ pub(in super::super) fn handle_as_var(
     // rationale on `match &Maybe<Heap<T>>` shape.
     let mut deref_depth = 0;
     while is_cbgr_ref(&variant) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(variant.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(variant);
         let dereffed = state.registers.get_absolute(abs_index);
         if dereffed.to_bits() == variant.to_bits() {
             break;
@@ -390,7 +390,7 @@ pub(in super::super) fn handle_get_variant_data(
     // Auto-deref through register-based references (CBGR encoding)
     let mut deref_depth = 0;
     while is_cbgr_ref(&variant) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(variant.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(variant);
         let dereffed = state.registers.get_absolute(abs_index);
         if dereffed.to_bits() == variant.to_bits() {
             break;
@@ -473,7 +473,7 @@ pub(in super::super) fn handle_get_variant_data_ref(
     // Auto-deref through register-based references (CBGR encoding)
     let mut deref_depth = 0;
     while is_cbgr_ref(&variant) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(variant.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(variant);
         let dereffed = state.registers.get_absolute(abs_index);
         if dereffed.to_bits() == variant.to_bits() {
             break;
@@ -527,7 +527,7 @@ pub(in super::super) fn handle_match_tag(
     // Auto-deref through register-based references (CBGR encoding)
     let mut deref_depth = 0;
     while is_cbgr_ref(&value) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(value.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(value);
         let dereffed = state.registers.get_absolute(abs_index);
         if dereffed.to_bits() == value.to_bits() {
             break;
@@ -637,7 +637,7 @@ pub(in super::super) fn handle_get_tag(
     // the full rationale.
     let mut deref_depth = 0;
     while is_cbgr_ref(&value) && deref_depth < 8 {
-        let (abs_index, _generation) = decode_cbgr_ref(value.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(value);
         let dereffed = state.registers.get_absolute(abs_index);
         if dereffed.to_bits() == value.to_bits() {
             break;

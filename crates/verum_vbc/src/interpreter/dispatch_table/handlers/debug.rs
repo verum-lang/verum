@@ -121,7 +121,7 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
     // ThinRef handling below.
     if super::cbgr_helpers::is_cbgr_ref(&value) {
         let (abs_index, _gen) =
-            super::cbgr_helpers::decode_cbgr_ref(value.as_i64());
+            super::cbgr_helpers::decode_cbgr_ref(value);
         let derefed = state.registers.get_absolute(abs_index);
         return format_value_for_print_depth(state, derefed, depth + 1);
     }

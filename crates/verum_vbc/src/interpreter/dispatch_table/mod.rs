@@ -608,7 +608,7 @@ pub(crate) fn do_return(
     // register file.
     if handlers::cbgr_helpers::is_cbgr_ref(&value) {
         let (abs_index, _gen) =
-            handlers::cbgr_helpers::decode_cbgr_ref(value.as_i64());
+            handlers::cbgr_helpers::decode_cbgr_ref(value);
         let frame_base = state.reg_base();
         let frame_top = state.registers.top() as u32;
         if abs_index >= frame_base && abs_index < frame_top {

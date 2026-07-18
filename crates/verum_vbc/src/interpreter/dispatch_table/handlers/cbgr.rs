@@ -8,8 +8,8 @@ use super::super::DispatchResult;
 use super::bytecode_io::*;
 use super::cbgr_helpers::{
     CBGR_NO_CHECK_GENERATION, EPOCH_WINDOW_SIZE, decode_cbgr_ref, encode_cbgr_ref,
-    encode_cbgr_ref_mut, is_cbgr_ref, is_cbgr_ref_mutable, strip_cbgr_ref_mutability,
-    validate_cbgr_generation, validate_epoch_window,
+    encode_cbgr_ref_mut, is_cbgr_ref, is_cbgr_ref_mutable, regref_generation_matches,
+    strip_cbgr_ref_mutability, validate_cbgr_generation, validate_epoch_window,
 };
 use crate::instruction::{CbgrSubOpcode, Opcode, Reg};
 use crate::types::TypeId;
@@ -90,7 +90,7 @@ pub(in super::super) fn handle_ref_create(
     if state.config.count_instructions {
         state.stats.cbgr_stats.tier0_refs += 1;
     }
-    state.set_reg(dst, Value::from_i64(encode_cbgr_ref(abs_index, generation)));
+    state.set_reg(dst, encode_cbgr_ref(abs_index, generation));
     Ok(DispatchResult::Continue)
 }
 
@@ -131,7 +131,7 @@ pub(in super::super) fn handle_ref_mut(
     // In this case, we pass through the existing reference directly instead of
     // creating a reference-to-reference which would cause NullPointer errors.
     let src_val = state.get_reg(src);
-    if is_cbgr_ref(&src_val) && is_cbgr_ref_mutable(src_val.as_i64()) {
+    if is_cbgr_ref(&src_val) && is_cbgr_ref_mutable(src_val) {
         // Source is already a mutable CBGR reference - pass it through directly
         state.set_reg(dst, src_val);
         return Ok(DispatchResult::Continue);
@@ -150,10 +150,7 @@ pub(in super::super) fn handle_ref_mut(
     if state.config.count_instructions {
         state.stats.cbgr_stats.tier0_refs += 1;
     }
-    state.set_reg(
-        dst,
-        Value::from_i64(encode_cbgr_ref_mut(abs_index, generation)),
-    );
+    state.set_reg(dst, encode_cbgr_ref_mut(abs_index, generation));
     Ok(DispatchResult::Continue)
 }
 
@@ -273,7 +270,7 @@ pub(in super::super) fn handle_deref(
         }
     } else if is_cbgr_ref(&ref_val) {
         // Register-based reference: decode abs_index and generation
-        let (abs_index, generation) = decode_cbgr_ref(ref_val.as_i64());
+        let (abs_index, generation) = decode_cbgr_ref(ref_val);
         // CBGR generation validation (Tier 0 only; skipped for Tier 1/2 sentinel)
         validate_cbgr_generation(state, abs_index, generation)?;
         let value = state.registers.get_absolute(abs_index);
@@ -333,7 +330,7 @@ pub(in super::super) fn handle_deref_mut(
 
     // The reference holds a negative-encoded absolute register index — write through it
     if is_cbgr_ref(&ref_val) {
-        let (abs_index, generation) = decode_cbgr_ref(ref_val.as_i64());
+        let (abs_index, generation) = decode_cbgr_ref(ref_val);
         validate_cbgr_generation(state, abs_index, generation)?;
         state.registers.set_absolute(abs_index, value);
         // CBGR epoch advancement: mutation through reference advances the epoch
@@ -384,7 +381,7 @@ pub(in super::super) fn handle_chk_ref(
 
     if is_cbgr_ref(&ref_val) {
         // Register-based CBGR reference
-        let (abs_index, generation) = decode_cbgr_ref(ref_val.as_i64());
+        let (abs_index, generation) = decode_cbgr_ref(ref_val);
         validate_cbgr_generation(state, abs_index, generation)?;
     } else if ref_val.is_ptr() && !ref_val.is_nil() {
         // Heap-based CBGR reference - validate AllocationHeader.
@@ -459,7 +456,7 @@ pub(in super::super) fn validate_ref_bool(state: &mut InterpreterState, ref_val:
         return false;
     }
     if is_cbgr_ref(&ref_val) {
-        let (abs_index, generation) = decode_cbgr_ref(ref_val.as_i64());
+        let (abs_index, generation) = decode_cbgr_ref(ref_val);
         return validate_cbgr_generation(state, abs_index, generation).is_ok();
     }
     if ref_val.is_ptr() {
@@ -499,7 +496,7 @@ pub(in super::super) fn handle_ref_checked(
     }
     state.set_reg(
         dst,
-        Value::from_i64(encode_cbgr_ref(abs_index, CBGR_NO_CHECK_GENERATION)),
+        encode_cbgr_ref(abs_index, CBGR_NO_CHECK_GENERATION),
     );
     Ok(DispatchResult::Continue)
 }
@@ -520,7 +517,7 @@ pub(in super::super) fn handle_ref_unsafe(
     }
     state.set_reg(
         dst,
-        Value::from_i64(encode_cbgr_ref(abs_index, CBGR_NO_CHECK_GENERATION)),
+        encode_cbgr_ref(abs_index, CBGR_NO_CHECK_GENERATION),
     );
     Ok(DispatchResult::Continue)
 }
@@ -1093,7 +1090,7 @@ pub(in super::super) fn handle_cbgr_extended(
 
             // Auto-deref CBGR register-based reference, like SetE/GetE do.
             let list_val = if is_cbgr_ref(&list_val) {
-                let (abs_index, _gen) = decode_cbgr_ref(list_val.as_i64());
+                let (abs_index, _gen) = decode_cbgr_ref(list_val);
                 state.registers.get_absolute(abs_index)
             } else if list_val.is_thin_ref() {
                 let thin_ref = list_val.as_thin_ref();
@@ -1244,7 +1241,7 @@ pub(in super::super) fn handle_cbgr_extended(
             // Auto-deref CBGR register reference / thin-ref / fat-ref
             // (same chain GetF runs before computing the field offset).
             let base_val = if is_cbgr_ref(&base_val) {
-                let (abs_index, _gen) = decode_cbgr_ref(base_val.as_i64());
+                let (abs_index, _gen) = decode_cbgr_ref(base_val);
                 state.registers.get_absolute(abs_index)
             } else if base_val.is_thin_ref() {
                 let thin_ref = base_val.as_thin_ref();
@@ -2059,8 +2056,8 @@ pub(in super::super) fn handle_cbgr_extended(
                     state.set_reg(dst, src_val);
                 } else {
                     // Strip mutability - downgrade &mut to &
-                    let attenuated = strip_cbgr_ref_mutability(src_val.as_i64());
-                    state.set_reg(dst, Value::from_i64(attenuated));
+                    let attenuated = strip_cbgr_ref_mutability(src_val);
+                    state.set_reg(dst, attenuated);
                 }
             } else if src_val.is_ptr() && !src_val.is_nil() {
                 // Heap-based reference: attenuate by removing from mutable set if WRITE not in mask
@@ -2089,7 +2086,7 @@ pub(in super::super) fn handle_cbgr_extended(
 
             if is_cbgr_ref(&src) {
                 // For register-based refs, bump the generation to invalidate source
-                let (abs_index, _) = decode_cbgr_ref(src.as_i64());
+                let (abs_index, _) = decode_cbgr_ref(src);
                 state.registers.bump_generation(abs_index);
             } else if src.is_ptr() && !src.is_nil() {
                 // For heap-based refs, remove from mutable set
@@ -2110,7 +2107,7 @@ pub(in super::super) fn handle_cbgr_extended(
             let src_val = state.get_reg(src_reg);
 
             let has_cap = if is_cbgr_ref(&src_val) {
-                let is_mut = is_cbgr_ref_mutable(src_val.as_i64());
+                let is_mut = is_cbgr_ref_mutable(src_val);
                 check_capabilities_for_mutability(cap, is_mut)
             } else if src_val.is_ptr() && !src_val.is_nil() {
                 let ptr_addr = src_val.as_ptr::<u8>() as usize;
@@ -2135,7 +2132,7 @@ pub(in super::super) fn handle_cbgr_extended(
             let src_val = state.get_reg(src_reg);
 
             let cap_mask = if is_cbgr_ref(&src_val) {
-                let is_mut = is_cbgr_ref_mutable(src_val.as_i64());
+                let is_mut = is_cbgr_ref_mutable(src_val);
                 if is_mut {
                     // Mutable ref: READ | WRITE | MUTABLE | DELEGATE | REVOKE
                     caps::OWNER
@@ -2171,8 +2168,8 @@ pub(in super::super) fn handle_cbgr_extended(
 
             if is_cbgr_ref(&src) {
                 // Strip mutability to create shared reference
-                let shared = strip_cbgr_ref_mutability(src.as_i64());
-                state.set_reg(dst, Value::from_i64(shared));
+                let shared = strip_cbgr_ref_mutability(src);
+                state.set_reg(dst, shared);
             } else if src.is_ptr() && !src.is_nil() {
                 // Remove from mutable set to create shared reference
                 let ptr_addr = src.as_ptr::<u8>() as usize;
@@ -2194,9 +2191,9 @@ pub(in super::super) fn handle_cbgr_extended(
 
             if is_cbgr_ref(&src) {
                 // For register-based refs, create mutable version
-                let (abs_index, generation) = decode_cbgr_ref(src.as_i64());
+                let (abs_index, generation) = decode_cbgr_ref(src);
                 let exclusive = encode_cbgr_ref_mut(abs_index, generation);
-                state.set_reg(dst, Value::from_i64(exclusive));
+                state.set_reg(dst, exclusive);
             } else if src.is_ptr() && !src.is_nil() {
                 // Add to mutable set to mark as exclusive
                 let ptr_addr = src.as_ptr::<u8>() as usize;
@@ -2221,7 +2218,7 @@ pub(in super::super) fn handle_cbgr_extended(
 
             let generation = if is_cbgr_ref(&src_val) {
                 // Register-based ref: extract generation from encoded value
-                let (_, ref_gen) = decode_cbgr_ref(src_val.as_i64());
+                let (_, ref_gen) = decode_cbgr_ref(src_val);
                 ref_gen as i64
             } else if src_val.is_ptr() && !src_val.is_nil() {
                 // Heap-based ref: read generation from AllocationHeader.
@@ -2250,7 +2247,7 @@ pub(in super::super) fn handle_cbgr_extended(
 
             let epoch = if is_cbgr_ref(&src_val) {
                 // Register-based ref: get epoch from register file
-                let (abs_index, _) = decode_cbgr_ref(src_val.as_i64());
+                let (abs_index, _) = decode_cbgr_ref(src_val);
                 state.registers.get_epoch(abs_index) as i64
             } else if src_val.is_ptr() && !src_val.is_nil() {
                 // Heap-based ref: read epoch from AllocationHeader.
@@ -2279,11 +2276,13 @@ pub(in super::super) fn handle_cbgr_extended(
 
             let is_valid = if is_cbgr_ref(&src_val) {
                 // Register-based ref: check generation matches and epoch is within window
-                let (abs_index, ref_gen) = decode_cbgr_ref(src_val.as_i64());
+                let (abs_index, ref_gen) = decode_cbgr_ref(src_val);
                 let current_gen = state.registers.get_generation(abs_index);
                 let ref_epoch = state.registers.get_epoch(abs_index);
                 let global_epoch = state.registers.global_epoch();
-                ref_gen == current_gen
+                // T0367: register-refs carry a 22-bit generation — compare via
+                // the SOLE modulo-2^22 authority (matches the deref validator).
+                regref_generation_matches(ref_gen, current_gen)
                     && validate_epoch_window(ref_epoch, global_epoch, EPOCH_WINDOW_SIZE)
             } else if src_val.is_ptr() && !src_val.is_nil() {
                 // Heap-based ref: validate epoch using window comparison
@@ -2443,12 +2442,14 @@ pub(in super::super) fn handle_cbgr_extended(
                 }
             } else if is_cbgr_ref(&src) {
                 // Register-based reference: check generation
-                let (abs_index, generation) = decode_cbgr_ref(src.as_i64());
+                let (abs_index, generation) = decode_cbgr_ref(src);
                 if generation == CBGR_NO_CHECK_GENERATION {
                     true
                 } else {
                     let current_gen = state.registers.get_generation(abs_index);
-                    generation == current_gen
+                    // T0367: register-refs carry a 22-bit generation — compare
+                    // via the SOLE modulo-2^22 authority.
+                    regref_generation_matches(generation, current_gen)
                 }
             } else {
                 false

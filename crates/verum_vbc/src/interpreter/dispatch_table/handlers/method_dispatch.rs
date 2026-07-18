@@ -529,7 +529,7 @@ pub(in super::super) fn handle_call_method(
     // left-identity regressions the first two drafts introduced).
     let mut dispatch_receiver = if is_cbgr_ref(&receiver) {
         let slot_val = {
-            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            let (abs_index, _) = decode_cbgr_ref(receiver);
             state.registers.get_absolute(abs_index)
         };
         if slot_val.is_ptr()
@@ -639,7 +639,7 @@ pub(in super::super) fn handle_call_method(
         };
         let new_value = alloc_string_value(state, &current_text)?;
         if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            let (abs_index, _) = decode_cbgr_ref(receiver);
             state.registers.set_absolute(abs_index, new_value);
         } else {
             state.registers.set(caller_base, receiver_reg, new_value);
@@ -732,7 +732,7 @@ pub(in super::super) fn handle_call_method(
         let arg_val_raw = state.registers.get(caller_base, Reg(args.start.0));
         // Deref CBGR ref for arg if present (covers `out.push_str(&body)`).
         let arg_val = if is_cbgr_ref(&arg_val_raw) {
-            let (abs_index, _) = decode_cbgr_ref(arg_val_raw.as_i64());
+            let (abs_index, _) = decode_cbgr_ref(arg_val_raw);
             state.registers.get_absolute(abs_index)
         } else {
             arg_val_raw
@@ -783,7 +783,7 @@ pub(in super::super) fn handle_call_method(
         // Write back to receiver_reg, following CBGR ref to the
         // caller's frame slot if present.
         if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            let (abs_index, _) = decode_cbgr_ref(receiver);
             if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
                 eprintln!(
                     "[push_str trace] WRITEBACK via CBGR ref, abs_index={}, new_text.len={}",
@@ -852,7 +852,7 @@ pub(in super::super) fn handle_call_method(
         let new_value = Value::from_ptr(obj.as_ptr() as *mut u8);
         // Writeback via CBGR ref to the caller-frame slot.
         if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            let (abs_index, _) = decode_cbgr_ref(receiver);
             state.registers.set_absolute(abs_index, new_value);
         } else {
             state.registers.set(caller_base, receiver_reg, new_value);
@@ -3214,9 +3214,7 @@ pub(in super::super) fn handle_call_method(
                 {
                     let abs = caller_base + receiver_reg.0 as u32;
                     let generation = state.registers.get_generation(abs);
-                    Value::from_i64(
-                        super::cbgr_helpers::encode_cbgr_ref_mut(abs, generation),
-                    )
+                    super::cbgr_helpers::encode_cbgr_ref_mut(abs, generation)
                 } else {
                     receiver
                 };
@@ -4335,7 +4333,7 @@ pub(super) fn dispatch_primitive_method(
     // and dispatch the method on it (e.g., `.sub()` on a reference to a pointer).
     // This must be checked BEFORE the Int section, which has a catch-all `_ => return Ok(None)`.
     if is_cbgr_ref(receiver) {
-        let (abs_index, generation) = decode_cbgr_ref(receiver.as_i64());
+        let (abs_index, generation) = decode_cbgr_ref(*receiver);
 
         // CBGR reference-specific methods
         match method {
@@ -4344,7 +4342,11 @@ pub(super) fn dispatch_primitive_method(
             }
             "is_valid" => {
                 let current_gen = state.registers.get_generation(abs_index);
-                return Ok(Some(Value::from_bool(generation == current_gen)));
+                // T0367: register-refs carry a 22-bit generation, so compare via
+                // the SOLE modulo-2^22 authority (matches the deref validator).
+                return Ok(Some(Value::from_bool(
+                    super::cbgr_helpers::regref_generation_matches(generation, current_gen),
+                )));
             }
             "epoch" => {
                 // Return the epoch from the interpreter state (register refs don't store epoch inline)
@@ -4353,14 +4355,14 @@ pub(super) fn dispatch_primitive_method(
             "epoch_caps" | "epoch_caps_raw" | "raw_epoch_caps" => {
                 // Return packed epoch + capabilities for register-based reference
                 let epoch = state.cbgr_epoch as u32;
-                let is_mut = is_cbgr_ref_mutable(receiver.as_i64());
+                let is_mut = is_cbgr_ref_mutable(*receiver);
                 let cap_bits: u32 = if is_mut { 0x03 } else { 0x01 }; // read+write or read-only
                 let packed = ((epoch & 0x00FF_FFFF) << 8) | cap_bits;
                 return Ok(Some(Value::from_i64(packed as i64)));
             }
             "capabilities" => {
                 let epoch = state.cbgr_epoch as u32;
-                let is_mut = is_cbgr_ref_mutable(receiver.as_i64());
+                let is_mut = is_cbgr_ref_mutable(*receiver);
                 let cap_bits: u32 = if is_mut { 0x03 } else { 0x01 };
                 let packed = ((epoch & 0x00FF_FFFF) << 8) | cap_bits;
                 return Ok(Some(Value::from_i64(packed as i64)));
@@ -4369,7 +4371,7 @@ pub(super) fn dispatch_primitive_method(
                 return Ok(Some(Value::from_bool(true)));
             }
             "can_write" => {
-                let is_mut = is_cbgr_ref_mutable(receiver.as_i64());
+                let is_mut = is_cbgr_ref_mutable(*receiver);
                 return Ok(Some(Value::from_bool(is_mut)));
             }
             "generation" => {
@@ -9185,7 +9187,7 @@ pub(super) fn dispatch_primitive_method(
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
                     let arg = if is_cbgr_ref(&pad_arg) {
-                        let (abs_index, _) = decode_cbgr_ref(pad_arg.as_i64());
+                        let (abs_index, _) = decode_cbgr_ref(pad_arg);
                         state.registers.get_absolute(abs_index)
                     } else {
                         pad_arg
@@ -9215,7 +9217,7 @@ pub(super) fn dispatch_primitive_method(
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
                     let arg = if is_cbgr_ref(&pad_arg) {
-                        let (abs_index, _) = decode_cbgr_ref(pad_arg.as_i64());
+                        let (abs_index, _) = decode_cbgr_ref(pad_arg);
                         state.registers.get_absolute(abs_index)
                     } else {
                         pad_arg
@@ -9248,7 +9250,7 @@ pub(super) fn dispatch_primitive_method(
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
                     let arg = if is_cbgr_ref(&pad_arg) {
-                        let (abs_index, _) = decode_cbgr_ref(pad_arg.as_i64());
+                        let (abs_index, _) = decode_cbgr_ref(pad_arg);
                         state.registers.get_absolute(abs_index)
                     } else {
                         pad_arg
@@ -11351,7 +11353,7 @@ pub(super) fn deref_cbgr_for_string(
     v: Value,
 ) -> Value {
     if is_cbgr_ref(&v) {
-        let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
     } else {
         v

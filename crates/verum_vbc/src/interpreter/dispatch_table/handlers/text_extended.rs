@@ -171,7 +171,7 @@ pub(in super::super) fn handle_text_extended(
 
             // Auto-deref: CBGR register-ref → absolute register, ThinRef → pointee.
             if is_cbgr_ref(&text) {
-                let (abs_index, _gen) = decode_cbgr_ref(text.as_i64());
+                let (abs_index, _gen) = decode_cbgr_ref(text);
                 text = state.registers.get_absolute(abs_index);
             }
             if text.is_thin_ref() {

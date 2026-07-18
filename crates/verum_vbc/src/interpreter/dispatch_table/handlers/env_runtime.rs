@@ -424,7 +424,7 @@ fn intercept_arg(
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
     let idx = if super::cbgr_helpers::is_cbgr_ref(&idx_val) {
-        let (abs, _) = super::cbgr_helpers::decode_cbgr_ref(idx_val.as_i64());
+        let (abs, _) = super::cbgr_helpers::decode_cbgr_ref(idx_val);
         state.registers.get_absolute(abs).as_i64()
     } else {
         idx_val.as_i64()

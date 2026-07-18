@@ -208,7 +208,7 @@ pub(in super::super) fn try_intercept_path_method(
 /// string-like value rendered as `<value:N>`.
 fn deref_cbgr(state: &InterpreterState, v: Value) -> Value {
     if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
         return state.registers.get_absolute(abs_index);
     }
     if v.is_thin_ref() {

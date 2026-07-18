@@ -137,7 +137,7 @@ pub(in super::super) fn try_intercept_shell_runtime(
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
     let unwrapped_val = if super::cbgr_helpers::is_cbgr_ref(&cmd_val) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(cmd_val.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(cmd_val);
         state.registers.get_absolute(abs_index)
     } else {
         cmd_val
@@ -295,7 +295,7 @@ fn intercept_run_argv(
 /// Unwrap CBGR-ref / ThinRef encodings down to the underlying Value.
 fn unwrap_ref_value(state: &InterpreterState, v: Value) -> Value {
     if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
         return state.registers.get_absolute(abs_index);
     }
     if v.is_thin_ref() {

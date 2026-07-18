@@ -103,7 +103,7 @@ pub(in super::super) fn handle_get_field(
     // (kept for layered register-ref chains the single resolve above
     // may still surface).
     let obj_val = if is_cbgr_ref(&obj_val) {
-        let (abs_index, _generation) = decode_cbgr_ref(obj_val.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(obj_val);
         state.registers.get_absolute(abs_index)
     } else {
         obj_val
@@ -496,7 +496,7 @@ pub(in super::super) fn handle_set_field(
     // This is essential when setting a field on a value accessed through a mutable reference:
     // e.g., `ref.field = value` where `ref: &mut Struct`
     let obj_val = if is_cbgr_ref(&obj_val) {
-        let (abs_index, _generation) = decode_cbgr_ref(obj_val.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(obj_val);
         state.registers.get_absolute(abs_index)
     } else {
         obj_val
@@ -732,7 +732,7 @@ pub(in super::super) fn handle_get_index(
     // collection value so indexing works correctly.
     use super::super::handlers::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
     let arr_val = if is_cbgr_ref(&arr_val) {
-        let (abs_index, _gen) = decode_cbgr_ref(arr_val.as_i64());
+        let (abs_index, _gen) = decode_cbgr_ref(arr_val);
         state.registers.get_absolute(abs_index)
     } else if arr_val.is_thin_ref() {
         let thin_ref = arr_val.as_thin_ref();
@@ -1123,7 +1123,7 @@ pub(in super::super) fn handle_set_index(
     // does).
     {
         let target = if is_cbgr_ref2(&arr_val) {
-            let (abs_index, _gen) = decode_cbgr_ref2(arr_val.as_i64());
+            let (abs_index, _gen) = decode_cbgr_ref2(arr_val);
             state.registers.get_absolute(abs_index)
         } else {
             arr_val
@@ -1180,7 +1180,7 @@ pub(in super::super) fn handle_set_index(
         }
     }
     let arr_val = if is_cbgr_ref2(&arr_val) {
-        let (abs_index, _gen) = decode_cbgr_ref2(arr_val.as_i64());
+        let (abs_index, _gen) = decode_cbgr_ref2(arr_val);
         state.registers.get_absolute(abs_index)
     } else if arr_val.is_thin_ref() {
         let thin_ref = arr_val.as_thin_ref();
@@ -1364,7 +1364,7 @@ pub(in super::super) fn handle_array_len(
 
     // Handle CBGR register-based reference: decode and dereference
     if is_cbgr_ref(&val) {
-        let (abs_index, _generation) = decode_cbgr_ref(val.as_i64());
+        let (abs_index, _generation) = decode_cbgr_ref(val);
         val = state.registers.get_absolute(abs_index);
     }
 

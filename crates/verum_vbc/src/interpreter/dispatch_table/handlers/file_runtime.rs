@@ -634,7 +634,7 @@ fn intercept_write_dispatch(
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg + 1));
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&contents_v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(contents_v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(contents_v);
         state.registers.get_absolute(abs_index)
     } else {
         contents_v
@@ -697,7 +697,7 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
     // rendering — surfacing as `NotFound` against a path the user
     // never typed.
     let mut unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
     } else {
         v
@@ -774,7 +774,7 @@ pub(super) fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_b
 /// caller frame — the FfiExtended System sub-ops (ENV-IMPL-TRIO-1).
 pub(super) fn extract_byte_list_from_value(state: &InterpreterState, v: Value) -> Vec<u8> {
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
     } else {
         v

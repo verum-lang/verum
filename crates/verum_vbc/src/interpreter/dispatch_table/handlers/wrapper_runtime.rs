@@ -72,7 +72,7 @@ fn arg_value(state: &InterpreterState, caller_base: u32, args_start: u16, idx: u
         .registers
         .get(caller_base, Reg(args_start + idx));
     if is_cbgr_ref(&raw) {
-        let (abs_index, _gen) = decode_cbgr_ref(raw.as_i64());
+        let (abs_index, _gen) = decode_cbgr_ref(raw);
         state.registers.get_absolute(abs_index)
     } else {
         raw

@@ -2083,7 +2083,7 @@ pub(in super::super) fn try_intercept_tcp_method(
     // routes `&mut self` through register-encoded references — unwrap
     // before any TcpStream-shape checks.
     let receiver = if super::cbgr_helpers::is_cbgr_ref(&receiver) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(receiver.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(receiver);
         state.registers.get_absolute(abs_index)
     } else {
         receiver
@@ -2222,7 +2222,7 @@ fn intercept_udp_send_to(
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg + 1));
     let addr_v = if super::cbgr_helpers::is_cbgr_ref(&addr_v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(addr_v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(addr_v);
         state.registers.get_absolute(abs_index)
     } else {
         addr_v
@@ -2277,7 +2277,7 @@ fn intercept_udp_recv_from(
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&buf_v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(buf_v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(buf_v);
         state.registers.get_absolute(abs_index)
     } else {
         buf_v
@@ -2511,7 +2511,7 @@ fn intercept_tcp_read(
         .registers
         .get(caller_base, crate::instruction::Reg(args_start_reg));
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&buf_v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(buf_v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(buf_v);
         state.registers.get_absolute(abs_index)
     } else {
         buf_v

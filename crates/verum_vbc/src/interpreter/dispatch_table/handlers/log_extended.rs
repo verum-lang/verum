@@ -372,8 +372,8 @@ pub(in super::super) fn handle_mem_extended(
             let a_val = state.get_reg(a_reg);
             let b_val = state.get_reg(b_reg);
             if is_cbgr_ref(&a_val) && is_cbgr_ref(&b_val) {
-                let (a_abs, _) = decode_cbgr_ref(a_val.as_i64());
-                let (b_abs, _) = decode_cbgr_ref(b_val.as_i64());
+                let (a_abs, _) = decode_cbgr_ref(a_val);
+                let (b_abs, _) = decode_cbgr_ref(b_val);
                 let tmp = state.registers.get_absolute(a_abs);
                 let b_inner = state.registers.get_absolute(b_abs);
                 state.registers.set_absolute(a_abs, b_inner);
@@ -404,7 +404,7 @@ pub(in super::super) fn handle_mem_extended(
             let dest_val = state.get_reg(dest_reg);
             let src_val = state.get_reg(src_reg);
             if is_cbgr_ref(&dest_val) {
-                let (abs, _) = decode_cbgr_ref(dest_val.as_i64());
+                let (abs, _) = decode_cbgr_ref(dest_val);
                 let old = state.registers.get_absolute(abs);
                 state.registers.set_absolute(abs, src_val);
                 state.set_reg(dst, old);

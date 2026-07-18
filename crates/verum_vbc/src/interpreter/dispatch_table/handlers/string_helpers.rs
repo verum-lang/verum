@@ -41,7 +41,7 @@ pub(super) fn extract_string(value: &Value, state: &InterpreterState) -> String 
     // that takes a `&Text` argument.
     let mut v = *value;
     if is_cbgr_ref(&v) {
-        let (abs_index, _gen) = decode_cbgr_ref(v.as_i64());
+        let (abs_index, _gen) = decode_cbgr_ref(v);
         v = state.registers.get_absolute(abs_index);
     }
     if v.is_thin_ref() {
@@ -143,7 +143,7 @@ pub(super) fn extract_text_bytes(value: &Value, state: &InterpreterState) -> Vec
     // `extract_string`.
     let mut v = *value;
     if is_cbgr_ref(&v) {
-        let (abs_index, _gen) = decode_cbgr_ref(v.as_i64());
+        let (abs_index, _gen) = decode_cbgr_ref(v);
         v = state.registers.get_absolute(abs_index);
     }
     if v.is_thin_ref() {
@@ -492,7 +492,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     let va_unwrapped = if let Some(inner) = unwrap_mut_ptr(va) {
         Some(inner)
     } else if is_cbgr_ref(va) {
-        let (abs_idx, _gen) = decode_cbgr_ref(va.as_i64());
+        let (abs_idx, _gen) = decode_cbgr_ref(*va);
         Some(state.registers.get_absolute(abs_idx))
     } else if va.is_thin_ref() {
         let tr = va.as_thin_ref();
@@ -507,7 +507,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     let vb_unwrapped = if let Some(inner) = unwrap_mut_ptr(vb) {
         Some(inner)
     } else if is_cbgr_ref(vb) {
-        let (abs_idx, _gen) = decode_cbgr_ref(vb.as_i64());
+        let (abs_idx, _gen) = decode_cbgr_ref(*vb);
         Some(state.registers.get_absolute(abs_idx))
     } else if vb.is_thin_ref() {
         let tr = vb.as_thin_ref();
@@ -628,7 +628,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             return false;
         }
         let deref_a = unsafe { *(thin_a.ptr as *const Value) };
-        let (abs_idx, _gen) = decode_cbgr_ref(vb.as_i64());
+        let (abs_idx, _gen) = decode_cbgr_ref(*vb);
         let deref_b = state.registers.get_absolute(abs_idx);
         return deep_value_eq_depth(&deref_a, &deref_b, state, depth + 1);
     }
@@ -638,7 +638,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         if thin_b.is_null() {
             return false;
         }
-        let (abs_idx, _gen) = decode_cbgr_ref(va.as_i64());
+        let (abs_idx, _gen) = decode_cbgr_ref(*va);
         let deref_a = state.registers.get_absolute(abs_idx);
         let deref_b = unsafe { *(thin_b.ptr as *const Value) };
         return deep_value_eq_depth(&deref_a, &deref_b, state, depth + 1);
@@ -646,8 +646,8 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
 
     // Handle two CBGR register references - compare dereferenced values
     if is_cbgr_ref(va) && is_cbgr_ref(vb) {
-        let (abs_idx_a, _gen_a) = decode_cbgr_ref(va.as_i64());
-        let (abs_idx_b, _gen_b) = decode_cbgr_ref(vb.as_i64());
+        let (abs_idx_a, _gen_a) = decode_cbgr_ref(*va);
+        let (abs_idx_b, _gen_b) = decode_cbgr_ref(*vb);
         let deref_a = state.registers.get_absolute(abs_idx_a);
         let deref_b = state.registers.get_absolute(abs_idx_b);
         return deep_value_eq_depth(&deref_a, &deref_b, state, depth + 1);

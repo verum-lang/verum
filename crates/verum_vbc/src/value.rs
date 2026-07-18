@@ -231,6 +231,58 @@ const FAT_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER | FAT_RE
 /// Mask for reference index (bits 0-44, 45 bits total).
 const REF_INDEX_MASK: u64 = (1u64 << 45) - 1;
 
+// ============================================================================
+// CBGR register-reference encoding (T0367 / CBGR-REGREF-TAG-1)
+// ============================================================================
+//
+// An interpreter Tier-0 register-ref names an ABSOLUTE register slot plus the
+// CBGR generation captured at borrow time. It is NOT a heap reference
+// (`ThinRef`/`FatRef`) and NOT an `Int`.
+//
+// **The soundness hole this replaces (T0367):** register-refs used to be
+// encoded as a NEGATIVE inline `Int` — `-1 - abs - (gen << 32)` — which squats
+// inside `TAG_INTEGER` space. A legal user `Int` of the form `-(k·2^32 + m)`
+// with `m ≤ 2^24` therefore false-positived `is_cbgr_ref`, decoded to a garbage
+// absolute register index, and hit `Registers::get_absolute` — a loud ICE in
+// debug and a SILENT substitution of a random register's value for the user's
+// `Int` in release (wrong-arithmetic soundness hole). Refs forgeable from data
+// break the three-tier CBGR premise.
+//
+// **The fix:** give register-refs a DISCRIMINATED tag so they can never collide
+// with an `Int`, a `Unit`, or any other Value kind. The 3-bit tag space and the
+// `TAG_POINTER` sub-marker space are both full, so the register-ref lives under
+// `TAG_UNIT` with bit 47 (the payload's top bit) as its discriminator marker —
+// `Value::unit()` is the only other `TAG_UNIT` inhabitant and it has payload 0,
+// so `is_unit()` is tightened to require payload == 0 and the two never overlap.
+//
+// Payload layout of a `TAG_UNIT` register-ref (bits 0-47):
+// ```text
+//   bit  47      : REGREF marker  (1 = register-ref, 0 = plain Unit)
+//   bit  46      : mutability     (1 = &mut, 0 = &)
+//   bits 45..24  : generation     (22 bits — low bits of the 32-bit slot gen)
+//   bits 23..0   : abs reg index  (24 bits — matches Registers::MAX_SIZE = 1<<24)
+// ```
+// A full CBGR slot generation is 32-bit (`registers::GEN_MAX`); the ref carries
+// its low 22 bits and the deref-time validator compares modulo 2^22 (mirrors
+// the 16-bit `ThinRef` epoch-window precedent). The no-check sentinel `0x7FFE`
+// fits in 22 bits, so Tier-1/2 refs round-trip exactly.
+
+/// Discriminator marker for a `TAG_UNIT` register-ref (bit 47 of the payload).
+/// A plain `Value::unit()` has payload 0, so this bit cleanly separates the two.
+const CBGR_REGREF_MARKER: u64 = 1u64 << 47;
+/// Mutability bit of a register-ref (bit 46): 1 = `&mut`, 0 = `&`.
+const CBGR_REGREF_MUT_BIT: u64 = 1u64 << 46;
+/// Width of the absolute-register-index field (bits 0-23).
+const CBGR_REGREF_ABS_BITS: u32 = 24;
+/// Width of the captured-generation field (bits 24-45).
+const CBGR_REGREF_GEN_BITS: u32 = 22;
+/// Mask isolating the absolute register index (bits 0-23).
+const CBGR_REGREF_ABS_MASK: u64 = (1u64 << CBGR_REGREF_ABS_BITS) - 1;
+/// Pre-shift mask for the 22-bit generation field.
+const CBGR_REGREF_GEN_MASK: u64 = (1u64 << CBGR_REGREF_GEN_BITS) - 1;
+/// Bit offset of the generation field within the payload.
+const CBGR_REGREF_GEN_SHIFT: u32 = CBGR_REGREF_ABS_BITS;
+
 // Thread-safe global storage for boxed integers
 use std::sync::Mutex;
 static BOXED_INTS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
@@ -839,6 +891,30 @@ impl Value {
         Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | FAT_REF_MARKER | index)
     }
 
+    /// Creates a CBGR register-reference value (T0367 tagged encoding).
+    ///
+    /// Encodes an ABSOLUTE interpreter register index, the CBGR generation
+    /// captured at borrow time (low 22 bits), and a mutability flag under
+    /// `TAG_UNIT` with the register-ref marker bit set — so the result can
+    /// never collide with an `Int`, a plain `Unit`, or any other Value kind.
+    /// See the `CBGR_REGREF_*` layout notes above.
+    ///
+    /// `abs_index` must be `< 1<<24` (the interpreter register file is bounded
+    /// by `registers::MAX_SIZE = 1<<24`); larger values would alias and are a
+    /// caller bug. `generation` is stored modulo 2^22.
+    #[inline]
+    pub fn cbgr_regref(abs_index: u32, generation: u32, mutable: bool) -> Self {
+        debug_assert!(
+            (abs_index as u64) <= CBGR_REGREF_ABS_MASK,
+            "CBGR register index {} exceeds 24-bit field (register file max is 1<<24)",
+            abs_index
+        );
+        let abs = (abs_index as u64) & CBGR_REGREF_ABS_MASK;
+        let gen_field = ((generation as u64) & CBGR_REGREF_GEN_MASK) << CBGR_REGREF_GEN_SHIFT;
+        let mut_bit = if mutable { CBGR_REGREF_MUT_BIT } else { 0 };
+        Value(NAN_BITS | (TAG_UNIT << TAG_SHIFT) | CBGR_REGREF_MARKER | mut_bit | gen_field | abs)
+    }
+
     // ========================================================================
     // Type Checks
     // ========================================================================
@@ -916,9 +992,50 @@ impl Value {
     }
 
     /// Returns true if this is the unit value.
+    ///
+    /// Tightened for T0367 (CBGR-REGREF-TAG-1): a `TAG_UNIT` value is the unit
+    /// value ONLY when its payload is zero. `Value::cbgr_regref` reuses
+    /// `TAG_UNIT` with a nonzero marker bit for interpreter register-refs, so
+    /// requiring payload == 0 keeps the two disjoint (`Value::unit()` is the
+    /// sole payload-zero `TAG_UNIT` inhabitant). This also matches the codegen
+    /// `is_unit` lowering, which compares against `NAN_UNIT_HEADER` exactly.
     #[inline]
     pub fn is_unit(&self) -> bool {
-        self.tag() == Some(TAG_UNIT as u8)
+        self.tag() == Some(TAG_UNIT as u8) && (self.0 & PAYLOAD_MASK) == 0
+    }
+
+    /// Returns true if this is a CBGR register-reference (T0367 tagged form).
+    ///
+    /// EXACT tag test — the whole point of CBGR-REGREF-TAG-1: `TAG_UNIT` with
+    /// the register-ref marker bit (47) set. No arithmetic-range guessing, so a
+    /// user `Int` (any value, any sign) can never be misclassified as a ref.
+    #[inline]
+    pub fn is_cbgr_regref(&self) -> bool {
+        self.tag() == Some(TAG_UNIT as u8) && (self.0 & CBGR_REGREF_MARKER) != 0
+    }
+
+    /// Absolute register index of a CBGR register-reference (bits 0-23).
+    ///
+    /// Only meaningful when [`is_cbgr_regref`](Self::is_cbgr_regref) is true.
+    #[inline]
+    pub fn cbgr_regref_abs(&self) -> u32 {
+        (self.0 & CBGR_REGREF_ABS_MASK) as u32
+    }
+
+    /// Captured 22-bit CBGR generation of a register-reference (bits 24-45).
+    ///
+    /// Only meaningful when [`is_cbgr_regref`](Self::is_cbgr_regref) is true.
+    #[inline]
+    pub fn cbgr_regref_generation(&self) -> u32 {
+        ((self.0 >> CBGR_REGREF_GEN_SHIFT) & CBGR_REGREF_GEN_MASK) as u32
+    }
+
+    /// True iff this CBGR register-reference is mutable (`&mut`, bit 46 set).
+    ///
+    /// Only meaningful when [`is_cbgr_regref`](Self::is_cbgr_regref) is true.
+    #[inline]
+    pub fn cbgr_regref_is_mut(&self) -> bool {
+        (self.0 & CBGR_REGREF_MUT_BIT) != 0
     }
 
     /// Returns true if this is a pointer.
@@ -1425,6 +1542,17 @@ impl fmt::Debug for Value {
         } else if self.is_boxed_int() {
             // Check boxed int before generic pointer (boxed ints use TAG_POINTER)
             write!(f, "Value::BoxedInt({})", self.as_i64())
+        } else if self.is_cbgr_regref() {
+            // Check register-ref before the generic TAG_UNIT arm (T0367: a
+            // register-ref reuses TAG_UNIT with a marker bit) so it never
+            // mis-prints as `Value::Unit`.
+            write!(
+                f,
+                "Value::CbgrRegRef(abs={}, gen={}, mut={})",
+                self.cbgr_regref_abs(),
+                self.cbgr_regref_generation(),
+                self.cbgr_regref_is_mut()
+            )
         } else {
             match self.tag() {
                 Some(tag) if tag == TAG_INTEGER as u8 => {
@@ -1470,6 +1598,9 @@ impl fmt::Display for Value {
         } else if self.is_boxed_int() {
             // Boxed integers display as regular integers
             write!(f, "{}", self.as_i64())
+        } else if self.is_cbgr_regref() {
+            // T0367: register-ref reuses TAG_UNIT with a marker bit.
+            write!(f, "<regref>")
         } else {
             match self.tag() {
                 Some(tag) if tag == TAG_INTEGER as u8 => write!(f, "{}", self.as_i64()),
@@ -2280,5 +2411,137 @@ mod tests {
         // Verify GENERATOR_ID_MASK is exactly 45 bits (bits 45-47 are reserved for markers)
         assert_eq!(GENERATOR_ID_MASK, (1u64 << 45) - 1);
         assert_eq!(GENERATOR_ID_MASK.count_ones(), 45);
+    }
+
+    // ========================================================================
+    // CBGR register-reference tag encoding (T0367 / CBGR-REGREF-TAG-1)
+    // ========================================================================
+
+    /// The soundness property: NO user `Int` — of ANY value, sign, or magnitude
+    /// — is ever misclassified as a CBGR register-reference. Pre-T0367 the
+    /// int-space encoding false-positived `-(k·2^32 + m)` shapes; the tagged
+    /// encoding lives under `TAG_UNIT`, disjoint from `TAG_INTEGER`, so the
+    /// class is closed.
+    #[test]
+    fn cbgr_regref_never_collides_with_int() {
+        // The exact T0367 seed-0xc9b value that hit the ICE.
+        assert!(!Value::from_i64(-131008744790).is_cbgr_regref());
+
+        // Sweep the whole collision family -(k·2^32 + m) that the legacy
+        // encoding decoded to a small abs-index, plus assorted user ints.
+        for k in 0..64i64 {
+            for m in [0i64, 1, 2, 1647571, 12242261, (1 << 24) - 1, 1 << 23] {
+                let bad = -(k * (1i64 << 32) + m) - 1;
+                let v = Value::from_i64(bad);
+                assert!(
+                    !v.is_cbgr_regref(),
+                    "user Int {} (k={}, m={}) misclassified as a register-ref",
+                    bad,
+                    k,
+                    m
+                );
+                assert!(v.is_int(), "collision-form value {} should stay an Int", bad);
+            }
+        }
+        // A broad ordinary sweep, both signs, including inline boundaries.
+        for &i in &[
+            0i64,
+            1,
+            -1,
+            i64::MIN,
+            i64::MAX,
+            MIN_SMALL_INT,
+            MAX_SMALL_INT,
+            -4296614867,
+            4296614867,
+        ] {
+            assert!(
+                !Value::from_i64(i).is_cbgr_regref(),
+                "user Int {} misclassified as a register-ref",
+                i
+            );
+        }
+    }
+
+    /// A real register-ref round-trips: encode → classified true → decode back
+    /// to the same `(abs, generation, mutable)` triple.
+    #[test]
+    fn cbgr_regref_roundtrip() {
+        let cases = [
+            (0u32, 1u32, false),
+            (5, 1, false),
+            (5, 1, true),
+            (1023, 0x7FFE, false), // GEN_NO_CHECK sentinel fits in 22 bits
+            ((1 << 24) - 1, (1 << 22) - 1, true),
+            (12242261, 42, false), // the T0367 abs, now a *legitimate* ref
+        ];
+        for (abs, generation, mutable) in cases {
+            let v = Value::cbgr_regref(abs, generation, mutable);
+            assert!(
+                v.is_cbgr_regref(),
+                "abs={} gen={} not a regref",
+                abs,
+                generation
+            );
+            assert_eq!(v.cbgr_regref_abs(), abs, "abs round-trip");
+            assert_eq!(
+                v.cbgr_regref_generation(),
+                generation & ((1 << 22) - 1),
+                "gen round-trip (mod 2^22)"
+            );
+            assert_eq!(v.cbgr_regref_is_mut(), mutable, "mutability round-trip");
+            // A register-ref classifies as NOTHING else.
+            assert!(!v.is_unit(), "regref must not be Unit");
+            assert!(!v.is_int(), "regref must not be Int");
+            assert!(!v.is_inline_int());
+            assert!(!v.is_boxed_int());
+            assert!(!v.is_float());
+            assert!(!v.is_bool());
+            assert!(!v.is_ptr());
+            assert!(!v.is_nil());
+            assert!(!v.is_thin_ref());
+            assert!(!v.is_fat_ref());
+            assert!(!v.is_generator());
+        }
+    }
+
+    /// Tightening `is_unit` keeps `Value::unit()` classified while excluding
+    /// every register-ref (which reuses `TAG_UNIT` with a nonzero payload).
+    #[test]
+    fn cbgr_regref_disjoint_from_unit() {
+        let u = Value::unit();
+        assert!(u.is_unit());
+        assert!(!u.is_cbgr_regref());
+        assert_eq!(u.0 & PAYLOAD_MASK, 0);
+
+        // Even the all-zero-field register-ref (abs=0, gen=0, immutable) has the
+        // marker bit set, so it is never confused with Unit.
+        let r = Value::cbgr_regref(0, 0, false);
+        assert!(!r.is_unit());
+        assert!(r.is_cbgr_regref());
+        assert_ne!(r.0 & PAYLOAD_MASK, 0);
+
+        // Both share the TAG_UNIT header nibble but differ in the payload.
+        assert_eq!(u.tag(), Some(TAG_UNIT as u8));
+        assert_eq!(r.tag(), Some(TAG_UNIT as u8));
+    }
+
+    /// The register-ref bit-field layout is exactly the 47-bit payload split
+    /// documented above: abs(24) + gen(22) + mut(1), marker at bit 47.
+    #[test]
+    fn cbgr_regref_field_layout_pinned() {
+        assert_eq!(CBGR_REGREF_MARKER, 1u64 << 47);
+        assert_eq!(CBGR_REGREF_MUT_BIT, 1u64 << 46);
+        assert_eq!(CBGR_REGREF_ABS_BITS + CBGR_REGREF_GEN_BITS, 46);
+        assert_eq!(CBGR_REGREF_GEN_SHIFT, 24);
+        // Fields tile bits 0..=45; mut is 46; marker is 47 — the full payload.
+        let abs_field = CBGR_REGREF_ABS_MASK;
+        let gen_field = CBGR_REGREF_GEN_MASK << CBGR_REGREF_GEN_SHIFT;
+        assert_eq!(abs_field & gen_field, 0, "abs/gen fields must not overlap");
+        assert_eq!(
+            abs_field | gen_field | CBGR_REGREF_MUT_BIT | CBGR_REGREF_MARKER,
+            PAYLOAD_MASK,
+            "abs|gen|mut|marker must tile the whole 48-bit payload",
+        );
     }
 }

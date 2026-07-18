@@ -7,7 +7,10 @@
 // Shared helpers (used by multiple handler modules)
 pub(super) mod arith_helpers;
 pub(super) mod bytecode_io;
-pub(super) mod cbgr_helpers;
+// Visibility is `pub(in crate::interpreter)` (was `pub(super)`) so the
+// collection normaliser in `interpreter::state` can route through this SOLE
+// register-ref encode/decode authority (T0367 deleted its inlined copy).
+pub(in crate::interpreter) mod cbgr_helpers;
 pub(super) mod string_helpers;
 // Shared heap-marshaling primitives for the Tier-0 intercept
 // modules (shell/file/env/stdio/process/net). Single canonical

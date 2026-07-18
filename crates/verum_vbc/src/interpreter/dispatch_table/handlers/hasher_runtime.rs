@@ -184,7 +184,7 @@ pub(in super::super) fn try_intercept_default_hasher(
 #[inline]
 fn deref_self(state: &InterpreterState, v: Value) -> Value {
     if is_cbgr_ref(&v) {
-        let (abs, _) = decode_cbgr_ref(v.as_i64());
+        let (abs, _) = decode_cbgr_ref(v);
         return state.registers.get_absolute(abs);
     }
     if v.is_thin_ref() {

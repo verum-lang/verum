@@ -130,8 +130,8 @@ pub(in super::super) fn handle_attenuate(
         if can_write {
             state.set_reg(dst, src_val);
         } else {
-            let attenuated = strip_cbgr_ref_mutability(src_val.as_i64());
-            state.set_reg(dst, Value::from_i64(attenuated));
+            let attenuated = strip_cbgr_ref_mutability(src_val);
+            state.set_reg(dst, attenuated);
         }
     } else if src_val.is_ptr() && !src_val.is_nil() {
         let ptr_addr = src_val.as_ptr::<u8>() as usize;
@@ -158,7 +158,7 @@ pub(in super::super) fn handle_has_capability(
     let ref_val = state.get_reg(ref_reg);
 
     let has_all_caps = if is_cbgr_ref(&ref_val) {
-        let is_mut = is_cbgr_ref_mutable(ref_val.as_i64());
+        let is_mut = is_cbgr_ref_mutable(ref_val);
         check_capabilities_for_mutability(cap_mask, is_mut)
     } else if ref_val.is_ptr() && !ref_val.is_nil() {
         let ptr_addr = ref_val.as_ptr::<u8>() as usize;
@@ -197,8 +197,8 @@ pub(in super::super) fn handle_require_capability(
     let ref_val = state.get_reg(ref_reg);
 
     let (has_caps, ptr_addr) = if is_cbgr_ref(&ref_val) {
-        let is_mut = is_cbgr_ref_mutable(ref_val.as_i64());
-        let (abs_index, _) = decode_cbgr_ref(ref_val.as_i64());
+        let is_mut = is_cbgr_ref_mutable(ref_val);
+        let (abs_index, _) = decode_cbgr_ref(ref_val);
         (
             check_capabilities_for_mutability(cap_mask, is_mut),
             abs_index as usize,

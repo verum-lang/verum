@@ -114,7 +114,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                 .registers
                 .get(caller_base, Reg(args_start_reg));
             let v = if is_cbgr_ref(&raw) {
-                let (abs_index, _) = decode_cbgr_ref(raw.as_i64());
+                let (abs_index, _) = decode_cbgr_ref(raw);
                 state.registers.get_absolute(abs_index)
             } else if raw.is_thin_ref() {
                 let tr = raw.as_thin_ref();
@@ -156,7 +156,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // some other register slot.  We need the absolute register
             // to write the new value back into.
             let (writeback_abs, current_val) = if is_cbgr_ref(&self_raw) {
-                let (abs, _) = decode_cbgr_ref(self_raw.as_i64());
+                let (abs, _) = decode_cbgr_ref(self_raw);
                 (Some(abs), state.registers.get_absolute(abs))
             } else if self_raw.is_thin_ref() {
                 let tr = self_raw.as_thin_ref();
@@ -334,7 +334,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // `&List<Text>`; sep is `&Text`).
             let unwrap = |mut v: Value| -> Value {
                 if is_cbgr_ref(&v) {
-                    let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+                    let (abs_index, _) = decode_cbgr_ref(v);
                     v = state.registers.get_absolute(abs_index);
                 }
                 if v.is_thin_ref() {
@@ -463,7 +463,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // Auto-deref CBGR ref / ThinRef for both receiver and arg.
             let deref = |v: Value, st: &InterpreterState| -> Value {
                 if is_cbgr_ref(&v) {
-                    let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+                    let (abs_index, _) = decode_cbgr_ref(v);
                     st.registers.get_absolute(abs_index)
                 } else if v.is_thin_ref() {
                     let tr = v.as_thin_ref();
@@ -533,7 +533,7 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             // Without this, the mutation is local to the intercept and
             // the caller's variable retains the pre-call value.
             if is_cbgr_ref(&self_raw) {
-                let (abs_index, _) = decode_cbgr_ref(self_raw.as_i64());
+                let (abs_index, _) = decode_cbgr_ref(self_raw);
                 state.registers.set_absolute(abs_index, new_value);
             } else {
                 state

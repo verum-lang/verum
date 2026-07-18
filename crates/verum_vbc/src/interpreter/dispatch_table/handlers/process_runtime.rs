@@ -311,7 +311,7 @@ fn unwrap_ref(state: &InterpreterState, reg: u16, caller_base: u32) -> Value {
         .registers
         .get(caller_base, crate::instruction::Reg(reg));
     if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
         state.registers.get_absolute(abs_index)
     } else {
         v

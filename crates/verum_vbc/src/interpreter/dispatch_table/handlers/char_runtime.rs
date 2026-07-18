@@ -65,7 +65,7 @@ pub(in super::super) fn try_intercept_char_mutator(
     // the caller's Char value.
     let self_raw = state.registers.get(caller_base, Reg(args_start_reg));
     let (abs_index, current_val) = if is_cbgr_ref(&self_raw) {
-        let (abs, _) = decode_cbgr_ref(self_raw.as_i64());
+        let (abs, _) = decode_cbgr_ref(self_raw);
         (Some(abs), state.registers.get_absolute(abs))
     } else if self_raw.is_thin_ref() {
         // ThinRef writeback isn't a register slot — fall through.
@@ -184,7 +184,7 @@ pub(in super::super) fn try_intercept_char_encode(
     let codepoint = if receiver_resolved.is_int() {
         receiver_resolved.as_i64()
     } else if is_cbgr_ref(&receiver_resolved) {
-        let (abs_index, _) = decode_cbgr_ref(receiver_resolved.as_i64());
+        let (abs_index, _) = decode_cbgr_ref(receiver_resolved);
         let inner = state.registers.get_absolute(abs_index);
         if !inner.is_int() {
             return Ok(None);

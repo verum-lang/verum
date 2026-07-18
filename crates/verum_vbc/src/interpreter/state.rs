@@ -2881,20 +2881,17 @@ impl InterpreterState {
     /// to the underlying heap object (mirrors the `handle_array_len` preamble).
     /// Shared by the structural collection readers below.
     fn normalize_collection_value(&self, mut val: Value) -> Value {
-        // Encoded CBGR register-ref: an inline int below -(1<<32) whose decoded
-        // absolute register index is small. (Inlined from cbgr_helpers, which
-        // are module-private to the dispatch handlers.)
-        if val.is_inline_int() {
-            let encoded = val.as_i64();
-            if encoded < -(1i64 << 32) {
-                const CBGR_MUTABLE_BIT: u32 = 0x8000_0000;
-                const CBGR_REF_ABS_INDEX_MAX: u32 = 1 << 24;
-                let raw = -(encoded + 1);
-                let abs_index = ((raw & 0xFFFF_FFFF) as u32) & !CBGR_MUTABLE_BIT;
-                if abs_index <= CBGR_REF_ABS_INDEX_MAX {
-                    val = self.registers.get_absolute(abs_index);
-                }
-            }
+        // CBGR register-ref (T0367 / CBGR-REGREF-TAG-1): resolve through the SOLE
+        // cbgr_helpers authority. The pre-T0367 inlined negative-int decoder that
+        // lived here — with its own `abs_index <= 1<<24` range guess — is deleted:
+        // it shared the very `is_cbgr_ref` false-positive that let a legal user
+        // Int decode to a garbage register index (redundancy-directive fix).
+        use crate::interpreter::dispatch_table::handlers::cbgr_helpers::{
+            decode_cbgr_ref, is_cbgr_ref,
+        };
+        if is_cbgr_ref(&val) {
+            let (abs_index, _gen) = decode_cbgr_ref(val);
+            val = self.registers.get_absolute(abs_index);
         }
         if val.is_thin_ref() {
             let tr = val.as_thin_ref();
