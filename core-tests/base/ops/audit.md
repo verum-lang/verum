@@ -131,9 +131,16 @@ address (`<ptr@0x…>`), so `P{1,2} == P{1,2}` was false. Fixed by a
 structural field-wise arm (declared-field-count-driven, recursing
 `deep_value_eq`) + a `Shared<T>` auto-deref sharing the GetF/SetF layout
 authority (`shared_cell_inner_value`, T0107). §F pins: structural same /
-diff, nested recursion, Text-field content, Shared-inner. The §F pins
-are ALSO the Tier-1 tripwire — AOT still lowers heap `==` as pointer
-identity (or misroutes string-marked registers through
-`verum_internal_strcmp`), so they are expected red on `--aot` until the
-T0273 AOT twin (structural `verum_value_eq` runtime + a compile-time
-field-count table) lands.
+diff, nested recursion, Text-field content, Shared-inner.
+
+Tier-1 status (EMPIRICAL, 2026-07-18): the single-file AOT probe of the
+exact §F shapes AGREES with the fixed interpreter
+(`rec_eq_same=true rec_eq_diff=false`, ADT and Text correct) — the
+predicted pointer-identity red did NOT reproduce, so the §F pins are
+expected green on `--aot` as well. The T0273 residual is code-confirmed
+but execution-unconfirmed: `CmpI`'s `is_string_register` marking can
+route a heap operand through `verum_internal_strcmp` (byte compare of
+non-Text payloads), and which lowering the probe actually took needs a
+DUMP_IR pass — tracked in the T0273 journal for the follow-up
+investigator. If a §F pin ever goes red on `--aot`, that residual is
+the first suspect.

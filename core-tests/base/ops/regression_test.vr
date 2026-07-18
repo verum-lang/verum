@@ -175,11 +175,12 @@ fn regression_control_flow_in_list_preserves_variants() {
 // Pre-fix, the interpreter's deep-equality tail arm classified two
 // same-type heap objects as "likely strings" and compared their rendered
 // forms; a record renders as its ADDRESS (`<ptr@0x…>`), so two
-// structurally identical records were never equal. These pins are also
-// the Tier-1 tripwire: the AOT lowering still compares heap `==` as raw
-// pointer identity (or misroutes through strcmp when a register is
-// string-marked) — expected red on `--aot` until the T0273 AOT twin
-// (structural `verum_value_eq` runtime) lands.
+// structurally identical records were never equal. The single-file AOT
+// probe of these exact shapes agrees with the fixed interpreter
+// (2026-07-18), so the pins are expected green on BOTH tiers; they
+// remain the tripwire for the T0273 residual (CmpI's string-marking can
+// route a heap operand through verum_internal_strcmp — code-confirmed,
+// not yet reproduced).
 // =============================================================================
 
 type EqPoint is { x: Int, y: Int };
