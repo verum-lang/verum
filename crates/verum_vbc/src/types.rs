@@ -232,6 +232,22 @@ impl TypeId {
     /// dyn switch) fell to the empty default for every Ordering value.
     pub const ORDERING: TypeId = TypeId(529);
 
+    /// Tensor — native tensor-handle carrier (T0202 TENSOR-HANDLE-OBJECT-1).
+    /// Layout: payload = ONE inline `interpreter::tensor::TensorHandle`
+    /// (a RAW Rust struct, NOT NaN-boxed Values) after the 24-byte
+    /// ObjectHeader.  Constructed ONLY by
+    /// `interpreter::dispatch_table::alloc_tensor_value` (the single
+    /// Value-boundary authority — raw `Box::into_raw` handoffs are the
+    /// pre-T0202 leak class) and read ONLY through
+    /// `interpreter::dispatch_table::tensor_handle_ptr` (type-id-checked).
+    /// `DropRef` reclaims the payload in place
+    /// (`tensor::take_and_drop_payload`) so TensorData frees when the
+    /// owning binding leaves scope; `Heap::clear` runs the same glue at
+    /// teardown for expression temps.  Lives in the SEMANTIC band on
+    /// purpose: the band gate excludes native-representation objects
+    /// from stdlib record drop-glue dispatch.
+    pub const TENSOR: TypeId = TypeId(530);
+
     /// First semantic type ID (for range checks).
     pub const FIRST_SEMANTIC: u32 = 512;
 

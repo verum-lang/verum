@@ -1435,6 +1435,20 @@ impl Heap {
             // SAFETY: All objects were allocated by this heap with MIN_ALIGNMENT.
             unsafe {
                 let header = obj_ptr.as_ref();
+                // T0202 TENSOR-HANDLE-OBJECT-1 (teardown leg): TENSOR
+                // carriers hold one inline `TensorHandle` whose `Drop`
+                // (decref → free TensorData) must run before the raw
+                // bytes go away — otherwise every tensor that never hit
+                // `DropRef` (expression temps, still-live bindings at
+                // exit) leaks its TensorData for the process lifetime.
+                // Idempotent with the DropRef-time reclaim: a payload
+                // already dropped there is the empty handle, whose drop
+                // is a no-op.
+                if header.type_id == crate::types::TypeId::TENSOR {
+                    let payload = (obj_ptr.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE)
+                        as *mut super::tensor::TensorHandle;
+                    super::tensor::take_and_drop_payload(payload);
+                }
                 let total_size = OBJECT_HEADER_SIZE + header.size as usize;
                 let layout = Layout::from_size_align_unchecked(total_size, MIN_ALIGNMENT);
                 dealloc(obj_ptr.as_ptr() as *mut u8, layout);
@@ -1987,6 +2001,44 @@ mod tests {
         assert_eq!(
             s1, s2,
             "all misaligned inputs must alias to the same static stub"
+        );
+    }
+
+    /// T0202 (teardown leg): `clear` must run the TENSOR payload glue
+    /// — the inline `TensorHandle`'s drop (decref) — before freeing
+    /// the carrier bytes, so expression temps that never hit DropRef
+    /// still release their TensorData at interpreter teardown.
+    #[test]
+    fn clear_runs_tensor_carrier_glue() {
+        use super::super::tensor::{DType, TensorHandle};
+
+        let mut heap = Heap::new();
+        let handle = TensorHandle::zeros(&[16], DType::F64).unwrap();
+        // Co-owning witness keeps the shared TensorData observable
+        // after `clear` reclaims the carrier's payload.
+        let witness = handle.clone();
+        let rc = |h: &TensorHandle| -> u32 {
+            // SAFETY: witness co-owns, so TensorData outlives this test.
+            unsafe { (*h.data.unwrap().as_ptr()).refcount() }
+        };
+        assert_eq!(rc(&witness), 2);
+
+        let size = std::mem::size_of::<TensorHandle>();
+        let mut moved = Some(handle);
+        heap.alloc_with_init(crate::types::TypeId::TENSOR, size, |data| {
+            // SAFETY: fresh `size`-byte 8-aligned region; `ptr::write`
+            // moves the handle in without reading the destination.
+            let h = moved.take().expect("init runs once");
+            unsafe { std::ptr::write(data.as_mut_ptr() as *mut TensorHandle, h) };
+        })
+        .unwrap();
+
+        // SAFETY: no outstanding references into this test-local heap.
+        unsafe { heap.clear() };
+        assert_eq!(
+            rc(&witness),
+            1,
+            "clear must drop the carrier payload (decref exactly once)"
         );
     }
 }

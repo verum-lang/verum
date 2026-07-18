@@ -4,6 +4,7 @@ use super::super::super::autodiff::GradMode as AutodiffGradMode;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
+use super::super::{alloc_tensor_value, tensor_handle_ptr};
 use super::bytecode_io::*;
 use super::string_helpers::{alloc_string_value, extract_string};
 use crate::value::Value;
@@ -175,8 +176,8 @@ pub(in super::super) fn handle_ml_extended(
                         &[floats.len()],
                         super::super::super::tensor::DType::F64,
                     ) {
-                        let ptr = Box::into_raw(Box::new(tensor));
-                        state.set_reg(dst, Value::from_ptr(ptr));
+                        let carrier = alloc_tensor_value(state, tensor)?;
+                        state.set_reg(dst, carrier);
                     } else {
                         state.set_reg(dst, Value::nil());
                     }
@@ -199,7 +200,7 @@ pub(in super::super) fn handle_ml_extended(
                 tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
             let tokens_val = state.get_reg(tokens_reg);
             let tokens_tensor_ptr =
-                tokens_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+                tensor_handle_ptr(tokens_val);
 
             if !tok_ptr.is_null() && !tokens_tensor_ptr.is_null() {
                 let tok = unsafe { &*tok_ptr };
@@ -263,8 +264,8 @@ pub(in super::super) fn handle_ml_extended(
                         &[floats.len()],
                         super::super::super::tensor::DType::F64,
                     ) {
-                        let ptr = Box::into_raw(Box::new(tensor));
-                        state.set_reg(dst, Value::from_ptr(ptr));
+                        let carrier = alloc_tensor_value(state, tensor)?;
+                        state.set_reg(dst, carrier);
                     } else {
                         state.set_reg(dst, Value::nil());
                     }
@@ -287,7 +288,7 @@ pub(in super::super) fn handle_ml_extended(
                 tok_val.as_ptr::<super::super::super::kernel::tokenizer::TokenizerHandle>();
             let tokens_val = state.get_reg(tokens_reg);
             let tokens_tensor_ptr =
-                tokens_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+                tensor_handle_ptr(tokens_val);
 
             if !tok_ptr.is_null() && !tokens_tensor_ptr.is_null() {
                 let tok = unsafe { &*tok_ptr };
@@ -321,7 +322,7 @@ pub(in super::super) fn handle_ml_extended(
             let p_reg = read_reg(state)?;
 
             let logits_val = state.get_reg(logits_reg);
-            let logits_ptr = logits_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let logits_ptr = tensor_handle_ptr(logits_val);
             let p = state.get_reg(p_reg).as_f64();
 
             if !logits_ptr.is_null() {
@@ -343,7 +344,7 @@ pub(in super::super) fn handle_ml_extended(
             let temp_reg = read_reg(state)?;
 
             let logits_val = state.get_reg(logits_reg);
-            let logits_ptr = logits_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let logits_ptr = tensor_handle_ptr(logits_val);
             let temperature = state.get_reg(temp_reg).as_f64();
 
             if !logits_ptr.is_null() {
@@ -369,11 +370,11 @@ pub(in super::super) fn handle_ml_extended(
             let context_len_reg = read_reg(state)?;
 
             let q_val = state.get_reg(q_reg);
-            let q_ptr = q_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let q_ptr = tensor_handle_ptr(q_val);
             let kv_val = state.get_reg(kv_cache_reg);
-            let kv_ptr = kv_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let kv_ptr = tensor_handle_ptr(kv_val);
             let bt_val = state.get_reg(block_table_reg);
-            let bt_ptr = bt_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let bt_ptr = tensor_handle_ptr(bt_val);
             let context_len = state.get_reg(context_len_reg).as_i64() as usize;
 
             if !q_ptr.is_null() && !kv_ptr.is_null() && !bt_ptr.is_null() {
@@ -383,8 +384,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_paged_attention(q, kv, bt, context_len)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -400,7 +401,7 @@ pub(in super::super) fn handle_ml_extended(
             let k_reg = read_reg(state)?;
 
             let logits_val = state.get_reg(logits_reg);
-            let logits_ptr = logits_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let logits_ptr = tensor_handle_ptr(logits_val);
             let k = state.get_reg(k_reg).as_i64() as usize;
 
             if !logits_ptr.is_null() {
@@ -423,7 +424,7 @@ pub(in super::super) fn handle_ml_extended(
             let p_reg = read_reg(state)?;
 
             let logits_val = state.get_reg(logits_reg);
-            let logits_ptr = logits_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let logits_ptr = tensor_handle_ptr(logits_val);
             let k = state.get_reg(k_reg).as_i64() as usize;
             let p = state.get_reg(p_reg).as_f64();
 
@@ -449,9 +450,9 @@ pub(in super::super) fn handle_ml_extended(
             let penalty_reg = read_reg(state)?;
 
             let logits_val = state.get_reg(logits_reg);
-            let logits_ptr = logits_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let logits_ptr = tensor_handle_ptr(logits_val);
             let past_val = state.get_reg(past_tokens_reg);
-            let past_ptr = past_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let past_ptr = tensor_handle_ptr(past_val);
             let penalty = state.get_reg(penalty_reg).as_f64();
 
             if !logits_ptr.is_null() && !past_ptr.is_null() {
@@ -460,8 +461,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_repetition_penalty(logits, past, penalty)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -511,13 +512,13 @@ pub(in super::super) fn handle_ml_extended(
             let zero_point_reg = read_reg(state)?;
 
             let input_val = state.get_reg(input_reg);
-            let input_ptr = input_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let input_ptr = tensor_handle_ptr(input_val);
             let weight_val = state.get_reg(weight_reg);
-            let weight_ptr = weight_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let weight_ptr = tensor_handle_ptr(weight_val);
             let scale_val = state.get_reg(scale_reg);
-            let scale_ptr = scale_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let scale_ptr = tensor_handle_ptr(scale_val);
             let zp_val = state.get_reg(zero_point_reg);
-            let zp_ptr = zp_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let zp_ptr = tensor_handle_ptr(zp_val);
 
             if !input_ptr.is_null()
                 && !weight_ptr.is_null()
@@ -531,8 +532,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_quantized_matmul(input, weight, scale, zp)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -606,9 +607,9 @@ pub(in super::super) fn handle_ml_extended(
             let target_probs_reg = read_reg(state)?;
 
             let draft_val = state.get_reg(draft_tokens_reg);
-            let draft_ptr = draft_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let draft_ptr = tensor_handle_ptr(draft_val);
             let target_val = state.get_reg(target_probs_reg);
-            let target_ptr = target_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let target_ptr = tensor_handle_ptr(target_val);
 
             if !draft_ptr.is_null() && !target_ptr.is_null() {
                 let draft = unsafe { &*draft_ptr };
@@ -616,8 +617,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_speculative_verify(draft, target)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -637,7 +638,7 @@ pub(in super::super) fn handle_ml_extended(
             let op_byte = read_u8(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let group_val = state.get_reg(group_reg);
             let group_ptr = group_val.as_ptr::<super::super::super::kernel::ProcessGroupHandle>();
 
@@ -649,8 +650,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_all_reduce(tensor, group, op)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -666,7 +667,7 @@ pub(in super::super) fn handle_ml_extended(
             let group_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let group_val = state.get_reg(group_reg);
             let group_ptr = group_val.as_ptr::<super::super::super::kernel::ProcessGroupHandle>();
 
@@ -676,8 +677,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_all_gather(tensor, group)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -694,7 +695,7 @@ pub(in super::super) fn handle_ml_extended(
             let group_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let src_rank = state.get_reg(src_reg).as_i64() as usize;
             let group_val = state.get_reg(group_reg);
             let group_ptr = group_val.as_ptr::<super::super::super::kernel::ProcessGroupHandle>();
@@ -705,8 +706,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_broadcast(tensor, src_rank, group)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -723,7 +724,7 @@ pub(in super::super) fn handle_ml_extended(
             let op_byte = read_u8(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let group_val = state.get_reg(group_reg);
             let group_ptr = group_val.as_ptr::<super::super::super::kernel::ProcessGroupHandle>();
 
@@ -735,8 +736,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_reduce_scatter(tensor, group, op)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -765,7 +766,7 @@ pub(in super::super) fn handle_ml_extended(
             let axis_name_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let axis_name = extract_string(&state.get_reg(axis_name_reg), state);
 
             if !tensor_ptr.is_null() {
@@ -773,8 +774,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_pmap_psum(tensor, &axis_name)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -790,7 +791,7 @@ pub(in super::super) fn handle_ml_extended(
             let axis_name_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let axis_name = extract_string(&state.get_reg(axis_name_reg), state);
 
             if !tensor_ptr.is_null() {
@@ -798,8 +799,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_pmap_pmean(tensor, &axis_name)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -815,7 +816,7 @@ pub(in super::super) fn handle_ml_extended(
             let axis_name_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let axis_name = extract_string(&state.get_reg(axis_name_reg), state);
 
             if !tensor_ptr.is_null() {
@@ -823,8 +824,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_pmap_pmax(tensor, &axis_name)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -840,7 +841,7 @@ pub(in super::super) fn handle_ml_extended(
             let axis_name_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let axis_name = extract_string(&state.get_reg(axis_name_reg), state);
 
             if !tensor_ptr.is_null() {
@@ -848,8 +849,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_pmap_all_gather(tensor, &axis_name)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -907,7 +908,7 @@ pub(in super::super) fn handle_ml_extended(
 
             // Ranks register contains a tensor of rank indices
             let ranks_val = state.get_reg(ranks_reg);
-            let ranks_ptr = ranks_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let ranks_ptr = tensor_handle_ptr(ranks_val);
 
             if !ranks_ptr.is_null() {
                 let ranks_tensor = unsafe { &*ranks_ptr };
@@ -971,7 +972,7 @@ pub(in super::super) fn handle_ml_extended(
             let group_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let dst_rank = state.get_reg(dst_rank_reg).as_i64() as usize;
             let group_val = state.get_reg(group_reg);
             let group_ptr = group_val.as_ptr::<super::super::super::kernel::ProcessGroupHandle>();
@@ -998,8 +999,8 @@ pub(in super::super) fn handle_ml_extended(
                 if let Some(result) =
                     super::super::super::kernel::dispatch_p2p_recv(src_rank, group)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -1016,7 +1017,7 @@ pub(in super::super) fn handle_ml_extended(
             let group_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
             let dst_rank = state.get_reg(dst_rank_reg).as_i64() as usize;
             let group_val = state.get_reg(group_reg);
             let group_ptr = group_val.as_ptr::<super::super::super::kernel::ProcessGroupHandle>();
@@ -1049,8 +1050,8 @@ pub(in super::super) fn handle_ml_extended(
                     super::super::super::kernel::dispatch_p2p_irecv(src_rank, group);
                 state.set_reg(handle_dst, Value::from_i64(handle_id as i64));
                 if let Some(tensor) = maybe_tensor {
-                    let ptr = Box::into_raw(Box::new(tensor));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, tensor)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -1096,8 +1097,8 @@ pub(in super::super) fn handle_ml_extended(
             if !param_ptr.is_null() {
                 let param = unsafe { &*param_ptr };
                 if let Some(grad) = super::super::super::kernel::dispatch_get_grad(param) {
-                    let ptr = Box::into_raw(Box::new(grad));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, grad)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -1114,7 +1115,7 @@ pub(in super::super) fn handle_ml_extended(
             let param_val = state.get_reg(param_reg);
             let param_ptr = param_val.as_ptr::<super::super::super::kernel::ParameterHandle>();
             let grad_val = state.get_reg(grad_reg);
-            let grad_ptr = grad_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let grad_ptr = tensor_handle_ptr(grad_val);
 
             if !param_ptr.is_null() && !grad_ptr.is_null() {
                 let param = unsafe { &mut *param_ptr };
@@ -1130,15 +1131,15 @@ pub(in super::super) fn handle_ml_extended(
             let grad_output_reg = read_reg(state)?;
 
             let grad_val = state.get_reg(grad_output_reg);
-            let grad_ptr = grad_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let grad_ptr = tensor_handle_ptr(grad_val);
 
             if !grad_ptr.is_null() {
                 let grad = unsafe { &*grad_ptr };
                 if let Some(result) =
                     super::super::super::kernel::dispatch_module_backward(&(), grad)
                 {
-                    let ptr = Box::into_raw(Box::new(result));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, result)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -1159,7 +1160,7 @@ pub(in super::super) fn handle_ml_extended(
             let mesh_val = state.get_reg(mesh_reg);
             let mesh_ptr = mesh_val.as_ptr::<super::super::super::kernel::ActorMeshHandle>();
             let coords_val = state.get_reg(coords_reg);
-            let coords_ptr = coords_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let coords_ptr = tensor_handle_ptr(coords_val);
 
             if !mesh_ptr.is_null() {
                 let mesh = unsafe { &*mesh_ptr };
@@ -1195,7 +1196,7 @@ pub(in super::super) fn handle_ml_extended(
             let shape_reg = read_reg(state)?;
 
             let shape_val = state.get_reg(shape_reg);
-            let shape_ptr = shape_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let shape_ptr = tensor_handle_ptr(shape_val);
 
             if !shape_ptr.is_null() {
                 let shape_tensor = unsafe { &*shape_ptr };
@@ -1229,8 +1230,8 @@ pub(in super::super) fn handle_ml_extended(
                     &[floats.len()],
                     super::super::super::tensor::DType::F64,
                 ) {
-                    let ptr = Box::into_raw(Box::new(tensor));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, tensor)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -1248,7 +1249,7 @@ pub(in super::super) fn handle_ml_extended(
             let tensor_reg = read_reg(state)?;
 
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
 
             if !tensor_ptr.is_null() {
                 let tensor = unsafe { &*tensor_ptr };
@@ -1271,8 +1272,8 @@ pub(in super::super) fn handle_ml_extended(
             if !ref_ptr.is_null() {
                 let rdma_ref = unsafe { &*ref_ptr };
                 if let Some(tensor) = super::super::super::kernel::dispatch_rdma_fetch(rdma_ref) {
-                    let ptr = Box::into_raw(Box::new(tensor));
-                    state.set_reg(dst, Value::from_ptr(ptr));
+                    let carrier = alloc_tensor_value(state, tensor)?;
+                    state.set_reg(dst, carrier);
                 } else {
                     state.set_reg(dst, Value::nil());
                 }
@@ -1289,7 +1290,7 @@ pub(in super::super) fn handle_ml_extended(
             let ref_val = state.get_reg(rdma_ref_reg);
             let ref_ptr = ref_val.as_ptr::<super::super::super::kernel::RdmaRefHandle>();
             let tensor_val = state.get_reg(tensor_reg);
-            let tensor_ptr = tensor_val.as_ptr::<super::super::super::tensor::TensorHandle>();
+            let tensor_ptr = tensor_handle_ptr(tensor_val);
 
             if !ref_ptr.is_null() && !tensor_ptr.is_null() {
                 let rdma_ref = unsafe { &mut *ref_ptr };

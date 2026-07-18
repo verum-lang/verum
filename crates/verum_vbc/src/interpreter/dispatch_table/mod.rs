@@ -1005,6 +1005,78 @@ pub(crate) fn alloc_list_from_values(
 }
 
 // ============================================================================
+// Tensor Value Boundary (T0202 TENSOR-HANDLE-OBJECT-1)
+// ============================================================================
+
+// The inline-payload contract of `alloc_tensor_value` requires the heap's
+// data region to satisfy the handle's alignment.
+const _: () = assert!(
+    std::mem::align_of::<super::tensor::TensorHandle>()
+        <= verum_common::layout::MIN_HEAP_ALIGNMENT
+);
+
+/// THE tensor Value-boundary constructor (T0202).
+///
+/// Every interpreter handler that hands a `TensorHandle` to VBC code
+/// goes through here: the handle is moved INLINE into a
+/// `TypeId::TENSOR` heap object (`[ObjectHeader | TensorHandle]`), so
+/// (a) display renders it honestly instead of reading raw Box bytes as
+/// a fake header (the T0176 'Release'/'Relaxed' garbage names),
+/// (b) `DropRef` on the owning binding reclaims the payload via
+/// `tensor::take_and_drop_payload` — tensor data no longer leaks, and
+/// (c) CBGR sees a real generation-tracked object.
+///
+/// Raw `Box::into_raw` at this boundary is FORBIDDEN — that was the
+/// pre-T0202 leak class (126 unreclaimed boxes in tensor_extended.rs
+/// alone, each stranding its `TensorData` for the process lifetime).
+pub(crate) fn alloc_tensor_value(
+    state: &mut InterpreterState,
+    handle: super::tensor::TensorHandle,
+) -> InterpreterResult<Value> {
+    let size = std::mem::size_of::<super::tensor::TensorHandle>();
+    let obj = state
+        .heap
+        .alloc_with_init(TypeId::TENSOR, size, move |data| {
+            // SAFETY: `data` is a fresh `size`-byte region aligned to
+            // MIN_HEAP_ALIGNMENT (≥ align_of::<TensorHandle>, asserted
+            // above); `ptr::write` moves the handle in without reading
+            // the uninitialized destination.
+            unsafe {
+                std::ptr::write(
+                    data.as_mut_ptr() as *mut super::tensor::TensorHandle,
+                    handle,
+                )
+            };
+        })?;
+    state.record_allocation();
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
+/// THE tensor Value-boundary reader (T0202) — twin of
+/// `alloc_tensor_value`.
+///
+/// Returns the payload pointer of a `TypeId::TENSOR` carrier, or null
+/// for anything else (nil, non-pointer, foreign heap object,
+/// misaligned bits).  The null return feeds the pre-existing per-site
+/// `is_null()` guards unchanged, so a non-tensor Value in a tensor
+/// position degrades to the same nil-result path as before.
+pub(crate) fn tensor_handle_ptr(value: Value) -> *mut super::tensor::TensorHandle {
+    if !value.is_regular_ptr() {
+        return std::ptr::null_mut();
+    }
+    let base = value.as_ptr::<u8>();
+    // SAFETY: alignment-gated header probe (`try_type_id` rejects null
+    // and misaligned pointers); the TENSOR type id proves the inline
+    // payload layout per the `alloc_tensor_value` contract.
+    if unsafe { super::heap::ObjectHeader::try_type_id(base) } != Some(TypeId::TENSOR) {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: TENSOR header established — the data region holds one
+    // initialized `TensorHandle`.
+    unsafe { base.add(super::heap::OBJECT_HEADER_SIZE) as *mut super::tensor::TensorHandle }
+}
+
+// ============================================================================
 // Deep Value Equality (used by method_dispatch and comparison handlers)
 // ============================================================================
 

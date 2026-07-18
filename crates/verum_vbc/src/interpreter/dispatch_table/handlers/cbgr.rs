@@ -679,6 +679,29 @@ pub(in super::super) fn handle_drop_ref(
                 return Ok(DispatchResult::Continue);
             }
 
+            // **T0202 TENSOR-HANDLE-OBJECT-1 (drop leg)** — the tensor
+            // carrier reclaims its payload when the owning binding
+            // drops: the inline `TensorHandle` is replaced by the
+            // empty handle and dropped (its `Drop` decrefs, freeing
+            // the shared `TensorData` when this was the last owner).
+            // `take_and_drop_payload` is idempotent, so alias
+            // bindings' later DropRefs are no-ops on a dead-but-valid
+            // handle.  The carrier OBJECT stays alive for the
+            // interpreter heap to reclaim (`Heap::clear` runs the same
+            // glue at teardown), mirroring Shared's no-hard-free
+            // policy; control falls through to the builtin CBGR
+            // cleanup below (register-generation bump + clear).
+            if type_id == crate::types::TypeId::TENSOR {
+                let payload = unsafe {
+                    obj_ptr.add(heap::OBJECT_HEADER_SIZE)
+                        as *mut crate::interpreter::tensor::TensorHandle
+                };
+                // SAFETY: the TENSOR header proves an initialized
+                // inline `TensorHandle` payload (the
+                // `alloc_tensor_value` contract).
+                unsafe { crate::interpreter::tensor::take_and_drop_payload(payload) };
+            }
+
             // ARCHIVE-TYPE-GLUE-IDS-1: resolve the descriptor BY ID
             // (`type_index_by_id`), never positionally.  Descriptor ids
             // are not positional in `module.types` (well-known-id

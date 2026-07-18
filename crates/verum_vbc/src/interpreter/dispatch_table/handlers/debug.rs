@@ -292,6 +292,27 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
                 return format_set_for_print_depth(state, base_ptr, depth + 1);
             }
 
+            // Tensor carrier: type_id == TENSOR (530) — render the
+            // inline payload honestly (T0202; the pre-carrier raw Box
+            // pointer had its `TensorHandle` bytes read as a fake
+            // header here → random type names, the T0176 render leg).
+            if header.type_id == crate::types::TypeId::TENSOR {
+                // SAFETY: TENSOR header proves an initialized inline
+                // `TensorHandle` payload (`alloc_tensor_value`
+                // contract); a DropRef'd carrier holds the empty
+                // handle, which renders as `Tensor<F32>[]`.
+                let h = unsafe {
+                    &*(base_ptr.add(data_offset)
+                        as *const super::super::super::tensor::TensorHandle)
+                };
+                let dims = h.shape[..h.ndim as usize]
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join("x");
+                return format!("Tensor<{:?}>[{}]", h.dtype, dims);
+            }
+
             // Variant detection — TWO paths:
             //  (1) Legacy synthetic-id form (`MakeVariant`): id is in
             //  the `0x8000+tag` sentinel range.

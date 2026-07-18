@@ -1307,7 +1307,13 @@ impl Clone for TensorHandle {
         Self {
             dtype: self.dtype,
             ndim: self.ndim,
-            flags: self.flags & !TensorFlags::OWNS_DATA, // Clone doesn't own
+            // T0202 refcount-balance: the clone bumped the TensorData
+            // refcount above, so it MUST co-own — OWNS_DATA is the
+            // "participates in refcount" bit that makes its Drop pair
+            // the incref with a decref.  The pre-T0202 `& !OWNS_DATA`
+            // ("clone doesn't own") left every clone's +1 unpaired:
+            // TensorData never freed once a handle had been cloned.
+            flags: self.flags | TensorFlags::OWNS_DATA,
             _reserved: 0,
             numel: self.numel,
             shape: self.shape,
@@ -1324,6 +1330,31 @@ impl Drop for TensorHandle {
             self.decref();
         }
     }
+}
+
+/// T0202 TENSOR-HANDLE-OBJECT-1 — kills a tensor-carrier payload in
+/// place, exactly once.  THE payload-reclaim authority shared by the
+/// `DropRef` TENSOR arm (binding-scope reclaim) and `Heap::clear`
+/// (teardown reclaim for expression temps).
+///
+/// Replaces the `TensorHandle` at `payload` with the empty handle and
+/// drops the previous one — its `Drop` runs `decref`, freeing the
+/// shared `TensorData` when this was the last owner.  Idempotent: a
+/// second call takes the empty handle, whose drop is a no-op (`data:
+/// None`), so alias bindings that DropRef the same carrier later
+/// observe a dead-but-VALID handle (element reads yield `None`, ops
+/// yield nil) — never freed memory.
+///
+/// # Safety
+/// `payload` must point at a validly-initialized `TensorHandle` — the
+/// data region of a `TypeId::TENSOR` heap object per the
+/// `alloc_tensor_value` contract.
+pub unsafe fn take_and_drop_payload(payload: *mut TensorHandle) {
+    // SAFETY: caller contract — `payload` is an initialized, exclusive
+    // `TensorHandle` slot; `replace` moves the old handle out without
+    // reading the (now re-initialized) destination again.
+    let dead = unsafe { std::ptr::replace(payload, TensorHandle::new()) };
+    drop(dead);
 }
 
 impl fmt::Debug for TensorHandle {
@@ -2317,7 +2348,11 @@ pub fn tensor_reshape(src: &TensorHandle, new_shape: &[usize]) -> Option<TensorH
     let mut result = TensorHandle {
         dtype: src.dtype,
         ndim: new_shape.len() as u8,
-        flags: (src.flags & !TensorFlags::OWNS_DATA) | TensorFlags::IS_VIEW,
+        // T0202 refcount-balance: the view increfed above, so it
+        // co-owns (same incref ⟺ OWNS_DATA discipline as `Clone`) —
+        // the shared TensorData stays alive as long as EITHER the
+        // base or the view lives, and frees when the last owner drops.
+        flags: src.flags | TensorFlags::OWNS_DATA | TensorFlags::IS_VIEW,
         _reserved: 0,
         numel: new_numel,
         shape: [0; MAX_DIMS],
@@ -7705,5 +7740,60 @@ mod tests {
         let lt = tensor_cmp(&a, &b, CompareOp::Lt).unwrap();
         let vals = tensor_to_bools(&lt).unwrap();
         assert_eq!(vals, vec![false, true, false]);
+    }
+
+    /// Reads the shared TensorData refcount through a live handle.
+    fn data_rc(h: &TensorHandle) -> u32 {
+        // SAFETY: `h.data` is Some for non-empty test tensors and the
+        // TensorData stays alive while `h` (an owner) is alive.
+        unsafe { (*h.data.unwrap().as_ptr()).refcount() }
+    }
+
+    /// T0202 refcount-balance: a clone increfs AND co-owns, so its
+    /// drop decrefs — the pre-fix `& !OWNS_DATA` left every clone's
+    /// +1 unpaired (TensorData never freed once cloned).
+    #[test]
+    fn clone_owns_and_balances_refcount() {
+        let h = TensorHandle::zeros(&[4], DType::F64).unwrap();
+        assert_eq!(data_rc(&h), 1);
+        let c = h.clone();
+        assert!(c.flags.contains(TensorFlags::OWNS_DATA));
+        assert_eq!(data_rc(&h), 2);
+        drop(c);
+        assert_eq!(data_rc(&h), 1);
+    }
+
+    /// T0202 refcount-balance: `tensor_reshape` views incref, so they
+    /// co-own — the shared TensorData survives whichever of base/view
+    /// drops first and frees on the last drop.
+    #[test]
+    fn reshape_view_owns_and_balances_refcount() {
+        let h = TensorHandle::zeros(&[2, 3], DType::F64).unwrap();
+        let v = tensor_reshape(&h, &[3, 2]).unwrap();
+        assert!(v.flags.contains(TensorFlags::OWNS_DATA));
+        assert_eq!(data_rc(&h), 2);
+        drop(v);
+        assert_eq!(data_rc(&h), 1);
+    }
+
+    /// T0202: `take_and_drop_payload` kills a carrier payload exactly
+    /// once — the slot is left as the empty handle and a second call
+    /// is a no-op (the alias-DropRef idempotence contract).
+    #[test]
+    fn take_and_drop_payload_is_idempotent() {
+        let mut slot = TensorHandle::zeros(&[8], DType::F64).unwrap();
+        // A co-owning clone keeps TensorData observable across the kill.
+        let witness = slot.clone();
+        assert_eq!(data_rc(&witness), 2);
+
+        // SAFETY: `slot` is an initialized, exclusive handle slot.
+        unsafe { take_and_drop_payload(&mut slot) };
+        assert!(slot.data.is_none(), "payload slot must be the empty handle");
+        assert_eq!(slot.numel, 0);
+        assert_eq!(data_rc(&witness), 1, "kill must decref exactly once");
+
+        // SAFETY: same slot — now holds the empty handle.
+        unsafe { take_and_drop_payload(&mut slot) };
+        assert_eq!(data_rc(&witness), 1, "second kill must be a no-op");
     }
 }
