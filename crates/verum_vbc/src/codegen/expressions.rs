@@ -15686,7 +15686,14 @@ impl VbcCodegen {
                 let variant_name = format!("{}", path);
                 // Path::Display joins with "::" but variants are registered with "."
                 // separator (e.g., "Tree.Leaf"). Build both forms for lookup.
-                let dot_name = variant_name.replace("::", ".");
+                // T0363: a qualified variant pattern can name its type through a
+                // mount-rename alias (`Constraint.Length` where `Constraint`
+                // re-exports `LayoutConstraint`). Variants register under the
+                // carrier type, so resolve the type head before the tag / const
+                // lookups below — the pattern-side twin of the construction
+                // path's alias resolution. Identity for non-aliases.
+                let dot_name =
+                    self.resolve_variant_path_alias(&variant_name.replace("::", "."));
                 let is_heap = variant_name == "Heap";
 
                 // **Transparent-newtype always-match guard** (§D).
@@ -17370,8 +17377,13 @@ impl VbcCodegen {
                 let payload_types: Option<Vec<String>> = {
                     // Extract simple variant name (e.g., "Num" from "Val::Num")
                     let simple_variant = variant_name.rsplit("::").next().unwrap_or(&variant_name);
-                    // Also try dot-separated form
-                    let dot_variant = variant_name.replace("::", ".");
+                    // Also try dot-separated form. T0363: resolve a mount-rename
+                    // alias in the type head (`Constraint.Length` ->
+                    // `LayoutConstraint.Length`) so the payload-type lookup hits
+                    // the carrier's registered variant — the bind-side twin of
+                    // the tag-test resolution in `compile_pattern_test`.
+                    let dot_variant =
+                        self.resolve_variant_path_alias(&variant_name.replace("::", "."));
 
                     // First try qualified lookup using the match scrutinee type
                     let qualified_lookup =

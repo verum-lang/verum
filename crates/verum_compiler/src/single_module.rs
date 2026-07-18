@@ -78,6 +78,20 @@ pub fn compile_module_with_stdlib(
         CTX_CACHE.apply_lazy_with_types(archive, &mut codegen, module);
     }
 
+    // T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE
+    // re-export renames (e.g. `LayoutConstraint as Constraint`) so a
+    // rename-alias used as a type namespace resolves to its carrier. Shares
+    // the one `seed_reexport_type_aliases` authority with the
+    // interpreter/build path (`compile_ast_to_vbc`); `verum test` reaches
+    // codegen through THIS path, not that one, so without this call the
+    // `term/layout/constraint` suite kept panicking on `Constraint.Length`
+    // even after the pipeline leg was fixed. The embedded metadata sidecar
+    // carries the archive's re-export record (T0244 true-name triples). Runs
+    // after the archive apply so a module's own decls still win.
+    if let Some(metadata) = crate::embedded_stdlib_metadata::get_runtime_metadata() {
+        crate::pipeline::vbc_codegen::seed_reexport_type_aliases(&mut codegen, &metadata);
+    }
+
     // **Protocol-default-method AST seed** (closes #29 user-side tail).
     //
     // The user module rarely defines stdlib protocols (`Ord` / `Eq` /

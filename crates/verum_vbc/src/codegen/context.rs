@@ -4228,18 +4228,14 @@ impl CodegenContext {
             .unwrap_or_else(|| name.to_string())
     }
 
-    /// Resolve `type Foo is Bar;` alias to its canonical target.
-    ///
-    /// The codegen-side type-alias registry isn't populated yet;
-    /// returning the input verbatim is a no-op fallback that keeps
-    /// callers like `expressions.rs::is_type_ns` correct (`resolved
-    /// != *first` evaluates false → alias-arm of the OR doesn't
-    /// fire, primary `has_functions_with_prefix` still works).
-    /// When the codegen alias map is wired in a future commit this
-    /// method becomes the canonical resolver.
-    pub fn resolve_type_alias(&self, name: &str) -> String {
-        name.to_string()
-    }
+    // NOTE: type-alias resolution is `VbcCodegen::resolve_type_alias`
+    // (codegen/mod.rs) — the one authority, backed by `type_aliases` /
+    // `local_concrete_types` / `ctx.mounted_types`. A dead no-op stub
+    // (`fn resolve_type_alias(&self, name) -> name.to_string()`) once lived
+    // here on `CodegenContext`; it had zero callers and, being identically
+    // named, was a footgun (`self.ctx.resolve_type_alias(...)` would have
+    // silently returned identity). Removed with T0363; do NOT reintroduce an
+    // alias resolver on `CodegenContext` — it has no alias table.
 
     /// Clears the required contexts and aliases.
     pub fn clear_required_contexts(&mut self) {

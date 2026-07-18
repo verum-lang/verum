@@ -233,6 +233,15 @@ impl<'s> CompilationPipeline<'s> {
             codegen.import_protocols(&self.global_protocol_registry);
         }
 
+        // T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE
+        // re-export renames into this module's `type_aliases`. Shared with
+        // the `verum test` path (`single_module::compile_module_with_stdlib`)
+        // so alias resolution is identical across tiers — see
+        // `seed_reexport_type_aliases`.
+        if let Some(metadata) = self.stdlib_metadata.get() {
+            seed_reexport_type_aliases(&mut codegen, metadata);
+        }
+
         // **Protocol-default-method AST seed** (closes the user-side
         // tail of #34).  On the precompiled-archive path (the canonical
         // production flow), `stdlib_bootstrap::compile_core_module_from_ast`
@@ -871,6 +880,78 @@ impl<'s> CompilationPipeline<'s> {
             total_before,
             user_mount_prefixes.len()
         );
+    }
+}
+
+/// T0363 — CODEGEN-MOUNT-ALIAS-DISPATCH-1: seed cross-module TYPE
+/// re-export renames into a user module's `type_aliases`, the codegen twin
+/// of the T0244 type-checker leg.
+///
+/// A stdlib module that re-exports a type under a new name
+/// (`core/term/layout/mod.vr`'s `public mount
+/// .constraint.{LayoutConstraint as Constraint}`) makes `Constraint` a
+/// rename-alias of the true carrier `LayoutConstraint`. The archive records
+/// this in `CoreMetadata.module_reexports` as `(local_name, true_name,
+/// source_module)` triples — the `true_name` field T0244 added and
+/// `pipeline/loading.rs` already folds into the type-checker's export shards.
+/// But an archive-loaded stdlib module carries a synthetic EMPTY AST, so the
+/// codegen's own `process_import_tree` (which records source-level
+/// `mount X as Y` renames into `type_aliases`) never runs for it. Without
+/// this seed, `VbcCodegen::resolve_type_alias("Constraint")` returns
+/// identity, `Constraint.Length(40)` fails the `is_type_ns` recognition in
+/// `compile_method_call`, and dispatches against an Int — the runtime
+/// "method 'Length' not found on receiver of runtime kind Int" panic that
+/// gated `term/layout/constraint`'s 10 variant tests.
+///
+/// Classification mirrors loading.rs's fold: only a leaf whose alias spelling
+/// differs from the true name AND whose true name is a declared TYPE (not a
+/// function/module rename) becomes a type alias — in the current stdlib that
+/// is exactly the one `LayoutConstraint as Constraint` pair; the other
+/// renames (`read as read_file`, `libsystem as sys_ffi`, …) are
+/// functions/modules and are skipped. `import_type_aliases` is
+/// additive/first-wins, so a module's own alias declarations always win.
+///
+/// Called from BOTH `compile_ast_to_vbc` (interpreter/build path) and
+/// `single_module::compile_module_with_stdlib` (the `verum test` path).
+pub(crate) fn seed_reexport_type_aliases(
+    codegen: &mut VbcCodegen,
+    metadata: &verum_types::core_metadata::CoreMetadata,
+) {
+    let mut reexport_type_aliases: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for (_reexporting_mp, leaves) in metadata.module_reexports.iter() {
+        for (local_name, true_name, source_module) in leaves.iter() {
+            if local_name.as_str() == true_name.as_str() {
+                continue; // plain re-export, not a rename
+            }
+            // Only genuine TYPE targets participate.
+            if !metadata.types.contains_key(true_name) {
+                continue;
+            }
+            // Same function probe loading.rs uses, so a name that is both a
+            // type and a function is not mis-seeded as a type.
+            let qualified = format!("{}.{}", source_module.as_str(), true_name.as_str());
+            let qualified_stripped = source_module
+                .as_str()
+                .strip_prefix("core.")
+                .map(|stripped| format!("{}.{}", stripped, true_name.as_str()));
+            let is_function = metadata
+                .functions
+                .contains_key(&Text::from(qualified.as_str()))
+                || qualified_stripped
+                    .as_ref()
+                    .is_some_and(|k| metadata.functions.contains_key(&Text::from(k.as_str())))
+                || metadata.functions.contains_key(true_name);
+            if is_function {
+                continue;
+            }
+            reexport_type_aliases
+                .entry(local_name.as_str().to_string())
+                .or_insert_with(|| true_name.as_str().to_string());
+        }
+    }
+    if !reexport_type_aliases.is_empty() {
+        codegen.import_type_aliases(&reexport_type_aliases);
     }
 }
 

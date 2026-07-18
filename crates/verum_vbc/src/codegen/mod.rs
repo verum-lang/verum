@@ -1454,6 +1454,27 @@ impl VbcCodegen {
         current
     }
 
+    /// T0363: resolve a mount-rename alias in the TYPE portion of a
+    /// qualified variant path (`Constraint.Length` -> `LayoutConstraint.Length`
+    /// when `Constraint` is `LayoutConstraint`'s re-export alias).
+    ///
+    /// Variant constructors register under the carrier type name, so a
+    /// pattern or qualified value written through the alias must resolve the
+    /// head before any tag / payload lookup — this is the pattern-side twin
+    /// of the `resolve_type_alias` call the construction path
+    /// (`compile_method_call`'s `is_type_ns`) already makes. Identity for
+    /// unqualified names and non-aliases, so existing `Result.Ok` /
+    /// `Maybe.Some` patterns are unchanged.
+    pub(crate) fn resolve_variant_path_alias(&self, dotted: &str) -> String {
+        if let Some((ty, variant)) = dotted.rsplit_once('.') {
+            let resolved = self.resolve_type_alias(ty);
+            if resolved != ty {
+                return format!("{}.{}", resolved, variant);
+            }
+        }
+        dotted.to_string()
+    }
+
     /// Strips generic arguments from a type name.
     ///
 
