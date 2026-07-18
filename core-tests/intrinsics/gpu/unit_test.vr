@@ -1,0 +1,142 @@
+// =============================================================================
+// core-tests/intrinsics/gpu/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/gpu.vr` — GPU operation intrinsics, exercised through the
+// interpreter's CPU fallback (no accelerator required). Every GPU_* intrinsic
+// returns `-> Int` (a status code or a handle); the interpreter implements
+// device/memory/stream/event/enumeration as host-side stubs, so this suite
+// pins the *wire contract* (T0177 / GPU-OPERAND-SHAPE-1): each op consumes
+// exactly `[dst][args...]` and yields its declared Int. The GPU thread-model
+// intrinsics (ThreadIdX/BlockIdX/…) are only meaningful inside a launched
+// kernel and are covered by audit.md, not here.
+// =============================================================================
+
+mount core.intrinsics.gpu.{ gpu_get_device, gpu_set_device };
+mount core.intrinsics.gpu.{ gpu_malloc, gpu_free, gpu_memset, gpu_memcpy };
+mount core.intrinsics.gpu.{ gpu_stream_create, gpu_stream_query, gpu_stream_destroy };
+mount core.intrinsics.gpu.{ gpu_event_create, gpu_event_record, gpu_event_query };
+mount core.intrinsics.gpu.{ gpu_event_sync, gpu_event_destroy };
+mount core.intrinsics.gpu.{ gpu_enumerate_cuda, gpu_enumerate_metal };
+mount core.intrinsics.gpu.{ gpu_enumerate_rocm, gpu_enumerate_vulkan };
+
+// =============================================================================
+// Section 1: Device management — get / set
+// =============================================================================
+
+@test
+fn test_device_set_returns_status() {
+    // gpu_set_device(id) -> Int status (0 = success).
+    let status: Int = gpu_set_device(0);
+    assert_eq(status, 0);
+}
+
+@test
+fn test_device_set_and_get_shape() {
+    // Tier-invariant contract: set_device returns a 0 status and get_device
+    // returns a non-negative device id. We deliberately do NOT assert a
+    // set->get equality: the interpreter tracks the active device in its GPU
+    // context, but the AOT runtime is a stateless CPU-fallback stub that
+    // returns 0 — asserting equality would be a cross-tier divergence. State
+    // tracking is out of scope for T0177 (a wire-shape fix).
+    let s: Int = gpu_set_device(3);
+    assert_eq(s, 0);
+    let dev: Int = gpu_get_device();
+    assert(dev >= 0);
+
+    let s2: Int = gpu_set_device(1);
+    assert_eq(s2, 0);
+    let dev2: Int = gpu_get_device();
+    assert(dev2 >= 0);
+}
+
+// =============================================================================
+// Section 2: Memory — malloc / free
+// =============================================================================
+
+@test
+fn test_malloc_free_status() {
+    // gpu_malloc(size, memory_space) -> Int handle; gpu_free(ptr) -> Int status.
+    let ptr: Int = gpu_malloc(256, 0);
+    let freed: Int = gpu_free(ptr);
+    assert_eq(freed, 0);
+}
+
+// =============================================================================
+// Section 3: Memory transfer — memset + memcpy round-trip
+// =============================================================================
+
+@test
+fn test_memset_memcpy_roundtrip_status() {
+    let src: Int = gpu_malloc(64, 0);
+    let dst: Int = gpu_malloc(64, 0);
+
+    // Zero-fill the source, then copy it into the destination.
+    let ms: Int = gpu_memset(src, 0, 64);
+    assert_eq(ms, 0);
+    let mc: Int = gpu_memcpy(dst, src, 64);
+    assert_eq(mc, 0);
+
+    let f1: Int = gpu_free(src);
+    let f2: Int = gpu_free(dst);
+    assert_eq(f1, 0);
+    assert_eq(f2, 0);
+}
+
+// =============================================================================
+// Section 4: Stream lifecycle — create / query / destroy
+// =============================================================================
+
+@test
+fn test_stream_create_query_destroy() {
+    let stream: Int = gpu_stream_create();
+    assert(stream >= 0);
+
+    // Query is a completion probe; exercise the call path (its truthy result
+    // shape is not pinned here — see regression_test for the wire pins).
+    let _q: Int = gpu_stream_query(stream);
+
+    let destroyed: Int = gpu_stream_destroy(stream);
+    assert_eq(destroyed, 0);
+}
+
+// =============================================================================
+// Section 5: Event lifecycle — create / record / query / sync / destroy
+// =============================================================================
+
+@test
+fn test_event_lifecycle() {
+    let event: Int = gpu_event_create();
+    assert(event >= 0);
+
+    let stream: Int = gpu_stream_create();
+    assert(stream >= 0);
+
+    // Record the event on the stream (2 args), then query / synchronize it.
+    let rec: Int = gpu_event_record(event, stream);
+    assert_eq(rec, 0);
+
+    let _q: Int = gpu_event_query(event);
+
+    let synced: Int = gpu_event_sync(event);
+    assert_eq(synced, 0);
+
+    let de: Int = gpu_event_destroy(event);
+    assert_eq(de, 0);
+    let ds: Int = gpu_stream_destroy(stream);
+    assert_eq(ds, 0);
+}
+
+// =============================================================================
+// Section 6: Device enumeration — every backend returns a non-negative handle
+// =============================================================================
+
+@test
+fn test_enumerate_backends_non_negative() {
+    assert(gpu_enumerate_cuda() >= 0);
+    assert(gpu_enumerate_metal() >= 0);
+    assert(gpu_enumerate_rocm() >= 0);
+    assert(gpu_enumerate_vulkan() >= 0);
+}
+
+fn main() {}

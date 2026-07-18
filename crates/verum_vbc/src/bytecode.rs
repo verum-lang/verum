@@ -875,6 +875,20 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // GPU - Fast Path (single-byte opcodes for common operations)
         // ====================================================================
+        //
+        // VESTIGIAL (T0177 / GPU-OPERAND-SHAPE-1): only the three real
+        // single-byte opcodes below — GpuSync (0xF9), GpuMemcpy (0xFA),
+        // GpuAlloc (0xFB) — round-trip (they have matching decode arms +
+        // interpreter handlers). Every OTHER structured `Gpu*` encode arm here
+        // targets the 0xF8 GpuExtended sub-op space but is NEVER exercised: no
+        // codegen constructs these variants, and `decode_instruction` decodes
+        // 0xF8 only as the `GpuExtended` carrier (`[dst][args...]`, length-
+        // prefixed) — never back into a structured variant. These arms are kept
+        // solely so the match stays total over `Instruction`; their byte layout
+        // (immediates, no length prefix) is NOT a live wire format. The live GPU
+        // path is emit_intrinsic_gpu_extended → GpuExtended carrier →
+        // handle_gpu_extended / lower_gpu_extended. See the `// GPU` block in
+        // instruction.rs for the full authority note.
         Instruction::GpuLaunch {
             kernel_id,
             grid,
