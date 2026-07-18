@@ -31886,6 +31886,15 @@ impl VbcCodegen {
             InlineSequenceId::SimdReduceAdd => {
                 self.emit_intrinsic_library_call("verum_simd_reduce_add", args, dest)?;
             }
+            InlineSequenceId::SimdReduceAnd => {
+                self.emit_intrinsic_library_call("verum_simd_reduce_and", args, dest)?;
+            }
+            InlineSequenceId::SimdReduceOr => {
+                self.emit_intrinsic_library_call("verum_simd_reduce_or", args, dest)?;
+            }
+            InlineSequenceId::SimdReduceXor => {
+                self.emit_intrinsic_library_call("verum_simd_reduce_xor", args, dest)?;
+            }
             InlineSequenceId::SimdReduceMul => {
                 self.emit_intrinsic_library_call("verum_simd_reduce_mul", args, dest)?;
             }
@@ -35246,6 +35255,18 @@ impl VbcCodegen {
             }),
             "verum_simd_reduce_max" => self.ctx.emit(Instruction::SimdExtended {
                 sub_op: SimdSubOpcode::ReduceMax as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_reduce_and" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ReduceAnd as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_reduce_or" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ReduceOr as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_simd_reduce_xor" => self.ctx.emit(Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::ReduceXor as u8,
                 operands: encode_operands(dest, args),
             }),
             "verum_simd_cmp_eq" => self.ctx.emit(Instruction::SimdExtended {

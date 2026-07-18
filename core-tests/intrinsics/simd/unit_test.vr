@@ -1,0 +1,351 @@
+// =============================================================================
+// core-tests/intrinsics/simd/unit_test.vr
+// =============================================================================
+//
+// API-surface coverage for `core/intrinsics/simd.vr` — the RAW SIMD intrinsic
+// layer.  One @test per public function, grouped by the source module's
+// section banners.
+//
+// CONTRACT UNDER TEST (tier-coherent SCALAR FALLBACK): on both tiers a
+// "vector" register currently carries ONE lane.  The pinned laws are the
+// ones that stay true when real multi-lane values land (splat∘extract = id,
+// insert-then-read = value, element-wise ops = per-lane scalar ops,
+// reductions over a splat = fold of equal lanes), so this suite survives the
+// vectorization upgrade; lane-COUNT-sensitive behaviour is deliberately not
+// asserted.  The one place the scalar fallback IS load-bearing
+// (reduce_add(splat(x)) == x, not N*x) is pinned in regression_test.vr with
+// the task reference.
+//
+// Float operands use exactly-representable binary values (0.5, 2.0, 42.0)
+// so assert_eq is bit-exact on both tiers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.simd.{
+    simd_splat, simd_extract, simd_insert,
+    simd_add, simd_sub, simd_mul, simd_div,
+    simd_neg, simd_abs, simd_sqrt, simd_fma, simd_min, simd_max,
+    simd_cmp_eq, simd_cmp_ne, simd_cmp_lt, simd_cmp_le, simd_cmp_gt, simd_cmp_ge,
+    simd_select,
+    simd_bitwise_and, simd_bitwise_or, simd_bitwise_xor, simd_bitwise_not,
+    simd_shift_left, simd_shift_right,
+    simd_reduce_add, simd_reduce_mul, simd_reduce_min, simd_reduce_max,
+    simd_reduce_and, simd_reduce_or, simd_reduce_xor,
+};
+
+// -----------------------------------------------------------------------------
+// SECTION 0 — Vector construction
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_splat_float_lane_readback() {
+    let v: Float = simd_splat(2.5);
+    let x: Float = simd_extract(v, 0);
+    assert_eq(x, 2.5);
+}
+
+@test
+fn simd_splat_int_lane_readback() {
+    let v: Int = simd_splat(42);
+    let x: Int = simd_extract(v, 0);
+    assert_eq(x, 42);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 1 — Lane access
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_extract_returns_lane_value() {
+    let v: Float = simd_splat(7.0);
+    // Every lane of a splat holds the same value — any index reads it back.
+    let x0: Float = simd_extract(v, 0);
+    let x1: Float = simd_extract(v, 1);
+    assert_eq(x0, 7.0);
+    assert_eq(x1, 7.0);
+}
+
+@test
+fn simd_insert_then_extract_reads_inserted() {
+    let v: Float = simd_splat(1.0);
+    let w: Float = simd_insert(v, 0, 9.5);
+    let x: Float = simd_extract(w, 0);
+    assert_eq(x, 9.5);
+}
+
+@test
+fn simd_insert_int_lane() {
+    let v: Int = simd_splat(0);
+    let w: Int = simd_insert(v, 0, 31);
+    let x: Int = simd_extract(w, 0);
+    assert_eq(x, 31);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 5 — Element-wise arithmetic (float lanes)
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_add_float_lanes() {
+    let a: Float = simd_splat(1.5);
+    let b: Float = simd_splat(2.25);
+    let c: Float = simd_add(a, b);
+    assert_eq(simd_extract(c, 0), 3.75);
+}
+
+@test
+fn simd_sub_float_lanes() {
+    let a: Float = simd_splat(5.0);
+    let b: Float = simd_splat(1.75);
+    let c: Float = simd_sub(a, b);
+    assert_eq(simd_extract(c, 0), 3.25);
+}
+
+@test
+fn simd_mul_float_lanes() {
+    let a: Float = simd_splat(3.0);
+    let b: Float = simd_splat(0.5);
+    let c: Float = simd_mul(a, b);
+    assert_eq(simd_extract(c, 0), 1.5);
+}
+
+@test
+fn simd_div_float_lanes() {
+    let a: Float = simd_splat(7.0);
+    let b: Float = simd_splat(2.0);
+    let c: Float = simd_div(a, b);
+    assert_eq(simd_extract(c, 0), 3.5);
+}
+
+@test
+fn simd_neg_flips_sign() {
+    let a: Float = simd_splat(4.5);
+    let n: Float = simd_neg(a);
+    assert_eq(simd_extract(n, 0), -4.5);
+}
+
+@test
+fn simd_neg_negative_input() {
+    let a: Float = simd_splat(-2.0);
+    let n: Float = simd_neg(a);
+    assert_eq(simd_extract(n, 0), 2.0);
+}
+
+@test
+fn simd_abs_negative_becomes_positive() {
+    let a: Float = simd_splat(-8.25);
+    let r: Float = simd_abs(a);
+    assert_eq(simd_extract(r, 0), 8.25);
+}
+
+@test
+fn simd_abs_positive_unchanged() {
+    let a: Float = simd_splat(8.25);
+    let r: Float = simd_abs(a);
+    assert_eq(simd_extract(r, 0), 8.25);
+}
+
+@test
+fn simd_sqrt_perfect_square() {
+    let a: Float = simd_splat(16.0);
+    let r: Float = simd_sqrt(a);
+    assert_eq(simd_extract(r, 0), 4.0);
+}
+
+@test
+fn simd_fma_single_rounding() {
+    let a: Float = simd_splat(2.0);
+    let b: Float = simd_splat(3.0);
+    let c: Float = simd_splat(1.0);
+    let r: Float = simd_fma(a, b, c);
+    assert_eq(simd_extract(r, 0), 7.0);
+}
+
+@test
+fn simd_min_picks_smaller() {
+    let a: Float = simd_splat(2.0);
+    let b: Float = simd_splat(5.0);
+    let r: Float = simd_min(a, b);
+    assert_eq(simd_extract(r, 0), 2.0);
+}
+
+@test
+fn simd_max_picks_larger() {
+    let a: Float = simd_splat(2.0);
+    let b: Float = simd_splat(5.0);
+    let r: Float = simd_max(a, b);
+    assert_eq(simd_extract(r, 0), 5.0);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 6 — Element-wise comparisons (masks)
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_cmp_eq_equal_lanes() {
+    let a: Float = simd_splat(1.5);
+    let b: Float = simd_splat(1.5);
+    let m: Bool = simd_cmp_eq(a, b);
+    assert(m);
+}
+
+@test
+fn simd_cmp_eq_unequal_lanes() {
+    let a: Float = simd_splat(1.5);
+    let b: Float = simd_splat(2.5);
+    let m: Bool = simd_cmp_eq(a, b);
+    assert(!m);
+}
+
+@test
+fn simd_cmp_ne_detects_difference() {
+    let a: Float = simd_splat(1.0);
+    let b: Float = simd_splat(2.0);
+    let m: Bool = simd_cmp_ne(a, b);
+    assert(m);
+}
+
+@test
+fn simd_cmp_lt_strict() {
+    let a: Float = simd_splat(1.0);
+    let b: Float = simd_splat(2.0);
+    assert(simd_cmp_lt(a, b));
+    assert(!simd_cmp_lt(b, a));
+    assert(!simd_cmp_lt(a, a));
+}
+
+@test
+fn simd_cmp_le_includes_equal() {
+    let a: Float = simd_splat(3.0);
+    assert(simd_cmp_le(a, a));
+    let b: Float = simd_splat(4.0);
+    assert(simd_cmp_le(a, b));
+    assert(!simd_cmp_le(b, a));
+}
+
+@test
+fn simd_cmp_gt_strict() {
+    let a: Float = simd_splat(9.0);
+    let b: Float = simd_splat(4.0);
+    assert(simd_cmp_gt(a, b));
+    assert(!simd_cmp_gt(b, a));
+    assert(!simd_cmp_gt(a, a));
+}
+
+@test
+fn simd_cmp_ge_includes_equal() {
+    let a: Float = simd_splat(9.0);
+    assert(simd_cmp_ge(a, a));
+    let b: Float = simd_splat(4.0);
+    assert(simd_cmp_ge(a, b));
+    assert(!simd_cmp_ge(b, a));
+}
+
+@test
+fn simd_select_true_mask_picks_first() {
+    let a: Float = simd_splat(1.0);
+    let b: Float = simd_splat(2.0);
+    let m: Bool = simd_cmp_eq(a, a);
+    let r: Float = simd_select(m, a, b);
+    assert_eq(simd_extract(r, 0), 1.0);
+}
+
+@test
+fn simd_select_false_mask_picks_second() {
+    let a: Float = simd_splat(1.0);
+    let b: Float = simd_splat(2.0);
+    let m: Bool = simd_cmp_ne(a, a);
+    let r: Float = simd_select(m, a, b);
+    assert_eq(simd_extract(r, 0), 2.0);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 7 — Bitwise and shifts (integer lanes)
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_bitwise_and_masks() {
+    let a: Int = simd_splat(0xFF);
+    let b: Int = simd_splat(0x0F);
+    let r: Int = simd_bitwise_and(a, b);
+    assert_eq(simd_extract(r, 0), 0x0F);
+}
+
+@test
+fn simd_bitwise_or_unions() {
+    let a: Int = simd_splat(0xF0);
+    let b: Int = simd_splat(0x0F);
+    let r: Int = simd_bitwise_or(a, b);
+    assert_eq(simd_extract(r, 0), 0xFF);
+}
+
+@test
+fn simd_bitwise_xor_toggles() {
+    let a: Int = simd_splat(0xFF);
+    let b: Int = simd_splat(0x0F);
+    let r: Int = simd_bitwise_xor(a, b);
+    assert_eq(simd_extract(r, 0), 0xF0);
+}
+
+@test
+fn simd_bitwise_not_inverts() {
+    let a: Int = simd_splat(0);
+    let r: Int = simd_bitwise_not(a);
+    assert_eq(simd_extract(r, 0), -1);
+}
+
+@test
+fn simd_shift_left_doubles() {
+    let a: Int = simd_splat(3);
+    let s: Int = simd_splat(2);
+    let r: Int = simd_shift_left(a, s);
+    assert_eq(simd_extract(r, 0), 12);
+}
+
+@test
+fn simd_shift_right_halves() {
+    let a: Int = simd_splat(12);
+    let s: Int = simd_splat(2);
+    let r: Int = simd_shift_right(a, s);
+    assert_eq(simd_extract(r, 0), 3);
+}
+
+// -----------------------------------------------------------------------------
+// SECTION 3+4 — Reductions (lane-fold over equal lanes)
+// -----------------------------------------------------------------------------
+// For a splat vector every lane is x, so min/max reductions are exactly x on
+// ANY lane count; and/or reductions of equal lanes are likewise x.  The
+// lane-count-sensitive folds (add=N*x, mul=x^N, xor over even N) are pinned
+// as the scalar-fallback contract in regression_test.vr — asserting them
+// here would break the day real vectors land.
+
+@test
+fn simd_reduce_min_of_splat_is_lane() {
+    let v: Float = simd_splat(3.5);
+    let r: Float = simd_reduce_min(v);
+    assert_eq(r, 3.5);
+}
+
+@test
+fn simd_reduce_max_of_splat_is_lane() {
+    let v: Float = simd_splat(3.5);
+    let r: Float = simd_reduce_max(v);
+    assert_eq(r, 3.5);
+}
+
+@test
+fn simd_reduce_and_of_splat_is_lane() {
+    let v: Int = simd_splat(0b1010);
+    let r: Int = simd_reduce_and(v);
+    assert_eq(r, 0b1010);
+}
+
+@test
+fn simd_reduce_or_of_splat_is_lane() {
+    let v: Int = simd_splat(0b1010);
+    let r: Int = simd_reduce_or(v);
+    assert_eq(r, 0b1010);
+}
+
+fn main() {
+}

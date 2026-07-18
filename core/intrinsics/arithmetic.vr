@@ -532,5 +532,13 @@ public fn checked_next_power_of_two<T>(x: T) -> Maybe<T> {
     Maybe.Some((1 as T) << (shift as UInt32))
 }
 
-/// Next power of 2 (wraps on overflow)
-public fn wrapping_next_power_of_two<T>(x: T) -> T { @intrinsic("wrapping_next_power_of_two", x) }
+/// Next power of 2 (wraps to 0 on overflow — the two's-complement shift
+/// past the top bit).  ARITH-PURE-BODY-1 discipline (T0116): pure body
+/// delegating to `checked_next_power_of_two` above — this was the last
+/// unregistered `@intrinsic` in the family (→ LoadNil at runtime).
+public fn wrapping_next_power_of_two<T>(x: T) -> T {
+    match checked_next_power_of_two(x) {
+        Maybe.Some(v) => v,
+        Maybe.None => 0 as T,
+    }
+}

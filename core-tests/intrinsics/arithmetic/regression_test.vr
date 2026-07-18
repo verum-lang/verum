@@ -86,14 +86,16 @@ fn regression_saturating_sub_wrapper_clamps() {
 // Tracked: task ARITH-MISSING-INTRINSICS-1, audit.md §3.
 // -----------------------------------------------------------------------------
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+// DE-STALED (T0116): overflowing_add/sub/mul registered + green since
+// ARITH-OVERFLOWING-ALIAS-1 — the @ignore outlived the fix.
 @test
 fn regression_overflowing_add_overflows() {
     let (_r, o) = overflowing_add(Int.MAX, 1);
     assert_eq(o, true);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+// DE-STALED (T0116): overflowing_add/sub/mul registered + green since
+// ARITH-OVERFLOWING-ALIAS-1 — the @ignore outlived the fix.
 @test
 fn regression_overflowing_sub_no_overflow() {
     let (r, o) = overflowing_sub(10, 4);
@@ -101,7 +103,8 @@ fn regression_overflowing_sub_no_overflow() {
     assert_eq(o, false);
 }
 
-@ignore("ARITH-MISSING-INTRINSICS-1 — intrinsic resolves to nil; no registry entry / dispatch impl. See audit.md §3.")
+// DE-STALED (T0116): overflowing_add/sub/mul registered + green since
+// ARITH-OVERFLOWING-ALIAS-1 — the @ignore outlived the fix.
 @test
 fn regression_overflowing_mul_overflows() {
     let (_r, o) = overflowing_mul(Int.MAX, 2);

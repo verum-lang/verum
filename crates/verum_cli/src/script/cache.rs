@@ -154,7 +154,7 @@ impl std::fmt::Display for CacheKey {
 /// probe cached at one wire schema ran its bytecode against re-shaped handler
 /// arms and SIGSEGV'd, masquerading as a code regression (T0197). Keep in
 /// lockstep with the stdlib bake schema (see T0219 BAKE-CACHE-COMPILER-IDENTITY).
-pub const WIRE_SCHEMA_VERSION: u32 = 2; // 2: GPU GpuExtended [dst][args...] realign (T0177)
+pub const WIRE_SCHEMA_VERSION: u32 = 3; // 2: GPU GpuExtended [dst][args...] realign (T0177); 3: simd reduce-trio emission LoadNil→SimdExtended (T0116 — same stale-replay class: `compiler_version` in the key is the FIXED CARGO_PKG_VERSION, so a codegen-output change for fixed source needs a bump here until a build-unique compiler identity joins the key)
 
 pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKey {
     let mut hasher = blake3::Hasher::new();

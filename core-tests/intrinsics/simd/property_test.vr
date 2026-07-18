@@ -1,0 +1,319 @@
+// =============================================================================
+// core-tests/intrinsics/simd/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the raw SIMD intrinsic layer.  Laws are chosen to be
+// LANE-COUNT-INVARIANT: they hold for the current scalar fallback AND for any
+// future true multi-lane implementation, because they quantify over splat
+// vectors (all lanes equal) and per-lane operations only.
+//
+// Sampling: representative float values (exact binary fractions incl.
+// negatives and zero) and integer bit patterns (0, low bits, sign bit,
+// alternating masks).  Domains documented inline.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.simd.{
+    simd_splat, simd_extract, simd_insert,
+    simd_add, simd_sub, simd_mul,
+    simd_neg, simd_abs, simd_min, simd_max,
+    simd_cmp_eq, simd_cmp_ne, simd_cmp_lt, simd_cmp_le, simd_cmp_gt, simd_cmp_ge,
+    simd_select,
+    simd_bitwise_and, simd_bitwise_or, simd_bitwise_xor, simd_bitwise_not,
+};
+
+fn float_domain() -> List<Float> {
+    // Exact binary fractions: sign coverage, zero, magnitudes across scales.
+    [-8.5, -1.0, -0.25, 0.0, 0.5, 1.0, 2.75, 64.0]
+}
+
+fn int_domain() -> List<Int> {
+    // 0, low bits, byte masks, alternating pattern, negative (all-ones tail).
+    [0, 1, 0x0F, 0xF0, 0xFF, 0x5555, -1]
+}
+
+// -----------------------------------------------------------------------------
+// Law: extract ∘ splat = identity (∀ x)
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_law_splat_extract_identity_float() {
+    for x in float_domain().iter() {
+        let v: Float = simd_splat(*x);
+        assert_eq(simd_extract(v, 0), *x);
+    }
+}
+
+@test
+fn simd_law_splat_extract_identity_int() {
+    for x in int_domain().iter() {
+        let v: Int = simd_splat(*x);
+        let got: Int = simd_extract(v, 0);
+        assert_eq(got, *x);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Law: extract(insert(v, i, y), i) = y (last-write wins per lane)
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_law_insert_read_back() {
+    for x in float_domain().iter() {
+        let base: Float = simd_splat(0.0);
+        let w: Float = simd_insert(base, 0, *x);
+        assert_eq(simd_extract(w, 0), *x);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Laws: element-wise arithmetic mirrors scalar arithmetic on splats
+//        (simd_op(splat a, splat b) = splat (a op b))
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_law_add_mirrors_scalar() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let r: Float = simd_add(va, vb);
+            assert_eq(simd_extract(r, 0), *a + *b);
+        }
+    }
+}
+
+@test
+fn simd_law_add_commutative() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let ab: Float = simd_add(va, vb);
+            let ba: Float = simd_add(vb, va);
+            assert_eq(simd_extract(ab, 0), simd_extract(ba, 0));
+        }
+    }
+}
+
+@test
+fn simd_law_mul_commutative() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let ab: Float = simd_mul(va, vb);
+            let ba: Float = simd_mul(vb, va);
+            assert_eq(simd_extract(ab, 0), simd_extract(ba, 0));
+        }
+    }
+}
+
+@test
+fn simd_law_sub_add_inverse() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let r: Float = simd_add(simd_sub(va, vb), vb);
+            // Exact binary fractions: add/sub round-trips are exact.
+            assert_eq(simd_extract(r, 0), *a);
+        }
+    }
+}
+
+@test
+fn simd_law_neg_involution() {
+    for a in float_domain().iter() {
+        let v: Float = simd_splat(*a);
+        let r: Float = simd_neg(simd_neg(v));
+        assert_eq(simd_extract(r, 0), *a);
+    }
+}
+
+@test
+fn simd_law_abs_idempotent() {
+    for a in float_domain().iter() {
+        let v: Float = simd_splat(*a);
+        let once: Float = simd_abs(v);
+        let twice: Float = simd_abs(once);
+        assert_eq(simd_extract(once, 0), simd_extract(twice, 0));
+    }
+}
+
+@test
+fn simd_law_abs_nonnegative() {
+    for a in float_domain().iter() {
+        let v: Float = simd_splat(*a);
+        let r: Float = simd_abs(v);
+        assert(simd_extract(r, 0) >= 0.0);
+    }
+}
+
+@test
+fn simd_law_min_max_bracket() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let lo: Float = simd_min(va, vb);
+            let hi: Float = simd_max(va, vb);
+            assert(simd_extract(lo, 0) <= simd_extract(hi, 0));
+        }
+    }
+}
+
+@test
+fn simd_law_min_max_absorb() {
+    // min(a,b) + max(a,b) = a + b (exact for our domain)
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let lo: Float = simd_extract(simd_min(va, vb), 0);
+            let hi: Float = simd_extract(simd_max(va, vb), 0);
+            assert_eq(lo + hi, *a + *b);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Laws: comparisons form a coherent order on splats
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_law_cmp_eq_reflexive() {
+    for a in float_domain().iter() {
+        let v: Float = simd_splat(*a);
+        assert(simd_cmp_eq(v, v));
+    }
+}
+
+@test
+fn simd_law_cmp_ne_is_negated_eq() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let eq: Bool = simd_cmp_eq(va, vb);
+            let ne: Bool = simd_cmp_ne(va, vb);
+            assert_eq(eq, !ne);
+        }
+    }
+}
+
+@test
+fn simd_law_cmp_trichotomy() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let lt: Bool = simd_cmp_lt(va, vb);
+            let eq: Bool = simd_cmp_eq(va, vb);
+            let gt: Bool = simd_cmp_gt(va, vb);
+            // Exactly one of lt/eq/gt on a total non-NaN domain.
+            let count = (if lt { 1 } else { 0 }) + (if eq { 1 } else { 0 }) + (if gt { 1 } else { 0 });
+            assert_eq(count, 1);
+        }
+    }
+}
+
+@test
+fn simd_law_cmp_le_is_lt_or_eq() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let le: Bool = simd_cmp_le(va, vb);
+            let lt: Bool = simd_cmp_lt(va, vb);
+            let eq: Bool = simd_cmp_eq(va, vb);
+            assert_eq(le, lt || eq);
+        }
+    }
+}
+
+@test
+fn simd_law_cmp_ge_mirrors_le() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            assert_eq(simd_cmp_ge(va, vb), simd_cmp_le(vb, va));
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Laws: select routes by mask
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_law_select_mask_routes() {
+    for a in float_domain().iter() {
+        for b in float_domain().iter() {
+            let va: Float = simd_splat(*a);
+            let vb: Float = simd_splat(*b);
+            let t: Bool = simd_cmp_eq(va, va);
+            let f: Bool = simd_cmp_ne(va, va);
+            assert_eq(simd_extract(simd_select(t, va, vb), 0), *a);
+            assert_eq(simd_extract(simd_select(f, va, vb), 0), *b);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Laws: Boolean algebra on integer lanes (De Morgan, idempotence, inverse)
+// -----------------------------------------------------------------------------
+
+@test
+fn simd_law_bitand_idempotent() {
+    for a in int_domain().iter() {
+        let v: Int = simd_splat(*a);
+        let r: Int = simd_bitwise_and(v, v);
+        assert_eq(simd_extract(r, 0), *a);
+    }
+}
+
+@test
+fn simd_law_bitor_idempotent() {
+    for a in int_domain().iter() {
+        let v: Int = simd_splat(*a);
+        let r: Int = simd_bitwise_or(v, v);
+        assert_eq(simd_extract(r, 0), *a);
+    }
+}
+
+@test
+fn simd_law_bitxor_self_is_zero() {
+    for a in int_domain().iter() {
+        let v: Int = simd_splat(*a);
+        let r: Int = simd_bitwise_xor(v, v);
+        assert_eq(simd_extract(r, 0), 0);
+    }
+}
+
+@test
+fn simd_law_not_involution() {
+    for a in int_domain().iter() {
+        let v: Int = simd_splat(*a);
+        let r: Int = simd_bitwise_not(simd_bitwise_not(v));
+        assert_eq(simd_extract(r, 0), *a);
+    }
+}
+
+@test
+fn simd_law_de_morgan() {
+    for a in int_domain().iter() {
+        for b in int_domain().iter() {
+            let va: Int = simd_splat(*a);
+            let vb: Int = simd_splat(*b);
+            // ¬(a ∧ b) = ¬a ∨ ¬b
+            let lhs: Int = simd_bitwise_not(simd_bitwise_and(va, vb));
+            let rhs: Int = simd_bitwise_or(simd_bitwise_not(va), simd_bitwise_not(vb));
+            assert_eq(simd_extract(lhs, 0), simd_extract(rhs, 0));
+        }
+    }
+}
+
+fn main() {
+}

@@ -666,6 +666,12 @@ pub enum InlineSequenceId {
     SimdReduceMin,
     /// simd_reduce_max: horizontal maximum reduction
     SimdReduceMax,
+    /// simd_reduce_and: horizontal bitwise-AND reduction
+    SimdReduceAnd,
+    /// simd_reduce_or: horizontal bitwise-OR reduction
+    SimdReduceOr,
+    /// simd_reduce_xor: horizontal bitwise-XOR reduction
+    SimdReduceXor,
     /// simd_cmp_eq: element-wise equality comparison -> mask
     SimdCmpEq,
     /// simd_cmp_ne: element-wise not-equal comparison -> mask
@@ -9451,6 +9457,54 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceMax),
         mlir_op: Some("vector.reduction <maxnumf>"),
         doc: "Horizontal maximum of all vector lanes",
+    },
+    // SIMD-REDUCE-BITWISE-REGISTRY-1: the bitwise reductions were declared
+    // in core/intrinsics/simd.vr and implemented by BOTH interpreters
+    // (handlers/simd_extended.rs) since day 1, but had no registry rows —
+    // every call lowered to LoadNil. Registered 2026-07-16 alongside the
+    // AOT ReduceAnd/Or/Xor arms (T0116 family; pinned by
+    // core-tests/intrinsics/simd/regression_test.vr).
+    Intrinsic {
+        name: "simd_reduce_and",
+        category: IntrinsicCategory::Simd,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceAnd),
+        mlir_op: Some("vector.reduction <and>"),
+        doc: "Horizontal bitwise AND of all vector lanes",
+    },
+    Intrinsic {
+        name: "simd_reduce_or",
+        category: IntrinsicCategory::Simd,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceOr),
+        mlir_op: Some("vector.reduction <or>"),
+        doc: "Horizontal bitwise OR of all vector lanes",
+    },
+    Intrinsic {
+        name: "simd_reduce_xor",
+        category: IntrinsicCategory::Simd,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceXor),
+        mlir_op: Some("vector.reduction <xor>"),
+        doc: "Horizontal bitwise XOR of all vector lanes",
     },
     // --- Comparisons (return masks) ---
     Intrinsic {
