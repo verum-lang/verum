@@ -19183,6 +19183,17 @@ fn lower_call_method<'ctx>(
             // the tracker lost returned 0.  Build the same runtime
             // type-id switch `dyn:` dispatch uses, over every compiled
             // `Type.method` candidate with a matching arity.
+            //
+            // T0103 LEG-4 / T0249: sized-int `{width}$method` intrinsics
+            // (`uint64$leading_zeros`, `int32$wrapping_add`,
+            // `byte$saturating_add`, `uint32$to_le_bytes`, …) are handled
+            // INLINE by the Tier-0 interpreter and have no compiled
+            // `Type.method` body, so they arrive here unresolved. Mirror
+            // the interpreter family width-correctly BEFORE the runtime
+            // type-switch (which finds no candidate → const-zero).
+            if try_lower_sizedint_method(ctx, method_name_str.as_str(), receiver, args, dst)? {
+                return Ok(());
+            }
             let mut entries: Vec<(u32, String)> = Vec::new();
             // vbc.types can carry DUPLICATE descriptors for one type id
             // (stdlib re-registration / duplicate public names debt).
@@ -27737,6 +27748,723 @@ fn build_unary_intrinsic_with_poison<'ctx>(
         .or_llvm_err()?
         .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
     Ok(result.into_int_value())
+}
+
+// ================================================================
+// Sized-integer `{width}$method` intrinsics — AOT CallM lowering
+// (T0103 LEG-4 / T0249).
+//
+// The Tier-0 interpreter handles `byte$…`, `int32$…`, `uint16$…`,
+// `uint32$…`, `uint64$…` method names INLINE (see
+// `interpreter/dispatch_table/handlers/method_dispatch.rs`). There is
+// no compiled `Type.method` body for them, so the AOT resolver left
+// `resolved_func_name = None` and the call degraded to a SILENT
+// const-zero stub (wrong value, no crash) — the witnessed bug was
+// `UInt64.leading_zeros()`/`trailing_zeros()` printing 0 under `--aot`
+// while `--interp` printed the correct 51/12.
+//
+// `try_lower_sizedint_method` mirrors the interpreter family EXACTLY,
+// width-correct: register values are i64 in the ABI but represent
+// {width}-bit ints, so each op truncates to `i<W>`, applies the
+// operation at `i<W>`, then zero/sign-extends back to i64 matching the
+// interpreter's `(v as uW)` / `(v as iW)` cast semantics.
+// ================================================================
+
+/// `llvm.<base>.i<W>` unary intrinsic (`ctpop`, `bswap`); operand and
+/// result are both `i<W>` (the width is derived from `a`'s own type).
+fn siv_unary_intr<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    iname: &str,
+    a: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let ity = a.get_type();
+    let fn_type = ity.fn_type(&[ity.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), iname, fn_type);
+    let r = ctx
+        .builder()
+        .build_call(func, &[a.into()], name)
+        .or_llvm_err()?
+        .basic_value_or_else(|| format!("{}: expected return value", iname))?;
+    Ok(r.into_int_value())
+}
+
+/// `llvm.<base>.i<W>` bit-count intrinsic taking the `is_zero_poison`
+/// i1 flag (`ctlz`, `cttz`); passes `false` (result defined on a zero
+/// input) to mirror Rust's `leading_zeros` / `trailing_zeros`.
+fn siv_ctlz_cttz<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    iname: &str,
+    a: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let ity = a.get_type();
+    let i1_ty = ctx.llvm_context().bool_type();
+    let fn_type = ity.fn_type(&[ity.into(), i1_ty.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), iname, fn_type);
+    let poison = i1_ty.const_int(0, false);
+    let r = ctx
+        .builder()
+        .build_call(func, &[a.into(), poison.into()], name)
+        .or_llvm_err()?
+        .basic_value_or_else(|| format!("{}: expected return value", iname))?;
+    Ok(r.into_int_value())
+}
+
+/// `llvm.<base>.i<W>` binary intrinsic (`uadd.sat`, `ssub.sat`, …);
+/// both operands and the result are `i<W>`.
+fn siv_binary_intr<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    iname: &str,
+    a: verum_llvm::values::IntValue<'ctx>,
+    b: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let ity = a.get_type();
+    let fn_type = ity.fn_type(&[ity.into(), ity.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), iname, fn_type);
+    let r = ctx
+        .builder()
+        .build_call(func, &[a.into(), b.into()], name)
+        .or_llvm_err()?
+        .basic_value_or_else(|| format!("{}: expected return value", iname))?;
+    Ok(r.into_int_value())
+}
+
+/// `llvm.<base>.i<W>` funnel-shift intrinsic (`fshl` / `fshr`); a
+/// rotate is the degenerate `fsh?(x, x, n)`. All three operands and the
+/// result are `i<W>`. Both the intrinsic and Rust's `rotate_*` reduce
+/// the shift amount mod W, so the truncated i64 amount is exact.
+fn siv_funnel_intr<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    iname: &str,
+    a: verum_llvm::values::IntValue<'ctx>,
+    b: verum_llvm::values::IntValue<'ctx>,
+    c: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let ity = a.get_type();
+    let fn_type = ity.fn_type(&[ity.into(), ity.into(), ity.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), iname, fn_type);
+    let r = ctx
+        .builder()
+        .build_call(func, &[a.into(), b.into(), c.into()], name)
+        .or_llvm_err()?
+        .basic_value_or_else(|| format!("{}: expected return value", iname))?;
+    Ok(r.into_int_value())
+}
+
+/// `llvm.<base>.with.overflow.i<W>` intrinsic; returns the
+/// `(value: i<W>, overflow: i1)` pair extracted from the `{iW, i1}`
+/// struct result. Used by the `checked_*` arms — overflow ⇒ `None`.
+fn siv_overflow_intr<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    iname: &str,
+    a: verum_llvm::values::IntValue<'ctx>,
+    b: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<(
+    verum_llvm::values::IntValue<'ctx>,
+    verum_llvm::values::IntValue<'ctx>,
+)> {
+    let ity = a.get_type();
+    let i1_ty = ctx.llvm_context().bool_type();
+    let struct_ty = ctx
+        .llvm_context()
+        .struct_type(&[ity.into(), i1_ty.into()], false);
+    let fn_type = struct_ty.fn_type(&[ity.into(), ity.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), iname, fn_type);
+    let r = ctx
+        .builder()
+        .build_call(func, &[a.into(), b.into()], name)
+        .or_llvm_err()?
+        .basic_value_or_else(|| format!("{}: expected return value", iname))?;
+    let sv = r.into_struct_value();
+    let val = ctx
+        .builder()
+        .build_extract_value(sv, 0, "siv_ovf_val")
+        .or_llvm_err()?;
+    let ovf = ctx
+        .builder()
+        .build_extract_value(sv, 1, "siv_ovf_flag")
+        .or_llvm_err()?;
+    Ok((val.into_int_value(), ovf.into_int_value()))
+}
+
+/// Truncate an i64 register value down to `width` bits (identity at 64).
+fn siv_trunc<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    v: verum_llvm::values::IntValue<'ctx>,
+    width: u32,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    if width >= 64 {
+        return Ok(v);
+    }
+    let iw = ctx.llvm_context().custom_width_int_type(width);
+    Ok(ctx.builder().build_int_truncate(v, iw, name).or_llvm_err()?)
+}
+
+/// Extend an `i<width>` value back to i64 — sign-extend for signed
+/// width-types, zero-extend for unsigned (identity at 64). Mirrors the
+/// interpreter's trailing `as i64` on a `(v as iW)` / `(v as uW)` cast.
+fn siv_ext<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    r: verum_llvm::values::IntValue<'ctx>,
+    width: u32,
+    signed: bool,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    if width >= 64 {
+        return Ok(r);
+    }
+    let i64_ty = ctx.types().i64_type();
+    Ok(if signed {
+        ctx.builder().build_int_s_extend(r, i64_ty, name).or_llvm_err()?
+    } else {
+        ctx.builder().build_int_z_extend(r, i64_ty, name).or_llvm_err()?
+    })
+}
+
+/// Build an unsigned `lo <= x <= hi` predicate (i1). Used by the
+/// `byte$is_ascii_*` classification family.
+fn siv_in_range<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    x: verum_llvm::values::IntValue<'ctx>,
+    lo: u64,
+    hi: u64,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let ge = ctx
+        .builder()
+        .build_int_compare(IntPredicate::UGE, x, i64_ty.const_int(lo, false), "siv_ge")
+        .or_llvm_err()?;
+    let le = ctx
+        .builder()
+        .build_int_compare(IntPredicate::ULE, x, i64_ty.const_int(hi, false), "siv_le")
+        .or_llvm_err()?;
+    Ok(ctx.builder().build_and(ge, le, name).or_llvm_err()?)
+}
+
+/// Store an i1 boolean into `dst` (zero-extended to the i64 register
+/// slot) and stamp the bool-register fact, mirroring the `is_null` /
+/// `is_some` intercepts.
+fn siv_set_bool<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    dst: Reg,
+    cond: verum_llvm::values::IntValue<'ctx>,
+) -> Result<()> {
+    let i64_ty = ctx.types().i64_type();
+    let ext = ctx
+        .builder()
+        .build_int_z_extend(cond, i64_ty, "siv_bool")
+        .or_llvm_err()?;
+    ctx.set_register(dst.0, ext.into());
+    ctx.mark_bool_register(dst.0);
+    Ok(())
+}
+
+/// Lower a sized-integer `{width}$method` intrinsic (or its qualified
+/// `<Type>.<method>` spelling) into the width-correct LLVM equivalent,
+/// returning `Ok(true)` when handled (caller `return`s) and `Ok(false)`
+/// to fall through to the runtime type-switch unchanged.
+///
+/// The receiver and every argument are i64 in the register ABI but
+/// carry `width`-bit semantics; each arm truncates to `i<width>`,
+/// applies the op, and re-extends per the width-type's signedness —
+/// bit-for-bit identical to the Tier-0 handlers.
+fn try_lower_sizedint_method<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    method: &str,
+    receiver: Reg,
+    args: &verum_vbc::instruction::RegRange,
+    dst: Reg,
+) -> Result<bool> {
+    // Mirror the interpreter's width-prefix normalisation
+    // (method_dispatch.rs ~4309): a qualified `<Type>.<method>` on a
+    // sized-int type is rewritten to the canonical `<width>$<method>`
+    // form. Only the Byte / Int32 / UInt64 prefixes are mapped (exactly
+    // as the interpreter does); the direct `uint16$` / `uint32$` forms
+    // arrive pre-normalised from the typed-let codegen path.
+    let canon: std::borrow::Cow<str> = match method.split_once('.') {
+        Some((prefix, rest)) => match prefix {
+            "Byte" | "UInt8" | "U8" | "u8" => std::borrow::Cow::Owned(format!("byte${}", rest)),
+            "Int32" | "I32" | "i32" => std::borrow::Cow::Owned(format!("int32${}", rest)),
+            "UInt" | "UInt64" | "U64" | "u64" | "USize" | "UIntSize" | "Usize" | "usize" => {
+                std::borrow::Cow::Owned(format!("uint64${}", rest))
+            }
+            _ => std::borrow::Cow::Borrowed(method),
+        },
+        None => std::borrow::Cow::Borrowed(method),
+    };
+
+    // Width and width-type signedness, keyed off the `<prefix>$` head.
+    // A non-sized prefix (or a name without `$`) is not ours.
+    let (width, signed): (u32, bool) = match canon.split('$').next() {
+        Some("byte") => (8, false),
+        Some("int32") => (32, true),
+        Some("uint16") => (16, false),
+        Some("uint32") => (32, false),
+        Some("uint64") => (64, false),
+        _ => return Ok(false),
+    };
+
+    let i64_ty = ctx.types().i64_type();
+    let v = as_i64(ctx, ctx.get_register(receiver.0)?, "siv_recv")?;
+
+    match canon.as_ref() {
+        // ── Bit counts: always non-negative → zero-extend ──
+        "int32$leading_zeros" | "uint64$leading_zeros" => {
+            let t = siv_trunc(ctx, v, width, "siv_lz_t")?;
+            let r = siv_ctlz_cttz(ctx, &format!("llvm.ctlz.i{}", width), t, "siv_lz")?;
+            let r = if width >= 64 {
+                r
+            } else {
+                ctx.builder().build_int_z_extend(r, i64_ty, "siv_lz_z").or_llvm_err()?
+            };
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "int32$trailing_zeros" | "uint64$trailing_zeros" => {
+            let t = siv_trunc(ctx, v, width, "siv_tz_t")?;
+            let r = siv_ctlz_cttz(ctx, &format!("llvm.cttz.i{}", width), t, "siv_tz")?;
+            let r = if width >= 64 {
+                r
+            } else {
+                ctx.builder().build_int_z_extend(r, i64_ty, "siv_tz_z").or_llvm_err()?
+            };
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "int32$count_ones" | "uint64$count_ones" => {
+            let t = siv_trunc(ctx, v, width, "siv_pc_t")?;
+            let r = siv_unary_intr(ctx, &format!("llvm.ctpop.i{}", width), t, "siv_pc")?;
+            let r = if width >= 64 {
+                r
+            } else {
+                ctx.builder().build_int_z_extend(r, i64_ty, "siv_pc_z").or_llvm_err()?
+            };
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        // ── swap_bytes / rotate: bit-pattern ops → sign-extend for the
+        //    signed int32 (`… as i32 as i64`), i64-direct for uint64 ──
+        "int32$swap_bytes" | "uint64$swap_bytes" => {
+            let t = siv_trunc(ctx, v, width, "siv_bs_t")?;
+            let r = siv_unary_intr(ctx, &format!("llvm.bswap.i{}", width), t, "siv_bs")?;
+            let r = siv_ext(ctx, r, width, signed, "siv_bs_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "int32$rotate_left" | "uint64$rotate_left" => {
+            let t = siv_trunc(ctx, v, width, "siv_rl_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_rl_n")?;
+            let n = siv_trunc(ctx, arg, width, "siv_rl_nt")?;
+            let r = siv_funnel_intr(ctx, &format!("llvm.fshl.i{}", width), t, t, n, "siv_rl")?;
+            let r = siv_ext(ctx, r, width, signed, "siv_rl_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "int32$rotate_right" | "uint64$rotate_right" => {
+            let t = siv_trunc(ctx, v, width, "siv_rr_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_rr_n")?;
+            let n = siv_trunc(ctx, arg, width, "siv_rr_nt")?;
+            let r = siv_funnel_intr(ctx, &format!("llvm.fshr.i{}", width), t, t, n, "siv_rr")?;
+            let r = siv_ext(ctx, r, width, signed, "siv_rr_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        // ── wrapping arithmetic: op at i<W>, extend per signedness ──
+        "byte$wrapping_add" | "int32$wrapping_add" | "uint64$wrapping_add" => {
+            let t = siv_trunc(ctx, v, width, "siv_wa_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_wa_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_wa_o")?;
+            let r = ctx.builder().build_int_add(t, o, "siv_wadd").or_llvm_err()?;
+            let r = siv_ext(ctx, r, width, signed, "siv_wadd_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "byte$wrapping_sub" | "int32$wrapping_sub" | "uint64$wrapping_sub" => {
+            let t = siv_trunc(ctx, v, width, "siv_ws_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_ws_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_ws_o")?;
+            let r = ctx.builder().build_int_sub(t, o, "siv_wsub").or_llvm_err()?;
+            let r = siv_ext(ctx, r, width, signed, "siv_wsub_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "byte$wrapping_mul" | "int32$wrapping_mul" => {
+            let t = siv_trunc(ctx, v, width, "siv_wm_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_wm_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_wm_o")?;
+            let r = ctx.builder().build_int_mul(t, o, "siv_wmul").or_llvm_err()?;
+            let r = siv_ext(ctx, r, width, signed, "siv_wmul_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        // ── saturating arithmetic: signed/unsigned sat intrinsic at i<W> ──
+        "byte$saturating_add" | "int32$saturating_add" | "uint64$saturating_add" => {
+            let t = siv_trunc(ctx, v, width, "siv_sa_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_sa_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_sa_o")?;
+            let base = if signed { "llvm.sadd.sat" } else { "llvm.uadd.sat" };
+            let r = siv_binary_intr(ctx, &format!("{}.i{}", base, width), t, o, "siv_sadd")?;
+            let r = siv_ext(ctx, r, width, signed, "siv_sadd_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "byte$saturating_sub" | "int32$saturating_sub" | "uint64$saturating_sub" => {
+            let t = siv_trunc(ctx, v, width, "siv_ss_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_ss_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_ss_o")?;
+            let base = if signed { "llvm.ssub.sat" } else { "llvm.usub.sat" };
+            let r = siv_binary_intr(ctx, &format!("{}.i{}", base, width), t, o, "siv_ssub")?;
+            let r = siv_ext(ctx, r, width, signed, "siv_ssub_ext")?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        // ── checked arithmetic → Maybe<Int> (overflow ⇒ None) ──
+        "byte$checked_add" | "int32$checked_add" | "uint64$checked_add" => {
+            let t = siv_trunc(ctx, v, width, "siv_ca_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_ca_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_ca_o")?;
+            let base = if signed { "llvm.sadd.with.overflow" } else { "llvm.uadd.with.overflow" };
+            let (val, ovf) = siv_overflow_intr(ctx, &format!("{}.i{}", base, width), t, o, "siv_cadd")?;
+            let value = siv_ext(ctx, val, width, signed, "siv_cadd_v")?;
+            let result = build_maybe_int_wrap(ctx, value, ovf, "siv_checked")?;
+            ctx.set_register(dst.0, result);
+            Ok(true)
+        }
+        "byte$checked_sub" | "int32$checked_sub" | "uint64$checked_sub" => {
+            let t = siv_trunc(ctx, v, width, "siv_cs_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_cs_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_cs_o")?;
+            let base = if signed { "llvm.ssub.with.overflow" } else { "llvm.usub.with.overflow" };
+            let (val, ovf) = siv_overflow_intr(ctx, &format!("{}.i{}", base, width), t, o, "siv_csub")?;
+            let value = siv_ext(ctx, val, width, signed, "siv_csub_v")?;
+            let result = build_maybe_int_wrap(ctx, value, ovf, "siv_checked")?;
+            ctx.set_register(dst.0, result);
+            Ok(true)
+        }
+        "byte$checked_mul" | "int32$checked_mul" | "uint64$checked_mul" => {
+            let t = siv_trunc(ctx, v, width, "siv_cm_t")?;
+            let arg = as_i64(ctx, ctx.get_register(args.start.0)?, "siv_cm_a")?;
+            let o = siv_trunc(ctx, arg, width, "siv_cm_o")?;
+            let base = if signed { "llvm.smul.with.overflow" } else { "llvm.umul.with.overflow" };
+            let (val, ovf) = siv_overflow_intr(ctx, &format!("{}.i{}", base, width), t, o, "siv_cmul")?;
+            let value = siv_ext(ctx, val, width, signed, "siv_cmul_v")?;
+            let result = build_maybe_int_wrap(ctx, value, ovf, "siv_checked")?;
+            ctx.set_register(dst.0, result);
+            Ok(true)
+        }
+        // ── abs / signum (int32, signed 32-bit) ──
+        "int32$abs" => {
+            let t = siv_trunc(ctx, v, 32, "siv_abs_t")?;
+            let z32 = ctx.llvm_context().custom_width_int_type(32).const_int(0, false);
+            let neg = ctx.builder().build_int_sub(z32, t, "siv_abs_neg").or_llvm_err()?;
+            let is_neg = ctx
+                .builder()
+                .build_int_compare(IntPredicate::SLT, t, z32, "siv_abs_isneg")
+                .or_llvm_err()?;
+            let sel = ctx
+                .builder()
+                .build_select(is_neg, neg, t, "siv_abs_sel")
+                .or_llvm_err()?
+                .into_int_value();
+            let r = ctx.builder().build_int_s_extend(sel, i64_ty, "siv_abs_sx").or_llvm_err()?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "int32$signum" => {
+            let t = siv_trunc(ctx, v, 32, "siv_sg_t")?;
+            let z32 = ctx.llvm_context().custom_width_int_type(32).const_int(0, false);
+            let gt = ctx
+                .builder()
+                .build_int_compare(IntPredicate::SGT, t, z32, "siv_sg_gt")
+                .or_llvm_err()?;
+            let lt = ctx
+                .builder()
+                .build_int_compare(IntPredicate::SLT, t, z32, "siv_sg_lt")
+                .or_llvm_err()?;
+            let one = i64_ty.const_int(1, false);
+            let neg1 = i64_ty.const_int(u64::MAX, false);
+            let zero64 = i64_ty.const_int(0, false);
+            let tmp = ctx
+                .builder()
+                .build_select(lt, neg1, zero64, "siv_sg_tmp")
+                .or_llvm_err()?
+                .into_int_value();
+            let r = ctx
+                .builder()
+                .build_select(gt, one, tmp, "siv_sg_r")
+                .or_llvm_err()?
+                .into_int_value();
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        // ── to_int (byte/uint64 identity; int32 = `v as i32 as i64`) ──
+        "byte$to_int" | "uint64$to_int" => {
+            ctx.set_register(dst.0, v.into());
+            Ok(true)
+        }
+        "int32$to_int" => {
+            let t = siv_trunc(ctx, v, 32, "siv_ti_t")?;
+            let r = ctx.builder().build_int_s_extend(t, i64_ty, "siv_ti_sx").or_llvm_err()?;
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        // ── MAX / MIN constants ──
+        "int32$MAX" => {
+            ctx.set_register(dst.0, i64_ty.const_int(i32::MAX as u64, false).into());
+            Ok(true)
+        }
+        "int32$MIN" => {
+            ctx.set_register(dst.0, i64_ty.const_int((i32::MIN as i64) as u64, false).into());
+            Ok(true)
+        }
+        "uint64$MAX" => {
+            ctx.set_register(dst.0, i64_ty.const_int(u64::MAX, false).into());
+            Ok(true)
+        }
+        "uint64$MIN" => {
+            ctx.set_register(dst.0, i64_ty.const_int(0, false).into());
+            Ok(true)
+        }
+        // ── byte$ ASCII classification (operate on the low 8 bits) ──
+        "byte$is_ascii_digit" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let c = siv_in_range(ctx, b, 0x30, 0x39, "siv_digit")?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_lowercase" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let c = siv_in_range(ctx, b, 0x61, 0x7A, "siv_lc")?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_uppercase" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let c = siv_in_range(ctx, b, 0x41, 0x5A, "siv_uc")?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_alphabetic" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let lc = siv_in_range(ctx, b, 0x61, 0x7A, "siv_lc")?;
+            let uc = siv_in_range(ctx, b, 0x41, 0x5A, "siv_uc")?;
+            let c = ctx.builder().build_or(lc, uc, "siv_alpha").or_llvm_err()?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_alphanumeric" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let lc = siv_in_range(ctx, b, 0x61, 0x7A, "siv_lc")?;
+            let uc = siv_in_range(ctx, b, 0x41, 0x5A, "siv_uc")?;
+            let dg = siv_in_range(ctx, b, 0x30, 0x39, "siv_dg")?;
+            let alpha = ctx.builder().build_or(lc, uc, "siv_alpha").or_llvm_err()?;
+            let c = ctx.builder().build_or(alpha, dg, "siv_alnum").or_llvm_err()?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_hexdigit" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let dg = siv_in_range(ctx, b, 0x30, 0x39, "siv_dg")?;
+            let af = siv_in_range(ctx, b, 0x61, 0x66, "siv_af")?;
+            let uf = siv_in_range(ctx, b, 0x41, 0x46, "siv_uf")?;
+            let lo = ctx.builder().build_or(dg, af, "siv_hex1").or_llvm_err()?;
+            let c = ctx.builder().build_or(lo, uf, "siv_hex").or_llvm_err()?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_graphic" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let c = siv_in_range(ctx, b, 0x21, 0x7E, "siv_graph")?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_control" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let lt = ctx
+                .builder()
+                .build_int_compare(IntPredicate::ULT, b, i64_ty.const_int(0x20, false), "siv_ctl_lt")
+                .or_llvm_err()?;
+            let del = ctx
+                .builder()
+                .build_int_compare(IntPredicate::EQ, b, i64_ty.const_int(0x7F, false), "siv_ctl_del")
+                .or_llvm_err()?;
+            let c = ctx.builder().build_or(lt, del, "siv_ctl").or_llvm_err()?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii_whitespace" => {
+            // Rust: matches b' ' | b'\t' | b'\n' | b'\x0C' | b'\r'.
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let mut acc: Option<verum_llvm::values::IntValue<'ctx>> = None;
+            for code in [0x20u64, 0x09, 0x0A, 0x0C, 0x0D] {
+                let eq = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::EQ, b, i64_ty.const_int(code, false), "siv_ws_eq")
+                    .or_llvm_err()?;
+                acc = Some(match acc {
+                    None => eq,
+                    Some(prev) => ctx.builder().build_or(prev, eq, "siv_ws_or").or_llvm_err()?,
+                });
+            }
+            siv_set_bool(ctx, dst, acc.expect("whitespace set is non-empty"))?;
+            Ok(true)
+        }
+        "byte$is_ascii_punctuation" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let r1 = siv_in_range(ctx, b, 0x21, 0x2F, "siv_p1")?;
+            let r2 = siv_in_range(ctx, b, 0x3A, 0x40, "siv_p2")?;
+            let r3 = siv_in_range(ctx, b, 0x5B, 0x60, "siv_p3")?;
+            let r4 = siv_in_range(ctx, b, 0x7B, 0x7E, "siv_p4")?;
+            let a = ctx.builder().build_or(r1, r2, "siv_p12").or_llvm_err()?;
+            let a = ctx.builder().build_or(a, r3, "siv_p123").or_llvm_err()?;
+            let c = ctx.builder().build_or(a, r4, "siv_punct").or_llvm_err()?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$is_ascii" => {
+            // Interp uses the FULL i64 receiver: `(0..=127).contains(&v)`.
+            let ge = ctx
+                .builder()
+                .build_int_compare(IntPredicate::SGE, v, i64_ty.const_int(0, false), "siv_asc_ge")
+                .or_llvm_err()?;
+            let le = ctx
+                .builder()
+                .build_int_compare(IntPredicate::SLE, v, i64_ty.const_int(127, false), "siv_asc_le")
+                .or_llvm_err()?;
+            let c = ctx.builder().build_and(ge, le, "siv_ascii").or_llvm_err()?;
+            siv_set_bool(ctx, dst, c)?;
+            Ok(true)
+        }
+        "byte$to_ascii_lowercase" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let is_up = siv_in_range(ctx, b, 0x41, 0x5A, "siv_isup")?;
+            let plus = ctx.builder().build_int_add(b, i64_ty.const_int(32, false), "siv_plus").or_llvm_err()?;
+            let r = ctx
+                .builder()
+                .build_select(is_up, plus, b, "siv_tolow")
+                .or_llvm_err()?
+                .into_int_value();
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        "byte$to_ascii_uppercase" => {
+            let b = ctx.builder().build_and(v, i64_ty.const_int(0xFF, false), "siv_b").or_llvm_err()?;
+            let is_lo = siv_in_range(ctx, b, 0x61, 0x7A, "siv_islo")?;
+            let minus = ctx.builder().build_int_sub(b, i64_ty.const_int(32, false), "siv_minus").or_llvm_err()?;
+            let r = ctx
+                .builder()
+                .build_select(is_lo, minus, b, "siv_toup")
+                .or_llvm_err()?
+                .into_int_value();
+            ctx.set_register(dst.0, r.into());
+            Ok(true)
+        }
+        // ── to_{le,be}_bytes → List<Byte> (canonical AOT list build) ──
+        "int32$to_le_bytes" | "uint16$to_le_bytes" | "uint32$to_le_bytes" | "uint64$to_le_bytes"
+        | "int32$to_be_bytes" | "uint16$to_be_bytes" | "uint32$to_be_bytes"
+        | "uint64$to_be_bytes" => {
+            let le = canon.ends_with("le_bytes");
+            let n = (width / 8) as u64;
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let list_ptr = runtime.lower_new_list(ctx.builder(), ctx.get_module())?;
+            for out_i in 0..n {
+                let src_i = if le { out_i } else { n - 1 - out_i };
+                let shifted = ctx
+                    .builder()
+                    .build_right_shift(v, i64_ty.const_int(8 * src_i, false), false, "siv_tb_shr")
+                    .or_llvm_err()?;
+                let byte = ctx
+                    .builder()
+                    .build_and(shifted, i64_ty.const_int(0xFF, false), "siv_tb_byte")
+                    .or_llvm_err()?;
+                runtime.lower_list_push(ctx.builder(), ctx.get_module(), list_ptr, byte.into())?;
+            }
+            ctx.set_register(dst.0, list_ptr.into());
+            ctx.mark_list_register(dst.0);
+            Ok(true)
+        }
+        // ── from_{le,be}_bytes → read N bytes, reassemble, extend ──
+        "int32$from_le_bytes" | "uint16$from_le_bytes" | "uint32$from_le_bytes"
+        | "uint64$from_le_bytes" | "int32$from_be_bytes" | "uint16$from_be_bytes"
+        | "uint32$from_be_bytes" | "uint64$from_be_bytes" => {
+            let le = canon.ends_with("le_bytes");
+            let n = (width / 8) as u64;
+            let list_ptr = as_ptr(ctx, ctx.get_register(args.start.0)?, "siv_fb_list")?;
+            let i8_ty = ctx.types().i8_type();
+            let ptr_ty = ctx.types().ptr_type();
+            // data_ptr = *(i64*)(list + LIST_PTR_OFFSET) — the i64-strided backing array.
+            let data_slot = unsafe {
+                ctx.builder()
+                    .build_in_bounds_gep(
+                        i8_ty,
+                        list_ptr,
+                        &[i64_ty.const_int(super::runtime::LIST_PTR_OFFSET, false)],
+                        "siv_fb_dslot",
+                    )
+                    .or_llvm_err()?
+            };
+            let data_int = ctx
+                .builder()
+                .build_load(i64_ty, data_slot, "siv_fb_dint")
+                .or_llvm_err()?
+                .into_int_value();
+            let data_ptr = ctx
+                .builder()
+                .build_int_to_ptr(data_int, ptr_ty, "siv_fb_dptr")
+                .or_llvm_err()?;
+            let mut result = i64_ty.const_int(0, false);
+            for read_i in 0..n {
+                let elem_ptr = unsafe {
+                    ctx.builder()
+                        .build_in_bounds_gep(
+                            i64_ty,
+                            data_ptr,
+                            &[i64_ty.const_int(read_i, false)],
+                            "siv_fb_eptr",
+                        )
+                        .or_llvm_err()?
+                };
+                let elem = ctx
+                    .builder()
+                    .build_load(i64_ty, elem_ptr, "siv_fb_elem")
+                    .or_llvm_err()?
+                    .into_int_value();
+                let byte = ctx
+                    .builder()
+                    .build_and(elem, i64_ty.const_int(0xFF, false), "siv_fb_byte")
+                    .or_llvm_err()?;
+                let dst_pos = if le { read_i } else { n - 1 - read_i };
+                let placed = if dst_pos == 0 {
+                    byte
+                } else {
+                    ctx.builder()
+                        .build_left_shift(byte, i64_ty.const_int(8 * dst_pos, false), "siv_fb_shl")
+                        .or_llvm_err()?
+                };
+                result = ctx.builder().build_or(result, placed, "siv_fb_or").or_llvm_err()?;
+            }
+            // Only the signed int32 sign-extends its 32-bit result; the
+            // unsigned widths leave the assembled (top-zero) value as-is.
+            let final_val = if width < 64 && signed {
+                let iw = ctx.llvm_context().custom_width_int_type(width);
+                let t = ctx.builder().build_int_truncate(result, iw, "siv_fb_tr").or_llvm_err()?;
+                ctx.builder().build_int_s_extend(t, i64_ty, "siv_fb_sx").or_llvm_err()?
+            } else {
+                result
+            };
+            ctx.set_register(dst.0, final_val.into());
+            Ok(true)
+        }
+        // Not a lowered sized-int intrinsic — fall through to the
+        // runtime type-switch unchanged.
+        _ => Ok(false),
+    }
 }
 
 /// Helper: coerce a value to f64, converting from int if needed.
