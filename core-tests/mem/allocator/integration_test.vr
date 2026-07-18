@@ -219,6 +219,41 @@ fn integration_shared_field_clone_preserves_identity() {
     assert_eq(s.get_size(), 88);
 }
 
+// -----------------------------------------------------------------------------
+// §7  Shared<T> whole-value DerefMut (T0374): `*shared = X` must write THROUGH
+//     the carrier to the inner value cell (slot1) — the whole-value twin of
+//     §6's SetF field write-through. Pre-fix the write landed on the Shared
+//     ObjectHeader and was lost (a naive `*ptr = X` at the carrier base).
+//     Pins the handle_deref_mut SHARED arm (interpreter cbgr.rs), which shares
+//     ONE whole-value Shared authority (`shared_inner_cell`) with the Deref
+//     read side, so `*shared` and `*shared = X` can never target different cells.
+// -----------------------------------------------------------------------------
+
+type T0374Pt is { x: Int, y: Int };
+
+@test
+fn integration_shared_deref_mut_immediate_inner() {
+    // Immediate inner T: `*s = X` writes straight into slot1.
+    let mut s = Shared.new(10);
+    assert_eq(*s, 10);
+    *s = 42;
+    assert_eq(*s, 42);
+}
+
+@test
+fn integration_shared_deref_mut_heap_inner() {
+    // Heap-object inner T (slot1 holds a pointer): `*s = new` replaces slot1's
+    // pointer; read back through the whole-value deref so both the write and
+    // the read go through the SHARED cell.
+    let mut s = Shared.new(T0374Pt { x: 1, y: 2 });
+    let before = *s;
+    assert_eq(before.x, 1);
+    *s = T0374Pt { x: 99, y: 100 };
+    let after = *s;
+    assert_eq(after.x, 99);
+    assert_eq(after.y, 100);
+}
+
 fn main() {
     // `verum test` synthesises a per-test main.
 }

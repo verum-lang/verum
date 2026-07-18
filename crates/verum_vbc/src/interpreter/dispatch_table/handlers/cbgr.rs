@@ -154,6 +154,56 @@ pub(in super::super) fn handle_ref_mut(
     Ok(DispatchResult::Continue)
 }
 
+/// Whole-value `Shared<T>` cell accessor (SHARED-STRONGCOUNT / T0374).
+///
+/// If `base_ptr` is a live `Shared<T>` carrier, return the address of its
+/// inner value cell (slot1) — the SAME cell that `*shared` reads, so the
+/// Deref read side and the DerefMut write side operate on ONE location and
+/// can never drift. Returns `None` for any non-Shared pointer.
+///
+/// This is the WHOLE-VALUE twin of `memory_collections::shared_carrier_inner`,
+/// and deliberately NOT the same helper: that one FOLLOWS slot1's pointer to
+/// the inner OBJECT so a subsequent field offset (`shared.field`) lands inside
+/// the inner `T`; this one hands back slot1's ADDRESS so a whole-value read
+/// (`*shared`) / write (`*shared = X`) touches the cell itself. Reusing the
+/// field-access helper here would target the inner object's header (or, for an
+/// immediate inner `T`, the carrier header) — both wrong for a whole write.
+///
+/// Guard: a `Heap<T>` CBGR cell's data pointer addresses its inner Value
+/// directly (there is no `ObjectHeader` there), so its out-of-bounds "header"
+/// bits could coincide with `TypeId::SHARED`. The `cbgr_allocations`
+/// membership test excludes those cells — the same live-allocation guard the
+/// T0107 `handle_clone` SHARED arm uses.
+///
+/// Shared layout: `[ObjectHeader][refcount:i64 @ slot0][inner:Value @ slot1]`.
+fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut Value> {
+    if base_ptr.is_null() {
+        return None;
+    }
+    // A CBGR `Heap<T>` cell is not a Shared carrier; its data pointer is not
+    // an ObjectHeader, so never read a SHARED type_id out of it.
+    let is_cbgr_cell = state.cbgr_allocations.contains(
+        &(base_ptr as usize)
+            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
+    );
+    if is_cbgr_cell {
+        return None;
+    }
+    if !(base_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+        return None;
+    }
+    // SAFETY: alignment verified; every VBC heap object begins with an
+    // ObjectHeader.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
+    if header.type_id != TypeId::SHARED {
+        return None;
+    }
+    // slot1 = the inner Value cell (skip the ObjectHeader and refcount slot0).
+    // SAFETY: `Shared.new(...)` initializes slot1; the pointer stays within
+    // the Shared object's data area.
+    Some(unsafe { (base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value).add(1) })
+}
+
 /// Deref (0x72) - Dereference with CBGR validation (Tier 0).
 ///
 
@@ -239,18 +289,12 @@ pub(in super::super) fn handle_deref(
                 // this arm the identity-deref below handed the Shared
                 // OBJECT to consumers (an f-string then dispatched
                 // `Shared.fmt` and panicked "method not found").
-                let unwrap_shared = (base_ptr as usize)
-                    .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-                    && {
-                        // SAFETY: alignment verified; heap objects begin
-                        // with an ObjectHeader.
-                        let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
-                        header.type_id == crate::types::TypeId::SHARED
-                    };
-                if unwrap_shared {
-                    let inner = unsafe {
-                        *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value).add(1)
-                    };
+                // ONE whole-value Shared authority with the DerefMut write
+                // side (T0374): both read/write slot1 via `shared_inner_cell`.
+                if let Some(slot1) = shared_inner_cell(state, base_ptr) {
+                    // SAFETY: `slot1` addresses the initialized inner Value
+                    // cell of a live Shared carrier (guaranteed by the helper).
+                    let inner = unsafe { *slot1 };
                     state.set_reg(dst, inner);
                     return Ok(DispatchResult::Continue);
                 }
@@ -337,20 +381,32 @@ pub(in super::super) fn handle_deref_mut(
         // This enables temporal ordering detection for stale references
         state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
     } else if ref_val.is_ptr() && !ref_val.is_nil() {
-        // Heap pointer deref-mut: write value at pointer location
-        let ptr = ref_val.as_ptr::<Value>();
+        // Heap pointer deref-mut: write value at pointer location.
+        let base_ptr = ref_val.as_ptr::<u8>();
+        // **T0374 — DerefMut twin of the Deref SHARED arm.**  `*shared = X`
+        // must write THROUGH the carrier to the inner value cell (slot1); a
+        // naive write at `base_ptr` lands on the Shared ObjectHeader and is
+        // lost.  `shared_inner_cell` redirects only genuine Shared carriers —
+        // non-Shared pointers (incl. `Heap<T>` CBGR cells, whose data pointer
+        // already IS the inner cell) keep the identity write.  ONE whole-value
+        // Shared authority shared with the Deref read side above.
+        let write_ptr =
+            shared_inner_cell(state, base_ptr).unwrap_or(base_ptr as *mut Value);
+        // SAFETY: `write_ptr` is either `base_ptr` (a live heap Value slot) or
+        // the guarded inner cell of a Shared carrier.
         unsafe {
-            std::ptr::write(ptr, value);
+            std::ptr::write(write_ptr, value);
         }
         // CBGR epoch advancement on heap mutation
         state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
         // Update the epoch in the AllocationHeader for this allocation.
+        // Keyed off the ORIGINAL carrier pointer — a Shared carrier is not a
+        // CBGR allocation, so this stays a no-op for the redirected case.
         // Header sits immediately before the data payload — see
         // `verum_common::layout::ALLOCATION_HEADER_SIZE` and
         // `ALLOCATION_HEADER_EPOCH_OFFSET`.
-        let ptr_addr = ptr as usize;
-        let header_addr =
-            ptr_addr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+        let header_addr = (base_ptr as usize)
+            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
         if state.cbgr_allocations.contains(&header_addr) {
             unsafe {
                 let epoch_ptr = (header_addr
