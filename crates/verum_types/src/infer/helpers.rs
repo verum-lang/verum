@@ -1607,6 +1607,157 @@ pub(crate) fn with_generic_var_scope_capture<R>(
     (result, scope)
 }
 
+/// ONE authority for turning a METADATA-reconstructed FREE-FUNCTION
+/// signature (already parsed to `fn_ty` under
+/// [`with_generic_var_scope_capture`], which yields `scope_vars`) into its
+/// quantified [`crate::context::TypeScheme`].
+///
+/// Two coupled properties this guarantees — both regressions the previous
+/// birth site (`dependent_helpers::collect_type_vars` into a hashed `Set`)
+/// violated, which made mounted stdlib generics such as
+/// `simd_extract<V, T>(vec: V, idx: UInt32) -> T` type-check
+/// NON-DETERMINISTICALLY (same fixed archive, only ~1/3 of runs green):
+///
+///  1. **Deterministic quantification order.**  Vars are read from
+///     `scope_vars`, whose iteration order is INSERTION order = first
+///     appearance in the signature (params left-to-right, then return).
+///     `collect_type_vars` returned a `verum_common::Set` (hashed) whose
+///     per-process-random iteration order let one two-generic call
+///     `f<A, B>(..)` bind its arguments as `[V, T]` on one run and
+///     `[T, V]` (or onto a degraded var) on the next.
+///
+///  2. **Only declared generics are explicit.**  A placeholder spelled
+///     `__generic_N`, or a bare name listed in `declared_generic_names`,
+///     is a DECLARED type parameter — the only kind a caller may bind with
+///     an explicit `f<..>(..)` type argument.  Any OTHER interned var
+///     comes from `parse_descriptor_type_string` mapping a
+///     `__opaque_type_N` spelling (a concrete VBC `TypeId` the archive
+///     could not name, e.g. `UInt32`) to a fresh var; that var is an
+///     EXISTENTIAL to be inferred from the call arguments, never a
+///     user-facing generic.  It is recorded in `implicit_vars` so the
+///     call-site explicit-type-argument binder (`infer/expr.rs`) SKIPS it.
+///     Otherwise the spurious var steals a positional `<..>` slot, the
+///     real generics shift, and an unrelated argument is checked against
+///     the wrong binding — e.g. `simd_extract`'s `idx: UInt32` collapses
+///     onto `V` and reports `expected 'Float', found 'Int'`.
+///
+/// Declared generics come first (appearance order); existentials follow.
+/// Every var stays quantified (freshly instantiated per use); `implicit`
+/// governs ONLY explicit-type-argument binding, so a call WITHOUT `<..>`
+/// args is byte-for-byte unaffected.
+pub(crate) fn build_metadata_function_scheme(
+    fn_ty: Type,
+    scope_vars: &indexmap::IndexMap<String, crate::ty::TypeVar>,
+    declared_generic_names: &std::collections::HashSet<String>,
+) -> crate::context::TypeScheme {
+    use crate::context::TypeScheme;
+    use crate::ty::TypeVar;
+    let is_declared = |placeholder: &str| -> bool {
+        placeholder.starts_with("__generic_") || declared_generic_names.contains(placeholder)
+    };
+    let mut explicit: List<TypeVar> = List::new();
+    let mut implicit: List<TypeVar> = List::new();
+    for (placeholder, tv) in scope_vars.iter() {
+        if is_declared(placeholder.as_str()) {
+            explicit.push(*tv);
+        } else {
+            implicit.push(*tv);
+        }
+    }
+    if explicit.is_empty() && implicit.is_empty() {
+        return TypeScheme::mono(fn_ty);
+    }
+    let mut implicit_set: Set<TypeVar> = Set::new();
+    for tv in implicit.iter() {
+        implicit_set.insert(*tv);
+    }
+    let mut var_list: List<TypeVar> = explicit;
+    for tv in implicit.iter() {
+        var_list.push(*tv);
+    }
+    TypeScheme::poly_with_implicit(var_list, fn_ty, implicit_set)
+}
+
+#[cfg(test)]
+mod build_metadata_function_scheme_tests {
+    use super::build_metadata_function_scheme;
+    use crate::ty::{Type, TypeVar};
+    use verum_common::List;
+
+    // A `__opaque_type_N` existential in the middle of the signature must
+    // NOT be quantified as an explicit generic, and the declared generics
+    // must be ordered by appearance — deterministically — regardless of
+    // TypeVar identity.  Models the baked `simd_extract` descriptor
+    // `(vec: __generic_1, idx: __opaque_type_8) -> __generic_0`.
+    #[test]
+    fn opaque_param_is_implicit_and_order_is_deterministic() {
+        // Run the reconstruction many times; the partition + ordering must
+        // be identical every time (no dependence on hashed-Set iteration).
+        let mut shapes = std::collections::HashSet::new();
+        for _ in 0..64 {
+            let v_vec = TypeVar::fresh();
+            let v_idx = TypeVar::fresh();
+            let v_ret = TypeVar::fresh();
+            let mut scope: indexmap::IndexMap<String, TypeVar> = indexmap::IndexMap::new();
+            scope.insert("__generic_1".to_string(), v_vec); // vec: V, appears first
+            scope.insert("__opaque_type_8".to_string(), v_idx); // idx: UInt32 (opaque)
+            scope.insert("__generic_0".to_string(), v_ret); // return: T
+            let fn_ty = Type::function(
+                List::from(vec![Type::Var(v_vec), Type::Var(v_idx)]),
+                Type::Var(v_ret),
+            );
+            let declared: std::collections::HashSet<String> =
+                ["V", "T"].iter().map(|s| s.to_string()).collect();
+            let scheme = build_metadata_function_scheme(fn_ty, &scope, &declared);
+
+            // Two explicit generics (V, T) in appearance order, existential last.
+            let vars: Vec<TypeVar> = scheme.vars.iter().copied().collect();
+            assert_eq!(vars, vec![v_vec, v_ret, v_idx]);
+            assert_eq!(scheme.explicit_var_count(), 2);
+            assert!(scheme.implicit_vars.contains(&v_idx));
+            assert!(!scheme.implicit_vars.contains(&v_vec));
+            assert!(!scheme.implicit_vars.contains(&v_ret));
+
+            // Record a structural fingerprint (positions of explicit vars).
+            let idx_of = |t: TypeVar| vars.iter().position(|x| *x == t).unwrap();
+            shapes.insert((idx_of(v_vec), idx_of(v_ret), idx_of(v_idx)));
+        }
+        assert_eq!(shapes.len(), 1, "scheme shape must be deterministic");
+    }
+
+    // A bare declared source name ("T") interns by name (RETNAME-CARRY) and
+    // must still be treated as an explicit generic, not an existential.
+    #[test]
+    fn declared_source_name_is_explicit() {
+        let v_t = TypeVar::fresh();
+        let v_op = TypeVar::fresh();
+        let mut scope: indexmap::IndexMap<String, TypeVar> = indexmap::IndexMap::new();
+        scope.insert("T".to_string(), v_t);
+        scope.insert("__opaque_type_3".to_string(), v_op);
+        let fn_ty = Type::function(
+            List::from(vec![Type::Var(v_t), Type::Var(v_op)]),
+            Type::Var(v_t),
+        );
+        let declared: std::collections::HashSet<String> =
+            ["T"].iter().map(|s| s.to_string()).collect();
+        let scheme = build_metadata_function_scheme(fn_ty, &scope, &declared);
+        assert_eq!(scheme.explicit_var_count(), 1);
+        assert!(!scheme.implicit_vars.contains(&v_t));
+        assert!(scheme.implicit_vars.contains(&v_op));
+    }
+
+    // No interned vars at all -> monomorphic scheme (unchanged behaviour).
+    #[test]
+    fn no_vars_is_mono() {
+        let scope: indexmap::IndexMap<String, TypeVar> = indexmap::IndexMap::new();
+        let fn_ty = Type::function(List::from(vec![Type::Int]), Type::Bool);
+        let declared: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let scheme = build_metadata_function_scheme(fn_ty, &scope, &declared);
+        assert!(scheme.vars.is_empty());
+        assert!(scheme.implicit_vars.is_empty());
+    }
+}
+
 pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "()" {

@@ -3564,7 +3564,15 @@ impl TypeChecker {
                                 registered_successfully = true;
                             } else {
                                 if let Some(metadata) = self.core_metadata.clone() {
-                                    if let Some(func_type) = self
+                                    // S4 (T0175): the resolver now returns a
+                                    // fully quantified scheme (declared generics
+                                    // explicit in appearance order, opaque
+                                    // existentials implicit, params+return under
+                                    // ONE shared scope) instead of a bare `Type`
+                                    // that was `mono`-wrapped here — which gave
+                                    // zero explicit type args and leaked free
+                                    // vars across call sites.
+                                    if let Some(scheme) = self
                                         .resolve_metadata_reexport_function(
                                             &metadata,
                                             &module_info.ast,
@@ -3572,9 +3580,7 @@ impl TypeChecker {
                                             &resolved_module_path,
                                         )
                                     {
-                                        self.ctx
-                                            .env
-                                            .insert(register_name, TypeScheme::mono(func_type));
+                                        self.ctx.env.insert(register_name, scheme);
                                         registered_successfully = true;
                                     }
                                 }
@@ -6376,24 +6382,43 @@ impl TypeChecker {
 
         let to_type =
             |s: &Text| -> Type { crate::infer::helpers::parse_descriptor_type_string(s.as_str()) };
+        // The descriptor's DECLARED generic-param names.  Source-verbatim
+        // carried spellings (RETNAME-CARRY) intern by NAME ("T"), not by the
+        // `__generic_N` placeholder, so the scheme builder needs the name set
+        // to tell a declared generic from a degraded-concrete existential.
+        // Free functions carry no impl-level generics, but chaining
+        // `impl_generic_names` keeps this identical to the method path in
+        // `core::register_inherent_methods_from_metadata`.
+        let declared_names: std::collections::HashSet<String> = fd
+            .impl_generic_names
+            .iter()
+            .map(|n| n.as_str().to_string())
+            .chain(fd.generic_params.iter().map(|gp| gp.name.as_str().to_string()))
+            .collect();
         // Parse params AND return under ONE generic-var scope so a param `F`
-        // and a projection `F.Output` in the return share the same TypeVar.
-        let (params, return_ty): (List<Type>, Type) =
-            crate::infer::helpers::with_generic_var_scope(|| {
-                let params: List<Type> = fd
-                    .params
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, p)| {
-                        if i == 0 && p.name.as_str() == "self" {
-                            None
-                        } else {
-                            Some(to_type(&p.ty))
-                        }
-                    })
-                    .collect();
-                let return_ty = to_type(&fd.return_type);
-                (params, return_ty)
+        // and a projection `F.Output` in the return share the same TypeVar,
+        // and CAPTURE the placeholder->TypeVar map (insertion = appearance
+        // order) so the scheme birth below is DETERMINISTIC and can separate
+        // a declared generic (`__generic_N` / a declared source name) from a
+        // degraded-concrete existential (`__opaque_type_N`, e.g. `UInt32`).
+        let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
+            crate::infer::helpers::with_declared_generic_names(declared_names.clone(), || {
+                crate::infer::helpers::with_generic_var_scope_capture(|| {
+                    let params: List<Type> = fd
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| {
+                            if i == 0 && p.name.as_str() == "self" {
+                                None
+                            } else {
+                                Some(to_type(&p.ty))
+                            }
+                        })
+                        .collect();
+                    let return_ty = to_type(&fd.return_type);
+                    (params, return_ty)
+                })
             });
         let fn_ty = Type::function(params, return_ty);
 
@@ -6426,16 +6451,19 @@ impl TypeChecker {
             None
         };
 
-        let scheme = {
-            use crate::dependent_helpers::collect_type_vars;
-            let vars = collect_type_vars(&fn_ty);
-            if vars.is_empty() {
-                TypeScheme::mono(fn_ty)
-            } else {
-                let var_list: List<TypeVar> = vars.iter().copied().collect();
-                TypeScheme::poly(var_list, fn_ty)
-            }
-        };
+        // ONE authority for metadata free-function scheme birth (T0175):
+        // quantify over the declared generics in appearance order and mark
+        // `__opaque_type_N` existentials implicit so a caller's positional
+        // `<A, B>` type arguments bind ONLY to the real generics.  Replaces
+        // the previous `collect_type_vars` -> `Set` collection, whose
+        // per-process-random iteration order made the same fixed descriptor
+        // resolve `simd_extract<V, T>` to a different (and often broken)
+        // scheme on each run.
+        let scheme = crate::infer::helpers::build_metadata_function_scheme(
+            fn_ty,
+            &scope_vars,
+            &declared_names,
+        );
         if let Some(required) = required_entry {
             self.function_required_params
                 .insert(Text::from(item_name), required);

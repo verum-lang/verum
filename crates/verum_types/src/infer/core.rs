@@ -1711,7 +1711,7 @@ impl TypeChecker {
         ast: &verum_ast::Module,
         func_name: &str,
         ast_module_path: &Text,
-    ) -> Option<Type> {
+    ) -> Option<TypeScheme> {
         use verum_ast::ItemKind;
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
         use verum_ast::ty::PathSegment;
@@ -1815,13 +1815,52 @@ impl TypeChecker {
             for key in candidates {
                 let key_text: Text = key.into();
                 if let Some(fd) = metadata.functions.get(&key_text) {
-                    let params: List<Type> = fd
-                        .params
+                    // Parse params AND return under ONE CAPTURED generic-var
+                    // scope (T0175).  Previously each
+                    // `parse_descriptor_type_string` ran WITHOUT a shared
+                    // scope, so a `__generic_N` in a param and the SAME
+                    // `__generic_N` in the return minted DISTINCT fresh
+                    // TypeVars (param `T` != return `T`); and the bare `Type`
+                    // returned here was `mono`-wrapped at the caller, giving a
+                    // scheme with ZERO quantified vars — the "expects 0
+                    // explicit type arguments" face — whose free vars then
+                    // leaked (mono-free-var poison) across call sites.
+                    let declared_names: std::collections::HashSet<String> = fd
+                        .impl_generic_names
                         .iter()
-                        .map(|p| parse_descriptor_type_string(p.ty.as_str()))
+                        .map(|n| n.as_str().to_string())
+                        .chain(
+                            fd.generic_params
+                                .iter()
+                                .map(|gp| gp.name.as_str().to_string()),
+                        )
                         .collect();
-                    let return_ty = parse_descriptor_type_string(fd.return_type.as_str());
-                    return Some(Type::function(params, return_ty));
+                    let ((params, return_ty), scope_vars): ((List<Type>, Type), _) =
+                        crate::infer::helpers::with_declared_generic_names(
+                            declared_names.clone(),
+                            || {
+                                crate::infer::helpers::with_generic_var_scope_capture(|| {
+                                    let params: List<Type> = fd
+                                        .params
+                                        .iter()
+                                        .map(|p| parse_descriptor_type_string(p.ty.as_str()))
+                                        .collect();
+                                    let return_ty =
+                                        parse_descriptor_type_string(fd.return_type.as_str());
+                                    (params, return_ty)
+                                })
+                            },
+                        );
+                    let fn_ty = Type::function(params, return_ty);
+                    // ONE authority (T0175): declared generics quantified in
+                    // appearance order, `__opaque_type_N` existentials marked
+                    // implicit; the caller inserts THIS scheme (not
+                    // `mono(bare)`).
+                    return Some(crate::infer::helpers::build_metadata_function_scheme(
+                        fn_ty,
+                        &scope_vars,
+                        &declared_names,
+                    ));
                 }
             }
         }
@@ -2129,8 +2168,22 @@ impl TypeChecker {
                     let impl_count = impl_ordered.len();
                     let mut var_list: List<crate::ty::TypeVar> =
                         impl_ordered.iter().map(|(_, tv)| *tv).collect();
-                    for tv in vars.iter() {
-                        if !impl_ordered.iter().any(|(_, iv)| iv == tv) {
+                    // Deterministic method-var tail (T0175): iterate the
+                    // CAPTURED scope map (insertion = appearance order)
+                    // instead of the hashed `collect_type_vars` Set, whose
+                    // per-process-random iteration order made the method-
+                    // level quantification order — and thus positional
+                    // explicit `<..>` binding — non-deterministic across
+                    // runs on the SAME fixed archive.  MEMBERSHIP is
+                    // preserved bit-for-bit: only vars `collect_type_vars`
+                    // already harvested pass the `vars.contains` gate, so
+                    // this widens nothing (guards the base/iterator 11->282
+                    // completeness regression) and leaves `impl_ordered` /
+                    // `impl_var_count` untouched.
+                    for (_placeholder, tv) in scope_vars.iter() {
+                        if vars.contains(tv)
+                            && !impl_ordered.iter().any(|(_, iv)| iv == tv)
+                        {
                             var_list.push(*tv);
                         }
                     }

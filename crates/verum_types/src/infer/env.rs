@@ -438,8 +438,26 @@ impl TypeChecker {
         let to_type = |s: &verum_common::Text| -> crate::ty::Type {
             crate::infer::helpers::parse_descriptor_type_string(s.as_str())
         };
-        let (params, return_ty): (verum_common::List<crate::ty::Type>, crate::ty::Type) =
-            crate::infer::helpers::with_generic_var_scope(|| {
+        // DECLARED generic-param names (impl-level first, then method/fn
+        // level) so the scheme builder can tell a declared generic from a
+        // degraded-concrete `__opaque_type_N` existential.  Mirrors S1 in
+        // `modules.rs::resolve_function_via_metadata_reexports`.
+        let declared_names: std::collections::HashSet<String> = fd
+            .impl_generic_names
+            .iter()
+            .map(|n| n.as_str().to_string())
+            .chain(fd.generic_params.iter().map(|gp| gp.name.as_str().to_string()))
+            .collect();
+        // Parse params AND return under ONE generic-var scope and CAPTURE the
+        // placeholder->TypeVar map (insertion = appearance order) so the
+        // scheme birth below is DETERMINISTIC (T0175): the previous
+        // `collect_type_vars` -> hashed `Set` collection let this same
+        // descriptor resolve to a different quantification order per run.
+        let ((params, return_ty), scope_vars): (
+            (verum_common::List<crate::ty::Type>, crate::ty::Type),
+            _,
+        ) = crate::infer::helpers::with_declared_generic_names(declared_names.clone(), || {
+            crate::infer::helpers::with_generic_var_scope_capture(|| {
                 let params: verum_common::List<crate::ty::Type> = fd
                     .params
                     .iter()
@@ -454,17 +472,13 @@ impl TypeChecker {
                     .collect();
                 let return_ty = to_type(&fd.return_type);
                 (params, return_ty)
-            });
+            })
+        });
         let fn_ty = crate::ty::Type::function(params, return_ty);
-        use crate::dependent_helpers::collect_type_vars;
-        let vars = collect_type_vars(&fn_ty);
-        if vars.is_empty() {
-            crate::context::TypeScheme::mono(fn_ty)
-        } else {
-            let var_list: verum_common::List<crate::ty::TypeVar> =
-                vars.iter().copied().collect();
-            crate::context::TypeScheme::poly(var_list, fn_ty)
-        }
+        // ONE authority (T0175): declared generics quantified in appearance
+        // order, `__opaque_type_N` existentials marked implicit so a caller's
+        // positional `<A, B>` type arguments bind ONLY to the real generics.
+        crate::infer::helpers::build_metadata_function_scheme(fn_ty, &scope_vars, &declared_names)
     }
 
     pub(super) fn register_stdlib_consts_from_metadata(
