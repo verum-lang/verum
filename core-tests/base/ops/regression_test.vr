@@ -168,4 +168,58 @@ fn regression_control_flow_in_list_preserves_variants() {
     assert_eq(break_count, 1);
 }
 
+// =============================================================================
+// REGRESSION §F: T0273 / RECORD-EQ-STRCMP-LATENT-1 — `==` on records is
+// STRUCTURAL (field-wise), never a pointer/address compare.
+//
+// Pre-fix, the interpreter's deep-equality tail arm classified two
+// same-type heap objects as "likely strings" and compared their rendered
+// forms; a record renders as its ADDRESS (`<ptr@0x…>`), so two
+// structurally identical records were never equal. These pins are also
+// the Tier-1 tripwire: the AOT lowering still compares heap `==` as raw
+// pointer identity (or misroutes through strcmp when a register is
+// string-marked) — expected red on `--aot` until the T0273 AOT twin
+// (structural `verum_value_eq` runtime) lands.
+// =============================================================================
+
+type EqPoint is { x: Int, y: Int };
+type EqWrap is { p: EqPoint, tag: Int };
+type EqNamed is { name: Text, n: Int };
+
+@test
+fn regression_record_eq_is_structural() {
+    let a = EqPoint { x: 1, y: 2 };
+    let b = EqPoint { x: 1, y: 2 };
+    let c = EqPoint { x: 1, y: 3 };
+    assert(a == b);
+    assert(!(a == c));
+}
+
+@test
+fn regression_nested_record_eq_recurses_fields() {
+    let a = EqWrap { p: EqPoint { x: 7, y: 8 }, tag: 1 };
+    let b = EqWrap { p: EqPoint { x: 7, y: 8 }, tag: 1 };
+    let c = EqWrap { p: EqPoint { x: 7, y: 9 }, tag: 1 };
+    assert(a == b);
+    assert(!(a == c));
+}
+
+@test
+fn regression_record_with_text_field_eq_compares_content() {
+    // A Text field must compare by content inside the structural walk.
+    let a = EqNamed { name: f"ab{"c"}", n: 4 };
+    let b = EqNamed { name: "abc", n: 4 };
+    assert(a == b);
+}
+
+@test
+fn regression_shared_eq_compares_inner_not_cell() {
+    // Shared<T> cells carry a refcount slot; `==` must auto-deref to the
+    // inner values (same layout authority as the GetF/SetF Shared
+    // auto-deref) instead of structurally comparing `[rc][inner]` cells.
+    let a = Shared.new(EqPoint { x: 5, y: 6 });
+    let b = Shared.new(EqPoint { x: 5, y: 6 });
+    assert(a == b);
+}
+
 fn main() {}

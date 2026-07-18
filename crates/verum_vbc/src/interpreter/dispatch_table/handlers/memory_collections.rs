@@ -477,10 +477,8 @@ fn shared_carrier_inner(
     if header.type_id != TypeId::SHARED {
         return Ok(ptr);
     }
-    // Shared layout: [ObjectHeader][rc:i64 @ slot0][inner:Value @ slot1].
-    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-    // SAFETY: Shared.new(...) initializes slot1 as the inner Value.
-    let inner_value = unsafe { *data_ptr.add(1) };
+    // SAFETY: SHARED type-id established above; layout per the helper.
+    let inner_value = unsafe { shared_cell_inner_value(ptr) };
     if inner_value.is_ptr() && !inner_value.is_nil() {
         let inner = inner_value.as_ptr::<u8>();
         if inner.is_null() {
@@ -497,6 +495,21 @@ fn shared_carrier_inner(
         return Ok(inner);
     }
     Ok(ptr)
+}
+
+/// Read the inner `Value` stored in a `Shared<T>` carrier cell.
+/// Shared layout: `[ObjectHeader][rc:i64 @ slot0][inner:Value @ slot1]` —
+/// the ONE layout authority for Shared auto-deref, shared by
+/// [`shared_carrier_inner`] (GetF/SetF, T0107) and the deep-equality
+/// path (T0273: `Shared<T> == Shared<T>` must compare inner values, not
+/// `[rc][inner]` cells whose refcounts differ).
+///
+/// SAFETY: caller must have established that `ptr` is a live,
+/// `TypeId::SHARED`-stamped heap object; `Shared.new(...)` initializes
+/// slot1 as the inner Value.
+pub(super) unsafe fn shared_cell_inner_value(ptr: *const u8) -> Value {
+    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    unsafe { *data_ptr.add(1) }
 }
 
 pub(in super::super) fn handle_set_field(
