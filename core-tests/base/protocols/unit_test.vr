@@ -339,14 +339,17 @@ fn test_ord_clamp() {
 /// Test PartialOrd for type with incomparable values
 @test
 fn test_partial_ord_incomparable() {
-    // Floating point NaN example simulation
-    type MaybeFloat is Valid(Float) | Invalid;
+    // Floating point NaN example simulation.
+    // Variants are prefixed `MF` so the bare suffix names do NOT collide
+    // with stdlib `Validated.Valid`/`Validated.Invalid` (core/base/result.vr) —
+    // same disambiguation discipline as `Item`->`EqReflexItem` above.
+    type MaybeFloat is MFValid(Float) | MFInvalid;
 
     implement Eq for MaybeFloat {
         fn eq(&self, other: &MaybeFloat) -> Bool {
             match (self, other) {
-                (Valid(a), Valid(b)) => *a == *b,
-                _ => false,  // Invalid never equals anything
+                (MFValid(a), MFValid(b)) => *a == *b,
+                _ => false,  // MFInvalid never equals anything
             }
         }
     }
@@ -354,19 +357,19 @@ fn test_partial_ord_incomparable() {
     implement PartialOrd for MaybeFloat {
         fn partial_cmp(&self, other: &MaybeFloat) -> Maybe<Ordering> {
             match (self, other) {
-                (Valid(a), Valid(b)) => {
+                (MFValid(a), MFValid(b)) => {
                     if *a < *b { Maybe.Some(Less) }
                     else if *a > *b { Maybe.Some(Greater) }
                     else { Maybe.Some(Equal) }
                 }
-                _ => Maybe.None,  // Invalid is incomparable
+                _ => Maybe.None,  // MFInvalid is incomparable
             }
         }
     }
 
-    let v1 = Valid(1.0);
-    let v2 = Valid(2.0);
-    let inv = Invalid;
+    let v1 = MFValid(1.0);
+    let v2 = MFValid(2.0);
+    let inv = MFInvalid;
 
     assert_eq(v1.partial_cmp(&v2), Maybe.Some(Less));
     assert_eq(v2.partial_cmp(&v1), Maybe.Some(Greater));
@@ -742,15 +745,20 @@ fn test_deref_mut_protocol() {
 /// Test AsRef implementation
 @test
 fn test_as_ref_protocol() {
-    type Wrapper is { inner: Text };
+    // Unique type name: a bare `Wrapper` collides with the `Wrapper`
+    // in `test_default_generic` (fields `{ value: Int }`), and the
+    // runtime's authoritative by-name type resolution picks the wrong
+    // definition (`no field named 'inner'`). Same disambiguation
+    // discipline as `EqReflexItem` above.
+    type AsRefWrapper is { inner: Text };
 
-    implement AsRef<Text> for Wrapper {
+    implement AsRef<Text> for AsRefWrapper {
         fn as_ref(&self) -> &Text {
             &self.inner
         }
     }
 
-    let w = Wrapper { inner: "hello" };
+    let w = AsRefWrapper { inner: "hello" };
     let text_ref: &Text = w.as_ref();
 
     assert_eq(*text_ref, "hello");
@@ -851,7 +859,7 @@ fn test_try_from_protocol() {
 @test
 fn test_formatter_write_str() {
     let mut buffer = Text.new();
-    let mut formatter = Formatter { buffer: &mut buffer };
+    let mut formatter = Formatter.new(&mut buffer);
 
     formatter.write_str(&"hello").unwrap();
     formatter.write_str(&" world").unwrap();
@@ -863,7 +871,7 @@ fn test_formatter_write_str() {
 @test
 fn test_formatter_write_char() {
     let mut buffer = Text.new();
-    let mut formatter = Formatter { buffer: &mut buffer };
+    let mut formatter = Formatter.new(&mut buffer);
 
     formatter.write_char('a').unwrap();
     formatter.write_char('b').unwrap();
