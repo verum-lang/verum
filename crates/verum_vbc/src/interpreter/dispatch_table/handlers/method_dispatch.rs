@@ -1371,46 +1371,93 @@ pub(in super::super) fn handle_call_method(
             // header_* / epoch* / capabilities / can_read / can_write) —
             // those are tried unconditionally earlier via
             // `dispatch_primitive_method` (line ~1000) and return before
-            // this point when matched. A method that falls through this
-            // far is meant for the WRAPPED value's own type — mirror the
-            // Shared<T> auto-deref immediately above: peel to the inner
-            // Value (no refcount slot here; unlike Shared, Heap is a
-            // unique owner with no clone/strong_count surface) and
-            // re-qualify `method_name` to `<InnerType>.<method>` so the
-            // qualified-lookup walkers below resolve the receiver's REAL
-            // concrete type instead of falling to the bare-suffix scan.
+            // this point when matched.
             //
-            // Pre-fix: `Heap<dyn Speaker>.sound()` read `header.type_id`
-            // off the wrong bytes (see the out-of-bounds note above),
-            // found no protocol impl, and fell to the bare-suffix scan —
-            // which silently bound to whichever same-named method the
-            // function table iterated to last (observed: both
-            // `Heap<Dog>` and `Shared<Cat>` printed "meow").
-            let inner = unsafe { *(ptr as *const Value) };
-            dispatch_receiver = inner;
-            // `receiver` stays the Heap CBGR pointer, mirroring the
-            // Shared arm's identity-preservation comment above.
-            if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
-                let inner_ptr = dispatch_receiver.as_ptr::<u8>();
-                if !inner_ptr.is_null()
-                    && (inner_ptr as usize)
-                        .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-                {
-                    // SAFETY: alignment verified; heap objects begin
-                    // with an ObjectHeader.
-                    let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
-                    if let Some(td) = state.module.get_type(inner_header.type_id)
-                        && let Some(inner_type_name) = state.module.strings.get(td.name)
-                        && !inner_type_name.is_empty()
+            // Owned `String` (not `&str`) for the same borrow-checker
+            // reason documented on the Shared arm above: it's read again
+            // after `method_name` is reassigned below.
+            let base_method: String = if let Some(idx) = method_name.rfind('.') {
+                method_name[idx + 1..].to_string()
+            } else if let Some(idx) = method_name.rfind("::") {
+                method_name[idx + 2..].to_string()
+            } else {
+                method_name.clone()
+            };
+
+            // HEAP-OWN-METHOD-GUARD-1: `Heap<T>` itself has a real,
+            // compiled method surface — `implement<T> Deref for Heap<T>`,
+            // `DerefMut`, `Drop`, `Clone`, `Debug`, `Eq`, `Ord`, … all live
+            // in core/base/memory.vr as genuine `Heap.<method>` bodies
+            // whose `self` IS the Heap<T> carrier, not the wrapped T.
+            // Peeling unconditionally (mirroring the Shared `_ =>` arm
+            // literally) broke exactly this: `boxed.a0` on a
+            // `Heap<MediumPayload>` compiles through `boxed.deref()`,
+            // which this block re-qualified to `MediumPayload.deref` —
+            // undefined (MediumPayload doesn't implement Deref) — instead
+            // of leaving `Heap.deref` for the pre-existing qualified-name
+            // fallback (`find_function_by_name`, unconditional on
+            // receiver type) that resolved it correctly before this fix
+            // (regression caught by
+            // core-tests/mem/allocator/integration_test.vr
+            // integration_heap_medium_size_class via a baseline-vs-fix
+            // full-suite diff). Shared<T> has the identical own-method
+            // surface but its `_ =>` arm never hit this trap in practice
+            // — Shared field access resolves through
+            // handle_get_field's independent auto-deref (§338) rather
+            // than a `CallM("deref")` round-trip — so the guard is
+            // Heap-specific here rather than a design Shared already
+            // needed.
+            //
+            // Gate: only skip the peel when `Heap.<method>` resolves to
+            // a function with a REAL body (bytecode_length > 0 or
+            // non-empty instructions) — a stub/descriptor-only entry
+            // must not block forwarding to the wrapped T.
+            let heap_owns_method = state
+                .module
+                .find_function_by_name(&format!("Heap.{}", base_method))
+                .and_then(|fid| state.module.get_function(fid))
+                .is_some_and(|f| {
+                    f.bytecode_length > 0
+                        || f.instructions.as_ref().is_some_and(|i| !i.is_empty())
+                });
+
+            if !heap_owns_method {
+                // Mirror the Shared<T> auto-deref immediately above: peel
+                // to the inner Value (no refcount slot here; unlike
+                // Shared, Heap is a unique owner with no clone/
+                // strong_count surface — `clone` is intercepted earlier,
+                // universally, by `dispatch_primitive_method`) and
+                // re-qualify `method_name` to `<InnerType>.<method>` so
+                // the qualified-lookup walkers below resolve the
+                // receiver's REAL concrete type instead of falling to
+                // the bare-suffix scan.
+                //
+                // Pre-fix: `Heap<dyn Speaker>.sound()` read
+                // `header.type_id` off the wrong bytes (see the
+                // out-of-bounds note above), found no protocol impl, and
+                // fell to the bare-suffix scan — which silently bound to
+                // whichever same-named method the function table
+                // iterated to last (observed: both `Heap<Dog>` and
+                // `Shared<Cat>` printed "meow").
+                let inner = unsafe { *(ptr as *const Value) };
+                dispatch_receiver = inner;
+                // `receiver` stays the Heap CBGR pointer, mirroring the
+                // Shared arm's identity-preservation comment above.
+                if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+                    let inner_ptr = dispatch_receiver.as_ptr::<u8>();
+                    if !inner_ptr.is_null()
+                        && (inner_ptr as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
                     {
-                        let base_method: String = if let Some(idx) = method_name.rfind('.') {
-                            method_name[idx + 1..].to_string()
-                        } else if let Some(idx) = method_name.rfind("::") {
-                            method_name[idx + 2..].to_string()
-                        } else {
-                            method_name.clone()
-                        };
-                        method_name = format!("{}.{}", inner_type_name, base_method);
+                        // SAFETY: alignment verified; heap objects begin
+                        // with an ObjectHeader.
+                        let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
+                        if let Some(td) = state.module.get_type(inner_header.type_id)
+                            && let Some(inner_type_name) = state.module.strings.get(td.name)
+                            && !inner_type_name.is_empty()
+                        {
+                            method_name = format!("{}.{}", inner_type_name, base_method);
+                        }
                     }
                 }
             }
