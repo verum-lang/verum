@@ -254,6 +254,37 @@ fn integration_shared_deref_mut_heap_inner() {
     assert_eq(after.y, 100);
 }
 
+// -----------------------------------------------------------------------------
+// §8  Shared<T> local DIRECT field read (T0385): `s.field` on a `Shared<T>`
+//     LOCAL must peel the transparent carrier (native `Deref`) and read the
+//     inner T's field via `GetF` — NOT emit a spurious `<T>.deref` protocol
+//     CallM.  Pre-fix the codegen (`chase_deref_for_field`) resolved
+//     `Shared.deref` in the function table and emitted `CallM deref`; the
+//     interpreter auto-derefed the Shared carrier to the inner T, then failed
+//     to find `deref` on T → "method 'T.deref' not found" panic (whole-file
+//     typecheck sink).  §6 covers method dispatch (`s.method()`) and §7 covers
+//     whole-value deref (`*s`); this is the single-level direct-field face.
+// -----------------------------------------------------------------------------
+
+type T0385Pt is { x: Int, y: Int };
+
+@test
+fn integration_shared_local_direct_field_transparent() {
+    // transparent-wrapper ctor form: `s` holds the inner T directly.
+    let s: Shared<T0385Pt> = Shared(T0385Pt { x: 7, y: 9 });
+    assert_eq(s.x, 7);
+    assert_eq(s.y, 9);
+}
+
+@test
+fn integration_shared_local_direct_field_carrier() {
+    // carrier form (Shared.new): `s` holds a refcounted Shared carrier that
+    // the native Deref peels (SHARED-STRONGCOUNT-1) before the inner GetF.
+    let s = Shared.new(T0385Pt { x: 3, y: 4 });
+    assert_eq(s.x, 3);
+    assert_eq(s.y, 4);
+}
+
 fn main() {
     // `verum test` synthesises a per-test main.
 }

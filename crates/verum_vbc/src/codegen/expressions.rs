@@ -19401,6 +19401,40 @@ impl VbcCodegen {
             if has_field {
                 break;
             }
+            // **SHARED-FIELD-DEREF-DISPATCH (T0385)** — transparent
+            // allocating wrappers (`Heap<T>` / `Shared<T>`) are NOT
+            // protocol-`Deref` receivers at the VBC level.  The register
+            // holds a transparent carrier that the native `Deref` opcode
+            // auto-peels — the interpreter's `handle_deref`
+            // SHARED-STRONGCOUNT-1 arm skips the refcount slot to the inner
+            // value, and a plain heap wrapper degrades to identity-deref —
+            // after which the terminal `GetF` reads the inner field.
+            //
+            // Emitting a `<Wrapper>.deref` *protocol* CallM instead (the
+            // generic user-Deref path below) mis-dispatches: at runtime the
+            // interpreter auto-derefs the Shared carrier to the inner `T`
+            // BEFORE method resolution, then looks up `deref` on `T` and
+            // panics `method 'T.deref' not found`.  Mirror `compile_unary`'s
+            // `is_heap_deref` exclusion so `s.field` lowers like `(*s).field`.
+            if self.is_allocating_wrapper(stripped) {
+                let Some(inner_ty) =
+                    VbcCodegen::split_generic_args(tn).into_iter().next()
+                else {
+                    break;
+                };
+                let derefed = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Deref {
+                    dst: derefed,
+                    ref_reg: current_reg,
+                });
+                if current_reg != base_reg {
+                    self.ctx.free_temp(current_reg);
+                }
+                current_reg = derefed;
+                current_base_type = Some(inner_ty);
+                deref_hops += 1;
+                continue;
+            }
             // No direct field; does the type implement Deref?
             let deref_qualified = format!("{}.deref", stripped);
             let Some(deref_info) = self.ctx.lookup_function(&deref_qualified).cloned() else {
