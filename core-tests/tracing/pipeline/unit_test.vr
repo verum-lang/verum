@@ -93,7 +93,7 @@ fn start_simple_span(provider: &TracerProvider, name: &Text) -> Span {
 // =============================================================================
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_end_delivers_span_to_exporter() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -105,7 +105,7 @@ fn test_end_delivers_span_to_exporter() {
 }
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_end_is_idempotent_single_export() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -117,7 +117,7 @@ fn test_end_is_idempotent_single_export() {
 }
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_exported_span_carries_identity_and_kind() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -134,7 +134,7 @@ fn test_exported_span_carries_identity_and_kind() {
 }
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_exported_span_carries_attributes_events_status() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -153,7 +153,7 @@ fn test_exported_span_carries_attributes_events_status() {
 }
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_mutation_after_end_is_ignored() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -176,7 +176,7 @@ fn test_mutation_after_end_is_ignored() {
 // =============================================================================
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_status_error_wins_over_ok() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -188,7 +188,7 @@ fn test_status_error_wins_over_ok() {
 }
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_status_error_is_final() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -204,7 +204,7 @@ fn test_status_error_is_final() {
 // =============================================================================
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_child_span_inherits_trace_and_links_parent() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -439,7 +439,7 @@ fn test_noop_tracer_passes_parent_context_through() {
 // =============================================================================
 
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; regressed with the payload-extraction fork class: extracting Shared<T> from an enum payload copies the cell, so any stateful hop loses writes). FS-side primitives and the exporter itself are green in isolation. Un-ignore when VBC shared-identity / payload-extraction lands — the assertions are already written against the canonical file-sink observation surface.")
+@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_provider_force_flush_and_shutdown_succeed() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());

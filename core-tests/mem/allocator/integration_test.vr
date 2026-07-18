@@ -178,6 +178,47 @@ fn integration_shared_clone_drops_back_to_one() {
     assert_eq(*s, 99);
 }
 
+// -----------------------------------------------------------------------------
+// §6  Shared<T> carrier identity: write-through + Shared-typed-field clone alias
+//     Pins the T0107 cell-fork fix. Two interpreter arms, one identity contract:
+//     (a) SetF SHARED write-through — a `&mut self` write through a `Shared`
+//         carrier must land in the inner value, never the refcount slot;
+//     (b) handle_clone SHARED arm — a value-semantic `Clone` of a directly
+//         `Shared`-typed field is a refcount-bump, so the field ALIASES the
+//         source and both observe a later write.
+//     Opcode proof (T0107 investigation): enum SetVariantData/GetVariantData
+//     never copy, so `handle_clone` + SetF are the whole cell-fork surface.
+// -----------------------------------------------------------------------------
+
+type T0107Cfg is { size: Int };
+
+implement T0107Cfg {
+    fn set_size(&mut self, v: Int) { self.size = v; }
+    fn get_size(&self) -> Int { self.size }
+}
+
+type T0107Holder is { cell: Shared<T0107Cfg> };
+
+@test
+fn integration_shared_write_through_reaches_inner() {
+    let s: Shared<T0107Cfg> = Shared(T0107Cfg { size: 10 });
+    // pre-fix: the write clobbered the refcount and `size` stayed 10.
+    s.set_size(77);
+    assert_eq(s.get_size(), 77);
+}
+
+@test
+fn integration_shared_field_clone_preserves_identity() {
+    let s: Shared<T0107Cfg> = Shared(T0107Cfg { size: 10 });
+    // Shared-typed struct field => codegen emits a value-semantic Clone on `s`;
+    // the SHARED arm makes it a refcount-bump, so `h.cell` aliases `s`.
+    let h = T0107Holder { cell: s };
+    h.cell.set_size(88);
+    // identity preserved: the write is visible through BOTH handles.
+    assert_eq(h.cell.get_size(), 88);
+    assert_eq(s.get_size(), 88);
+}
+
 fn main() {
     // `verum test` synthesises a per-test main.
 }

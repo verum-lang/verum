@@ -350,34 +350,12 @@ pub(in super::super) fn handle_get_field(
     // Pre-fix repro: `BufferPool { state: Shared<BufferPoolState> }`
     // → `pool.state.config.buf_size` reads the Shared refcount
     // instead of the BufferPoolState.config slot.
-    if header.type_id == TypeId::SHARED {
-        // Skip the refcount slot to reach the inner value.
-        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        // SAFETY: Shared layout guarantees data_ptr.add(1) is the
-        // value slot, initialized at Shared.new(...) construction.
-        let inner_value = unsafe { *data_ptr.add(1) };
-        if inner_value.is_ptr() && !inner_value.is_nil() {
-            ptr = inner_value.as_ptr::<u8>();
-            if ptr.is_null() {
-                return Err(InterpreterError::NullPointer);
-            }
-            // Re-read the header for the inner object.
-            if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
-                return Err(InterpreterError::Panic {
-                    message: format!(
-                        "misaligned inner pointer {:p} after Shared auto-deref",
-                        ptr,
-                    ),
-                });
-            }
-        }
-        // Note: we don't re-bind `header` here because the variant
-        // check below (type_id.0 >= 0x8000) operates on the OUTER
-        // header. After Shared deref the inner can ALSO be a variant
-        // wrapper (Shared<Heap<T>>) — fall through to the existing
-        // variant unwrap which re-reads the header from the (now
-        // updated) ptr.
-    }
+    // T0107: Shared<T> carrier auto-deref via the ONE shared authority
+    // (identical to the write side in handle_set_field so the two can't
+    // drift). `ptr` may now point at the inner value; the variant check
+    // below re-reads the header from the updated ptr. Shared<Heap<T>> still
+    // falls through to the existing variant unwrap.
+    ptr = shared_carrier_inner(header, ptr)?;
 
     // SAFETY: Re-read header — `ptr` may have advanced past Shared
     // auto-deref above; alignment was re-verified inside the Shared
@@ -483,6 +461,44 @@ pub(in super::super) fn handle_get_field(
 }
 
 /// SetF (0x63) - Set field: obj.field = val
+/// If `ptr` points to a `Shared<T>` carrier (TypeId::SHARED), advance past the
+/// refcount slot to the inner value's pointer — mirrors the GetF #338 auto-deref.
+/// Returns the inner ptr, or the original ptr if not Shared. This is the ONE
+/// authority for the Shared read/write auto-deref so `handle_get_field` and
+/// `handle_set_field` can never drift: T0107 — SetF lacked this arm, so a
+/// `&mut self` write through a Shared carrier landed in the cell (field 0
+/// clobbered the refcount) instead of reaching the inner T.
+///
+/// SAFETY: caller must have verified `ptr` alignment for `ObjectHeader`.
+fn shared_carrier_inner(
+    header: &heap::ObjectHeader,
+    ptr: *mut u8,
+) -> InterpreterResult<*mut u8> {
+    if header.type_id != TypeId::SHARED {
+        return Ok(ptr);
+    }
+    // Shared layout: [ObjectHeader][rc:i64 @ slot0][inner:Value @ slot1].
+    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    // SAFETY: Shared.new(...) initializes slot1 as the inner Value.
+    let inner_value = unsafe { *data_ptr.add(1) };
+    if inner_value.is_ptr() && !inner_value.is_nil() {
+        let inner = inner_value.as_ptr::<u8>();
+        if inner.is_null() {
+            return Err(InterpreterError::NullPointer);
+        }
+        if !(inner as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+            return Err(InterpreterError::Panic {
+                message: format!(
+                    "misaligned inner pointer {:p} after Shared auto-deref",
+                    inner,
+                ),
+            });
+        }
+        return Ok(inner);
+    }
+    Ok(ptr)
+}
+
 pub(in super::super) fn handle_set_field(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -542,6 +558,13 @@ pub(in super::super) fn handle_set_field(
     // SAFETY: See handle_get_field — alignment verified above, `ptr` is a
     // live heap object, and all objects begin with ObjectHeader.
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+    // T0107: Shared<T> carrier auto-deref — was MISSING on the write side, so a
+    // `&mut self` write through a Shared carrier landed in the cell (field 0
+    // clobbered the refcount) instead of reaching the inner T. ONE authority
+    // with the reader (handle_get_field) so the two sides cannot drift.
+    ptr = shared_carrier_inner(header, ptr)?;
+    // Re-read the header for the (possibly Shared-deref'd) inner object.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if header.type_id.0 >= 0x8000 {
         let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
         // SAFETY: See handle_get_field — variant payload layout applies.
@@ -553,6 +576,11 @@ pub(in super::super) fn handle_set_field(
             }
         }
     }
+    // T0107: re-read the header AFTER the variant deref so the bounds check
+    // below validates against the INNER object's size — the write side
+    // previously used the stale OUTER header (the read side re-reads; the
+    // write side did not, a latent under-/over-check).
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
     let value = state.get_reg(val);
     let field_offset = field_idx
@@ -2257,6 +2285,35 @@ pub(in super::super) fn handle_clone(
             let header = unsafe { heap::ObjectHeader::ref_or_stub(src_ptr) };
             let type_id = header.type_id;
             let data_size = header.size as usize;
+
+            // SHARED-CLONE-IDENTITY-1 (T0107): a `Shared<T>` carrier clones by
+            // refcount-bump + handle-copy — NEVER deep-copy.  `Instruction::Clone`
+            // (0x78) is codegen's value-semantic bind/move, emitted (among other
+            // sites) when a `Shared<T>` payload is extracted out of an enum
+            // variant; deep-copying the carrier forks the cell (fresh refcount +
+            // copied inner Value) so any later `&mut`-write or stateful hop
+            // through the clone is lost to the original — the root of the tracing
+            // `end() -> processor -> exporter` delivery drop.  Mirrors the
+            // `Shared.clone` method arm in `method_dispatch.rs` (repr
+            // `[ObjectHeader][refcount:i64 @ slot0][inner:Value @ slot1]`), and
+            // is the write-side twin of the GetF/SetF `shared_carrier_inner`
+            // auto-deref: one SHARED identity contract across read, write, clone.
+            // Guard against a `Heap<T>` CBGR cell whose out-of-bounds header may
+            // read as SHARED — the same live-allocation membership test the
+            // method-dispatch SHARED arm uses.
+            let is_cbgr_cell = state.cbgr_allocations.contains(
+                &(src_ptr as usize)
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
+            );
+            if !is_cbgr_cell && type_id == TypeId::SHARED {
+                let rc_ptr = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                unsafe {
+                    let refcount = (*rc_ptr).as_i64();
+                    *rc_ptr = Value::from_i64(refcount + 1);
+                }
+                state.set_reg(dst, value); // handle-copy: same carrier pointer
+                return Ok(DispatchResult::Continue);
+            }
 
             // Allocate a new object with same type and size
             let new_obj = state.heap.alloc(type_id, data_size)?;
