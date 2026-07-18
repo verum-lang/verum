@@ -154,7 +154,7 @@ impl std::fmt::Display for CacheKey {
 /// probe cached at one wire schema ran its bytecode against re-shaped handler
 /// arms and SIGSEGV'd, masquerading as a code regression (T0197). Keep in
 /// lockstep with the stdlib bake schema (see T0219 BAKE-CACHE-COMPILER-IDENTITY).
-pub const WIRE_SCHEMA_VERSION: u32 = 1;
+pub const WIRE_SCHEMA_VERSION: u32 = 2; // 2: GPU GpuExtended [dst][args...] realign (T0177)
 
 pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKey {
     let mut hasher = blake3::Hasher::new();

@@ -12996,6 +12996,24 @@ pub enum Instruction {
     // ========================================================================
     // GPU
     // ========================================================================
+    //
+    // WIRE AUTHORITY (T0177 / GPU-OPERAND-SHAPE-1): the `GpuExtended { sub_op,
+    // operands }` carrier is the ONLY 0xF8 wire format. Its `operands` are the
+    // flat `[dst][args...]` register encoding produced by
+    // `emit_intrinsic_gpu_extended` (length-prefixed) and consumed by both the
+    // interpreter (`handle_gpu_extended`) and the AOT (`lower_gpu_extended`).
+    //
+    // The structured `Gpu*` variants below (GpuMemset, GpuStreamCreate, …) are
+    // a RICHER legacy shape (u8 immediates, `[Reg;3]` dims, varint kernel ids).
+    // They are retained ONLY as the match targets of the AOT/MLIR lowering (in
+    // verum_codegen) and a couple of unit tests; NO codegen path constructs
+    // them, and the sequential decoder never produces them — structured 0xF8
+    // decode was removed (see `decode_instruction`'s GpuExtended arm), leaving
+    // the carrier as the sole authority. Their `bytecode.rs` encode arms are
+    // therefore vestigial and their byte layouts must NOT be treated as a live
+    // wire format. Do not add emitters that construct these variants: route new
+    // GPU ops through `emit_intrinsic_gpu_extended` + the carrier so all four
+    // consumers (emitter, structured codec, interpreter, AOT) stay in one shape.
     /// Launch GPU kernel.
     GpuLaunch {
         /// Kernel function table index.

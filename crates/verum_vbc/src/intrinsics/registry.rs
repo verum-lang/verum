@@ -11825,6 +11825,18 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // GPU Operations - Device Management
     // =========================================================================
+    //
+    // WIRE-SHAPE INVARIANT (T0177 / GPU-OPERAND-SHAPE-1): every GPU_* intrinsic
+    // is emitted as the `GpuExtended` carrier `[dst][args...]` (length-prefixed,
+    // register-only). The leading `dst` register is present iff `return_count
+    // > 0` (see `emit_intrinsic_gpu_extended`). `core/intrinsics/gpu.vr` is the
+    // SIGNATURE AUTHORITY: every fn there returns `-> Int` (a status code or
+    // handle), so every GPU_* entry below carries `return_count: 1`. The sole
+    // exception is `GPU_MEM_INFO`, a documented multi-return (free, total)
+    // probe. A `return_count: 0` here would drop `dst` on the wire and desync
+    // the interpreter's sequential operand reads (garbage register index →
+    // out-of-bounds → SIGSEGV) while making the call evaluate to unit instead
+    // of the declared Int.
     Intrinsic {
         name: "GPU_GET_DEVICE",
         category: IntrinsicCategory::Gpu,
@@ -11840,7 +11852,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // device id
-        return_count: 0,
+        return_count: 1, // status Int (see WIRE-SHAPE INVARIANT above)
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::SetDevice),
         mlir_op: Some("verum.gpu_set_device"),
         doc: "Set current GPU device",
@@ -11850,7 +11862,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 0,
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::DeviceReset),
         mlir_op: Some("verum.gpu_device_reset"),
         doc: "Reset GPU device",
@@ -11880,7 +11892,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // peer device
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::EnablePeerAccess),
         mlir_op: Some("verum.gpu_enable_peer"),
         doc: "Enable peer device access",
@@ -11890,7 +11902,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // peer device
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::DisablePeerAccess),
         mlir_op: Some("verum.gpu_disable_peer"),
         doc: "Disable peer device access",
@@ -11923,7 +11935,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // ptr
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::Free),
         mlir_op: Some("verum.gpu_free"),
         doc: "Free GPU memory",
@@ -11933,7 +11945,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 2, // ptr, size
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::PinMemory),
         mlir_op: Some("verum.gpu_pin_memory"),
         doc: "Pin host memory for faster transfers",
@@ -11943,7 +11955,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // ptr
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::UnpinMemory),
         mlir_op: Some("verum.gpu_unpin_memory"),
         doc: "Unpin host memory",
@@ -11953,7 +11965,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 3, // ptr, size, device
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::Prefetch),
         mlir_op: Some("verum.gpu_prefetch"),
         doc: "Prefetch memory to device",
@@ -11966,7 +11978,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 3, // dst, src, size
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::Memcpy),
         mlir_op: Some("verum.gpu_memcpy"),
         doc: "Synchronous GPU memory copy",
@@ -11976,7 +11988,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 4, // dst, src, size, stream
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::MemcpyAsync),
         mlir_op: Some("verum.gpu_memcpy_async"),
         doc: "Asynchronous GPU memory copy",
@@ -11986,7 +11998,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 3, // dst, src, size
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::MemcpyH2D),
         mlir_op: Some("verum.gpu_memcpy_h2d"),
         doc: "Copy host to device",
@@ -11996,7 +12008,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 3, // dst, src, size
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::MemcpyD2H),
         mlir_op: Some("verum.gpu_memcpy_d2h"),
         doc: "Copy device to host",
@@ -12006,7 +12018,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 3, // dst, src, size
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::MemcpyD2D),
         mlir_op: Some("verum.gpu_memcpy_d2d"),
         doc: "Copy device to device",
@@ -12016,7 +12028,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 3, // ptr, value, size
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::Memset),
         mlir_op: Some("verum.gpu_memset"),
         doc: "Set GPU memory",
@@ -12026,7 +12038,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 4, // ptr, value, size, stream
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::MemsetAsync),
         mlir_op: Some("verum.gpu_memset_async"),
         doc: "Async set GPU memory",
@@ -12059,7 +12071,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // stream
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::StreamDestroy),
         mlir_op: Some("verum.gpu_stream_destroy"),
         doc: "Destroy GPU stream",
@@ -12079,7 +12091,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 2, // stream, event
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::StreamWaitEvent),
         mlir_op: Some("verum.gpu_stream_wait_event"),
         doc: "Make stream wait for event",
@@ -12092,7 +12104,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // stream
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::SyncStream),
         mlir_op: Some("verum.gpu_sync"),
         doc: "Synchronize GPU stream",
@@ -12102,7 +12114,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 0,
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::SyncDevice),
         mlir_op: Some("verum.gpu_sync_all"),
         doc: "Synchronize all GPU streams",
@@ -12135,7 +12147,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // event
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::EventDestroy),
         mlir_op: Some("verum.gpu_event_destroy"),
         doc: "Destroy GPU event",
@@ -12145,7 +12157,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 2, // event, stream
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::EventRecord),
         mlir_op: Some("verum.gpu_event_record"),
         doc: "Record event on stream",
@@ -12155,7 +12167,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // event
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::EventSynchronize),
         mlir_op: Some("verum.gpu_event_sync"),
         doc: "Wait for event to complete",
@@ -12198,7 +12210,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // stream
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::GraphBeginCapture),
         mlir_op: Some("verum.gpu_graph_begin"),
         doc: "Begin graph capture on stream",
@@ -12228,7 +12240,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 2, // exec, stream
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::GraphLaunch),
         mlir_op: Some("verum.gpu_graph_launch"),
         doc: "Launch graph on stream",
@@ -12238,7 +12250,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // graph
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::GraphDestroy),
         mlir_op: Some("verum.gpu_graph_destroy"),
         doc: "Destroy GPU graph",
@@ -12248,7 +12260,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // exec
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::GraphExecDestroy),
         mlir_op: Some("verum.gpu_graph_exec_destroy"),
         doc: "Destroy graph executable",
@@ -12258,7 +12270,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 2, // exec, graph
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::GraphExecUpdate),
         mlir_op: Some("verum.gpu_graph_exec_update"),
         doc: "Update graph executable",
@@ -12271,7 +12283,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 6, // kernel_id, grid, block, shared_mem, stream, args
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::Launch),
         mlir_op: Some("verum.gpu_launch"),
         doc: "Launch GPU kernel",
@@ -12281,7 +12293,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 6, // kernel_id, grid, block, shared_mem, stream, args
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::LaunchCooperative),
         mlir_op: Some("verum.gpu_launch_coop"),
         doc: "Launch cooperative GPU kernel",
@@ -12294,7 +12306,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 1, // name
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::ProfileMarkerPush),
         mlir_op: Some("verum.gpu_marker_push"),
         doc: "Push profiling marker",
@@ -12304,7 +12316,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
         param_count: 0,
-        return_count: 0,
+        return_count: 1, // status Int
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::ProfileMarkerPop),
         mlir_op: Some("verum.gpu_marker_pop"),
         doc: "Pop profiling marker",

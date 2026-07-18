@@ -25,12 +25,22 @@ pub(in super::super) fn handle_gpu_extended(
     use crate::instruction::GpuSubOpcode;
 
     let sub_op_byte = read_u8(state)?;
-    // Skip the length-prefix that the carrier encoder writes after sub_op
-    // (same convention as FfiExtended/MathExtended/…).
-    let _operand_len = read_varint(state)?;
+    // Length-prefix that the carrier encoder writes after sub_op (same
+    // convention as FfiExtended/MathExtended/…).
+    //
+    // T0193-style hardening (T0177): the envelope is AUTHORITATIVE for
+    // stream advance. After the sub-op arm runs, the dispatcher
+    // repositions pc to `operands_start + operand_byte_count` — an arm
+    // that reads fewer or more registers than the emitter packed can
+    // produce a wrong value, but can no longer desync the instruction
+    // stream (the gpu_memset SIGSEGV mechanism of T0177). Arms therefore
+    // must not exit the match early on a non-error path; errors abort
+    // interpretation, so their bypass of the repositioning is moot.
+    let operand_byte_count = read_varint(state)?;
+    let operands_start = state.pc();
     let sub_op = GpuSubOpcode::from_byte(sub_op_byte);
 
-    match sub_op {
+    let result = match sub_op {
         // ================================================================
         // Device Enumeration (0x90-0x93)
         // ================================================================
@@ -131,9 +141,19 @@ pub(in super::super) fn handle_gpu_extended(
         // ================================================================
         // Synchronization (0x10-0x1F) - Stubs
         // ================================================================
-        Some(GpuSubOpcode::SyncStream) | Some(GpuSubOpcode::SyncDevice) => {
+        Some(GpuSubOpcode::SyncStream) => {
+            // gpu_sync(stream) -> Int : wire [dst][stream]
             let dst = read_reg(state)?;
-            let _stream_or_device = read_reg(state)?;
+            let _stream = read_reg(state)?;
+            state.set_reg(dst, Value::from_i64(0)); // success
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(GpuSubOpcode::SyncDevice) => {
+            // gpu_sync_all() -> Int : wire [dst] (no args) — distinct arity from
+            // SyncStream; a shared arm here read one register too many and
+            // desynced the operand stream (T0177 / GPU-OPERAND-SHAPE-1).
+            let dst = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -319,14 +339,10 @@ pub(in super::super) fn handle_gpu_extended(
             // overflow waiting to happen the first time the caller
             // wrote past byte 0. Treat as null pointer (allocation
             // failure), matching the standard malloc-fail contract.
-            let layout = match std::alloc::Layout::from_size_align(alloc_size, 8) {
-                Ok(l) => l,
-                Err(_) => {
-                    state.set_reg(dst, Value::from_ptr::<u8>(std::ptr::null_mut()));
-                    return Ok(DispatchResult::Continue);
-                }
+            let ptr = match std::alloc::Layout::from_size_align(alloc_size, 8) {
+                Ok(layout) => unsafe { std::alloc::alloc(layout) },
+                Err(_) => std::ptr::null_mut(),
             };
-            let ptr = unsafe { std::alloc::alloc(layout) };
             if !ptr.is_null() {
                 state
                     .gpu_context
@@ -344,14 +360,10 @@ pub(in super::super) fn handle_gpu_extended(
             let alloc_size = if size == 0 { 1 } else { size };
             // Same heap-overflow class as GpuSubOpcode::Alloc — never
             // silently downgrade an oversize layout to 1 byte.
-            let layout = match std::alloc::Layout::from_size_align(alloc_size, 8) {
-                Ok(l) => l,
-                Err(_) => {
-                    state.set_reg(dst, Value::from_ptr::<u8>(std::ptr::null_mut()));
-                    return Ok(DispatchResult::Continue);
-                }
+            let ptr = match std::alloc::Layout::from_size_align(alloc_size, 8) {
+                Ok(layout) => unsafe { std::alloc::alloc(layout) },
+                Err(_) => std::ptr::null_mut(),
             };
-            let ptr = unsafe { std::alloc::alloc(layout) };
             if !ptr.is_null() {
                 state
                     .gpu_context
@@ -390,10 +402,20 @@ pub(in super::super) fn handle_gpu_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(GpuSubOpcode::PinMemory) | Some(GpuSubOpcode::UnpinMemory) => {
+        Some(GpuSubOpcode::PinMemory) => {
+            // gpu_pin_memory(ptr, size) -> Int : wire [dst][ptr][size]
             let dst = read_reg(state)?;
             let _ptr = read_reg(state)?;
             let _size = read_reg(state)?;
+            state.set_reg(dst, Value::from_i64(0)); // success
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(GpuSubOpcode::UnpinMemory) => {
+            // gpu_unpin_memory(ptr) -> Int : wire [dst][ptr] — one fewer arg
+            // than PinMemory; a shared arm read one register too many (T0177).
+            let dst = read_reg(state)?;
+            let _ptr = read_reg(state)?;
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -416,14 +438,37 @@ pub(in super::super) fn handle_gpu_extended(
             Ok(DispatchResult::Continue)
         }
 
+        // gpu_memcpy(dst, src, size) -> Int : wire [dst][dst_ptr][src_ptr][size].
+        // Memcpy2D / Memcpy2DAsync are not on the core/intrinsics/gpu.vr surface
+        // (never emitted); they ride this 3-arg arm only to keep the match total.
         Some(GpuSubOpcode::Memcpy)
-        | Some(GpuSubOpcode::MemcpyAsync)
         | Some(GpuSubOpcode::Memcpy2D)
         | Some(GpuSubOpcode::Memcpy2DAsync) => {
             let dst = read_reg(state)?;
             let dst_ptr_reg = read_reg(state)?;
             let src_ptr_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
+            let dst_ptr = state.get_reg(dst_ptr_reg).as_ptr::<u8>();
+            let src_ptr = state.get_reg(src_ptr_reg).as_ptr::<u8>();
+            let size = state.get_reg(size_reg).as_i64() as usize;
+            if !dst_ptr.is_null() && !src_ptr.is_null() && size > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, size);
+                }
+            }
+            state.set_reg(dst, Value::from_i64(0)); // success
+            Ok(DispatchResult::Continue)
+        }
+
+        // gpu_memcpy_async(dst, src, size, stream) -> Int : wire
+        // [dst][dst_ptr][src_ptr][size][stream] — one more register than the
+        // synchronous form; a shared arm read one too few and desynced (T0177).
+        Some(GpuSubOpcode::MemcpyAsync) => {
+            let dst = read_reg(state)?;
+            let dst_ptr_reg = read_reg(state)?;
+            let src_ptr_reg = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            let _stream_reg = read_reg(state)?;
             let dst_ptr = state.get_reg(dst_ptr_reg).as_ptr::<u8>();
             let src_ptr = state.get_reg(src_ptr_reg).as_ptr::<u8>();
             let size = state.get_reg(size_reg).as_i64() as usize;
@@ -476,11 +521,33 @@ pub(in super::super) fn handle_gpu_extended(
             Ok(DispatchResult::Continue)
         }
 
-        Some(GpuSubOpcode::Memset) | Some(GpuSubOpcode::MemsetAsync) => {
+        // gpu_memset(ptr, value, size) -> Int : wire [dst][ptr][value][size]
+        Some(GpuSubOpcode::Memset) => {
             let dst = read_reg(state)?;
             let ptr_reg = read_reg(state)?;
             let value_reg = read_reg(state)?;
             let size_reg = read_reg(state)?;
+            let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
+            let value = state.get_reg(value_reg).as_i64() as u8;
+            let size = state.get_reg(size_reg).as_i64() as usize;
+            if !ptr.is_null() && size > 0 {
+                unsafe {
+                    std::ptr::write_bytes(ptr, value, size);
+                }
+            }
+            state.set_reg(dst, Value::from_i64(0)); // success
+            Ok(DispatchResult::Continue)
+        }
+
+        // gpu_memset_async(ptr, value, size, stream) -> Int : wire
+        // [dst][ptr][value][size][stream] — one more register than the
+        // synchronous form; a shared arm read one too few and desynced (T0177).
+        Some(GpuSubOpcode::MemsetAsync) => {
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let value_reg = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            let _stream_reg = read_reg(state)?;
             let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
             let value = state.get_reg(value_reg).as_i64() as u8;
             let size = state.get_reg(size_reg).as_i64() as usize;
@@ -604,155 +671,30 @@ pub(in super::super) fn handle_gpu_extended(
         }
 
         // ================================================================
-        // Kernel Launch - CPU Fallback with Thread Model Simulation
+        // Kernel Launch - CPU-fallback stub (flat .vr ABI)
         // ================================================================
         //
-
-        // GPU kernel launch executes the kernel function for every thread
-        // in the grid. Threads execute sequentially on the CPU, with each
-        // thread having access to its identity (threadIdx, blockIdx) via
-        // the gpu_thread_ctx field in InterpreterState.
-        //
-
-        // Shared memory is allocated per-block and shared across threads.
-        // __syncthreads() is a no-op since threads execute in order.
+        // gpu_launch / gpu_launch_coop take six flat scalar Int args
+        // (kernel_id, grid, block, shared_mem, stream, args) and return a
+        // status Int — see core/intrinsics/gpu.vr. The carrier wire shape is
+        // [dst][kernel_id][grid][block][shared_mem][stream][args]; consume
+        // exactly those seven registers (matching emit_intrinsic_gpu_extended
+        // and the AOT lowering) and return 0. The interpreter is a CPU
+        // fallback with no real device, so no kernel is dispatched. The richer
+        // 3-D thread-model simulation in gpu_simulator::GpuThreadContext is
+        // only reachable from the structured GpuLaunch encoding (varint
+        // kernel_id + [Reg;3] dims + varint arg-count), which no codegen path
+        // emits; reviving it needs a dedicated structured-launch intrinsic.
         Some(GpuSubOpcode::Launch) | Some(GpuSubOpcode::LaunchCooperative) => {
-            use super::super::super::gpu_simulator::{
-                GpuThreadContext, KernelLaunchParams, SharedMemoryBlock,
-            };
-
-            // Read kernel_id (varint)
-            let kernel_id = read_varint(state)? as u32;
-            // Read grid dimensions (3 registers)
-            let grid_x_reg = read_reg(state)?;
-            let grid_y_reg = read_reg(state)?;
-            let grid_z_reg = read_reg(state)?;
-            // Read block dimensions (3 registers)
-            let block_x_reg = read_reg(state)?;
-            let block_y_reg = read_reg(state)?;
-            let block_z_reg = read_reg(state)?;
-            // Read shared memory size and stream registers
-            let shared_mem_reg = read_reg(state)?;
+            // Flat scalar ABI: [dst][kernel_id][grid][block][shared_mem][stream][args].
+            let dst = read_reg(state)?;
+            let _kernel_id = read_reg(state)?;
+            let _grid = read_reg(state)?;
+            let _block = read_reg(state)?;
+            let _shared_mem = read_reg(state)?;
             let _stream = read_reg(state)?;
-            // Read argument registers (varint count + regs)
-            let arg_count = read_varint(state)? as usize;
-            let mut arg_regs = Vec::with_capacity(arg_count);
-            for _ in 0..arg_count {
-                arg_regs.push(read_reg(state)?);
-            }
-
-            let caller_base = state.reg_base();
-
-            // Read launch parameters from registers
-            let grid_dim = [
-                state.registers.get(caller_base, grid_x_reg).as_i64().max(1) as u32,
-                state.registers.get(caller_base, grid_y_reg).as_i64().max(1) as u32,
-                state.registers.get(caller_base, grid_z_reg).as_i64().max(1) as u32,
-            ];
-            let block_dim = [
-                state
-                    .registers
-                    .get(caller_base, block_x_reg)
-                    .as_i64()
-                    .max(1) as u32,
-                state
-                    .registers
-                    .get(caller_base, block_y_reg)
-                    .as_i64()
-                    .max(1) as u32,
-                state
-                    .registers
-                    .get(caller_base, block_z_reg)
-                    .as_i64()
-                    .max(1) as u32,
-            ];
-            let shared_mem_size = state
-                .registers
-                .get(caller_base, shared_mem_reg)
-                .as_i64()
-                .max(0) as usize;
-
-            // Collect argument values before modifying state
-            let mut arg_values = Vec::with_capacity(arg_count);
-            for &reg in &arg_regs {
-                arg_values.push(state.registers.get(caller_base, reg));
-            }
-
-            let func_id = FunctionId(kernel_id);
-            let func = match state.module.get_function(func_id) {
-                Some(f) => f,
-                None => return Ok(DispatchResult::Continue),
-            };
-            let reg_count = func.register_count;
-
-            let params = KernelLaunchParams {
-                kernel_id,
-                grid_dim,
-                block_dim,
-                shared_mem_size,
-                args: arg_values.iter().map(|v| v.as_i64()).collect(),
-            };
-
-            // Save PC after reading all launch operands — this is the continuation point
-            let return_pc = state.pc();
-
-            // Save previous GPU thread context (for nested launches)
-            let prev_gpu_ctx = state.gpu_thread_ctx.take();
-            let prev_shared_mem = state.gpu_shared_memory.take();
-            let prev_shared_offset = state.gpu_shared_mem_offset;
-
-            // Iterate over all blocks in the grid
-            let mut current_block: Option<[u32; 3]> = None;
-            for (block_id, thread_id) in params.thread_iter() {
-                // Allocate new shared memory when entering a new block
-                if current_block.as_ref() != Some(&block_id) {
-                    current_block = Some(block_id);
-                    state.gpu_shared_memory = Some(SharedMemoryBlock::new(shared_mem_size));
-                    state.gpu_shared_mem_offset = 0;
-                }
-
-                // Set thread context for this thread
-                let smem = match state.gpu_shared_memory.as_ref() {
-                    Some(m) => m,
-                    None => {
-                        return Err(InterpreterError::InvalidOperand {
-                            message: "GPU shared memory not initialized for kernel launch"
-                                .to_string(),
-                        });
-                    }
-                };
-                state.gpu_thread_ctx = Some(GpuThreadContext::new(
-                    thread_id, block_id, block_dim, grid_dim, smem,
-                ));
-
-                // Push a new frame for the kernel function
-                let entry_depth = state.call_stack.depth();
-                let new_base =
-                    state
-                        .call_stack
-                        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
-                state.registers.push_frame(reg_count);
-
-                // Copy arguments to callee registers
-                for (i, val) in arg_values.iter().enumerate() {
-                    state.registers.set(new_base, Reg(i as u16), *val);
-                }
-
-                // Set PC to start of kernel function
-                state.set_pc(0);
-                state.record_call();
-
-                // Execute kernel function to completion using nested dispatch loop
-                let _result = dispatch_loop_table_with_entry_depth(state, entry_depth)?;
-            }
-
-            // Restore previous GPU context (for nested launches)
-            state.gpu_thread_ctx = prev_gpu_ctx;
-            state.gpu_shared_memory = prev_shared_mem;
-            state.gpu_shared_mem_offset = prev_shared_offset;
-
-            // Restore PC to continuation point after launch
-            // PC is already restored by frame pop in dispatch_loop_table_with_entry_depth
+            let _args = read_reg(state)?;
+            state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
 
@@ -818,66 +760,68 @@ pub(in super::super) fn handle_gpu_extended(
             }
 
             let func_id = FunctionId(kernel_id);
-            let func = match state.module.get_function(func_id) {
-                Some(f) => f,
-                None => return Ok(DispatchResult::Continue),
-            };
-            let reg_count = func.register_count;
+            // Unknown kernel function: no-op fall-through (legacy sim path,
+            // never emitted by live codegen) — the envelope repositioning
+            // below the match keeps the stream coherent either way.
+            if let Some(func) = state.module.get_function(func_id) {
+                let reg_count = func.register_count;
 
-            let params = KernelLaunchParams {
-                kernel_id,
-                grid_dim,
-                block_dim,
-                shared_mem_size,
-                args: arg_values.iter().map(|v| v.as_i64()).collect(),
-            };
-
-            let return_pc = state.pc();
-            let prev_gpu_ctx = state.gpu_thread_ctx.take();
-            let prev_shared_mem = state.gpu_shared_memory.take();
-            let prev_shared_offset = state.gpu_shared_mem_offset;
-
-            let mut current_block: Option<[u32; 3]> = None;
-            for (block_id, thread_id) in params.thread_iter() {
-                if current_block.as_ref() != Some(&block_id) {
-                    current_block = Some(block_id);
-                    state.gpu_shared_memory = Some(SharedMemoryBlock::new(shared_mem_size));
-                    state.gpu_shared_mem_offset = 0;
-                }
-
-                let smem = match state.gpu_shared_memory.as_ref() {
-                    Some(m) => m,
-                    None => {
-                        return Err(InterpreterError::InvalidOperand {
-                            message: "GPU shared memory not initialized for kernel launch"
-                                .to_string(),
-                        });
-                    }
+                let params = KernelLaunchParams {
+                    kernel_id,
+                    grid_dim,
+                    block_dim,
+                    shared_mem_size,
+                    args: arg_values.iter().map(|v| v.as_i64()).collect(),
                 };
-                state.gpu_thread_ctx = Some(GpuThreadContext::new(
-                    thread_id, block_id, block_dim, grid_dim, smem,
-                ));
 
-                let entry_depth = state.call_stack.depth();
-                let new_base =
-                    state
-                        .call_stack
-                        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
-                state.registers.push_frame(reg_count);
+                let return_pc = state.pc();
+                let prev_gpu_ctx = state.gpu_thread_ctx.take();
+                let prev_shared_mem = state.gpu_shared_memory.take();
+                let prev_shared_offset = state.gpu_shared_mem_offset;
 
-                for (i, val) in arg_values.iter().enumerate() {
-                    state.registers.set(new_base, Reg(i as u16), *val);
+                let mut current_block: Option<[u32; 3]> = None;
+                for (block_id, thread_id) in params.thread_iter() {
+                    if current_block.as_ref() != Some(&block_id) {
+                        current_block = Some(block_id);
+                        state.gpu_shared_memory = Some(SharedMemoryBlock::new(shared_mem_size));
+                        state.gpu_shared_mem_offset = 0;
+                    }
+
+                    let smem = match state.gpu_shared_memory.as_ref() {
+                        Some(m) => m,
+                        None => {
+                            return Err(InterpreterError::InvalidOperand {
+                                message: "GPU shared memory not initialized for kernel launch"
+                                    .to_string(),
+                            });
+                        }
+                    };
+                    state.gpu_thread_ctx = Some(GpuThreadContext::new(
+                        thread_id, block_id, block_dim, grid_dim, smem,
+                    ));
+
+                    let entry_depth = state.call_stack.depth();
+                    let new_base =
+                        state
+                            .call_stack
+                            .push_frame(func_id, reg_count, return_pc, Reg(0))?;
+                    state.registers.push_frame(reg_count);
+
+                    for (i, val) in arg_values.iter().enumerate() {
+                        state.registers.set(new_base, Reg(i as u16), *val);
+                    }
+
+                    state.set_pc(0);
+                    state.record_call();
+                    let _result = dispatch_loop_table_with_entry_depth(state, entry_depth)?;
                 }
 
-                state.set_pc(0);
-                state.record_call();
-                let _result = dispatch_loop_table_with_entry_depth(state, entry_depth)?;
+                state.gpu_thread_ctx = prev_gpu_ctx;
+                state.gpu_shared_memory = prev_shared_mem;
+                state.gpu_shared_mem_offset = prev_shared_offset;
             }
-
-            state.gpu_thread_ctx = prev_gpu_ctx;
-            state.gpu_shared_memory = prev_shared_mem;
-            state.gpu_shared_mem_offset = prev_shared_offset;
-            // PC is already restored by frame pop in dispatch_loop_table_with_entry_depth
+            // PC (frame-pop restored inside the sim) is superseded by the
+            // envelope-authoritative repositioning after the match.
             Ok(DispatchResult::Continue)
         }
 
@@ -1209,7 +1153,12 @@ pub(in super::super) fn handle_gpu_extended(
             feature: "unknown GPU sub-opcode",
             opcode: Some(crate::instruction::Opcode::GpuExtended),
         }),
-    }
+    };
+    // Envelope-authoritative continuation (see the header comment): the
+    // next instruction starts exactly past the encoded operand bytes,
+    // regardless of how many registers the arm consumed.
+    state.set_pc(operands_start.wrapping_add(operand_byte_count as u32));
+    result
 }
 
 // ============================================================================

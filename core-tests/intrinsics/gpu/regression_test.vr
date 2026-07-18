@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/intrinsics/gpu/regression_test.vr
+// =============================================================================
+//
+// Wire-shape regression pins for T0177 / GPU-OPERAND-SHAPE-1. Each @test pins
+// one defect in the GpuExtended `[dst][args...]` carrier contract:
+//
+//   * GPU-OPERAND-SHAPE-1     — GPU_MEMSET dropped its dst on the wire
+//                               (return_count: 0) → interpreter read one
+//                               register too many → OOB → SIGSEGV.
+//   * GPU-RETURN-CONTRACT-1   — status ops evaluated to unit instead of the
+//                               `-> Int` the .vr surface declares.
+//   * GPU-ENUM-VULKAN-RC      — enumerate must yield a non-negative handle.
+//   * Part-C arity splits     — interpreter arms that shared a read count with
+//                               a differently-arity sibling and desynced.
+// =============================================================================
+
+mount core.intrinsics.gpu.{ gpu_malloc, gpu_free, gpu_memset };
+mount core.intrinsics.gpu.{ gpu_memcpy_async, gpu_unpin_memory };
+mount core.intrinsics.gpu.{ gpu_sync_all, gpu_get_device };
+mount core.intrinsics.gpu.{ gpu_stream_create, gpu_stream_destroy };
+mount core.intrinsics.gpu.{ gpu_enumerate_vulkan };
+
+// -----------------------------------------------------------------------------
+// GPU-OPERAND-SHAPE-1: malloc -> memset(size=0) -> free must return 0, no crash.
+// This is the exact reproducer: `gpu_malloc(64, 0); gpu_memset(p, 171, 0)`
+// used to SIGSEGV because the emitter omitted the dst register while the
+// interpreter read [dst][ptr][value][size].
+// -----------------------------------------------------------------------------
+
+@test
+fn test_gpu_operand_shape_1_memset_no_crash() {
+    let p: Int = gpu_malloc(64, 0);
+    let status: Int = gpu_memset(p, 171, 0);
+    assert_eq(status, 0);
+    let freed: Int = gpu_free(p);
+    assert_eq(freed, 0);
+}
+
+// -----------------------------------------------------------------------------
+// GPU-RETURN-CONTRACT-1: gpu_free(p) is a real, comparable Int (== 0), not unit.
+// -----------------------------------------------------------------------------
+
+@test
+fn test_gpu_return_contract_1_free_is_typed_int() {
+    let p: Int = gpu_malloc(32, 0);
+    let status: Int = gpu_free(p);
+    assert(status == 0);
+    assert_eq(status, 0);
+}
+
+// -----------------------------------------------------------------------------
+// GPU-ENUM-VULKAN-RC: gpu_enumerate_vulkan() returns a non-negative handle.
+// -----------------------------------------------------------------------------
+
+@test
+fn test_gpu_enum_vulkan_rc_non_negative() {
+    let handle: Int = gpu_enumerate_vulkan();
+    assert(handle >= 0);
+}
+
+// -----------------------------------------------------------------------------
+// Part-C arity split: gpu_sync_all() takes NO args (wire [dst] only); a shared
+// interpreter arm with gpu_sync(stream) read one register too many. Pin the
+// zero-arg call and prove the following op still decodes (no operand drift).
+// -----------------------------------------------------------------------------
+
+@test
+fn test_gpu_sync_all_zero_arg_no_desync() {
+    let status: Int = gpu_sync_all();
+    assert_eq(status, 0);
+    let dev: Int = gpu_get_device();
+    assert(dev >= 0);
+}
+
+// -----------------------------------------------------------------------------
+// Part-C arity split: gpu_memcpy_async(dst, src, size, stream) has 4 args; a
+// shared arm with the 3-arg gpu_memcpy read one register too few, leaving a
+// stray operand that desynced the next instruction.
+// -----------------------------------------------------------------------------
+
+@test
+fn test_gpu_memcpy_async_four_arg_no_desync() {
+    let src: Int = gpu_malloc(48, 0);
+    let dst: Int = gpu_malloc(48, 0);
+    let stream: Int = gpu_stream_create();
+    let mc: Int = gpu_memcpy_async(dst, src, 48, stream);
+    assert_eq(mc, 0);
+    let sd: Int = gpu_stream_destroy(stream);
+    assert_eq(sd, 0);
+    let f1: Int = gpu_free(src);
+    let f2: Int = gpu_free(dst);
+    assert_eq(f1, 0);
+    assert_eq(f2, 0);
+}
+
+// -----------------------------------------------------------------------------
+// Part-C arity split: gpu_unpin_memory(ptr) has 1 arg; a shared arm with the
+// 2-arg gpu_pin_memory read one register too many.
+// -----------------------------------------------------------------------------
+
+@test
+fn test_gpu_unpin_memory_one_arg_no_desync() {
+    let p: Int = gpu_malloc(16, 0);
+    let up: Int = gpu_unpin_memory(p);
+    assert_eq(up, 0);
+    let freed: Int = gpu_free(p);
+    assert_eq(freed, 0);
+}
+
+fn main() {}
