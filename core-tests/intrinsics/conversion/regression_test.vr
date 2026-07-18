@@ -76,6 +76,47 @@ fn regression_from_be_inverts_to_be() {
 }
 
 // =============================================================================
+// T0104 (CVT-PASSTHRU-1): opaque-generic (laundered) `x as Int` / `x as Float`
+// lower to the DYNAMIC CvtToI / CvtToF opcode (compile_cast source type == None).
+// Pre-fix the Tier-1 (AOT) arm bit-passthrough'd the source register — an IEEE
+// double reinterpreted verbatim as an integer (silent garbage); Tier-0 always
+// converted, so the tiers diverged. These pin interp == AOT for the dynamic
+// path AND the saturating float->int semantics (Rust `as`): NaN->0,
+// +inf->Int.MAX, -inf->Int.MIN, out-of-range clamps to the i64 bounds.
+// `launder` erases the static type so the cast cannot fold to the typed CvtFI.
+// =============================================================================
+
+fn launder_t0104<T>(x: T) -> T { x }
+
+@test
+fn regression_t0104_laundered_float_to_int_truncates() {
+    assert_eq(launder_t0104(3.7) as Int, 3);
+    assert_eq(launder_t0104(-3.7) as Int, -3);
+    assert_eq(launder_t0104(5.0) as Int, 5);
+}
+
+@test
+fn regression_t0104_laundered_int_to_float() {
+    assert_eq(launder_t0104(42) as Float, 42.0);
+    assert_eq(launder_t0104(-7) as Float, -7.0);
+}
+
+@test
+fn regression_t0104_laundered_float_to_int_saturates() {
+    // NaN / ±inf produced by float-literal arithmetic (they stay Float-marked
+    // through `launder`). Rust `as` / llvm.fptosi.sat semantics: NaN -> 0,
+    // +inf / too-big -> Int.MAX, -inf / too-small -> Int.MIN.
+    let nan = 0.0 / 0.0;
+    let pinf = 1.0 / 0.0;
+    let ninf = -1.0 / 0.0;
+    assert_eq(launder_t0104(nan) as Int, 0);
+    assert_eq(launder_t0104(pinf) as Int, Int.MAX);
+    assert_eq(launder_t0104(ninf) as Int, Int.MIN);
+    assert_eq(launder_t0104(1.0e300) as Int, Int.MAX);
+    assert_eq(launder_t0104(-1.0e300) as Int, Int.MIN);
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

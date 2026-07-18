@@ -198,6 +198,32 @@ fn regression_saturating_div_basic() {
     assert_eq(saturating_div(20, 5), 4);
 }
 
+// -----------------------------------------------------------------------------
+// T0104 (POLY-FLOAT-ARM) — the generic arithmetic intrinsics
+// (core.intrinsics.arithmetic.{add,neg,signum,clamp,…}) emit the ArithExtended
+// Poly* opcodes, which dispatch int-vs-float on the runtime tag.  Pre-fix the
+// Tier-1 (AOT) arms lowered them INT-ONLY; the fix (POLY-FLOAT-ARM) adds the
+// float path via the scalar_reg_is_float authority.  This pin guards that the
+// refactor of the INT arms into the shared poly_binary/poly_unary helpers is
+// value-preserving on both tiers (int is the marking-insensitive default path).
+//
+// The FLOAT arms are proven correct by the standalone differential + kill-switch
+// (VERUM_AOT_CVT_PASSTHRU_LEGACY=1 flips them to garbage), but they cannot be
+// pinned here yet: a qualified `add<Float>(…)` is a non-inlined CALL to
+// `add(a: T0, b: T0)` whose params stay GENERIC in the VBC, so AOT never
+// float-marks them and the float arm can't fire.  That is the AOT float-mark /
+// generic-instantiation gap tracked in T0375 — a separate root from this
+// opcode-level fix.  When T0375 lands, the float pins become expressible here.
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_t0104_poly_int_arms_value_preserving() {
+    assert_eq(core.intrinsics.arithmetic.add(2, 3), 5);
+    assert_eq(core.intrinsics.arithmetic.neg(7), -7);
+    assert_eq(core.intrinsics.arithmetic.signum(-9), -1);
+    assert_eq(core.intrinsics.arithmetic.clamp(15, 1, 3), 3);
+}
+
 fn main() {
     // `verum test` synthesises a per-test main.
 }

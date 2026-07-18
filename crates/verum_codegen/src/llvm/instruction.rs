@@ -2213,6 +2213,53 @@ fn as_i64<'ctx>(
     }
 }
 
+/// Kill-switch (T0104 CVT-PASSTHRU-1 / POLY-FLOAT-ARM): setting
+/// `VERUM_AOT_CVT_PASSTHRU_LEGACY=1` restores the pre-fix behaviour — dynamic
+/// int<->float conversions bit-passthrough their source register and the
+/// polymorphic arithmetic family lowers int-only. Present ONLY as an emergency
+/// revert for the honest lowering below; the honest path is the default.
+fn legacy_cvt_passthru() -> bool {
+    std::env::var_os("VERUM_AOT_CVT_PASSTHRU_LEGACY").is_some()
+}
+
+/// ONE authority (T0104 Leg-A) for "does this scalar register currently hold a
+/// float?" at AOT. Tier-0 dispatches polymorphic scalar ops on the runtime
+/// NaN-box tag; AOT registers are unboxed i64/f64 with side-table class marks,
+/// so we stand in for the tag with: the LLVM value is a `FloatValue`, OR the
+/// register carries a float class-mark, OR the VBC pre-scan flagged it as a
+/// float operand. Every dynamic scalar lowering (CvtToI / CvtToF / the Poly*
+/// family) consults this single predicate — no ad-hoc per-site float checks.
+fn scalar_reg_is_float(ctx: &FunctionContext<'_, '_>, reg: u16, val: BasicValueEnum<'_>) -> bool {
+    matches!(val, BasicValueEnum::FloatValue(_))
+        || ctx.is_float_register(reg)
+        || ctx.is_prescan_float_register(reg)
+}
+
+/// ONE saturation authority (T0104 Leg-C) for float->i64. Plain LLVM `fptosi`
+/// is POISON on NaN / out-of-range inputs; Rust `as` (and the Tier-0
+/// interpreter's `f.trunc() as i64`) instead SATURATE: NaN->0, +inf / too-big
+/// -> i64::MAX, -inf / too-small -> i64::MIN. `llvm.fptosi.sat.i64.f64`
+/// implements exactly that. Routed from both CvtToI (dynamic) and CvtFI
+/// (typed, after the rounding intrinsic) so the two tiers agree bit-for-bit.
+fn build_fptosi_sat_i64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    src: verum_llvm::values::FloatValue<'ctx>,
+    name: &str,
+) -> Result<IntValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let f64_ty = ctx.types().f64_type();
+    let fn_type = i64_ty.fn_type(&[f64_ty.into()], false);
+    let func =
+        super::error::get_or_declare_function(ctx.get_module(), "llvm.fptosi.sat.i64.f64", fn_type);
+    let result = ctx
+        .builder()
+        .build_call(func, &[src.into()], name)
+        .or_llvm_err()?
+        .basic_value_or_else(|| "llvm.fptosi.sat.i64.f64: expected return value".to_string())?
+        .into_int_value();
+    Ok(result)
+}
+
 /// Lower a single VBC instruction to LLVM IR.
 /// Emit a call to verum_text_free(text_obj) to free an owned Text object.
 /// Frees both the character buffer and the 24-byte header.
@@ -2386,15 +2433,14 @@ pub fn lower_instruction<'ctx>(
         Instruction::CvtFI { mode, dst, src } => {
             let src_val = as_f64(ctx, ctx.get_register(src.0)?, "fconv_src")?;
             let rounded = match mode {
-                FloatToIntMode::Trunc => src_val, // fptosi truncates toward zero
+                FloatToIntMode::Trunc => src_val, // fptosi.sat truncates toward zero
                 FloatToIntMode::Floor => build_round_intrinsic(ctx, "llvm.floor.f64", "floor", src_val)?,
                 FloatToIntMode::Ceil => build_round_intrinsic(ctx, "llvm.ceil.f64", "ceil", src_val)?,
                 FloatToIntMode::Round => build_round_intrinsic(ctx, "llvm.round.f64", "round", src_val)?,
             };
-            let result = ctx
-                .builder()
-                .build_float_to_signed_int(rounded, ctx.types().i64_type(), "fptosi")
-                .or_llvm_err()?;
+            // T0104 Leg-C: SATURATING fptosi (NaN->0, oob->i64::MIN/MAX) matches
+            // Tier-0 `f.<round>() as i64`; plain fptosi POISONs on NaN/oob.
+            let result = build_fptosi_sat_i64(ctx, rounded, "cvt_fi_sat")?;
             ctx.set_register(dst.0, result.into());
             Ok(())
         }
@@ -2432,10 +2478,56 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
-        Instruction::CvtToI { dst, src } | Instruction::CvtToF { dst, src } => {
-            // Dynamic conversions - for now just pass through
+        Instruction::CvtToI { dst, src } => {
+            // T0104 (CVT-PASSTHRU-1) Leg-B: a dynamic `x as Int` emitted when
+            // the operand's static type was opaque (laundered / opaque-generic).
+            // Tier-0 (handle_cvt_toi) does a REAL numeric conversion; AOT must
+            // too — copying the raw register bits reinterprets an IEEE double as
+            // an integer (silent garbage). See aot-bitcast-passthrough class.
             let value = ctx.get_register(src.0)?;
-            ctx.set_register(dst.0, value);
+            if legacy_cvt_passthru() {
+                ctx.set_register(dst.0, value);
+                return Ok(());
+            }
+            if scalar_reg_is_float(ctx, src.0, value) {
+                // float -> i64: truncate toward zero, SATURATING (Rust `as`).
+                let f = as_f64(ctx, value, "cvt_toi_src")?;
+                let result = build_fptosi_sat_i64(ctx, f, "cvt_toi")?;
+                ctx.set_register(dst.0, result.into());
+            } else {
+                // int / char / bool / ptr -> i64: already an integer
+                // representation (as_i64 z-extends bool, ptr_to_int a pointer),
+                // mirroring the non-float arms of Tier-0 handle_cvt_toi.
+                let result = as_i64(ctx, value, "cvt_toi")?;
+                ctx.set_register(dst.0, result.into());
+            }
+            Ok(())
+        }
+
+        Instruction::CvtToF { dst, src } => {
+            // T0104 (CVT-PASSTHRU-1) Leg-B: a dynamic `x as Float`. Mirror
+            // Tier-0 handle_cvt_tof — a float stays a float, an int is sitofp'd.
+            // NEVER a raw register copy (an int register copied as a float
+            // reinterprets the integer bits as an IEEE double).
+            let value = ctx.get_register(src.0)?;
+            if legacy_cvt_passthru() {
+                ctx.set_register(dst.0, value);
+                return Ok(());
+            }
+            let result = if scalar_reg_is_float(ctx, src.0, value) {
+                // already a float — recover the FloatValue (direct, or the
+                // alloca-mode i64 bitcast) so dst carries a genuine double.
+                as_f64(ctx, value, "cvt_tof_src")?
+            } else {
+                // int -> float (signed). bool/char are int-tagged, so z-ext then
+                // sitofp yields 1.0/0.0 / codepoint-as-float, matching Tier-0.
+                let i = as_i64(ctx, value, "cvt_tof_src")?;
+                ctx.builder()
+                    .build_signed_int_to_float(i, ctx.types().f64_type(), "cvt_tof_sitofp")
+                    .or_llvm_err()?
+            };
+            ctx.set_register(dst.0, result.into());
+            ctx.mark_float_register(dst.0);
             Ok(())
         }
 
@@ -20035,6 +20127,88 @@ fn saturate_to_width<'ctx>(
         .map(|v| v.into_int_value())
 }
 
+/// T0104 (POLY-FLOAT-ARM): shared float/int dispatch for the *binary*
+/// polymorphic arithmetic ops (PolyAdd/Sub/Mul/Div/Rem/Min/Max). Tier-0
+/// dispatches each on the runtime float tag (`a.is_float()`); AOT mirrors that
+/// through the ONE `scalar_reg_is_float` authority (checking either operand so
+/// a lost class-mark on one side still recovers — well-typed operands are
+/// homogeneous). The int path is unchanged; the float path was previously
+/// MISSING — operands were bitcast to i64 and run through integer arithmetic,
+/// silently corrupting every laundered/opaque-generic float `+ - * / %`.
+fn poly_binary<'ctx, FF, FI>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+    float_op: FF,
+    int_op: FI,
+) -> Result<()>
+where
+    FF: FnOnce(
+        &mut FunctionContext<'_, 'ctx>,
+        verum_llvm::values::FloatValue<'ctx>,
+        verum_llvm::values::FloatValue<'ctx>,
+    ) -> Result<verum_llvm::values::FloatValue<'ctx>>,
+    FI: FnOnce(&mut FunctionContext<'_, 'ctx>, IntValue<'ctx>, IntValue<'ctx>) -> Result<IntValue<'ctx>>,
+{
+    if operands.len() < 3 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let a_reg = op_reg(operands, 1);
+    let b_reg = op_reg(operands, 2);
+    let a_val = ctx.get_register(a_reg)?;
+    let b_val = ctx.get_register(b_reg)?;
+    if !legacy_cvt_passthru()
+        && (scalar_reg_is_float(ctx, a_reg, a_val) || scalar_reg_is_float(ctx, b_reg, b_val))
+    {
+        let a = as_f64(ctx, a_val, "poly_a")?;
+        let b = as_f64(ctx, b_val, "poly_b")?;
+        let result = float_op(ctx, a, b)?;
+        ctx.set_register(dst, result.into());
+        ctx.mark_float_register(dst);
+    } else {
+        let a = as_i64(ctx, a_val, "poly_a")?;
+        let b = as_i64(ctx, b_val, "poly_b")?;
+        let result = int_op(ctx, a, b)?;
+        ctx.set_register(dst, result.into());
+    }
+    Ok(())
+}
+
+/// T0104 (POLY-FLOAT-ARM): shared float/int dispatch for the *unary*
+/// polymorphic arithmetic ops (PolyNeg/Abs/Signum). Same one-authority float
+/// dispatch as `poly_binary`.
+fn poly_unary<'ctx, FF, FI>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    operands: &[u8],
+    float_op: FF,
+    int_op: FI,
+) -> Result<()>
+where
+    FF: FnOnce(
+        &mut FunctionContext<'_, 'ctx>,
+        verum_llvm::values::FloatValue<'ctx>,
+    ) -> Result<verum_llvm::values::FloatValue<'ctx>>,
+    FI: FnOnce(&mut FunctionContext<'_, 'ctx>, IntValue<'ctx>) -> Result<IntValue<'ctx>>,
+{
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let src_reg = op_reg(operands, 1);
+    let src_val = ctx.get_register(src_reg)?;
+    if !legacy_cvt_passthru() && scalar_reg_is_float(ctx, src_reg, src_val) {
+        let s = as_f64(ctx, src_val, "poly_s")?;
+        let result = float_op(ctx, s)?;
+        ctx.set_register(dst, result.into());
+        ctx.mark_float_register(dst);
+    } else {
+        let s = as_i64(ctx, src_val, "poly_s")?;
+        let result = int_op(ctx, s)?;
+        ctx.set_register(dst, result.into());
+    }
+    Ok(())
+}
+
 fn lower_arith_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
@@ -20813,218 +20987,207 @@ fn lower_arith_extended<'ctx>(
         // After type checking, we know these are integer ops (Int is the common case).
         // For float operands, the type checker would have emitted float-specific ops.
         // ====================================================================
-        Some(ArithSubOpcode::PolyAdd) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
-            let result = ctx
-                .builder()
-                .build_int_add(a, b, "poly_add")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::PolySub) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
-            let result = ctx
-                .builder()
-                .build_int_sub(a, b, "poly_sub")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::PolyMul) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
-            let result = ctx
-                .builder()
-                .build_int_mul(a, b, "poly_mul")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::PolyDiv) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
-            let result = safe_int_div(ctx, a, b, "poly_div")?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::PolyNeg) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let zero = ctx.types().i64_type().const_zero();
-            let result = ctx
-                .builder()
-                .build_int_sub(zero, a, "poly_neg")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::PolyAbs) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let i64_type = ctx.types().i64_type();
-            let zero = i64_type.const_zero();
-            // abs(x) = x >= 0 ? x : -x
-            let is_neg = ctx
-                .builder()
-                .build_int_compare(IntPredicate::SLT, a, zero, "is_neg")
-                .or_llvm_err()?;
-            let neg = ctx
-                .builder()
-                .build_int_sub(zero, a, "neg")
-                .or_llvm_err()?;
-            let neg_bv: BasicValueEnum = neg.into();
-            let a_bv: BasicValueEnum = a.into();
-            let result = ctx
-                .builder()
-                .build_select(is_neg, neg_bv, a_bv, "abs")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into_int_value().into());
-            Ok(())
-        }
+        Some(ArithSubOpcode::PolyAdd) => poly_binary(
+            ctx,
+            operands,
+            |ctx, a, b| ctx.builder().build_float_add(a, b, "poly_fadd").or_llvm_err(),
+            |ctx, a, b| ctx.builder().build_int_add(a, b, "poly_add").or_llvm_err(),
+        ),
+        Some(ArithSubOpcode::PolySub) => poly_binary(
+            ctx,
+            operands,
+            |ctx, a, b| ctx.builder().build_float_sub(a, b, "poly_fsub").or_llvm_err(),
+            |ctx, a, b| ctx.builder().build_int_sub(a, b, "poly_sub").or_llvm_err(),
+        ),
+        Some(ArithSubOpcode::PolyMul) => poly_binary(
+            ctx,
+            operands,
+            |ctx, a, b| ctx.builder().build_float_mul(a, b, "poly_fmul").or_llvm_err(),
+            |ctx, a, b| ctx.builder().build_int_mul(a, b, "poly_mul").or_llvm_err(),
+        ),
+        Some(ArithSubOpcode::PolyDiv) => poly_binary(
+            ctx,
+            operands,
+            |ctx, a, b| ctx.builder().build_float_div(a, b, "poly_fdiv").or_llvm_err(),
+            |ctx, a, b| safe_int_div(ctx, a, b, "poly_div"),
+        ),
+        Some(ArithSubOpcode::PolyNeg) => poly_unary(
+            ctx,
+            operands,
+            |ctx, s| ctx.builder().build_float_neg(s, "poly_fneg").or_llvm_err(),
+            |ctx, s| {
+                let zero = ctx.types().i64_type().const_zero();
+                ctx.builder().build_int_sub(zero, s, "poly_neg").or_llvm_err()
+            },
+        ),
+        Some(ArithSubOpcode::PolyAbs) => poly_unary(
+            ctx,
+            operands,
+            |ctx, s| build_round_intrinsic(ctx, "llvm.fabs.f64", "poly_fabs", s),
+            |ctx, s| {
+                let zero = ctx.types().i64_type().const_zero();
+                // abs(x) = x < 0 ? -x : x
+                let is_neg = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::SLT, s, zero, "is_neg")
+                    .or_llvm_err()?;
+                let neg = ctx.builder().build_int_sub(zero, s, "neg").or_llvm_err()?;
+                Ok(ctx
+                    .builder()
+                    .build_select(is_neg, neg, s, "abs")
+                    .or_llvm_err()?
+                    .into_int_value())
+            },
+        ),
 
-        Some(ArithSubOpcode::PolyRem) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
-            let result = safe_int_rem(ctx, a, b, "poly_rem")?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::PolySignum) => {
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let i64_type = ctx.types().i64_type();
-            let zero = i64_type.const_zero();
-            let one = i64_type.const_int(1, false);
-            let neg_one = i64_type.const_all_ones(); // -1 in two's complement
-            // signum(x) = x > 0 ? 1 : (x < 0 ? -1 : 0)
-            let is_pos = ctx
-                .builder()
-                .build_int_compare(IntPredicate::SGT, a, zero, "is_pos")
-                .or_llvm_err()?;
-            let is_neg = ctx
-                .builder()
-                .build_int_compare(IntPredicate::SLT, a, zero, "is_neg")
-                .or_llvm_err()?;
-            let neg_one_bv: BasicValueEnum = neg_one.into();
-            let zero_bv: BasicValueEnum = zero.into();
-            let one_bv: BasicValueEnum = one.into();
-            let neg_or_zero: BasicValueEnum = ctx
-                .builder()
-                .build_select(is_neg, neg_one_bv, zero_bv, "neg_or_zero")
-                .or_llvm_err()?;
-            let result: BasicValueEnum = ctx
-                .builder()
-                .build_select(is_pos, one_bv, neg_or_zero, "signum")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into_int_value().into());
-            Ok(())
-        }
+        Some(ArithSubOpcode::PolyRem) => poly_binary(
+            ctx,
+            operands,
+            |ctx, a, b| ctx.builder().build_float_rem(a, b, "poly_frem").or_llvm_err(),
+            |ctx, a, b| safe_int_rem(ctx, a, b, "poly_rem"),
+        ),
+        Some(ArithSubOpcode::PolySignum) => poly_unary(
+            ctx,
+            operands,
+            |ctx, s| {
+                let f64_ty = ctx.types().f64_type();
+                let zero = f64_ty.const_float(0.0);
+                let one = f64_ty.const_float(1.0);
+                let neg_one = f64_ty.const_float(-1.0);
+                // signum(x) = x > 0 ? 1.0 : (x < 0 ? -1.0 : 0.0). OGT/OLT are
+                // ORDERED — NaN is neither, yielding 0.0 (matches Tier-0).
+                let is_pos = ctx
+                    .builder()
+                    .build_float_compare(FloatPredicate::OGT, s, zero, "f_is_pos")
+                    .or_llvm_err()?;
+                let is_neg = ctx
+                    .builder()
+                    .build_float_compare(FloatPredicate::OLT, s, zero, "f_is_neg")
+                    .or_llvm_err()?;
+                let neg_or_zero: BasicValueEnum = ctx
+                    .builder()
+                    .build_select(is_neg, neg_one, zero, "f_neg_or_zero")
+                    .or_llvm_err()?;
+                let one_bv: BasicValueEnum = one.into();
+                Ok(ctx
+                    .builder()
+                    .build_select(is_pos, one_bv, neg_or_zero, "f_signum")
+                    .or_llvm_err()?
+                    .into_float_value())
+            },
+            |ctx, s| {
+                let i64_type = ctx.types().i64_type();
+                let zero = i64_type.const_zero();
+                let one = i64_type.const_int(1, false);
+                let neg_one = i64_type.const_all_ones(); // -1 in two's complement
+                // signum(x) = x > 0 ? 1 : (x < 0 ? -1 : 0)
+                let is_pos = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::SGT, s, zero, "is_pos")
+                    .or_llvm_err()?;
+                let is_neg = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::SLT, s, zero, "is_neg")
+                    .or_llvm_err()?;
+                let neg_or_zero: BasicValueEnum = ctx
+                    .builder()
+                    .build_select(is_neg, neg_one, zero, "neg_or_zero")
+                    .or_llvm_err()?;
+                let one_bv: BasicValueEnum = one.into();
+                Ok(ctx
+                    .builder()
+                    .build_select(is_pos, one_bv, neg_or_zero, "signum")
+                    .or_llvm_err()?
+                    .into_int_value())
+            },
+        ),
 
-        Some(ArithSubOpcode::PolyMin) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
-            let cmp = ctx
-                .builder()
-                .build_int_compare(IntPredicate::SLT, a, b, "min_cmp")
-                .or_llvm_err()?;
-            let a_bv: BasicValueEnum = a.into();
-            let b_bv: BasicValueEnum = b.into();
-            let result: BasicValueEnum = ctx
-                .builder()
-                .build_select(cmp, a_bv, b_bv, "poly_min")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into_int_value().into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::PolyMax) => {
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "poly_a")?;
-            let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "poly_b")?;
-            let cmp = ctx
-                .builder()
-                .build_int_compare(IntPredicate::SGT, a, b, "max_cmp")
-                .or_llvm_err()?;
-            let a_bv: BasicValueEnum = a.into();
-            let b_bv: BasicValueEnum = b.into();
-            let result: BasicValueEnum = ctx
-                .builder()
-                .build_select(cmp, a_bv, b_bv, "poly_max")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into_int_value().into());
-            Ok(())
-        }
+        Some(ArithSubOpcode::PolyMin) => poly_binary(
+            ctx,
+            operands,
+            |ctx, a, b| build_binary_intrinsic_f64(ctx, "llvm.minnum.f64", "poly_fmin", a, b),
+            |ctx, a, b| {
+                let cmp = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::SLT, a, b, "min_cmp")
+                    .or_llvm_err()?;
+                Ok(ctx
+                    .builder()
+                    .build_select(cmp, a, b, "poly_min")
+                    .or_llvm_err()?
+                    .into_int_value())
+            },
+        ),
+        Some(ArithSubOpcode::PolyMax) => poly_binary(
+            ctx,
+            operands,
+            |ctx, a, b| build_binary_intrinsic_f64(ctx, "llvm.maxnum.f64", "poly_fmax", a, b),
+            |ctx, a, b| {
+                let cmp = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::SGT, a, b, "max_cmp")
+                    .or_llvm_err()?;
+                Ok(ctx
+                    .builder()
+                    .build_select(cmp, a, b, "poly_max")
+                    .or_llvm_err()?
+                    .into_int_value())
+            },
+        ),
         Some(ArithSubOpcode::PolyClamp) => {
-            // clamp(val, lo, hi) = max(lo, min(val, hi))
+            // clamp(val, lo, hi) = min(max(val, lo), hi) — mirrors Tier-0
+            // `v.max(lo).min(hi)` on BOTH the int and float paths (the old int
+            // arm used max(lo, min(val, hi)), which diverges for a degenerate
+            // lo > hi; unifying on the interp formula also adds the float path).
             if operands.len() < 4 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let val = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "clamp_val")?;
-            let lo = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "clamp_lo")?;
-            let hi = as_i64(ctx, ctx.get_register(op_reg(operands, 3))?, "clamp_hi")?;
-            // min(val, hi)
-            let cmp_hi = ctx
-                .builder()
-                .build_int_compare(IntPredicate::SLT, val, hi, "cmp_hi")
-                .or_llvm_err()?;
-            let val_bv: BasicValueEnum = val.into();
-            let hi_bv: BasicValueEnum = hi.into();
-            let min_val: BasicValueEnum = ctx
-                .builder()
-                .build_select(cmp_hi, val_bv, hi_bv, "min_hi")
-                .or_llvm_err()?;
-            // max(lo, min_val)
-            let min_int = min_val.into_int_value();
-            let cmp_lo = ctx
-                .builder()
-                .build_int_compare(IntPredicate::SGT, lo, min_int, "cmp_lo")
-                .or_llvm_err()?;
-            let lo_bv: BasicValueEnum = lo.into();
-            let min_bv: BasicValueEnum = min_int.into();
-            let result: BasicValueEnum = ctx
-                .builder()
-                .build_select(cmp_lo, lo_bv, min_bv, "poly_clamp")
-                .or_llvm_err()?;
-            ctx.set_register(dst, result.into_int_value().into());
+            let val_reg = op_reg(operands, 1);
+            let lo_reg = op_reg(operands, 2);
+            let hi_reg = op_reg(operands, 3);
+            let val_v = ctx.get_register(val_reg)?;
+            let lo_v = ctx.get_register(lo_reg)?;
+            let hi_v = ctx.get_register(hi_reg)?;
+            if !legacy_cvt_passthru()
+                && (scalar_reg_is_float(ctx, val_reg, val_v)
+                    || scalar_reg_is_float(ctx, lo_reg, lo_v)
+                    || scalar_reg_is_float(ctx, hi_reg, hi_v))
+            {
+                let v = as_f64(ctx, val_v, "clamp_val")?;
+                let lo = as_f64(ctx, lo_v, "clamp_lo")?;
+                let hi = as_f64(ctx, hi_v, "clamp_hi")?;
+                let max_lo = build_binary_intrinsic_f64(ctx, "llvm.maxnum.f64", "clamp_fmax", v, lo)?;
+                let result =
+                    build_binary_intrinsic_f64(ctx, "llvm.minnum.f64", "clamp_fmin", max_lo, hi)?;
+                ctx.set_register(dst, result.into());
+                ctx.mark_float_register(dst);
+            } else {
+                let val = as_i64(ctx, val_v, "clamp_val")?;
+                let lo = as_i64(ctx, lo_v, "clamp_lo")?;
+                let hi = as_i64(ctx, hi_v, "clamp_hi")?;
+                // max(val, lo)
+                let cmp_lo = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::SGT, val, lo, "clamp_cmp_lo")
+                    .or_llvm_err()?;
+                let max_lo = ctx
+                    .builder()
+                    .build_select(cmp_lo, val, lo, "clamp_max_lo")
+                    .or_llvm_err()?
+                    .into_int_value();
+                // min(max_lo, hi)
+                let cmp_hi = ctx
+                    .builder()
+                    .build_int_compare(IntPredicate::SLT, max_lo, hi, "clamp_cmp_hi")
+                    .or_llvm_err()?;
+                let result = ctx
+                    .builder()
+                    .build_select(cmp_hi, max_lo, hi, "poly_clamp")
+                    .or_llvm_err()?
+                    .into_int_value();
+                ctx.set_register(dst, result.into());
+            }
             Ok(())
         }
 

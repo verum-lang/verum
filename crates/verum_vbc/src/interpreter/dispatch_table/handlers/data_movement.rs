@@ -297,6 +297,14 @@ pub(in super::super) fn handle_cvt_tof(
         val.as_f64()
     } else if val.is_int() {
         val.as_i64() as f64
+    } else if val.is_bool() {
+        // Bool -> Float: true -> 1.0, false -> 0.0. Matches typed Bool->Float
+        // (= 1.0) and the AOT `sitofp` of the zero-extended bool. T0104 Leg-D.
+        if val.as_bool() {
+            1.0
+        } else {
+            0.0
+        }
     } else {
         0.0
     };
