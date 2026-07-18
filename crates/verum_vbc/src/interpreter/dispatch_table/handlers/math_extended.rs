@@ -558,8 +558,12 @@ pub(in super::super) fn handle_math_extended(
             let y_reg = read_reg(state)?;
             let x = state.get_reg(x_reg).as_f64();
             let y = state.get_reg(y_reg).as_f64();
-            // IEEE 754 remainder: x - n*y where n = round(x/y)
-            let n = (x / y).round();
+            // IEEE 754 remainder: x - n*y where n = round-to-nearest, TIES TO EVEN
+            // of x/y. `.round()` (ties away from zero) is IEEE-incorrect at exact
+            // half-integer quotients — e.g. remainder(5,2) must be 1 (2.5 -> even
+            // 2), not -1. round_ties_even matches the AOT `lower_remainder_f64`
+            // (@llvm.roundeven.f64), so both tiers agree and are IEEE-correct (T0250).
+            let n = (x / y).round_ties_even();
             state.set_reg(dst, Value::from_f64(x - n * y));
             Ok(DispatchResult::Continue)
         }
@@ -638,7 +642,10 @@ pub(in super::super) fn handle_math_extended(
             let y_reg = read_reg(state)?;
             let x = state.get_reg(x_reg).as_f64() as f32;
             let y = state.get_reg(y_reg).as_f64() as f32;
-            let n = (x / y).round();
+            // Round-to-nearest TIES-TO-EVEN quotient (IEEE-754 remainder); matches
+            // the AOT path and the F64 arm above. `.round()` (ties away) is wrong
+            // at half-integer quotients. (T0250)
+            let n = (x / y).round_ties_even();
             state.set_reg(dst, Value::from_f64((x - n * y) as f64));
             Ok(DispatchResult::Continue)
         }

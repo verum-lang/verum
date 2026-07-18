@@ -21488,6 +21488,39 @@ fn lower_arith_extended<'ctx>(
 /// `Fmod*` (LLVM `frem` instruction, no intrinsic), and the
 /// classification family (`IsNan*` / `IsInf*` / `IsFinite*` —
 /// custom float-compare logic).
+/// Allowlist of the `@llvm.*.f64` intrinsics the generic `lower_math_extended`
+/// tail is permitted to emit — every one verified present in LLVM's intrinsic
+/// table (`llvm/IR/IntrinsicEnums.inc`, LLVM 21). This is the exhaustive set of
+/// names produced by `op.f64_sibling().llvm_intrinsic()` for the MathSubOpcodes
+/// that are NOT special-cased above.
+///
+/// Ops whose meta names a PHANTOM intrinsic — asinh/acosh/atanh/remainder/fdim
+/// (T0250) and the pre-existing expm1/log1p/hypot/cbrt/fmod (cca259610) — are
+/// composed no-libc in special-case arms and never reach this list. Keeping the
+/// list closed is what stops a future op from silently re-introducing a phantom
+/// `llvm.*` extern that Darwin's dynamic_lookup links and dyld SIGSEGVs at load.
+/// (no-libc invariant; phantom-extern-dyld-startup-sigsegv class.)
+const GENERIC_MATH_F64_INTRINSICS: &[&str] = &[
+    // Trigonometric (LLVM 19+ added asin/acos/atan/atan2).
+    "llvm.sin.f64", "llvm.cos.f64", "llvm.tan.f64",
+    "llvm.asin.f64", "llvm.acos.f64", "llvm.atan.f64", "llvm.atan2.f64",
+    // Hyperbolic (LLVM 19+ added sinh/cosh/tanh; the INVERSE hyperbolics
+    // asinh/acosh/atanh are NOT intrinsics and are composed, not listed).
+    "llvm.sinh.f64", "llvm.cosh.f64", "llvm.tanh.f64",
+    // Exponential / logarithmic.
+    "llvm.exp.f64", "llvm.exp2.f64",
+    "llvm.log.f64", "llvm.log2.f64", "llvm.log10.f64",
+    "llvm.pow.f64",
+    // Roots.
+    "llvm.sqrt.f64",
+    // Rounding.
+    "llvm.floor.f64", "llvm.ceil.f64", "llvm.round.f64", "llvm.trunc.f64",
+    "llvm.roundeven.f64",
+    // Special.
+    "llvm.fabs.f64", "llvm.copysign.f64",
+    "llvm.minnum.f64", "llvm.maxnum.f64",
+];
+
 fn lower_math_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
@@ -21542,6 +21575,37 @@ fn lower_math_extended<'ctx>(
         MathSubOpcode::CbrtF64 | MathSubOpcode::CbrtF32 => {
             return lower_cbrt_f64(ctx, operands);
         }
+        // T0250 / phantom-extern-dyld-startup-sigsegv: asinh/acosh/atanh have NO
+        // @llvm.* intrinsic — their meta names (`llvm.{asinh,acosh,atanh}.f64`,
+        // verum_vbc instruction.rs) are PHANTOM (verified absent from LLVM's
+        // IntrinsicEnums.inc). The generic dispatch below would emit a call to a
+        // non-existent `llvm.asinh.f64`; Darwin's `-undefined,dynamic_lookup`
+        // links the phantom extern and dyld then SIGSEGVs the binary AT LOAD.
+        // Compose them no-libc from the inverse-hyperbolic ln-identities using
+        // @llvm.log.f64 + @llvm.sqrt.f64 + arithmetic.
+        MathSubOpcode::AsinhF64 | MathSubOpcode::AsinhF32 => {
+            return lower_asinh_f64(ctx, operands);
+        }
+        MathSubOpcode::AcoshF64 | MathSubOpcode::AcoshF32 => {
+            return lower_acosh_f64(ctx, operands);
+        }
+        MathSubOpcode::AtanhF64 | MathSubOpcode::AtanhF32 => {
+            return lower_atanh_f64(ctx, operands);
+        }
+        // remainder/fdim likewise have PHANTOM meta names (`llvm.remainder.f64`,
+        // `llvm.fdim.f64` — absent from LLVM). Compose no-libc:
+        //   remainder(x,y) = x - roundeven(x/y)*y   (IEEE-754 round-to-nearest-
+        //     even quotient, via @llvm.roundeven.f64; the interpreter's
+        //     RemainderF64 uses the same round-ties-even semantics so both tiers
+        //     agree and are IEEE-correct).
+        //   fdim(x,y) = (x > y) ? (x - y) : 0        (matches the interpreter's
+        //     FdimF64 exactly, incl. returning +0 when either operand is NaN).
+        MathSubOpcode::RemainderF64 | MathSubOpcode::RemainderF32 => {
+            return lower_remainder_f64(ctx, operands);
+        }
+        MathSubOpcode::FdimF64 | MathSubOpcode::FdimF32 => {
+            return lower_fdim_f64(ctx, operands);
+        }
         _ => {}
     }
 
@@ -21552,9 +21616,26 @@ fn lower_math_extended<'ctx>(
     // sibling IS the op itself, so this is identity.  See
     // `MathSubOpcode::f64_sibling()` for the structural mapping.
     let intrinsic_name = op.f64_sibling().llvm_intrinsic();
-    debug_assert!(intrinsic_name.starts_with("llvm."),
-        "{:?}: f64-sibling intrinsic {:?} not in llvm.* namespace \
-         (no-libc invariant)", op, intrinsic_name);
+    // no-libc HARD GUARD (T0250 / phantom-extern-dyld-startup-sigsegv).
+    // The generic tail may only emit an `@llvm.*` that ACTUALLY EXISTS in LLVM's
+    // intrinsic table. The old `debug_assert!` checked merely the `llvm.` prefix
+    // — and was compiled out in release — so a MathSubOpcode whose meta names a
+    // PHANTOM intrinsic (asinh/acosh/atanh/remainder/fdim did) sailed through,
+    // Darwin's `-undefined,dynamic_lookup` linked the phantom extern, and dyld
+    // SIGSEGV'd the AOT binary at load. Every such op is now composed in a
+    // special-case arm above; anything reaching here must be in the allowlist of
+    // real intrinsics. A FUTURE phantom is caught LOUDLY at codegen (both this
+    // guard and the `phantom_math_intrinsic_guard` unit test), never shipped.
+    if !GENERIC_MATH_F64_INTRINSICS.contains(&intrinsic_name) {
+        return Err(LlvmLoweringError::internal(format!(
+            "MathExtended {:?}: f64-sibling intrinsic {:?} is not a known-existent \
+             LLVM intrinsic (no-libc invariant). It must be composed no-libc in a \
+             special-case arm of lower_math_extended — a phantom `llvm.*` extern is \
+             linked by Darwin dynamic_lookup and SIGSEGVs the binary at load. \
+             See T0250.",
+            op, intrinsic_name
+        )));
+    }
     // Re-use the variant mnemonic as the SSA value debug label —
     // self-documenting and unique per op.
     let label = op.mnemonic();
@@ -21755,6 +21836,133 @@ fn lower_cbrt_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) ->
         .build_select(is_zero, x_bv, signed_bv, "cbrt_result")
         .or_llvm_err()?;
     ctx.set_register(dst, result);
+    Ok(())
+}
+
+/// `asinh(x) = ln(x + sqrt(x·x + 1))`. No `@llvm.asinh` intrinsic exists (the
+/// meta name is PHANTOM — absent from LLVM's intrinsic table), so compose it
+/// no-libc from `@llvm.sqrt.f64` + `@llvm.log.f64` + arithmetic. The argument
+/// `x + sqrt(x²+1)` is > 0 for every finite `x` (asinh's domain is all reals),
+/// so no domain guard is needed. Precision note as for expm1/log1p: catastrophic
+/// cancellation for large negative `x` loses low-order bits versus a true libm
+/// `asinh`; the interpreter keeps the precise path. Exact at `asinh(0) = 0`.
+/// (T0250 / FLOAT-AOT-LIBM-1.)
+fn lower_asinh_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let x = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "asinh_x")?;
+    let one = ctx.types().f64_type().const_float(1.0);
+    let xx = ctx.builder().build_float_mul(x, x, "asinh_xx").or_llvm_err()?;
+    let xx1 = ctx.builder().build_float_add(xx, one, "asinh_xx1").or_llvm_err()?;
+    let s = build_round_intrinsic(ctx, "llvm.sqrt.f64", "asinh_sqrt", xx1)?;
+    let arg = ctx.builder().build_float_add(x, s, "asinh_arg").or_llvm_err()?;
+    let r = build_round_intrinsic(ctx, "llvm.log.f64", "asinh_log", arg)?;
+    ctx.set_register(dst, r.into());
+    ctx.mark_float_register(dst);
+    Ok(())
+}
+
+/// `acosh(x) = ln(x + sqrt(x·x − 1))`, domain `x ≥ 1`. No `@llvm.acosh` intrinsic
+/// exists (PHANTOM meta name), so compose no-libc from `@llvm.sqrt.f64` +
+/// `@llvm.log.f64`. For `x < 1`, `x²−1 < 0` so `sqrt` yields NaN and `log(NaN)`
+/// is NaN — reproducing libm `acosh`'s out-of-domain NaN for free. Exact at
+/// `acosh(1) = 0`. (T0250 / FLOAT-AOT-LIBM-1.)
+fn lower_acosh_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let x = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "acosh_x")?;
+    let one = ctx.types().f64_type().const_float(1.0);
+    let xx = ctx.builder().build_float_mul(x, x, "acosh_xx").or_llvm_err()?;
+    let xxm1 = ctx.builder().build_float_sub(xx, one, "acosh_xxm1").or_llvm_err()?;
+    let s = build_round_intrinsic(ctx, "llvm.sqrt.f64", "acosh_sqrt", xxm1)?;
+    let arg = ctx.builder().build_float_add(x, s, "acosh_arg").or_llvm_err()?;
+    let r = build_round_intrinsic(ctx, "llvm.log.f64", "acosh_log", arg)?;
+    ctx.set_register(dst, r.into());
+    ctx.mark_float_register(dst);
+    Ok(())
+}
+
+/// `atanh(x) = 0.5 · ln((1 + x) / (1 − x))`, domain `|x| < 1`. No `@llvm.atanh`
+/// intrinsic exists (PHANTOM meta name), so compose no-libc from `@llvm.log.f64`
+/// + arithmetic. Edge behaviour reproduces libm for free: `x = +1` → `+∞`,
+/// `x = −1` → `−∞` (log of `+∞` / `0`), `|x| > 1` → NaN (log of a negative
+/// ratio). Exact at `atanh(0) = 0`. (T0250 / FLOAT-AOT-LIBM-1.)
+fn lower_atanh_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 2 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let x = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "atanh_x")?;
+    let f64_ty = ctx.types().f64_type();
+    let one = f64_ty.const_float(1.0);
+    let half = f64_ty.const_float(0.5);
+    let num = ctx.builder().build_float_add(one, x, "atanh_num").or_llvm_err()?;
+    let den = ctx.builder().build_float_sub(one, x, "atanh_den").or_llvm_err()?;
+    let ratio = ctx.builder().build_float_div(num, den, "atanh_ratio").or_llvm_err()?;
+    let l = build_round_intrinsic(ctx, "llvm.log.f64", "atanh_log", ratio)?;
+    let r = ctx.builder().build_float_mul(half, l, "atanh").or_llvm_err()?;
+    ctx.set_register(dst, r.into());
+    ctx.mark_float_register(dst);
+    Ok(())
+}
+
+/// `remainder(x, y) = x − roundeven(x / y)·y` — the IEEE-754 remainder, whose
+/// quotient rounds to nearest with ties to EVEN (via `@llvm.roundeven.f64`). No
+/// `@llvm.remainder` intrinsic exists (PHANTOM meta name). Round-ties-even is
+/// what distinguishes `remainder` from `fmod` (truncated quotient): e.g.
+/// `remainder(7.5, 2) = −0.5` while `fmod(7.5, 2) = 1.5`, and at an exact tie
+/// `remainder(5, 2) = 1` (2.5 rounds to the even 2). The interpreter's
+/// `RemainderF64` uses the same round-ties-even semantics, so both tiers agree
+/// and are IEEE-correct. `y = 0` → NaN (`roundeven(±∞)·0 = NaN`), matching libm.
+/// (T0250 / FLOAT-AOT-LIBM-1.)
+fn lower_remainder_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 3 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let x = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "rem_x")?;
+    let y = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "rem_y")?;
+    let q = ctx.builder().build_float_div(x, y, "rem_q").or_llvm_err()?;
+    let n = build_round_intrinsic(ctx, "llvm.roundeven.f64", "rem_n", q)?;
+    let ny = ctx.builder().build_float_mul(n, y, "rem_ny").or_llvm_err()?;
+    let r = ctx.builder().build_float_sub(x, ny, "rem").or_llvm_err()?;
+    ctx.set_register(dst, r.into());
+    ctx.mark_float_register(dst);
+    Ok(())
+}
+
+/// `fdim(x, y) = (x > y) ? (x − y) : 0` — the positive difference. No
+/// `@llvm.fdim` intrinsic exists (PHANTOM meta name); compose no-libc with an
+/// ordered-greater-than compare + select. Matches the interpreter's `FdimF64`
+/// exactly, including returning `+0` when either operand is NaN (`OGT` is false
+/// for unordered operands) — a deliberate, tier-consistent choice.
+/// (T0250 / FLOAT-AOT-LIBM-1.)
+fn lower_fdim_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) -> Result<()> {
+    if operands.len() < 3 {
+        return Ok(());
+    }
+    let dst = op_reg(operands, 0);
+    let x = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fdim_x")?;
+    let y = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fdim_y")?;
+    let f64_ty = ctx.types().f64_type();
+    let zero = f64_ty.const_float(0.0);
+    let diff = ctx.builder().build_float_sub(x, y, "fdim_diff").or_llvm_err()?;
+    let gt = ctx
+        .builder()
+        .build_float_compare(FloatPredicate::OGT, x, y, "fdim_gt")
+        .or_llvm_err()?;
+    let diff_bv: BasicValueEnum = diff.into();
+    let zero_bv: BasicValueEnum = zero.into();
+    let result = ctx
+        .builder()
+        .build_select(gt, diff_bv, zero_bv, "fdim")
+        .or_llvm_err()?;
+    ctx.set_register(dst, result);
+    ctx.mark_float_register(dst);
     Ok(())
 }
 
@@ -39501,4 +39709,97 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
         ctx.mark_text_register(dst.0);
     }
     Ok(())
+}
+
+/// Phantom-`llvm.*` math-intrinsic tripwire (T0250 / phantom-extern-dyld-startup-
+/// sigsegv). The generic `lower_math_extended` tail emits
+/// `op.f64_sibling().llvm_intrinsic()` verbatim as an LLVM call. If an op whose
+/// meta names a NON-EXISTENT intrinsic (asinh/acosh/atanh/remainder/fdim did)
+/// reaches that tail, the phantom extern is linked by Darwin's dynamic_lookup and
+/// dyld SIGSEGVs the AOT binary AT LOAD. These tests pin, at `cargo test` time,
+/// that every MathSubOpcode is either special-cased (composed no-libc) or maps to
+/// a real, allowlisted intrinsic — closing the class the way the runtime guard in
+/// `lower_math_extended` closes it at codegen time.
+#[cfg(test)]
+mod phantom_math_intrinsic_guard {
+    use super::GENERIC_MATH_F64_INTRINSICS;
+    use verum_vbc::instruction::MathSubOpcode;
+
+    /// MathSubOpcodes handled by a special-case arm in `lower_math_extended`
+    /// (composed no-libc or custom lowering) — they never reach the generic
+    /// dispatch tail, so a phantom meta `llvm_intrinsic` on them is never emitted.
+    /// MUST stay in sync with the `match op` special-case block.
+    fn is_special_cased(op: MathSubOpcode) -> bool {
+        use MathSubOpcode::*;
+        matches!(
+            op,
+            FmaF64 | FmaF32
+                | FmodF64 | FmodF32
+                | IsNanF64 | IsNanF32
+                | IsInfF64 | IsInfF32
+                | IsFiniteF64 | IsFiniteF32
+                | IsSubnormalF64
+                | IsSignNegativeF64 | IsSignPositiveF64
+                | Expm1F64 | Expm1F32
+                | Log1pF64 | Log1pF32
+                | HypotF64 | HypotF32
+                | PowiF64 | PowiF32
+                | CbrtF64 | CbrtF32
+                | AsinhF64 | AsinhF32
+                | AcoshF64 | AcoshF32
+                | AtanhF64 | AtanhF32
+                | RemainderF64 | RemainderF32
+                | FdimF64 | FdimF32
+        )
+    }
+
+    fn all_math_sub_opcodes() -> Vec<MathSubOpcode> {
+        (0u8..=0xFF).filter_map(MathSubOpcode::from_byte).collect()
+    }
+
+    /// Every MathSubOpcode is either special-cased OR its f64-sibling intrinsic is
+    /// in the known-existent allowlist. A future variant whose meta names a
+    /// phantom `llvm.*` and is not special-cased fails here (and would trip the
+    /// runtime guard) before any AOT binary can ship a dyld-fatal phantom extern.
+    #[test]
+    fn every_generic_dispatch_math_intrinsic_is_real() {
+        for op in all_math_sub_opcodes() {
+            if is_special_cased(op) {
+                continue;
+            }
+            let name = op.f64_sibling().llvm_intrinsic();
+            assert!(
+                GENERIC_MATH_F64_INTRINSICS.contains(&name),
+                "MathSubOpcode {:?} reaches the generic lower_math_extended tail \
+                 with intrinsic {:?}, which is NOT a known-existent LLVM intrinsic. \
+                 Compose it no-libc in a special-case arm — a phantom llvm.* extern \
+                 SIGSEGVs the AOT binary at load (T0250).",
+                op, name
+            );
+        }
+    }
+
+    /// Defence in depth: a typo re-adding a phantom name to the allowlist would
+    /// silently defeat the guard, so pin that the known phantoms are absent.
+    #[test]
+    fn allowlist_contains_no_phantom_intrinsics() {
+        for phantom in [
+            "llvm.asinh.f64",
+            "llvm.acosh.f64",
+            "llvm.atanh.f64",
+            "llvm.expm1.f64",
+            "llvm.log1p.f64",
+            "llvm.hypot.f64",
+            "llvm.cbrt.f64",
+            "llvm.remainder.f64",
+            "llvm.fdim.f64",
+            "llvm.fmod.f64",
+        ] {
+            assert!(
+                !GENERIC_MATH_F64_INTRINSICS.contains(&phantom),
+                "{phantom} is NOT a real LLVM intrinsic and must never appear in \
+                 GENERIC_MATH_F64_INTRINSICS (it would re-open T0250)."
+            );
+        }
+    }
 }
