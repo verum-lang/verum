@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/intrinsics/simd/regression_test.vr
+// =============================================================================
+//
+// One @test per pinned defect / load-bearing contract.  Never deleted.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.simd.{
+    simd_splat, simd_extract, simd_insert,
+    simd_add,
+    simd_reduce_add, simd_reduce_mul, simd_reduce_xor,
+    simd_reduce_and, simd_reduce_or,
+};
+
+// REGRESSION: SIMD-RAW-SCALAR-CONTRACT-1 — the raw SIMD layer is a scalar
+// fallback on BOTH tiers (interp handlers/simd_extended.rs and AOT
+// lower_simd_extended agree): a "vector" register carries ONE lane, so the
+// lane-count-sensitive reductions are IDENTITY (reduce_add(splat x) == x,
+// NOT lanes*x).  This pin is the tier-coherence witness for that contract.
+// When true multi-lane vector values land (tracked with T0112 — AOT vector
+// lowering — plus the interp twin), these expectations flip to N-lane folds
+// and THIS TEST must be updated in the same change-set.
+@test
+fn simd_pin_scalar_fallback_reduce_add_is_identity() {
+    let v: Float = simd_splat(3.0);
+    let r: Float = simd_reduce_add(v);
+    assert_eq(r, 3.0);
+}
+
+// REGRESSION: same contract, multiplicative fold.
+@test
+fn simd_pin_scalar_fallback_reduce_mul_is_identity() {
+    let v: Float = simd_splat(3.0);
+    let r: Float = simd_reduce_mul(v);
+    assert_eq(r, 3.0);
+}
+
+// REGRESSION: same contract, xor fold (even lane counts would cancel to 0
+// on a real vector; the scalar fallback keeps the lane).
+@test
+fn simd_pin_scalar_fallback_reduce_xor_is_identity() {
+    let v: Int = simd_splat(0x5A);
+    let r: Int = simd_reduce_xor(v);
+    assert_eq(r, 0x5A);
+}
+
+// REGRESSION: SIMD-REDUCE-BITWISE-REGISTRY-1 — simd_reduce_and/or/xor were
+// declared in core/intrinsics/simd.vr since day 1 and implemented by the
+// interpreter (handlers/simd_extended.rs ReduceAnd/ReduceOr/ReduceXor), but
+// had NO registry entries, so every call lowered to LoadNil → nil on both
+// tiers; the AOT lowering also lacked the ReduceAnd/Or/Xor arms.  Fixed by
+// registering the trio (InlineSequence SimdReduceAnd/Or/Xor) + extending
+// the AOT reduce arm group.  These pins hold the wiring down.
+@test
+fn simd_pin_reduce_and_wired() {
+    let v: Int = simd_splat(6);
+    let r: Int = simd_reduce_and(v);
+    assert_eq(r, 6);
+}
+
+@test
+fn simd_pin_reduce_or_wired() {
+    let v: Int = simd_splat(6);
+    let r: Int = simd_reduce_or(v);
+    assert_eq(r, 6);
+}
+
+// REGRESSION: SIMD-SPLAT-UNDECLARED-1 — `simd_splat` had a registry entry
+// (InlineSequence(SimdSplat)) and interpreter+AOT implementations, but
+// core/intrinsics/simd.vr never DECLARED it, so the documented "no vector
+// constructor" gap in the old audit was a pure stdlib-surface omission.
+// Declared 2026-07-16; this pin exercises the declaration end-to-end.
+@test
+fn simd_pin_splat_constructor_declared() {
+    let v: Int = simd_splat(123);
+    let x: Int = simd_extract(v, 0);
+    assert_eq(x, 123);
+}
+
+// REGRESSION: insert-lane result feeds arithmetic without corruption
+// (guards the register-type plumbing between SimdExtended ops and the
+// scalar arithmetic that consumes their results).
+@test
+fn simd_pin_insert_result_flows_into_add() {
+    let v: Float = simd_splat(1.0);
+    let w: Float = simd_insert(v, 0, 2.5);
+    let s: Float = simd_add(w, w);
+    assert_eq(simd_extract(s, 0), 5.0);
+}
+
+fn main() {
+}

@@ -1,0 +1,117 @@
+// =============================================================================
+// core-tests/intrinsics/simd/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios: raw SIMD intrinsics meeting the float intrinsics,
+// List iteration, and control flow — the shapes real numeric kernels use.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.simd.{
+    simd_splat, simd_extract, simd_insert,
+    simd_add, simd_mul, simd_sqrt, simd_fma, simd_min, simd_max,
+    simd_cmp_lt, simd_select,
+    simd_reduce_min, simd_reduce_max,
+};
+mount core.intrinsics.float.{sqrt, fma};
+
+// SIMD sqrt agrees with the scalar float intrinsic on the same input.
+@test
+fn simd_integration_sqrt_agrees_with_float_intrinsic() {
+    let v: Float = simd_splat(2.25);
+    let via_simd: Float = simd_extract(simd_sqrt(v), 0);
+    let via_float = sqrt(2.25);
+    assert_eq(via_simd, via_float);
+}
+
+// SIMD fma agrees with the scalar fused multiply-add.
+@test
+fn simd_integration_fma_agrees_with_float_intrinsic() {
+    let a: Float = simd_splat(1.5);
+    let b: Float = simd_splat(4.0);
+    let c: Float = simd_splat(0.25);
+    let via_simd: Float = simd_extract(simd_fma(a, b, c), 0);
+    let via_float = fma(1.5, 4.0, 0.25);
+    assert_eq(via_simd, via_float);
+}
+
+// Accumulate a dot-product-style loop over Lists through the SIMD ops.
+@test
+fn simd_integration_dot_product_loop() {
+    let xs: List<Float> = [1.0, 2.0, 3.0, 4.0];
+    let ys: List<Float> = [0.5, 0.5, 0.5, 0.5];
+    let mut acc = 0.0;
+    let mut i = 0;
+    while i < 4 {
+        let vx: Float = simd_splat(xs[i]);
+        let vy: Float = simd_splat(ys[i]);
+        let prod: Float = simd_mul(vx, vy);
+        acc = acc + simd_extract(prod, 0);
+        i = i + 1;
+    }
+    assert_eq(acc, 5.0);
+}
+
+// Clamp pipeline: min/max compose into a branch-free clamp.
+@test
+fn simd_integration_branch_free_clamp() {
+    let lo: Float = simd_splat(0.0);
+    let hi: Float = simd_splat(1.0);
+    let samples: List<Float> = [-0.5, 0.25, 1.75];
+    let expected: List<Float> = [0.0, 0.25, 1.0];
+    let mut i = 0;
+    while i < 3 {
+        let v: Float = simd_splat(samples[i]);
+        let clamped: Float = simd_min(simd_max(v, lo), hi);
+        assert_eq(simd_extract(clamped, 0), expected[i]);
+        i = i + 1;
+    }
+}
+
+// Select-based ReLU: mask = x < 0 ? routes zero, else x.
+@test
+fn simd_integration_relu_via_select() {
+    let zero: Float = simd_splat(0.0);
+    let samples: List<Float> = [-3.0, -0.25, 0.0, 2.5];
+    let expected: List<Float> = [0.0, 0.0, 0.0, 2.5];
+    let mut i = 0;
+    while i < 4 {
+        let v: Float = simd_splat(samples[i]);
+        let is_neg: Bool = simd_cmp_lt(v, zero);
+        let r: Float = simd_select(is_neg, zero, v);
+        assert_eq(simd_extract(r, 0), expected[i]);
+        i = i + 1;
+    }
+}
+
+// Running min/max fold over a List via SIMD reductions.
+@test
+fn simd_integration_running_extrema() {
+    let xs: List<Float> = [4.0, -2.0, 7.5, 0.5];
+    let mut lo = 4.0;
+    let mut hi = 4.0;
+    let mut i = 1;
+    while i < 4 {
+        let v: Float = simd_splat(xs[i]);
+        let vlo: Float = simd_splat(lo);
+        let vhi: Float = simd_splat(hi);
+        lo = simd_reduce_min(simd_min(v, vlo));
+        hi = simd_reduce_max(simd_max(v, vhi));
+        i = i + 1;
+    }
+    assert_eq(lo, -2.0);
+    assert_eq(hi, 7.5);
+}
+
+// Insert result participates in comparisons and select routing.
+@test
+fn simd_integration_insert_compare_select_chain() {
+    let base: Float = simd_splat(10.0);
+    let patched: Float = simd_insert(base, 0, 3.0);
+    let small: Bool = simd_cmp_lt(patched, base);
+    let routed: Float = simd_select(small, patched, base);
+    assert_eq(simd_extract(routed, 0), 3.0);
+}
+
+fn main() {
+}

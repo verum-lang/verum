@@ -2202,6 +2202,28 @@ impl IntrinsicLowering {
                 })
             }
 
+            InlineSequenceId::SimdReduceAnd
+            | InlineSequenceId::SimdReduceOr
+            | InlineSequenceId::SimdReduceXor => {
+                // vector.reduction <and|or|xor> — integer-lane reductions
+                // (SIMD-REDUCE-BITWISE-REGISTRY-1, registered 2026-07-16).
+                let kind = match seq_id {
+                    InlineSequenceId::SimdReduceAnd => "and",
+                    InlineSequenceId::SimdReduceOr => "or",
+                    _ => "xor",
+                };
+                self.emit(MlirOp {
+                    name: "vector.reduction".to_string(),
+                    attrs: vec![MlirAttr {
+                        name: "kind".to_string(),
+                        value: MlirAttrValue::String(kind.to_string()),
+                    }],
+                    result_types: vec![MlirType::I64],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
+
             InlineSequenceId::SimdReduceMul => {
                 // vector.reduction <mul>
                 self.emit(MlirOp {

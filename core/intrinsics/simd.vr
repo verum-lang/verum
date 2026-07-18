@@ -32,6 +32,21 @@
 module core.intrinsics.simd;
 
 // =============================================================================
+// SECTION 0: Vector Construction
+// =============================================================================
+// Tier-coherence status (pinned by core-tests/intrinsics/simd): both the
+// VBC interpreter and the AOT scalar path implement these ops as the
+// SCALAR-FALLBACK contract (a "vector" register holds one lane; splat is
+// identity, reductions are identity, lane ops address the single lane).
+// The vectorized lowering (LLVM <N x T>) engages through the typed
+// `core.simd.Vec<T, N>` API; widening THIS raw layer to true multi-lane
+// register values on both tiers is tracked as a language-level task.
+
+/// Broadcast a scalar to all lanes of a SIMD vector.
+/// The canonical constructor for the raw SIMD intrinsic layer.
+public fn simd_splat<V, T>(val: T) -> V { @intrinsic("simd_splat", val) }
+
+// =============================================================================
 // SECTION 1: Lane Access
 // =============================================================================
 
@@ -76,3 +91,84 @@ public fn simd_reduce_or<V, T>(vec: V) -> T { @intrinsic("simd_reduce_or", vec) 
 
 /// Reduce SIMD vector by XOR
 public fn simd_reduce_xor<V, T>(vec: V) -> T { @intrinsic("simd_reduce_xor", vec) }
+
+// =============================================================================
+// SECTION 5: Element-wise Arithmetic
+// =============================================================================
+
+/// Element-wise vector addition
+public fn simd_add<V>(a: V, b: V) -> V { @intrinsic("simd_add", a, b) }
+
+/// Element-wise vector subtraction
+public fn simd_sub<V>(a: V, b: V) -> V { @intrinsic("simd_sub", a, b) }
+
+/// Element-wise vector multiplication
+public fn simd_mul<V>(a: V, b: V) -> V { @intrinsic("simd_mul", a, b) }
+
+/// Element-wise vector division
+public fn simd_div<V>(a: V, b: V) -> V { @intrinsic("simd_div", a, b) }
+
+/// Element-wise vector negation
+public fn simd_neg<V>(a: V) -> V { @intrinsic("simd_neg", a) }
+
+/// Element-wise vector absolute value
+public fn simd_abs<V>(a: V) -> V { @intrinsic("simd_abs", a) }
+
+/// Element-wise vector square root
+public fn simd_sqrt<V>(a: V) -> V { @intrinsic("simd_sqrt", a) }
+
+/// Element-wise fused multiply-add: a * b + c (single rounding)
+public fn simd_fma<V>(a: V, b: V, c: V) -> V { @intrinsic("simd_fma", a, b, c) }
+
+/// Element-wise vector minimum
+public fn simd_min<V>(a: V, b: V) -> V { @intrinsic("simd_min", a, b) }
+
+/// Element-wise vector maximum
+public fn simd_max<V>(a: V, b: V) -> V { @intrinsic("simd_max", a, b) }
+
+// =============================================================================
+// SECTION 6: Element-wise Comparisons (return masks)
+// =============================================================================
+
+/// Element-wise equality comparison, returns mask
+public fn simd_cmp_eq<V, M>(a: V, b: V) -> M { @intrinsic("simd_cmp_eq", a, b) }
+
+/// Element-wise inequality comparison, returns mask
+public fn simd_cmp_ne<V, M>(a: V, b: V) -> M { @intrinsic("simd_cmp_ne", a, b) }
+
+/// Element-wise less-than comparison, returns mask
+public fn simd_cmp_lt<V, M>(a: V, b: V) -> M { @intrinsic("simd_cmp_lt", a, b) }
+
+/// Element-wise less-or-equal comparison, returns mask
+public fn simd_cmp_le<V, M>(a: V, b: V) -> M { @intrinsic("simd_cmp_le", a, b) }
+
+/// Element-wise greater-than comparison, returns mask
+public fn simd_cmp_gt<V, M>(a: V, b: V) -> M { @intrinsic("simd_cmp_gt", a, b) }
+
+/// Element-wise greater-or-equal comparison, returns mask
+public fn simd_cmp_ge<V, M>(a: V, b: V) -> M { @intrinsic("simd_cmp_ge", a, b) }
+
+/// Lane-wise select: mask ? a : b
+public fn simd_select<M, V>(mask: M, a: V, b: V) -> V { @intrinsic("simd_select", mask, a, b) }
+
+// =============================================================================
+// SECTION 7: Element-wise Bitwise and Shifts (integer lanes)
+// =============================================================================
+
+/// Element-wise bitwise AND
+public fn simd_bitwise_and<V>(a: V, b: V) -> V { @intrinsic("simd_bitwise_and", a, b) }
+
+/// Element-wise bitwise OR
+public fn simd_bitwise_or<V>(a: V, b: V) -> V { @intrinsic("simd_bitwise_or", a, b) }
+
+/// Element-wise bitwise XOR
+public fn simd_bitwise_xor<V>(a: V, b: V) -> V { @intrinsic("simd_bitwise_xor", a, b) }
+
+/// Element-wise bitwise NOT
+public fn simd_bitwise_not<V>(a: V) -> V { @intrinsic("simd_bitwise_not", a) }
+
+/// Element-wise shift left by per-lane amounts
+public fn simd_shift_left<V, S>(a: V, amount: S) -> V { @intrinsic("simd_shift_left", a, amount) }
+
+/// Element-wise logical shift right by per-lane amounts
+public fn simd_shift_right<V, S>(a: V, amount: S) -> V { @intrinsic("simd_shift_right", a, amount) }
