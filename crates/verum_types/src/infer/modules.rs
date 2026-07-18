@@ -10298,15 +10298,21 @@ impl TypeChecker {
                 };
                 match body {
                     FunctionBody::Block(block) => {
-                        // Stub detection: if the block has no statements and no trailing
-                        // expression, it's a stub/placeholder body. Accept any return type.
-                        let is_stub = block.stmts.is_empty() && block.expr.is_none();
-                        if !is_stub {
-                            if self.stdlib_single_file_mode {
-                                let _ = self.check_block(block, check_ty);
-                            } else {
-                                self.check_block(block, check_ty)?;
-                            }
+                        // A function that HAS a body block must type-check that body
+                        // against the declared return type. `check_block` is the sole
+                        // authority: an empty `{}` block has type Unit, so an empty body
+                        // paired with a non-unit declared return type is correctly
+                        // rejected there (Mismatch: expected <ret>, actual Unit).
+                        //
+                        // Bodyless-by-design declarations — intrinsics, `@intrinsic`,
+                        // extern/FFI imports, and protocol method signatures — parse to
+                        // `body: None` and never reach this arm, so they remain exempt.
+                        // (Previously an `is_stub` guard skipped the check for empty
+                        // blocks, which silently accepted any return type — T0118.)
+                        if self.stdlib_single_file_mode {
+                            let _ = self.check_block(block, check_ty);
+                        } else {
+                            self.check_block(block, check_ty)?;
                         }
                         // ============================================================
                         // Return Lifetime Validation for Block Bodies
