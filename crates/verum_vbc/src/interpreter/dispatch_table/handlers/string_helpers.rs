@@ -4,6 +4,7 @@ use super::super::super::error::InterpreterResult;
 use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+use super::memory_collections::shared_cell_inner_value;
 use crate::types::TypeId;
 use crate::value::Value;
 
@@ -423,6 +424,24 @@ fn is_typed_sum_variant(state: &InterpreterState, type_id: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// For a `TypeKind::Record` descriptor id, the DECLARED field count —
+/// `None` when the id is not a record in the module's type table.
+/// Sibling of [`is_typed_sum_variant`]; drives the structural record arm
+/// of `deep_value_eq` (T0273). The declared count is preferred over
+/// `header.size / 8` because the `New` allocator floors zero-field
+/// records at one (uninitialized) slot and the codegen literal floor can
+/// pad past the declared layout — comparing those pad slots would read
+/// garbage (see the `alloc_slots` note in codegen/expressions.rs).
+fn typed_record_field_count(state: &InterpreterState, type_id: u32) -> Option<usize> {
+    use crate::types::TypeKind;
+    state
+        .module
+        .types
+        .iter()
+        .find(|td| td.id.0 == type_id)
+        .and_then(|td| matches!(td.kind, TypeKind::Record).then(|| td.fields.len()))
+}
+
 fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: usize) -> bool {
     if depth >= MAX_EQ_DEPTH {
         // At max depth, fall back to bit-level comparison
@@ -719,6 +738,28 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let type_id_a = unsafe { *(ptr_a as *const u32) };
         let type_id_b = unsafe { *(ptr_b as *const u32) };
 
+        // Shared<T> carrier auto-deref (T0273): `==` through a Shared
+        // carrier must compare the INNER values — the cell's slot-0
+        // refcount differs between structurally equal cells, so a
+        // structural compare of the cells themselves would be a false
+        // negative. Same layout authority as the GetF/SetF auto-deref
+        // (`shared_cell_inner_value`, T0107).
+        if type_id_a == TypeId::SHARED.0 || type_id_b == TypeId::SHARED.0 {
+            // SAFETY: the matching side is a live SHARED-stamped object
+            // (type id read from its header above).
+            let a2 = if type_id_a == TypeId::SHARED.0 {
+                unsafe { shared_cell_inner_value(ptr_a) }
+            } else {
+                *va
+            };
+            let b2 = if type_id_b == TypeId::SHARED.0 {
+                unsafe { shared_cell_inner_value(ptr_b) }
+            } else {
+                *vb
+            };
+            return deep_value_eq_depth(&a2, &b2, state, depth + 1);
+        }
+
         // Variant types from `MakeVariant` carry a synthetic TypeId
         // composed via `verum_common::layout::synthetic_variant_type_id`;
         // the predicate below is the canonical sibling that recognises
@@ -813,10 +854,70 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             }
             return true;
         } else if type_id_a == type_id_b {
-            // Same non-variant type - likely strings
-            let str_a = extract_string(va, state);
-            let str_b = extract_string(vb, state);
-            return str_a == str_b;
+            // Defensive TEXT arm: real heap Text is intercepted by the
+            // string-likeness path above (`is_heap_string`); keep the
+            // content compare if one ever reaches here.
+            if type_id_a == TypeId::TEXT.0 {
+                let str_a = extract_string(va, state);
+                let str_b = extract_string(vb, state);
+                return str_a == str_b;
+            }
+
+            // T0273 / RECORD-EQ-STRCMP-LATENT-1: same-type RECORD objects
+            // compare STRUCTURALLY (field-wise recursion). The retired arm
+            // here assumed "same non-variant type — likely strings" and
+            // called `extract_string`, whose non-Text rendering is the
+            // ADDRESS string `<ptr@0x…>` — so `P{1,2} == P{1,2}` compared
+            // two different address-strings and returned false. Records
+            // are Value-slot payloads `[ObjectHeader][Value;N]` with
+            // `header.size = N*8` stamped by BOTH allocators (`handle_new`
+            // and `alloc_record_n_fields`) — the same contract the
+            // variant/tuple arms above already rely on.
+            let record_fields = typed_record_field_count(state, type_id_a).or({
+                if type_id_a == verum_common::layout::SYNTHETIC_RECORD_TYPE_ID {
+                    // Runtime-synthesized record (no descriptor): trust the
+                    // stamped payload size.
+                    Some(usize::MAX)
+                } else {
+                    None
+                }
+            });
+            if let Some(declared) = record_fields {
+                let header_a = unsafe { heap::ObjectHeader::ref_or_stub(ptr_a) };
+                let header_b = unsafe { heap::ObjectHeader::ref_or_stub(ptr_b) };
+                let size_a = header_a.size as usize;
+                let size_b = header_b.size as usize;
+                if size_a != size_b {
+                    return false;
+                }
+                // Compare the DECLARED fields only, capped by the stamped
+                // payload — `New` floors zero-field records at one
+                // uninitialized slot and the codegen literal floor can pad,
+                // and those slots hold garbage, not fields.
+                let field_count = declared.min(size_a / std::mem::size_of::<Value>());
+                for i in 0..field_count {
+                    let fa = unsafe {
+                        &*(ptr_a.add(OBJECT_HEADER_SIZE + i * std::mem::size_of::<Value>())
+                            as *const Value)
+                    };
+                    let fb = unsafe {
+                        &*(ptr_b.add(OBJECT_HEADER_SIZE + i * std::mem::size_of::<Value>())
+                            as *const Value)
+                    };
+                    if !deep_value_eq_depth(fa, fb, state, depth + 1) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            // Same-type heap object that is neither Text, variant, tuple,
+            // array, nor record: a native/opaque representation whose
+            // payload is NOT Value slots (Map/Set internals, future native
+            // carriers). Identity already failed (the bits-equal fast
+            // path), and a rendering-based compare was exactly the
+            // address-string defect — report not-equal rather than guess.
+            return false;
         } else {
             // Different types -> not equal
             return false;

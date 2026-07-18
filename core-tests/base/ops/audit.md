@@ -121,3 +121,19 @@ Pending grep over `crates/`.
 | Drop protocol deterministic-cleanup integration test | medium VBC runtime work | future task |
 | Property — Try::branch · from_output = Continue exhaustive | 1h | future task |
 | Cross-tier AOT validation | gated on stdlib-wide AOT blocker | task #7 |
+
+## §7 — Regression §F: structural record `==` (T0273, 2026-07-18)
+
+`==` on records was a POINTER-STRING compare at Tier 0: the interpreter's
+deep-equality tail arm classified two same-type heap objects as "likely
+strings" and compared their rendered forms — a record renders as its
+address (`<ptr@0x…>`), so `P{1,2} == P{1,2}` was false. Fixed by a
+structural field-wise arm (declared-field-count-driven, recursing
+`deep_value_eq`) + a `Shared<T>` auto-deref sharing the GetF/SetF layout
+authority (`shared_cell_inner_value`, T0107). §F pins: structural same /
+diff, nested recursion, Text-field content, Shared-inner. The §F pins
+are ALSO the Tier-1 tripwire — AOT still lowers heap `==` as pointer
+identity (or misroutes string-marked registers through
+`verum_internal_strcmp`), so they are expected red on `--aot` until the
+T0273 AOT twin (structural `verum_value_eq` runtime + a compile-time
+field-count table) lands.
