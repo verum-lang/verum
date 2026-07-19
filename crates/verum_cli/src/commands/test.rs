@@ -345,6 +345,23 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         proptest_cases: manifest.test.proptest_cases,
         differential: manifest.test.differential,
         fuzzing: manifest.test.fuzzing,
+        // T0373: `-Z test.property_seed=<hex>` — the replay mechanism
+        // the failure report advertises. Validated at the flag
+        // (feature_overrides::parse_seed_hex), so an unparseable value
+        // never reaches here silently.
+        property_seed: match &manifest.test.property_seed {
+            Some(hex) => match crate::commands::property::Seed::from_hex(hex.as_str()) {
+                Some(s) => Some(s),
+                None => {
+                    return Err(CliError::InvalidArgument(format!(
+                        "invalid test.property_seed `{}` (expected a 64-bit hex \
+                         seed such as 0x40bcc236d2644c70)",
+                        hex
+                    )));
+                }
+            },
+            None => None,
+        },
     };
 
     // T0365: `ignored` in the summary counts tests SKIPPED because of
@@ -1073,6 +1090,15 @@ struct TestRunCfg {
     /// hint and continues (best-effort observability rather than
     /// a hard CI gate). See `commands/fuzz.rs`.
     fuzzing: bool,
+    /// T0373 — mirror of `[test].property_seed` / `-Z
+    /// test.property_seed=<hex>`: the seed a property failure's replay
+    /// line prints. When set, every `@property` runs that ONE seed
+    /// once (pinned), overriding `@property(seed = …)` and skipping
+    /// the regression-DB replay pass, so the run reproduces exactly
+    /// the reported counter-example. Pre-fix the printed hint named a
+    /// key the override registry REJECTED — a dead user-facing
+    /// instruction.
+    property_seed: Option<crate::commands::property::Seed>,
 }
 
 enum TestResult {
@@ -1510,6 +1536,26 @@ fn combine_differential_outcomes(
     }
 }
 
+/// T0373: the ONE place the property replay command line is spelled.
+///
+/// The printed hint must BE the supported mechanism: pre-fix it named
+/// `-Z test.property_seed=<hex>`, which the `-Z` override registry
+/// rejected outright ("unknown override key"), so the instruction
+/// printed on every property failure was dead. The key is now
+/// registered (`feature_overrides::apply_raw_override`) and wired to
+/// the runner; `PROPERTY_SEED_OVERRIDE_KEY` is shared with the
+/// registry's unit test so the two can never drift apart again.
+pub(crate) const PROPERTY_SEED_OVERRIDE_KEY: &str = "test.property_seed";
+
+fn property_replay_hint(test_name: &str, seed: crate::commands::property::Seed) -> String {
+    format!(
+        "verum test --exact --filter '{}' -Z {}={}",
+        test_name,
+        PROPERTY_SEED_OVERRIDE_KEY,
+        seed.to_hex(),
+    )
+}
+
 /// Property-test path: compile once via VBC, loop the PBT runner.
 /// Routes through the interpreter irrespective of --tier because the
 /// property runner needs per-iteration Value construction that the
@@ -1545,6 +1591,48 @@ fn run_test_property(
 
     // Replay regression DB seeds first, then draw fresh ones.
     let mut db = load_regression_db();
+
+    // T0373: an explicit `-Z test.property_seed=<hex>` is a REPLAY of
+    // one reported counter-example — run exactly that seed, once,
+    // skipping the regression-DB pass (whose other seeds would bury
+    // the failure the user is reproducing) and overriding any
+    // `@property(seed = …)`.
+    if let Some(replay) = cfg.property_seed {
+        let cfg_run = RunnerConfig {
+            runs: 1,
+            max_shrinks: 500,
+            seed: replay,
+            pinned_seed: true,
+            // Already the user's chosen seed — nothing to journal.
+            seed_journal: None,
+        };
+        let outcome = run_property(&module, prop, &cfg_run);
+        return match outcome.failure {
+            Some(f) => TestResult::Fail {
+                duration: start.elapsed(),
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: None,
+                error: format!(
+                    "property failed on replayed seed {}\n  original: ({})\n  shrunk: ({}) [{} shrink steps]\n  error: {}",
+                    f.seed.to_hex(),
+                    f.original_inputs.join(", "),
+                    f.shrunk_inputs.join(", "),
+                    f.shrink_steps,
+                    f.message,
+                ),
+            },
+            None => TestResult::Pass {
+                duration: start.elapsed(),
+                stdout: format!(
+                    "replayed seed {} passed — the counter-example it captured no \
+                     longer reproduces",
+                    replay.to_hex()
+                ),
+                stderr: String::new(),
+            },
+        };
+    }
 
     // T0372: a leftover write-ahead journal means a previous run
     // ABORTED mid-iteration (host panic under panic=abort — nothing
@@ -1635,15 +1723,14 @@ fn run_test_property(
     let outcome = run_property(&module, prop, &cfg);
     if let Some(f) = outcome.failure {
         let msg = format!(
-            "property failed after {} iterations\n  seed: {}\n  original: ({})\n  shrunk: ({}) [{} shrink steps]\n  error: {}\n  replay: verum test --filter '{}' -Z test.property_seed={}",
+            "property failed after {} iterations\n  seed: {}\n  original: ({})\n  shrunk: ({}) [{} shrink steps]\n  error: {}\n  replay: {}",
             outcome.iterations,
             f.seed.to_hex(),
             f.original_inputs.join(", "),
             f.shrunk_inputs.join(", "),
             f.shrink_steps,
             f.message,
-            test.name,
-            f.seed.to_hex(),
+            property_replay_hint(test.name.as_str(), f.seed),
         );
         // Persist failing seed so future runs replay it first — and
         // only THEN retire the write-ahead journal (T0372: the journal
@@ -3380,6 +3467,54 @@ fn pinned_drop_me() {
         assert!(!segment_anchored_contains("aé/xé/y::t", "é/"));
     }
 
+    /// T0373 pin: the replay line printed on a property failure must
+    /// be a command the CLI actually accepts — the key it names is
+    /// validated against the live `-Z` override registry here, so the
+    /// hint and the registry can never drift apart again (pre-fix the
+    /// registry rejected the printed key outright).
+    #[test]
+    fn property_replay_hint_key_is_accepted_by_the_override_registry() {
+        use crate::commands::property::Seed;
+        let seed = Seed(0x40bc_c236_d264_4c70);
+        let hint = super::property_replay_hint("beta/property_test::prop_x", seed);
+        assert!(
+            hint.contains(&format!("-Z {}={}", super::PROPERTY_SEED_OVERRIDE_KEY, seed.to_hex())),
+            "hint must carry the registered key and the seed: {hint}"
+        );
+        assert!(hint.contains("--exact"), "replay must select ONE test: {hint}");
+        assert!(hint.contains("beta/property_test::prop_x"), "{hint}");
+
+        // The registry must ACCEPT the exact key=value the hint prints
+        // and land the seed in the manifest.
+        let ov = crate::feature_overrides::LanguageFeatureOverrides {
+            raw_overrides: vec![Text::from(format!(
+                "{}={}",
+                super::PROPERTY_SEED_OVERRIDE_KEY,
+                seed.to_hex()
+            ))],
+            ..Default::default()
+        };
+        let mut m = crate::config::create_default_manifest(
+            "hint-pin",
+            false,
+            crate::config::LanguageProfile::Application,
+        );
+        ov.apply_to(&mut m)
+            .expect("the printed replay key must be a registered override");
+        assert_eq!(
+            m.test.property_seed.as_ref().map(|t| t.to_string()),
+            Some(seed.to_hex())
+        );
+        // …and the manifest value must parse back to the SAME seed the
+        // runner will pin (the full round-trip the user experiences).
+        assert_eq!(
+            Seed::from_hex(m.test.property_seed.as_ref().unwrap().as_str())
+                .expect("seed round-trips")
+                .0,
+            seed.0
+        );
+    }
+
     #[test]
     fn format_parse_accepts_known() {
         assert_eq!(TestFormat::parse("pretty").unwrap(), TestFormat::Pretty);
@@ -3456,6 +3591,7 @@ fn pinned_drop_me() {
             proptest_cases,
             differential: false,
             fuzzing: false,
+            property_seed: None,
         }
     }
 
@@ -3473,6 +3609,7 @@ fn pinned_drop_me() {
             proptest_cases: 256,
             differential,
             fuzzing: false,
+            property_seed: None,
         }
     }
 

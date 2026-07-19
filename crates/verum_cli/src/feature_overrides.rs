@@ -537,6 +537,11 @@ fn apply_raw_override(m: &mut Manifest, raw: &str) -> Result<()> {
         "test.parallel" => m.test.parallel = parse_bool(key, value)?,
         "test.coverage" => m.test.coverage = parse_bool(key, value)?,
         "test.deny_warnings" => m.test.deny_warnings = parse_bool(key, value)?,
+        // PBT-REPLAY-HINT-DEAD-KEY (T0373): the key a property
+        // failure's replay line prints. Validated HERE (loudly) so a
+        // mistyped seed fails at the flag instead of silently running
+        // a random-seeded campaign that "cannot reproduce" the bug.
+        "test.property_seed" => m.test.property_seed = Some(parse_seed_hex(key, value)?),
 
         // ---------- debug ----------
         "debug.dap_enabled" => m.debug.dap_enabled = parse_bool(key, value)?,
@@ -592,6 +597,30 @@ fn parse_u16(key: &str, value: &str) -> Result<u16> {
     value
         .parse::<u16>()
         .map_err(|_| CliError::Custom(format!("invalid u16 for '{}': '{}'", key, value)))
+}
+
+/// T0373: validate a 64-bit seed in the exact spelling the property
+/// failure report prints (`0x` + 16 hex digits); a bare hex string is
+/// accepted too. Stored verbatim so the manifest round-trips what the
+/// user typed.
+fn parse_seed_hex(key: &str, value: &str) -> Result<Text> {
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if digits.is_empty()
+        || digits.len() > 16
+        || !digits.chars().all(|c| c.is_ascii_hexdigit())
+        || u64::from_str_radix(digits, 16).is_err()
+    {
+        return Err(CliError::Custom(format!(
+            "invalid seed for '{}': '{}' (expected a 64-bit hex seed such as \
+             0x40bcc236d2644c70 — copy the `seed:` value from the property \
+             failure report)",
+            key, value
+        )));
+    }
+    Ok(Text::from(value))
 }
 
 #[cfg(test)]
@@ -665,6 +694,58 @@ mod tests {
         let mut m = manifest();
         ov.apply_to(&mut m).unwrap();
         assert_eq!(m.runtime.cbgr_mode.as_str(), "checked");
+    }
+
+    /// T0373 pin: `test.property_seed` is a REGISTERED key (the
+    /// property-failure replay hint prints it), it stores the seed
+    /// verbatim in the exact spelling the report prints, and a
+    /// malformed seed is rejected LOUDLY at the flag — a silently
+    /// ignored seed would run a random campaign that "cannot
+    /// reproduce" the reported failure.
+    #[test]
+    fn property_seed_override_is_registered_and_validated() {
+        let ov = LanguageFeatureOverrides {
+            raw_overrides: vec![Text::from("test.property_seed=0x40bcc236d2644c70")],
+            ..Default::default()
+        };
+        let mut m = manifest();
+        ov.apply_to(&mut m).unwrap();
+        assert_eq!(
+            m.test.property_seed.as_ref().map(|t| t.to_string()),
+            Some("0x40bcc236d2644c70".to_string())
+        );
+
+        // Bare hex (no 0x) is accepted too.
+        let ov = LanguageFeatureOverrides {
+            raw_overrides: vec![Text::from("test.property_seed=deadbeef")],
+            ..Default::default()
+        };
+        let mut m = manifest();
+        ov.apply_to(&mut m).unwrap();
+        assert_eq!(
+            m.test.property_seed.as_ref().map(|t| t.to_string()),
+            Some("deadbeef".to_string())
+        );
+
+        for bad in [
+            "test.property_seed=",
+            "test.property_seed=zzzz",
+            "test.property_seed=0xdeadbeefdeadbeef0", // 17 digits — overflows u64
+            "test.property_seed=12 34",
+        ] {
+            let ov = LanguageFeatureOverrides {
+                raw_overrides: vec![Text::from(bad)],
+                ..Default::default()
+            };
+            let mut m = manifest();
+            let err = ov
+                .apply_to(&mut m)
+                .expect_err(&format!("`{bad}` must be rejected"));
+            assert!(
+                format!("{err}").contains("invalid seed"),
+                "expected a loud seed error for `{bad}`, got: {err}"
+            );
+        }
     }
 
     #[test]

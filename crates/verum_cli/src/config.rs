@@ -1053,6 +1053,17 @@ pub struct TestConfig {
     /// Fail tests on any emitted warning.
     #[serde(default)]
     pub deny_warnings: bool,
+
+    /// Pin the property-test seed for replay (hex, e.g.
+    /// `"0x40bcc236d2644c70"` — the exact spelling the failure report
+    /// prints). Normally injected per-invocation via
+    /// `-Z test.property_seed=<hex>` rather than written to the
+    /// manifest. When set, the pinned seed runs exactly once per
+    /// property, wins over any `@property(seed = …)` attribute, and
+    /// skips the regression-DB replay pass — the run reproduces
+    /// precisely the reported failure.
+    #[serde(default)]
+    pub property_seed: Option<Text>,
 }
 
 impl Default for TestConfig {
@@ -1066,6 +1077,7 @@ impl Default for TestConfig {
             parallel: true,
             coverage: false,
             deny_warnings: false,
+            property_seed: None,
         }
     }
 }
