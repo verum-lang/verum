@@ -21125,6 +21125,24 @@ impl VbcCodegen {
         // `compile_record` for variant constructors finds the same
         // declared-order layout. Mirrors the same shape as
         // `register_archive_type` would do via its descriptor walk.
+        //
+        // **MATCH-DESTRUCTURE-VARIANT-OFFSET-1 (T0243).** The SIMPLE
+        // variant key is first-wins across modules — four stdlib types
+        // declare a record variant `TypeMismatch` with DIFFERENT field
+        // lists (`ContextError` {context_name, expected, found},
+        // `CacheError`/`RedisError` {expected, found}, `ManifestError`
+        // {field, expected, found}) — so whichever imported first owned
+        // the bare key and every other parent's destructure resolved
+        // against the WRONG layout (shifted slots, neighbour values,
+        // out-of-bounds reads). Register the collision-free QUALIFIED
+        // `<Parent>.<Variant>` key ALONGSIDE it, exactly as the
+        // record-field block above does for META-GROUP-XMODULE-1 and as
+        // the source-compile path already does via
+        // `register_type_constructors`. Pattern-side resolution asks for
+        // the qualified key (`variant_pattern_field_type_key`), so each
+        // parent now gets its own declared layout regardless of import
+        // order; the simple key keeps its historical first-wins
+        // discipline for bare-name callers.
         for v in imported.variants.iter() {
             if !matches!(v.kind, crate::types::VariantKind::Record) || v.fields.is_empty() {
                 continue;
@@ -21144,6 +21162,17 @@ impl VbcCodegen {
                         .unwrap_or_default()
                 })
                 .collect();
+            // Qualified keys first — they can never collide, so they are
+            // registered for BOTH the simple and the module-qualified
+            // parent spelling (the pattern side may know either).
+            self.type_field_layouts
+                .entry(format!("{}.{}", name_str, v_name))
+                .or_insert(v_field_names.clone());
+            if let Some(ref q) = qualified_key {
+                self.type_field_layouts
+                    .entry(format!("{}.{}", q, v_name))
+                    .or_insert(v_field_names.clone());
+            }
             self.type_field_layouts
                 .entry(v_name)
                 .or_insert(v_field_names);

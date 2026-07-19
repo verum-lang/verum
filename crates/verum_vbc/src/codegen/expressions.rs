@@ -714,6 +714,58 @@ impl VbcCodegen {
         agreed
     }
 
+    /// **MATCH-DESTRUCTURE-VARIANT-OFFSET-1 (T0243).** The type-name KEY a
+    /// record-variant PATTERN's field-slot resolution must hand to
+    /// `resolve_field_index`: the variant QUALIFIED by its declaring
+    /// parent type (`ContextError.TypeMismatch`), never the bare variant
+    /// name. Bare-name resolution first-wins across same-named sibling
+    /// variants in other modules (`ContextError.TypeMismatch
+    /// { context_name, expected, found }` vs `CacheError.TypeMismatch
+    /// { expected, found }`) and binds every field at the SIBLING's
+    /// slot — shifted offsets, neighbour values, out-of-bounds reads.
+    ///
+    /// Resolution:
+    ///  1. A qualified pattern path carries its parent syntactically —
+    ///     dot-normalize (`::` → `.`) and resolve mount-rename aliases
+    ///     in the type head (T0363 twin of the tag-test path). The
+    ///     returned key then hits `resolve_field_index_impl`'s
+    ///     `Parent.Variant` arm, whose authority is
+    ///     `find_variant_in_type_descriptors` — the same nominal
+    ///     descriptor scan the T0170 access path trusts.
+    ///  2. A BARE variant pattern is qualified from the match
+    ///     scrutinee's type, then the enclosing impl's `self` type —
+    ///     the same candidate order `compile_pattern_test`'s
+    ///     scoped-first tag resolution uses — committing only when that
+    ///     parent GENUINELY declares a variant of this name.
+    ///  3. Otherwise the bare name is returned unchanged and the
+    ///     caller's legacy chain (including the T0170
+    ///     `unique_variant_field_position` agreement scan and its loud
+    ///     FIELD-GUESS doors) applies.
+    pub(super) fn variant_pattern_field_type_key(&self, pattern_path: &str) -> String {
+        let dotted = self.resolve_variant_path_alias(&pattern_path.replace("::", "."));
+        if dotted.contains('.') {
+            return dotted;
+        }
+        let mut candidates: Vec<String> = Vec::new();
+        if let Some(st) = self.ctx.match_scrutinee_type.clone() {
+            candidates.push(st);
+        }
+        if let Some(slf) = self.ctx.variable_type_names.get("self").cloned() {
+            candidates.push(slf);
+        }
+        for cand in candidates {
+            let base =
+                crate::codegen::VbcCodegen::strip_generic_args(Self::strip_wrapper_type(&cand));
+            if base.is_empty() || base == dotted {
+                continue;
+            }
+            if let Some((_, canonical, _)) = self.find_variant_in_type_descriptors(base, &dotted) {
+                return format!("{}.{}", canonical, dotted);
+            }
+        }
+        dotted
+    }
+
     pub(super) fn find_variant_in_type_descriptors(
         &self,
         parent_path: &str,
@@ -15892,18 +15944,37 @@ impl VbcCodegen {
                             tag,
                         });
 
-                        // Recursively check sub-patterns in variant data
+                        // Recursively check sub-patterns in variant data.
+                        //
+                        // **T0243**: each sub-pattern carries the payload SLOT
+                        // it tests. Tuple data is positional by construction;
+                        // RECORD data carries the FIELD NAME and resolves its
+                        // declared slot nominally (via the qualified pattern
+                        // key) at emission below. The previous flattening
+                        // enumerated only explicit sub-patterns, so a
+                        // non-prefix field test (`{ expected: "A" }`, declared
+                        // slot 1) read slot 0 — and bare-name resolution could
+                        // shift ALL slots to a same-named sibling variant's
+                        // layout.
                         if let Some(data) = data {
-                            let sub_patterns: Vec<&verum_ast::Pattern> = match data {
-                                verum_ast::VariantPatternData::Tuple(patterns) => {
-                                    patterns.iter().collect()
-                                }
-                                verum_ast::VariantPatternData::Record { fields, .. } => {
-                                    fields.iter().filter_map(|f| f.pattern.as_ref()).collect()
-                                }
-                            };
+                            let sub_patterns: Vec<(Option<String>, &verum_ast::Pattern)> =
+                                match data {
+                                    verum_ast::VariantPatternData::Tuple(patterns) => {
+                                        patterns.iter().map(|p| (None, p)).collect()
+                                    }
+                                    verum_ast::VariantPatternData::Record { fields, .. } => {
+                                        let mut named: Vec<(Option<String>, &verum_ast::Pattern)> =
+                                            Vec::new();
+                                        for f in fields.iter() {
+                                            if let verum_common::Maybe::Some(ref p) = f.pattern {
+                                                named.push((Some(f.name.name.to_string()), p));
+                                            }
+                                        }
+                                        named
+                                    }
+                                };
 
-                            let has_non_wildcard = sub_patterns.iter().any(|p| {
+                            let has_non_wildcard = sub_patterns.iter().any(|(_, p)| {
                             !matches!(p.kind, PatternKind::Wildcard)
                             && !matches!(&p.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none())
                         });
@@ -15976,23 +16047,36 @@ impl VbcCodegen {
                                     .and_then(|info| info.variant_payload_types.clone());
 
                                 // Tag matched — now check sub-patterns
-                                for (i, sub_pat) in sub_patterns.iter().enumerate() {
+                                for (i, (slot_name, sub_pat)) in
+                                    sub_patterns.iter().enumerate()
+                                {
                                     if matches!(sub_pat.kind, PatternKind::Wildcard)
                                         || matches!(&sub_pat.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none())
                                     {
                                         continue;
                                     }
+                                    // T0243: record fields test their DECLARED
+                                    // slot (nominal, via the qualified pattern
+                                    // key); tuple payloads stay positional.
+                                    let slot: u32 = match slot_name {
+                                        Some(fname) => {
+                                            let field_key = self
+                                                .variant_pattern_field_type_key(&variant_name);
+                                            self.resolve_field_index(Some(&field_key), fname)
+                                        }
+                                        None => i as u32,
+                                    };
                                     let field_reg = self.ctx.alloc_temp();
                                     self.ctx.emit(Instruction::GetVariantData {
                                         dst: field_reg,
                                         variant: scrutinee,
-                                        field: i as u32,
+                                        field: slot,
                                     });
                                     let sub_result = self.ctx.alloc_temp();
                                     let prev_scrutinee_type =
                                         self.ctx.match_scrutinee_type.clone();
                                     if let Some(ref pts) = payload_types
-                                        && let Some(payload_ty) = pts.get(i)
+                                        && let Some(payload_ty) = pts.get(slot as usize)
                                         && !payload_ty.is_empty()
                                     {
                                         // **Generic-param substitution** (4th
@@ -16395,6 +16479,11 @@ impl VbcCodegen {
                             .emit_forward_jump(&rec_end, |offset| Instruction::Jmp { offset });
                         self.ctx.define_label(&check_fields);
 
+                        // T0243: sub-pattern field READS use the nominally-
+                        // qualified variant key (scrutinee / impl-self parent),
+                        // matching the bind-side slot resolution — a bare name
+                        // first-wins to a same-named sibling variant's layout.
+                        let field_key = self.variant_pattern_field_type_key(&type_name);
                         for field in fields.iter() {
                             if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
                                 if matches!(inner_pattern.kind, PatternKind::Wildcard) {
@@ -16402,7 +16491,7 @@ impl VbcCodegen {
                                 }
                                 let field_reg = self.ctx.alloc_temp();
                                 let field_idx =
-                                    self.resolve_field_index(Some(&type_name), &field.name.name);
+                                    self.resolve_field_index(Some(&field_key), &field.name.name);
                                 self.ctx.emit(Instruction::GetVariantData {
                                     dst: field_reg,
                                     variant: scrutinee,
@@ -17583,8 +17672,20 @@ impl VbcCodegen {
                             // Use resolve_field_index to get the actual field position,
                             // not the enumeration index — handles `Node { left, .. }`
                             // where `left` is at position 1, not 0.
-                            let simple_variant =
-                                variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                            //
+                            // **MATCH-DESTRUCTURE-VARIANT-OFFSET-1 (T0243)**:
+                            // resolve against the variant QUALIFIED by its
+                            // declaring parent (`ContextError.TypeMismatch`),
+                            // never the bare variant name. The previous
+                            // `rsplit("::")` DISCARDED the pattern's own
+                            // qualifier, so resolution fell to bare-name
+                            // first-wins across same-named sibling variants in
+                            // other modules (`CacheError.TypeMismatch
+                            // { expected, found }` vs ContextError's
+                            // `{ context_name, expected, found }`) and bound
+                            // every field at the sibling's slot — neighbour
+                            // values and out-of-bounds garbage.
+                            let field_key = self.variant_pattern_field_type_key(&variant_name);
                             for field in fields.iter() {
                                 let field_name = field.name.name.to_string();
 
@@ -17592,7 +17693,7 @@ impl VbcCodegen {
 
                                 // Resolve actual field position from type layout
                                 let field_idx =
-                                    self.resolve_field_index(Some(simple_variant), &field_name);
+                                    self.resolve_field_index(Some(&field_key), &field_name);
                                 self.ctx.emit(Instruction::GetVariantData {
                                     dst: field_reg,
                                     variant: scrutinee,
@@ -17743,13 +17844,25 @@ impl VbcCodegen {
                     None
                 };
 
+                // T0243: a BARE record-variant pattern resolves its field
+                // slots via the nominally-qualified key (scrutinee / impl-self
+                // parent) — never the bare variant name, which first-wins
+                // across same-named sibling variants in other modules. Plain
+                // records keep the record type name (the pattern's own path
+                // IS the nominal type there).
+                let field_key: String = if is_variant {
+                    self.variant_pattern_field_type_key(&type_name)
+                } else {
+                    type_name.clone()
+                };
+
                 for field in fields.iter() {
                     let field_name = field.name.name.to_string();
                     let field_reg = self.ctx.alloc_temp();
 
                     if is_variant {
                         // Record variant: resolve actual field position from type layout
-                        let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
+                        let field_idx = self.resolve_field_index(Some(&field_key), &field_name);
                         self.ctx.emit(Instruction::GetVariantData {
                             dst: field_reg,
                             variant: scrutinee,
@@ -17757,7 +17870,7 @@ impl VbcCodegen {
                         });
                     } else {
                         // Plain record: extract field by type-specific position
-                        let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
+                        let field_idx = self.resolve_field_index(Some(&field_key), &field_name);
                         self.ctx.emit(Instruction::GetF {
                             dst: field_reg,
                             obj: scrutinee,
@@ -17768,7 +17881,7 @@ impl VbcCodegen {
                     // Determine field type for type registration
                     let field_type_name: Option<String> = if is_variant {
                         // Variant record: resolve by field name from type layout
-                        let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
+                        let field_idx = self.resolve_field_index(Some(&field_key), &field_name);
                         payload_types
                             .as_ref()
                             .and_then(|types| types.get(field_idx as usize).cloned())
@@ -21101,17 +21214,50 @@ impl VbcCodegen {
             // historical behaviour, valid for in-order writes).
             let declared_order: Option<Vec<String>> =
                 descriptor_match.as_ref().map(|(_, names)| names.clone());
+            // **MATCH-DESTRUCTURE-VARIANT-OFFSET-1 (T0243), construction
+            // twin.** When the descriptor scan didn't fire (a QUALIFIED
+            // literal like `ContextError.TypeMismatch { … }` resolves its
+            // tag via the fn-table `lookup_function_in_scope`, which
+            // short-circuits before the descriptor fallback), recover the
+            // declared field order NOMINALLY from the parent type's
+            // descriptor — the same authority the read side uses. The bare
+            // `type_field_layouts.get(<simple variant>)` fallback below is
+            // FIRST-WINS across modules: four stdlib types declare a record
+            // variant `TypeMismatch` with DIFFERENT field lists, so the bare
+            // key returns whichever imported first (`CacheError`'s
+            // `[expected, found]`), and the constructor then remaps
+            // `context_name`/`expected`/`found` against the WRONG sibling's
+            // layout — writing values to shifted slots. Consulting the
+            // qualified parent (`ContextError`) closes that.
             let declared_order: Option<Vec<String>> = declared_order.or_else(|| {
-                // Variant record fields are also registered into
-                // `type_field_layouts` under the variant's simple name
-                // by `register_type_constructors`. Use that as a fallback
-                // for the user-defined-variant case (which doesn't go
-                // through the descriptor scan).
-                let last = variant_name
+                let simple = variant_name
                     .rsplit(|c| c == '.' || c == ':')
                     .next()
                     .unwrap_or(&variant_name);
-                self.type_field_layouts.get(last).cloned()
+                let parent = self.parent_type_from_qualified_name(&dot_name);
+                parent
+                    .as_deref()
+                    .and_then(|p| {
+                        self.find_variant_in_type_descriptors(p, simple)
+                            .map(|(_, _, decl)| decl)
+                            .filter(|decl| !decl.is_empty())
+                    })
+                    // User-defined variants register their record fields into
+                    // `type_field_layouts` under the QUALIFIED `Parent.Variant`
+                    // key (register_type_constructors) — collision-free — before
+                    // the bare simple-name key. Prefer the qualified key.
+                    .or_else(|| {
+                        parent.as_deref().and_then(|p| {
+                            self.type_field_layouts
+                                .get(&format!("{}.{}", p, simple))
+                                .cloned()
+                        })
+                    })
+                    // Last resort: the bare simple-name layout. First-wins
+                    // across same-named sibling variants, but preserved for
+                    // the un-qualified bare-variant-literal case where no
+                    // parent is syntactically available.
+                    .or_else(|| self.type_field_layouts.get(simple).cloned())
             });
             for (literal_idx, field) in fields.iter().enumerate() {
                 let saved_field_type =
