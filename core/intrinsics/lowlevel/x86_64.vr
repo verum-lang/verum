@@ -30,7 +30,6 @@
 // Ensure proper context (kernel mode, correct privilege level) before use.
 //
 
-// Spec: docs/architecture/low-level-features.md Section 5.4
 // =============================================================================
 
 // Only compile this module for x86_64

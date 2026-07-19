@@ -61,7 +61,7 @@ five profiles from `full` (servers) down to `embedded`
 | **Contexts** | Capability-based DI (`using [Database, Logger]`) — not algebraic effects. 14 compile-time meta-contexts (`TypeInfo`, `AstAccess`, `Schema`, `CompileDiag`, `Hygiene`, `BuildAssets`, …) + 10 standard runtime contexts (`Logger`, `Database`, `Auth`, `Config`, `Cache`, `Metrics`, `Tracer`, `Clock`, `Random`, `FileSystem`). |
 | **Error handling** | `Result<T, E>`, `Maybe<T>`, typed `throws E`, `try`/`recover`/`finally`, `defer`/`errdefer`, `?` propagation. |
 | **Metaprogramming** | Staged `meta fn`, `quote { ... }`, multi-stage `meta(N)` / `quote(N)`, `lift()`, 40+ attributes. Tagged literals (`sql#`, `json#`, `rx#`, `url#`, …) validated at compile time. |
-| **Execution** | Two modes — VBC interpreter and AOT via LLVM (CPU) or MLIR (GPU targets: PTX, HSACO, SPIR-V, Metal). No JIT. Zero-FFI path via VBC opcodes `0xF1`/`0xF2`/`0xF4`/`0xF5` for syscalls, atomics, I/O, and clocks. |
+| **Execution** | Two modes — VBC interpreter and AOT native code via LLVM (CPU). Tensor operations run through an MLIR-based engine (JIT-compiled CPU kernels today; GPU device backends are staged work). Zero-FFI path via VBC opcodes `0xF1`/`0xF2`/`0xF4`/`0xF5` for syscalls, atomics, I/O, and clocks. |
 | **Cog distribution** | `.cog` archives carry VBC bytecode plus optional proof certificates, validated offline against declared capabilities. |
 
 ## A first look

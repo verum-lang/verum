@@ -59,7 +59,6 @@ module sys.interrupt;
 /// ```
 ///
 
-/// Implementation Reference: docs/architecture/low-level-features.md Section 4
 
 // =============================================================================
 // EXCEPTION FRAME TYPES

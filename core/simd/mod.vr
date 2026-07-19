@@ -41,7 +41,6 @@
 /// ```
 ///
 
-/// Implementation Reference: docs/architecture/low-level-features.md Section 5
 
 // GPU compute types and kernel API (CUDA, ROCm, Metal, Vulkan)
 

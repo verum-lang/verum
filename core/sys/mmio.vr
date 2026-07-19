@@ -51,7 +51,6 @@ module sys.mmio;
 /// ```
 ///
 
-/// Implementation Reference: docs/architecture/low-level-features.md Section 3
 
 // =============================================================================
 // ACCESS MODE TYPES

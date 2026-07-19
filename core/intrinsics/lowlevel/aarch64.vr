@@ -30,7 +30,6 @@
 // require unsafe blocks and are marked accordingly.
 //
 
-// Spec: docs/architecture/low-level-features.md Section 5.4
 // =============================================================================
 
 // Only compile this module for aarch64

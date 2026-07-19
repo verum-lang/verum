@@ -220,24 +220,25 @@ Compile-time platform detection:
 
 ## Architecture Notes
 
-### Platform Targeting
+### Platform Targeting (design target)
 
-Verum SIMD compiles to optimal instructions on:
+The SIMD surface is designed to lower to native vector instructions:
 - **x86_64**: SSE4.2 (128-bit), AVX2 (256-bit), AVX-512 (512-bit)
 - **aarch64**: NEON (128-bit), SVE (scalable)
 
-### VBC Opcodes
+Current lowering is a tier-coherent SCALAR fallback on BOTH tiers
+(pinned by `core-tests/intrinsics/simd/regression_test.vr`); true
+multi-lane register values are staged work.
 
-SIMD operations use VBC opcodes 0xC0-0xCF:
-- `SIMD_SPLAT` - Broadcast scalar
-- `SIMD_LOAD` - Aligned load
-- `SIMD_BINOP` - Element-wise arithmetic
-- `SIMD_FMA` - Fused multiply-add
-- `SIMD_REDUCE` - Horizontal reduction
-- `SIMD_SHUFFLE` - Permute elements
-- `SIMD_GATHER/SCATTER` - Indexed load/store
+### VBC Dispatch
 
-### Performance Targets
+SIMD operations ride the `SimdExtended` opcode (`0x2A`) with a
+sub-opcode byte — see `SimdSubOpcode` in
+`crates/verum_vbc/src/instruction.rs` for the authoritative list
+(splat, extract, element-wise arithmetic, FMA, reductions,
+compares, shuffles). There is no dedicated 0xC0-0xCF opcode range.
+
+### Performance Targets (once native lowering lands)
 
 - `Vec.splat()`: Single broadcast instruction
 - `Vec.add()`: Single SIMD add instruction

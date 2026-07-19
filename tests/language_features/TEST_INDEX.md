@@ -117,27 +117,24 @@ let result = nums |> filter(|x| x > 5) |> map(|x| x * 2) |> collect();
 ```
 
 ### 6. Tensor Literals
-**File**: `test_tensor.vr` (318 lines)
+**File**: `test_tensor.vr` (193 lines)
 
-Tests multi-dimensional array operations:
+Tests basic multi-dimensional array operations:
 - 1D, 2D, 3D tensor literals
-- Generic N-D tensors
 - Tensor initialization
-- Tensor indexing and slicing
-- Tensor operations (arithmetic, broadcasting)
-- Tensor transformations (reshape, transpose)
-- Meta-level tensor types
-- Compile-time shape checking
-- Tensor comprehensions
-- GPU tensor operations
+- Tensor indexing and mutation
+- Element-wise arithmetic
+- Matrix operations (manual transpose / multiply)
+- Tensor iteration
+
+Not covered here: meta-level tensor types, compile-time shape
+checking, comprehensions, and GPU execution (tracked as staged
+work in `docs/architecture/gpu-tensor-capability-audit-2026-07.md`).
 
 **Key syntax tested**:
 ```verum
-type Tensor2D<T, R: meta Int, C: meta Int> is {
-    data: [[T; C]; R],
-};
-
 let matrix: [[Int; 3]; 2] = [[1, 2, 3], [4, 5, 6]];
+let element = matrix[1][2];
 ```
 
 ### 7. Refinement Types
@@ -406,7 +403,7 @@ All test files verified for:
 - ✅ Uses semantic types: `Text`, `List`, `Maybe` (NOT `String`, `Vec`, `Option`)
 - ✅ Uses `where type T:` for bounds
 - ✅ Uses `using [...]` for contexts
-- ✅ Follows grammar in `docs/detailed/05-syntax-grammar.md`
+- ✅ Follows grammar in `grammar/verum.ebnf`
 
 ## Coverage Matrix
 
@@ -417,7 +414,7 @@ All test files verified for:
 | HKT | test_hkt.vr | 346 | ✅ Complete |
 | Negative Bounds | test_negative_bounds.vr | 279 | ✅ Complete |
 | Streams | test_streams.vr | 229 | ✅ Complete |
-| Tensors | test_tensor.vr | 318 | ✅ Complete |
+| Tensors | test_tensor.vr | 193 | ✅ Basic ops (no meta shapes / GPU) |
 | Refinements | test_refinements.vr | 226 | ✅ Complete |
 | Async/Await | test_async.vr | 283 | ✅ Complete |
 | Contexts | test_contexts.vr | 167 | ✅ Complete |
@@ -430,7 +427,7 @@ All test files verified for:
 
 ## Related Documentation
 
-- **Grammar**: `/docs/detailed/05-syntax-grammar.md`
+- **Grammar**: `/grammar/verum.ebnf`
 - **Type System**: `/docs/detailed/03-type-system.md`
 - **Context System**: `/docs/detailed/16-context-system.md`
 - **Advanced Protocols**: `/docs/detailed/18-advanced-protocols.md`

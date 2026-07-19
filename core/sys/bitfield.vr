@@ -50,7 +50,6 @@ module sys.bitfield;
 /// ```
 ///
 
-/// Implementation Reference: docs/architecture/low-level-features.md Section 2
 
 // =============================================================================
 // BITFIELD TRAITS
