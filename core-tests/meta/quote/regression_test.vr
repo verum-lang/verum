@@ -19,16 +19,17 @@
 //       `Maybe`-returning token accessors that clone/borrow
 //       (`Token.as_ident`, `TokenTree.as_token`) return the wrong
 //       tag under AOT. (META-AOT-PARITY-1.)
-//   (B) BOTH-TIER INTRINSIC/COLLISION — `Span.call_site`/`Span.join`/
+//   (B) BOTH-TIER INTRINSIC — `Span.call_site`/`Span.join`/
 //       `keyword_from_str` are bodiless `@compiler_intrinsic`s that
 //       return nil at runtime (META-INTRINSIC-NILSTUB-1);
-//       `Token.ident_spanned` (cross-module static ctor) and a direct
-//       `Group { ... }` record literal (Group-vs-Probability TypeId
-//       collision, META-GROUP-XMODULE-1) corrupt object layout.
+//       `Token.ident_spanned` (cross-module static ctor) corrupts object
+//       layout. The historical direct-record-literal collision
+//       (Group-vs-Probability TypeId, META-GROUP-XMODULE-1) is resolved
+//       via the unique `TokenGroup` rename (deeper root T0408).
 // =============================================================================
 
 mount core.meta.quote.{QuoteBuilder, GroupBuilder, parens, braces, brackets};
-mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter, Group};
+mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter, TokenGroup};
 mount core.meta.span.{MetaSpan, Span, SpanFlags};
 mount core.base.maybe.{Maybe};
 
@@ -48,12 +49,13 @@ fn empty_ts() -> TokenStream {
 // Family A: interp passes, AOT mis-lowers (META-AOT-PARITY-1)
 // =============================================================================
 
-// REGRESSION (META-GROUP-XMODULE-1): ANY builder Group construction —
-// `.group()` here — passes `--interp` but FLAKES under `--aot`: the
-// Group TypeId collides with `Probability` (1240) and the assignment
-// is non-deterministic per compile, so the same test's pass/fail set
-// changes run-to-run. Even `.tokens.len()` after one `.group()` is
-// unreliable. Un-ignore when Group gets a stable per-module TypeId.
+// REGRESSION (META-AOT-PARITY-1): a builder group construction —
+// `.group()` here — passes `--interp` but historically FLAKED under
+// `--aot`. The cause originally blamed (the meta.token group record
+// sharing a colliding simple-name TypeId with `Probability`, 1240) is
+// resolved: the record is now the uniquely-named `TokenGroup` (deeper
+// first-wins layout-registry root tracked as T0408). Remains @ignore'd
+// pending an `--aot` re-check of builder-path parity.
 @ignore
 @test
 fn regression_aot_flaky_builder_group() {
@@ -62,9 +64,11 @@ fn regression_aot_flaky_builder_group() {
     assert_eq(b.tokens.len(), 1);
 }
 
-// REGRESSION (META-GROUP-XMODULE-1): `.paren()/.brace()/.bracket()`
-// (the `wrap`-style group helpers) share the same Group-collision
-// AOT flakiness. Interp is fine.
+// REGRESSION (META-AOT-PARITY-1): `.paren()/.brace()/.bracket()`
+// (the `wrap`-style group helpers) shared the same historical AOT
+// flakiness. The Group/Probability simple-name collision it was blamed
+// on is resolved via the `TokenGroup` rename (root T0408); interp is
+// fine. Remains @ignore'd pending an `--aot` re-check.
 @ignore
 @test
 fn regression_aot_flaky_builder_paren_wrapper() {
@@ -73,9 +77,10 @@ fn regression_aot_flaky_builder_paren_wrapper() {
     assert_eq(b.tokens.len(), 1);
 }
 
-// REGRESSION (META-GROUP-XMODULE-1): `paren_open()` returns a
-// `GroupBuilder`; reading its `.delimiter` is AOT-flaky for the same
-// collision reason. Interp is fine.
+// REGRESSION (META-AOT-PARITY-1): `paren_open()` returns a
+// `GroupBuilder`; reading its `.delimiter` was AOT-flaky. The collision
+// it was blamed on is resolved via the `TokenGroup` rename (root T0408);
+// interp is fine. Remains @ignore'd pending an `--aot` re-check.
 @ignore
 @test
 fn regression_aot_flaky_group_builder_open() {
@@ -171,14 +176,18 @@ fn regression_builder_ident_static_ctor_layout() {
     assert_eq(b.tokens.len(), 1);
 }
 
-// REGRESSION (META-GROUP-XMODULE-1): a direct `Group { ... }` record
-// literal in a test module resolves `Group` to a colliding TypeId
-// (1240, shared with `Probability`); the field write runs past the
-// object's data size ("field write out of bounds ... type='Group'").
+// REGRESSION (META-GROUP-XMODULE-1, historical): a direct record literal
+// for the meta.token group type used to resolve the bare name `Group` to a
+// colliding TypeId (1240, shared with `Probability`), so the field write ran
+// past the object's data size ("field write out of bounds ... type='Group'").
+// The record has since been renamed to the unique `TokenGroup`, dodging the
+// simple-name collision; the deeper first-wins layout-registry root is tracked
+// as T0408. Remains @ignore'd only for the shared builder AOT-parity issue
+// (META-AOT-PARITY-1) — the collision itself is resolved.
 @ignore
 @test
 fn regression_direct_group_literal_collision() {
-    let g = Group { delimiter: Delimiter.Parenthesis, tokens: empty_ts(), span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Parenthesis, tokens: empty_ts(), span: synthetic_span() };
     let tt: TokenTree = TokenTree.Grouped(g);
     assert(tt.is_group());
 }

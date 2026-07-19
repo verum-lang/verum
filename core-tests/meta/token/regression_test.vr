@@ -5,7 +5,7 @@
 // Pinned regressions for `core/meta/token.vr`.
 // =============================================================================
 
-mount core.meta.token.{Group, Delimiter, TokenStream, TokenTree, Token, TokenKind};
+mount core.meta.token.{TokenGroup, Delimiter, TokenStream, TokenTree, Token, TokenKind};
 mount core.meta.span.{MetaSpan, SpanFlags};
 mount core.base.maybe.{Maybe};
 
@@ -18,75 +18,69 @@ fn empty_stream() -> TokenStream {
 }
 
 // =============================================================================
-// META-GROUP-XMODULE-1 — cross-module simple-type-name collision → Group
-//                        field-write out of bounds
+// META-GROUP-XMODULE-1 — cross-module simple-type-name collision (historical)
 // =============================================================================
 //
-// DEFECT CLASS: archive type-name collision across modules.
+// DEFECT CLASS: archive type-name collision across modules (first-wins on
+// the *simple* name).  These tests were born from it; the record has since
+// been renamed to a unique simple name, so the history is recorded here.
 //
-// Constructing `meta.token.Group { delimiter, tokens, span }` died with:
+// ORIGINAL SYMPTOM.  Constructing the meta.token group record died with:
 //
 //   Panic: field write out of bounds: field index 3 (offset 24+8 = 32)
 //          exceeds object data size 24  type_id=1240 type='Group'
-//          backtrace=[…@pc=46]
 //
-// ROOT CAUSE: the archive loader keyed types by their **simple** name in
-// a first-wins registry.  Three unrelated `Group`s exist in the stdlib:
+// ROOT CAUSE: the codegen layout registry keyed types by their **simple**
+// name in a first-wins map.  Three unrelated `Group`s existed in the stdlib:
 //
-//   * `core.meta.token.Group`   — the 3-field record { delimiter, tokens, span }
+//   * `core.meta.token.Group`   — a 3-field record { delimiter, tokens, span }
 //   * `core.math.algebra.Group` — an algebraic-structure *protocol*
 //   * `core.cli.spec.Group`     — a CLI argument-group record
 //
-// Whichever `Group` was registered first won the bare name `Group`, so
-// `meta.token.Group`'s field writes resolved against the *wrong* type's
-// layout — a 3-field (24-byte) object was addressed as if it had the
-// colliding type's shape, and the write of field index 3 (the `span`
-// field, at byte offset 24) ran off the end of the 24-byte allocation.
+// Whichever `Group` registered first won the bare name, so the meta.token
+// record's field writes resolved against the *wrong* type's layout — the
+// 3-field (24-byte) object was addressed with the colliding type's shape and
+// the field-index-3 write (`span`, byte offset 24) ran off the 24-byte
+// allocation.
 //
-// INTENDED FIX: module-qualified type registration + mount-aware re-key,
-// so `meta.token.Group` retains its own 3-field layout regardless of
-// which same-named type loaded first.
+// RESOLUTION (current tree).  The two colliding *records* were given unique
+// simple names so no two record layouts contend for one bare key:
+// `meta.token.Group` -> `TokenGroup` (this suite) and `cli.spec.Group` ->
+// `ArgGroup`.  Only the `math.algebra.Group` *protocol* keeps the bare name,
+// and protocols carry no record layout, so the collision is structurally gone
+// for these types.
 //
-// ORDER-SENSITIVITY (observed 2026-07-06).  Because the collision lives
-// in a *global* first-wins registry, the manifestation is nondeterministic
-// with respect to the set + order of modules compiled in a single
-// `verum test` run — NOT reproducible from any one file in isolation:
+// The DEEPER root — a layout registry that is first-wins on the simple name —
+// is NOT closed by the renames; it is tracked as T0408
+// (SIMPLE-KEY-LAYOUT-SQUAT-CONSUMER-1: `type_field_layouts` simple-key is a
+// first-wins global namespace).  T0408's charter is the module-qualified /
+// mount-aware re-key that lets same-simple-name types coexist safely; a
+// genuine cross-module same-simple-name collision regression belongs there.
 //
-//   * `verum test --interp --filter meta/token/` with ONLY `unit_test.vr`
-//     present in the folder → the `test_group_record_construction_*`
-//     tests hit the OOB above (meta.token.Group LOST the bare name).
-//   * The same filter with `property_test.vr` + this file also present
-//     → all Group constructions resolve correctly (meta.token.Group WON
-//     the bare name); the folder is green.
-//
-// The four tests below therefore act as a CANARY, not a deterministic
-// red-until-fixed pin: they exercise the Group construct + `.delimiter()`
-// / `.tokens()` read-back path (field 0 and field 1 reads, plus the
-// trailing `span` field-2 write that overran the allocation).  On the
-// current binary + suite composition they PASS; a proper module-qualified
-// registration fix makes them pass deterministically under EVERY load
-// order.  Any future run that turns these (or the `unit_test.vr` Group
-// tests) red is the collision resurfacing — re-open META-GROUP-XMODULE-1
-// and validate the fix across multiple suite compositions, not one filter.
+// The four tests below now construct `TokenGroup` and guard its 3-field
+// layout + `.delimiter()` / `.tokens()` read-back (field 0 and field 1 reads
+// plus the trailing `span` field-2 write that historically overran).  They no
+// longer exercise the collision itself (TokenGroup's name is unique) — that
+// guard moves to T0408.
 // =============================================================================
 
 @test
 fn regression_meta_group_xmodule_parenthesis() {
-    let g = Group { delimiter: Delimiter.Parenthesis, tokens: empty_stream(), span: syn() };
+    let g = TokenGroup { delimiter: Delimiter.Parenthesis, tokens: empty_stream(), span: syn() };
     assert(g.delimiter() is Delimiter.Parenthesis);
     assert(g.tokens().is_empty());
 }
 
 @test
 fn regression_meta_group_xmodule_brace() {
-    let g = Group { delimiter: Delimiter.Brace, tokens: empty_stream(), span: syn() };
+    let g = TokenGroup { delimiter: Delimiter.Brace, tokens: empty_stream(), span: syn() };
     assert(g.delimiter() is Delimiter.Brace);
     assert(g.tokens().is_empty());
 }
 
 @test
 fn regression_meta_group_xmodule_bracket() {
-    let g = Group { delimiter: Delimiter.Bracket, tokens: empty_stream(), span: syn() };
+    let g = TokenGroup { delimiter: Delimiter.Bracket, tokens: empty_stream(), span: syn() };
     assert(g.delimiter() is Delimiter.Bracket);
     assert(g.tokens().is_empty());
 }
@@ -99,7 +93,7 @@ fn regression_meta_group_xmodule_nonempty_tokens_readback() {
     // field would still be caught.
     let leaf = TokenTree.Leaf(Token { kind: TokenKind.Ident(Text.from("x")), span: syn() });
     let inner = TokenStream { tokens: List.of(leaf), span: syn() };
-    let g = Group { delimiter: Delimiter.Bracket, tokens: inner, span: syn() };
+    let g = TokenGroup { delimiter: Delimiter.Bracket, tokens: inner, span: syn() };
     assert(g.delimiter() is Delimiter.Bracket);
     assert_eq(g.tokens().len(), 1);
 }

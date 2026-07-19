@@ -23,13 +23,13 @@
 //     .is_token / .is_group / .as_token / .as_group
 //   * TokenStream record direct construction + .is_empty / .len /
 //     .span / .first / .last / .trees / .to_trees
-//   * Group record + .delimiter / .tokens
+//   * TokenGroup record + .delimiter / .tokens
 //   * LexError record + .new + Eq derived
 // =============================================================================
 
 mount core.meta.token.{
     TokenStream, Token, TokenTree, TokenKind, Token as TokenStruct,
-    Delimiter, Spacing, Keyword, Literal, StringKind, Group, LexError,
+    Delimiter, Spacing, Keyword, Literal, StringKind, TokenGroup, LexError,
 };
 mount core.meta.span.{MetaSpan, Span, SpanFlags};
 mount core.base.maybe.{Maybe};
@@ -525,7 +525,7 @@ fn test_token_tree_leaf_variant() {
 @test
 fn test_token_tree_grouped_variant() {
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
     let t: TokenTree = TokenTree.Grouped(g);
     assert(t is TokenTree.Grouped);
 }
@@ -534,7 +534,7 @@ fn test_token_tree_grouped_variant() {
 fn test_token_tree_variants_disjoint() {
     let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
     let grouped: TokenTree = TokenTree.Grouped(g);
     assert(leaf is TokenTree.Leaf && !(leaf is TokenTree.Grouped));
     assert(grouped is TokenTree.Grouped && !(grouped is TokenTree.Leaf));
@@ -550,7 +550,7 @@ fn test_token_tree_is_token_for_leaf() {
 @test
 fn test_token_tree_is_group_for_grouped() {
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Bracket, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Bracket, tokens: inner, span: synthetic_span() };
     let t: TokenTree = TokenTree.Grouped(g);
     assert(t.is_group());
     assert(!t.is_token());
@@ -566,7 +566,7 @@ fn test_token_tree_as_token_some_for_leaf() {
 @test
 fn test_token_tree_as_group_some_for_grouped() {
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
     let t: TokenTree = TokenTree.Grouped(g);
     let r = t.as_group();
     assert(r is Some);
@@ -575,7 +575,7 @@ fn test_token_tree_as_group_some_for_grouped() {
 @test
 fn test_token_tree_as_token_none_for_grouped() {
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
     let t: TokenTree = TokenTree.Grouped(g);
     let r = t.as_token();
     assert(r is None);
@@ -638,13 +638,13 @@ fn test_token_stream_last_none_when_empty() {
 }
 
 // =============================================================================
-// Section 12: Group record + accessors
+// Section 12: TokenGroup record + accessors
 // =============================================================================
 
 @test
 fn test_group_record_construction_parenthesis() {
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
     let d = g.delimiter();
     assert(d is Delimiter.Parenthesis);
 }
@@ -652,14 +652,14 @@ fn test_group_record_construction_parenthesis() {
 @test
 fn test_group_record_construction_brace() {
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
     assert(g.delimiter() is Delimiter.Brace);
 }
 
 @test
 fn test_group_record_construction_bracket() {
     let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
-    let g = Group { delimiter: Delimiter.Bracket, tokens: inner, span: synthetic_span() };
+    let g = TokenGroup { delimiter: Delimiter.Bracket, tokens: inner, span: synthetic_span() };
     assert(g.delimiter() is Delimiter.Bracket);
 }
 
