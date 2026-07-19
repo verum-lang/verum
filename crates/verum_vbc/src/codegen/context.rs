@@ -421,6 +421,19 @@ pub struct CodegenContext {
     /// `match (self, other) { … }` element typing.
     pub pending_let_tuple_types: Option<Vec<Option<String>>>,
 
+    /// T0178 (TRANSMUTE-NANBOX-FLOAT-1): the annotated target type name of
+    /// a `let x: T = transmute(arg)` binding, stashed by `compile_let` for
+    /// the duration of the initializer compile ONLY when the initializer is
+    /// *directly* a `transmute(...)` call. The `transmute` arm of
+    /// `try_compile_builtin` reads it to decide whether the cast crosses the
+    /// Int<->Float NaN-box boundary (and must reinterpret the 64-bit payload
+    /// via `F64FromBits` / `F64ToBits`) or is a same-representation identity.
+    /// The explicit turbofish `type_args` are the primary channel; this field
+    /// carries the far more common inferred form. Scoped to the direct-value
+    /// case so a transmute nested deeper in the initializer never mistakes
+    /// this binding's type for its own target.
+    pub pending_transmute_target: Option<String>,
+
     /// Registers that contain raw FFI pointers (not CBGR references).
     ///
 
@@ -1432,6 +1445,7 @@ impl CodegenContext {
             match_scrutinee_type: None,
             match_tuple_element_types: None,
             pending_let_tuple_types: None,
+            pending_transmute_target: None,
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
             generic_type_params_ordered: Vec::new(),

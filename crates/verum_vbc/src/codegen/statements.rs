@@ -316,6 +316,29 @@ impl VbcCodegen {
         }
     }
 
+    /// T0178: is `expr` — after peeling `Paren` wrappers — a DIRECT call to
+    /// the `transmute` builtin (`transmute(x)` or `transmute<S, D>(x)`)? Used
+    /// by `compile_let` to stash a binding's annotated target type for the
+    /// `transmute` reinterpret decision without leaking it to an unrelated
+    /// transmute nested deeper in the initializer.
+    fn is_direct_transmute_call(expr: &verum_ast::Expr) -> bool {
+        use verum_ast::expr::ExprKind;
+        let mut cur = expr;
+        loop {
+            match &cur.kind {
+                ExprKind::Paren(inner) => cur = inner,
+                ExprKind::Call { func, .. } => {
+                    return matches!(
+                        &func.kind,
+                        ExprKind::Path(p)
+                            if p.as_ident().is_some_and(|i| i.name.as_str() == "transmute")
+                    );
+                }
+                _ => return false,
+            }
+        }
+    }
+
     /// Compiles a let binding.
     fn compile_let(
         &mut self,
@@ -1016,6 +1039,27 @@ impl VbcCodegen {
         } else {
             None
         };
+
+        // T0178 (TRANSMUTE-NANBOX-FLOAT-1): a `let x: T = transmute(arg)`
+        // needs T at the transmute emit site to decide whether the cast
+        // crosses the Int<->Float NaN-box boundary. `type_args` (turbofish)
+        // is the primary channel; for the far more common inferred form we
+        // stash the annotation's base type name so the `transmute` arm in
+        // `try_compile_builtin` can read the target. Scoped to a DIRECT
+        // `transmute(...)` initializer (peeling `Paren`) so an unrelated
+        // transmute nested deeper in the initializer — e.g.
+        // `let x: Int = wrap(transmute(f))` — never mistakes this binding's
+        // type for its own target. `extract_base_type_name` yields the raw
+        // target name (`Float` / `Int` / `UInt64`) and `None` for reference
+        // targets, so every existing pointer/reference transmute stays a
+        // same-representation identity.
+        let saved_transmute_target = self.ctx.pending_transmute_target.take();
+        if let (Some(ann), Some(v)) = (ty, value)
+            && Self::is_direct_transmute_call(v)
+        {
+            self.ctx.pending_transmute_target = self.extract_base_type_name(ann);
+        }
+
         let mut init_reg = if let Some(expr) = value {
             self.compile_expr(expr)?
         } else {
@@ -1024,6 +1068,8 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::LoadUnit { dst: reg });
             Some(reg)
         };
+        // Restore regardless of whether the transmute arm consumed the hint.
+        self.ctx.pending_transmute_target = saved_transmute_target;
         if let Some(saved) = saved_return_type {
             self.ctx.current_return_type_name = saved;
         }

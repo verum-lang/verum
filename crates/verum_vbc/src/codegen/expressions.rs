@@ -1158,15 +1158,21 @@ impl VbcCodegen {
                 args,
                 // VBC-GENERIC-INSTANTIATION-1 (task #3): the concrete type
                 // argument of a legacy meta-fn (`size_of<Int>()`) is NOT
-                // visible here — monomorphisation moves it into
+                // reliably visible here — monomorphisation moves it into
                 // `resolved_call_target` and clears `type_args` before VBC
                 // codegen, so a call-site const-fold can't read it at this
                 // layer.  The canonical `T.size` / `T.id` forms (compiled via
                 // `compile_type_property`, which DOES see the type) are the
                 // supported surface; the `@deprecated` fn form is tracked in
                 // task #3.
-                type_args: _,
-            } => self.compile_call(func, args),
+                //
+                // T0178: the `transmute` reinterpret decision DOES consult
+                // these turbofish args (`transmute<Int, Float>(x)`) when they
+                // survive to here; when they don't, it falls back to argument
+                // inference (source) and a `let x: T = transmute(...)` target
+                // hint (`pending_transmute_target`). Thread them through.
+                type_args,
+            } => self.compile_call(func, args, type_args),
             ExprKind::MethodCall {
                 receiver,
                 method,
@@ -5228,6 +5234,7 @@ impl VbcCodegen {
         &mut self,
         func: &Expr,
         args: &verum_common::List<Expr>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
         // Get function name from path. Also remember whether the path was
         // rooted at a module-path keyword (`super`, `cog`, or `.`) — those
@@ -5556,7 +5563,7 @@ impl VbcCodegen {
         }
 
         // Handle built-in functions
-        if let Some(result) = self.try_compile_builtin(&func_name, args)? {
+        if let Some(result) = self.try_compile_builtin(&func_name, args, type_args)? {
             return Ok(result);
         }
 
@@ -7479,11 +7486,38 @@ impl VbcCodegen {
         }
     }
 
+    /// Emit a two-register `ArithExtended` op — `dst`, then `src` — using the
+    /// canonical 1-or-2-byte register encoding that the interpreter's
+    /// `read_reg` decodes (`< 128` short form, else `0x80 | hi` + `lo`). One
+    /// authority for the encoding shared by the F64<->bits inline sequences
+    /// and the `transmute` Int<->Float reinterpret (T0178).
+    fn emit_arith_extended_reg2(
+        &mut self,
+        sub_op: crate::instruction::ArithSubOpcode,
+        dst: Reg,
+        src: Reg,
+    ) {
+        let mut operands = Vec::with_capacity(4);
+        for r in [dst, src] {
+            if r.is_short() {
+                operands.push(r.0 as u8);
+            } else {
+                operands.push(0x80 | ((r.0 >> 8) as u8));
+                operands.push(r.0 as u8);
+            }
+        }
+        self.ctx.emit(Instruction::ArithExtended {
+            sub_op: sub_op as u8,
+            operands,
+        });
+    }
+
     /// Tries to compile a builtin function.
     fn try_compile_builtin(
         &mut self,
         name: &str,
         args: &verum_common::List<Expr>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Option<Reg>>> {
         match name {
             "print" | "println" => {
@@ -7677,9 +7711,31 @@ impl VbcCodegen {
             }
 
             // transmute(x) — reinterpret bits as a different type.
-            // In the VBC interpreter, all values are 64-bit NaN-boxed,
-            // so transmute is a no-op that just passes the value through.
-            // The type system has already validated the transmute at compile time.
+            //
+            // T0178 (TRANSMUTE-NANBOX-FLOAT-1): VBC values are 64-bit
+            // NaN-boxed, so a SAME-representation transmute (ptr<->Int,
+            // Int<->Int, ref<->ref, opaque handle<->ptr) is genuinely a
+            // value-level identity — the payload bits are already in the
+            // right envelope. But an Int<->Float transmute CROSSES the
+            // NaN-box boundary: an Int is stored as a NaN-boxed i64 payload
+            // whereas a Float is stored as its raw IEEE-754 f64 bit pattern.
+            // Passing the value through unchanged makes the consumer read the
+            // wrong envelope — an Int's boxed bits read as an f64 land on a
+            // quiet-NaN (the historical `transmute<Int, Float>` => NaN bug),
+            // and an f64 read as an Int yields garbage. Reinterpret the
+            // 64-bit PAYLOAD via the same tier-coherent `F64FromBits` /
+            // `F64ToBits` opcodes the intrinsic InlineSequence path uses
+            // (both proven green on interp + AOT).
+            //
+            // Direction is chosen from the instantiated types: the explicit
+            // turbofish `type_args` when present (`transmute<Int, Float>(x)`),
+            // else the argument's inferred kind (source) and the
+            // `let x: T = transmute(...)` annotation stashed in
+            // `pending_transmute_target` (target). Anything that is NOT a
+            // 64-bit Int<->Float crossing stays identity — unchanged behavior,
+            // so every existing pointer/reference transmute in core/ is
+            // untouched. f32-width crossings are out of scope here (the value
+            // representation stores f32 as f64) and also stay identity.
             "transmute" => {
                 if args.len() != 1 {
                     return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
@@ -7688,11 +7744,74 @@ impl VbcCodegen {
                         function: "transmute".to_string(),
                     }));
                 }
+
+                use verum_common::well_known_types::type_names;
+                // 64-bit float names only — `F64FromBits` / `F64ToBits` are
+                // the 64-bit reinterpret; `is_float_type` would also admit f32.
+                fn is_f64_name(n: &str) -> bool {
+                    matches!(n, "Float" | "Float64" | "f64" | "F64")
+                }
+
+                // Explicit turbofish source / target names, when present.
+                // Read as sequential immutable borrows (no self-capturing
+                // closure held across the mutable `pending_transmute_target`
+                // take below).
+                let source_name = match type_args.first() {
+                    Some(verum_ast::ty::GenericArg::Type(t)) => self.extract_base_type_name(t),
+                    _ => None,
+                };
+                let ta_target_name = match type_args.get(1) {
+                    Some(verum_ast::ty::GenericArg::Type(t)) => self.extract_base_type_name(t),
+                    _ => None,
+                };
+                let arg_kind = self.infer_expr_type_kind(&args[0]);
+                // The inferred `let x: T = transmute(...)` target hint. Taken
+                // AFTER the immutable reads above (borrows don't overlap) and
+                // BEFORE compiling the argument, so a transient push/pop inside
+                // the arg compile can't perturb it.
+                let target_name =
+                    ta_target_name.or_else(|| self.ctx.pending_transmute_target.take());
+
+                let source_is_int = source_name
+                    .as_deref()
+                    .map(type_names::is_integer_type)
+                    .unwrap_or(false)
+                    || matches!(arg_kind, Some(verum_ast::ty::TypeKind::Int));
+                let source_is_f64 = source_name
+                    .as_deref()
+                    .map(is_f64_name)
+                    .unwrap_or(false)
+                    || matches!(arg_kind, Some(verum_ast::ty::TypeKind::Float));
+                let target_is_int = target_name
+                    .as_deref()
+                    .map(type_names::is_integer_type)
+                    .unwrap_or(false);
+                let target_is_f64 =
+                    target_name.as_deref().map(is_f64_name).unwrap_or(false);
+
                 let src = self
                     .compile_expr(&args[0])?
                     .or_internal("transmute arg has no value")?;
-                // transmute is identity at the value level in VBC
-                Ok(Some(Some(src)))
+
+                use crate::instruction::ArithSubOpcode;
+                if source_is_int && target_is_f64 {
+                    // Int NaN-box payload bits -> f64 value.
+                    let dst = self.ctx.alloc_temp();
+                    self.emit_arith_extended_reg2(ArithSubOpcode::F64FromBits, dst, src);
+                    self.ctx.free_temp(src);
+                    Ok(Some(Some(dst)))
+                } else if source_is_f64 && target_is_int {
+                    // f64 bits -> Int NaN-box payload.
+                    let dst = self.ctx.alloc_temp();
+                    self.emit_arith_extended_reg2(ArithSubOpcode::F64ToBits, dst, src);
+                    self.ctx.free_temp(src);
+                    Ok(Some(Some(dst)))
+                } else {
+                    // Same-representation transmute — identity at the value
+                    // level in VBC (the historical, correct behavior for
+                    // ptr/ref/Int<->Int casts).
+                    Ok(Some(Some(src)))
+                }
             }
 
             // offset_of(Type, field) — returns the byte offset of a field in a struct.
@@ -31119,23 +31238,9 @@ impl VbcCodegen {
                     _ => unreachable!(),
                 };
                 let src = if !args.is_empty() { args[0] } else { dest };
-                let mut operands = Vec::with_capacity(4);
-                if dest.is_short() {
-                    operands.push(dest.0 as u8);
-                } else {
-                    operands.push(0x80 | ((dest.0 >> 8) as u8));
-                    operands.push(dest.0 as u8);
-                }
-                if src.is_short() {
-                    operands.push(src.0 as u8);
-                } else {
-                    operands.push(0x80 | ((src.0 >> 8) as u8));
-                    operands.push(src.0 as u8);
-                }
-                self.ctx.emit(Instruction::ArithExtended {
-                    sub_op: sub_op as u8,
-                    operands,
-                });
+                // Shared encoding authority (T0178) — same op the `transmute`
+                // Int<->Float reinterpret emits.
+                self.emit_arith_extended_reg2(sub_op, dest, src);
             }
 
             // Byte conversion: to_le_bytes(value) -> [byte; N]
