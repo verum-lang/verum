@@ -4551,8 +4551,8 @@ pub(super) fn dispatch_primitive_method(
         // VBC-internal: interpreter method routing gate. Uses WKT registry to check
         // if the type prefix names a stdlib type with built-in interpreter dispatch.
         // User-defined types must fall through to compiled method lookup.
-        // Additional interpreter-specific aliases (String, Byte, numeric variants,
-        // timer types) that are not in WKT are also checked.
+        // Additional interpreter-specific aliases (String, Byte, numeric
+        // variants) that are not in WKT are also checked.
         let is_builtin_prefix = WKT::from_name(type_prefix).is_some()
             || matches!(
                 type_prefix,
@@ -4587,10 +4587,6 @@ pub(super) fn dispatch_primitive_method(
                     | "Int128" | "I128" | "i128"
                     | "USize" | "UIntSize" | "Usize" | "usize"
                     | "ISize" | "IntSize" | "Isize" | "isize"
-                    // Timer types (interpreter-specific, not in WKT).
-                    | "Stopwatch"
-                    | "PerfCounter"
-                    | "DeadlineTimer"
             );
         if !is_builtin_prefix && !receiver_is_actually_builtin {
             // User-defined type and not a builtin collection - let user method be called
@@ -4634,10 +4630,6 @@ pub(super) fn dispatch_primitive_method(
                     | "Int128" | "I128" | "i128"
                     | "USize" | "UIntSize" | "Usize" | "usize"
                     | "ISize" | "IntSize" | "Isize" | "isize"
-                    // Timer types (interpreter-specific, not in WKT).
-                    | "Stopwatch"
-                    | "PerfCounter"
-                    | "DeadlineTimer"
             );
         if !is_builtin_prefix && !receiver_is_actually_builtin {
             return Ok(None);

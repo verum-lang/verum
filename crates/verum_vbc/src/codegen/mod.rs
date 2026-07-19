@@ -3168,36 +3168,6 @@ impl VbcCodegen {
             ("sleep_ms", 1, "time_sleep_ms"),
             ("sleep_us", 1, "time_sleep_us"),
             ("sleep", 1, "time_sleep_duration"),
-            // Stopwatch impl methods
-            ("Stopwatch.new", 0, "time_stopwatch_new"),
-            ("Stopwatch.elapsed", 1, "time_stopwatch_elapsed"),
-            ("Stopwatch.stop", 1, "time_stopwatch_stop"),
-            ("Stopwatch.start", 1, "time_stopwatch_start"),
-            ("Stopwatch.reset", 1, "time_stopwatch_reset"),
-            // PerfCounter impl methods
-            ("PerfCounter.now", 0, "time_perf_counter_now"),
-            (
-                "PerfCounter.elapsed_since",
-                2,
-                "time_perf_counter_elapsed_since",
-            ),
-            ("PerfCounter.as_nanos", 1, "time_perf_counter_as_nanos"),
-            // DeadlineTimer impl methods
-            (
-                "DeadlineTimer.from_duration",
-                1,
-                "time_deadline_timer_from_duration",
-            ),
-            (
-                "DeadlineTimer.is_expired",
-                1,
-                "time_deadline_timer_is_expired",
-            ),
-            (
-                "DeadlineTimer.remaining",
-                1,
-                "time_deadline_timer_remaining",
-            ),
             // Arithmetic intrinsics (core/intrinsics/arithmetic.vr)
             ("add", 2, "add"),
             ("sub", 2, "sub"),

@@ -509,12 +509,13 @@ public mount .darwin.{
 
 @cfg(target_os = "macos")
 public mount .darwin.{
-    // Time Types
+    // Time Types (Stopwatch/PerfCounter/DeadlineTimer are declared per-platform
+    // as `DarwinStopwatch` etc.; no bare cross-platform declaration exists).
     Duration,
     Instant,
-    Stopwatch,
-    PerfCounter,
-    DeadlineTimer,
+    DarwinStopwatch,
+    DarwinPerfCounter,
+    DarwinDeadlineTimer,
     // Clock Functions
     time_monotonic_nanos,
     monotonic_raw_nanos,
@@ -722,12 +723,13 @@ public mount .windows.{
 
 @cfg(target_os = "windows")
 public mount .windows.{
-    // Time Types
+    // Time Types (Stopwatch/PerfCounter/DeadlineTimer are declared per-platform
+    // as `WindowsStopwatch` etc.; no bare cross-platform declaration exists).
     Duration,
     Instant,
-    Stopwatch,
-    PerfCounter,
-    DeadlineTimer,
+    WindowsStopwatch,
+    WindowsPerfCounter,
+    WindowsDeadlineTimer,
     // Time Functions — `monotonic_nanos` / `monotonic_millis` are exposed
     // by the cross-platform wrappers below; windows ones stay internal.
     monotonic_micros,

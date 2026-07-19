@@ -424,12 +424,14 @@ public mount thread.{
 // =============================================================================
 
 public mount time.{
-    // Types
+    // Types.  The Stopwatch / PerfCounter / DeadlineTimer types are declared
+    // per-platform (`WindowsStopwatch`, …) with no bare cross-platform
+    // declaration, so they are re-exported under their concrete names.
     Duration,
     Instant,
-    Stopwatch,
-    PerfCounter,
-    DeadlineTimer,
+    WindowsStopwatch,
+    WindowsPerfCounter,
+    WindowsDeadlineTimer,
 
     // Constants
     NANOS_PER_SEC,

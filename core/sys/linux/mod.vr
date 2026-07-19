@@ -298,7 +298,9 @@ public mount .time.{
     Timeval,
     Duration,
     Instant,
-    Stopwatch,
+    // `LinuxStopwatch` is the concrete platform type; there is no bare
+    // cross-platform `Stopwatch` declaration to re-export.
+    LinuxStopwatch,
 
     // Clock operations
     clock_gettime,

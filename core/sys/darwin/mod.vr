@@ -324,12 +324,15 @@ public mount .thread.{
 // =============================================================================
 
 public mount .time.{
-    // Types
+    // Types.  The Stopwatch / PerfCounter / DeadlineTimer types are declared
+    // per-platform (`DarwinStopwatch`, …) and have no bare cross-platform
+    // declaration, so they are re-exported under their concrete names below
+    // rather than as dangling bare items.
     Duration,
     Instant,
-    Stopwatch,
-    PerfCounter,
-    DeadlineTimer,
+    DarwinStopwatch,
+    DarwinPerfCounter,
+    DarwinDeadlineTimer,
     // Clock functions
     monotonic_nanos as time_monotonic_nanos,
     monotonic_raw_nanos,

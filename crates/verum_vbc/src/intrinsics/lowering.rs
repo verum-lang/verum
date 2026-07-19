@@ -3387,7 +3387,7 @@ impl IntrinsicLowering {
 
             // Note: SaturatingAdd, SaturatingSub, Sext, Zext are handled earlier in this match
 
-            // Time intrinsics (Duration, Instant, Stopwatch, PerfCounter, DeadlineTimer)
+            // Time intrinsics (Duration, Instant, and the sleep family)
             // are handled at the VBC interpreter level via FfiExtended sub-opcodes and
             // inline instruction sequences. They don't need MLIR lowering.
             InlineSequenceId::DurationFromNanos
@@ -3411,18 +3411,7 @@ impl IntrinsicLowering {
             | InlineSequenceId::TimeUnixTimestamp
             | InlineSequenceId::TimeSleepMs
             | InlineSequenceId::TimeSleepUs
-            | InlineSequenceId::TimeSleepDuration
-            | InlineSequenceId::StopwatchNew
-            | InlineSequenceId::StopwatchStart
-            | InlineSequenceId::StopwatchStop
-            | InlineSequenceId::StopwatchElapsed
-            | InlineSequenceId::StopwatchReset
-            | InlineSequenceId::PerfCounterNow
-            | InlineSequenceId::PerfCounterElapsedSince
-            | InlineSequenceId::PerfCounterAsNanos
-            | InlineSequenceId::DeadlineTimerFromDuration
-            | InlineSequenceId::DeadlineTimerIsExpired
-            | InlineSequenceId::DeadlineTimerRemaining => {
+            | InlineSequenceId::TimeSleepDuration => {
                 // Emit a no-op or pass-through for MLIR — these are VBC-only intrinsics
                 if !operands.is_empty() {
                     Some(operands[0])

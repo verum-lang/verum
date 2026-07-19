@@ -57,9 +57,6 @@ pub enum WellKnownType {
     // Time
     Duration,
     Instant,
-    Stopwatch,
-    PerfCounter,
-    DeadlineTimer,
 
     // Misc
     Never,
@@ -100,9 +97,6 @@ impl WellKnownType {
             Self::AtomicBool => "AtomicBool",
             Self::Duration => "Duration",
             Self::Instant => "Instant",
-            Self::Stopwatch => "Stopwatch",
-            Self::PerfCounter => "PerfCounter",
-            Self::DeadlineTimer => "DeadlineTimer",
             Self::Never => "Never",
             Self::Ordering => "Ordering",
             Self::Range => "Range",
@@ -141,9 +135,6 @@ impl WellKnownType {
             "AtomicBool" => Some(Self::AtomicBool),
             "Duration" => Some(Self::Duration),
             "Instant" => Some(Self::Instant),
-            "Stopwatch" => Some(Self::Stopwatch),
-            "PerfCounter" => Some(Self::PerfCounter),
-            "DeadlineTimer" => Some(Self::DeadlineTimer),
             "Never" => Some(Self::Never),
             "Ordering" => Some(Self::Ordering),
             "Range" => Some(Self::Range),
@@ -521,9 +512,6 @@ impl WellKnownType {
             // Time — `core/time/<name>.vr`.
             Self::Duration => &["core.time.duration", "core.time"],
             Self::Instant => &["core.time.instant", "core.time"],
-            Self::Stopwatch => &["core.time.stopwatch", "core.time"],
-            Self::PerfCounter => &["core.time.perf_counter", "core.time"],
-            Self::DeadlineTimer => &["core.time.deadline_timer", "core.time"],
             // Misc — `core/base/<name>.vr` for Never/Ordering/Range.
             Self::Never => &["core.base"],
             Self::Ordering => &["core.base.ordering", "core.base"],

@@ -8,8 +8,8 @@
 // @description: Tests for macOS time and duration utilities.
 //
 // Coverage:
-// - Duration, Instant, Stopwatch: Time types
-// - PerfCounter, DeadlineTimer: High-resolution timing
+// - DarwinDuration, DarwinInstant, DarwinStopwatch: Time types
+// - DarwinPerfCounter, DarwinDeadlineTimer: High-resolution timing
 // - monotonic_nanos, monotonic_raw_nanos: Monotonic time
 // - realtime_nanos, unix_timestamp: Real time
 // - sleep, sleep_ms, sleep_us: Sleep operations
@@ -30,7 +30,7 @@
 module test.stdlib.sys.darwin.time_test;
 
 mount core.sys.darwin.time.{
-    Duration, Instant, Stopwatch, PerfCounter, DeadlineTimer,
+    DarwinDuration, DarwinInstant, DarwinStopwatch, DarwinPerfCounter, DarwinDeadlineTimer,
     monotonic_nanos, monotonic_raw_nanos,
     realtime_nanos, unix_timestamp,
     thread_cputime_nanos, process_cputime_nanos,
@@ -71,32 +71,32 @@ fn test_clock_constants() {
 }
 
 // =============================================================================
-// Duration Tests
+// DarwinDuration Tests
 // =============================================================================
 
 @test
 fn test_duration() {
     // Create from seconds
-    let d1 = Duration.from_secs(5);
+    let d1 = DarwinDuration.from_secs(5);
     assert(d1.as_secs() == 5);
     assert(d1.as_nanos() == 5_000_000_000);
 
     // Create from milliseconds
-    let d2 = Duration.from_millis(1500);
+    let d2 = DarwinDuration.from_millis(1500);
     assert(d2.as_millis() == 1500);
     assert(d2.as_secs() == 1);
 
     // Create from microseconds
-    let d3 = Duration.from_micros(2_500_000);
+    let d3 = DarwinDuration.from_micros(2_500_000);
     assert(d3.as_micros() == 2_500_000);
     assert(d3.as_millis() == 2500);
 
     // Create from nanoseconds
-    let d4 = Duration.from_nanos(1_234_567_890);
+    let d4 = DarwinDuration.from_nanos(1_234_567_890);
     assert(d4.as_nanos() == 1_234_567_890);
 
     // Zero duration
-    let zero = Duration.ZERO;
+    let zero = DarwinDuration.ZERO;
     assert(zero.as_nanos() == 0);
     assert(zero.is_zero());
 
@@ -105,17 +105,17 @@ fn test_duration() {
     assert(d3 > d2);
     assert(d4 < d2);
 
-    print("Duration tests passed");
+    print("DarwinDuration tests passed");
 }
 
 // =============================================================================
-// Instant Tests
+// DarwinInstant Tests
 // =============================================================================
 
 @test
 fn test_instant() {
     // Get current instant
-    let now = Instant.now();
+    let now = DarwinInstant.now();
 
     // Do some work
     let mut sum = 0;
@@ -124,7 +124,7 @@ fn test_instant() {
     }
 
     // Get another instant
-    let later = Instant.now();
+    let later = DarwinInstant.now();
 
     // Later should be after or equal to now
     assert(later >= now);
@@ -137,7 +137,7 @@ fn test_instant() {
     let elapsed2 = now.elapsed();
     assert(elapsed2 >= elapsed);
 
-    print("Instant tests passed");
+    print("DarwinInstant tests passed");
 }
 
 // =============================================================================
@@ -231,8 +231,8 @@ fn test_sleep_operations() {
     assert(elapsed_us >= 900_000);       // At least 0.9ms
     assert(elapsed_us < 50_000_000);     // Less than 50ms
 
-    // Test sleep with Duration
-    let duration = Duration.from_millis(5);
+    // Test sleep with DarwinDuration
+    let duration = DarwinDuration.from_millis(5);
     let before_d = monotonic_nanos();
     sleep(duration);
     let after_d = monotonic_nanos();
@@ -245,13 +245,13 @@ fn test_sleep_operations() {
 }
 
 // =============================================================================
-// Stopwatch Tests
+// DarwinStopwatch Tests
 // =============================================================================
 
 @test
 fn test_stopwatch() {
     // Create stopwatch
-    let mut sw = Stopwatch.new();
+    let mut sw = DarwinStopwatch.new();
 
     // Initially near-zero (within 1ms of creation)
     let initial = sw.elapsed();
@@ -286,17 +286,17 @@ fn test_stopwatch() {
     let after_reset = sw.elapsed();
     assert(after_reset.as_nanos() < 1_000_000);
 
-    print("Stopwatch tests passed");
+    print("DarwinStopwatch tests passed");
 }
 
 // =============================================================================
-// PerfCounter Tests
+// DarwinPerfCounter Tests
 // =============================================================================
 
 @test
 fn test_perf_counter() {
     // Create performance counter
-    let pc1 = PerfCounter.now();
+    let pc1 = DarwinPerfCounter.now();
 
     // Do some work
     let mut sum = 0;
@@ -304,7 +304,7 @@ fn test_perf_counter() {
         sum += i;
     }
 
-    let pc2 = PerfCounter.now();
+    let pc2 = DarwinPerfCounter.now();
 
     // Elapsed should be positive
     let elapsed = pc2.elapsed_since(pc1);
@@ -314,17 +314,17 @@ fn test_perf_counter() {
     let nanos = pc2.as_nanos() - pc1.as_nanos();
     assert(nanos >= 0);
 
-    print("PerfCounter tests passed");
+    print("DarwinPerfCounter tests passed");
 }
 
 // =============================================================================
-// DeadlineTimer Tests
+// DarwinDeadlineTimer Tests
 // =============================================================================
 
 @test
 fn test_deadline_timer() {
     // Create deadline 10ms from now
-    let timer = DeadlineTimer.from_duration(Duration.from_millis(10));
+    let timer = DarwinDeadlineTimer.from_duration(DarwinDuration.from_millis(10));
 
     // Not expired yet
     assert(!timer.is_expired());
@@ -344,7 +344,7 @@ fn test_deadline_timer() {
     let remaining_after = timer.remaining();
     assert(remaining_after.as_millis() == 0);
 
-    print("DeadlineTimer tests passed");
+    print("DarwinDeadlineTimer tests passed");
 }
 
 // =============================================================================
@@ -365,10 +365,10 @@ fn test_time_it() {
     // Result should be correct
     assert(result == 49995000);
 
-    // Duration should be positive
+    // DarwinDuration should be positive
     assert(duration.as_nanos() > 0);
 
-    // Duration should be reasonable
+    // DarwinDuration should be reasonable
     assert(duration.as_secs() < 1);
 
     print("time_it tests passed");

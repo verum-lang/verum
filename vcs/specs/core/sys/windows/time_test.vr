@@ -8,8 +8,8 @@
 // @description: Tests for Windows time and performance counter utilities.
 //
 // Coverage:
-// - Duration, Instant, Stopwatch: Time types
-// - PerfCounter, DeadlineTimer: High-resolution timing
+// - WindowsDuration, WindowsInstant, WindowsStopwatch: Time types
+// - WindowsPerfCounter, WindowsDeadlineTimer: High-resolution timing
 // - monotonic_nanos, monotonic_micros, monotonic_millis: Monotonic time
 // - sleep, sleep_ms, sleep_us: Sleep operations
 // - get_perf_freq, perf_counter_to_nanos: Performance counter utilities
@@ -27,7 +27,7 @@
 module test.stdlib.sys.windows.time_test;
 
 mount core.sys.windows.time.{
-    Duration, Instant, Stopwatch, PerfCounter, DeadlineTimer,
+    WindowsDuration, WindowsInstant, WindowsStopwatch, WindowsPerfCounter, WindowsDeadlineTimer,
     monotonic_nanos, monotonic_micros, monotonic_millis,
     sleep, sleep_ms, sleep_us,
     get_perf_freq, perf_counter_to_nanos,
@@ -61,32 +61,32 @@ fn test_time_constants() {
 }
 
 // =============================================================================
-// Duration Tests
+// WindowsDuration Tests
 // =============================================================================
 
 @test
 fn test_duration() {
     // Create from seconds
-    let d1 = Duration.from_secs(5);
+    let d1 = WindowsDuration.from_secs(5);
     assert(d1.as_secs() == 5);
     assert(d1.as_nanos() == 5_000_000_000);
 
     // Create from milliseconds
-    let d2 = Duration.from_millis(1500);
+    let d2 = WindowsDuration.from_millis(1500);
     assert(d2.as_millis() == 1500);
     assert(d2.as_secs() == 1);
 
     // Create from microseconds
-    let d3 = Duration.from_micros(2_500_000);
+    let d3 = WindowsDuration.from_micros(2_500_000);
     assert(d3.as_micros() == 2_500_000);
     assert(d3.as_millis() == 2500);
 
     // Create from nanoseconds
-    let d4 = Duration.from_nanos(1_234_567_890);
+    let d4 = WindowsDuration.from_nanos(1_234_567_890);
     assert(d4.as_nanos() == 1_234_567_890);
 
     // Zero duration
-    let zero = Duration.ZERO;
+    let zero = WindowsDuration.ZERO;
     assert(zero.as_nanos() == 0);
     assert(zero.is_zero());
 
@@ -103,17 +103,17 @@ fn test_duration() {
     let diff = d1 - d2;
     assert(diff.as_millis() == 3500);
 
-    print("Duration tests passed");
+    print("WindowsDuration tests passed");
 }
 
 // =============================================================================
-// Instant Tests
+// WindowsInstant Tests
 // =============================================================================
 
 @test
 fn test_instant() {
     // Get current instant
-    let now = Instant.now();
+    let now = WindowsInstant.now();
 
     // Do some work
     let mut sum = 0;
@@ -122,7 +122,7 @@ fn test_instant() {
     }
 
     // Get another instant
-    let later = Instant.now();
+    let later = WindowsInstant.now();
 
     // Later should be after or equal to now
     assert(later >= now);
@@ -135,7 +135,7 @@ fn test_instant() {
     let elapsed2 = now.elapsed();
     assert(elapsed2 >= elapsed);
 
-    print("Instant tests passed");
+    print("WindowsInstant tests passed");
 }
 
 // =============================================================================
@@ -197,8 +197,8 @@ fn test_sleep_operations() {
     assert(elapsed_us >= 900_000);       // At least 0.9ms
     assert(elapsed_us < 50_000_000);     // Less than 50ms
 
-    // Test sleep with Duration
-    let duration = Duration.from_millis(5);
+    // Test sleep with WindowsDuration
+    let duration = WindowsDuration.from_millis(5);
     let before_d = monotonic_nanos();
     sleep(duration);
     let after_d = monotonic_nanos();
@@ -211,13 +211,13 @@ fn test_sleep_operations() {
 }
 
 // =============================================================================
-// Stopwatch Tests
+// WindowsStopwatch Tests
 // =============================================================================
 
 @test
 fn test_stopwatch() {
     // Create stopwatch
-    let mut sw = Stopwatch.new();
+    let mut sw = WindowsStopwatch.new();
 
     // Initially near-zero
     let initial = sw.elapsed();
@@ -252,17 +252,17 @@ fn test_stopwatch() {
     let after_reset = sw.elapsed();
     assert(after_reset.as_nanos() < 1_000_000);
 
-    print("Stopwatch tests passed");
+    print("WindowsStopwatch tests passed");
 }
 
 // =============================================================================
-// PerfCounter Tests
+// WindowsPerfCounter Tests
 // =============================================================================
 
 @test
 fn test_perf_counter() {
     // Create performance counter
-    let pc1 = PerfCounter.now();
+    let pc1 = WindowsPerfCounter.now();
 
     // Do some work
     let mut sum = 0;
@@ -270,7 +270,7 @@ fn test_perf_counter() {
         sum += i;
     }
 
-    let pc2 = PerfCounter.now();
+    let pc2 = WindowsPerfCounter.now();
 
     // Elapsed should be positive
     let elapsed = pc2.elapsed_since(pc1);
@@ -281,7 +281,7 @@ fn test_perf_counter() {
     let raw2 = pc2.raw();
     assert(raw2 >= raw1);
 
-    print("PerfCounter tests passed");
+    print("WindowsPerfCounter tests passed");
 }
 
 // =============================================================================
@@ -311,13 +311,13 @@ fn test_perf_freq() {
 }
 
 // =============================================================================
-// DeadlineTimer Tests
+// WindowsDeadlineTimer Tests
 // =============================================================================
 
 @test
 fn test_deadline_timer() {
     // Create deadline 10ms from now
-    let timer = DeadlineTimer.from_duration(Duration.from_millis(10));
+    let timer = WindowsDeadlineTimer.from_duration(WindowsDuration.from_millis(10));
 
     // Not expired yet
     assert(!timer.is_expired());
@@ -337,7 +337,7 @@ fn test_deadline_timer() {
     let remaining_after = timer.remaining();
     assert(remaining_after.as_millis() == 0);
 
-    print("DeadlineTimer tests passed");
+    print("WindowsDeadlineTimer tests passed");
 }
 
 // =============================================================================
@@ -346,9 +346,9 @@ fn test_deadline_timer() {
 
 @test
 fn test_time_arithmetic() {
-    // Duration arithmetic
-    let d1 = Duration.from_millis(100);
-    let d2 = Duration.from_millis(50);
+    // WindowsDuration arithmetic
+    let d1 = WindowsDuration.from_millis(100);
+    let d2 = WindowsDuration.from_millis(50);
 
     // Addition
     let sum = d1 + d2;
