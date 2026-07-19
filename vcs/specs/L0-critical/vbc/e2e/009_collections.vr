@@ -117,15 +117,15 @@ fn test_map_insert_and_get() {
     m.insert("two", 2);
     m.insert("three", 3);
     assert_eq(m.len(), 3);
-    assert_eq(m.get("one"), 1);
-    assert_eq(m.get("two"), 2);
-    assert_eq(m.get("three"), 3);
+    assert_eq(m.get("one"), Maybe.Some(1));
+    assert_eq(m.get("two"), Maybe.Some(2));
+    assert_eq(m.get("three"), Maybe.Some(3));
 }
 
 @test
 fn test_map_get_missing() {
     let m: Map<Text, Int> = Map.new();
-    assert_eq(m.get("missing"), 0);  // Map.get returns default value (0 for Int) when missing
+    assert_eq(m.get("missing"), Maybe.None);  // Map.get returns Maybe.None when the key is absent
 }
 
 @test
@@ -141,7 +141,7 @@ fn test_map_overwrite() {
     let mut m: Map<Text, Int> = Map.new();
     m.insert("x", 1);
     m.insert("x", 2);
-    assert_eq(m.get("x"), 2);
+    assert_eq(m.get("x"), Maybe.Some(2));
     assert_eq(m.len(), 1);
 }
 
@@ -152,8 +152,8 @@ fn test_map_remove() {
     m.insert("b", 2);
     m.remove("a");
     assert_eq(m.len(), 1);
-    assert_eq(m.get("a"), 0);  // removed key returns default
-    assert_eq(m.get("b"), 2);
+    assert_eq(m.get("a"), Maybe.None);  // removed key is absent -> Maybe.None
+    assert_eq(m.get("b"), Maybe.Some(2));
 }
 
 // =============================================================================
@@ -225,7 +225,7 @@ fn test_build_map_in_loop() {
         m.insert(i, i * i);
     }
     assert_eq(m.len(), 5);
-    assert_eq(m.get(1), 1);
-    assert_eq(m.get(3), 9);
-    assert_eq(m.get(5), 25);
+    assert_eq(m.get(1), Maybe.Some(1));
+    assert_eq(m.get(3), Maybe.Some(9));
+    assert_eq(m.get(5), Maybe.Some(25));
 }

@@ -19660,15 +19660,19 @@ fn lower_call_method<'ctx>(
         // Maybe unwrap bridge: compiled text.vr returns Maybe<T> (variant
         // with tag at +24, payload at +32) but user code expects raw value
         // with -1 for None. Extract payload from Some or return -1.
-        // Map/Set method bridge: compiled map.vr returns Maybe<V> for
-        // get/remove/contains_key. User code expects raw values (0 for not-found).
+        // Map/Set method bridge. `Map.get` returns a real `Maybe<V>` variant
+        // (fixup_map_get, T0274) that flows through the else-branch below
+        // untouched, so `match m.get(k) { Some/None }` and `.unwrap_or(d)`
+        // destructure it natively — matching the source `-> Maybe<V>` shape
+        // and the Tier-0 interpreter. Only variant-returning shapes that the
+        // caller wants UNWRAPPED to a raw payload here need the bridge:
+        // `remove_entry` (Maybe<(K,V)>). (`Map.remove` still returns a bare
+        // value at Tier-1 — a kin defect to T0274, tracked separately.)
         let caller_fn = ctx.function_name().as_str();
         let caller_is_map_internal = caller_fn.starts_with("Map.")
             || caller_fn.starts_with("Set.")
             || caller_fn.starts_with("Deque.")
             || caller_fn.starts_with("Slot.");
-        // Map.get and Map.remove now return V directly (not Maybe).
-        // Only remove_entry still returns Maybe<(K, V)>.
         let is_map_maybe_method = !caller_is_map_internal
             && (func_name.starts_with("Map.") || func_name.starts_with("Set."))
             && matches!(bare_method_early, "remove_entry");

@@ -2376,7 +2376,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .get_return_type()
             .map_or(false, |rt| rt.is_pointer_type());
 
-        // found: return value at entry_ptr + 8
+        // found: return Maybe.Some(value) — value at entry_ptr + 8.
+        // The result MUST be a real `Maybe<V>` variant, not a bare value:
+        // `Map.get(&self, K) -> Maybe<V>` (canonical lookup-API shape) and
+        // the Tier-0 interpreter's intercept both return `Maybe.Some(v)`, so
+        // idiomatic `match m.get(k) { Some(v) => .., None => .. }` /
+        // `m.get(k).unwrap_or(d)` destructure a variant. Returning the raw
+        // value made the caller match a bare integer as a variant pointer →
+        // SIGSEGV at Tier-1 (T0274). Mirrors `build_maybe_int_wrap` and the
+        // interpreter's `make_some_value` — bit-identical Some(tag=1) layout.
         builder.position_at_end(found);
         // SAFETY: GEP into the 32-byte map entry to access the value field; the entry was found by linear probe
         let val_slot = unsafe {
@@ -2389,16 +2397,20 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 )
                 .or_llvm_err()?
         };
+        let some_value = builder
+            .build_load(i64_type, val_slot, "value")
+            .or_llvm_err()?
+            .into_int_value();
+        let some_tag = verum_common::well_known_types::maybe_success_tag();
+        let some_ptr = self.lower_make_variant(&builder, module, some_tag, 1)?;
+        self.lower_set_variant_data(&builder, some_ptr, 0, some_value)?;
         if returns_ptr {
-            let value = builder
-                .build_load(ptr_type, val_slot, "value")
-                .or_llvm_err()?;
-            builder.build_return(Some(&value)).or_llvm_err()?;
+            builder.build_return(Some(&some_ptr)).or_llvm_err()?;
         } else {
-            let value = builder
-                .build_load(i64_type, val_slot, "value")
+            let some_int = builder
+                .build_ptr_to_int(some_ptr, i64_type, "some_variant_int")
                 .or_llvm_err()?;
-            builder.build_return(Some(&value)).or_llvm_err()?;
+            builder.build_return(Some(&some_int)).or_llvm_err()?;
         }
 
         // check_psl: Robin Hood early termination
@@ -2471,15 +2483,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
             (&psl_next, check_psl),
         ]);
 
-        // not_found: return null/0
+        // not_found: return Maybe.None (tag=0, no payload). See the `found`
+        // block — the contract is `Maybe<V>`, not a bare 0-on-miss sentinel
+        // (0 is a legitimate value for `V = Int`, so a sentinel is lossy).
         builder.position_at_end(not_found);
+        let none_tag = verum_common::well_known_types::maybe_none_tag();
+        let none_ptr = self.lower_make_variant(&builder, module, none_tag, 0)?;
         if returns_ptr {
-            let null_ptr = ptr_type.const_null();
-            builder.build_return(Some(&null_ptr)).or_llvm_err()?;
+            builder.build_return(Some(&none_ptr)).or_llvm_err()?;
         } else {
-            builder
-                .build_return(Some(&i64_type.const_zero()))
+            let none_int = builder
+                .build_ptr_to_int(none_ptr, i64_type, "none_variant_int")
                 .or_llvm_err()?;
+            builder.build_return(Some(&none_int)).or_llvm_err()?;
         }
         Ok(())
     }
@@ -3187,14 +3203,22 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
         builder.build_store(tomb_slot, tomb_plus1).or_llvm_err()?;
 
-        // Return value
+        // Return Maybe.Some(value). `Map.remove(&mut self, K) -> Maybe<V>`
+        // (core/collections/map.vr) and the Tier-0 interpreter return the
+        // prior value wrapped in `Maybe.Some`; returning a bare value made
+        // `match m.remove(k) { Some(v) => .. }` deref a variant tag out of a
+        // raw integer → SIGSEGV, the identical defect fixed for `Map.get`
+        // (T0274). Same Some(tag=1) layout via lower_make_variant.
+        let some_tag = verum_common::well_known_types::maybe_success_tag();
+        let some_ptr = self.lower_make_variant(&builder, module, some_tag, 1)?;
+        self.lower_set_variant_data(&builder, some_ptr, 0, value)?;
         if returns_ptr {
-            let value_ptr = builder
-                .build_int_to_ptr(value, ptr_type, "value_ptr")
-                .or_llvm_err()?;
-            builder.build_return(Some(&value_ptr)).or_llvm_err()?;
+            builder.build_return(Some(&some_ptr)).or_llvm_err()?;
         } else {
-            builder.build_return(Some(&value)).or_llvm_err()?;
+            let some_int = builder
+                .build_ptr_to_int(some_ptr, i64_type, "some_variant_int")
+                .or_llvm_err()?;
+            builder.build_return(Some(&some_int)).or_llvm_err()?;
         }
 
         // check_psl: Robin Hood early termination + advance
@@ -3264,15 +3288,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
             (&psl_next, check_psl),
         ]);
 
-        // not_found: return null/0
+        // not_found: return Maybe.None (tag=0, no payload) — see the `found`
+        // block; the contract is Maybe<V>, not a bare 0-on-miss sentinel.
         builder.position_at_end(not_found);
+        let none_tag = verum_common::well_known_types::maybe_none_tag();
+        let none_ptr = self.lower_make_variant(&builder, module, none_tag, 0)?;
         if returns_ptr {
-            let null_ptr = ptr_type.const_null();
-            builder.build_return(Some(&null_ptr)).or_llvm_err()?;
+            builder.build_return(Some(&none_ptr)).or_llvm_err()?;
         } else {
-            builder
-                .build_return(Some(&i64_type.const_zero()))
+            let none_int = builder
+                .build_ptr_to_int(none_ptr, i64_type, "none_variant_int")
                 .or_llvm_err()?;
+            builder.build_return(Some(&none_int)).or_llvm_err()?;
         }
         Ok(())
     }
@@ -3377,16 +3404,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_conditional_branch(self_is_null, ret_none, call_ensure)
             .or_llvm_err()?;
 
-        // ret_none: return 0/null
+        // ret_none: self was null (no-op) → return Maybe.None, matching the
+        // Maybe<V> contract (a bare 0 here would crash a caller's `match`).
         builder.position_at_end(ret_none);
+        let ret_none_tag = verum_common::well_known_types::maybe_none_tag();
+        let ret_none_ptr = self.lower_make_variant(&builder, module, ret_none_tag, 0)?;
         if returns_ptr {
-            builder
-                .build_return(Some(&ptr_type.const_null()))
-                .or_llvm_err()?;
+            builder.build_return(Some(&ret_none_ptr)).or_llvm_err()?;
         } else {
-            builder
-                .build_return(Some(&i64_type.const_zero()))
+            let ret_none_int = builder
+                .build_ptr_to_int(ret_none_ptr, i64_type, "ret_none_variant_int")
                 .or_llvm_err()?;
+            builder.build_return(Some(&ret_none_int)).or_llvm_err()?;
         }
 
         // call_ensure: call Map.ensure_capacity if available, then proceed
@@ -3629,13 +3658,20 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder
             .build_store(found_val_slot, value_i64)
             .or_llvm_err()?;
+        // Key existed: return Maybe.Some(old_value). `Map.insert(k,v) -> Maybe<V>`
+        // yields the prior value; a bare value made `match m.insert(k,v) {
+        // Some(old) => .. }` deref a variant tag from a raw integer → SIGSEGV
+        // (same class as T0274 get/remove). Some(tag=1) via lower_make_variant.
+        let some_tag = verum_common::well_known_types::maybe_success_tag();
+        let some_ptr = self.lower_make_variant(&builder, module, some_tag, 1)?;
+        self.lower_set_variant_data(&builder, some_ptr, 0, old_value)?;
         if returns_ptr {
-            let old_ptr = builder
-                .build_int_to_ptr(old_value, ptr_type, "old_ptr")
-                .or_llvm_err()?;
-            builder.build_return(Some(&old_ptr)).or_llvm_err()?;
+            builder.build_return(Some(&some_ptr)).or_llvm_err()?;
         } else {
-            builder.build_return(Some(&old_value)).or_llvm_err()?;
+            let some_int = builder
+                .build_ptr_to_int(some_ptr, i64_type, "some_variant_int")
+                .or_llvm_err()?;
+            builder.build_return(Some(&some_int)).or_llvm_err()?;
         }
 
         // search_check_psl: Robin Hood early termination
@@ -4016,14 +4052,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_llvm_err()?;
         builder.build_store(len_slot, len_plus1).or_llvm_err()?;
 
+        // New key inserted: no prior value → return Maybe.None (not bare 0).
+        let none_tag = verum_common::well_known_types::maybe_none_tag();
+        let none_ptr = self.lower_make_variant(&builder, module, none_tag, 0)?;
         if returns_ptr {
-            builder
-                .build_return(Some(&ptr_type.const_null()))
-                .or_llvm_err()?;
+            builder.build_return(Some(&none_ptr)).or_llvm_err()?;
         } else {
-            builder
-                .build_return(Some(&i64_type.const_zero()))
+            let none_int = builder
+                .build_ptr_to_int(none_ptr, i64_type, "none_variant_int")
                 .or_llvm_err()?;
+            builder.build_return(Some(&none_int)).or_llvm_err()?;
         }
         Ok(())
     }

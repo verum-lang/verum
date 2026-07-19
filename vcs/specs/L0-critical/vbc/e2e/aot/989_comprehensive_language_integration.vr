@@ -172,7 +172,7 @@ fn main() -> Int {
     m.insert("b", 2);
     m.insert("c", 3);
     assert_eq(m.len(), 3);
-    assert_eq(m.get("b"), 2);
+    assert_eq(m.get("b"), Maybe.Some(2));
     passed = passed + 1;
 
     assert_eq(passed, 13);

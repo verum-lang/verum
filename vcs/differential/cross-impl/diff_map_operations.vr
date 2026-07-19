@@ -16,16 +16,15 @@ fn main() -> Int {
     assert_eq(m.contains_key("one"), true);
     assert_eq(m.contains_key("four"), false);
 
-    let v1 = m.get("one");
-    assert_eq(v1, 1);
-    let v2 = m.get("two");
-    assert_eq(v2, 2);
-    let v3 = m.get("three");
-    assert_eq(v3, 3);
+    // Map.get returns Maybe<V> (canonical lookup API)
+    assert_eq(m.get("one"), Maybe.Some(1));
+    assert_eq(m.get("two"), Maybe.Some(2));
+    assert_eq(m.get("three"), Maybe.Some(3));
+    assert_eq(m.get("absent"), Maybe.None);
 
     // Overwrite
     m.insert("one", 100);
-    assert_eq(m.get("one"), 100);
+    assert_eq(m.get("one"), Maybe.Some(100));
     assert_eq(m.len(), 3);
 
     // Integer keys
@@ -36,8 +35,8 @@ fn main() -> Int {
         i = i + 1;
     }
     assert_eq(int_map.len(), 10);
-    assert_eq(int_map.get(5), 25);
-    assert_eq(int_map.get(9), 81);
+    assert_eq(int_map.get(5), Maybe.Some(25));
+    assert_eq(int_map.get(9), Maybe.Some(81));
 
     print("diff_map_operations: ok");
     0

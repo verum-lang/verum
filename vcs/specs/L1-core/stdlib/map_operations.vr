@@ -19,10 +19,10 @@ fn main() {
     // Length
     assert_eq(m.len(), 3);
 
-    // Get
-    assert_eq(m.get("alice"), 30);
-    assert_eq(m.get("bob"), 25);
-    assert_eq(m.get("charlie"), 35);
+    // Get — Map.get returns Maybe<V> (canonical lookup API)
+    assert_eq(m.get("alice"), Maybe.Some(30));
+    assert_eq(m.get("bob"), Maybe.Some(25));
+    assert_eq(m.get("charlie"), Maybe.Some(35));
 
     // Contains
     assert_eq(m.contains_key("alice"), true);
@@ -30,7 +30,7 @@ fn main() {
 
     // Update existing key
     m.insert("alice", 31);
-    assert_eq(m.get("alice"), 31);
+    assert_eq(m.get("alice"), Maybe.Some(31));
     assert_eq(m.len(), 3);
 
     // Remove
@@ -46,6 +46,6 @@ fn main() {
         i = i + 1;
     }
     assert_eq(counts.len(), 10);
-    assert_eq(counts.get(5), 25);
-    assert_eq(counts.get(9), 81);
+    assert_eq(counts.get(5), Maybe.Some(25));
+    assert_eq(counts.get(9), Maybe.Some(81));
 }
