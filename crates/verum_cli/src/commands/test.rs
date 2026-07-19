@@ -22,9 +22,11 @@
 //! # Options modelled on libtest / `cargo test`
 //!
 
-//! * `--filter STR` — substring match on test name; a leading `^`
-//!   anchors at the name start (`--filter '^text/'` scopes to the
-//!   `text/` subtree without catching `context/`)
+//! * `--filter STR` — substring match on test name. A filter that
+//!   contains `/` only matches at suite-path segment boundaries
+//!   (`--filter sync/` selects `sync/…` and `runtime/sync/…` but never
+//!   `async/…`); a leading `^` additionally anchors at the name start
+//!   (`--filter '^text/'` scopes to the `text/` subtree only)
 //! * `--exact` — require full match (like libtest `--exact`)
 //! * `--skip PATTERN` — substring-exclude; repeatable
 //! * `--include-ignored` — run all, including `@ignore`
@@ -790,11 +792,48 @@ fn matches_filter(name: &Text, filter: &Option<Text>, exact: bool) -> bool {
         // 2026-07-10 text campaign four separate collisions.
         // `--filter '^text/'` now does what the subtree-scoping doc
         // always promised.
+        //
+        // TEST-FILTER-SUBSTRING-ANCHOR-1 (T0341): a filter CONTAINING
+        // `/` names suite-path segments, so it matches only at a
+        // segment boundary — `--filter sync/` selects `sync/…` and the
+        // nested `runtime/sync/…` but never `async/…` (pre-fix it
+        // pulled 483 async/* tests into a 257-test sync sweep). Plain
+        // slash-less substrings (`--filter bloom`) keep their historic
+        // anywhere-match semantics.
         Some(f) => match f.as_str().strip_prefix('^') {
             Some(prefix) => name.as_str().starts_with(prefix),
+            None if f.as_str().contains('/') => {
+                segment_anchored_contains(name.as_str(), f.as_str())
+            }
             None => name.as_str().contains(f.as_str()),
         },
     }
+}
+
+/// T0341: does `filter` occur in `name` starting at a suite-path
+/// segment boundary (the name start, or immediately after a `/`)?
+///
+/// This is the ONE matcher used for slash-carrying filters — it keeps
+/// mid-tree subtree scoping (`collections/list` matches
+/// `core/collections/list::t`) while making segment names
+/// substring-safe (`sync/` cannot match `async/`).
+fn segment_anchored_contains(name: &str, filter: &str) -> bool {
+    let mut from = 0;
+    while let Some(rel) = name[from..].find(filter) {
+        let at = from + rel;
+        if at == 0 || name.as_bytes()[at - 1] == b'/' {
+            return true;
+        }
+        // Advance one full character past this occurrence's start so
+        // overlapping occurrences at later boundaries are still found.
+        from = at
+            + name[at..]
+                .chars()
+                .next()
+                .map(char::len_utf8)
+                .unwrap_or(1);
+    }
+    false
 }
 
 /// T0365: annotate a failing result from a deliberately-executed
@@ -2493,9 +2532,10 @@ struct Test {
 /// Qualification makes test names unique across directories (two
 /// `unit_test.vr` files in different folders no longer collapse to the
 /// same `unit_test::fn` name) and lets `--filter '^mem/'` or
-/// `--filter '^mem/capability/'` scope a run to a subtree (the `^`
-/// anchor is REQUIRED for true subtree scoping — bare `mem/` is a
-/// substring and also matches any `*mem/` elsewhere in the tree). The function leaf
+/// `--filter '^mem/capability/'` scope a run to a subtree (`^` anchors
+/// at the name START; a bare `mem/` filter anchors at segment
+/// boundaries — it also selects a nested `…/mem/` subtree but never a
+/// name where `mem/` is a substring inside a segment; T0341). The function leaf
 /// still follows the final `::`, so `--filter <fn>` and function
 /// resolution (which prefers `Test::fn_name`) are unaffected.
 fn module_qualified_prefix(file: &Path) -> String {
@@ -3237,6 +3277,75 @@ fn pinned_drop_me() {
         let f: Option<Text> = Some("abc".into());
         assert!(matches_filter(&"abc".into(), &f, true));
         assert!(!matches_filter(&"abcd".into(), &f, true));
+    }
+
+    /// T0341 pin: a slash-carrying filter matches only at suite-path
+    /// segment boundaries — `sync/` can no longer pull `async/` (or
+    /// any other superstring segment) into the run.
+    #[test]
+    fn filter_with_slash_is_segment_anchored() {
+        let f: Option<Text> = Some("sync/".into());
+        assert!(matches_filter(&"sync/mutex::test_lock".into(), &f, false));
+        assert!(
+            matches_filter(&"runtime/sync/atomic::test_cas".into(), &f, false),
+            "nested sync/ segment must still match"
+        );
+        assert!(
+            !matches_filter(&"async/task::test_spawn".into(), &f, false),
+            "async/ is NOT a segment-boundary occurrence of sync/"
+        );
+        assert!(
+            !matches_filter(&"runtime/async/waker::test_wake".into(), &f, false),
+            "nested async/ must not match either"
+        );
+        // Mid-tree subtree scoping still works, and a partial tail is
+        // allowed (the anchor constrains the START of the match).
+        let g: Option<Text> = Some("collections/list".into());
+        assert!(matches_filter(
+            &"core/collections/list::test_push".into(),
+            &g,
+            false
+        ));
+        let h: Option<Text> = Some("sync/mu".into());
+        assert!(matches_filter(&"sync/mutex::test_lock".into(), &h, false));
+    }
+
+    /// T0341 pin: preserved behaviors around the segment anchor —
+    /// plain slash-less substrings match anywhere (`--filter bloom`,
+    /// `--filter sync`), and `^` remains a pure name-start anchor.
+    #[test]
+    fn filter_plain_substring_and_caret_semantics_preserved() {
+        let bloom: Option<Text> = Some("bloom".into());
+        assert!(matches_filter(
+            &"text/bloom_filter::test_insert".into(),
+            &bloom,
+            false
+        ));
+        // Slash-less `sync` intentionally keeps anywhere-substring
+        // semantics (matches async too) — only `/`-carrying filters
+        // opt into segment anchoring.
+        let sync_plain: Option<Text> = Some("sync".into());
+        assert!(matches_filter(&"async/task::test_spawn".into(), &sync_plain, false));
+        // `^` prefix anchor unchanged.
+        let caret: Option<Text> = Some("^text/".into());
+        assert!(matches_filter(&"text/mod::unit".into(), &caret, false));
+        assert!(!matches_filter(&"context/mod::unit".into(), &caret, false));
+    }
+
+    #[test]
+    fn segment_anchored_contains_boundary_table() {
+        use super::segment_anchored_contains;
+        assert!(segment_anchored_contains("sync/a::t", "sync/"));
+        assert!(segment_anchored_contains("x/sync/a::t", "sync/"));
+        assert!(!segment_anchored_contains("async/a::t", "sync/"));
+        // First occurrence unanchored, later occurrence anchored.
+        assert!(segment_anchored_contains("async/sync/a::t", "sync/"));
+        // A filter starting with a multi-byte character walks the scan
+        // by whole characters (no byte-boundary panic) and still
+        // resolves boundaries correctly.
+        assert!(segment_anchored_contains("é/x::t", "é/"));
+        assert!(segment_anchored_contains("a/é/x::t", "é/"));
+        assert!(!segment_anchored_contains("aé/xé/y::t", "é/"));
     }
 
     #[test]
