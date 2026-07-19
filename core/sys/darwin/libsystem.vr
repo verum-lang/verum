@@ -161,7 +161,10 @@ extern {
     // =========================================================================
 
     /// Get process ID. C: `pid_t getpid(void);` (`pid_t = int32_t`).
-    fn getpid() -> Int32;
+    /// `_ffi` so the raw extern is not shadowed by the public
+    /// `safe_getpid as getpid` alias (mod.vr) — see T0446 / the mmap_ffi pattern.
+    @ffi_name("getpid")
+    fn getpid_ffi() -> Int32;
 
     /// Get parent process ID. C: `pid_t getppid(void);`.
     fn getppid() -> Int32;
@@ -208,7 +211,10 @@ extern {
 
     /// Create kqueue. C: `int kqueue(void);` (returns a file descriptor,
     /// POSIX `int`).
-    public fn kqueue() -> Int32;
+    /// `_ffi` so the raw extern is not shadowed by the public
+    /// `safe_kqueue as kqueue` alias (mod.vr) — see T0446 / the mmap_ffi pattern.
+    @ffi_name("kqueue")
+    public fn kqueue_ffi() -> Int32;
 
     /// Register/poll events.
     /// C: `int kevent(int kq, const struct kevent *changelist, int nchanges,
@@ -345,7 +351,12 @@ extern {
 
     /// Get clock time (POSIX). C: `int clock_gettime(clockid_t, struct timespec *)`.
     /// `clockid_t` is `int32` on macOS. T0.4 fix.
-    public fn clock_gettime(clk_id: Int32, tp: &mut DarwinTimespec) -> Int32;
+    /// `_ffi` so the 2-arg raw extern is not shadowed by the 1-arg public
+    /// `safe_clock_gettime as clock_gettime` alias (mod.vr) — the collision made
+    /// 2-arg callers bind to the 1-arg wrapper and panic-stub with an arity
+    /// mismatch (T0446). See the mmap_ffi pattern.
+    @ffi_name("clock_gettime")
+    public fn clock_gettime_ffi(clk_id: Int32, tp: &mut DarwinTimespec) -> Int32;
 
     /// Sleep (nanoseconds). C: `int nanosleep(const struct timespec *rqtp,
     /// struct timespec *rmtp);`.
@@ -550,7 +561,10 @@ extern {
 
     /// Get entropy (macOS 10.12+). C: `int getentropy(void *buffer,
     /// size_t length);`. `length` is size_t (kept Int), return is `int`.
-    fn getentropy(buffer: &unsafe Byte, length: Int) -> Int32;
+    /// `_ffi` so the raw extern is not shadowed by the public
+    /// `safe_getentropy as getentropy` alias (mod.vr) — see T0446 / the mmap_ffi pattern.
+    @ffi_name("getentropy")
+    fn getentropy_ffi(buffer: &unsafe Byte, length: Int) -> Int32;
 
     /// arc4random (BSD)
     fn arc4random() -> UInt32;
@@ -1330,7 +1344,7 @@ public fn madvise_free_reuse(addr: &unsafe Byte, len: Int) -> Result<(), OSError
 @intrinsic("sys_getpid")
 @vbc_direct_lowering
 public fn safe_getpid() -> Int {
-    unsafe { getpid() }
+    unsafe { getpid_ffi() }
 }
 
 /// Get thread ID
@@ -1349,7 +1363,7 @@ public fn safe_getentropy(buf: &unsafe Byte, len: Int) -> Result<(), OSError> {
     if len > 256 {
         return Result.Err(OSError.new(5, "getentropy: max 256 bytes"));
     }
-    let result = unsafe { getentropy(buf, len) };
+    let result = unsafe { getentropy_ffi(buf, len) };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))
@@ -1360,7 +1374,7 @@ public fn safe_getentropy(buf: &unsafe Byte, len: Int) -> Result<(), OSError> {
 
 /// Create kqueue (safe wrapper)
 public fn safe_kqueue() -> Result<FileDesc, OSError> {
-    let result = unsafe { kqueue() };
+    let result = unsafe { kqueue_ffi() };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))
@@ -1411,7 +1425,7 @@ public fn monotonic_millis() -> UInt64 {
 /// Get clock time
 public fn safe_clock_gettime(clock_id: Int) -> Result<DarwinTimespec, OSError> {
     let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
-    let result = unsafe { clock_gettime(clock_id, &mut ts) };
+    let result = unsafe { clock_gettime_ffi(clock_id, &mut ts) };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))

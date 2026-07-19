@@ -388,7 +388,7 @@ implement DarwinCondvar {
     public fn wait_timeout(&mut self, mutex: &mut DarwinMutex, timeout_ms: Int) -> Result<Bool, DarwinThreadError> {
         // Calculate absolute timeout
         let mut ts = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
-        unsafe { super.libsystem.clock_gettime(0, &mut ts) };  // CLOCK_REALTIME
+        unsafe { super.libsystem.clock_gettime_ffi(0, &mut ts) };  // CLOCK_REALTIME
         ts.tv_sec += timeout_ms / 1000;
         ts.tv_nsec += (timeout_ms % 1000) * 1_000_000;
         if ts.tv_nsec >= 1_000_000_000 {
