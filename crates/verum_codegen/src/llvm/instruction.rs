@@ -30593,6 +30593,97 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(SystemSubOpcode::TypedArrayLoad) => {
+            // Tier-1 twin of the interpreter's TypedArrayLoad (T0356): read
+            // one element from a PACKED typed array, DECODING by width — the
+            // read twin of TypedArrayStore and typed analogue of
+            // ByteArrayLoad. Format: dst:reg, arr:reg, idx:reg, elem_size:u8
+            // (bit 0x80 = float). Integer widths zero-extend to i64; F32
+            // bit-reinterprets then widens; F64 bit-reinterprets — AOT floats
+            // are f64 FloatValues (see LoadF / F64FromBits). Mirrors the interp
+            // `heap::typed_array_element` decode so the tiers agree. The
+            // elem_size byte sits after three (possibly wide) register operands.
+            if operands.len() < 4 {
+                return Err(LlvmLoweringError::internal(
+                    "TypedArrayLoad: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "tal_base")?;
+            let index = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "tal_idx")?;
+            let mut cursor = 0usize;
+            for _ in 0..3 {
+                cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
+            }
+            let elem_byte = *operands.get(cursor).unwrap_or(&8);
+            let elem: u64 = match elem_byte & 0x7F {
+                w @ (1 | 2 | 4 | 8) => w as u64,
+                _ => 8,
+            };
+            let is_float = elem_byte & 0x80 != 0;
+            let i64_ty = ctx.types().i64_type();
+            let i8_ty = ctx.llvm_context().i8_type();
+            let off = ctx
+                .builder()
+                .build_int_mul(index, i64_ty.const_int(elem, false), "tal_off")
+                .or_llvm_err()?;
+            // SAFETY: GEP into the packed array at idx*elem (bytes); bounds are
+            // the caller's contract (mirrors TypedArrayStore).
+            let eptr = unsafe {
+                ctx.builder()
+                    .build_gep(i8_ty, base_ptr, &[off], "tal_ptr")
+                    .or_llvm_err()?
+            };
+            let llvm_ctx = ctx.llvm_context();
+            let int_ty = match elem {
+                1 => llvm_ctx.i8_type(),
+                2 => llvm_ctx.i16_type(),
+                4 => llvm_ctx.i32_type(),
+                _ => i64_ty,
+            };
+            let raw = ctx
+                .builder()
+                .build_load(int_ty, eptr, "tal_raw")
+                .or_llvm_err()?
+                .into_int_value();
+            if is_float {
+                let f64_ty = ctx.types().f64_type();
+                let fval = if elem == 4 {
+                    // F32: the 4 raw bytes are IEEE single bits → bitcast to
+                    // f32, then widen to the f64 register representation.
+                    let f32_ty = ctx.llvm_context().f32_type();
+                    let f32v = ctx
+                        .builder()
+                        .build_bit_cast(raw, f32_ty, "tal_f32")
+                        .or_llvm_err()?
+                        .into_float_value();
+                    ctx.builder()
+                        .build_float_ext(f32v, f64_ty, "tal_fpext")
+                        .or_llvm_err()?
+                } else {
+                    // F64: bit-reinterpret the 8 raw bytes as a double.
+                    ctx.builder()
+                        .build_bit_cast(raw, f64_ty, "tal_f64")
+                        .or_llvm_err()?
+                        .into_float_value()
+                };
+                ctx.set_register(dst_reg, fval.into());
+                ctx.mark_float_register(dst_reg);
+            } else {
+                // Integer widths zero-extend to i64 (u8/u16/u32 zext; an
+                // 8-byte read is already the i64 value).
+                let ext = if elem == 8 {
+                    raw
+                } else {
+                    ctx.builder()
+                        .build_int_z_extend(raw, i64_ty, "tal_zext")
+                        .or_llvm_err()?
+                };
+                ctx.set_register(dst_reg, ext.into());
+            }
+            Ok(())
+        }
+
         Some(SystemSubOpcode::TypedArrayStore) => {
             // Tier-1 twin of the interpreter's TypedArrayStore (peer
             // opcode, ffi_extended.rs): store one element into a PACKED
@@ -30608,7 +30699,6 @@ fn lower_ffi_extended<'ctx>(
             }
             let arr_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 0))?, "tas_base")?;
             let index = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "tas_idx")?;
-            let value = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "tas_val")?;
             let mut cursor = 0usize;
             for _ in 0..3 {
                 cursor += if operands[cursor] & 0x80 != 0 { 2 } else { 1 };
@@ -30618,6 +30708,32 @@ fn lower_ffi_extended<'ctx>(
                 _ => 8,
             };
             let i64_ty = ctx.types().i64_type();
+            // Unbox the value to the raw `elem`-byte integer to store. Ints /
+            // F64 bit-reinterpret via `as_i64` (an f64 register keeps all 8
+            // bytes). A `[Float32; N]` slot (elem == 4 + float register) must
+            // NARROW the f64 to f32 IEEE bits first — the interp stores
+            // `(f as f32).to_bits()`; `as_i64` alone would keep the LOW half
+            // of the f64 pattern, silent garbage on read-back (T0356).
+            let val_raw = ctx.get_register(op_reg(operands, 2))?;
+            let value = if elem == 4 && scalar_reg_is_float(ctx, op_reg(operands, 2), val_raw) {
+                let f64v = as_f64(ctx, val_raw, "tas_f64src")?;
+                let f32_ty = ctx.llvm_context().f32_type();
+                let f32v = ctx
+                    .builder()
+                    .build_float_trunc(f64v, f32_ty, "tas_f32narrow")
+                    .or_llvm_err()?;
+                let i32_ty = ctx.llvm_context().i32_type();
+                let i32v = ctx
+                    .builder()
+                    .build_bit_cast(f32v, i32_ty, "tas_f32bits")
+                    .or_llvm_err()?
+                    .into_int_value();
+                ctx.builder()
+                    .build_int_z_extend(i32v, i64_ty, "tas_f32zext")
+                    .or_llvm_err()?
+            } else {
+                as_i64(ctx, val_raw, "tas_val")?
+            };
             let i8_ty = ctx.llvm_context().i8_type();
             let off = ctx
                 .builder()

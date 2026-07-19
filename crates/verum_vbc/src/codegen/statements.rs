@@ -977,9 +977,10 @@ impl VbcCodegen {
             // Bind to pattern
             self.compile_pattern_bind(pattern, result)?;
 
-            // Mark the variable as a typed array
+            // Mark the variable as a typed array (carry float-ness so the
+            // index read can emit TypedArrayLoad with the 0x80 flag — T0356).
             if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                self.ctx.mark_typed_array_var(&name.name, elem_size);
+                self.ctx.mark_typed_array_var(&name.name, elem_size, is_float);
             }
 
             return Ok(None);

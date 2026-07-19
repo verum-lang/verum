@@ -942,6 +942,78 @@ fn ffi_extended_body(
         }
 
         // ================================================================
+        // Typed Array Load — T0356
+        // ================================================================
+        Some(SystemSubOpcode::TypedArrayLoad) => {
+            // Load one element from a packed typed array, DECODING by width.
+            // Format: dst:reg, arr:reg, idx:reg, elem_size:u8 (bit 0x80 = float).
+            // The read twin of `TypedArrayStore` and the typed analogue of
+            // `ByteArrayLoad` (elem_size == 1): integer widths zero-extend, F32
+            // widens `from_bits` → f64, F64 round-trips its IEEE bits. Reuses
+            // the ONE decode authority `heap::typed_array_element` so this path
+            // and the `GetE` typed-array branch stay bit-identical.
+            let dst = read_reg(state)?;
+            let arr_reg = read_reg(state)?;
+            let idx_reg = read_reg(state)?;
+            let elem_byte = read_u8(state)?;
+            let elem_size = (elem_byte & 0x7F) as usize;
+            let is_float = elem_byte & 0x80 != 0;
+
+            let arr_ptr = state.get_reg(arr_reg).as_ptr::<u8>();
+            if arr_ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+            let idx = state.get_reg(idx_reg).as_i64();
+            if idx < 0 {
+                return Err(InterpreterError::IndexOutOfBounds { index: idx, length: 0 });
+            }
+            // Bounds-check against `header.size` (BYTES), mirroring the store.
+            let array_bytes = {
+                // SAFETY: `arr_ptr` non-null (checked) and begins with an
+                // `ObjectHeader`; the borrow does not escape this block.
+                let header = unsafe {
+                    &*(arr_ptr as *const super::super::super::heap::ObjectHeader)
+                };
+                header.size as usize
+            };
+            let elem_stride = elem_size.max(1);
+            let offset = (idx as usize).checked_mul(elem_size).ok_or({
+                InterpreterError::IndexOutOfBounds {
+                    index: idx,
+                    length: array_bytes / elem_stride,
+                }
+            })?;
+            if offset.checked_add(elem_size).map_or(true, |end| end > array_bytes) {
+                return Err(InterpreterError::IndexOutOfBounds {
+                    index: idx,
+                    length: array_bytes / elem_stride,
+                });
+            }
+            // Map (elem_size, is_float) → the packed-scalar TypeId, then decode
+            // through the shared authority (keys `typed_array_element_spec`).
+            let tid = match (elem_size, is_float) {
+                (1, false) => TypeId::U8,
+                (2, false) => TypeId::U16,
+                (4, false) => TypeId::U32,
+                (8, false) => TypeId::U64,
+                (4, true) => TypeId::F32,
+                (8, true) => TypeId::F64,
+                // Widths outside {1,2,4,8}: fall back to a raw i64 read.
+                _ => TypeId::U64,
+            };
+            // SAFETY: bounds-checked above; the data area starts at
+            // `HEADER` and `typed_array_element` reads `idx*stride` within it.
+            let data_ptr =
+                unsafe { arr_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) };
+            let value = unsafe {
+                super::super::super::heap::typed_array_element(tid, data_ptr, idx as usize)
+            }
+            .unwrap_or_else(|| Value::from_i64(0));
+            state.set_reg(dst, value);
+            Ok(DispatchResult::Continue)
+        }
+
+        // ================================================================
         // Static-Mut Backing Cell Address — Task #26 [E2] enabler.
         // ================================================================
         //

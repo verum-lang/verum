@@ -5240,6 +5240,19 @@ pub enum SystemSubOpcode {
     /// (`GetE`/`SliceGet reserved=elem_size` → `from_i64`) are coherent.
     TypedArrayStore = 0x5E,
 
+    /// Load one element from a typed (packed) array, DECODING by width.
+    ///
+    /// Format: `dst:reg, arr:reg, idx:reg, elem_size:u8`
+    /// Reads `elem_size` (bit 0x80 = float) raw bytes at
+    /// `HEADER + idx*(elem_size & 0x7F)` and boxes the result: integer
+    /// widths zero-extend (`from_i64`), F32 widens `from_bits` → f64, F64
+    /// round-trips its IEEE bits (`from_f64`). The read twin of
+    /// `TypedArrayStore` and the typed analogue of `ByteArrayLoad` (the
+    /// `elem_size == 1` case) — closes the T0356 Tier-1 typed store/load
+    /// leg (there was NO typed load opcode; `[Int; N]`/`[Float; N]` index
+    /// reads crashed or read garbage at AOT via the packed container-view).
+    TypedArrayLoad = 0x5F,
+
     /// Get raw address of a struct field.
     ///
 
@@ -6251,6 +6264,7 @@ impl SystemSubOpcode {
             0x4D => Some(Self::TypedArrayElementAddr),
             0x4E => Some(Self::NewTypedArray),
             0x5E => Some(Self::TypedArrayStore),
+            0x5F => Some(Self::TypedArrayLoad),
             0x4F => Some(Self::StructFieldAddr),
             // Callback Support
             0x50 => Some(Self::CreateCallback),
@@ -6426,6 +6440,7 @@ impl SystemSubOpcode {
             Self::TypedArrayElementAddr  => m!("FFI_TYPED_ARRAY_ELEM_ADDR",  MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::NewTypedArray          => m!("FFI_NEW_TYPED_ARRAY",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
             Self::TypedArrayStore        => m!("FFI_TYPED_ARRAY_STORE",      MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
+            Self::TypedArrayLoad         => m!("FFI_TYPED_ARRAY_LOAD",       MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
             Self::StructFieldAddr        => m!("FFI_STRUCT_FIELD_ADDR",      MemoryOperations,         call=false, marshal=false, alloc=false, dealloc=false),
 
             // ===== Callback Support (0x50-0x5F) =====
@@ -17247,8 +17262,8 @@ mod tests {
         // corresponding meta() arm is in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 111,
-            "SystemSubOpcode variant count drift: expected 111, got {}",
+        assert_eq!(count, 112,
+            "SystemSubOpcode variant count drift: expected 112, got {}",
             count);
     }
 
@@ -17283,6 +17298,7 @@ mod tests {
             (0x5C, SystemCategory::MemoryOperations),          // TlsSlotClearF
             (0x5D, SystemCategory::MemoryOperations),          // TlsGetBaseF
             (0x5E, SystemCategory::MemoryOperations),          // TypedArrayStore
+            (0x5F, SystemCategory::MemoryOperations),          // TypedArrayLoad
         ];
         let mut exceptions_hit = 0usize;
         for_every_system_sub_opcode(|op| {
@@ -17398,7 +17414,7 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 111);
+        assert_eq!(seen.len(), 112);
     }
 
     // ========================================================================
@@ -18592,8 +18608,8 @@ mod tests {
     fn text_meta_count_pinned_at_ten() {
         let mut count = 0;
         for_every_text_sub_opcode(|_| count += 1);
-        assert_eq!(count, 10,
-            "TextSubOpcode variant count drift: expected 10, got {}", count);
+        assert_eq!(count, 11,
+            "TextSubOpcode variant count drift: expected 11, got {}", count);
     }
 
     #[test]
@@ -18652,6 +18668,6 @@ mod tests {
             assert!(!seen.contains(&m), "duplicate mnemonic {:?}", m);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 10);
+        assert_eq!(seen.len(), 11);
     }
 }

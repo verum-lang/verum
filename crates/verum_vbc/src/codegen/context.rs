@@ -635,7 +635,10 @@ pub struct CodegenContext {
 
     /// This is used for `TypedArrayElementAddr` to compute correct element offsets.
     /// Byte arrays (element size 1) are tracked separately in `byte_array_vars`.
-    pub typed_array_vars: std::collections::HashMap<String, usize>,
+    /// The bool is the element float-ness (`[Float; N]` / `[Float32; N]`), so
+    /// the index read/write can emit `TypedArrayLoad`/`TypedArrayStore` with the
+    /// `0x80` float flag (T0356: the elem_size alone can't tell F32 from U32).
+    pub typed_array_vars: std::collections::HashMap<String, (usize, bool)>,
 
     /// Depth counter for nested try/recover blocks.
     ///
@@ -1746,8 +1749,9 @@ impl CodegenContext {
     /// Variables marked as typed arrays need special handling when their elements
     /// are referenced with `&mut arr[idx] as *mut T` - we emit `TypedArrayElementAddr`
     /// with the element size to compute the correct memory address.
-    pub fn mark_typed_array_var(&mut self, name: &str, elem_size: usize) {
-        self.typed_array_vars.insert(name.to_string(), elem_size);
+    pub fn mark_typed_array_var(&mut self, name: &str, elem_size: usize, is_float: bool) {
+        self.typed_array_vars
+            .insert(name.to_string(), (elem_size, is_float));
     }
 
     /// Gets the element size of a typed array variable.
@@ -1759,7 +1763,20 @@ impl CodegenContext {
         if self.byte_array_vars.contains(name) {
             Some(1)
         } else {
-            self.typed_array_vars.get(name).copied()
+            self.typed_array_vars.get(name).map(|&(sz, _)| sz)
+        }
+    }
+
+    /// Gets whether a typed-array variable's element type is float
+    /// (`[Float; N]` / `[Float32; N]`). Byte arrays are never float.
+    /// Returns `None` when the variable is not a tracked typed array.
+    /// T0356: routes the index read/write to the `0x80` float flag so
+    /// `TypedArrayLoad`/`TypedArrayStore` decode the IEEE bits correctly.
+    pub fn get_typed_array_float(&self, name: &str) -> Option<bool> {
+        if self.byte_array_vars.contains(name) {
+            Some(false)
+        } else {
+            self.typed_array_vars.get(name).map(|&(_, is_float)| is_float)
         }
     }
 

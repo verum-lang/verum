@@ -1,0 +1,18 @@
+// T0356 — packed [Float; N] (typed array, elem_size 8, FLOAT) index store /
+// read / compound. The float twin of packed_int_store_probe.vr: exercises the
+// TypedArrayLoad 0x80 float flag (F64 IEEE-bit round-trip) + TypedArrayStore
+// float unboxing, on BOTH tiers. Before T0356 this diverged/crashed at Tier-1
+// (no TypedArrayLoad opcode; the AOT NewTypedArray/GetE never saw the float
+// flag). All values are exactly representable in f64.
+
+fn main() {
+    let mut fs: [Float; 4] = [0.0; 4];
+    fs[1] = 3.5;                  // typed FLOAT index store  (compile_assignment)
+    fs[2] = fs[1] + 1.5;          // typed FLOAT index read   (compile_index) + arith
+    fs[3] = 2.0;
+    fs[3] += 0.25;                // typed FLOAT compound      (compile_compound_assignment)
+    assert_eq(fs[1], 3.5);
+    assert_eq(fs[2], 5.0);
+    assert_eq(fs[3], 2.25);
+    print("FLOAT_STORE_OK");
+}

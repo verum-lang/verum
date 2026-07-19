@@ -3592,6 +3592,40 @@ impl VbcCodegen {
                     return Ok(None);
                 }
 
+                // PACKED-TYPED-INDEX-ASSIGN-AOT (T0356): `xs[i] = v` on a
+                // tracked packed `[Int/Float/…; N]` (elem_size 2/4/8) local uses
+                // the dedicated `TypedArrayStore` (the width twin of
+                // `ByteArrayStore`), same root as the byte case — generic `SetE`
+                // has no packed-scalar arm at Tier-1. The elem_size operand is
+                // CLEAN (no 0x80 flag): the store unboxes floats by inspecting
+                // the value (both tiers), matching the array-literal fill.
+                if let ExprKind::Path(path) = &base.kind
+                    && path.segments.len() == 1
+                    && let PathSegment::Name(ident) = &path.segments[0]
+                    && let Some(sz) = self.ctx.get_typed_array_elem_size(&ident.name)
+                    && matches!(sz, 2 | 4 | 8)
+                {
+                    let base_reg = self
+                        .compile_expr(base)?
+                        .or_internal("index base has no value")?;
+                    let index_reg = self
+                        .compile_expr(index)?
+                        .or_internal("index has no value")?;
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, base_reg.0);
+                    Self::write_reg(&mut operands, index_reg.0);
+                    Self::write_reg(&mut operands, value_reg.0);
+                    operands.push(sz as u8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::TypedArrayStore.to_byte(),
+                        operands,
+                    });
+                    self.ctx.free_temp(base_reg);
+                    self.ctx.free_temp(index_reg);
+                    self.ctx.free_temp(value_reg);
+                    return Ok(None);
+                }
+
                 let base_reg = self
                     .compile_expr(base)?
                     .or_internal("index base has no value")?;
@@ -4126,14 +4160,35 @@ impl VbcCodegen {
                 // packed byte buffer is a bare data pointer with no type_id
                 // stamp for the container-view classifier).  Same root as the
                 // plain index read/write paths.
-                let is_byte_arr = if let ExprKind::Path(path) = &arr.kind
-                    && path.segments.len() == 1
-                    && let PathSegment::Name(ident) = &path.segments[0]
-                {
-                    self.ctx.is_byte_array_var(&ident.name)
-                } else {
-                    false
-                };
+                // Classify the base ONCE: byte-array (byte-strided) or typed
+                // packed array (elem_size 2/4/8, with float-ness). T0356 extends
+                // the T0172 byte handling to the typed widths — the read and the
+                // store-back both route through the dedicated packed opcodes.
+                let (is_byte_arr, typed_spec): (bool, Option<(usize, bool)>) =
+                    if let ExprKind::Path(path) = &arr.kind
+                        && path.segments.len() == 1
+                        && let PathSegment::Name(ident) = &path.segments[0]
+                    {
+                        let byte = self.ctx.is_byte_array_var(&ident.name);
+                        let typed = if byte {
+                            None
+                        } else {
+                            self.ctx
+                                .get_typed_array_elem_size(&ident.name)
+                                .filter(|&sz| matches!(sz, 2 | 4 | 8))
+                                .map(|sz| {
+                                    (
+                                        sz,
+                                        self.ctx
+                                            .get_typed_array_float(&ident.name)
+                                            .unwrap_or(false),
+                                    )
+                                })
+                        };
+                        (byte, typed)
+                    } else {
+                        (false, None)
+                    };
 
                 // Load array
                 let arr_reg = self
@@ -4154,6 +4209,16 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, idx_reg.0);
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: crate::instruction::SystemSubOpcode::ByteArrayLoad.to_byte(),
+                        operands,
+                    });
+                } else if let Some((sz, is_float)) = typed_spec {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, current_val.0);
+                    Self::write_reg(&mut operands, arr_reg.0);
+                    Self::write_reg(&mut operands, idx_reg.0);
+                    operands.push(if is_float { (sz as u8) | 0x80 } else { sz as u8 });
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::TypedArrayLoad.to_byte(),
                         operands,
                     });
                 } else {
@@ -4201,6 +4266,18 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, result.0);
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: crate::instruction::SystemSubOpcode::ByteArrayStore.to_byte(),
+                        operands,
+                    });
+                } else if let Some((sz, _)) = typed_spec {
+                    // Clean elem_size (no 0x80): TypedArrayStore unboxes floats
+                    // by inspecting the value register on both tiers.
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, arr_reg.0);
+                    Self::write_reg(&mut operands, idx_reg.0);
+                    Self::write_reg(&mut operands, result.0);
+                    operands.push(sz as u8);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::TypedArrayStore.to_byte(),
                         operands,
                     });
                 } else {
@@ -21115,6 +21192,40 @@ impl VbcCodegen {
             Self::write_reg(&mut operands, idx_reg.0);
             self.ctx.emit(Instruction::FfiExtended {
                 sub_op: crate::instruction::SystemSubOpcode::ByteArrayLoad.to_byte(),
+                operands,
+            });
+            self.ctx.free_temp(base_reg);
+            self.ctx.free_temp(idx_reg);
+            return Ok(Some(result));
+        }
+
+        // PACKED-TYPED-INDEX-READ-AOT (T0356): reading `xs[i]` from a tracked
+        // packed `[Int/Float/…; N]` (elem_size 2/4/8) local uses the dedicated
+        // `TypedArrayLoad`, NOT the generic `GetE` — same root as the byte case.
+        // The elem_size operand carries the 0x80 FLOAT flag (from the tracked
+        // element type) so the load decodes the IEEE bits: after reading raw
+        // bytes the opcode cannot otherwise tell an f64 slot from an i64 one.
+        if let ExprKind::Path(path) = &base.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ident) = &path.segments[0]
+            && let Some(sz) = self.ctx.get_typed_array_elem_size(&ident.name)
+            && matches!(sz, 2 | 4 | 8)
+        {
+            let is_float = self.ctx.get_typed_array_float(&ident.name).unwrap_or(false);
+            let base_reg = self
+                .compile_expr(base)?
+                .or_internal("index base has no value")?;
+            let idx_reg = self
+                .compile_expr(index)?
+                .or_internal("index has no value")?;
+            let result = self.ctx.alloc_temp();
+            let mut operands = Vec::<u8>::new();
+            Self::write_reg(&mut operands, result.0);
+            Self::write_reg(&mut operands, base_reg.0);
+            Self::write_reg(&mut operands, idx_reg.0);
+            operands.push(if is_float { (sz as u8) | 0x80 } else { sz as u8 });
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: crate::instruction::SystemSubOpcode::TypedArrayLoad.to_byte(),
                 operands,
             });
             self.ctx.free_temp(base_reg);
