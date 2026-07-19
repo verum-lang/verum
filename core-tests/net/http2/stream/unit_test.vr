@@ -53,7 +53,12 @@ fn test_h2stream_probe_persist_after_bound_event() {
     assert_eq(fsm.state(), StreamState.Open);
 }
 
-@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+// MUTSELF-MATCH-1 CLOSED (T0149): an inline `&StreamEvent.SendHeaders { … }`
+// payload-variant arg to a `&mut self` method now persists the writeback.
+// Same root and same fix as INLINE-AGG-REF-ARG — `stabilize_ref_source`'s
+// `needs_stable` gained `ExprKind::Record` (0b9d3a0b9), so the inline
+// aggregate arg materialises in a fresh non-recyclable slot instead of
+// aliasing the `&mut self` receiver storage. Verified green at HEAD.
 @test
 fn test_h2stream_probe_persist_after_let_underscore() {
     let mut fsm = StreamFsm.new(1_u32);
@@ -61,7 +66,8 @@ fn test_h2stream_probe_persist_after_let_underscore() {
     assert_eq(fsm.state(), StreamState.Open);
 }
 
-@ignore("MUTSELF-MATCH-1: inline payload-event step corrupts persisted self.state across step() calls. See audit.md section 3.1.")
+// MUTSELF-MATCH-1 CLOSED (T0149): inline payload-variant scrutinee to a
+// `&mut self` method now persists the writeback (0b9d3a0b9, see above).
 @test
 fn test_h2stream_probe_persist_after_match_discard() {
     let mut fsm = StreamFsm.new(1_u32);
@@ -130,10 +136,10 @@ fn test_h2stream_idle_recv_push_promise_reserved_remote() {
 // Section 3: Open → half-closed → Closed (data path, §5.1)
 // =============================================================================
 
-// NOTE: setup events are bound to locals before `step` (not passed inline) —
-// see MUTSELF-MATCH-1 (catalogue §13): an inline `&Variant{}` payload arg to a
-// `&mut self` method loses the field writeback, while a `&bound_local` persists.
-// Binding is the fix discipline; the inline form is pinned @ignore'd above.
+// NOTE: setup events are bound to locals before `step`. This was the
+// MUTSELF-MATCH-1 fix DISCIPLINE while the inline `&Variant{}` payload-arg
+// codegen was broken; that root is now CLOSED (0b9d3a0b9 — see the two
+// un-gated inline probes above), so binding is stylistic here, not required.
 
 @test
 fn test_h2stream_open_send_data_end_half_closed_local() {
