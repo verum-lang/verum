@@ -14,10 +14,15 @@
 // corrupts memory (audit §meta/attribute #17/#39; kin to the
 // META-GROUP-XMODULE-1 `Group`-vs-`Probability` TypeId collision).
 //
-// Whether the collision *fires* depends on the compiled type-universe
-// (which TypeIds get assigned), so these pins can pass in isolation
-// and fail (or SIGSEGV) inside a larger build. That instability is
-// itself the regression being tracked.
+// Historically the collision *fired* universe-dependently: the wanted-key
+// fanout let the FIRST bare-named archive descriptor sharing the leaf
+// squat the canonical `<Type>.<method>` key, so the winner depended on
+// archive walk order. CLOSED by the parent-type guard on that fanout
+// (DELIM-FANOUT-SQUAT-1, commit 8bf486ddc): a key binds only when the
+// descriptor's own parent_type_name matches the key's type segment.
+// Verified deterministic at T0150 close (2026-07-19): the calls compile
+// to direct function-id Calls (no dyn: CallM, no runtime name scan).
+// Section 1 stays as the re-regression guardrail for the class.
 // =============================================================================
 
 mount core.meta.attribute.{
@@ -44,13 +49,14 @@ fn empty_ts() -> TokenStream {
 // Section 1: AttributeArg.positional / .named static-ctor collision
 // =============================================================================
 //
-// REGRESSION (audit #17/#39): `AttributeArg.positional(value)` is a
-// 3-field record ctor, but the bare name `positional` collided with a
-// wider same-named sibling; codegen wrote past the AttributeArg's
-// 3-field size and panicked. The 8 unit-test cases exercising it are
-// still `@ignore`'d there. These two pins assert the CORRECT builder
-// behaviour (is_named reflects the ctor used); they pass when the
-// collision is dormant and fail/panic when it fires.
+// REGRESSION (audit #17/#39, closed under T0150): `AttributeArg.positional
+// (value)` is a 3-field record ctor whose canonical key could be squatted
+// by a bare-named sibling from an unrelated module; the wrong (wider) body
+// then wrote past AttributeArg's 3-field size and panicked. Fixed by the
+// DELIM-FANOUT-SQUAT-1 parent-type guard (8bf486ddc); the 8 unit-test
+// cases exercising the surface are un-ignored since 2026-07-19 (T0150).
+// These two pins assert the CORRECT builder behaviour (is_named reflects
+// the ctor used) and guard against any re-regression of the squat.
 //
 
 @test

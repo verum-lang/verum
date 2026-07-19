@@ -172,20 +172,27 @@ fn test_meta_attribute_value_as_string_miss() {
 // Section 4: AttributeArg .positional / .named / .is_named
 // =============================================================================
 //
-// task #17/#39: `AttributeArg.positional` static method collides with a
-// same-named sibling that takes a wider record (15 fields vs 3), so codegen
-// writes past the AttributeArg.data size and panics. AttributeArg.named
-// works because `named` is uniquely-named. @ignore until #28 closes.
+// Historical (task #17/#39, re-audited as T0150): `AttributeArg.positional` /
+// `.named` / the `MetaAttributeValue` value-ctors used to mis-dispatch when
+// the canonical `<Type>.<method>` registry key was first-wins-squatted by an
+// unrelated bare-named archive descriptor sharing the leaf (`named` collides
+// with `core.logic.separation.named` at the same arity; `string`/`int`/`bool`
+// collide with `Literal.*` ctors and `core.meta.quote` free fns) — the wrong
+// body then wrote a wider record's fields past AttributeArg's 3-slot size.
+// Fixed by the parent-type guard on the wanted-key fanout
+// (DELIM-FANOUT-SQUAT-1, commit 8bf486ddc): a key binds only when the
+// descriptor's own parent_type_name matches the key's type segment, so all
+// these calls now compile to direct function-id Calls (T0150 probe:
+// VERUM_DUMP_VBC shows no dyn: CallM; VERUM_TRACE_FNREG shows the canonical
+// key bound to the AttributeArg impl id). Un-ignored 2026-07-19 (T0150).
 //
 
-@ignore
 @test
 fn test_attribute_arg_positional_not_named() {
     let a = AttributeArg.positional(MetaAttributeValue.string(Text.from("x")));
     assert(!a.is_named());
 }
 
-@ignore
 @test
 fn test_attribute_arg_named_is_named() {
     let a = AttributeArg.named(
@@ -195,7 +202,6 @@ fn test_attribute_arg_named_is_named() {
     assert(a.is_named());
 }
 
-@ignore
 @test
 fn test_attribute_arg_as_string_pulls_string() {
     let a = AttributeArg.positional(MetaAttributeValue.string(Text.from("linux")));
@@ -203,7 +209,6 @@ fn test_attribute_arg_as_string_pulls_string() {
     assert(s is Some);
 }
 
-@ignore
 @test
 fn test_attribute_arg_as_string_miss() {
     let a = AttributeArg.positional(MetaAttributeValue.int(1));
@@ -211,7 +216,6 @@ fn test_attribute_arg_as_string_miss() {
     assert(s is None);
 }
 
-@ignore
 @test
 fn test_attribute_arg_as_int_pulls_int() {
     let a = AttributeArg.positional(MetaAttributeValue.int(42));
@@ -219,7 +223,6 @@ fn test_attribute_arg_as_int_pulls_int() {
     assert(r is Some);
 }
 
-@ignore
 @test
 fn test_attribute_arg_as_int_miss() {
     let a = AttributeArg.positional(MetaAttributeValue.string(Text.from("x")));
@@ -227,7 +230,6 @@ fn test_attribute_arg_as_int_miss() {
     assert(r is None);
 }
 
-@ignore
 @test
 fn test_attribute_arg_as_bool_pulls_bool() {
     let a = AttributeArg.positional(MetaAttributeValue.bool(true));
@@ -235,7 +237,6 @@ fn test_attribute_arg_as_bool_pulls_bool() {
     assert(r is Some);
 }
 
-@ignore
 @test
 fn test_attribute_arg_as_ident_pulls_ident() {
     let a = AttributeArg.positional(MetaAttributeValue.ident(Text.from("X")));
