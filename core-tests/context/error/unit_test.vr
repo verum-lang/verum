@@ -100,11 +100,13 @@ fn test_type_mismatch_message_contains_all_three_fields() {
         found: "NoopTracer".clone(),
     };
     let msg = err.message();
-    assert(msg.contains("Tracer"));
-    assert(msg.contains("OpenTelemetryTracer"));
-    assert(msg.contains("NoopTracer"));
-    assert(msg.contains("expected"));
-    assert(msg.contains("found"));
+    // T0243: STRICT equality, not substring probes. The substring form
+    // passed BY ACCIDENT while match-destructure bound the variant's
+    // fields at shifted payload slots — `contains("Tracer")` matched
+    // "OpenTelemetryTracer", masking that context_name carried the
+    // NEIGHBOUR field's value. Equality pins each field to its
+    // declared slot.
+    assert_eq(msg, "Context 'Tracer': expected type 'OpenTelemetryTracer', found 'NoopTracer'");
 }
 
 // =============================================================================

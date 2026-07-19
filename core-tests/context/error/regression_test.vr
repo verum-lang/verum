@@ -135,3 +135,69 @@ fn regression_debug_includes_variant_name_for_each_variant() {
     assert(f"{cd:?}".contains("CircularDependency"));
     assert(f"{sv:?}".contains("ScopeViolation"));
 }
+
+// =============================================================================
+// REGRESSION §6 (T0243): duplicate variant NAME across modules —
+// match-destructure must bind fields at their DECLARED slots
+// =============================================================================
+//
+// `TypeMismatch` is declared as a record variant by FOUR stdlib types
+// (`ContextError`, `CacheError`, `RedisError`, `ManifestError`) with
+// DIFFERENT field lists ({context_name, expected, found} vs
+// {expected, found} vs {field, expected, found}). Pattern-binding
+// emission resolved payload slots by the BARE variant name — first-wins
+// across modules — so `ContextError.TypeMismatch { context_name,
+// expected, found }` bound each field at the SIBLING's offset:
+// neighbour values and out-of-bounds garbage. Fix: the destructure
+// resolves fields against the pattern's declared PARENT type (nominal),
+// `variant_pattern_field_type_key` → `find_variant_in_type_descriptors`.
+//
+// Two pins: the stdlib cross-module shape (compiled at stdlib bake,
+// where all four TypeMismatch parents are registered), and a hermetic
+// local twin (two sum types, same variant name, different record
+// arities — LocalBeta declared FIRST so its 2-field layout wins any
+// bare-name first-wins race).
+
+type LocalBeta is
+    Mismatch { expected: Text, found: Text }
+    | BetaOther { code: Int };
+
+type LocalAlpha is
+    Mismatch { context_name: Text, expected: Text, found: Text }
+    | AlphaOther { code: Int };
+
+@test
+fn regression_t0243_stdlib_type_mismatch_message_exact() {
+    let err = ContextError.TypeMismatch {
+        context_name: "Ctx".clone(),
+        expected: "Want".clone(),
+        found: "Got".clone(),
+    };
+    assert_eq(err.message(), "Context 'Ctx': expected type 'Want', found 'Got'");
+}
+
+@test
+fn regression_t0243_local_duplicate_variant_destructure_declared_slots() {
+    let a = LocalAlpha.Mismatch {
+        context_name: "CTX".clone(),
+        expected: "EXP".clone(),
+        found: "FND".clone(),
+    };
+    match a {
+        LocalAlpha.Mismatch { context_name, expected, found } => {
+            assert_eq(context_name, "CTX");
+            assert_eq(expected, "EXP");
+            assert_eq(found, "FND");
+        }
+        _ => panic("LocalAlpha.Mismatch arm must fire"),
+    }
+
+    let b = LocalBeta.Mismatch { expected: "BE".clone(), found: "BF".clone() };
+    match b {
+        LocalBeta.Mismatch { expected, found } => {
+            assert_eq(expected, "BE");
+            assert_eq(found, "BF");
+        }
+        _ => panic("LocalBeta.Mismatch arm must fire"),
+    }
+}

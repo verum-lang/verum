@@ -195,7 +195,9 @@ fn property_type_mismatch_message_includes_expected_and_found() {
         context_name: "C".clone(), expected: "EEE".clone(), found: "FFF".clone(),
     };
     let msg = err.message();
-    assert(msg.contains("EEE"));
-    assert(msg.contains("FFF"));
-    assert(msg.contains("C"));
+    // T0243: STRICT equality — the substring probes could not tell
+    // WHICH slot each value came from, so a shifted-offset destructure
+    // (context_name/expected/found bound at the sibling variant's
+    // positions) still passed. Equality pins the slot assignment.
+    assert_eq(msg, "Context 'C': expected type 'EEE', found 'FFF'");
 }
