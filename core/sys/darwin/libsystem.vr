@@ -349,7 +349,14 @@ extern {
 
     /// Sleep (nanoseconds). C: `int nanosleep(const struct timespec *rqtp,
     /// struct timespec *rmtp);`.
-    public fn nanosleep(rqtp: &DarwinTimespec, rmtp: &mut DarwinTimespec) -> Int32;
+    /// Distinct Verum name so the raw extern does NOT collide with the public
+    /// `safe_nanosleep as nanosleep` alias (mod.vr). The collision made every
+    /// bare `nanosleep(...)` call — including `safe_nanosleep`'s own — resolve
+    /// to the bodied wrapper instead of this extern, so the Tier-0 interpreter
+    /// recursed to a stack overflow (T0440). Mirrors `mmap_ffi`. The dlsym key
+    /// stays the C symbol `nanosleep` via `@ffi_name`.
+    @ffi_name("nanosleep")
+    public fn nanosleep_ffi(rqtp: &DarwinTimespec, rmtp: &mut DarwinTimespec) -> Int32;
 
     /// Get monotonic time (mach)
     public fn mach_absolute_time() -> UInt64;
@@ -1366,7 +1373,7 @@ public fn safe_kqueue() -> Result<FileDesc, OSError> {
 public fn safe_nanosleep(seconds: Int, nanoseconds: Int) -> Result<(), OSError> {
     let req = DarwinTimespec { tv_sec: seconds, tv_nsec: nanoseconds };
     let mut rem = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
-    let result = unsafe { nanosleep(&req, &mut rem) };
+    let result = unsafe { nanosleep_ffi(&req, &mut rem) };
     if result < 0 {
         let err = errno();
         Result.Err(OSError.new(err, errno_to_message(err)))

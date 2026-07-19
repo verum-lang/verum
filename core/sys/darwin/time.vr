@@ -28,7 +28,7 @@ module sys.darwin.time;
 mount sys.common.OSError;
 mount super.libsystem.{
     mach_absolute_time, mach_timebase_info, MachTimebaseInfo,
-    clock_gettime, nanosleep, DarwinTimespec,
+    clock_gettime, nanosleep_ffi, DarwinTimespec,
     CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_RAW,
     CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
     errno,
@@ -326,7 +326,7 @@ public fn sleep(duration: DarwinDuration) -> Maybe<DarwinDuration> {
     let req = duration.to_timespec();
     let mut rem = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
 
-    let result = unsafe { nanosleep(&req, &mut rem) };
+    let result = unsafe { nanosleep_ffi(&req, &mut rem) };
 
     if result == 0 {
         Maybe.None
