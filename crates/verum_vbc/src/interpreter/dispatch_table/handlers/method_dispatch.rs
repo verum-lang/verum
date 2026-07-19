@@ -2465,6 +2465,103 @@ pub(in super::super) fn handle_call_method(
     };
     let cache_key = receiver_type_id_for_cache.map(|tid| (method_id, tid));
 
+    // **T0146 LEG-R — carried-fact protocol dispatch, ALL tid-recoverable
+    // receivers.** The typed-receiver face of T0106: codegen collapses
+    // protocol-method calls to whatever spelling the static type
+    // suggested (or a bare name when it couldn't), and the by-name
+    // strategies below re-derive receiver identity with fuzzy scans
+    // (first-suffix-wins, namespace-DENYLIST-filtered) — the io/
+    // bare-name collision class (`s.write` for `s: Sink` executing
+    // `sys.linux.syscall.write`). The ONE fact that always survives to
+    // dispatch time is the runtime receiver's concrete TypeId;
+    // `resolved_protocol_dispatch` is the precomputed
+    // `(tid, bare-method) → FunctionId` authority built ONCE per
+    // execution assembly by `VbcModule::resolve_protocol_dispatch`
+    // (protocol-impl overrides + non-abstract protocol defaults,
+    // body-gated). Consult it FIRST — before the dispatch cache and
+    // every name strategy — whenever the receiver's concrete TypeId is
+    // recoverable. T0106's `dyn:P` receivers are subsumed: the §J
+    // classifier below remains the fallback for map misses
+    // (primitives, unregistered tids).
+    //
+    // ORDERING IS LOAD-BEARING (T0368 lesson: a naive candidate
+    // reorder here regressed base/protocols 692→135): every builtin
+    // surface — primitive/collection intercepts, Heap/Shared own
+    // methods (HEAP-OWN-METHOD-GUARD-1), variant/array dispatch,
+    // static-constructor intercepts — ran ABOVE and already returned;
+    // the map must never outrank them. Receivers excluded from tid
+    // recovery, each deliberate:
+    //   * builtin-layout collections (MAP/SET/LIST/BYTE_LIST/DEQUE/
+    //     CHANNEL): their historical resolution order stays untouched;
+    //   * Text receivers (small OR heap string): the static-call
+    //     convention passes TYPE NAMES as string receivers
+    //     (`Foo.new()` arrives with receiver = "Foo"), so a TEXT-tid
+    //     consult would shadow static dispatch;
+    //   * Heap CBGR cells (no ObjectHeader — probing one is the exact
+    //     garbage-classify trap HEAP-CARRIER-PEEL-1 documents) and
+    //     tracked interior Value-slot pointers;
+    //   * multi-element FatRefs (slice runtime kind); a single-Value
+    //     referent classifies by the REFERENT (FATREF-RECV-CLASSIFY-1).
+    // Arity gate: the callee must take exactly the call's args with or
+    // without a leading self — a bare-name arity collision falls
+    // through to the receiver-aware strategies instead of pushing a
+    // garbage frame. A map hit flows through the ONE invocation
+    // authority below (takes_self detection, &mut-self CBGR synthesis,
+    // cache fill) — resolution changes, invocation does not.
+    // Kill switch: VERUM_DISABLE_PROTOCOL_DISPATCH=1 (empties the map
+    // at build time). Trace: VERUM_TRACE_PROTOCOL_DISPATCH=1.
+    {
+        let classify_target: Value =
+            fat_ref_single_referent(&dispatch_receiver).unwrap_or(dispatch_receiver);
+        if classify_target.is_regular_ptr()
+            && !classify_target.is_nil()
+            && !classify_target.is_small_string()
+            && !is_heap_string(&classify_target)
+        {
+            let ptr = classify_target.as_ptr::<u8>();
+            let addr = ptr as usize;
+            let is_cbgr_cell = state.cbgr_allocations.contains(
+                &addr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize),
+            );
+            if !ptr.is_null() && !is_cbgr_cell && !state.cbgr_mutable_ptrs.contains(&addr) {
+                // SAFETY: try_type_id discharges the null/alignment gate
+                // internally and copies the id out (no retained borrow).
+                if let Some(tid) = unsafe { heap::ObjectHeader::try_type_id(ptr) }
+                    && !matches!(
+                        tid,
+                        TypeId::MAP
+                            | TypeId::SET
+                            | TypeId::LIST
+                            | TypeId::BYTE_LIST
+                            | TypeId::DEQUE
+                            | TypeId::CHANNEL
+                    )
+                    && let Some(fid) = state
+                        .module
+                        .resolve_protocol_method_by_name(tid.0, &bare_method_name)
+                    && let Some(func) = state.module.get_function(fid)
+                    && (func.params.len() == args.count as usize + 1
+                        || func.params.len() == args.count as usize)
+                {
+                    if std::env::var_os("VERUM_TRACE_PROTOCOL_DISPATCH").is_some() {
+                        eprintln!(
+                            "[protocol-dispatch] hit tid={} method='{}' -> fid={} '{}'",
+                            tid.0,
+                            bare_method_name,
+                            fid.0,
+                            state
+                                .module
+                                .strings
+                                .get(func.name)
+                                .unwrap_or("?"),
+                        );
+                    }
+                    found_func_id = Some(fid);
+                }
+            }
+        }
+    }
+
     // For builtin collections (List/Map/Set/Deque/Channel), NEVER use compiled
     // functions because the interpreter has its own optimized handlers with
     // correct memory layout. The is_already_qualified flag is irrelevant for
@@ -2475,7 +2572,11 @@ pub(in super::super) fn handle_call_method(
     // AND the method is a recognised builtin operation; if we're past
     // that, we either have a non-builtin receiver or an unrecognised
     // method whose user-compiled body has been registered.
-    if let Some(key) = cache_key
+    // T0146: gated on the carried-fact consult above having missed —
+    // a stale cached name-scan resolution must not clobber the map's
+    // precise (tid, method) binding.
+    if found_func_id.is_none()
+        && let Some(key) = cache_key
         && let Some(&cached_fid) = state.method_cache.get(&key)
     {
         // Verify the cached function still exists (should always be true within a module)
@@ -3315,16 +3416,11 @@ pub(in super::super) fn handle_call_method(
     // the fallback for these prevents the protocol-stub path from
     // resolving e.g. `Duration.eq` to a placeholder Eq.eq body in
     // the function table that returns false unconditionally.
-    fn is_abstract_operator_method(bare: &str) -> bool {
-        matches!(
-            bare,
-            "eq" | "ne"
-                | "cmp" | "partial_cmp"
-                | "lt" | "le" | "gt" | "ge"
-                | "hash"
-                | "clone"
-        )
-    }
+    // T0146: predicate authority is `crate::module::
+    // is_abstract_operator_method` — shared with the
+    // `resolve_protocol_dispatch` builder's default harvest so the two
+    // refusals can never drift.
+    use crate::module::is_abstract_operator_method;
     if found_func_id.is_none()
         && is_already_qualified
         && dispatch_receiver.is_ptr()
@@ -8965,6 +9061,58 @@ pub(super) fn dispatch_primitive_method(
             }
             "is_null" => {
                 return Ok(Some(Value::from_bool(ptr_addr == 0)));
+            }
+            // **T0146 — raw-pointer `read`/`write` gate.** These two
+            // arms were UNGATED: every `x.read(buf)` / `x.write(buf)`
+            // CallM whose receiver is any heap object was intercepted
+            // as a raw pointer dereference and returned `*ptr` garbage
+            // — the io/ Read/Write protocol surface (BufferCursor /
+            // BufReader / Take / Chain receivers) never reached typed
+            // dispatch. Same defect class as the pointer-arithmetic
+            // arms above, which got their structured-record gate in
+            // the 2026-05-27 fundamental fix; `read`/`write` were left
+            // out of it. The gate here is REGISTERED-TID-driven rather
+            // than `type_id != 0`: a CBGR DATA pointer's probed
+            // "header" is the stored payload bytes, which can fake an
+            // arbitrary nonzero tid — but a tid that resolves to a
+            // real TypeDescriptor means the receiver is (with
+            // overwhelming probability) a live typed record whose
+            // `read`/`write` belongs to its protocol surface, so
+            // typed dispatch (the resolved_protocol_dispatch consult
+            // and the name cascade) must run instead. Genuinely raw
+            // pointers (headerless, TypeId(0) stub, or garbage tids)
+            // keep the historical raw semantics.
+            // CBGR-tracked pointers are excluded from the gate (their
+            // probed "header" is stored-payload bytes — an Int in slot
+            // 0 can fake any tid), so allocator-produced raw pointers
+            // keep raw `read`/`write` unconditionally. The gate itself
+            // is part of the T0146 typed-dispatch restoration and
+            // rides the SAME kill-switch as the carried-fact map: an
+            // EMPTY `resolved_protocol_dispatch`
+            // (VERUM_DISABLE_PROTOCOL_DISPATCH=1, or an assembly that
+            // never built it) restores the pristine raw-arm behavior
+            // bit-for-bit — one coherent switch for the whole
+            // restoration, zero per-call env cost.
+            "read" | "write"
+                if !state.module.resolved_protocol_dispatch.is_empty()
+                    && !state.cbgr_allocations.contains(
+                        &ptr_addr.wrapping_sub(
+                            verum_common::layout::ALLOCATION_HEADER_SIZE as usize,
+                        ),
+                    )
+                    && !state.cbgr_mutable_ptrs.contains(&ptr_addr)
+                    && state
+                        .module
+                        .get_type(
+                            unsafe {
+                                heap::ObjectHeader::ref_or_stub(receiver.as_ptr::<u8>())
+                            }
+                            .type_id,
+                        )
+                        .is_some() =>
+            {
+                // Structured, registered receiver — not a raw pointer.
+                // Fall through to typed dispatch.
             }
             "read" => {
                 let val = unsafe { *(ptr_addr as *const Value) };

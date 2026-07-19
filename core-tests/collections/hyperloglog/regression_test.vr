@@ -32,7 +32,7 @@ fn regression_hll_estimate_on_empty_is_zero() {
 // REGRESSION (§B.1): `hll.add(&item)` routes through `hash64`
 // which uses `hmac_sha256` — gated on the IndexOutOfBounds {64,64}
 // defect in hmac/sha256 block processing.  Same shape as Bloom §B.
-@ignore
+@ignore  // T0146 probe: RED both modes — hmac/sha256 class, not dispatch.
 @test
 fn regression_hll_add_then_estimate_at_least_one() {
     let mut hll = HyperLogLog.new(DEFAULT_PRECISION);

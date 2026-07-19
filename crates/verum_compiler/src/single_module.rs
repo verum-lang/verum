@@ -136,7 +136,19 @@ pub fn compile_module_with_stdlib(
         .compile_module_items(module)
         .map_err(|e| anyhow!("VBC codegen: bodies: {:?}", e))?;
 
-    codegen
+    let mut vbc_module = codegen
         .finalize_module()
-        .map_err(|e| anyhow!("VBC codegen: finalize: {:?}", e))
+        .map_err(|e| anyhow!("VBC codegen: finalize: {:?}", e))?;
+
+    // T0146 LEG-R: this is an EXECUTION assembly (test runner, REPL,
+    // direct AST→VBC) — precompute the carried-fact protocol-dispatch
+    // map on the final table, mirroring the T0106 leg-2a wiring at the
+    // pipeline's three sites (source-driven `compile_ast_to_vbc`,
+    // linker-merge, AOT mono). Without this, `verum test --interp`
+    // executed with an EMPTY `resolved_protocol_dispatch` and the
+    // dispatch-time consult was inert across the whole core-tests
+    // surface. Idempotent when the pipeline delegates here and later
+    // recomputes on its own (possibly merged) assembly.
+    let _ = vbc_module.resolve_protocol_dispatch();
+    Ok(vbc_module)
 }

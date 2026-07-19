@@ -839,6 +839,21 @@ impl VbcModule {
             .copied()
     }
 
+    /// **T0146 LEG-R** — by-name face of
+    /// [`Self::resolve_protocol_method`] for dispatch sites that carry
+    /// the bare method as text (the `CallM` handler's `bare_method_name`).
+    /// Read-only: the builder interned every mapped bare name, so a
+    /// non-interned name can have no map entry by construction.
+    #[inline]
+    pub fn resolve_protocol_method_by_name(
+        &self,
+        type_id: u32,
+        bare_method: &str,
+    ) -> Option<FunctionId> {
+        let sid = self.strings.lookup(bare_method)?;
+        self.resolve_protocol_method(type_id, sid)
+    }
+
     /// **T0106** — build the carried-fact protocol-dispatch map
     /// `(concrete TypeId, bare-method StringId) → concrete FunctionId`
     /// for every method reachable on every concrete type through its
@@ -850,12 +865,48 @@ impl VbcModule {
     /// tiers can restore protocol dispatch that codegen erased to the
     /// `Heap.m`/`Shared.m` wrapper spellings.
     ///
-    /// Deterministic: iterates the type + function tables in id order
-    /// and interns each bare method name once (bake-nondeterminism
-    /// discipline — the map itself is `#[serde(skip)]`, never baked).
-    /// Impl-block overrides win over protocol defaults (inserted first,
-    /// `entry(..).or_insert` keeps them). Call after
+    /// Deterministic: single pass over the function table builds a
+    /// name-keyed owner index; the type walk then binds each
+    /// descriptor's method surface through it. Bare names are interned
+    /// once, in sorted order (bake-nondeterminism discipline — the map
+    /// itself is `#[serde(skip)]`, never baked). The type's own bodies
+    /// (rank 0) win over protocol defaults (rank 1) via the sort +
+    /// `entry(..).or_insert`. Call after
     /// [`Self::resolve_external_bands`] on an EXECUTION assembly.
+    ///
+    /// T0146 LEG-R: the harvest is NAME-driven — `ProtocolImpl.methods`
+    /// function ids are deliberately NOT consulted. Archive import
+    /// copies those ids VERBATIM as archive-entry-local values (the
+    /// documented contract in `remap_type_glue_fn_ids` is "their
+    /// consumer validates by name before dispatching, so stale ids
+    /// fall through harmlessly"), and the vbc finalize walker then
+    /// remaps them *as if* they were ctx ids — so on every
+    /// archive-driven assembly they may point at arbitrary functions.
+    /// An id-driven harvest would turn that latent id-space untruth
+    /// into silent wrong dispatch the moment the map is consulted;
+    /// name+parent validation is the same discipline every other
+    /// consumer of descriptor method ids already applies. This is the
+    /// precomputed form of [`Self::find_method_by_receiver_type`]
+    /// (`<TypeName>.<bare>` first, protocol defaults as gap-fill).
+    ///
+    /// Binding rules, each load-bearing:
+    /// * bodyless functions are never bound — a descriptor-only stub
+    ///   must not shadow the loud "method not found" path;
+    /// * a candidate whose `parent_type` names a DIFFERENT type never
+    ///   binds (SAME-NAME-PARENT-TIEBREAK-1: the stdlib carries twin
+    ///   type names — two `Rational`s — and the receiver's TypeId is
+    ///   the ground truth a name cannot express);
+    /// * a parent-less candidate binds only when its owner base-name
+    ///   names exactly ONE type descriptor (ambiguous bases resolve
+    ///   only through an explicit parent stamp);
+    /// * abstract-operator names (see [`is_abstract_operator_method`])
+    ///   are excluded from the PROTOCOL-DEFAULT harvest: Eq/Ord/Hash/
+    ///   Clone declarations are abstract — a protocol-side entry is a
+    ///   placeholder whose body returns a constant, and binding it
+    ///   converts a loud miss into a silent wrong answer (the
+    ///   `Duration.eq → placeholder Eq.eq` shape the handler's
+    ///   protocol-default fallback already refuses). The type's OWN
+    ///   bodies for those names (rank 0) stay.
     ///
     /// Kill switch: `VERUM_DISABLE_PROTOCOL_DISPATCH=1`.
     /// Trace: `VERUM_TRACE_PROTOCOL_DISPATCH=1`.
@@ -864,62 +915,242 @@ impl VbcModule {
             return 0;
         }
         let trace = std::env::var_os("VERUM_TRACE_PROTOCOL_DISPATCH").is_some();
-        // (tid, bare-name) → fid; collect into a plain map first so the
-        // borrow of `self.types`/`self.functions` stays immutable while
-        // we intern names (intern needs `&mut self`).
-        let mut pending: Vec<(u32, String, u32)> = Vec::new();
+        let has_body = |desc: &FunctionDescriptor| -> bool {
+            desc.bytecode_length > 0
+                || desc
+                    .instructions
+                    .as_ref()
+                    .map(|i| !i.is_empty())
+                    .unwrap_or(false)
+        };
+        // Base-ify a type or owner spelling: strip generic args, then
+        // any module qualification ("core.io.buffer.BufferCursor<T>"
+        // → "BufferCursor").
+        fn base_of(name: &str) -> &str {
+            let no_generics = name.split('<').next().unwrap_or(name);
+            no_generics.rsplit('.').next().unwrap_or(no_generics)
+        }
+        // ---- Owner index: ONE pass over the function table. ----
+        // owner-base → bare → candidates in table order. Owners are
+        // TYPE spellings (Upper-camel second-to-last segment); a
+        // lowercase owner segment is a module-path piece
+        // ("sys.linux.syscall.write") and never participates — the
+        // namespace-shadow class this task exists to end.
+        struct Cand {
+            fid: u32,
+            bodied: bool,
+            parent: Option<TypeId>,
+        }
+        let mut owner_index: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, Vec<Cand>>,
+        > = std::collections::HashMap::new();
+        for (idx, desc) in self.functions.iter().enumerate() {
+            if crate::stub_ranges::is_stub_id(desc.id.0) {
+                continue;
+            }
+            let Some(fname) = self.get_string(desc.name) else {
+                continue;
+            };
+            // Technical/mangled names (band wrappers, tls init, …)
+            // never participate in receiver-method dispatch.
+            if fname.starts_with("__") {
+                continue;
+            }
+            let mut segs = fname.rsplit('.');
+            let (Some(bare), Some(owner_raw)) = (segs.next(), segs.next()) else {
+                continue;
+            };
+            if bare.is_empty()
+                || !owner_raw
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase())
+            {
+                continue;
+            }
+            owner_index
+                .entry(base_of(owner_raw).to_string())
+                .or_default()
+                .entry(bare.to_string())
+                .or_default()
+                .push(Cand {
+                    fid: idx as u32,
+                    bodied: has_body(desc),
+                    parent: desc.parent_type,
+                });
+        }
+        // ---- Type-name ambiguity census. ----
+        let mut base_count: std::collections::HashMap<&str, u32> =
+            std::collections::HashMap::new();
+        for td in self.types.iter() {
+            if let Some(tname) = self.get_string(td.name)
+                && !tname.is_empty()
+            {
+                *base_count.entry(base_of(tname)).or_insert(0) += 1;
+            }
+        }
+        // Owned snapshot of the census for the post-intern diagnostic
+        // dump (the borrowed `base_count` keys cannot outlive the
+        // `intern_string` mutable borrow below). Built only under
+        // trace.
+        let base_count_dbg: std::collections::HashMap<String, u32> = if trace {
+            base_count
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+        // Candidate picker for a (tid, owner-base) pair: first bodied
+        // parent-matched candidate (table order = deterministic), else
+        // — only when the base names exactly one descriptor — the
+        // first bodied parent-less one. Parent-mismatched candidates
+        // never bind.
+        let pick = |cands: &[Cand], tid: u32, unique_base: bool| -> Option<u32> {
+            cands
+                .iter()
+                .find(|c| c.bodied && c.parent.map(|p| p.0) == Some(tid))
+                .or_else(|| {
+                    if unique_base {
+                        cands.iter().find(|c| c.bodied && c.parent.is_none())
+                    } else {
+                        None
+                    }
+                })
+                .map(|c| c.fid)
+        };
+        // (tid, bare-name, rank, fid); rank 0 = the type's own body,
+        // rank 1 = protocol default. Plain vec first so the borrows of
+        // `self.types`/`self.functions` stay immutable while interning
+        // below (intern needs `&mut self`).
+        let mut pending: Vec<(u32, String, u8, u32)> = Vec::new();
         for descriptor in self.types.iter() {
             let tid = descriptor.id.0;
-            for protocol_impl in descriptor.protocols.iter() {
-                // Impl-block overrides first (they win).
-                for raw in protocol_impl.methods.iter().copied() {
-                    if let Some(fdesc) = self.functions.get(raw as usize)
-                        && let Some(fname) = self.get_string(fdesc.name)
-                    {
-                        let bare = fname.rsplit('.').next().unwrap_or(fname).to_string();
-                        pending.push((tid, bare, raw));
+            let Some(tname) = self.get_string(descriptor.name) else {
+                continue;
+            };
+            if tname.is_empty() {
+                continue;
+            }
+            let tbase = base_of(tname);
+            let t_unique = base_count.get(tbase).copied().unwrap_or(0) == 1;
+            // Rank 0 — the type's own method surface under its
+            // canonical `<TypeName>.<bare>` spellings.
+            if let Some(bares) = owner_index.get(tbase) {
+                for (bare, cands) in bares.iter() {
+                    if let Some(fid) = pick(cands, tid, t_unique) {
+                        pending.push((tid, bare.clone(), 0, fid));
                     }
                 }
-                // Protocol default methods (declared on the protocol
-                // type itself) — only fill gaps the impl left open.
-                let proto_methods: Vec<(String, u32)> = self
-                    .types
-                    .iter()
-                    .find(|t| t.id.0 == protocol_impl.protocol.0)
-                    .map(|t| {
-                        t.protocols
-                            .iter()
-                            .flat_map(|pi| pi.methods.iter().copied())
-                            .filter_map(|raw| {
-                                self.functions.get(raw as usize).and_then(|fd| {
-                                    self.get_string(fd.name).map(|n| {
-                                        (n.rsplit('.').next().unwrap_or(n).to_string(), raw)
-                                    })
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                for (bare, raw) in proto_methods {
-                    pending.push((tid, bare, raw));
+            }
+            // Rank 1 — protocol defaults for every protocol this type
+            // implements (`ProtocolImpl.protocol` ids ARE remapped on
+            // import — the trustworthy half of the descriptor).
+            // `get_type` rides the ARCHIVE-TYPE-GLUE-IDS-1 O(1) reverse
+            // cache — a linear `types.iter().find` here was
+            // O(types × impls) and cost seconds per compile on the
+            // merged stdlib table.
+            for protocol_impl in descriptor.protocols.iter() {
+                let Some(ptd) = self.get_type(TypeId(protocol_impl.protocol.0)) else {
+                    continue;
+                };
+                let Some(pname) = self.get_string(ptd.name) else {
+                    continue;
+                };
+                if pname.is_empty() {
+                    continue;
+                }
+                let pbase = base_of(pname);
+                let p_unique = base_count.get(pbase).copied().unwrap_or(0) == 1;
+                if let Some(bares) = owner_index.get(pbase) {
+                    for (bare, cands) in bares.iter() {
+                        if is_abstract_operator_method(bare) {
+                            continue;
+                        }
+                        if let Some(fid) = pick(cands, ptd.id.0, p_unique) {
+                            pending.push((tid, bare.clone(), 1, fid));
+                        }
+                    }
                 }
             }
         }
-        // Sort by (tid, name, fid) so intern order is deterministic.
-        pending.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        // Sort by (tid, name, rank, fid) so the type's own bodies beat
+        // protocol defaults and intern order is deterministic.
+        pending.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.cmp(&b.1))
+                .then(a.2.cmp(&b.2))
+                .then(a.3.cmp(&b.3))
+        });
         let mut map: std::collections::HashMap<(u32, u32), FunctionId> =
             std::collections::HashMap::with_capacity(pending.len());
-        for (tid, bare, raw) in pending {
+        for (tid, bare, _rank, raw) in pending {
             let sid = self.intern_string(&bare);
-            // First insert wins: the pre-sort pushes impl-block
-            // overrides before defaults for a given (tid, name) only
-            // within one protocol_impl; the sort collapses that, so use
-            // or_insert to keep the lowest-fid (deterministic) binding.
+            // First insert wins: after the sort that is the lowest
+            // (rank, fid) binding for each (tid, name) — the type's
+            // own body first, protocol default only as gap-fill.
             map.entry((tid, sid.0)).or_insert(FunctionId(raw));
         }
         let count = map.len();
         if trace {
             eprintln!("[protocol-dispatch] resolved {count} (tid,method) bindings");
+            // Diagnostic dump: `VERUM_TRACE_PROTOCOL_DISPATCH=<substr>`
+            // (any value other than "1") prints, for every type whose
+            // base name contains <substr>, the descriptor identity and
+            // each owner-index candidate with the pick verdict — the
+            // triage surface for "why did (tid, bare) not bind".
+            if let Some(filter) = std::env::var("VERUM_TRACE_PROTOCOL_DISPATCH")
+                .ok()
+                .filter(|v| v != "1")
+            {
+                for td in self.types.iter() {
+                    let Some(tname) = self.get_string(td.name) else {
+                        continue;
+                    };
+                    let tbase = base_of(tname);
+                    if !tbase.contains(filter.as_str()) {
+                        continue;
+                    }
+                    let uniq = base_count_dbg.get(tbase).copied().unwrap_or(0);
+                    eprintln!(
+                        "[protocol-dispatch] type tid={} name='{}' base='{}' base_count={} protocols={}",
+                        td.id.0,
+                        tname,
+                        tbase,
+                        uniq,
+                        td.protocols.len(),
+                    );
+                    if let Some(bares) = owner_index.get(tbase) {
+                        let mut sorted: Vec<&String> = bares.keys().collect();
+                        sorted.sort();
+                        for bare in sorted {
+                            for c in bares[bare].iter() {
+                                let fname = self
+                                    .functions
+                                    .get(c.fid as usize)
+                                    .and_then(|f| self.get_string(f.name))
+                                    .unwrap_or("?");
+                                eprintln!(
+                                    "[protocol-dispatch]   cand bare='{}' fid={} '{}' bodied={} parent={:?} -> {}",
+                                    bare,
+                                    c.fid,
+                                    fname,
+                                    c.bodied,
+                                    c.parent.map(|p| p.0),
+                                    if c.bodied && c.parent.map(|p| p.0) == Some(td.id.0) {
+                                        "PARENT-MATCH"
+                                    } else if c.bodied && c.parent.is_none() && uniq == 1 {
+                                        "UNIQUE-BASE"
+                                    } else {
+                                        "reject"
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
         self.resolved_protocol_dispatch = map;
         count
@@ -1607,6 +1838,21 @@ impl VbcModule {
     }
 }
 
+/// Operator-protocol method names whose protocol-side declarations are
+/// ABSTRACT — Eq/Ord/Hash/Clone bodies are always provided by the
+/// implementer; any protocol-side function entry under these names is a
+/// placeholder stub (e.g. an `Eq.eq` that returns `false`
+/// unconditionally). ONE authority (T0146): consulted by
+/// [`VbcModule::resolve_protocol_dispatch`]'s default harvest AND by
+/// the interpreter's protocol-default dispatch fallback
+/// (`method_dispatch.rs`) so both refusals can never drift.
+pub fn is_abstract_operator_method(bare: &str) -> bool {
+    matches!(
+        bare,
+        "eq" | "ne" | "cmp" | "partial_cmp" | "lt" | "le" | "gt" | "ge" | "hash" | "clone"
+    )
+}
+
 // ============================================================================
 // String Table
 // ============================================================================
@@ -1679,6 +1925,15 @@ impl StringTable {
     pub fn get(&self, id: StringId) -> Option<&str> {
         let idx = *self.ensure_reverse_index().get(&id)?;
         self.index.get_index(idx).map(|(s, _)| s.as_str())
+    }
+
+    /// Read-only reverse of [`Self::intern`]: the `StringId` under
+    /// which `s` is ALREADY interned, or `None`. O(1); never mutates
+    /// — safe on shared `Arc<VbcModule>` runtime paths (T0146: the
+    /// dispatch-time consult of `resolved_protocol_dispatch` keys by
+    /// bare-method StringId and must not intern on the hot path).
+    pub fn lookup(&self, s: &str) -> Option<StringId> {
+        self.index.get(s).copied()
     }
 
     /// Lazy populator for the `StringId → IndexMap-position` reverse

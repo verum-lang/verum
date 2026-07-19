@@ -137,6 +137,15 @@ fn regression_sink_flush_dispatches_correctly() {
 // internally — same collision class. Pin both layers.
 // =============================================================================
 
+// STILL PINNED after T0146 LEG-R — the dispatch class IS closed (a
+// slice-backed `BufferCursor.read_exact` probe runs green, and the
+// carried-fact map binds (BufferCursor, read_exact) correctly), but
+// these three §B/§C cases die LATER and identically in BOTH dispatch
+// modes: `NullPointerAt { op: 0x65, site: "Slice.copy_from_slice" }`.
+// That is byte-buffer marshalling through the `&mut [Byte]` argument
+// (FFI byte-buffer contract family), NOT method resolution — the
+// kill-switch makes no difference to it. Un-ignore when the
+// copy_from_slice null-slice leg closes.
 @ignore
 @test
 fn regression_read_exact_default_method_dispatch() {
@@ -157,7 +166,6 @@ fn regression_read_to_end_default_method_dispatch() {
     assert_eq(n, 4);
 }
 
-@ignore
 @test
 fn regression_write_all_default_method_dispatch() {
     let mut s = sink();
@@ -173,6 +181,8 @@ fn regression_write_all_default_method_dispatch() {
 // `inner.read(...)` calls — same dispatch collision.
 // =============================================================================
 
+// STILL PINNED after T0146 LEG-R — same `Slice.copy_from_slice`
+// null-slice residual as §B above, identical in both dispatch modes.
 @ignore
 @test
 fn regression_take_read_limits_correctly() {

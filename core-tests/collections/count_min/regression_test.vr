@@ -30,7 +30,7 @@ fn regression_cms_with_target_constructible() {
 // `hmac_sha256` which trips the IndexOutOfBounds {64,64} defect
 // in the hmac/sha256 block-processing path.  Same shape as Bloom
 // §B; gated on the hmac/sha256 fix.
-@ignore
+@ignore  // T0146 probe: RED both modes — hmac/sha256 class, not dispatch.
 @test
 fn regression_cms_add_increments_total() {
     let mut cms = CountMinSketch.new(1024, 8);
@@ -40,7 +40,7 @@ fn regression_cms_add_increments_total() {
 }
 
 // REGRESSION (§B.2): same shape as §B.1.
-@ignore
+@ignore  // T0146 probe: RED both modes — hmac/sha256 class, not dispatch.
 @test
 fn regression_cms_estimate_non_negative() {
     let cms = CountMinSketch.new(1024, 8);

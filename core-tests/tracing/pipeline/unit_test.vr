@@ -92,8 +92,8 @@ fn start_simple_span(provider: &TracerProvider, name: &Text) -> Span {
 // Section 1: end() delivers exactly one SpanData to the exporter
 // =============================================================================
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_end_delivers_span_to_exporter() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -104,8 +104,8 @@ fn test_end_delivers_span_to_exporter() {
     assert(blob.contains(&"work".into()));
 }
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_end_is_idempotent_single_export() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -116,8 +116,8 @@ fn test_end_is_idempotent_single_export() {
     assert_eq(sink.line_count(), 1);
 }
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_exported_span_carries_identity_and_kind() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -133,8 +133,8 @@ fn test_exported_span_carries_identity_and_kind() {
     assert(blob.contains(&"parent=-".into()));
 }
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_exported_span_carries_attributes_events_status() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -152,8 +152,8 @@ fn test_exported_span_carries_attributes_events_status() {
     assert(blob.contains(&"status=OK".into()));
 }
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_mutation_after_end_is_ignored() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -175,8 +175,8 @@ fn test_mutation_after_end_is_ignored() {
 // Section 2: status transition lattice survives the pipeline
 // =============================================================================
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_status_error_wins_over_ok() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -187,8 +187,8 @@ fn test_status_error_wins_over_ok() {
     assert(sink.read_blob().contains(&"status=ERROR".into()));
 }
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_status_error_is_final() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -203,8 +203,8 @@ fn test_status_error_is_final() {
 // Section 3: parent linkage
 // =============================================================================
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_child_span_inherits_trace_and_links_parent() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());
@@ -438,8 +438,8 @@ fn test_noop_tracer_passes_parent_context_through() {
 // Section 8: provider lifecycle — flush / shutdown over the handles
 // =============================================================================
 
+@ignore("[[tracing-delivery-vbc-class]] T0146 probe: RED in BOTH dispatch modes on the final LEG-R binary. Residual = baked-module Shared-field method-dispatch/self-binding mis-lower (core/tracing/data.vr), a T0146-FAMILY but distinct root NOT closed by the interpreter-CallM carried-fact consult. Un-ignore when baked Shared-field dispatch lands.")
 @test
-@ignore("[[tracing-delivery-vbc-class]] — the end()→processor→exporter delivery chain drops the call between baked-module stages (verified live to the exporter cell in an earlier assembly; the memory-cell fork class is FIXED (T0107: SetF SHARED write-through + handle_clone SHARED arm, pinned in mem/allocator §6). Opcode proof: enum SetVariantData/GetVariantData never copy — this was NEVER a cell copy. Residual = baked-module Shared-field method-dispatch / self-binding mis-lowering, core/tracing/data.vr:1351, a T0146-family root). FS-side primitives and the exporter itself are green in isolation. Un-ignore when baked-module Shared-field method-dispatch lands (T0146 family) — the assertions are already written against the canonical file-sink observation surface.")
 fn test_provider_force_flush_and_shutdown_succeed() {
     let sink = FileSink.fresh();
     let provider = make_provider(sink.exporter());

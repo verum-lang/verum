@@ -57,7 +57,7 @@ fn regression_bloom_with_defaults_constructible() {
 // Re-checked 2026-05-25 — also surfaces a GetE pointer-mismatch
 // (post task #47 stage-3 stubs) when called with proper slices.
 // Tracked as task #17.
-@ignore
+@ignore  // T0146 probe: RED in BOTH dispatch modes — gated on the hmac/sha256 IndexOutOfBounds{64,64} class, NOT bare-name dispatch. Un-ignore when that closes.
 @test
 fn regression_bloom_insert_contains_round_trip() {
     let mut bf = BloomFilter.with_target(1024, 1000);
@@ -68,7 +68,7 @@ fn regression_bloom_insert_contains_round_trip() {
 
 // REGRESSION (§B.2): same shape as §B.1 — `check_and_set` calls
 // `contains → probe_offsets → hmac_sha256` chain.
-@ignore
+@ignore  // T0146 probe: RED in BOTH dispatch modes — gated on the hmac/sha256 IndexOutOfBounds{64,64} class, NOT bare-name dispatch. Un-ignore when that closes.
 @test
 fn regression_bloom_check_and_set_idempotent() {
     let mut bf = BloomFilter.with_target(1024, 1000);
@@ -80,7 +80,7 @@ fn regression_bloom_check_and_set_idempotent() {
 }
 
 // REGRESSION (§B.3): same shape as §B.1 — `insert` chain.
-@ignore
+@ignore  // T0146 probe: RED in BOTH dispatch modes — gated on the hmac/sha256 IndexOutOfBounds{64,64} class, NOT bare-name dispatch. Un-ignore when that closes.
 @test
 fn regression_bloom_admitted_counter_increments_on_insert() {
     let mut bf = BloomFilter.with_target(1024, 1000);
@@ -92,7 +92,7 @@ fn regression_bloom_admitted_counter_increments_on_insert() {
 }
 
 // REGRESSION (§B.4): same shape as §B.1 — `insert` chain.
-@ignore
+@ignore  // T0146 probe: RED in BOTH dispatch modes — gated on the hmac/sha256 IndexOutOfBounds{64,64} class, NOT bare-name dispatch. Un-ignore when that closes.
 @test
 fn regression_bloom_clear_resets_admitted_counter() {
     let mut bf = BloomFilter.with_target(1024, 1000);

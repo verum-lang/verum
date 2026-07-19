@@ -3,9 +3,10 @@
 // =============================================================================
 //
 // Pinned regressions for `core.io.buffer`. The method-call surface
-// (BufReader.read, BufWriter.write, BufferCursor.read/write/seek) is gated
-// by task #io-1 (mount-scope-aware lookup_function). Once #io-1 closes,
-// every @ignore'd test here flips green.
+// (BufReader.read, BufWriter.write, BufferCursor.read/write/seek) was
+// gated by the bare-name method-dispatch collision class (#io-1 →
+// T0146); closed 2026-07-19 by the resolved_protocol_dispatch
+// carried-fact consult (T0146 LEG-R) — all former pins below run live.
 // =============================================================================
 
 mount core.io.buffer.{
@@ -27,7 +28,10 @@ mount core.intrinsics.runtime.os.{__process_wait_raw};
 // §A — BufferCursor read/write/seek surface gated by #io-1
 // =============================================================================
 
-@ignore
+// Un-@ignore'd 2026-07-19 (T0146 LEG-R) — receiver-typed method dispatch
+// resolves BufferCursor/BufReader/BufWriter/LineWriter and the
+// copy/read_all generic drivers through the resolved_protocol_dispatch
+// carried-fact map (runtime TypeId → bare method → FunctionId).
 @test
 fn regression_buffer_cursor_write_then_read_round_trip() {
     let mut c = BufferCursor.new(List.new());
@@ -63,7 +67,6 @@ fn regression_buffer_cursor_seek_negative_returns_err() {
 // §B — BufReader/BufWriter wrapping a BufferCursor — gated by #io-1
 // =============================================================================
 
-@ignore
 @test
 fn regression_buf_reader_over_cursor_reads_data() {
     let data: List<Byte> = [10, 20, 30, 40, 50];
@@ -74,7 +77,6 @@ fn regression_buf_reader_over_cursor_reads_data() {
     assert(n > 0);
 }
 
-@ignore
 @test
 fn regression_buf_writer_over_cursor_writes_data() {
     let cursor = BufferCursor.new(List.new());
@@ -89,6 +91,12 @@ fn regression_buf_writer_over_cursor_writes_data() {
 // §C — utility functions `copy` and `read_all` — gated by #io-1
 // =============================================================================
 
+// STILL PINNED after T0146 LEG-R — `copy` / `read_all` are GENERIC
+// free-fn drivers (`copy<R: Read, W: Write>`); a direct probe of the
+// same List-backed cursors dies in BOTH dispatch modes with
+// `NullPointerAt { op: 0x65, site: "Slice.copy_from_slice" }` at the
+// internal scratch-buffer handoff. Byte-buffer marshalling, not
+// method resolution — the dispatch kill-switch does not move it.
 @ignore
 @test
 fn regression_copy_reader_to_writer() {
@@ -114,7 +122,6 @@ fn regression_read_all_collects_full_stream() {
 // §D — LineWriter newline-flushing semantics — gated by #io-1
 // =============================================================================
 
-@ignore
 @test
 fn regression_line_writer_flushes_on_newline() {
     let cursor = BufferCursor.new(List.new());
