@@ -56,6 +56,186 @@ fn fat_ref_single_referent(v: &Value) -> Option<Value> {
     }
 }
 
+/// CTX-UNIT-RECEIVER-DISPATCH-1 (T0245) kill switch: restores the
+/// pre-fix fallthrough (unit receivers under dyn dispatch degrade to the
+/// bare-suffix scan).  Convention mirror of
+/// `VERUM_DISABLE_PROTOCOL_DISPATCH` (module.rs).
+fn unit_dyn_dispatch_disabled() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("VERUM_DISABLE_UNIT_DYN_DISPATCH").is_some())
+}
+
+/// Resolution outcome of the T0245 unit-receiver protocol-implementor walk.
+enum UnitDynResolution {
+    /// Exactly one unit-shaped implementor provides the method.
+    Unique(FunctionId),
+    /// Several unit-shaped implementors provide it — the unit value
+    /// cannot distinguish them (names carried for the loud diagnostic).
+    Ambiguous(Vec<String>),
+    /// No unit-shaped implementor provides it.
+    None,
+}
+
+/// CTX-UNIT-RECEIVER-DISPATCH-1 (T0245): resolve `dyn:<P>.<m>` for a
+/// UNIT-typed receiver via the protocol-implementor table.
+///
+/// A unit value carries no ObjectHeader, so the receiver cannot name its
+/// type — but the `dyn:` token names the PROTOCOL, and the module's
+/// `TypeDescriptor.protocols` lists every implementor.  Only unit-shaped
+/// types can produce unit values, in two tiers:
+///
+///  * phase A — `TypeKind::Unit` (`type X is ();`): the canonical
+///    unit-value source (`LoadUnit` construction, no header ever);
+///  * phase B — fieldless non-transparent Records: normally heap objects
+///    (`New` with a header), unit-valued ONLY via the bare-name
+///    construction path (MOUNTED-UNIT-VALUE-1 in codegen) — consulted
+///    only when phase A has no candidate, so stdlib fieldless-record
+///    implementors (`NullLogger is {}` for the base-log Logger) cannot
+///    manufacture false ambiguity against a genuine unit type.
+///
+/// The candidate method resolves in impl-authority order: the
+/// `ProtocolImpl.methods` fid list, the qualified `<Type>.<m>` /
+/// dotted-suffix spelling, then the protocol's own default body
+/// (`<P>.<m>`).  Multi-bound tokens ("Debug+Clone") try each bound in
+/// order — first protocol with a candidate wins, mirroring codegen's
+/// `dyn_protocol_of` first-bound convention.
+fn resolve_unit_receiver_protocol_impl(
+    state: &InterpreterState,
+    protocol_quals: &str,
+    method: &str,
+) -> UnitDynResolution {
+    let has_body = |fid: FunctionId| -> bool {
+        state
+            .module
+            .get_function(fid)
+            .map(|f| {
+                f.bytecode_length > 0
+                    || f.instructions
+                        .as_ref()
+                        .map(|i| !i.is_empty())
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    };
+    for proto in protocol_quals
+        .split('+')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        // Protocol descriptor id(s) by name — short spelling first-class,
+        // module-qualified (".{proto}" suffix) tolerated.
+        let dotted_proto = format!(".{}", proto);
+        let proto_ids: Vec<u32> = state
+            .module
+            .types
+            .iter()
+            .filter(|td| {
+                matches!(td.kind, crate::types::TypeKind::Protocol)
+                    && state
+                        .module
+                        .strings
+                        .get(td.name)
+                        .is_some_and(|n| n == proto || n.ends_with(dotted_proto.as_str()))
+            })
+            .map(|td| td.id.0)
+            .collect();
+        if proto_ids.is_empty() {
+            continue;
+        }
+        let mut phase_a: Vec<(String, FunctionId)> = Vec::new();
+        let mut phase_b: Vec<(String, FunctionId)> = Vec::new();
+        for td in state.module.types.iter() {
+            let is_unit_kind = matches!(td.kind, crate::types::TypeKind::Unit);
+            let is_fieldless_record = matches!(td.kind, crate::types::TypeKind::Record)
+                && td.fields.is_empty()
+                && !td.is_transparent_wrapper;
+            if !is_unit_kind && !is_fieldless_record {
+                continue;
+            }
+            if !td
+                .protocols
+                .iter()
+                .any(|pi| proto_ids.iter().any(|p| *p == pi.protocol.0))
+            {
+                continue;
+            }
+            let tname = match state.module.strings.get(td.name) {
+                Some(n) if !n.is_empty() => n.to_string(),
+                _ => continue,
+            };
+            // (a) the impl's own method from the ProtocolImpl fid list;
+            let mut fid: Option<FunctionId> = None;
+            let dotted_m = format!(".{}", method);
+            for pi in td.protocols.iter() {
+                if !proto_ids.iter().any(|p| *p == pi.protocol.0) {
+                    continue;
+                }
+                for &raw in pi.methods.iter() {
+                    if let Some(fd) = state.module.functions.get(raw as usize)
+                        && let Some(fname) = state.module.strings.get(fd.name)
+                        && (fname == method || fname.ends_with(dotted_m.as_str()))
+                        && has_body(fd.id)
+                    {
+                        fid = Some(fd.id);
+                        break;
+                    }
+                }
+                if fid.is_some() {
+                    break;
+                }
+            }
+            // (b) qualified `<Type>.<method>` / dotted-suffix spelling;
+            if fid.is_none() {
+                let qualified = format!("{}.{}", tname, method);
+                fid = state
+                    .module
+                    .find_function_by_name(&qualified)
+                    .filter(|f| has_body(*f))
+                    .or_else(|| {
+                        let dotted = format!(".{}.{}", tname, method);
+                        state.module.functions.iter().find_map(|f| {
+                            let n = state.module.strings.get(f.name).unwrap_or("");
+                            (n.ends_with(dotted.as_str()) && f.bytecode_length > 0)
+                                .then_some(f.id)
+                        })
+                    });
+            }
+            // (c) the protocol's own default body (`<P>.<m>`).
+            if fid.is_none() {
+                let default_name = format!("{}.{}", proto, method);
+                fid = state
+                    .module
+                    .find_function_by_name(&default_name)
+                    .filter(|f| has_body(*f));
+            }
+            if let Some(f) = fid {
+                let bucket = if is_unit_kind {
+                    &mut phase_a
+                } else {
+                    &mut phase_b
+                };
+                if !bucket.iter().any(|(n, _)| *n == tname) {
+                    bucket.push((tname, f));
+                }
+            }
+        }
+        let winner = if !phase_a.is_empty() { phase_a } else { phase_b };
+        match winner.len() {
+            0 => continue,
+            1 => {
+                let (_, fid) = winner.into_iter().next().expect("len checked == 1");
+                return UnitDynResolution::Unique(fid);
+            }
+            _ => {
+                return UnitDynResolution::Ambiguous(
+                    winner.into_iter().map(|(n, _)| n).collect(),
+                );
+            }
+        }
+    }
+    UnitDynResolution::None
+}
+
 // Re-import debug helpers
 use super::debug::format_value_for_print;
 
@@ -2073,6 +2253,20 @@ pub(in super::super) fn handle_call_method(
     // emitted `<hi>` instead of `<"hi">` because Display.fmt for Text
     // was picked over Debug.fmt_debug for Text).
     let mut was_dyn_dispatch = method_name.starts_with("dyn:");
+    // CTX-UNIT-RECEIVER-DISPATCH-1 (T0245): remember the protocol
+    // qualifier of a `dyn:`/`ctx:` token BEFORE the strip below discards
+    // it.  A UNIT-typed receiver carries no ObjectHeader, so for
+    // provided context values of unit types (`type SimpleLogger is ();`
+    // provided for `Logger`) the protocol name inside the token is the
+    // ONLY dispatch fact left at runtime — the unit-receiver resolution
+    // in the dyn block below consumes it.
+    let mut dyn_protocol: Option<String> =
+        if method_name.starts_with("dyn:") || method_name.starts_with("ctx:") {
+            let rest = &method_name[4..];
+            rest.rfind('.').map(|dot| rest[..dot].to_string())
+        } else {
+            None
+        };
     let mut method_name = if method_name.starts_with("dyn:") || method_name.starts_with("ctx:") {
         let rest = &method_name[4..];
         if let Some(dot) = rest.rfind('.') {
@@ -2101,10 +2295,14 @@ pub(in super::super) fn handle_call_method(
         let qualifier = &method_name[..dot];
         if state.protocol_name_index.contains(qualifier) {
             was_dyn_dispatch = true;
+            // T0245: a protocol-qualified token IS dyn dispatch — carry
+            // the protocol name for the unit-receiver resolution too.
+            dyn_protocol = Some(qualifier.to_string());
             method_name = method_name[dot + 1..].to_string();
         }
     }
     let was_dyn_dispatch = was_dyn_dispatch;
+    let dyn_protocol = dyn_protocol;
     let method_name = method_name;
 
     // COLLECT-FROMITER-2 (runtime leg): the generic `collect` body
@@ -2389,6 +2587,55 @@ pub(in super::super) fn handle_call_method(
                 }
             }
         }
+        // ── CTX-UNIT-RECEIVER-DISPATCH-1 (T0245) ─────────────────────
+        // A UNIT receiver under dyn dispatch has NO ObjectHeader, so the
+        // typed lookups above degrade to `Unit.<method>` and historically
+        // fell through to the bare-suffix scan — which binds an unrelated
+        // same-name global: `dyn:Logger.log` on a provided
+        // `type SimpleLogger is ();` value executed the stdlib math
+        // `log`; release silently dropped both `[LOG]` lines of
+        // vcs context_multiple.vr, debug ICE'd in as_f64.  The protocol
+        // name carried by the `dyn:` token is the remaining dispatch
+        // fact: resolve through the module's protocol-implementor table
+        // (TypeDescriptor.protocols).
+        //
+        // Ordering: the `Unit.<method>` chain above stays FIRST — the
+        // primitive `()`'s own impls keep winning exactly as before this
+        // fix (status quo for `implement <P> for ()`); the walk only
+        // handles what previously reached the hijack scan.
+        //
+        // Soundness: a unit VALUE can only originate from the primitive
+        // `()` (handled above), a nominal `TypeKind::Unit` type, or a
+        // fieldless non-transparent Record constructed via the bare-name
+        // path (MOUNTED-UNIT-VALUE-1).  Exactly one unit-shaped
+        // implementor of the protocol ⇒ unambiguous dispatch.  Several ⇒
+        // the value cannot distinguish them: LOUD error, never a guess.
+        // Kill switch: VERUM_DISABLE_UNIT_DYN_DISPATCH=1 restores the
+        // pre-T0245 fallthrough.
+        if found_func_id.is_none()
+            && classify_target.is_unit()
+            && !unit_dyn_dispatch_disabled()
+            && let Some(quals) = dyn_protocol.as_deref()
+        {
+            match resolve_unit_receiver_protocol_impl(state, quals, &method_name) {
+                UnitDynResolution::Unique(fid) => found_func_id = Some(fid),
+                UnitDynResolution::Ambiguous(candidates) => {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "CTX-UNIT-RECEIVER-DISPATCH-1: dyn dispatch of `{}.{}` on a \
+                             unit-typed receiver is ambiguous — multiple unit-shaped \
+                             implementors provide it ({}); unit values carry no type \
+                             identity, so give the implementors distinguishable \
+                             representations (a field) or provide a fielded type (T0245)",
+                            quals,
+                            method_name,
+                            candidates.join(", ")
+                        ),
+                    });
+                }
+                UnitDynResolution::None => {}
+            }
+        }
         // DYN-FMT-BUILTIN-FALLBACK-1 (#48 local-sum leg): a dyn-protocol
         // Debug/Display call whose receiver type has NO impl (typed
         // lookup above exhausted exact AND dotted spellings) must NOT
@@ -2442,6 +2689,30 @@ pub(in super::super) fn handle_call_method(
             let sval = alloc_string_value(state, &rendered)?;
             state.set_reg(dst, sval);
             return Ok(DispatchResult::Continue);
+        }
+
+        // T0245 hard stop: past every legitimate resolution (primitive
+        // `Unit.<m>` lookups, the unit-implementor walk, the runtime
+        // formatter), a unit receiver under dyn dispatch must NEVER
+        // reach the bare-suffix scan below — that scan is exactly the
+        // silent-hijack channel this task closes ("a CallM whose
+        // receiver is a unit-typed value never resolves through
+        // bare-name global functions").  Loud failure names the
+        // protocol and method instead of executing a stranger's body.
+        if found_func_id.is_none()
+            && classify_target.is_unit()
+            && !unit_dyn_dispatch_disabled()
+            && let Some(proto) = dyn_protocol.as_deref()
+        {
+            return Err(InterpreterError::Panic {
+                message: format!(
+                    "CTX-UNIT-RECEIVER-DISPATCH-1: method `{}` of protocol `{}` is not \
+                     resolvable on a unit-typed receiver — no unit-shaped implementor \
+                     of `{}` provides it, and bare-name fallback is refused (it binds \
+                     unrelated same-name globals; T0245)",
+                    method_name, proto, proto
+                ),
+            });
         }
     }
 

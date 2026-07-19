@@ -2,8 +2,19 @@
 // @expected-stdout: [LOG] Starting operation\nMetrics: counter=1\n[LOG] Operation completed\nMetrics: counter=2
 // @tier: 0
 // @level: L2
-// @tags: contexts, using, multiple, vbc, runtime
-// @description: Tests multiple contexts in using clause work correctly together
+// @tags: contexts, using, multiple, vbc, runtime, unit-receiver
+// @description: Multiple contexts in one using clause dispatch through their provided values — including a UNIT-typed context implementor (CTX-UNIT-RECEIVER-DISPATCH-1, T0245)
+//
+// Pins the T0245 unit-receiver class: `SimpleLogger` is `type ... is ();`
+// — its provided value is a bare NaN-boxed unit with NO object header, so
+// runtime `dyn:Logger.log` dispatch cannot read a type_id from the
+// receiver. The historical failure fell through to the bare-name suffix
+// scan and bound the stdlib math `log` (silently skipping both `[LOG]`
+// lines in release; as_f64 debug-assert ICE in debug). The `[LOG]` lines
+// in @expected-stdout are the assertion for the Logger leg (a unit value
+// cannot carry state to assert on); the Metrics counter values are
+// additionally hard-asserted in-body so a mis-dispatch cannot page the
+// failure out of stdout comparison.
 
 // Logger context
 context Logger {
@@ -44,6 +55,7 @@ fn do_operation() using [Logger, Metrics] {
     Logger.log("Starting operation");
     Metrics.increment();
     let count = Metrics.get_counter();
+    assert_eq(count, 1);
     println(f"Metrics: counter={count}");
 }
 
@@ -52,6 +64,7 @@ fn finish_operation() using [Logger, Metrics] {
     Logger.log("Operation completed");
     Metrics.increment();
     let count = Metrics.get_counter();
+    assert_eq(count, 2);
     println(f"Metrics: counter={count}");
 }
 
