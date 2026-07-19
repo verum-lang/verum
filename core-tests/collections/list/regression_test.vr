@@ -166,7 +166,7 @@ fn regression_list_is_sorted_ref_deref_compare() {
 @test
 fn regression_list_sort_by_closure_via_deref_compare() {
     // T0271 (ORD-DECODE-1): the `sort_by` runtime intercept used to
-    // decode the closure's `Ordering` result with `Value::as_i64()`
+    // decode the closure's `Ordering` result with the raw int accessor
     // — the C `qsort` convention. A Verum comparator returns the
     // `Ordering` sum type (a heap unit variant), not an integer, so
     // `as_i64` read the NaN-boxed pointer's address (always positive)
