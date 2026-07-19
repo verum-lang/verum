@@ -163,11 +163,18 @@ fn regression_list_is_sorted_ref_deref_compare() {
     assert(xs.is_sorted());
 }
 
-@ignore
 @test
 fn regression_list_sort_by_closure_via_deref_compare() {
-    // Same defect class as is_sorted — the closure is invoked with
-    // `&T` references that compare addresses, not values.
+    // T0271 (ORD-DECODE-1): the `sort_by` runtime intercept used to
+    // decode the closure's `Ordering` result with `Value::as_i64()`
+    // — the C `qsort` convention. A Verum comparator returns the
+    // `Ordering` sum type (a heap unit variant), not an integer, so
+    // `as_i64` read the NaN-boxed pointer's address (always positive)
+    // and every comparison decoded as Greater: the sort scrambled the
+    // input identically regardless of the closure. `[3,1,2]` came out
+    // `[2,1,3]` for BOTH `a.cmp(b)` and `b.cmp(a)`. Fixed by routing
+    // the result through `decode_ordering_result` (variant tag → Rust
+    // Ordering). This reverse comparator now yields descending order.
     let mut xs: List<Int> = [3, 1, 2];
     xs.sort_by(|a, b| (*b).cmp(a));
     assert_eq(xs.get(0), Maybe.Some(3));
