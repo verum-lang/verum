@@ -56,7 +56,7 @@ fn test_h2stream_probe_persist_after_bound_event() {
 // MUTSELF-MATCH-1 CLOSED (T0149): an inline `&StreamEvent.SendHeaders { … }`
 // payload-variant arg to a `&mut self` method now persists the writeback.
 // Same root and same fix as INLINE-AGG-REF-ARG — `stabilize_ref_source`'s
-// `needs_stable` gained `ExprKind::Record` (0b9d3a0b9), so the inline
+// `needs_stable` gained the record-expr kind (0b9d3a0b9), so the inline
 // aggregate arg materialises in a fresh non-recyclable slot instead of
 // aliasing the `&mut self` receiver storage. Verified green at HEAD.
 @test
