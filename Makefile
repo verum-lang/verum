@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs
+.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -32,6 +32,9 @@ check-markers: ## Gate: landed-markers fence (docs/architecture/landed-markers.t
 
 check-vr-syntax: ## Gate: no Rust-style `::` in .vr sources (grammar/verum.ebnf uses `.`)
 	python3 vcs/scripts/check_no_double_colon.py --check
+
+check-op-bytes: ## Gate (T0198): .vr op-byte doc comments match the instruction.rs enums
+	python3 vcs/scripts/check_op_byte_docs.py --check
 
 check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean files stay clean, proved counts never fall
 	python3 scripts/ci/proof_gate.py

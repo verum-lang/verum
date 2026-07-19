@@ -24,12 +24,18 @@ jobs:
   # (IPv6 / SQL-cast / URI / script DATA excluded). See the script's header.
   # ---------------------------------------------------------------------------
   vr-syntax:
-    name: Verum syntax gate (no Rust `::`)
+    name: Verum syntax gate (no Rust `::`, op-byte doc truth)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: No Rust-style `::` in .vr sources
         run: python3 vcs/scripts/check_no_double_colon.py --check
+      # instruction.rs is the single source of truth for VBC op bytes; a .vr
+      # doc comment that contradicts it is worse than no comment, because the
+      # next author writes code against it (T0193 shipped a `3 = log` claim
+      # where the enum says 4). Re-derives the enums on every run.
+      - name: .vr op-byte doc comments match the instruction.rs enums
+        run: python3 vcs/scripts/check_op_byte_docs.py --check
 
   # ---------------------------------------------------------------------------
   # Job 1: compile + unit tests on Linux (x86_64 + aarch64) and macOS.
