@@ -221,35 +221,27 @@ fn handle_request(path: Text) using WebStack { ... }
 ```
 
 ### 10. FFI (Foreign Function Interface)
-**File**: `test_ffi.vr` (327 lines)
+**File**: `test_ffi.vr` (62 lines)
 
-Tests FFI boundary declarations:
-- External C function declarations
-- FFI type mappings
-- Opaque types
-- C-compatible structs (#[repr(C)])
-- Packed and aligned structs
-- C-compatible enums
-- Function pointers
-- Platform-specific FFI
-- Variadic functions
-- Callback functions
-- Memory management across FFI
+Tests basic FFI boundary declarations:
+- `ffi` block with an `@extern("C")` function declaration
+- C-compatible record and enum shapes
+
+Broader FFI coverage (packed/aligned layouts, callbacks, variadics,
+platform-specific bindings, byte-buffer marshalling) lives in the
+conformance suites — see `core-tests/` and
+`docs/architecture/ffi-byte-buffer-contract.md`.
 
 **Key syntax tested**:
 ```verum
-extern "C" {
-    fn printf(format: *const i8, ...) -> i32;
-    fn malloc(size: usize) -> *mut void;
+ffi CStdlib {
+    @extern("C") fn test_fn() -> Int;
 }
 
-#[repr(C)]
 type Point is {
-    x: f64,
-    y: f64,
+    x: Float,
+    y: Float,
 };
-
-type CCallback is extern "C" fn(data: *mut void) -> i32;
 ```
 
 ---
@@ -418,7 +410,7 @@ All test files verified for:
 | Refinements | test_refinements.vr | 226 | ✅ Complete |
 | Async/Await | test_async.vr | 283 | ✅ Complete |
 | Contexts | test_contexts.vr | 167 | ✅ Complete |
-| FFI | test_ffi.vr | 327 | ✅ Complete |
+| FFI | test_ffi.vr | 62 | ✅ Basic declarations (full FFI coverage in core-tests) |
 | Generics | test_generics.vr | 149 | ✅ Complete |
 | Pattern Matching | test_pattern_matching.vr | 139 | ✅ Complete |
 | Closures | test_closures.vr | 192 | ✅ Complete |
