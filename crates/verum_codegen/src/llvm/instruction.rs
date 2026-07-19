@@ -28911,9 +28911,8 @@ fn lower_ffi_extended<'ctx>(
             // security-critical zero through a separate opcode.
             //
 
-            // Audit: `internal/specs/tls-quic-security-audit.md` §2
-            // Action #2 ("LLVM-IR audit of zeroise memset
-            // preservation").
+            // Spec: tls-quic-security-audit §2 Action #2 ("LLVM-IR
+            // audit of zeroise memset preservation").
             if operands.len() < 2 {
                 return Err(LlvmLoweringError::internal(
                     "CSecureZero: insufficient operands",

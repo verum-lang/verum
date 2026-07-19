@@ -30546,9 +30546,8 @@ impl VbcCodegen {
                 // Routes to FFI sub-opcode 0xA3 (CSecureZero), which
                 // lowers in AOT to a *volatile* `llvm.memset` (the
                 // optimiser cannot DCE it). Used to wipe key
-                // material before storage leaves scope. Audit
-                // `internal/specs/tls-quic-security-audit.md` §2
-                // Action #2.
+                // material before storage leaves scope.
+                // Spec: tls-quic-security-audit §2 Action #2.
                 if args.len() >= 2 {
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, args[0].0); // dst
