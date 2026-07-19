@@ -3561,6 +3561,43 @@ impl VbcCodegen {
             }
 
             ExprKind::Index { expr: base, index } => {
+                // PACKED-BYTE-INDEX-ASSIGN-AOT (T0172): `buf[i] = v` on a
+                // tracked packed `[Byte; N]` (TypeId::U8) local must lower to
+                // the dedicated byte-strided `ByteArrayStore`, NOT the generic
+                // `SetE`.  `SetE`'s Tier-1 lowering routes through the runtime
+                // container-view classifier, which has no packed-scalar arm —
+                // and a Tier-1 byte buffer is a bare data pointer carrying no
+                // type_id stamp, so the classifier misreads the raw bytes as a
+                // cell/list header and stores an 8-byte Value at a wild address
+                // (native SIGSEGV; the interpreter survives via runtime
+                // type_id dispatch in `typed_array_element_spec`).  Mirrors the
+                // array-literal fill and `&buf[i]` element-address paths, which
+                // already route packed arrays through the dedicated opcodes.
+                if let ExprKind::Path(path) = &base.kind
+                    && path.segments.len() == 1
+                    && let PathSegment::Name(ident) = &path.segments[0]
+                    && self.ctx.is_byte_array_var(&ident.name)
+                {
+                    let base_reg = self
+                        .compile_expr(base)?
+                        .or_internal("index base has no value")?;
+                    let index_reg = self
+                        .compile_expr(index)?
+                        .or_internal("index has no value")?;
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, base_reg.0);
+                    Self::write_reg(&mut operands, index_reg.0);
+                    Self::write_reg(&mut operands, value_reg.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::ByteArrayStore.to_byte(),
+                        operands,
+                    });
+                    self.ctx.free_temp(base_reg);
+                    self.ctx.free_temp(index_reg);
+                    self.ctx.free_temp(value_reg);
+                    return Ok(None);
+                }
+
                 let base_reg = self
                     .compile_expr(base)?
                     .or_internal("index base has no value")?;
@@ -4087,6 +4124,23 @@ impl VbcCodegen {
 
             // Index access: arr[idx] += value
             ExprKind::Index { expr: arr, index } => {
+                // PACKED-BYTE-COMPOUND-INDEX-AOT (T0172): `buf[i] ^= v` on a
+                // tracked packed `[Byte; N]` (TypeId::U8) local is a read-
+                // modify-write, so BOTH the current-value read and the store-
+                // back must use the dedicated byte-strided ByteArrayLoad /
+                // ByteArrayStore.  The generic GetE/SetE crash at Tier-1 (the
+                // packed byte buffer is a bare data pointer with no type_id
+                // stamp for the container-view classifier).  Same root as the
+                // plain index read/write paths.
+                let is_byte_arr = if let ExprKind::Path(path) = &arr.kind
+                    && path.segments.len() == 1
+                    && let PathSegment::Name(ident) = &path.segments[0]
+                {
+                    self.ctx.is_byte_array_var(&ident.name)
+                } else {
+                    false
+                };
+
                 // Load array
                 let arr_reg = self
                     .compile_expr(arr)?
@@ -4099,11 +4153,22 @@ impl VbcCodegen {
 
                 // Get current element value
                 let current_val = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::GetE {
-                    dst: current_val,
-                    arr: arr_reg,
-                    idx: idx_reg,
-                });
+                if is_byte_arr {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, current_val.0);
+                    Self::write_reg(&mut operands, arr_reg.0);
+                    Self::write_reg(&mut operands, idx_reg.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::ByteArrayLoad.to_byte(),
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::GetE {
+                        dst: current_val,
+                        arr: arr_reg,
+                        idx: idx_reg,
+                    });
+                }
 
                 // Evaluate right side
                 let right_reg = self
@@ -4135,11 +4200,22 @@ impl VbcCodegen {
                 }
 
                 // Store back to array element
-                self.ctx.emit(Instruction::SetE {
-                    arr: arr_reg,
-                    idx: idx_reg,
-                    value: result,
-                });
+                if is_byte_arr {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, arr_reg.0);
+                    Self::write_reg(&mut operands, idx_reg.0);
+                    Self::write_reg(&mut operands, result.0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: crate::instruction::SystemSubOpcode::ByteArrayStore.to_byte(),
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::SetE {
+                        arr: arr_reg,
+                        idx: idx_reg,
+                        value: result,
+                    });
+                }
 
                 self.ctx.free_temp(current_val);
                 self.ctx.free_temp(right_reg);
@@ -20663,6 +20739,40 @@ impl VbcCodegen {
             self.ctx.free_temp(start_reg);
             self.ctx.free_temp(len_reg);
             return Ok(Some(dest));
+        }
+
+        // PACKED-BYTE-INDEX-READ-AOT (T0172): reading `buf[i]` from a tracked
+        // packed `[Byte; N]` (TypeId::U8) local must use the dedicated
+        // byte-strided `ByteArrayLoad`, NOT the generic `GetE` — same root as
+        // the write side (`SetE`).  The Tier-1 `GetE` container-view classifier
+        // has no packed-scalar arm and misreads the raw byte buffer (a bare
+        // data pointer with no type_id stamp) as a cell/list header, yielding a
+        // wild pointer and a native SIGSEGV.  The interpreter survives via
+        // runtime type_id dispatch; the AOT twin needs the compile-time-known
+        // packed opcode.
+        if let ExprKind::Path(path) = &base.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ident) = &path.segments[0]
+            && self.ctx.is_byte_array_var(&ident.name)
+        {
+            let base_reg = self
+                .compile_expr(base)?
+                .or_internal("index base has no value")?;
+            let idx_reg = self
+                .compile_expr(index)?
+                .or_internal("index has no value")?;
+            let result = self.ctx.alloc_temp();
+            let mut operands = Vec::<u8>::new();
+            Self::write_reg(&mut operands, result.0);
+            Self::write_reg(&mut operands, base_reg.0);
+            Self::write_reg(&mut operands, idx_reg.0);
+            self.ctx.emit(Instruction::FfiExtended {
+                sub_op: crate::instruction::SystemSubOpcode::ByteArrayLoad.to_byte(),
+                operands,
+            });
+            self.ctx.free_temp(base_reg);
+            self.ctx.free_temp(idx_reg);
+            return Ok(Some(result));
         }
 
         let base_reg = self

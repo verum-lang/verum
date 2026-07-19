@@ -1,0 +1,21 @@
+// T0172 sibling characterization — packed [Int; N] (typed array, elem_size 8)
+// index store + read + COMPOUND-assign. INTENTIONALLY OUTSIDE the T0172 byte fix
+// (which gates on is_byte_array_var), so every op here takes the generic
+// SetE/GetE path — i.e. the byte-identical ELSE-branch of all three edited arms.
+// The `xs[i] += v` line specifically exercises the compound-assign arm's
+// else-branch (the subtlest edit): at interp it must produce the correct result
+// (proving byte-identity, not just asserting it). The AOT state characterizes
+// the typed-array packed sibling (generic SetE/GetE has no packed-scalar arm at
+// Tier-1 either — tracked separately; no TypedArrayLoad opcode exists yet).
+
+fn main() {
+    let mut xs: [Int; 4] = [0; 4];
+    xs[1] = 42;                   // plain typed index store  (else-branch of compile_assignment)
+    xs[2] = xs[1] + 8;            // typed index read         (else-branch of compile_index)
+    xs[3] = 3;
+    xs[3] += 7;                   // typed COMPOUND assign    (else-branch of compile_compound_assignment)
+    assert_eq(xs[1], 42);
+    assert_eq(xs[2], 50);
+    assert_eq(xs[3], 10);
+    print("INT_STORE_OK");
+}

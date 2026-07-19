@@ -1,0 +1,17 @@
+// T0172 neighbor probe — sibling packed-byte-array paths that must be green at
+// both tiers after the fix (the READ path now routes through ByteArrayLoad).
+//   * plain [Byte; N] literal init + element read (no reassignment)
+//   * [Byte; N] read used in an arithmetic expression
+// The [Int; N] typed-array store sibling is characterized separately
+// (packed_int_store_probe.vr) — it is intentionally untouched by this fix.
+
+fn main() {
+    let b: [Byte; 4] = [65, 66, 67, 68];
+    assert_eq(b[0] as Int, 65);
+    assert_eq(b[3] as Int, 68);
+    let mut acc: Int = 0;
+    acc = acc + (b[1] as Int);
+    acc = acc + (b[2] as Int);
+    assert_eq(acc, 133);          // 66 + 67
+    print("NEIGHBOR_OK");
+}
