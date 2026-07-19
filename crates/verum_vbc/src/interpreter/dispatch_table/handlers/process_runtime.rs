@@ -102,6 +102,25 @@ pub(in super::super) fn try_intercept_process_runtime(
         "native_fd_read_chunk" if arg_count == 2 => {
             intercept_native_fd_read_chunk(state, args_start_reg, caller_base)
         }
+        // T0111 LEG A — `core.io.buffer`'s `__fd_read_chunk_raw(fd, max)
+        // -> List<Byte>` has a PLACEHOLDER `.vr` body (`{ [] }`), so the
+        // bodyless-intrinsic gate in calls.rs never reaches the by-name
+        // dispatch for it: the placeholder body ran and produced
+        // permanent EOF for every `FdReader.read`.  Placeholder-body
+        // intrinsics require this HIGH-LEVEL name intercept (fires
+        // before any body dispatch) — same idiom as
+        // `native_fd_read_chunk` above.
+        "__fd_read_chunk_raw" if arg_count == 2 => {
+            intercept_fd_read_chunk_bare(state, args_start_reg, caller_base)
+        }
+        // T0111 LEG A — `__fd_close_raw_buf` (FdReader/BufReader
+        // owned-fd close in `core.io.buffer`) is the same
+        // placeholder-body idiom; route to the ONE close bridge so
+        // open_files-backed pipe fds actually close (pre-fix: silent
+        // no-op leak at Tier-0).
+        "__fd_close_raw_buf" if arg_count == 1 => {
+            intercept_fd_close_bare(state, args_start_reg, caller_base)
+        }
         "close_fd" if arg_count == 1 => {
             intercept_close_fd(state, args_start_reg, caller_base)
         }
@@ -135,16 +154,8 @@ fn intercept_spawn_with_output(
     if let Some(denied) = check_process_permission(state, &cmd.program) {
         return Ok(Some(denied));
     }
-    let mut std_cmd = std::process::Command::new(&cmd.program);
-    for a in &cmd.args {
-        std_cmd.arg(a);
-    }
-    for (k, v) in &cmd.env_vars {
-        std_cmd.env(k, v);
-    }
-    if let Some(dir) = &cmd.working_dir {
-        std_cmd.current_dir(dir);
-    }
+    let mut std_cmd =
+        build_std_command(&cmd.program, &cmd.args, &cmd.env_vars, &cmd.working_dir);
     std_cmd.stdin(stdio_from_cfg(cmd.stdin_cfg));
     // The stdlib's `Command.output()` pins stdout/stderr to Piped
     // before invoking `spawn_child_with_output`, so we override
@@ -216,9 +227,34 @@ fn read_command_record(state: &InterpreterState, v: Value) -> Option<CommandData
     })
 }
 
+/// Build a `std::process::Command` from marshaled Verum-side pieces —
+/// the ONE construction authority shared by the modern record-driven
+/// intercepts (`spawn_child_with_output` / `spawn_child`) and the
+/// legacy `__process_spawn_raw` surface (T0111 C1).
+fn build_std_command(
+    program: &str,
+    args: &[String],
+    env_vars: &[(String, String)],
+    working_dir: &Option<String>,
+) -> std::process::Command {
+    let mut std_cmd = std::process::Command::new(program);
+    for a in args {
+        std_cmd.arg(a);
+    }
+    for (k, v) in env_vars {
+        std_cmd.env(k, v);
+    }
+    if let Some(dir) = working_dir {
+        std_cmd.current_dir(dir);
+    }
+    std_cmd
+}
+
 /// Walk a `List<Text>` heap record — three-Value header
 /// `[len, cap, backing_ptr]` where backing is `[Value; cap]` of Texts.
-fn read_text_list(state: &InterpreterState, v: Value) -> Option<Vec<String>> {
+/// `pub(super)`: the legacy `__process_spawn_raw` arm in calls.rs
+/// marshals its argv through this same walker (T0111 C1).
+pub(super) fn read_text_list(state: &InterpreterState, v: Value) -> Option<Vec<String>> {
     let (len, backing_ptr) = read_list_header(v)?;
     let mut out = Vec::with_capacity(len);
     for i in 0..len {
@@ -331,20 +367,27 @@ fn stdio_from_cfg(tag: u32) -> std::process::Stdio {
 // Permission gate
 // ============================================================================
 
-/// VBC-PERM-1 — granular target_id: hash the program path so a
-/// script frontmatter `permissions = ["run=/bin/echo"]` grants
-/// only that program.  Falls through to WILDCARD for scripts
-/// that grant `"run"` without a target.
+/// VBC-PERM-1 decision authority — granular target_id: hash the
+/// program path so a script frontmatter `permissions = ["run=/bin/echo"]`
+/// grants only that program.  Falls through to WILDCARD for scripts
+/// that grant `"run"` without a target.  Shared by the Result-shaped
+/// modern intercepts (`check_process_permission`) and the raw-i64
+/// legacy `__process_spawn_raw` surface (T0111 C1).
+fn process_spawn_denied(state: &mut InterpreterState, program: &str) -> bool {
+    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+    let tid = target_id_for(program);
+    if state.check_permission(PermissionScope::Process, tid) == PermissionDecision::Allow {
+        return false;
+    }
+    state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+        == PermissionDecision::Deny
+}
+
 fn check_process_permission(
     state: &mut InterpreterState,
     program: &str,
 ) -> Option<Value> {
-    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
-    let tid = target_id_for(program);
-    if state.check_permission(PermissionScope::Process, tid) == PermissionDecision::Allow {
-        return None;
-    }
-    if state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID) != PermissionDecision::Deny {
+    if !process_spawn_denied(state, program) {
         return None;
     }
     // Surface as an Err(Text) — the stdlib's spawn return type is
@@ -444,16 +487,8 @@ fn intercept_spawn_child(
     if let Some(denied) = check_process_permission(state, &cmd.program) {
         return Ok(Some(denied));
     }
-    let mut std_cmd = std::process::Command::new(&cmd.program);
-    for a in &cmd.args {
-        std_cmd.arg(a);
-    }
-    for (k, v) in &cmd.env_vars {
-        std_cmd.env(k, v);
-    }
-    if let Some(dir) = &cmd.working_dir {
-        std_cmd.current_dir(dir);
-    }
+    let mut std_cmd =
+        build_std_command(&cmd.program, &cmd.args, &cmd.env_vars, &cmd.working_dir);
     // Honour the caller's stdio config — unlike spawn_child_with_output
     // which forces Piped, spawn_child preserves the original intent.
     std_cmd.stdin(stdio_from_cfg(cmd.stdin_cfg));
@@ -509,19 +544,14 @@ fn intercept_spawn_child(
     Ok(Some(wrap_in_variant(state, "Result", 0, &[child_record])?))
 }
 
-fn intercept_wait_for_child(
-    state: &mut InterpreterState,
-    args_start_reg: u16,
-    caller_base: u32,
-) -> InterpreterResult<Option<Value>> {
-    let pid_v = unwrap_ref(state, args_start_reg, caller_base);
-    if !pid_v.is_int() {
-        let msg = alloc_string_value(state, "wait_for_child: pid must be Int")?;
-        return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
-    }
-    let pid = pid_v.as_i64();
-    // Take ownership of the Child so wait() blocks the OS thread
-    // outside the registry lock.
+/// ONE wait authority (T0111 C1): reap `pid` and return the RAW
+/// waitpid status word (`encode_exit_status` encoding — the same
+/// contract as AOT's `verum_process_wait`).  Registry-first: a Child
+/// spawned by either the modern `spawn_child` intercept or the legacy
+/// `__process_spawn_raw` surface is taken out of CHILD_REGISTRY so
+/// `wait()` blocks outside the lock; foreign pids fall back to
+/// waitpid(2).
+pub(super) fn wait_child_host(pid: i64) -> Result<i64, String> {
     let owned: Option<std::process::Child> = {
         let mut map = CHILD_REGISTRY.lock().unwrap();
         match map.get_mut(&pid) {
@@ -538,44 +568,208 @@ fn intercept_wait_for_child(
                     .lock()
                     .unwrap()
                     .insert(pid, ChildEntry { child: None });
-                let msg = alloc_string_value(
-                    state,
-                    &format!("wait_for_child(pid={pid}): {}", e),
-                )?;
-                return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+                return Err(format!("wait_for_child(pid={pid}): {}", e));
             }
         },
         None => {
             // PID isn't in our registry — fall back to libc::waitpid.
-            // Returns -1 on failure (no such child / EPERM / ECHILD).
+            // Errors surface for no such child / EPERM / ECHILD.
             #[cfg(unix)]
+            // SAFETY: waitpid writes a c_int status into a live stack
+            // slot; an invalid pid yields r < 0, surfaced as Err.
             unsafe {
                 let mut status: libc::c_int = 0;
                 let r = libc::waitpid(pid as libc::pid_t, &mut status, 0);
                 if r < 0 {
                     let errno = std::io::Error::last_os_error();
-                    let msg = alloc_string_value(
-                        state,
-                        &format!("waitpid(pid={pid}): {}", errno),
-                    )?;
-                    return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+                    return Err(format!("waitpid(pid={pid}): {}", errno));
                 }
                 status as i64
             }
             #[cfg(not(unix))]
             {
-                let msg = alloc_string_value(
-                    state,
-                    &format!("wait_for_child(pid={pid}): not in registry"),
-                )?;
-                return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+                return Err(format!("wait_for_child(pid={pid}): not in registry"));
             }
         }
     };
     // Cleanup: drop the registry entry now that the child is reaped.
     CHILD_REGISTRY.lock().unwrap().remove(&pid);
-    let status = alloc_record_n_fields(state, "ExitStatus", &[Value::from_i64(raw_status)])?;
-    Ok(Some(wrap_in_variant(state, "Result", 0, &[status])?))
+    Ok(raw_status)
+}
+
+fn intercept_wait_for_child(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let pid_v = unwrap_ref(state, args_start_reg, caller_base);
+    if !pid_v.is_int() {
+        let msg = alloc_string_value(state, "wait_for_child: pid must be Int")?;
+        return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+    }
+    match wait_child_host(pid_v.as_i64()) {
+        Ok(raw_status) => {
+            let status =
+                alloc_record_n_fields(state, "ExitStatus", &[Value::from_i64(raw_status)])?;
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[status])?))
+        }
+        Err(e) => {
+            let msg = alloc_string_value(state, &e)?;
+            Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?))
+        }
+    }
+}
+
+/// SIGKILL a spawned child by pid — CHILD_REGISTRY-first (std Child
+/// handle), raw kill(2) fallback for pids spawned outside the registry.
+/// Backs the legacy `__process_kill_raw` surface (T0111 C1).
+pub(super) fn kill_child_host(pid: i64) -> bool {
+    if let Some(entry) = CHILD_REGISTRY.lock().unwrap().get_mut(&pid) {
+        if let Some(child) = entry.child.as_mut() {
+            return child.kill().is_ok();
+        }
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(2) with a caller-supplied pid; an invalid pid
+        // yields ESRCH (reported as false), never UB.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+/// Detach a captured stdout pipe as a host `File` (unix: OwnedFd,
+/// windows: OwnedHandle).  `None` on platforms without an fd/handle
+/// conversion — the dropped pipe closes and the child sees EPIPE.
+fn take_stdout_file(child: &mut std::process::Child) -> Option<std::fs::File> {
+    #[cfg(any(unix, windows))]
+    {
+        child.stdout.take().map(pipe_into_file)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = child;
+        None
+    }
+}
+
+/// Twin of `take_stdout_file` for stderr.
+fn take_stderr_file(child: &mut std::process::Child) -> Option<std::fs::File> {
+    #[cfg(any(unix, windows))]
+    {
+        child.stderr.take().map(pipe_into_file)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = child;
+        None
+    }
+}
+
+#[cfg(unix)]
+fn pipe_into_file(pipe: impl Into<std::os::fd::OwnedFd>) -> std::fs::File {
+    std::fs::File::from(pipe.into())
+}
+
+#[cfg(windows)]
+fn pipe_into_file(pipe: impl Into<std::os::windows::io::OwnedHandle>) -> std::fs::File {
+    std::fs::File::from(pipe.into())
+}
+
+/// Register a captured child pipe in `state.open_files` keyed by a
+/// fresh synthetic fd id (monotone, >= 100).  Returns the id, or -1
+/// when there is no pipe to register.
+fn register_child_pipe(state: &mut InterpreterState, file: Option<std::fs::File>) -> i64 {
+    match file {
+        Some(f) => {
+            let fd = state.next_fd;
+            state.next_fd += 1;
+            state.open_files.insert(fd, f);
+            fd
+        }
+        None => -1,
+    }
+}
+
+/// T0111 C1 — host-side spawn for the LEGACY `__process_spawn_raw`
+/// intrinsic surface (`core.sys.process_ops`).  Routes onto the SAME
+/// VBC-PROC-3 authorities as the modern path — `std::process::Command`
+/// via `build_std_command`, CHILD_REGISTRY keyed by the REAL host pid
+/// (so `__process_wait_raw` shares `wait_child_host` with the modern
+/// `wait_for_child`), and `state.open_files` for captured pipes
+/// (readable through the `host_fd_*` bridge, closable via
+/// `__fd_close_raw`).
+///
+/// Returns a host pointer to an i64 `[pid, stdout_fd, stderr_fd]`
+/// triple (fd slots -1 when not captured) or 0 on spawn failure /
+/// permission denial — the exact contract of AOT's
+/// `verum_process_spawn_cmd` (the `__process_spawn_raw` lowering in
+/// verum_codegen instruction.rs; usage pinned by
+/// vcs/specs/L0-critical/vbc/e2e/aot/953_process_output_capture.vr).
+///
+/// Stdio policy mirrors AOT `verum_process_spawn`: captured streams
+/// are piped; UNcaptured streams INHERIT the parent's (pre-fix Tier-0
+/// nulled them, diverging from the AOT contract); stdin always
+/// inherits.
+pub(super) fn spawn_raw_triple(
+    state: &mut InterpreterState,
+    program: &str,
+    args: &[String],
+    capture_stdout: bool,
+    capture_stderr: bool,
+) -> i64 {
+    use std::process::Stdio;
+    if process_spawn_denied(state, program) {
+        if std::env::var("VERUM_TRACE_PROCESS").is_ok() {
+            eprintln!(
+                "[process_runtime] __process_spawn_raw '{}' denied by Process permission",
+                program
+            );
+        }
+        return 0;
+    }
+    let mut cmd = build_std_command(program, args, &[], &None);
+    cmd.stdout(if capture_stdout {
+        Stdio::piped()
+    } else {
+        Stdio::inherit()
+    });
+    cmd.stderr(if capture_stderr {
+        Stdio::piped()
+    } else {
+        Stdio::inherit()
+    });
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            if std::env::var("VERUM_TRACE_PROCESS").is_ok() {
+                eprintln!(
+                    "[process_runtime] __process_spawn_raw '{}' failed: {}",
+                    program, e
+                );
+            }
+            return 0;
+        }
+    };
+    let pid = child.id() as i64;
+    let stdout_fd = if capture_stdout {
+        register_child_pipe(state, take_stdout_file(&mut child))
+    } else {
+        -1
+    };
+    let stderr_fd = if capture_stderr {
+        register_child_pipe(state, take_stderr_file(&mut child))
+    } else {
+        -1
+    };
+    CHILD_REGISTRY
+        .lock()
+        .unwrap()
+        .insert(pid, ChildEntry { child: Some(child) });
+    alloc_host_i64_triple(pid, stdout_fd, stderr_fd)
 }
 
 fn intercept_native_fd_write_all(
@@ -633,6 +827,132 @@ fn intercept_native_fd_write_all(
     }
 }
 
+// ============================================================================
+// T0111 — ONE host-side fd bridge (open_files-first, raw-fd fallback)
+// ============================================================================
+//
+// Tier-0 has TWO fd spaces (the H3 fd-space schism, tracked under
+// T0111 residuals):
+//
+//  * synthetic `state.open_files` ids (>= 100) — file opens via
+//  `__file_open_raw` AND child pipe fds registered by the legacy
+//  `__process_spawn_raw` surface;
+//  * raw host fds — the VBC-PROC-3 `spawn_child` intercept surrenders
+//  `into_raw_fd()` values to the script.
+//
+// Every Tier-0 fd read/close funnels through these primitives so both
+// spaces resolve identically: the synthetic table is consulted FIRST
+// (`next_fd` is monotone and starts at 100, so a handed-out synthetic
+// id can never be re-keyed), then the value is treated as a raw host
+// fd.  A numeric collision (a real host fd >= 100 while the same id is
+// live in `open_files`) would misroute — that residual risk is the H3
+// schism itself and is eliminated only by unifying the two spaces.
+
+/// Read up to `max` bytes from `fd`.  Blocking + EINTR-safe.
+///
+/// POSIX pipe contract: a read on a pipe with no data BLOCKS until the
+/// writer produces bytes or closes its end (EOF -> `Ok(vec![])`).
+/// Callers that drain to EOF therefore block until child exit.
+pub(super) fn host_fd_read_chunk(
+    state: &mut InterpreterState,
+    fd: i64,
+    max: usize,
+) -> Result<Vec<u8>, String> {
+    let max = max.min(1 << 20);
+    if let Some(file) = state.open_files.get_mut(&fd) {
+        use std::io::Read as _;
+        let mut buf = vec![0_u8; max];
+        loop {
+            match file.read(&mut buf) {
+                Ok(n) => {
+                    buf.truncate(n);
+                    return Ok(buf);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(format!("fd_read_chunk(fd={fd}): {}", e)),
+            }
+        }
+    }
+    #[cfg(unix)]
+    {
+        let mut buf = vec![0_u8; max];
+        loop {
+            // SAFETY: buf is a live owned allocation of len bytes; read(2)
+            // writes at most buf.len() bytes.  A bogus fd yields EBADF,
+            // surfaced as Err — never UB.
+            let n = unsafe {
+                libc::read(
+                    fd as libc::c_int,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    buf.len(),
+                )
+            };
+            if n < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(format!("fd_read_chunk(fd={fd}): {}", err));
+            }
+            buf.truncate(n as usize);
+            return Ok(buf);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        Err(format!(
+            "fd_read_chunk(fd={fd}): raw-fd reads not supported on this platform"
+        ))
+    }
+}
+
+/// Drain `fd` to EOF through the chunk primitive.  Blocks until the
+/// peer closes the fd (see `host_fd_read_chunk`'s pipe contract).
+pub(super) fn host_fd_read_to_end(
+    state: &mut InterpreterState,
+    fd: i64,
+) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    loop {
+        let chunk = host_fd_read_chunk(state, fd, 4096)?;
+        if chunk.is_empty() {
+            return Ok(out);
+        }
+        out.extend_from_slice(&chunk);
+    }
+}
+
+/// Close `fd` through the same two-space bridge: an `open_files` hit is
+/// removed (dropping the `File` closes the OS handle); otherwise the
+/// value is treated as a raw host fd.
+///
+/// Tier-0 stdio guard: at Tier-0 the script executes INSIDE the
+/// interpreter's own process — raw-closing fd 0/1/2 would sever the
+/// harness's stdio (the io/buffer suite constructs
+/// `FdReader.from_owned_fd(0..2)` whose Drop lands here and killed the
+/// batch runner when this close became real).  AOT-compiled programs
+/// own their process and close stdio for real — a documented,
+/// deliberate tier divergence, not an accident.
+pub(super) fn host_fd_close(state: &mut InterpreterState, fd: i64) {
+    if state.open_files.remove(&fd).is_some() {
+        return;
+    }
+    if fd <= 2 {
+        return;
+    }
+    #[cfg(unix)]
+    // SAFETY: fd is a host descriptor surrendered to the script by the
+    // spawn intercept (`into_raw_fd`) — closing it is the script's
+    // documented duty; a stale/duplicate close returns EBADF, never UB.
+    unsafe {
+        libc::close(fd as libc::c_int);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = fd;
+    }
+}
+
 fn intercept_native_fd_read_chunk(
     state: &mut InterpreterState,
     args_start_reg: u16,
@@ -646,39 +966,52 @@ fn intercept_native_fd_read_chunk(
     }
     let fd = fd_v.as_i64();
     let max = max_v.as_i64().clamp(0, 1 << 20) as usize;
-    let mut buf = vec![0_u8; max];
-    #[cfg(unix)]
-    {
-        loop {
-            let n = unsafe {
-                libc::read(
-                    fd as libc::c_int,
-                    buf.as_mut_ptr() as *mut libc::c_void,
-                    buf.len(),
-                )
-            };
-            if n < 0 {
-                let err = std::io::Error::last_os_error();
-                if err.kind() == std::io::ErrorKind::Interrupted {
-                    continue;
-                }
-                let msg = alloc_string_value(
-                    state,
-                    &format!("fd_read_chunk(fd={fd}): {}", err),
-                )?;
-                return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
-            }
-            buf.truncate(n as usize);
-            let chunk = alloc_byte_list(state, &buf)?;
-            return Ok(Some(wrap_in_variant(state, "Result", 0, &[chunk])?));
+    match host_fd_read_chunk(state, fd, max) {
+        Ok(bytes) => {
+            let chunk = alloc_byte_list(state, &bytes)?;
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[chunk])?))
+        }
+        Err(msg) => {
+            let m = alloc_string_value(state, &msg)?;
+            Ok(Some(wrap_in_variant(state, "Result", 1, &[m])?))
         }
     }
-    #[cfg(not(unix))]
-    {
-        let _ = (fd, max, buf);
-        let msg = alloc_string_value(state, "fd_read_chunk: not supported on this platform")?;
-        Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?))
+}
+
+/// T0111 LEG A — bare-`List<Byte>` chunk read backing `core.io.buffer`'s
+/// `__fd_read_chunk_raw(fd, max) -> List<Byte>`.  Unlike
+/// `native_fd_read_chunk` (Result-wrapped), the buffer.vr contract is a
+/// BARE list — empty on EOF.  Read errors have no channel in that
+/// signature and surface as EOF (empty list).  AOT twin (the missing
+/// `verum_fd_read_chunk` emitter) is pooled separately as T0376.
+fn intercept_fd_read_chunk_bare(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let max_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    if !fd_v.is_int() || !max_v.is_int() {
+        return Ok(Some(alloc_byte_list(state, &[])?));
     }
+    let fd = fd_v.as_i64();
+    let max = max_v.as_i64().clamp(0, 1 << 20) as usize;
+    let bytes = host_fd_read_chunk(state, fd, max).unwrap_or_default();
+    Ok(Some(alloc_byte_list(state, &bytes)?))
+}
+
+/// T0111 LEG A — unit-returning close backing `core.io.buffer`'s
+/// `__fd_close_raw_buf(fd)` placeholder.
+fn intercept_fd_close_bare(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
+    if fd_v.is_int() {
+        host_fd_close(state, fd_v.as_i64());
+    }
+    Ok(Some(Value::unit()))
 }
 
 fn intercept_close_fd(
@@ -690,15 +1023,7 @@ fn intercept_close_fd(
     if !fd_v.is_int() {
         return Ok(Some(Value::unit()));
     }
-    let fd = fd_v.as_i64();
-    #[cfg(unix)]
-    unsafe {
-        libc::close(fd as libc::c_int);
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = fd;
-    }
+    host_fd_close(state, fd_v.as_i64());
     Ok(Some(Value::unit()))
 }
 
@@ -735,6 +1060,76 @@ fn intercept_native_kill(
         let msg = alloc_string_value(state, "native_kill: not supported on this platform")?;
         Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?))
     }
+}
+
+// ============================================================================
+// T0111 — host [len, cap, buf] byte-buffer ABI (Tier-0 twin of AOT)
+// ============================================================================
+
+/// Allocate a host `[len@0, cap@8, buf_ptr@16]` 24-byte header plus its
+/// data buffer via `std::alloc` and return the header address as i64.
+///
+/// This is the Tier-0 twin of the AOT `verum_fd_read_all` result ABI
+/// (`platform_ir.rs::emit_fd_read_all_ir` — the canonical byte-buffer
+/// header authority).  Caller-side reads go through the 2-arg
+/// `__ptr_read_i64(ptr, index)` intrinsic; `__ptr_free` is a documented
+/// no-op on BOTH tiers (AOT: "24 bytes per spawn call are negligible"),
+/// so the allocation intentionally has static lifetime.
+///
+/// Returns 0 only on allocation failure — an EMPTY read still yields a
+/// valid header with len 0, exactly like the AOT drain loop.
+pub(super) fn alloc_len_cap_buf_header(bytes: &[u8]) -> i64 {
+    let cap = bytes.len().max(8);
+    let buf_layout = match std::alloc::Layout::from_size_align(cap, 8) {
+        Ok(l) => l,
+        Err(_) => return 0,
+    };
+    // SAFETY: layout is non-zero-sized (cap >= 8) and 8-aligned.
+    let buf = unsafe { std::alloc::alloc_zeroed(buf_layout) };
+    if buf.is_null() {
+        return 0;
+    }
+    if !bytes.is_empty() {
+        // SAFETY: buf has cap >= bytes.len() writable bytes; bytes is a
+        // live borrow; regions are distinct allocations.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, bytes.len()) };
+    }
+    let hdr_layout = std::alloc::Layout::from_size_align(24, 8)
+        .expect("static 24/8 layout is valid");
+    // SAFETY: 24-byte non-zero layout.
+    let hdr = unsafe { std::alloc::alloc_zeroed(hdr_layout) } as *mut i64;
+    if hdr.is_null() {
+        return 0;
+    }
+    // SAFETY: hdr points at 24 writable, 8-aligned bytes = 3 i64 slots.
+    unsafe {
+        *hdr = bytes.len() as i64;
+        *hdr.add(1) = cap as i64;
+        *hdr.add(2) = buf as i64;
+    }
+    hdr as i64
+}
+
+/// Allocate a host i64 `[a, b, c]` triple (24 bytes) and return its
+/// address — the `__process_spawn_raw` result shape
+/// `[pid, stdout_fd, stderr_fd]`, mirroring AOT's
+/// `verum_process_spawn_cmd` contract (instruction.rs lowering).
+/// Freed by the same no-op `__ptr_free` policy as the header above.
+pub(super) fn alloc_host_i64_triple(a: i64, b: i64, c: i64) -> i64 {
+    let layout = std::alloc::Layout::from_size_align(24, 8)
+        .expect("static 24/8 layout is valid");
+    // SAFETY: 24-byte non-zero layout.
+    let ptr = unsafe { std::alloc::alloc_zeroed(layout) } as *mut i64;
+    if ptr.is_null() {
+        return 0;
+    }
+    // SAFETY: ptr points at 24 writable, 8-aligned bytes = 3 i64 slots.
+    unsafe {
+        *ptr = a;
+        *ptr.add(1) = b;
+        *ptr.add(2) = c;
+    }
+    ptr as i64
 }
 
 // ----------------------------------------------------------------------------

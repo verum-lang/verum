@@ -254,21 +254,45 @@ public fn __dealloc_raw(ptr: Int, size: Int) -> Int;
 // Process spawn / wait
 // =============================================================================
 
-/// Spawn child process. Returns pid or -1.
+/// Spawn child process. Returns a host pointer to an i64
+/// [pid, stdout_fd, stderr_fd] triple (fd slots are -1 when the stream
+/// was not captured), or 0 on failure. Unpack via __ptr_read_i64;
+/// release via __ptr_free. Same contract on both tiers (AOT:
+/// verum_process_spawn_cmd; Tier-0: spawn_raw_triple in
+/// process_runtime.rs).
 @intrinsic("process_spawn")
 public fn __process_spawn_raw(program: Text, args: List<Text>, capture_stdout: Int, capture_stderr: Int) -> Int;
 
-/// Wait for child process. Returns status.
+/// Wait for child process. Returns the RAW waitpid status word
+/// (exited: code == (raw >> 8) & 0xFF when (raw & 0x7F) == 0;
+/// signaled: raw & 0x7F is the signal number), or -1 on error.
+/// Same raw-word contract on both tiers (AOT: verum_process_wait).
 @intrinsic("process_wait")
 public fn __process_wait_raw(pid: Int) -> Int;
 
-/// Read all bytes from fd. Returns list header pointer.
+/// Read all bytes from fd — drains to EOF, which for a pipe BLOCKS
+/// until the peer closes its write end (normally at child exit).
+/// Returns a host [len@0, cap@8, buf_ptr@16] header pointer
+/// (see the byte-buffer header ABI of verum_fd_read_all), or 0 on
+/// allocation failure. Unpack via __ptr_read_i64.
 @intrinsic("fd_read_all")
 public fn __fd_read_all_raw(fd: Int) -> Int;
 
 /// Close fd.
 @intrinsic("fd_close")
 public fn __fd_close_raw(fd: Int) -> Int;
+
+/// Read an i64 from a raw host pointer at an i64-array index
+/// (ptr[index], 8-byte stride). Both tiers on rails: AOT lowers to
+/// GEP+load; Tier-0 dereferences the host allocation directly.
+@intrinsic("ptr_read_i64")
+public fn __ptr_read_i64(ptr: Int, index: Int) -> Int;
+
+/// Release a host allocation returned by __process_spawn_raw /
+/// __fd_read_all_raw. Documented no-op on BOTH tiers — those
+/// allocations have static lifetime (a few dozen bytes per spawn).
+@intrinsic("ptr_free")
+public fn __ptr_free(ptr: Int) -> Int;
 
 // =============================================================================
 // Context System

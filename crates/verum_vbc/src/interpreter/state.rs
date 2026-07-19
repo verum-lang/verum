@@ -468,31 +468,22 @@ pub struct InterpreterState {
 
     /// V-LLSI file-descriptor table — backs `__file_open_raw` /
     /// `__file_read_raw` / `__file_write_raw` / `__file_close_raw` /
-    /// `__file_size_raw` / `__file_seek_raw` under Tier-0. Tier-1 AOT
-    /// uses real OS-level fds via libSystem / direct syscall.
+    /// `__file_size_raw` / `__file_seek_raw` under Tier-0, AND (T0111)
+    /// the child pipe fds that `__process_spawn_raw` captures.  Tier-1
+    /// AOT uses real OS-level fds via libSystem / direct syscall.
     /// The interpreter assigns synthetic fd ids starting at 100 (to
     /// avoid colliding with the host POSIX 0/1/2 sentinels) and stores
     /// the backing `std::fs::File` here keyed by the synthetic id.
+    /// Reads/closes resolve through the `host_fd_*` bridge in
+    /// `dispatch_table/handlers/process_runtime.rs` (open_files-first,
+    /// raw-host-fd fallback).
     pub open_files: std::collections::HashMap<i64, std::fs::File>,
 
-    /// Next synthetic fd id to hand out from `__file_open_raw`.
+    /// Next synthetic fd id to hand out from `__file_open_raw` /
+    /// `__process_spawn_raw` pipe registration.
     /// Monotonically increases; never reused even after `__file_close_raw`
     /// to avoid use-after-close hazards in the same interpreter session.
     pub next_fd: i64,
-
-    /// V-LLSI child-process table — backs `__process_spawn_raw` /
-    /// `__process_wait_raw` / `__fd_read_all_raw` under Tier-0.  The
-    /// interpreter assigns synthetic pid ids starting at 1000 (to avoid
-    /// colliding with the host POSIX pid space, which is sparse-but-
-    /// real-valued) and stores the spawned `std::process::Child` here
-    /// keyed by the synthetic id.  Stdout / stderr pipes are tracked
-    /// via the same `open_files` table — `__process_spawn_raw` returns
-    /// the synthetic pid and the caller separately maps the pid to its
-    /// stdout fd via `child.stdout_fd` on the Verum-side Child record.
-    pub spawned_children: std::collections::HashMap<i64, std::process::Child>,
-
-    /// Next synthetic pid to hand out.
-    pub next_pid: i64,
 
     /// Async task queue for spawned tasks.
     pub tasks: TaskQueue,
@@ -2679,8 +2670,6 @@ impl InterpreterState {
             defer_stack: Vec::new(),
             open_files: std::collections::HashMap::new(),
             next_fd: 100,
-            spawned_children: std::collections::HashMap::new(),
-            next_pid: 1000,
             tasks: TaskQueue::new(),
             generators: GeneratorRegistry::new(),
             current_generator: None,

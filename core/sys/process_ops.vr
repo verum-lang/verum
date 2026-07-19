@@ -4,16 +4,25 @@ module sys.process_ops;
 // sys/process_ops.vr - Process Operations (replaces C verum_process_*)
 // =============================================================================
 // Layer: 1 (I/O)
-// Dependencies: sys/raw
+// Dependencies: intrinsics/runtime/os, sys/process_native
 // =============================================================================
 //
 
 // Pure Verum process management. Compiled through VBC → LLVM.
 //
 
+// T0111: this legacy surface is a THIN wrapper over the same host
+// authorities the modern `core.io.process` path uses — spawn returns
+// the canonical [pid, stdout_fd, stderr_fd] triple pointer (both
+// tiers), waits return the RAW waitpid status word (both tiers), and
+// stdout draining goes through `native_fd_read_chunk` (the ONE
+// chunk-read primitive). No parallel process implementation lives
+// here.
+//
+
 // =============================================================================
 
-mount core.{List, Text, Maybe};
+mount core.{List, Text, Maybe, Result, Byte};
 // Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed
 // at a `core/sys/raw.vr` file that no longer exists — declarations
 // migrated to `core/intrinsics/runtime/os.vr`. Same architectural fix
@@ -21,11 +30,16 @@ mount core.{List, Text, Maybe};
 mount core.intrinsics.runtime.os.{
     __process_spawn_raw,
     __process_wait_raw,
-    __fd_read_all_raw,
     __fd_close_raw,
+    __ptr_read_i64,
+    __ptr_free,
     __args_count_raw,
     __arg_raw,
 };
+// The ONE chunk-read primitive (VBC-PROC-3) — shared with
+// core.io.process. Tier-0 intercepts it at the call boundary;
+// Tier-1 runs its direct-syscall body.
+mount core.sys.process_native.{native_fd_read_chunk};
 
 /// Exit status from a child process.
 public type ProcessExitStatus is {
@@ -44,6 +58,29 @@ implement ProcessExitStatus {
     }
 }
 
+/// Decode a RAW waitpid status word into a shell-convention exit code:
+/// exited → (raw >> 8) & 0xFF; killed by signal N → 128 + N;
+/// wait error (raw < 0) → -1. `__process_wait_raw` returns the raw
+/// word on BOTH tiers (AOT verum_process_wait contract), so decoding
+/// lives here in ONE place.
+fn decode_wait_code(raw: Int) -> Int {
+    if raw < 0 {
+        return -1;
+    }
+    let sig = raw & 0x7F;
+    if sig == 0 {
+        (raw >> 8) & 0xFF
+    } else {
+        128 + sig
+    }
+}
+
+/// Wait for `pid` and decode its exit status.
+fn wait_status(pid: Int) -> ProcessExitStatus {
+    let raw = __process_wait_raw(pid);
+    ProcessExitStatus { code: decode_wait_code(raw) }
+}
+
 /// A child process handle.
 public type Child is {
     pid: Int,
@@ -54,57 +91,68 @@ public type Child is {
 implement Child {
     /// Wait for the child to exit. Returns the exit status.
     public fn wait(&self) -> ProcessExitStatus {
-        let status = __process_wait_raw(self.pid);
-        ProcessExitStatus { code: status }
+        wait_status(self.pid)
     }
 
-    /// Read all stdout from the child (if captured).
+    /// Read all stdout from the child (if captured) and close the fd.
+    ///
+    /// POSIX pipe semantics: draining to EOF BLOCKS until the child
+    /// closes its stdout end (normally at exit) — call this BEFORE
+    /// `wait()`; the reverse order can deadlock on a child that fills
+    /// the pipe buffer while the parent is blocked in waitpid.
     public fn read_stdout(&self) -> Text {
         if self.stdout_fd < 0 {
             return "";
         }
-        let result_ptr = __fd_read_all_raw(self.stdout_fd);
-        __fd_close_raw(self.stdout_fd);
-        // Result ptr is a [len, cap, buf] header
-        if result_ptr == 0 {
-            ""
-        } else {
-            // Read length and buffer pointer from header
-            let len = __ptr_read_i64(result_ptr);
-            let buf_ptr = __ptr_read_i64(result_ptr + 16);
-            // Construct text from raw buffer
-            __text_from_raw(buf_ptr, len)
+        let mut bytes: List<Byte> = [];
+        loop {
+            // 4096 = one pipe buffer page per read.
+            match native_fd_read_chunk(self.stdout_fd, 4096) {
+                Result.Ok(chunk) => {
+                    if chunk.is_empty() { break; }
+                    for b in chunk.iter() { bytes.push(*b); }
+                }
+                Result.Err(_) => break,
+            }
         }
+        let _ = __fd_close_raw(self.stdout_fd);
+        Text.from_utf8_lossy(&bytes)
     }
 }
 
-// Raw helpers used by Child
-fn __ptr_read_i64(ptr: Int) -> Int { 0 }
-fn __text_from_raw(buf: Int, len: Int) -> Text { "" }
-
 /// Spawn a child process with the given program and arguments.
+/// stdout/stderr are captured (piped); drain via `Child.read_stdout`.
 public fn spawn(program: Text, args: List<Text>) -> Maybe<Child> {
-    let result = __process_spawn_raw(program, args, 1, 1);
-    if result < 0 {
+    let triple = __process_spawn_raw(program, args, 1, 1);
+    if triple == 0 {
         Maybe.None
     } else {
+        // [pid, stdout_fd, stderr_fd] host triple — the canonical
+        // spawn result shape on BOTH tiers (see the intrinsic's doc in
+        // core/intrinsics/runtime/os.vr).
+        let pid = __ptr_read_i64(triple, 0);
+        let stdout_fd = __ptr_read_i64(triple, 1);
+        let stderr_fd = __ptr_read_i64(triple, 2);
+        let _ = __ptr_free(triple);
         Maybe.Some(Child {
-            pid: result,
-            stdout_fd: -1,
-            stderr_fd: -1,
+            pid: pid,
+            stdout_fd: stdout_fd,
+            stderr_fd: stderr_fd,
         })
     }
 }
 
-/// Run a program and wait for it to finish.
+/// Run a program and wait for it to finish. The child inherits the
+/// parent's stdout/stderr (nothing is captured).
 /// Returns the exit status.
 public fn run(program: Text, args: List<Text>) -> ProcessExitStatus {
-    let result = __process_spawn_raw(program, args, 0, 0);
-    if result < 0 {
+    let triple = __process_spawn_raw(program, args, 0, 0);
+    if triple == 0 {
         ProcessExitStatus { code: -1 }
     } else {
-        let status = __process_wait_raw(result);
-        ProcessExitStatus { code: status }
+        let pid = __ptr_read_i64(triple, 0);
+        let _ = __ptr_free(triple);
+        wait_status(pid)
     }
 }
 

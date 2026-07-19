@@ -6,11 +6,24 @@
 // =============================================================================
 
 mount core.prelude.*;
+// `spawn` is a contextual keyword in expression position (async task
+// spawn), so a BARE `spawn(...)` call cannot parse — alias it at the
+// mount.  `run` has no such collision.
 mount core.sys.process_ops.{
     ProcessExitStatus,
+    Child,
+    spawn as spawn_proc,
+    run,
     arg_count,
     args,
 };
+// Reap the spawn pin's child via the raw intrinsic: `child.wait()` is
+// blocked by the pre-existing bare-name method collision (the prelude's
+// `core.io.process.Child.wait -> Result<ExitStatus, Text>` shadows
+// `process_ops.Child.wait -> ProcessExitStatus` — T0146 dispatch
+// class).  The wait_status decode path is covered by the `run` pins,
+// which stay inside process_ops.
+mount core.intrinsics.runtime.os.{__process_wait_raw};
 
 // =============================================================================
 // Section 1: ProcessExitStatus composes with Maybe-shaped error funnel
@@ -63,6 +76,53 @@ fn integration_args_fold_does_not_panic() {
     }
     // Non-negative sum.
     assert(total_len >= 0);
+}
+
+// =============================================================================
+// Section 3 — T0111: live spawn / read_stdout / wait / run round-trips
+// =============================================================================
+// Pre-fix Tier-0: `__process_spawn_raw` dropped argv and returned a
+// synthetic pid with no readable pipes; `__fd_read_*` returned "no
+// data"; `read_stdout` was silently empty.  These pins are the
+// acceptance surface for the honest host bridge.
+
+@test
+fn integration_spawn_echo_read_stdout_wait() {
+    let echo_args: List<Text> = ["hello"];
+    match spawn_proc("/bin/echo", echo_args) {
+        Maybe.Some(child) => {
+            assert(child.pid > 0);
+            assert(child.stdout_fd >= 0);
+            // Drains the pipe to EOF — blocks until the child closes
+            // its stdout end (i.e. exits).  Must run BEFORE the wait.
+            let out = child.read_stdout();
+            assert_eq(out, "hello\n");
+            // exited(0) -> RAW waitpid word 0 (see mount note on why
+            // the raw intrinsic reaps here instead of child.wait()).
+            let raw = __process_wait_raw(child.pid);
+            assert_eq(raw, 0);
+        }
+        Maybe.None => assert(false),
+    }
+}
+
+@test
+fn integration_run_true_succeeds() {
+    let no_args: List<Text> = [];
+    let status = run("/usr/bin/true", no_args);
+    assert_eq(status.code(), 0);
+    assert(status.success());
+}
+
+@test
+fn integration_run_false_exit_code_decoded() {
+    // RAW waitpid word for exit(1) is 0x100 — decode_wait_code must
+    // yield the shell-convention 1, NOT the raw 256 (the pre-fix
+    // Tier-0/Tier-1 divergence this suite pins shut).
+    let no_args: List<Text> = [];
+    let status = run("/usr/bin/false", no_args);
+    assert_eq(status.code(), 1);
+    assert_eq(status.success(), false);
 }
 
 fn main() {}

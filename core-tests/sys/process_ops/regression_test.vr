@@ -19,6 +19,14 @@ mount core.sys.process_ops.{
     arg_count,
     args,
 };
+mount core.intrinsics.runtime.os.{
+    __process_spawn_raw,
+    __process_wait_raw,
+    __fd_read_all_raw,
+    __fd_close_raw,
+    __ptr_read_i64,
+    __ptr_free,
+};
 
 // =============================================================================
 // §A — raw-intrinsic mount migration
@@ -61,6 +69,44 @@ fn regression_exit_status_success_for_zero_code() {
 fn regression_exit_status_not_success_for_nonzero_code() {
     let s = ProcessExitStatus { code: 1 };
     assert_eq(s.success(), false);
+}
+
+// =============================================================================
+// §C — T0111: raw spawn-triple + fd_read_all header ABI honest at Tier-0
+// =============================================================================
+// Pre-fix Tier-0: `__process_spawn_raw` returned a bare synthetic pid
+// (while AOT returned the triple pointer — cross-tier divergence),
+// `__fd_read_all_raw` returned constant 0 ("no data") and
+// `__ptr_read_i64` returned constant 0.  This pin drives the raw ABI
+// end-to-end exactly like the AOT e2e spec
+// (vcs/specs/L0-critical/vbc/e2e/aot/953_process_output_capture.vr).
+
+@test
+fn regression_spawn_raw_triple_and_fd_read_all_header() {
+    let echo_args: List<Text> = ["t0111"];
+    let triple = __process_spawn_raw("/bin/echo", echo_args, 1, 0);
+    assert(triple != 0);
+    let pid = __ptr_read_i64(triple, 0);
+    let stdout_fd = __ptr_read_i64(triple, 1);
+    let stderr_fd = __ptr_read_i64(triple, 2);
+    let _ = __ptr_free(triple);
+    assert(pid > 0);
+    assert(stdout_fd >= 0);
+    // stderr was not captured -> -1 slot.
+    assert_eq(stderr_fd, -1);
+    // Drain stdout via the [len@0, cap@8, buf@16] header ABI.  The
+    // drain blocks until the child closes its stdout end (exit).
+    let hdr = __fd_read_all_raw(stdout_fd);
+    assert(hdr != 0);
+    let len = __ptr_read_i64(hdr, 0);
+    assert_eq(len, 6);  // "t0111\n"
+    let cap = __ptr_read_i64(hdr, 1);
+    assert(cap >= len);
+    let _ = __ptr_free(hdr);
+    let _ = __fd_close_raw(stdout_fd);
+    // exited(0) -> RAW waitpid word 0.
+    let raw = __process_wait_raw(pid);
+    assert_eq(raw, 0);
 }
 
 fn main() {}

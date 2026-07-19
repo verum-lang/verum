@@ -1728,9 +1728,19 @@ fn try_dispatch_intrinsic_by_name(
                 Err(_) => Ok(Some(Value::from_i64(-1))),
             }
         }
-        "__file_close_raw" | "__fd_close_raw" => {
+        "__file_close_raw" => {
             let fd = get_i64_arg(state, 0);
             state.open_files.remove(&fd);
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__fd_close_raw" => {
+            // T0111 — unlike the file-only surface above, the process
+            // fd surface can legitimately hold either an open_files
+            // synthetic id (legacy `__process_spawn_raw` pipes) or a
+            // raw host fd (modern `spawn_child` intercept handout);
+            // close through the ONE two-space bridge.
+            let fd = get_i64_arg(state, 0);
+            super::process_runtime::host_fd_close(state, fd);
             Ok(Some(Value::from_i64(0)))
         }
         "__file_size_raw" => {
@@ -2509,100 +2519,154 @@ fn try_dispatch_intrinsic_by_name(
         | "madvise_free_reusable"
         | "madvise_free_reuse" => Ok(Some(Value::from_i64(0))),
 
-        // --- Process Management ---
-        // Process bridge via core.sys.process_native — these legacy stubs
-        // are kept for backwards-compat with bytecode that still references
-        // the old C-runtime entrypoint names. Once all callers have been
-        // moved to the native path they can be removed entirely.
-        // Real process spawn (Tier-0) — replaces the pre-fix stub
-        // that returned -1 for every call.  Routes through
-        // `std::process::Command`, captures stdout/stderr per the
-        // capture-flags args, stores the resulting `Child` in
-        // `state.spawned_children` keyed by a synthetic pid id, and
-        // returns that pid to the caller.
+        // --- Process Management (T0111) ---
+        // Legacy `core.sys.process_ops` raw surface, consolidated onto
+        // the SAME VBC-PROC-3 host authorities the modern
+        // `core.io.process` intercepts use (process_runtime.rs:
+        // CHILD_REGISTRY, `wait_child_host`, the `host_fd_*` bridge).
+        // NOT a parallel implementation — thin marshaling shims only.
         "__process_spawn_raw" => {
-            // Signature: (program: Text, args: List<Text>, capture_stdout: Int, capture_stderr: Int) -> Int(pid or -1).
-            use std::process::{Command, Stdio};
+            // Signature: (program: Text, args: List<Text>,
+            //  capture_stdout: Int, capture_stderr: Int) -> Int
+            //  (host ptr to an i64 [pid, stdout_fd, stderr_fd] triple,
+            //  or 0 on failure).
+            //
+            // T0111 C1 — honest Tier-0 spawn matching the AOT
+            // `verum_process_spawn_cmd` contract.  Pre-fix this
+            // returned a bare synthetic pid (the .vr caller then
+            // misread the AOT triple-ptr as a pid — rotten on BOTH
+            // tiers), dropped argv entirely, and buried the pipes in
+            // `state.spawned_children` where nothing could read them.
+            // Now: argv is really marshaled via `read_text_list`;
+            // captured pipes land in `state.open_files` so every fd
+            // consumer (`native_fd_read_chunk`, `__fd_read_chunk_raw`,
+            // `__fd_read_all_raw`, `__fd_close_raw`) resolves them
+            // through the ONE host_fd bridge; the Child registers in
+            // CHILD_REGISTRY under its REAL host pid so
+            // `__process_wait_raw` shares the modern wait authority.
             let program =
                 super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
-            let _args_handle = get_arg(state, 1);
+            let args_v = {
+                let v = get_arg(state, 1);
+                if super::cbgr_helpers::is_cbgr_ref(&v) {
+                    let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v);
+                    state.registers.get_absolute(abs_index)
+                } else {
+                    v
+                }
+            };
+            let argv =
+                super::process_runtime::read_text_list(state, args_v).unwrap_or_default();
             let capture_stdout = get_i64_arg(state, 2) != 0;
             let capture_stderr = get_i64_arg(state, 3) != 0;
-            let mut cmd = Command::new(&program);
-            if capture_stdout {
-                cmd.stdout(Stdio::piped());
-            } else {
-                cmd.stdout(Stdio::null());
-            }
-            if capture_stderr {
-                cmd.stderr(Stdio::piped());
-            } else {
-                cmd.stderr(Stdio::null());
-            }
-            // TODO Tier-1 parity: marshal `args: List<Text>` from the
-            // Verum-side List record's backing-array into a Rust
-            // `Vec<String>`.  The Tier-0 dispatch lacks the List
-            // backing-pointer extraction primitive here (it would
-            // need cross-call into `dispatch_array_method`'s iter),
-            // so for now we spawn programs that take no arguments.
-            // Callers that need argv shape go through the Tier-1 AOT
-            // path.  The Verum-side `process_ops::spawn` already
-            // expects a `Maybe<Child>` result, so the cap matches.
-            match cmd.spawn() {
-                Ok(child) => {
-                    let pid = state.next_pid;
-                    state.next_pid += 1;
-                    state.spawned_children.insert(pid, child);
-                    Ok(Some(Value::from_i64(pid)))
-                }
-                Err(_) => Ok(Some(Value::from_i64(-1))),
-            }
+            Ok(Some(Value::from_i64(
+                super::process_runtime::spawn_raw_triple(
+                    state,
+                    &program,
+                    &argv,
+                    capture_stdout,
+                    capture_stderr,
+                ),
+            )))
         }
         "__process_exec_raw" | "__process_spawn_full_raw" => {
-            // Same shape as process_spawn but with capture-full args
-            // — Tier-1-only entry points kept as failing stubs in
-            // the interpreter for backward-compat with pre-fix
-            // callers.
+            // Tier-1-only entry points kept as failing stubs in the
+            // interpreter for backward-compat with pre-fix callers.
+            // Their AOT emitter stubs are pooled separately (T0377) —
+            // do not grow implementations here without that twin.
             Ok(Some(Value::from_i64(-1)))
         }
         "__process_wait_raw" => {
-            // Signature: (pid: Int) -> Int(exit_status).
+            // Signature: (pid: Int) -> Int (RAW waitpid status word,
+            // or -1 on error) — the same contract as AOT's
+            // `verum_process_wait`.
+            //
+            // T0111 C1 — routes onto the ONE wait authority
+            // (`wait_child_host`: CHILD_REGISTRY take + wait,
+            // waitpid(2) fallback for foreign pids), raw-word encoding
+            // via `encode_exit_status`.  Pre-fix Tier-0 returned the
+            // DECODED exit code here, silently diverging from Tier-1;
+            // the .vr-side `process_ops` now decodes the raw word
+            // identically on both tiers.
             let pid = get_i64_arg(state, 0);
-            match state.spawned_children.remove(&pid) {
-                Some(mut child) => match child.wait() {
-                    Ok(status) => Ok(Some(Value::from_i64(status.code().unwrap_or(-1) as i64))),
-                    Err(_) => Ok(Some(Value::from_i64(-1))),
-                },
-                None => Ok(Some(Value::from_i64(-1))),
-            }
+            Ok(Some(Value::from_i64(
+                super::process_runtime::wait_child_host(pid).unwrap_or(-1),
+            )))
         }
         "__process_kill_raw" => {
+            // Signature: (pid: Int) -> Int (0 ok / -1 error).
+            // T0111 C1 — CHILD_REGISTRY-first SIGKILL, kill(2)
+            // fallback (`kill_child_host`).
             let pid = get_i64_arg(state, 0);
-            match state.spawned_children.get_mut(&pid) {
-                Some(child) => match child.kill() {
-                    Ok(()) => Ok(Some(Value::from_i64(0))),
-                    Err(_) => Ok(Some(Value::from_i64(-1))),
+            Ok(Some(Value::from_i64(
+                if super::process_runtime::kill_child_host(pid) {
+                    0
+                } else {
+                    -1
                 },
-                None => Ok(Some(Value::from_i64(-1))),
-            }
+            )))
         }
-        "__fd_read_all_raw" | "__fd_read_chunk_raw" => {
-            // Signature: (fd: Int) -> Int(buf_ptr_or_0).
-            // The Verum-side `Child.read_stdout` expects this to
-            // return a ptr to a [len, cap, buf] header.  Under
-            // Tier-0 we don't have stable raw pointers in user space,
-            // so we read-to-end the host pipe and return a
-            // synthetic Int marker that the higher-level intercept
-            // in the Verum-side body short-circuits on (0 = empty).
-            // For now: return 0 (treated by caller as "no data").
-            // Real wiring through state.open_files would need a
-            // [len, cap, buf] header allocation primitive — out of
-            // scope for this fundamental fix surface.
-            Ok(Some(Value::from_i64(0)))
+        "__fd_read_all_raw" => {
+            // Signature: (fd: Int) -> Int (ptr to [len@0, cap@8,
+            // buf_ptr@16] header, or 0 on allocation failure).
+            //
+            // T0111 LEG B — honest Tier-0 drain.  Mirrors the AOT
+            // `verum_fd_read_all` emitter
+            // (`platform_ir.rs::emit_fd_read_all_ir`, the canonical
+            // byte-buffer-header ABI): read errors terminate the drain
+            // exactly like EOF (AOT: `n <= 0` -> EOF) and the header is
+            // returned with whatever was read; 0 ONLY on allocation
+            // failure.  The fd resolves through the ONE two-space
+            // bridge (`host_fd_read_to_end`: `state.open_files`
+            // synthetic ids first, raw host fds second).  POSIX pipe
+            // contract: the drain BLOCKS until the child closes its
+            // write end (normally at exit).
+            //
+            // NB: `__fd_read_chunk_raw` deliberately does NOT share
+            // this arm any more — it has a placeholder `.vr` body in
+            // core/io/buffer.vr, so the bodyless-intrinsic gate never
+            // routes it here; its real Tier-0 implementation is the
+            // HIGH-LEVEL `process_runtime` name intercept
+            // (`intercept_fd_read_chunk_bare`), which fires before any
+            // body dispatch and returns the bare `List<Byte>` the
+            // buffer.vr contract wants (NOT this host header).
+            let fd = get_i64_arg(state, 0);
+            let bytes =
+                super::process_runtime::host_fd_read_to_end(state, fd).unwrap_or_default();
+            Ok(Some(Value::from_i64(
+                super::process_runtime::alloc_len_cap_buf_header(&bytes),
+            )))
         }
         "__fd_write_all_raw" => Ok(Some(Value::from_i64(-1))),
-        "__fd_close_raw_buf" => Ok(Some(Value::from_i64(0))),
-        "__ptr_read_i64" | "__ptr_free" => Ok(Some(Value::from_i64(0))),
+        "__ptr_read_i64" => {
+            // Signature: (ptr: Int, index: Int) -> Int — i64-array
+            // indexed host read; the Tier-0 twin of the AOT GEP+load
+            // lowering (instruction.rs `__ptr_read_i64`).  Used by
+            // `core.sys.process_ops` to unpack the
+            // `[pid, stdout_fd, stderr_fd]` spawn triple and the
+            // `[len, cap, buf]` read_all header.  Pre-fix this
+            // returned constant 0, silently corrupting every caller.
+            let ptr = get_i64_arg(state, 0);
+            let idx = get_i64_arg(state, 1);
+            if ptr <= 4096 || idx < 0 {
+                // Null-page / negative-index guard: AOT would UB here;
+                // Tier-0 degrades to 0 for the same inputs the .vr
+                // callers already treat as "no data".
+                return Ok(Some(Value::from_i64(0)));
+            }
+            // SAFETY: ptr originates from the host allocators
+            // (`alloc_host_i64_triple` / `alloc_len_cap_buf_header`)
+            // whose 8-aligned allocations outlive the interpreter
+            // (no-op `__ptr_free` policy); idx is bounded by the .vr
+            // caller's contract (triple: 0..=2, header: 0..=2).
+            let v = unsafe { *(ptr as *const i64).add(idx as usize) };
+            Ok(Some(Value::from_i64(v)))
+        }
+        // No-op on BOTH tiers: AOT's `__ptr_free` lowering is a
+        // documented no-op ("24 bytes per spawn call are negligible");
+        // the Tier-0 host allocators mirror that static-lifetime
+        // policy.
+        "__ptr_free" => Ok(Some(Value::from_i64(0))),
 
         // --- Echo control (interactive password prompt) ---
         "__termios_save_and_disable_echo" | "__windows_save_and_disable_echo" => {

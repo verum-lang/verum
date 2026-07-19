@@ -16,6 +16,12 @@ mount core.io.buffer.{
 };
 mount core.io.protocols.{SeekFrom, StreamError, IoErrorKind};
 mount core.collections.list.List;
+mount core.{Maybe, Text, Byte};
+// `spawn` is a contextual keyword in expression position — alias it.
+mount core.sys.process_ops.{spawn as spawn_proc, Child};
+// Reap via the raw intrinsic — `child.wait()` hits the pre-existing
+// bare-name Child-method collision (T0146 dispatch class).
+mount core.intrinsics.runtime.os.{__process_wait_raw};
 
 // =============================================================================
 // §A — BufferCursor read/write/seek surface gated by #io-1
@@ -115,6 +121,42 @@ fn regression_line_writer_flushes_on_newline() {
     let mut lw = LineWriter.new(cursor);
     let buf: [Byte; 6] = [104, 105, 10, 121, 111, 33];  // "hi\nyo!"
     lw.write(&buf).unwrap();
+}
+
+// =============================================================================
+// §E — T0111: FdReader.read over a real child-stdout pipe
+// =============================================================================
+// Pre-fix: `__fd_read_chunk_raw`'s placeholder `.vr` body (`{ [] }`)
+// beat the intrinsic-stub gate, so every `FdReader.read` returned
+// permanent EOF at Tier-0.  The fix routes the call through the
+// high-level `process_runtime` name intercept onto the host fd
+// bridge.
+
+@test
+fn regression_fd_reader_reads_child_stdout_pipe() {
+    let echo_args: List<Text> = ["fdreader"];
+    match spawn_proc("/bin/echo", echo_args) {
+        Maybe.Some(child) => {
+            assert(child.stdout_fd >= 0);
+            // Borrowed fd: Child.read_stdout is NOT used — this pin
+            // exercises the FdReader.read path specifically.
+            let mut r = FdReader.from_borrowed_fd(child.stdout_fd);
+            let mut buf: [Byte; 9] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+            // Blocks until the child writes; echo emits "fdreader\n"
+            // (9 bytes) in one atomic pipe write.
+            let n = r.read(&mut buf).unwrap();
+            assert_eq(n, 9);
+            assert_eq(buf[0], 102 as Byte);  // 'f'
+            assert_eq(buf[8], 10 as Byte);   // '\n'
+            // Child exited + pipe drained -> EOF.
+            let n2 = r.read(&mut buf).unwrap();
+            assert_eq(n2, 0);
+            // exited(0) -> RAW waitpid word 0.
+            let raw = __process_wait_raw(child.pid);
+            assert_eq(raw, 0);
+        }
+        Maybe.None => assert(false),
+    }
 }
 
 fn main() {}
