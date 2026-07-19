@@ -5,8 +5,14 @@
 // Algebraic laws for `core/text/numeric/rational.vr` — arbitrary-precision
 // rational numbers (numerator: BigInt, denominator: BigInt).
 //
-// All @ignore'd while task #24 (BigInt method-return) blocks the
-// underlying arithmetic.  Once that closes, these flip green.
+// The three @ignore'd law tests below (add-commutativity, add-zero-identity,
+// reciprocal-round-trip) now PASS under --interp — the old BigInt
+// method-return blocker (legacy task #24) has closed — but stay @ignore'd
+// because BigInt-backed rational arithmetic FAILS under --aot (Tier-1):
+// add / mul / reciprocal produce wrong results or crash, while neg and the
+// error paths (div-by-zero, reciprocal-of-zero) pass. The always-active
+// law_mul_* tests fail --aot for the same reason (the visible signal). Un-
+// ignore all three when the AOT BigInt-rational arithmetic bug closes (T0165).
 // =============================================================================
 
 mount core.text.numeric.rational.{Rational};
