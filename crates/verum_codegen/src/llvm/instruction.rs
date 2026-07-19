@@ -14441,6 +14441,56 @@ fn lower_call_method<'ctx>(
                     }
 
                     ctx.set_register(dst.0, phi.as_basic_value());
+
+                    // T0371: NaN-box-mark the dyn-dispatched result per the
+                    // callee's DECLARED return type. Dispatch SELECTION above is
+                    // correct, but the result register was left UNMARKED, so a
+                    // heap-returning protocol method (`-> Text` / `-> List` /
+                    // `-> record`) handed `print` a bare i64 and rendered the
+                    // handle as an ADDRESS (`Heap<dyn Speaker>.sound()` printed a
+                    // pointer instead of "woof"). A normal `Call` marks its dst
+                    // via `mark_register_from_return_type` (see the CallM Call
+                    // arm) — do the same here, keyed on the concrete impl's
+                    // declared return type. Every concrete impl of one protocol
+                    // method shares that declared return, so the first dispatch
+                    // entry is representative.
+                    //
+                    // SELF/GENERIC GUARD: a `-> Self` / `-> T` method (e.g.
+                    // `Clone.clone`) has NO single static return representation —
+                    // the heap arms return a record pointer while the
+                    // primitive-default and scalar-guard arms return the RAW
+                    // receiver value (the `method_name == "clone"` arms above).
+                    // Marking those raw scalars as a heap handle would re-break a
+                    // generic `clone` over a primitive (it would render the
+                    // scalar as a bogus pointer), so leave Self/Generic returns
+                    // UNMARKED — matching the pre-fix behaviour for exactly that
+                    // case. A concrete impl of `-> Self` carries the return as
+                    // either `Generic(_)` or its own `Concrete`/`Instantiated`
+                    // type id (== the dispatched type id), so both spellings are
+                    // recognised.
+                    if let Some((self_tid, first_fname)) = dispatch_entries.first() {
+                        if let Some(ret_type) = vbc
+                            .find_function_by_name(first_fname.as_str())
+                            .and_then(|fid| vbc.get_function(fid))
+                            .map(|fd| fd.return_type.clone())
+                        {
+                            // Peel leading references to inspect the referent.
+                            let mut probe: &TypeRef = &ret_type;
+                            while let TypeRef::Reference { inner, .. } = probe {
+                                probe = &**inner;
+                            }
+                            let returns_self = match probe {
+                                TypeRef::Generic(_) => true,
+                                TypeRef::Concrete(rtid) => rtid.0 == *self_tid,
+                                TypeRef::Instantiated { base, .. } => base.0 == *self_tid,
+                                _ => false,
+                            };
+                            if !returns_self {
+                                mark_register_from_return_type(ctx, dst.0, &ret_type);
+                            }
+                        }
+                    }
+
                     return Ok(());
                 }
             }
