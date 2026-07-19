@@ -41,6 +41,17 @@
 // receiver-narrowing path at lines ~6020-6051) correctly picks the
 // `implement ToSocketAddrs for SocketAddr` impl rather than falling
 // through to the `Text` impl.
+//
+// SCOPE NOTE (T0242): the STANDALONE braced-mount resolution leg — a
+// `mount core.net.addr.{SocketAddr, Ipv4Addr, ToSocketAddrs};` in a file
+// with no accompanying `mount core.*;` glob — used to fail E402 and was
+// a co-blocker on un-skipping this spec. That leg is RESOLVED and now
+// passes at interp; it is pinned by
+// `vcs/specs/L0-critical/modules/mount_braced_type_from_archive_submodule.vr`
+// (the interp-tier mount-form of this test, which exercises the same
+// `to_socket_addrs()` body and prints `v4`). The @skip above therefore
+// stands for the AOT protocol-DISPATCH bug ALONE — the only remaining
+// reason this tier-2 spec is skipped.
 
 mount core.*;
 mount core.net.addr.{SocketAddr, Ipv4Addr, ToSocketAddrs};

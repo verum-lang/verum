@@ -1,0 +1,69 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: modules, mount, braced-import, archive, stdlib, protocol-dispatch, T0242
+// @timeout: 120000
+// @expected-stdout: v4
+// @expected-exit: 0
+// @description: Braced mount of TYPES (+ a protocol) from an archive
+// submodule, STANDALONE — the interp-tier mount-form of the #76
+// socket_addrs spec.
+//
+// T0242 regression pin. `mount <archive-submodule>.{Type, ...}` in a
+// file that mounts nothing else must resolve the items and compile.
+//
+// The failure this pins: a standalone braced TYPE mount used to fail
+// `E402: module ... not found` while the UNBRACED `mount core.net.addr;`
+// form (pinned by the sibling spec below) worked. The asymmetry was in
+// the import path, not in item availability -- an archive module has no
+// walkable `ModuleInfo` (the embedded `.vbca` carries a synthetic empty
+// AST, and the on-disk module resolver cannot see stdlib sources), so
+// the import fell through a FREE-FUNCTION-only fallback straight to
+// E402 for the TYPE leaves. Types and protocols live in the archive
+// type metadata and are reachable through the mount-scoped type
+// authority, which the import path consults before declaring a module
+// missing.
+//
+// Deliberately mounts NOTHING else: an accompanying `mount core.*;`
+// glob masks the defect by registering the names through another path.
+// The companion AOT-tier spec
+// `vcs/specs/L0-critical/_codegen_regressions/aot_to_socket_addrs_dispatch.vr`
+// stays @skip'd for a SEPARATE, still-open AOT protocol-dispatch bug;
+// this is its interp-tier mount-form, which passes.
+//
+// Two properties are pinned in one body:
+//   1. Annotation position -- the mounted names are used BARE as a
+//      parameter and return type (`fn pick`). A mount that stops
+//      erroring but binds an item to an opaque qualified self-ref
+//      placeholder (`Named(core.net.addr.SocketAddr)`) would still
+//      resolve method calls while failing to unify against any real
+//      value; only annotation position catches that half-fix.
+//   2. Protocol-method dispatch -- `to_socket_addrs()` comes from the
+//      braced `ToSocketAddrs` protocol.
+
+mount core.net.addr.{SocketAddr, Ipv4Addr, ToSocketAddrs};
+
+fn pick(a: SocketAddr) -> SocketAddr {
+    a
+}
+
+fn main() -> Int {
+    let ip: Ipv4Addr = Ipv4Addr.localhost();
+    let addr: SocketAddr = pick(SocketAddr.new_v4(ip, 8080));
+    match addr.to_socket_addrs() {
+        Ok(addrs) => {
+            for sa in addrs {
+                if sa.is_ipv4() {
+                    print("v4");
+                } else {
+                    print("not v4");
+                }
+            }
+            0
+        }
+        Err(_) => {
+            print("err");
+            1
+        }
+    }
+}

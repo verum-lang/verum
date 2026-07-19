@@ -1,0 +1,37 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: modules, mount, archive, stdlib, T0242
+// @timeout: 120000
+// @expected-stdout: v4
+// @expected-exit: 0
+// @description: Unbraced mount of an archive submodule, STANDALONE.
+//
+// T0242 control pin. This form ALREADY worked when the braced form
+// (sibling spec `mount_braced_type_from_archive_submodule.vr`) failed
+// E402, so it is the invariant the fix had to leave untouched: whatever
+// makes braced mounts resolve must not change unbraced resolution.
+//
+// Keep this spec and its braced sibling in lockstep -- same module,
+// same types, same output -- so a divergence between the two mount
+// forms shows up as exactly one failing name.
+
+mount core.net.addr;
+
+// Annotation-position use mirrors the braced sibling exactly, so the
+// two specs differ ONLY in the mount form.
+fn pick(a: SocketAddr) -> SocketAddr {
+    a
+}
+
+fn main() -> Int {
+    let ip: Ipv4Addr = Ipv4Addr.localhost();
+    let a: SocketAddr = pick(SocketAddr.new_v4(ip, 8080));
+    if a.is_ipv4() {
+        print("v4");
+        0
+    } else {
+        print("not v4");
+        1
+    }
+}

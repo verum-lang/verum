@@ -1,0 +1,26 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L0
+// @tags: modules, mount, braced-import, error-reporting, T0242
+// @expected-error: E402
+// @description: A genuinely missing module in a braced mount must still
+// fail LOUD with E402.
+//
+// T0242 negative pin -- the guard on the fix. Making braced TYPE mounts
+// fall back to the archive type metadata must NOT turn a real typo into
+// silence. The fallback fires only when the type authority actually
+// materialises a descriptor for the requested ITEM name; when it does
+// not, E402 stands.
+//
+// Both the module path AND the item name below are nonexistent, which
+// is the shape a user typo takes. Note the archive keys types by the
+// enclosing archive module rather than by leaf `.vr` file, so a mount
+// path that differs only in a leaf segment the archive does not
+// preserve is NOT distinguishable here by design -- this pin asserts
+// the loudness the architecture can actually guarantee.
+
+mount core.net.definitely_not_a_real_module.{NoSuchTypeAnywhere};
+
+fn main() -> Int {
+    0
+}

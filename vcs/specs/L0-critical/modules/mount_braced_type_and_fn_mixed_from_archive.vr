@@ -1,0 +1,34 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: modules, mount, braced-import, archive, stdlib, T0242
+// @timeout: 120000
+// @expected-stdout: ok
+// @expected-exit: 0
+// @description: Braced mount MIXING types and a free fn from one archive
+// submodule, STANDALONE.
+//
+// T0242 regression pin. `core.net.cidr` exports both public TYPES
+// (`Cidr`, `CidrError`) and a public free FUNCTION (`parse`). Free
+// functions already resolved through the archive metadata fallback
+// while types did not, so a mixed brace list was the shape where the
+// two legs had to agree: every item in one brace list must resolve, or
+// the whole mount fails.
+//
+// This is the spec that would catch a fix that repaired types by
+// bypassing (rather than joining) the existing free-function leg.
+
+mount core.net.cidr.{Cidr, CidrError, parse};
+
+fn main() -> Int {
+    match parse(&Text.from("10.0.0.0/8")) {
+        Ok(_c) => {
+            print("ok");
+            0
+        }
+        Err(_e) => {
+            print("err");
+            1
+        }
+    }
+}
