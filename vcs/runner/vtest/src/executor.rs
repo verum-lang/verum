@@ -1662,6 +1662,60 @@ impl Executor {
     }
 
     /// Execute a run test.
+    /// Shared `@expected-error` discipline for `run` tests
+    /// (CTX-HIJACK-TRIPWIRE-1 / T0240 pin support).
+    ///
+    /// A `run` test that declares `@expected-error: E0xxx` asserts the
+    /// program MUST FAIL to build/execute with that diagnostic — the only
+    /// way to pin codegen-stage compile errors, which no *-fail test type
+    /// reaches (`typecheck-fail` stops before VBC codegen;
+    /// `vbc-codegen-fail` drives the stdlib-less `compile_to_vbc`
+    /// front-end that rejects stdlib-name-colliding sources earlier).
+    ///
+    /// Returns `None` when the test declares no expected errors (normal
+    /// run semantics apply); otherwise the definitive outcome:
+    ///  * nonzero exit + stderr carrying every expected error → Pass
+    ///  * nonzero exit, wrong/missing diagnostics → Fail
+    ///  * exit 0 → Fail (the pinned defect regressed to silent success)
+    fn expected_error_run_outcome(
+        &self,
+        output: &ProcessOutput,
+        directives: &TestDirectives,
+        tier: Tier,
+        start: Instant,
+    ) -> Option<TestOutcome> {
+        if directives.expected_errors.is_empty() {
+            return None;
+        }
+        if output.exit_code == Some(0) {
+            return Some(TestOutcome::Fail {
+                tier,
+                reason: "Expected a compile/run error, but the program succeeded"
+                    .to_string()
+                    .into(),
+                expected: Some(format!("{:?}", directives.expected_errors).into()),
+                actual: Some("exit code 0".to_string().into()),
+                duration: start.elapsed(),
+            });
+        }
+        if self.check_expected_errors_in_output(&output.stderr, &directives.expected_errors) {
+            Some(TestOutcome::Pass {
+                tier,
+                duration: start.elapsed(),
+            })
+        } else {
+            Some(TestOutcome::Fail {
+                tier,
+                reason: "Program failed but without the expected error(s)"
+                    .to_string()
+                    .into(),
+                expected: Some(format!("{:?}", directives.expected_errors).into()),
+                actual: Some(output.stderr.trim().to_string().into()),
+                duration: start.elapsed(),
+            })
+        }
+    }
+
     async fn execute_run(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
         let start = Instant::now();
 
@@ -1681,6 +1735,20 @@ impl Executor {
                         actual: None,
                         duration: start.elapsed(),
                     };
+                }
+
+                // CTX-HIJACK-TRIPWIRE-1 (T0240): a `run` test carrying
+                // `@expected-error` asserts the program MUST FAIL to
+                // build/run with that diagnostic (compile-fail pins for
+                // codegen-stage errors, e.g. E0702, which no *-fail test
+                // type reaches — typecheck-fail stops before codegen and
+                // vbc-codegen-fail uses the stdlib-less compile_to_vbc
+                // front-end).  Success (exit 0) means the pinned defect
+                // regressed to silent acceptance.
+                if let Some(outcome) =
+                    self.expected_error_run_outcome(&output, directives, tier, start)
+                {
+                    return outcome;
                 }
 
                 // Check exit code
@@ -1849,6 +1917,15 @@ impl Executor {
                     timed_out: false,
                 };
 
+                // CTX-HIJACK-TRIPWIRE-1 (T0240): `@expected-error` on a
+                // `run` test = the build/run MUST fail with that
+                // diagnostic (see the process-path twin in execute_run).
+                if let Some(outcome) =
+                    self.expected_error_run_outcome(&output, directives, tier, start)
+                {
+                    return outcome;
+                }
+
                 // Check exit code
                 if let Some(expected_exit) = directives.expected_exit {
                     if output.exit_code != Some(expected_exit) {
@@ -1924,12 +2001,29 @@ impl Executor {
                 }
             }
             Err(e) => {
-                // Compilation or execution error
+                // Compilation or execution error.  When the test declares
+                // `@expected-error`, a build failure carrying the declared
+                // diagnostic IS the expected outcome (compile-fail pins for
+                // codegen-stage errors — CTX-HIJACK-TRIPWIRE-1 / T0240):
+                // run_for_test surfaces compile errors through this arm,
+                // not through a nonzero-exit ProcessOutput.
+                let error_text = e.to_string();
+                if !directives.expected_errors.is_empty()
+                    && self.check_expected_errors_in_output(
+                        &error_text,
+                        &directives.expected_errors,
+                    )
+                {
+                    return TestOutcome::Pass {
+                        tier,
+                        duration: start.elapsed(),
+                    };
+                }
                 TestOutcome::Fail {
                     tier,
                     reason: format!("Execution failed: {}", e).into(),
                     expected: None,
-                    actual: Some(e.to_string().into()),
+                    actual: Some(error_text.into()),
                     duration: start.elapsed(),
                 }
             }

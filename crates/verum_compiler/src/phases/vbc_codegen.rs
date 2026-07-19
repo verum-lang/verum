@@ -130,8 +130,12 @@ impl VbcCodegenPhase {
         codegen.set_tier_context(tier_context);
 
         let vbc_module = codegen.compile_module(module).map_err(|e| {
+            // Structured codegen errors carry their own diagnostic code
+            // (E0702 = context call outside `using` scope,
+            // CTX-HIJACK-TRIPWIRE-1 / T0240); everything else stays
+            // under the generic E0701 wrapper.
             let diagnostic = verum_diagnostics::DiagnosticBuilder::error()
-                .code("E0701")
+                .code(e.code().unwrap_or(verum_diagnostics::codes::E0701))
                 .message(format!("VBC codegen error: {}", e))
                 .build();
             {

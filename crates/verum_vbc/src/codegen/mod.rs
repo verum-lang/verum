@@ -2232,6 +2232,13 @@ impl VbcCodegen {
             // Without this, context protocol impls can't populate TypeDescriptor.protocols.
             if let ItemKind::Context(ctx_decl) = &item.kind {
                 let ctx_name = ctx_decl.name.name.to_string();
+                // CTX-HIJACK-TRIPWIRE-1 (T0240): record every DECLARED
+                // context name (outside the type-registration guard below
+                // — re-collection across modules must still remember it).
+                // `compile_method_call` fails fast (E0702) on
+                // `<Ctx>.method(...)` receivers outside their `using`
+                // scope instead of letting the static rungs hijack them.
+                self.ctx.declared_context_types.insert(ctx_name.clone());
                 if !self.type_name_to_id.contains_key(&ctx_name) {
                     let type_id = self.alloc_user_type_id();
                     self.type_name_to_id.insert(ctx_name.clone(), type_id);

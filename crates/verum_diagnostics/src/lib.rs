@@ -199,6 +199,17 @@ pub mod codes {
     pub const E0316: &str = "E0316";
     /// Unused Result that must be used (@must_handle annotation)
     pub const E0317: &str = "E0317";
+
+    // VBC codegen phase errors (E0700-E0702)
+    /// VBC codegen phase received wrong input data
+    pub const E0700: &str = "E0700";
+    /// VBC codegen error (uncategorised)
+    pub const E0701: &str = "E0701";
+    /// Context method call outside its `using` scope — the codegen
+    /// tripwire that keeps declared-context receivers from silently
+    /// binding same-name globals (CTX-HIJACK-TRIPWIRE-1, T0240; the
+    /// authority for the code is `verum_vbc::codegen::CodegenError::code`)
+    pub const E0702: &str = "E0702";
 }
 
 /// Warning codes for Verum diagnostics

@@ -1506,6 +1506,20 @@ impl VbcCodegen {
         // its exit_scope picks up the defer the same way.
         self.ctx.add_defer(vec![Instruction::CtxEnd], false);
 
+        // CTX-HIJACK-TRIPWIRE-1 (T0240) legitimacy carve-out: after an
+        // unscoped `provide Ctx = v;` the context IS available for the
+        // remainder of the enclosing function (the CtxProvide/CtxEnd
+        // pair above brackets it at runtime), so later `Ctx.method(...)`
+        // calls in this body are context calls — register the name so
+        // CTX-SHADOWS-ALL-1 compiles them as CtxGet + dyn CallM instead
+        // of the tripwire (or, pre-tripwire, the silent static hijack).
+        // Insert-only within this function: `set_required_contexts` at
+        // the next function entry resets the set, and a use AFTER the
+        // enclosing block's CtxEnd compiles to CtxGet whose runtime
+        // "context not provided" panic is loud — strictly better than
+        // the pre-fix silent mis-binding.
+        self.ctx.required_contexts.insert(context.to_string());
+
         // Don't free value_reg - context owns it now
 
         Ok(None)
@@ -1568,10 +1582,24 @@ impl VbcCodegen {
         self.ctx
             .emit_forward_context_provide(&end_label, context_id, value_reg);
 
+        // CTX-HIJACK-TRIPWIRE-1 (T0240) legitimacy carve-out: inside a
+        // `provide Ctx = v in { ... }` body the context is definitionally
+        // available — `Ctx.method(...)` there is a context call and must
+        // compile through CTX-SHADOWS-ALL-1 (CtxGet + dyn CallM on the
+        // provided value), not fall to the static rungs (pre-fix these
+        // bodies hit the same silent hijack the tripwire now rejects).
+        // Scoped push/restore: only remove on exit when THIS provide
+        // introduced the name (an enclosing `using [Ctx]` keeps it).
+        let ctx_newly_required = self.ctx.required_contexts.insert(context.to_string());
+
         // Compile body (can be block expression or any expression)
         self.ctx.enter_scope();
         let result = self.compile_expr(body)?;
         let (_, defers) = self.ctx.exit_scope(false);
+
+        if ctx_newly_required {
+            self.ctx.required_contexts.remove(context);
+        }
 
         // Emit defers
         for defer_instrs in defers {

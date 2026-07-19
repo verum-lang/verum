@@ -1,0 +1,45 @@
+// @test: run
+// @expected-error: E0702
+// @tier: 0
+// @level: L2
+// @tags: contexts, using, tripwire, error, codegen, hijack
+// @description: CTX-HIJACK-TRIPWIRE-1 (T0240) — a declared context's method called from a fn whose using clause (post module-level desugar) does not include it must FAIL LOUD at VBC codegen (E0702), never fall through to static name resolution
+//
+// The hijack class this pins (E2E-CONTEXT-FLOAT-VALUE-1 / T0229 family):
+// `Logger.log(...)` outside a `using [Logger]` scope does not resolve
+// through the context system — the static rungs of compile_method_call
+// bind it to a same-name global instead (stdlib `Logger` protocol methods,
+// math `log`, or the context decl stub), silently skipping the provided
+// value. Before the tripwire this program compiled and ran to exit 0 with
+// the NoopLogger.log body never executing (only "done" printed) — silent
+// wrong behaviour. The signature deliberately matches the stdlib
+// `core.base.log` Logger protocol (`log(level: LogLevel, message)`), the
+// ONE shape that clears the front-end type checker and reaches the
+// codegen rungs. A `run` test with @expected-error asserts the build
+// FAILS with the tripwire code instead of running.
+
+context Logger {
+    fn log(level: LogLevel, message: Text);
+}
+
+type NoopLogger is {};
+
+implement Logger for NoopLogger {
+    fn log(&self, level: LogLevel, message: Text) {
+        println("impl-ran");
+    }
+}
+
+// BUG UNDER TEST: no `using [Logger]` on this fn (and no module-level
+// `using`) — the call below must be rejected at VBC codegen with E0702.
+fn caller() {
+    Logger.log(LogLevel.Warn, "boom");
+}
+
+mount core.prelude.*;
+
+fn main() {
+    provide Logger = NoopLogger {};
+    caller();
+    println("done");
+}

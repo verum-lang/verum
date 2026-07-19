@@ -122,6 +122,28 @@ pub enum CodegenErrorKind {
         max: usize,
     },
 
+    // === Context System Errors ===
+    /// CTX-HIJACK-TRIPWIRE-1 (T0240): a method call's receiver names a
+    /// DECLARED context type, but the enclosing function's `using [...]`
+    /// clause (after the T0229 module-level desugar) does not include
+    /// it.  Without this tripwire the call falls through
+    /// `compile_method_call`'s static-resolution rungs and silently
+    /// binds a same-name global (the E2E-CONTEXT-FLOAT-VALUE-1 class:
+    /// `Logger.log` bound to the stdlib math `log`, computing a natural
+    /// logarithm of a Text pointer) — silent wrong behaviour in release.
+    ///
+    /// Diagnostic code: `E0702` (embedded in the Display output so every
+    /// stringification path carries it; mirrored in
+    /// `verum_diagnostics::codes::E0702`).
+    ContextOutsideUsingScope {
+        /// The declared context the receiver names.
+        context: String,
+        /// The function compiling the call site.
+        function: String,
+        /// The method being called on the context.
+        method: String,
+    },
+
     // === Internal Errors ===
     /// Internal compiler error.
     Internal(String),
@@ -178,6 +200,21 @@ impl CodegenError {
     /// Creates a not implemented error.
     pub fn not_implemented(feature: impl Into<String>) -> Self {
         Self::new(CodegenErrorKind::NotImplemented(feature.into()))
+    }
+
+    /// Structured diagnostic code for error kinds that have one.
+    ///
+    /// The VBC codegen layer owns its codes (verum_vbc cannot depend on
+    /// verum_diagnostics — layering); the same constants are registered
+    /// in `verum_diagnostics::codes` for the canonical error-code table,
+    /// and `verum_compiler::phases::vbc_codegen` consumes this accessor
+    /// to build properly-coded diagnostics instead of the generic E0701.
+    pub fn code(&self) -> Option<&'static str> {
+        match &self.kind {
+            // CTX-HIJACK-TRIPWIRE-1 (T0240).
+            CodegenErrorKind::ContextOutsideUsingScope { .. } => Some("E0702"),
+            _ => None,
+        }
     }
 }
 
@@ -382,6 +419,29 @@ impl fmt::Display for CodegenErrorKind {
                     needed, max
                 )
             }
+            Self::ContextOutsideUsingScope {
+                context,
+                function,
+                method,
+            } => {
+                // The E0702 token is embedded here on purpose: several
+                // consumers stringify CodegenError (anyhow wrapping in
+                // pipeline/vbc_codegen.rs, lenient-skip traces, test
+                // runners matching @expected-error), and the code must
+                // survive every one of them.
+                write!(
+                    f,
+                    "error[E0702]: context `{ctx}` method call `{ctx}.{m}` in fn `{func}` \
+                     outside its `using` scope — the enclosing function does not declare \
+                     `using [{ctx}]` (module-level `using` counts), so this call would \
+                     fall through to unrelated same-name globals (the T0229 hijack \
+                     class) instead of the provided context value; add `using [{ctx}]` \
+                     to fn `{func}` or move the call inside a `provide {ctx} = ...` scope",
+                    ctx = context,
+                    m = method,
+                    func = function,
+                )
+            }
             Self::Internal(msg) => write!(f, "internal compiler error: {}", msg),
             Self::NotImplemented(feature) => write!(f, "not yet implemented: {}", feature),
         }
@@ -429,6 +489,14 @@ mod tests {
             CodegenErrorKind::ImmutableAssignment("x".into()),
             CodegenErrorKind::BreakOutsideLoop,
             CodegenErrorKind::InvalidLiteral("0xFFFG".into()),
+            // CTX-HIJACK-TRIPWIRE-1 (T0240): the tripwire is loud by
+            // design — a lenient-skip that silences it would re-open the
+            // silent-hijack channel it exists to close.
+            CodegenErrorKind::ContextOutsideUsingScope {
+                context: "Logger".into(),
+                function: "caller".into(),
+                method: "log".into(),
+            },
         ];
         for k in cases {
             let err = CodegenError::new(k);
@@ -463,5 +531,31 @@ mod tests {
     fn skip_class_label_is_grep_stable() {
         assert_eq!(SkipClass::BugClass.label(), "bug-class");
         assert_eq!(SkipClass::Irreducible.label(), "irreducible");
+    }
+
+    /// CTX-HIJACK-TRIPWIRE-1 (T0240): the E0702 code must survive every
+    /// stringification path — pinned both on the structured accessor and
+    /// embedded in the Display output (vtest @expected-error matches by
+    /// substring on stderr; the pipeline wraps via anyhow/format!).
+    #[test]
+    fn context_outside_using_scope_carries_e0702() {
+        let err = CodegenError::new(CodegenErrorKind::ContextOutsideUsingScope {
+            context: "Logger".into(),
+            function: "caller".into(),
+            method: "log".into(),
+        });
+        assert_eq!(err.code(), Some("E0702"));
+        let rendered = format!("{}", err);
+        assert!(
+            rendered.contains("E0702")
+                && rendered.contains("Logger")
+                && rendered.contains("caller")
+                && rendered.contains("using [Logger]"),
+            "Display must embed the code, context, function, and the fix hint: {}",
+            rendered
+        );
+        // Codes are the exception, not the rule — the generic kinds stay
+        // uncoded and keep the E0701 wrapper in the pipeline.
+        assert_eq!(CodegenError::internal("x").code(), None);
     }
 }

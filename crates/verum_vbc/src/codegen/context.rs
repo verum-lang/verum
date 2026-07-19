@@ -638,6 +638,23 @@ pub struct CodegenContext {
     /// contexts can access them via method calls on the context type name.
     pub required_contexts: HashSet<String>,
 
+    /// CTX-HIJACK-TRIPWIRE-1 (T0240): every context NAME declared by a
+    /// `context X { ... }` item in any module compiled by this codegen
+    /// run (populated by the `ItemKind::Context` arm of
+    /// `collect_protocol_definitions`; insert-only, never cleared).
+    ///
+    /// `compile_method_call` consults this set to fail FAST (E0702) when
+    /// a method call's receiver names a DECLARED context but the
+    /// enclosing function's `using [...]` clause (post module-level
+    /// desugar, T0229) does not include it — the exact situation that
+    /// otherwise falls through the static-resolution rungs and silently
+    /// binds a same-name global (the E2E-CONTEXT-FLOAT-VALUE-1 hijack:
+    /// `Logger.log` bound to the stdlib math `log`).  Contexts declared
+    /// only in the PRECOMPILED archive are deliberately absent — archive
+    /// metadata flattens contexts into Protocol descriptors, and
+    /// protocol-qualified dispatch on those must stay untouched.
+    pub declared_context_types: HashSet<String>,
+
     /// Simple names brought into scope by an EXPLICIT `mount X.Y.{name}` /
     /// `mount X.Y.fn as alias` (every site that calls
     /// `register_function_authoritative`).  Used by bare-name call
@@ -1464,6 +1481,7 @@ impl CodegenContext {
             typed_array_vars: HashMap::new(),
             try_recover_depth: 0,
             required_contexts: HashSet::new(),
+            declared_context_types: HashSet::new(),
             explicit_mount_names: HashSet::new(),
             context_aliases: HashMap::new(),
             active_pattern_cache: HashMap::new(),

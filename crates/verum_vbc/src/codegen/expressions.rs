@@ -9710,6 +9710,61 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
+        // ──────────────────────────────────────────────────────────
+        // CTX-HIJACK-TRIPWIRE-1 (T0240): a receiver naming a DECLARED
+        // context OUTSIDE its `using` scope fails FAST — E0702.
+        //
+        // The CTX-SHADOWS-ALL-1 branch above handles the legitimate
+        // case (context in this function's required set, post T0229
+        // module-level desugar, provide-scope registration included).
+        // Everything that reaches this point with a declared-context
+        // receiver would fall through to the static-resolution rungs
+        // below, each of which "successfully" binds the name to
+        // something that is NOT the provided value — the decl-stub
+        // FunctionInfo, the Protocol-stub TypeDescriptor, or a
+        // same-name global (`Logger.log` → stdlib math `log`, the
+        // E2E-CONTEXT-FLOAT-VALUE-1 silent hijack).  Loud beats silent:
+        // the diagnostic names the context, the method, and the fix.
+        //
+        // Deliberate scope bounds:
+        //  * only single-segment bare-name receivers — qualified paths
+        //    (`core.x.Type.method`) never mean a context;
+        //  * only NAMES DECLARED as contexts by modules of THIS codegen
+        //    run (`declared_context_types`) — archive-flattened protocol
+        //    names and protocol-qualified dyn dispatch stay untouched;
+        //  * a local variable of the same name shadows the context
+        //    (dispatch on the local is the user's intent);
+        //  * a same-name REAL type (non-Protocol descriptor) shadows it
+        //    too — `Type.static_method()` calls stay legal (the
+        //    static_method_not_context.vr discipline).
+        if let ExprKind::Path(ref path) = receiver.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ref ctx_ident) = path.segments[0]
+            && self
+                .ctx
+                .declared_context_types
+                .contains(ctx_ident.name.as_str())
+            && !self.ctx.is_required_context(&ctx_ident.name)
+            && self.ctx.lookup_var(ctx_ident.name.as_str()).is_none()
+            && self
+                .type_name_to_id
+                .get(ctx_ident.name.as_str())
+                .and_then(|tid| self.types.iter().find(|td| td.id == *tid))
+                .is_none_or(|td| td.kind == crate::types::TypeKind::Protocol)
+        {
+            return Err(CodegenError::with_span(
+                CodegenErrorKind::ContextOutsideUsingScope {
+                    context: ctx_ident.name.to_string(),
+                    function: self
+                        .ctx
+                        .current_function
+                        .clone()
+                        .unwrap_or_else(|| "<top-level>".to_string()),
+                    method: method.name.to_string(),
+                },
+                receiver.span,
+            ));
+        }
 
         // ──────────────────────────────────────────────────────────
         // TIER-COHERENCE-TOSTRING-1: `x.to_text()` / `x.to_string()` on a
