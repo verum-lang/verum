@@ -822,12 +822,70 @@ impl TensorHandle {
         }
     }
 
-    /// Gets element at flat index as f64.
-    /// Unlike `get_scalar_f64`, this works for multi-element tensors.
-    pub fn get_element_f64(&self, index: usize) -> Option<f64> {
-        if index >= self.numel {
+    /// Maps a logical row-major flat element index into the physical
+    /// element offset into the backing buffer, honoring this view's
+    /// `offset` and `strides`.
+    ///
+    /// The flat-index element accessors (`get_element_f64` /
+    /// `set_element_f64`) and every caller treat `index` as a
+    /// **logical** row-major index into `numel` elements. For a
+    /// contiguous tensor the row-major strides reconstruct the flat
+    /// index exactly, so the physical offset is `offset + logical`
+    /// (a contiguous *slice* may still carry a nonzero `offset`); the
+    /// zero-offset case returns the index unchanged, matching the
+    /// historical behavior byte-for-byte. For an offset or strided
+    /// view (slice / transpose / broadcast / flip) the logical index
+    /// is un-raveled into per-dimension coordinates and walked through
+    /// the strides — the same `offset + Σ coord_i * strides_i`
+    /// computation as `get_ptr`, the canonical multi-index path.
+    ///
+    /// Returns `None` when `logical` is out of range, or when a
+    /// negative stride would drive the physical offset below zero (an
+    /// invalid view whose base pointer was not adjusted to the logical
+    /// start) — a loud rejection rather than an out-of-bounds access.
+    #[inline]
+    fn logical_to_physical(&self, logical: usize) -> Option<usize> {
+        if logical >= self.numel {
             return None;
         }
+        // Fast path: contiguous row-major layout collapses to
+        // offset + logical (offset covers a contiguous slice view).
+        if self.is_contiguous() {
+            return Some(self.offset + logical);
+        }
+        // General path: un-ravel the row-major logical index (last
+        // dimension varies fastest) into coordinates, then apply
+        // strides + offset. Mirrors the strides walk in `get_ptr`.
+        let ndim = self.ndim as usize;
+        let mut physical = self.offset as isize;
+        let mut remaining = logical;
+        for i in (0..ndim).rev() {
+            let dim = self.shape[i];
+            // dim > 0 is guaranteed: logical < numel = Π shape[..ndim],
+            // and numel == 0 would have failed the bound check above.
+            let coord = remaining % dim;
+            remaining /= dim;
+            physical += (coord as isize) * self.strides[i];
+        }
+        debug_assert!(
+            physical >= 0,
+            "Negative physical offset indicates an invalid strided view"
+        );
+        if physical < 0 {
+            return None;
+        }
+        Some(physical as usize)
+    }
+
+    /// Gets element at flat index as f64.
+    /// Unlike `get_scalar_f64`, this works for multi-element tensors.
+    /// Honors this view's `offset` and `strides` (see
+    /// `logical_to_physical`), so a non-contiguous view reads the
+    /// logically-correct element rather than raw buffer position.
+    pub fn get_element_f64(&self, index: usize) -> Option<f64> {
+        // `index` becomes the physical buffer offset (offset+strides
+        // applied); the per-dtype addressing below is unchanged.
+        let index = self.logical_to_physical(index)?;
         let data = self.data.as_ref()?;
         unsafe {
             let ptr = (*data.as_ptr()).as_ptr();
@@ -861,11 +919,16 @@ impl TensorHandle {
     /// Complex dtypes write the real component and zero the
     /// imaginary one, mirroring the real-part read contract of
     /// `get_element_f64`. Returns false when the index is out of
-    /// range or the tensor has no data.
+    /// range or the tensor has no data. Honors this view's `offset`
+    /// and `strides` (see `logical_to_physical`), so a non-contiguous
+    /// view writes the logically-correct element.
     pub fn set_element_f64(&mut self, index: usize, value: f64) -> bool {
-        if index >= self.numel {
+        // `index` becomes the physical buffer offset (offset+strides
+        // applied); the per-dtype addressing below is unchanged.
+        // Immutable borrow ends before the `as_mut` below.
+        let Some(index) = self.logical_to_physical(index) else {
             return false;
-        }
+        };
         let Some(data) = self.data.as_mut() else {
             return false;
         };
