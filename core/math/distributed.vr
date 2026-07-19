@@ -732,7 +732,15 @@ implement<M: Module<In, Out>, In, Out> FSDP<M> {
 
     // Reduce-scatter gradients after backward
     public fn reduce_scatter_grads(&mut self) {
-        for param in self.model.parameters_mut() {
+        // T0455 (FORLOOP-XMOD-ITEM-PIN-1) interim: pin the item type. The
+        // for-loop item inference does not fix `param` to the concrete
+        // element type &mut DynTensor<Float> returned by the cross-module
+        // Module protocol's parameters_mut(); without this binding `param`
+        // resolves as a use-order-dependent free var — get_grad(&) collapses
+        // it to & before set_grad(&mut) — yielding a spurious E400. Root
+        // tracked in T0455; drop this annotation once the inference is fixed.
+        let params: List<&mut DynTensor<Float>> = self.model.parameters_mut();
+        for param in params {
             if let Maybe.Some(grad) = get_grad(param) {
                 let sharded_grad = reduce_scatter(&grad, &self.process_group, ReduceOp.Avg);
                 set_grad(param, sharded_grad);
