@@ -445,9 +445,29 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
-            // catch_unwind(f) intercept (#50): run f, catch Panic, build
-            // Result<T, PanicInfo>.  Must come LAST so other intercepts
-            // that match "catch_unwind" are not reachable (none currently).
+            // panic_impl(msg, file, line, col) intercept
+            // (PANIC-IMPL-EXIT-1, T0148): the stdlib body writes stderr
+            // then exit_process(101) — correct for Tier-1 top-level
+            // panics, but under the interpreter it made panic_at /
+            // resume_unwind uncatchable (ProcessExit is not a panic)
+            // and killed the whole per-file test batch. Raise the
+            // canonical InterpreterError::Panic instead so
+            // catch_unwind can catch it and uncaught panics report
+            // per-test.
+            // (Never yields Some — it either declines with Ok(None) or
+            // raises the panic via Err, which `?` propagates.)
+            let _ = super::panic_runtime::try_intercept_panic_impl(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )?;
+            // catch_unwind(f) intercept (#50): run f, catch the
+            // panic-class errors (Panic / AssertionFailed /
+            // Unreachable), build Result<T, PanicInfo>.  Must come
+            // LAST so other intercepts that match "catch_unwind" are
+            // not reachable (none currently).
             if let Some(result) = super::panic_runtime::try_intercept_catch_unwind(
                 state,
                 &func_name,
