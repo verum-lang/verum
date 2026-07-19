@@ -15,18 +15,26 @@
 //! # Cache key
 //!
 
-//! `CacheKey = blake3(source_bytes ++ compiler_version ++ flags)`.
+//! `CacheKey = blake3(wire_schema ++ compiler_identity ++ source_bytes ++
+//! compiler_version ++ flags)`.
 //!
 
-//! Both `compiler_version` and `flags` are part of the digest because a
-//! source file alone does NOT determine the compilation output:
+//! Every field is part of the digest because a source file alone does NOT
+//! determine the compilation output:
 //!
 
-//!  * a different compiler version may emit different VBC for the same
-//!  source (e.g. an intrinsic-name change, a codegen optimisation
+//!  * the **compiler identity** is the build-unique fingerprint of the
+//!  running `verum` binary (its on-disk length + mtime). Any recompile of
+//!  the executable — including a codegen change in a dependency crate that
+//!  leaves `CARGO_PKG_VERSION` untouched — relinks the binary with a fresh
+//!  mtime, so this component auto-invalidates the cache (T0387);
+//!  * a different compiler **version** string may emit different VBC for
+//!  the same source (e.g. an intrinsic-name change, a codegen optimisation
 //!  pass that landed mid-release);
-//!  * profile flags (verify mode, tier, opt-level) change the bytecode
-//!  materially.
+//!  * profile **flags** (verify mode, tier, opt-level) change the bytecode
+//!  materially;
+//!  * the **wire schema** version is a manual belt-and-suspenders bump for
+//!  bytecode wire-format changes (see [`WIRE_SCHEMA_VERSION`]).
 //!
 
 //! Including everything in the key means a cache hit is always a *valid*
@@ -72,6 +80,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -142,10 +151,11 @@ impl std::fmt::Display for CacheKey {
 /// Compute the cache key for a source + compiler + flag set.
 ///
 
-/// The digest order is `source ++ b"\x00" ++ compiler ++ b"\x00" ++ flag1
-/// ++ b"\x00" ++ flag2 ++ ...` — null bytes between fields prevent
-/// length-extension collisions where, e.g., `("a", "bc")` and `("ab",
-/// "c")` would otherwise hash identically.
+/// The digest order is `wire_schema ++ b"\x00" ++ compiler_identity ++
+/// b"\x00" ++ source ++ b"\x00" ++ compiler ++ b"\x00" ++ flag1 ++ b"\x00"
+/// ++ flag2 ++ ...` — null bytes between fields prevent length-extension
+/// collisions where, e.g., `("a", "bc")` and `("ab", "c")` would otherwise
+/// hash identically.
 /// Bytecode-wire schema version mixed into every script-cache key. **BUMP THIS**
 /// whenever the VBC bytecode wire format or an interpreter dispatch handler's
 /// operand layout changes. Without it, a `~/.verum/script-cache` entry produced
@@ -154,13 +164,43 @@ impl std::fmt::Display for CacheKey {
 /// probe cached at one wire schema ran its bytecode against re-shaped handler
 /// arms and SIGSEGV'd, masquerading as a code regression (T0197). Keep in
 /// lockstep with the stdlib bake schema (see T0219 BAKE-CACHE-COMPILER-IDENTITY).
-pub const WIRE_SCHEMA_VERSION: u32 = 3; // 2: GPU GpuExtended [dst][args...] realign (T0177); 3: simd reduce-trio emission LoadNil→SimdExtended (T0116 — same stale-replay class: `compiler_version` in the key is the FIXED CARGO_PKG_VERSION, so a codegen-output change for fixed source needs a bump here until a build-unique compiler identity joins the key)
+///
+/// As of T0387 this is belt-and-suspenders: `key_for` also mixes in a
+/// build-unique compiler identity ([`compiler_identity`]), so any rebuild of
+/// the `verum` binary auto-invalidates the cache even without a hand-bump.
+/// Still bump this on a deliberate wire-format change — it is the portable,
+/// cross-machine signal (a binary copied to another host keeps its bytes but
+/// gets a new mtime; the schema version travels with the source).
+pub const WIRE_SCHEMA_VERSION: u32 = 3; // 2: GPU GpuExtended [dst][args...] realign (T0177); 3: simd reduce-trio emission LoadNil→SimdExtended (T0116 — same stale-replay class). T0387 added a build-unique compiler identity to the key so a codegen-output change for fixed source now auto-invalidates; this manual bump remains the portable belt-and-suspenders signal.
 
 pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKey {
+    key_with_identity(source, compiler_version, flags, compiler_identity())
+}
+
+/// The single hashing authority behind [`key_for`]. `compiler_identity` is
+/// the build-unique fingerprint of the running compiler binary (see
+/// [`compiler_identity`]); it is an explicit parameter so tests can prove a
+/// changed compiler identity yields a different key without rebuilding the
+/// binary. `key_for` supplies the real process identity — no other caller
+/// should invent one.
+fn key_with_identity(
+    source: &[u8],
+    compiler_version: &str,
+    flags: &[&str],
+    compiler_identity: &[u8],
+) -> CacheKey {
     let mut hasher = blake3::Hasher::new();
     // Wire-schema component FIRST: a bump invalidates every cached script,
     // so re-shaped bytecode is never re-run against a mismatched interpreter.
     hasher.update(&WIRE_SCHEMA_VERSION.to_le_bytes());
+    hasher.update(&[0]);
+    // Build-unique compiler identity SECOND (T0387): the on-disk fingerprint
+    // (len + mtime) of the running `verum` binary. Any recompile — including
+    // a codegen change in a dependency crate that leaves CARGO_PKG_VERSION
+    // AND WIRE_SCHEMA_VERSION untouched — relinks the executable with a fresh
+    // mtime, so this component auto-invalidates the whole script cache. This
+    // is the ROOT that WIRE_SCHEMA_VERSION previously only hand-approximated.
+    hasher.update(compiler_identity);
     hasher.update(&[0]);
     hasher.update(source);
     hasher.update(&[0]);
@@ -173,6 +213,46 @@ pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> CacheKe
     let mut bytes = [0u8; 32];
     bytes.copy_from_slice(hash.as_bytes());
     CacheKey(bytes)
+}
+
+/// Build-unique identity of the running compiler binary, mixed into every
+/// script-cache key so a rebuild auto-invalidates stale bytecode (T0387).
+///
+/// Computed once per process and cached. The identity is the current
+/// executable's on-disk `(len, mtime)` — a rebuilt binary is always
+/// rewritten with a fresh mtime (and usually a new length), so this changes
+/// on every `cargo build` of `verum` regardless of *which* crate's codegen
+/// moved. That property is why runtime `current_exe()` metadata is used
+/// rather than a build-time-baked hash: `verum_cli/build.rs` declares
+/// `rerun-if-changed=build.rs`, so a codegen change confined to `verum_vbc`
+/// would NOT re-run it — a baked value would go stale on exactly the change
+/// this key must catch. Reading the linked binary sidesteps that entirely.
+fn compiler_identity() -> &'static [u8] {
+    static IDENTITY: OnceLock<Vec<u8>> = OnceLock::new();
+    IDENTITY.get_or_init(compute_compiler_identity).as_slice()
+}
+
+/// Compute the build-unique compiler identity. Falls back to the
+/// compile-time `CARGO_PKG_VERSION` when the executable path or its metadata
+/// is unavailable (e.g. the binary was deleted while running) so the key
+/// stays deterministic — that fallback is the pre-T0387 discrimination floor
+/// (`compiler_version` alone), never an empty component.
+fn compute_compiler_identity() -> Vec<u8> {
+    let mut id = Vec::with_capacity(24);
+    if let Ok(path) = std::env::current_exe() {
+        if let Ok(meta) = fs::metadata(&path) {
+            id.extend_from_slice(&meta.len().to_le_bytes());
+            if let Ok(mtime) = meta.modified() {
+                if let Ok(dur) = mtime.duration_since(UNIX_EPOCH) {
+                    id.extend_from_slice(&dur.as_nanos().to_le_bytes());
+                }
+            }
+        }
+    }
+    if id.is_empty() {
+        id.extend_from_slice(env!("CARGO_PKG_VERSION").as_bytes());
+    }
+    id
 }
 
 /// Schema version for `meta.toml`. Bumped on incompatible layout changes
@@ -670,6 +750,52 @@ mod tests {
         let a = key_for(b"ab", "0.6", &[]);
         let b = key_for(b"a", "0.6", &["b"]);
         assert_ne!(a, b);
+    }
+
+    // Build-unique compiler identity (T0387) ------------------------------------------------
+
+    #[test]
+    fn key_distinguishes_compiler_identity() {
+        // The T0387 root: two builds that differ ONLY in codegen — same
+        // source, same compiler_version, same flags, same WIRE_SCHEMA_VERSION
+        // — carry different build-unique identities and so MUST NOT collide
+        // on the cache key. Before the fix the key was identical and the
+        // stale bytecode from build A was silently replayed under build B.
+        let a = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-A-mtime-len");
+        let b = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-B-mtime-len");
+        assert_ne!(a, b, "different compiler identity must change the key");
+        // Same identity + same inputs is still deterministic.
+        let a2 = key_with_identity(b"src", "0.6.0", &["tier=0"], b"build-A-mtime-len");
+        assert_eq!(a, a2, "same identity + inputs must be stable");
+    }
+
+    #[test]
+    fn compiler_identity_is_nonempty_and_process_stable() {
+        // The process identity must be discoverable (current_exe present
+        // under the test harness) and constant across calls within a run —
+        // otherwise the cache would never hit.
+        let a = compiler_identity();
+        let b = compiler_identity();
+        assert!(!a.is_empty(), "compiler identity must never be empty");
+        assert_eq!(a, b, "compiler identity is process-constant");
+    }
+
+    #[test]
+    fn key_for_folds_in_process_compiler_identity() {
+        // key_for must fold in compiler_identity(): it equals the explicit
+        // form fed the real process identity, and differs from one built
+        // with a deliberately different identity.
+        let via_public = key_for(b"src", "0.6.0", &["tier=0"]);
+        let via_same = key_with_identity(b"src", "0.6.0", &["tier=0"], compiler_identity());
+        assert_eq!(
+            via_public, via_same,
+            "key_for must fold in compiler_identity()"
+        );
+        let via_other = key_with_identity(b"src", "0.6.0", &["tier=0"], b"a-different-binary");
+        assert_ne!(
+            via_public, via_other,
+            "a different binary identity must change key_for's output"
+        );
     }
 
     // ScriptCache CRUD -----------------------------------------------------------------------
