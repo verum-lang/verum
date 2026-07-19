@@ -102,16 +102,14 @@ fn regression_encode_unsatisfiable_simple() {
     assert(h == want);
 }
 
-// REGRESSION (net-conformance-20260705): INLINE-AGG-REF-ARG.
+// REGRESSION (net-conformance-20260705): INLINE-AGG-REF-ARG — CLOSED (T0149).
 // Passing an INLINE aggregate literal by reference as a call argument —
-// `resolve_and_merge(&RangeSet { specs: specs }, total)` — crashes the
-// COMPILER (SIGSEGV in VBC codegen), while binding it to a `let` first
-// (`let rs = RangeSet { specs }; resolve_and_merge(&rs, total)`) lowers
-// correctly. property_test.vr.law_merged_output_is_fixpoint uses the
-// let-bind form. @ignore'd because it crashes at COMPILE time (the whole
-// suite dies); flips to a live pin once the inline-aggregate-reference
-// argument codegen is fixed.
-@ignore
+// `resolve_and_merge(&RangeSet { specs: specs }, total)` — previously crashed
+// the COMPILER (SIGSEGV in VBC codegen). Fixed by 0b9d3a0b9:
+// `stabilize_ref_source`'s `needs_stable` gained the aggregate-literal
+// ExprKinds (Record/Tuple/Array/Map/Set), so an inline `&RangeSet { … }` arg
+// materialises into a fresh non-recyclable slot instead of colliding with a
+// sibling arg's alloc_temp. Now a live pin — verified green at HEAD.
 @test
 fn regression_inline_aggregate_reference_argument_crash() {
     let rs = parse_range_header(&"bytes=0-9".clone()).unwrap();
