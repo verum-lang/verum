@@ -15,7 +15,7 @@ mount core.base.result.{Result, Ok, Err};
 // =============================================================================
 
 fn semver_zero() -> SemVer {
-    SemVer { major: 0_u64, minor: 0_u64, patch: 0_u64, pre_release: "".to_text(), build_meta: "".to_text() }
+    SemVer { major: 0_u64, minor: 0_u64, patch: 0_u64, pre_release: List.new(), build_meta: List.new() }
 }
 
 @test
