@@ -62,7 +62,7 @@ mount super.linalg.Numeric;
 //```verum
 //@allow(internal_api)
 //fn custom_add(a: Value, b: Value) -> Value {
-//  emit_raw_opcode(0x30, &[a, b]) // 0x30 = AddF opcode
+//  emit_raw_opcode(0x20, &[a, b]) // 0x20 = AddF opcode
 //}
 //```
 @intrinsic("verum.vbc.emit_raw")

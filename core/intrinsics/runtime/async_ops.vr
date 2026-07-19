@@ -6,7 +6,7 @@
 //
 
 // These intrinsics require the Verum async runtime (executor, scheduler).
-// VBC Opcodes: Spawn (0xA0), Await (0xA1), IoSubmit (0x4C), IoPoll (0x4D)
+// VBC Opcodes: Spawn (0xA0), Await (0xA1), IoSubmit (0xE7), IoPoll (0xE8)
 //
 
 // Spec: docs/detailed/05-syntax-grammar.md

@@ -603,7 +603,8 @@ public const HAS_NEON: Bool = false;
 // VBC OPCODE REFERENCE
 // =============================================================================
 
-/// VBC SIMD opcodes (0xC0-0xCF range).
+/// VBC SIMD opcodes: the SimdExtended (0x2A) prefix followed by a
+/// SimdSubOpcode byte (0x00-0x95).
 ///
 
 /// These opcodes are used by the VBC interpreter and JIT compiler.

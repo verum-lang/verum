@@ -169,7 +169,7 @@ public fn compiler_fence(order: MemoryOrder) { @intrinsic("compiler_fence", orde
 // opcodes are needed. For generic atomic operations, use the generic functions above.
 //
 
-// VBC Opcodes: AtomicLoad (0x48), AtomicStore (0x49), AtomicCas (0x4A)
+// VBC Opcodes: AtomicLoad (0xE3), AtomicStore (0xE4), AtomicCas (0xE5)
 // =============================================================================
 
 /// Memory ordering constants for atomic operations (VBC compatible).
@@ -179,22 +179,22 @@ public const ORDERING_RELEASE: UInt8 = 2;
 public const ORDERING_ACQ_REL: UInt8 = 3;
 public const ORDERING_SEQ_CST: UInt8 = 4;
 
-/// Atomic load of UInt8 (VBC opcode: AtomicLoad 0x48 with size=1).
+/// Atomic load of UInt8 (VBC opcode: AtomicLoad 0xE3 with size=1).
 @intrinsic("atomic_load_u8")
 @vbc_direct_lowering
 public fn atomic_load_u8(ptr: *const UInt8, ordering: UInt8) -> UInt8;
 
-/// Atomic load of UInt16 (VBC opcode: AtomicLoad 0x48 with size=2).
+/// Atomic load of UInt16 (VBC opcode: AtomicLoad 0xE3 with size=2).
 @intrinsic("atomic_load_u16")
 @vbc_direct_lowering
 public fn atomic_load_u16(ptr: *const UInt16, ordering: UInt8) -> UInt16;
 
-/// Atomic load of UInt32 (VBC opcode: AtomicLoad 0x48 with size=4).
+/// Atomic load of UInt32 (VBC opcode: AtomicLoad 0xE3 with size=4).
 @intrinsic("atomic_load_u32")
 @vbc_direct_lowering
 public fn atomic_load_u32(ptr: *const UInt32, ordering: UInt8) -> UInt32;
 
-/// Atomic load of UInt64 (VBC opcode: AtomicLoad 0x48 with size=8).
+/// Atomic load of UInt64 (VBC opcode: AtomicLoad 0xE3 with size=8).
 @intrinsic("atomic_load_u64")
 @vbc_direct_lowering
 public fn atomic_load_u64(ptr: *const UInt64, ordering: UInt8) -> UInt64;
@@ -209,7 +209,7 @@ public fn atomic_load_i32(ptr: *const Int32, ordering: UInt8) -> Int32;
 @vbc_direct_lowering
 public fn atomic_load_ptr<T>(ptr: *const *const T, ordering: UInt8) -> *const T;
 
-/// Atomic store of UInt8 (VBC opcode: AtomicStore 0x49 with size=1).
+/// Atomic store of UInt8 (VBC opcode: AtomicStore 0xE4 with size=1).
 @intrinsic("atomic_store_u8")
 @vbc_direct_lowering
 public fn atomic_store_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8);
@@ -239,7 +239,7 @@ public fn atomic_store_i32(ptr: *mut Int32, value: Int32, ordering: UInt8);
 @vbc_direct_lowering
 public fn atomic_store_ptr<T>(ptr: *mut *const T, value: *const T, ordering: UInt8);
 
-/// Atomic compare-and-swap for UInt32 (VBC opcode: AtomicCas 0x4A).
+/// Atomic compare-and-swap for UInt32 (VBC opcode: AtomicCas 0xE5).
 @intrinsic("atomic_cas_u32")
 @vbc_direct_lowering
 public fn atomic_cas_u32(
@@ -360,7 +360,7 @@ public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) ->
 // signed variants share the same opcode tree as unsigned.
 // -----------------------------------------------------------------------------
 
-/// Atomic load of Int64 (VBC opcode: AtomicLoad 0x48 with size=8).
+/// Atomic load of Int64 (VBC opcode: AtomicLoad 0xE3 with size=8).
 @intrinsic("atomic_load_i64")
 @vbc_direct_lowering
 public fn atomic_load_i64(ptr: *const Int64, ordering: UInt8) -> Int64;

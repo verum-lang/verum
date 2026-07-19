@@ -28,12 +28,16 @@
 ///
 
 /// System operations map directly to VBC opcodes:
-/// - 0xF0: syscall (direct kernel call)
-/// - 0xF1: mmap/munmap (memory operations)
-/// - 0xF2: atomic operations
-/// - 0xF3: futex (thread synchronization)
-/// - 0xF4: io_uring/kqueue submit
-/// - 0xF5: clock_gettime
+/// - 0xE0: SyscallLinux (direct kernel call)
+/// - 0xE1 / 0xE2: Mmap / Munmap (memory operations)
+/// - 0xE3-0xE6: AtomicLoad / AtomicStore / AtomicCas / AtomicFence
+/// - 0xE7 / 0xE8: IoSubmit / IoPoll (io_uring / kqueue)
+///
+
+/// futex and clock_gettime have no dedicated top-level opcode; they
+/// route through FfiExtended (0xBC) with a sub-opcode:
+/// - SyncSubOpcode.FutexWait (0x00) / FutexWake (0x01)
+/// - TimeSubOpcode.MonotonicNanos (0x00)
 
 @arch_module(
     requires: [Capability.Exec(ExecTarget.Syscall(0))],

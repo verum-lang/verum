@@ -175,7 +175,8 @@ public fn tensor_broadcast<S>(t: Int, shape: S) -> Int { @intrinsic("TENSOR_BROA
 // SECTION 5: Element-wise Operations
 // =============================================================================
 
-/// Element-wise binary operation (op: 0=add, 1=sub, 2=mul, 3=div, 4=pow, 5=mod)
+/// Element-wise binary operation (op: 0=add, 1=sub, 2=mul, 3=div, 4=pow,
+/// 5=mod, 6=min, 7=max — mirrors TensorBinaryOp byte values)
 public fn tensor_binop(a: Int, b: Int, op: Int) -> Int { @intrinsic("TENSOR_BINOP", a, b, op) }
 
 /// Element-wise unary operation (op: 0=neg, 1=abs, 2=sqrt, 3=exp, 4=log,
@@ -278,7 +279,8 @@ public fn tensor_trace(t: Int) -> Float { @intrinsic("TENSOR_TRACE", t) }
 /// 5=var — mirrors TensorReduceOp byte values)
 public fn tensor_reduce(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_REDUCE", t, op, axis) }
 
-/// Reduce all elements (op: 0=sum, 1=prod, 2=max, 3=min, 4=mean)
+/// Reduce all elements (op: 0=sum, 1=prod, 2=max, 3=min, 4=mean —
+/// mirrors TensorReduceOp byte values)
 public fn tensor_reduce_all(t: Int, op: Int) -> Int { @intrinsic("TENSOR_REDUCE_ALL", t, op) }
 
 /// Argmax along axis — returns an I64 index tensor. axis < 0
@@ -289,7 +291,8 @@ public fn tensor_argmax(t: Int, axis: Int) -> Int { @intrinsic("TENSOR_ARGMAX", 
 /// largest first). Paired-indices surface: T0179 epic.
 public fn tensor_topk(t: Int, k: Int, axis: Int) -> Int { @intrinsic("TENSOR_TOPK", t, k, axis) }
 
-/// Cumulative operation along axis (op: 0=sum, 1=prod)
+/// Cumulative operation along axis (op: 0=sum, 1=prod, 2=max, 3=min —
+/// mirrors TensorCumulativeOp byte values)
 public fn tensor_cumulative(t: Int, op: Int, axis: Int) -> Int { @intrinsic("TENSOR_CUMULATIVE", t, op, axis) }
 
 // =============================================================================

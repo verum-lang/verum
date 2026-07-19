@@ -55,10 +55,12 @@
 ///
 
 /// All operations use sys-subsystem calls via VBC intrinsics:
-/// - Memory: `sys.mmap`, `sys.munmap` → VBC opcode 0xF1
-/// - I/O: `sys.io_uring_enter`, `sys.kqueue` → VBC opcode 0xF4
-/// - Sync: `sys.futex`, `sys.atomic_*` → VBC opcode 0xF2
-/// - Time: `sys.clock_gettime` → VBC opcode 0xF5
+/// - Memory: `sys.mmap` → Mmap (0xE1), `sys.munmap` → Munmap (0xE2)
+/// - I/O: `sys.io_uring_enter` → IoSubmit (0xE7), `sys.kqueue` → IoPoll (0xE8)
+/// - Sync: `sys.atomic_*` → AtomicLoad/Store/Cas/Fence (0xE3-0xE6);
+///   `sys.futex` → FfiExtended (0xBC) + SyncSubOpcode.FutexWait (0x00)
+/// - Time: `sys.clock_gettime` → FfiExtended (0xBC) +
+///   TimeSubOpcode.MonotonicNanos (0x00)
 ///
 
 /// ## Performance Targets

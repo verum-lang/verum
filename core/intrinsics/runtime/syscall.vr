@@ -10,7 +10,7 @@
 // VBC: VM issues the syscall on behalf of the program.
 //
 
-// VBC Opcode: SyscallLinux (0x45)
+// VBC Opcode: SyscallLinux (0xE0)
 //
 
 // Spec: docs/detailed/05-syntax-grammar.md

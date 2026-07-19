@@ -9,7 +9,7 @@
 // These provide ~2ns access compared to ~20ns for HashMap lookups.
 //
 
-// VBC Opcodes: TlsGet (0x4E), TlsSet (0x4F)
+// VBC Opcodes: TlsGet (0xE9), TlsSet (0xEA)
 //
 
 // Spec: docs/detailed/05-syntax-grammar.md
