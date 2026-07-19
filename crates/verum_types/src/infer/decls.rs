@@ -283,6 +283,27 @@ impl TypeChecker {
         // NB: `effective_body` — not `type_decl.body` — so a bare
         // `type X is <ExistingType>;` rerouted above is registered as the
         // alias it actually is.
+        //
+        // GENERIC-PARAM-LEAK (T0148): several arms below `?`-propagate
+        // (alias/newtype/tuple target resolution, variant/record/protocol
+        // sub-registration).  Any such early exit used to skip the
+        // type-parameter cleanup that follows the match, leaving this
+        // declaration's generic param NAMES (`T`, `E`, …) bound in the
+        // GLOBAL type table as `Named{param}` / `Var(_)`.  Import callers
+        // deliberately swallow registration errors (infer/modules.rs:
+        // "Log the error but don't fail … fall through to fallback
+        // registration"), so the leaked binding silently poisoned every
+        // later bare-`T` annotation/scheme resolution in the importing
+        // file.  Canonical repro: `mount core.base.panic.{CatchResult}`
+        // (a generic ALIAS whose target resolution fails on the lazy
+        // import path) flipped the unrelated `let maybe =
+        // Maybe.Some(42); assert_some(maybe)` to E400 "expected 'T',
+        // found 'Int'" — base/panic unit_test failed typecheck FILE-WIDE.
+        // Same run-body-then-cleanup discipline as
+        // `types_being_registered` in `register_type_declaration_inner`:
+        // the immediately-invoked closure captures every `?`, making the
+        // parameter cleanup below unconditional.
+        let body_result: Result<()> = (|| {
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 // Register the type alias in the type context
@@ -618,12 +639,18 @@ impl TypeChecker {
             }
         }
 
-        // CRITICAL: Clean up type parameters from the type context
-        // This prevents generic type parameters from one type (e.g., T from Maybe<T>)
-        // from polluting the environment and interfering with other types
+        Ok(())
+        })();
+
+        // CRITICAL: Clean up type parameters from the type context —
+        // unconditionally, on BOTH success and failure of the body above
+        // (GENERIC-PARAM-LEAK, T0148).  This prevents generic type
+        // parameters from one type (e.g., T from Maybe<T>) from polluting
+        // the environment and interfering with other types.
         for param_name in type_param_names {
             self.ctx.remove_type(&param_name);
         }
+        body_result?;
 
         // NOTE: Cleanup of types_being_registered is now done in register_type_declaration_inner
         // to ensure it happens on BOTH success and error paths. This enables retry after failed
