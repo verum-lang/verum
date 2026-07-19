@@ -907,6 +907,14 @@ pub struct RunnerConfig {
     pub max_shrinks: u32,
     pub seed: Seed,
     pub pinned_seed: bool,
+    /// PBT-WORKER-PANIC-KILLS-MODULE (T0372): write-ahead seed journal.
+    /// When set, the runner persists each iteration's seed HERE before
+    /// invoking the property, so a host-side abort (the shipped CLI
+    /// builds with `panic = "abort"`) cannot lose the failing seed —
+    /// the next run promotes a leftover journal into the regression DB.
+    /// The owner (test.rs) removes the file once the outcome is
+    /// durably recorded.
+    pub seed_journal: Option<PathBuf>,
 }
 
 pub struct PropertyOutcome {
@@ -923,12 +931,110 @@ pub struct PropertyFailure {
     pub message: String,
 }
 
+/// Fresh interpreter over the shared immutable module with the PBT cap
+/// profile: property bodies are short but the cumulative instruction
+/// counter kills long campaigns, so both caps are disabled (iteration
+/// count is the budget; see also the same gate in bench.rs). Also the
+/// recovery primitive after a caught host panic — the panicking
+/// interpreter's internal state (frames, register file) is poisoned
+/// and must be discarded, which is sound because `VbcModule` is
+/// immutable behind the `Arc`.
+fn fresh_interp(module: &Arc<VbcModule>) -> verum_vbc::interpreter::Interpreter {
+    let mut interp = verum_vbc::interpreter::Interpreter::new(Arc::clone(module));
+    interp.state.config.max_instructions = 0;
+    interp.state.config.timeout_ms = 0;
+    interp
+}
+
+/// T0372: run `f`, converting a host-side panic into `Err(message)`
+/// instead of letting it unwind into the test runner (where it fails
+/// every sibling test sharing the process and loses the failing seed).
+///
+/// Only effective in unwinding builds; the shipped CLI compiles with
+/// `panic = "abort"` (workspace `[profile.release]`), where the
+/// process dies before this catch can engage — the write-ahead seed
+/// journal (`RunnerConfig::seed_journal`) is the abort-safe leg that
+/// keeps the failing seed reproducible, and the per-FILE process
+/// quarantine (TEST-RUNNER-ISOLATION-1) bounds the blast radius.
+fn catch_host_panic<T>(f: impl FnOnce() -> T) -> std::result::Result<T, String> {
+    // AssertUnwindSafe: every caller discards the &mut state it lent
+    // the closure (the interpreter is rebuilt via `fresh_interp`)
+    // whenever this returns Err, so no broken invariant is observable
+    // after the catch.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|p| {
+        if let Some(s) = p.downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = p.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "non-string panic payload".to_string()
+        }
+    })
+}
+
+/// Outcome of one guarded property invocation (iteration or shrink
+/// trial).
+enum GuardedCall {
+    /// The property returned successfully.
+    Ok,
+    /// The property reported a Verum-level failure (assert / panic
+    /// inside the program) — the normal counter-example signal.
+    Fail(String),
+    /// Host-side argument encoding failed — an infrastructure error,
+    /// NOT a counter-example (shrinking on it would "minimise" the
+    /// encoder, not the property).
+    EncodeError(String),
+    /// The invocation PANICKED on the host side (interpreter defect).
+    /// Still a counter-example — the input provokes the defect — but
+    /// the interpreter that ran it is poisoned and must be rebuilt.
+    Panicked(String),
+}
+
+/// Encode `inputs` and invoke the property once, catching host panics
+/// (T0372) so one bad draw cannot take down the sibling tests sharing
+/// this process. On `Panicked` the caller MUST discard `interp` and
+/// rebuild via [`fresh_interp`].
+fn guarded_call(
+    interp: &mut verum_vbc::interpreter::Interpreter,
+    fid: FunctionId,
+    inputs: &[TreeValue],
+) -> GuardedCall {
+    enum Inner {
+        Fail(String),
+        Encode(String),
+        Ok,
+    }
+    let r = catch_host_panic(|| {
+        let args: Vec<Value> = match inputs
+            .iter()
+            .map(|tv| tv.to_vbc_value(interp))
+            .collect::<Result<Vec<_>>>()
+        {
+            Ok(a) => a,
+            Err(e) => return Inner::Encode(format!("host-side arg encode: {}", e)),
+        };
+        match call_with_args(interp, fid, &args) {
+            Ok(_) => Inner::Ok,
+            Err(e) => Inner::Fail(format!("{:?}", e)),
+        }
+    });
+    match r {
+        Ok(Inner::Ok) => GuardedCall::Ok,
+        Ok(Inner::Fail(msg)) => GuardedCall::Fail(msg),
+        Ok(Inner::Encode(msg)) => GuardedCall::EncodeError(msg),
+        Err(panic_msg) => GuardedCall::Panicked(format!(
+            "host-side panic in property invocation: {} \
+             (interpreter defect — the generated input is still a valid counter-example)",
+            panic_msg
+        )),
+    }
+}
+
 pub fn run_property(
     module: &Arc<VbcModule>,
     prop: &PropertyFunc,
     cfg: &RunnerConfig,
 ) -> PropertyOutcome {
-    use verum_vbc::interpreter::Interpreter;
     let start = Instant::now();
 
     // Build a generator per parameter — always succeeds; unknown types
@@ -983,12 +1089,7 @@ pub fn run_property(
         }
     };
 
-    let mut interp = Interpreter::new(Arc::clone(module));
-    // Property bodies are typically short but the cumulative counter
-    // kills us across many iterations. Disable both caps (see also
-    // bench.rs comment for the same gate).
-    interp.state.config.max_instructions = 0;
-    interp.state.config.timeout_ms = 0;
+    let mut interp = fresh_interp(module);
 
     let total_runs = if cfg.pinned_seed { 1 } else { cfg.runs };
 
@@ -1022,14 +1123,18 @@ pub fn run_property(
             inputs.push(v);
         }
 
-        // Invoke.
-        let args: Vec<Value> = match inputs
-            .iter()
-            .map(|tv| tv.to_vbc_value(&mut interp))
-            .collect::<Result<Vec<_>>>()
-        {
-            Ok(a) => a,
-            Err(e) => {
+        // T0372: persist this iteration's seed BEFORE invoking — a
+        // host abort mid-iteration then leaves the journal behind for
+        // the next run to promote into the regression DB.
+        if let Some(journal) = &cfg.seed_journal {
+            journal_write(journal, &prop.name, seed);
+        }
+
+        // Invoke (panic-guarded — one bad draw must not take down the
+        // sibling tests sharing this process, nor lose its seed).
+        match guarded_call(&mut interp, fid, &inputs) {
+            GuardedCall::Ok => {}
+            GuardedCall::EncodeError(message) => {
                 return PropertyOutcome {
                     iterations: i,
                     duration: start.elapsed(),
@@ -1038,28 +1143,43 @@ pub fn run_property(
                         original_inputs: inputs.iter().map(TreeValue::display).collect(),
                         shrunk_inputs: vec![],
                         shrink_steps: 0,
-                        message: format!("host-side arg encode: {}", e),
+                        message,
                     }),
                 };
             }
-        };
-
-        let outcome = call_with_args(&mut interp, fid, &args);
-        if let Err(e) = outcome {
-            // Shrink.
-            let original = inputs.iter().map(TreeValue::display).collect();
-            let (shrunk, steps) = shrink_failure(&mut interp, fid, inputs, cfg.max_shrinks);
-            return PropertyOutcome {
-                iterations: i + 1,
-                duration: start.elapsed(),
-                failure: Some(PropertyFailure {
-                    seed,
-                    original_inputs: original,
-                    shrunk_inputs: shrunk,
-                    shrink_steps: steps,
-                    message: format!("{:?}", e),
-                }),
-            };
+            GuardedCall::Fail(message) => {
+                let original = inputs.iter().map(TreeValue::display).collect();
+                let (shrunk, steps) = shrink_failure(module, fid, inputs, cfg.max_shrinks);
+                return PropertyOutcome {
+                    iterations: i + 1,
+                    duration: start.elapsed(),
+                    failure: Some(PropertyFailure {
+                        seed,
+                        original_inputs: original,
+                        shrunk_inputs: shrunk,
+                        shrink_steps: steps,
+                        message,
+                    }),
+                };
+            }
+            GuardedCall::Panicked(message) => {
+                // The panicking interpreter is poisoned; the shrinker
+                // builds (and rebuilds) its own. The panic is still a
+                // genuine counter-example — shrink it like any other.
+                let original = inputs.iter().map(TreeValue::display).collect();
+                let (shrunk, steps) = shrink_failure(module, fid, inputs, cfg.max_shrinks);
+                return PropertyOutcome {
+                    iterations: i + 1,
+                    duration: start.elapsed(),
+                    failure: Some(PropertyFailure {
+                        seed,
+                        original_inputs: original,
+                        shrunk_inputs: shrunk,
+                        shrink_steps: steps,
+                        message,
+                    }),
+                };
+            }
         }
     }
 
@@ -1074,12 +1194,19 @@ pub fn run_property(
 /// first shrink that still fails; repeat until no shrinks fail or we
 /// exhaust the budget. Classic QuickCheck strategy adapted for our
 /// flat vector of inputs.
+///
+/// T0372: owns its interpreter (rebuilt after any trial that PANICS —
+/// the panicking instance is poisoned) and runs every trial through
+/// the panic guard, so a shrink of a host-crashing input shrinks the
+/// crash instead of aborting the runner. Encode errors skip the
+/// candidate (they are infrastructure failures, not counter-examples).
 fn shrink_failure(
-    interp: &mut verum_vbc::interpreter::Interpreter,
+    module: &Arc<VbcModule>,
     fid: FunctionId,
     mut inputs: Vec<TreeValue>,
     budget: u32,
 ) -> (Vec<String>, u32) {
+    let mut interp = fresh_interp(module);
     let mut steps = 0u32;
     'outer: loop {
         if steps >= budget {
@@ -1094,19 +1221,19 @@ fn shrink_failure(
                 steps += 1;
                 let mut trial = inputs.clone();
                 trial[idx] = cand;
-                let args: Vec<Value> = match trial
-                    .iter()
-                    .map(|tv| tv.to_vbc_value(interp))
-                    .collect::<Result<Vec<_>>>()
-                {
-                    Ok(a) => a,
-                    Err(_) => continue,
-                };
-                if call_with_args(interp, fid, &args).is_err() {
-                    inputs = trial;
-                    // Make progress on this index again from the top —
-                    // smaller values often shrink further.
-                    continue 'outer;
+                match guarded_call(&mut interp, fid, &trial) {
+                    GuardedCall::Ok | GuardedCall::EncodeError(_) => {}
+                    GuardedCall::Fail(_) => {
+                        inputs = trial;
+                        // Make progress on this index again from the
+                        // top — smaller values often shrink further.
+                        continue 'outer;
+                    }
+                    GuardedCall::Panicked(_) => {
+                        interp = fresh_interp(module);
+                        inputs = trial;
+                        continue 'outer;
+                    }
                 }
             }
         }
@@ -1201,6 +1328,74 @@ pub fn save_regression_db(db: &RegressionDb) -> Result<()> {
     let json =
         serde_json::to_string_pretty(db).map_err(|e| CliError::Custom(format!("json: {}", e)))?;
     fs::write(&p, json).map_err(|e| CliError::Custom(format!("write: {}", e)))
+}
+
+// --------------------------------------------------------------------
+// Write-ahead seed journal — abort-safe counterpart of the panic guard
+// --------------------------------------------------------------------
+//
+// `catch_host_panic` contains a panicking iteration only when the
+// binary unwinds; the shipped CLI builds with `panic = "abort"`
+// (workspace `[profile.release]`), where a host panic kills the whole
+// process before ANY in-process recording can run — historically the
+// failing seed died with it (T0372). The journal closes that hole:
+// the runner persists each iteration's seed to a per-test file BEFORE
+// invoking the property; a journal still present at the START of the
+// next run means the previous run crashed mid-iteration, and its seed
+// is promoted into the regression DB (then replayed first, exactly
+// like any captured failure). A run that reaches a durable outcome
+// removes its journal. Per-test files (keyed by a stable hash of the
+// test name) keep concurrent property tests — rayon workers AND the
+// per-FILE quarantine children — from racing one shared file.
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SeedJournal {
+    pub test: String,
+    pub seed: String,
+}
+
+/// Journal path for one property test, alongside the regression DB
+/// (both are relative to the invocation directory by design — the
+/// crashed run and the replaying run resolve them identically).
+pub fn journal_path(test: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    test.hash(&mut h);
+    PathBuf::from(format!("target/test/pbt-inflight/{:016x}.json", h.finish()))
+}
+
+/// Best-effort write-ahead record of the seed about to be exercised.
+/// Failures are deliberately swallowed: journalling must never be able
+/// to fail a healthy property run (a read-only checkout still tests).
+pub fn journal_write(path: &std::path::Path, test: &str, seed: Seed) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string(&SeedJournal {
+        test: test.to_string(),
+        seed: seed.to_hex(),
+    }) {
+        let _ = fs::write(path, json);
+    }
+}
+
+/// Consume a leftover journal for `test`: parse, verify it belongs to
+/// this test (hash-collision paranoia), REMOVE the file, and return
+/// the crashed seed. `None` when no journal exists or it is foreign /
+/// unparseable (an unparseable file is removed too — it can never be
+/// promoted and would otherwise wedge every subsequent run).
+pub fn journal_take(test: &str) -> Option<Seed> {
+    journal_take_at(&journal_path(test), test)
+}
+
+fn journal_take_at(path: &std::path::Path, test: &str) -> Option<Seed> {
+    let raw = fs::read_to_string(path).ok()?;
+    let _ = fs::remove_file(path);
+    let parsed: SeedJournal = serde_json::from_str(&raw).ok()?;
+    if parsed.test != test {
+        return None;
+    }
+    Seed::from_hex(&parsed.seed)
 }
 
 pub fn seeds_for(db: &RegressionDb, test: &str) -> Vec<Seed> {
@@ -1344,6 +1539,56 @@ mod tests {
     fn seed_roundtrip_hex() {
         let s = Seed(0xDEADBEEFCAFEBABE);
         assert_eq!(Seed::from_hex(&s.to_hex()).unwrap().0, s.0);
+    }
+
+    /// T0372 pin: the per-invocation panic guard converts a host-side
+    /// panic into an Err carrying the payload message instead of
+    /// unwinding into the runner (where it failed every sibling test
+    /// in the module). Runs under `cargo test` (unwinding profile);
+    /// in abort builds the write-ahead journal below is the safety
+    /// net.
+    #[test]
+    fn catch_host_panic_contains_panics_and_passes_values() {
+        assert_eq!(catch_host_panic(|| 7), Ok(7));
+        let err = catch_host_panic(|| -> u32 { panic!("boom at iteration") })
+            .expect_err("panic must be caught");
+        assert!(err.contains("boom at iteration"), "payload lost: {err}");
+        let err = catch_host_panic(|| -> u32 { panic!("{}", String::from("owned payload")) })
+            .expect_err("panic must be caught");
+        assert!(err.contains("owned payload"), "payload lost: {err}");
+    }
+
+    /// T0372 pin: write-ahead journal round-trip — write, take (which
+    /// consumes the file), foreign-test rejection, unparseable-file
+    /// cleanup.
+    #[test]
+    fn seed_journal_write_take_roundtrip() {
+        let dir = std::env::temp_dir().join(format!(
+            "verum-pbt-journal-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("probe.json");
+        let seed = Seed(0x00C0_FFEE_00C0_FFEE);
+
+        journal_write(&path, "suite/property_test::prop_x", seed);
+        assert!(path.exists(), "journal must be written ahead");
+        let taken = journal_take_at(&path, "suite/property_test::prop_x")
+            .expect("own journal must be taken");
+        assert_eq!(taken.0, seed.0);
+        assert!(!path.exists(), "take must consume the file");
+
+        // Foreign journal: removed, not returned.
+        journal_write(&path, "other/property_test::prop_y", seed);
+        assert!(journal_take_at(&path, "suite/property_test::prop_x").is_none());
+        assert!(!path.exists(), "foreign journal is still consumed");
+
+        // Unparseable journal: removed, not returned.
+        std::fs::write(&path, "not-json").unwrap();
+        assert!(journal_take_at(&path, "suite/property_test::prop_x").is_none());
+        assert!(!path.exists(), "unparseable journal is cleaned up");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

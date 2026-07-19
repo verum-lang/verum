@@ -1520,8 +1520,8 @@ fn run_test_property(
     cfg: &TestRunCfg,
 ) -> TestResult {
     use crate::commands::property::{
-        RunnerConfig, Seed, load_regression_db, record_regression, run_property,
-        save_regression_db, seeds_for,
+        RunnerConfig, Seed, journal_path, journal_take, load_regression_db,
+        record_regression, run_property, save_regression_db, seeds_for,
     };
 
     let start = Instant::now();
@@ -1545,6 +1545,23 @@ fn run_test_property(
 
     // Replay regression DB seeds first, then draw fresh ones.
     let mut db = load_regression_db();
+
+    // T0372: a leftover write-ahead journal means a previous run
+    // ABORTED mid-iteration (host panic under panic=abort — nothing
+    // in-process could record the seed). Promote it into the
+    // regression DB so the crashing seed replays FIRST, exactly like
+    // any captured failure — and stays reproducible even if replaying
+    // it aborts this run too (the DB entry is durable before replay).
+    if let Some(crashed) = journal_take(test.name.as_str()) {
+        record_regression(
+            &mut db,
+            test.name.as_str(),
+            crashed,
+            "(runner aborted mid-iteration — promoted from write-ahead journal)",
+        );
+        let _ = save_regression_db(&db);
+    }
+
     let replay_seeds = seeds_for(&db, test.name.as_str());
 
     // Default-runs precedence: per-test `@property(runs = N)` wins
@@ -1566,6 +1583,8 @@ fn run_test_property(
             max_shrinks: 500,
             seed: *s,
             pinned_seed: true,
+            // Replay seeds are already durable in the DB — no journal.
+            seed_journal: None,
         };
         let outcome = run_property(&module, prop, &cfg);
         if let Some(f) = outcome.failure {
@@ -1602,11 +1621,16 @@ fn run_test_property(
             .unwrap_or(1);
         Seed(nanos ^ 0x9E37_79B9_7F4A_7C15)
     });
+    // T0372: fresh samples journal each iteration's seed write-ahead;
+    // the journal is removed below once the outcome is durable (the
+    // failing seed recorded in the DB, or the whole pass green).
+    let journal = journal_path(test.name.as_str());
     let cfg = RunnerConfig {
         runs: default_runs,
         max_shrinks: 500,
         seed,
         pinned_seed: pinned.is_some(),
+        seed_journal: Some(journal.clone()),
     };
     let outcome = run_property(&module, prop, &cfg);
     if let Some(f) = outcome.failure {
@@ -1621,7 +1645,10 @@ fn run_test_property(
             test.name,
             f.seed.to_hex(),
         );
-        // Persist failing seed so future runs replay it first.
+        // Persist failing seed so future runs replay it first — and
+        // only THEN retire the write-ahead journal (T0372: the journal
+        // must outlive every window in which the seed is not yet
+        // durable somewhere else).
         record_regression(
             &mut db,
             test.name.as_str(),
@@ -1629,6 +1656,7 @@ fn run_test_property(
             &format!("({})", f.shrunk_inputs.join(", ")),
         );
         let _ = save_regression_db(&db);
+        let _ = std::fs::remove_file(&journal);
         return TestResult::Fail {
             duration: start.elapsed(),
             stdout: String::new(),
@@ -1637,6 +1665,10 @@ fn run_test_property(
             error: msg,
         };
     }
+
+    // Green pass: the journal's last entry captured an iteration that
+    // completed successfully — retire it.
+    let _ = std::fs::remove_file(&journal);
 
     TestResult::Pass {
         duration: start.elapsed(),
