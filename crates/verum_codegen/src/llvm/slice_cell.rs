@@ -10,8 +10,7 @@
 //!
 //! Runtime container classification (`view`) discriminates the three
 //! shapes every slice-typed register can hold:
-//!   * cell — word0 is a heap DATA pointer (>= platform heap floor,
-//!     8-aligned; an ObjectHeader word is never a plausible pointer);
+//!   * cell — word0 is a heap DATA pointer (>= platform heap floor);
 //!   * stamped Pack — header type_id TUPLE(521) / BYTE_SLICE(528):
 //!     `{data@24, len@32}`, byte elements;
 //!   * unstamped List — word0 == 0 stamp: canonical layout
@@ -20,6 +19,24 @@
 //! REAL branches throughout — the shapes have different valid extents,
 //! and a `select` executes BOTH arms' loads (the exact OOB class the
 //! #48 campaign retired; see the phase-1 commit dae237627).
+//!
+//! `probe()` discriminates cell-vs-not on the heap-floor compare ALONE
+//! — deliberately NOT also on 8-byte alignment of word0 (dropped post
+//! T0129/#56 SUBSLICE-AOT-LEN0). For the cell shape, word0 IS the
+//! `data` field: a byte-precise pointer into the referent buffer.
+//! `SliceSubslice`/`SplitAt` compute it as `source_data + start*elem`
+//! (phase-1.6, 4341ed7d0); for a byte-stride source (`elem == 1`) a
+//! non-multiple-of-8 `start` legitimately produces a misaligned
+//! pointer. Requiring alignment made such a (real, correctly-formed)
+//! cell fail the probe on every later re-classification — e.g.
+//! `sub.len()` — falling through to the Pack/List arms and reading
+//! `len` from the wrong slot (always garbage, observed as 0). Dropping
+//! alignment is sound: `lower_pack_typed` zeroes the full 24-byte
+//! header before stamping ONLY a small TypeId constant into the low 4
+//! bytes (521/528, upper 32 bits left 0), and `lower_new_list[_with_capacity]`
+//! memsets the whole header to 0 — word0 for both shapes is always far
+//! below ANY platform floor regardless of alignment, so the floor
+//! compare alone already carries the full disambiguating weight.
 //!
 //! The functions here are RAW (LLVM `Context` + `Builder`): usable both
 //! from `instruction.rs` (which wraps them for `FunctionContext`
@@ -61,7 +78,10 @@ pub struct ContainerView<'ctx> {
 
 impl<'ctx> CellEnv<'ctx> {
     /// Pointer-plausibility probe: `(is_cell, word0)`.
-    /// `word0 >= heap_floor && (word0 & 7) == 0` ⇒ canonical cell.
+    /// `word0 >= heap_floor` ⇒ canonical cell — see the module-level
+    /// doc for why this is NOT also gated on 8-byte alignment of
+    /// `word0` (T0129/#56: a byte-stride cell's `data` field is a
+    /// byte-precise pointer, not guaranteed aligned).
     pub fn probe(
         &self,
         builder: &Builder<'ctx>,
@@ -73,27 +93,13 @@ impl<'ctx> CellEnv<'ctx> {
             .build_load(i64_ty, base_ptr, &format!("{}_w0", tag))
             .or_llvm_err()?
             .into_int_value();
-        let above = builder
+        let is_cell = builder
             .build_int_compare(
                 IntPredicate::UGE,
                 word0,
                 i64_ty.const_int(self.heap_floor, false),
-                &format!("{}_above", tag),
+                &format!("{}_is_cell", tag),
             )
-            .or_llvm_err()?;
-        let align_bits = builder
-            .build_and(word0, i64_ty.const_int(7, false), &format!("{}_align", tag))
-            .or_llvm_err()?;
-        let aligned = builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                align_bits,
-                i64_ty.const_zero(),
-                &format!("{}_aligned", tag),
-            )
-            .or_llvm_err()?;
-        let is_cell = builder
-            .build_and(above, aligned, &format!("{}_is_cell", tag))
             .or_llvm_err()?;
         Ok((is_cell, word0))
     }
