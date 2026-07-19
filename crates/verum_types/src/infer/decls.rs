@@ -3650,16 +3650,35 @@ impl TypeChecker {
         use Type::*;
 
         match ty {
-            // Placeholder type - this is an error!
+            // Placeholder type - an error ONLY if genuinely undefined.
             Placeholder { name, span } => {
                 // Avoid duplicate errors for the same placeholder
-                if !visited.contains(name) {
-                    visited.insert(name.clone());
-                    errors.push(crate::TypeError::UnresolvedPlaceholder {
-                        name: name.clone(),
-                        span: *span,
-                    });
+                if visited.contains(name) {
+                    return;
                 }
+                // A forward reference resolves when the same name is defined
+                // later in the same compilation: `type A is X { f: B }; type B
+                // is ...`. Two-pass resolution stores the Pass-1 placeholder in
+                // a sum-type variant body (records keep field structure under a
+                // `__struct_fields_` key this walk skips, so they never tripped
+                // this); use sites already resolve it lazily via
+                // substitute_placeholders (infer/expr.rs). If `name` now names a
+                // concrete (non-placeholder) type, it is resolved — not an
+                // error; recurse into the real type to catch nested placeholders.
+                // Only a name with no definition anywhere is a true unresolved
+                // type. (T0453 / VARIANT-FIELD-FWDREF-1.)
+                if let Some(resolved_ty) = self.ctx.lookup_type(name.as_str()) {
+                    if !matches!(resolved_ty, Placeholder { .. }) {
+                        visited.insert(name.clone());
+                        self.collect_placeholder_errors(resolved_ty, errors, visited);
+                        return;
+                    }
+                }
+                visited.insert(name.clone());
+                errors.push(crate::TypeError::UnresolvedPlaceholder {
+                    name: name.clone(),
+                    span: *span,
+                });
             }
 
             // Compound types - recurse into nested types
