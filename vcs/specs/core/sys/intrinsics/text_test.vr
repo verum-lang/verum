@@ -288,7 +288,7 @@ fn test_text_parse_float() {
 }
 
 // #39 PARSE-FLOAT-INF-NAN-PARITY-1 — differential (Tier-0 vs Tier-1).
-// Tier-0 `str.trim().parse::<f64>()` accepts inf/infinity/nan (±,
+// Tier-0 `str.trim()` + Rust f64 parse accepts inf/infinity/nan (±,
 // case-insensitive, full token); Tier-1's digit-gate used to return None.
 // Both tiers must now agree: Some for a real special token, None for a
 // partial like "infx".

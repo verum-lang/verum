@@ -634,7 +634,7 @@ implement TcpStream {
 
     /// Returns the local IP and port assigned to this socket by the kernel.
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
-        // Packed `[Byte; 128]` (TypeId::U8): its `&mut` slice hands the kernel
+        // Packed `[Byte; 128]` (TypeId U8): its `&mut` slice hands the kernel
         // contiguous ABI bytes. A NaN-boxed `[0_u8; 128]` List (reserved=0) is
         // 8-byte-strided, so getsockname would scatter the sockaddr across
         // Value slots (FFI-BYTE-BUFFER-STRIDE-1).

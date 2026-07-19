@@ -1649,7 +1649,7 @@ implement Text {
     /// Split from the right, yielding parts RIGHTMOST-FIRST.
     ///
     /// `"a,b,c".rsplit(",")` → `["c", "b", "a"]` — the industry-standard
-    /// (Rust `str::rsplit`) contract.  Rightmost-first order is what makes
+    /// (Rust `str rsplit`) contract.  Rightmost-first order is what makes
     /// `rsplit` a distinct operation from `split`; the pre-fix trailing
     /// `reverse()` returned left-to-right parts, making full `rsplit`
     /// indistinguishable from `split` (RSPLIT-ORDER-1, pinned in
@@ -1682,7 +1682,7 @@ implement Text {
     ///
     /// `"a,b,c,d".rsplitn(2, ",")` → `["d", "a,b,c"]` — the last split
     /// piece first, the unsplit remainder (leftmost run) as the FINAL
-    /// element.  Matches Rust `str::rsplitn`; sibling contract of
+    /// element.  Matches Rust `str rsplitn`; sibling contract of
     /// `rsplit` (RSPLIT-ORDER-1).
     public fn rsplitn(&self, n: Int, sep: &Text) -> List<Text> {
         let mut res = List.new();

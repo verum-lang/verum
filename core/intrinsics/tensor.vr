@@ -40,7 +40,7 @@ module core.intrinsics.tensor;
 // =============================================================================
 // Canonical dtype ids accepted by tensor_new / tensor_fill /
 // tensor_from_slice / tensor_cast. These mirror the runtime DType
-// byte encoding (verum_vbc::dtype::DType::from_byte) — id 0 is F32,
+// byte encoding (verum_vbc/src/dtype.rs DType from_byte) — id 0 is F32,
 // id 1 is F64. Passing a raw integer works but reads wrong at the
 // call-site; use the named constants.
 

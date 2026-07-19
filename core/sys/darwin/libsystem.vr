@@ -1994,7 +1994,7 @@ public fn safe_recvfrom(
     addr_len: &mut UInt32
 ) -> Result<Int, OSError> {
     // FFI-BYTE-BUFFER-STRIDE-1: `.as_mut_ptr()` (Unslice) yields the packed
-    // data pointer for a reserved=1 byte slice (TypeId::U8 array / BYTE_LIST),
+    // data pointer for a reserved=1 byte slice (TypeId U8 array / BYTE_LIST),
     // exactly as `safe_getsockname`/`safe_getsockopt` do. A `transmute` of the
     // FatRef VALUE handed the kernel the fat-ref struct bits, so recvfrom wrote
     // the datagram into the descriptor rather than the buffer (recv silently

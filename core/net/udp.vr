@@ -532,7 +532,7 @@ implement UdpSocket {
     /// Queries the kernel live via `getsockname`: a socket bound to port 0
     /// is assigned an ephemeral port at bind time, so the addr requested at
     /// construction is not authoritative. `[Byte; 128]` is the packed
-    /// (TypeId::U8) buffer whose `&mut` slice hands the kernel contiguous
+    /// (TypeId U8) buffer whose `&mut` slice hands the kernel contiguous
     /// ABI bytes (FFI-BYTE-BUFFER-STRIDE-1).
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
         let mut addr_buf: [Byte; 128] = [0; 128];

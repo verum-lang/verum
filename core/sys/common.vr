@@ -1294,7 +1294,7 @@ public const CONTEXT_SLOT_COUNT: Int = 256;
 /// dense slot starting HERE, so compiler-assigned `provide` slots can
 /// never collide with the static region. Mirrored by
 /// CTX_DYNAMIC_SLOT_BASE in
-/// crates/verum_codegen/src/llvm/context.rs::ctx_dense_slot — the two
+/// crates/verum_codegen/src/llvm/context.rs ctx_dense_slot — the two
 /// MUST stay equal.
 public const CONTEXT_DYNAMIC_SLOT_BASE: Int = 32;
 
@@ -1438,7 +1438,7 @@ implement Eq for SysContextError {
 //
 // ONE store authority per tier.  The `provide` / `using` context system
 // executes through the CtxProvide/CtxGet/CtxEnd opcodes, which under the
-// Tier-0 interpreter read/write `InterpreterState::context_stack`.  The
+// Tier-0 interpreter read/write the InterpreterState context stack.  The
 // user-callable slot surface below (`ctx_get` / `ctx_set` / `ctx_clear`)
 // MUST read/write that SAME store — not a parallel one.
 //

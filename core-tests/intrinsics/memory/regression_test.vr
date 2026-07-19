@@ -89,7 +89,7 @@ fn regression_transmute_bits_to_float_reinterprets() {
 // executed it (cross-tier divergence):
 //   1. The handlers (CMemcpy/CMemset/CSecureZero/CMemmove/CMemcmp in
 //      handlers/ffi_extended.rs) extracted buffer addresses with bare
-//      `Value::as_ptr()` — an INT-TAGGED address (cbgr bridge, `as *mut T`
+//      `Value as_ptr()` — an INT-TAGGED address (cbgr bridge, `as *mut T`
 //      casts) decoded as NULL and the null-guard skipped the op; memcmp
 //      ranked garbage (two equal buffers compared -1).  → canonical
 //      `value_as_addr` dual extraction (the PtrAdd/atomic pattern).
@@ -142,7 +142,7 @@ fn regression_memcmp_compares_contents_not_addresses() {
 // reference shape those CBGR handlers never dereference: handle_deref falls
 // to the identity fallback (returns the ADDRESS), handle_deref_mut silently
 // does nothing.  AOT lowers both correctly → cross-tier kernel incident.
-// Fix design: call-site width channel → SystemSubOpcode::DerefRaw/
+// Fix design: call-site width channel → SystemSubOpcode DerefRaw/
 // DerefRawSigned/DerefMutRaw {size} (task #16).
 
 @ignore("MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — interp ptr_write no-op / ptr_read identity; AOT correct. Acceptance pin for the width-channel rerouting.")

@@ -1069,7 +1069,7 @@ fn parse_hosts_content(content: &Text) -> List<(IpAddr, Text)> {
 ///
 /// RFC 6761 §6.3: the name `localhost` and any name ending in
 /// `.localhost` are special and MUST resolve to loopback
-/// (127.0.0.1 / ::1) even when no resolver is reachable and even if
+/// (127.0.0.1 / IPv6 loopback) even when no resolver is reachable and even if
 /// `/etc/hosts` says nothing about them — so those are answered from
 /// the hardcoded table directly, before any file is consulted. This
 /// guarantees `TcpStream.connect("localhost:PORT")` works in an
