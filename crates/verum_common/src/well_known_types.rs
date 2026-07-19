@@ -1088,6 +1088,32 @@ pub fn ordering_tag_for_std(ord: std::cmp::Ordering) -> u32 {
     tag_of_or_drift(ORDERING_VARIANT_LAYOUT, name, "ORDERING_VARIANT_LAYOUT")
 }
 
+/// Inverse of [`ordering_tag_for_std`]: decode a runtime `Ordering`
+/// variant tag back into a Rust `std::cmp::Ordering`.
+///
+/// Consumers are the comparator-driven runtime paths — every place
+/// that CALLS a Verum comparator (`<T>.cmp`, a user `sort_by`
+/// closure) and must act on its result. Those sites previously
+/// open-coded `tag == ordering_tag_for_std(Greater)`, which answers
+/// only "is it Greater" and silently treats a malformed result as
+/// "not greater"; routing through this function keeps the tag table
+/// in ONE place and lets callers reject a non-Ordering result loudly.
+///
+/// Returns `None` for any tag outside the canonical layout so the
+/// caller can raise a typed error rather than guess an ordering.
+pub fn std_ordering_for_tag(tag: u32) -> Option<std::cmp::Ordering> {
+    let name = ORDERING_VARIANT_LAYOUT
+        .iter()
+        .find(|entry| entry.tag == tag)
+        .map(|entry| entry.name)?;
+    match name {
+        "Less" => Some(std::cmp::Ordering::Less),
+        "Equal" => Some(std::cmp::Ordering::Equal),
+        "Greater" => Some(std::cmp::Ordering::Greater),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod ordering_layout_tests {
     use super::*;
@@ -1109,6 +1135,24 @@ mod ordering_layout_tests {
         assert_eq!(ordering_tag_for_std(std::cmp::Ordering::Less), 0);
         assert_eq!(ordering_tag_for_std(std::cmp::Ordering::Equal), 1);
         assert_eq!(ordering_tag_for_std(std::cmp::Ordering::Greater), 2);
+    }
+
+    /// `std_ordering_for_tag` round-trips `ordering_tag_for_std` for
+    /// all three variants, and refuses any tag outside the layout.
+    /// The round-trip is what the comparator-driven runtime paths
+    /// (`List.sort`, `List.sort_by`) rely on to turn a Verum
+    /// `Ordering` value back into a sort decision (T0271).
+    #[test]
+    fn std_ordering_for_tag_round_trips_and_rejects_unknown() {
+        for ord in [
+            std::cmp::Ordering::Less,
+            std::cmp::Ordering::Equal,
+            std::cmp::Ordering::Greater,
+        ] {
+            assert_eq!(std_ordering_for_tag(ordering_tag_for_std(ord)), Some(ord));
+        }
+        assert_eq!(std_ordering_for_tag(3), None);
+        assert_eq!(std_ordering_for_tag(u32::MAX), None);
     }
 
     /// Pins the canonical layout of `Maybe<T>`. Mirrors the

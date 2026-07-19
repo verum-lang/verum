@@ -11048,21 +11048,17 @@ pub(super) fn dispatch_array_method(
                     .find_function_by_name(&format!("{}.cmp", tname))
             });
             if let Some(cmp_fid) = record_cmp_fn {
-                let greater_tag = verum_common::well_known_types::ordering_tag_for_std(
-                    std::cmp::Ordering::Greater,
-                );
                 for i in 1..elems.len() {
                     let key = elems[i];
                     let mut j = i;
                     while j > 0 {
                         let ord_val =
                             call_function_sync(state, cmp_fid, &[elems[j - 1], key])?;
-                        let is_greater = ord_val.is_regular_ptr()
-                            && !ord_val.is_nil()
-                            && unsafe {
-                                heap::variant_tag(ord_val.as_ptr::<u8>()) == greater_tag
-                            };
-                        if is_greater {
+                        // Shared decode authority with the `sort_by` arm
+                        // (ORD-DECODE-1 / T0271) — the open-coded
+                        // `tag == greater_tag` test this replaces silently
+                        // read a malformed result as "not greater".
+                        if decode_ordering_result(ord_val)? == std::cmp::Ordering::Greater {
                             elems[j] = elems[j - 1];
                             j -= 1;
                         } else {
@@ -11114,15 +11110,20 @@ pub(super) fn dispatch_array_method(
                 elems.push(get_array_element(ptr, header, i)?);
             }
             // Use a simple insertion sort so we can call the closure comparator
-            // (cannot use sort_by with a closure that borrows mutable state)
+            // (Vec::sort_by cannot re-enter the interpreter). Shifting only
+            // while the predecessor compares GREATER keeps the sort stable —
+            // equal elements never swap past one another.
+            //
+            // The comparator's answer is decoded by the ONE authority
+            // `decode_ordering_result` (ORD-DECODE-1 / T0271), shared with
+            // the `sort` arm above: a Verum `fn(&T,&T) -> Ordering` returns a
+            // heap unit variant, NOT a C `qsort` integer.
             for i in 1..elems.len() {
                 let key = elems[i];
                 let mut j = i;
                 while j > 0 {
                     let cmp_result = call_closure_sync(state, closure_val, &[elems[j - 1], key])?;
-                    // Comparator returns: negative = less, 0 = equal, positive = greater
-                    let cmp_val = cmp_result.as_i64();
-                    if cmp_val > 0 {
+                    if decode_ordering_result(cmp_result)? == std::cmp::Ordering::Greater {
                         elems[j] = elems[j - 1];
                         j -= 1;
                     } else {
@@ -11769,6 +11770,59 @@ pub(super) fn deref_cbgr_for_string(
     } else {
         v
     }
+}
+
+/// Decode the result of a Verum comparator into a `std::cmp::Ordering`.
+///
+/// **ORD-DECODE-1 (T0271)** — ONE authority for every intercept that
+/// CALLS a comparator and must act on its answer: the `<T>.cmp`
+/// resolved by the `sort` arm, the user closure passed to `sort_by`,
+/// and any future `max_by` / `min_by` / `binary_search_by` arm.
+///
+/// A Verum comparator is declared `fn(&T, &T) -> Ordering`, and
+/// `Ordering` is a stdlib SUM TYPE — its values are heap unit
+/// variants (`make_ordering` / `MakeVariant`), never integers. The
+/// `sort_by` arm historically decoded the result with
+/// `Value::as_i64()`, the C `qsort` convention. On a NaN-boxed
+/// pointer `as_i64` reinterprets the 48-bit heap ADDRESS as an
+/// integer, which is always positive — so every comparison decoded
+/// as "greater" and the sort scrambled the input identically no
+/// matter what the closure returned (`[3,1,2]` → `[2,1,3]` for both
+/// `a.cmp(b)` and `b.cmp(a)`). Decoding through the variant tag is
+/// what makes the comparator actually drive the order.
+///
+/// Accepted shapes, in order:
+///   1. heap `Ordering` unit variant — the canonical result;
+///   2. plain `Int` — the C convention (negative / zero / positive),
+///      retained because `@intrinsic`-backed comparators and hand-
+///      written FFI thunks may still hand back a raw integer;
+///   3. anything else — a typed error, never a silent guess.
+pub(super) fn decode_ordering_result(v: Value) -> InterpreterResult<std::cmp::Ordering> {
+    if v.is_regular_ptr() {
+        // SAFETY: `is_regular_ptr` excludes nil / marker-carrying
+        // (thin/fat ref) encodings, so the payload is a real heap
+        // object pointer, and every heap object carries the variant
+        // header slot at `VARIANT_TAG_OFFSET` (written by
+        // `write_variant_data_header` for variants; read here only
+        // to classify).
+        let tag = unsafe { heap::variant_tag(v.as_ptr::<u8>()) };
+        return verum_common::well_known_types::std_ordering_for_tag(tag).ok_or(
+            InterpreterError::TypeMismatch {
+                expected: "Ordering variant (Less/Equal/Greater)",
+                got: "heap object with a non-Ordering variant tag",
+                operation: "comparator result",
+            },
+        );
+    }
+    if v.is_int() && !v.is_bool() {
+        // C convention: negative = less, 0 = equal, positive = greater.
+        return Ok(v.as_i64().cmp(&0));
+    }
+    Err(InterpreterError::TypeMismatch {
+        expected: "Ordering",
+        got: "non-variant, non-integer value",
+        operation: "comparator result",
+    })
 }
 
 pub(super) fn make_ordering(
