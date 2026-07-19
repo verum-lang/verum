@@ -255,16 +255,25 @@ way.
     prototyped let-destructure element-type recording works on top. The
     prototype infra is correct and harmless (no-op when the tuple type
     is unparseable) — it just needs (a) first.
-* **INLINE-AGG-REF-ARG — OPEN.** `f(&RangeSet { specs })` (an inline
-  aggregate literal by reference as a call argument) crashes VBC
-  codegen; `let x = …; &x` works. Candidate: `stabilize_ref_source`
-  (`expressions.rs:22353`) `needs_stable` list omits record/aggregate
-  literals — but the SIGSEGV suggests a deeper fault than stabilization.
-* **SELECTBESTMEDIA-CODEGEN — OPEN.** Calling a stdlib fn whose body
-  threads a tuple `(Float, Int)` return through a monomorphised body
-  crashes codegen at the call site (`select_best_media`; some 2-offer
-  `select_best_coding`). Likely the tuple-value lowering in
-  monomorphisation.
+* **INLINE-AGG-REF-ARG — CLOSED 2026-07-06 (`0b9d3a0b9`).** The
+  `stabilize_ref_source` `needs_stable` list gained the aggregate-literal
+  ExprKinds (Record/Tuple/Array/Map/Set), so an inline `f(&RangeSet { … })`
+  ref-arg materialises into a fresh non-recyclable slot instead of
+  colliding with a sibling arg's `alloc_temp`. The pin
+  (`core-tests/net/http_range/regression_test.vr`) is un-gated and green
+  at interp (T0149). Same commit closed **MUTSELF-MATCH-1** — an inline
+  `&Variant { … }` payload-arg to a `&mut self` method is the same
+  recycle-collision (the arg is an `ExprKind::Record`).
+* **SELECTBESTMEDIA-CODEGEN — compile-crash CLOSED (`1aad1409a`,
+  2026-07-06).** `select_best_media` / `select_best_coding` compile and
+  run; the earlier "crash at the call site" is gone (it was the
+  `Text.as_bytes()` cbgr_mutable_ptr deref, closed by that commit which
+  un-ignored the 13 select_best tests). NOTE (T0149): the
+  `net/content_negotiation` property/regression laws that read a local
+  `List<Text>` back are still red at interp, but the root is **T0146**,
+  not select/tuple lowering — an explicit `mount core.collections.List`
+  mis-dispatches the List INDEX operator `xs[i]` (bare-name collision;
+  `.len()`/`.push()` are fine). Handed to T0146.
 
 ## 3. no-libc remaining surface (see no-libc-architecture.md table)
 
