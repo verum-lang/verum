@@ -2,13 +2,14 @@
 // vcs/specs/stdlib/sys/linux/time_test.vr
 // =============================================================================
 // @test: run
+// @skip: bare cross-platform Stopwatch/Instant/Duration have no standalone declaration (only LinuxStopwatch/LinuxDuration/... exist, with divergent APIs — LinuxDuration has no ZERO); gated on T0442 (implement cross-platform time types) + T0440 (sleep_ms interpreter overflow). Un-skip when T0442 lands. Cannot be verified on a non-Linux host.
 // @tier: 0
 // @level: L0
 // @tags: stdlib, sys, linux, time, clock
 // @description: Tests for Linux time and clock operations.
 //
 // Coverage:
-// - Timespec, LinuxDuration, LinuxInstant, LinuxStopwatch: Time types
+// - Timespec, Duration, Instant, Stopwatch: Time types
 // - clock_gettime: Clock access
 // - monotonic_nanos, monotonic_micros, monotonic_millis: Monotonic time
 // - realtime_nanos, unix_timestamp: Real time
@@ -30,7 +31,7 @@
 module test.stdlib.sys.linux.time_test;
 
 mount core.sys.linux.time.{
-    Timespec, LinuxDuration, LinuxInstant, LinuxStopwatch,
+    Timespec, Duration, Instant, Stopwatch,
     clock_gettime,
     monotonic_nanos, monotonic_micros, monotonic_millis,
     monotonic_raw_nanos, monotonic_coarse_nanos,
@@ -103,51 +104,51 @@ fn test_timespec() {
 }
 
 // =============================================================================
-// LinuxDuration Tests
+// Duration Tests
 // =============================================================================
 
 @test
 fn test_duration() {
     // Create from seconds
-    let d1 = LinuxDuration.from_secs(5);
+    let d1 = Duration.from_secs(5);
     assert(d1.as_secs() == 5);
     assert(d1.as_nanos() == 5_000_000_000);
 
     // Create from milliseconds
-    let d2 = LinuxDuration.from_millis(1500);
+    let d2 = Duration.from_millis(1500);
     assert(d2.as_millis() == 1500);
     assert(d2.as_secs() == 1);
 
     // Create from microseconds
-    let d3 = LinuxDuration.from_micros(2_500_000);
+    let d3 = Duration.from_micros(2_500_000);
     assert(d3.as_micros() == 2_500_000);
     assert(d3.as_millis() == 2500);
 
     // Create from nanoseconds
-    let d4 = LinuxDuration.from_nanos(1_234_567_890);
+    let d4 = Duration.from_nanos(1_234_567_890);
     assert(d4.as_nanos() == 1_234_567_890);
 
     // Zero duration
-    let zero = LinuxDuration.ZERO;
+    let zero = Duration.ZERO;
     assert(zero.as_nanos() == 0);
     assert(zero.is_zero());
 
-    // LinuxDuration comparison
+    // Duration comparison
     assert(d1 > d2);
     assert(d3 > d2);
     assert(d4 < d2);
 
-    print("LinuxDuration tests passed");
+    print("Duration tests passed");
 }
 
 // =============================================================================
-// LinuxInstant Tests
+// Instant Tests
 // =============================================================================
 
 @test
 fn test_instant() {
     // Get current instant
-    let now = LinuxInstant.now();
+    let now = Instant.now();
 
     // Do some work
     let mut sum = 0;
@@ -156,7 +157,7 @@ fn test_instant() {
     }
 
     // Get another instant
-    let later = LinuxInstant.now();
+    let later = Instant.now();
 
     // Later should be after or equal to now
     assert(later >= now);
@@ -169,7 +170,7 @@ fn test_instant() {
     let elapsed2 = now.elapsed();
     assert(elapsed2 >= elapsed);
 
-    print("LinuxInstant tests passed");
+    print("Instant tests passed");
 }
 
 // =============================================================================
@@ -279,8 +280,8 @@ fn test_sleep_operations() {
     assert(elapsed_us >= 900_000);
     assert(elapsed_us < 50_000_000);
 
-    // Test sleep with LinuxDuration
-    let duration = LinuxDuration.from_millis(5);
+    // Test sleep with Duration
+    let duration = Duration.from_millis(5);
     let before_d = monotonic_nanos();
     sleep(duration);
     let after_d = monotonic_nanos();
@@ -333,13 +334,13 @@ fn test_rdtsc() {
 }
 
 // =============================================================================
-// LinuxStopwatch Tests
+// Stopwatch Tests
 // =============================================================================
 
 @test
 fn test_stopwatch() {
     // Create and start stopwatch
-    let mut sw = LinuxStopwatch.new();
+    let mut sw = Stopwatch.new();
 
     // Initially should show near-zero elapsed
     let initial = sw.elapsed();
@@ -376,7 +377,7 @@ fn test_stopwatch() {
     let after_reset = sw.elapsed();
     assert(after_reset.as_nanos() < 1_000_000);  // Near zero
 
-    print("LinuxStopwatch tests passed");
+    print("Stopwatch tests passed");
 }
 
 // =============================================================================
@@ -397,10 +398,10 @@ fn test_time_it() {
     // Result should be correct
     assert(result == 49995000);
 
-    // LinuxDuration should be positive
+    // Duration should be positive
     assert(duration.as_nanos() > 0);
 
-    // LinuxDuration should be reasonable (less than 1 second)
+    // Duration should be reasonable (less than 1 second)
     assert(duration.as_secs() < 1);
 
     print("time_it tests passed");
