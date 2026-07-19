@@ -3,14 +3,6 @@
 // @tier: 0
 // @tags: stdlib, theory-interop, congruence-closure, nieuwenhuis-oliveras
 // @expected-stdout: empty: ok\nsingle_eq: ok\ncongruence_step: ok\ntransitivity: ok\nsymbol_mismatch: ok\narity_mismatch: ok\nstress_chain: ok\nall-pass
-// @skip: blocked on stdlib-cache codegen bug (#143 — `Waker.drop` NPE
-//        on EquationSet destructor; identical-source local copy runs
-//        cleanly per memory entry "loom quality pivot 2026-04-25").
-//        The V1.5 signature-table algorithm at
-//        core/theory_interop/congruence_closure.vr is correctly
-//        written and will go green when the stdlib-cache codegen
-//        layer is fixed. Test is left in place as the eventual
-//        acceptance gate.
 // @description: Correctness contract for the V1.5 signature-table
 // congruence-closure (core.theory_interop.congruence_closure).
 //

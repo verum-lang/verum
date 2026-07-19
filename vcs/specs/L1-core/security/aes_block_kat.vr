@@ -1,8 +1,10 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @level: L1
 // @tier: 0
 // @tags: aes, fips197, kat, encrypt, decrypt, roundtrip
-// @timeout: 5000
+// @timeout: 120000
+// @expected-stdout: aes-block-kat-ok
+// @expected-exit: 0
 //
 // FIPS 197 Appendix C — known-answer test source for AES-128 and AES-256
 // single-block encrypt + decrypt. Verifies the new
@@ -10,10 +12,11 @@
 // canonical NIST vectors AND verifies decrypt(encrypt(plain)) == plain
 // for every key length.
 //
-// Currently typecheck-pass only — the stdlib-cache codegen bug (#143)
-// blocks running this end-to-end via `verum run --interp`. Once that
-// lifts, the @test directive should be promoted to `run` with
-// `@expected-stdout: aes-block-kat-ok` and `@expected-exit: 0`.
+// Promoted from typecheck-pass to run-interpreter (T0125): the
+// stdlib-cache codegen bug that blocked end-to-end execution was the
+// own-declaration simple-key layout eviction gap
+// (OWN-DECL-LAYOUT-EVICT-1) — a module's own record literal could be
+// hijacked by a same-named imported VARIANT constructor.
 
 mount core.*;
 mount core.security.cipher.aes.{

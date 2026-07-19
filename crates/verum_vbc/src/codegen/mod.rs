@@ -2435,12 +2435,31 @@ impl VbcCodegen {
         // module's bodies — evict the stale simple-key layout cache so
         // the local registration claims it (or_insert-guarded
         // downstream). Qualified keys are untouched.
+        //
+        // OWN-DECL-LAYOUT-EVICT-1 (T0125): the layout eviction MUST be
+        // unconditional, not gated on a shadowed TypeId binding. The
+        // stdlib bake seeds each module's codegen with earlier modules'
+        // record layouts TypeId-FREE (`import_type_layouts`, D2b), so a
+        // foreign same-named layout can occupy the simple key with NO
+        // `type_name_to_id` entry. Pre-fix, the eviction sat inside the
+        // `if let Some(old_id)` arm and was skipped for exactly that
+        // case: `core.theory_interop.congruence_closure`'s own
+        // `type Term` lost its simple key to the seeded
+        // `core.cog.resolve.Term` layout `[package, range, positive]`,
+        // `compile_record`'s superset guard then rejected the record
+        // interpretation of the module's OWN `Term { id, symbol, args,
+        // arity }` literal, and the imported `Signal.Term` VARIANT ctor
+        // (tag 10 — SIGTERM) hijacked it: `term_new` baked
+        // `MakeVariant { tag: 10 }` and every Term round-trip through
+        // the archive came back field-scrambled (the vcs #143 register
+        // entry). Lexical scoping: the declaring module owns its simple
+        // key; the foreign layout stays reachable via its qualified key.
         let type_id = self.alloc_user_type_id();
+        self.type_field_layouts.remove(type_name);
         if let Some(old_id) = self
             .type_name_to_id
             .insert(type_name.to_string(), type_id)
         {
-            self.type_field_layouts.remove(type_name);
             // The finalize type-table gate requires ONE descriptor per
             // NAME. The shadowed descriptor keeps its identity under its
             // module-QUALIFIED name (which archive body remap prefers
