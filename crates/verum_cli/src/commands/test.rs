@@ -140,6 +140,64 @@ impl TestFormat {
     }
 }
 
+/// TEST-IGNORED-FLAGS-NOOP-1 (T0365): the ONE authority for how
+/// `@ignore` interacts with selection AND execution.
+///
+/// `--ignored` / `--include-ignored` are SELECTION flags; historically
+/// they stopped at the parent's selection pass and never reached the
+/// child re-invocations (`run_interp_file_subprocess`,
+/// `run_aot_subprocess`), whose own default-mode selection silently
+/// re-skipped every `@ignore`'d test — `verum test --ignored` printed
+/// "running N tests" and then reported `0 passed; 0 failed; N ignored`
+/// (and the per-test AOT child matched zero tests and exited 0: a
+/// silent false PASS). Everything that needs the mode — parent
+/// selection, ignored-count accounting, child argv, child-result
+/// accounting, default-mode reporting — derives it from this enum so
+/// the decision cannot fork again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IgnoreMode {
+    /// Default: run only tests without `@ignore`.
+    SkipIgnored,
+    /// `--ignored`: run ONLY `@ignore`'d tests (pin promotion /
+    /// pin-verification sweeps).
+    OnlyIgnored,
+    /// `--include-ignored`: run everything.
+    IncludeIgnored,
+}
+
+impl IgnoreMode {
+    fn from_opts(opts: &TestOptions) -> Self {
+        if opts.ignored_only {
+            IgnoreMode::OnlyIgnored
+        } else if opts.include_ignored {
+            IgnoreMode::IncludeIgnored
+        } else {
+            IgnoreMode::SkipIgnored
+        }
+    }
+
+    /// Does a test whose `@ignore` status is `ignored` get EXECUTED
+    /// under this mode?
+    fn selects(self, ignored: bool) -> bool {
+        match self {
+            IgnoreMode::SkipIgnored => !ignored,
+            IgnoreMode::OnlyIgnored => ignored,
+            IgnoreMode::IncludeIgnored => true,
+        }
+    }
+
+    /// Argv fragment that reproduces this mode in a child
+    /// re-invocation (the child re-applies selection over its own
+    /// discovery, so the parent's mode must ride along).
+    fn child_args(self) -> &'static [&'static str] {
+        match self {
+            IgnoreMode::SkipIgnored => &[],
+            IgnoreMode::OnlyIgnored => &["--ignored"],
+            IgnoreMode::IncludeIgnored => &["--include-ignored"],
+        }
+    }
+}
+
 pub fn execute(opts: TestOptions) -> Result<()> {
     let start = Instant::now();
     // SCRIPT-HOOK-TEST-RUNNER-1: the in-process interpret tier below drives
@@ -209,17 +267,10 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     //  --ignored → only ignored
     //  --include-ignored → everything
     //  default → skip ignored
+    let ignore_mode = IgnoreMode::from_opts(&opts);
     let active: Vec<&Test> = filtered
         .iter()
-        .filter(|t| {
-            if opts.ignored_only {
-                t.ignored
-            } else if opts.include_ignored {
-                true
-            } else {
-                !t.ignored
-            }
-        })
+        .filter(|t| ignore_mode.selects(t.ignored))
         .collect();
 
     // --list: print and exit
@@ -294,8 +345,15 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         fuzzing: manifest.test.fuzzing,
     };
 
-    let total = filtered.len();
-    let ignored_count = filtered.iter().filter(|t| t.ignored).count();
+    // T0365: `ignored` in the summary counts tests SKIPPED because of
+    // their `@ignore` pin. Under `--ignored` / `--include-ignored` the
+    // pinned tests EXECUTE — reporting them as "ignored" was exactly
+    // the defect's face ("running 13 tests" → "0 passed; 13 ignored").
+    let ignored_count = match ignore_mode {
+        IgnoreMode::SkipIgnored => filtered.iter().filter(|t| t.ignored).count(),
+        IgnoreMode::OnlyIgnored | IgnoreMode::IncludeIgnored => 0,
+    };
+    let total = active.len() + ignored_count;
 
     if !quiet {
         // Banner reports the EFFECTIVE worker count — `--test-threads 1`
@@ -440,7 +498,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
                 .rsplit_once("::")
                 .map(|(p, _)| p.to_string())
                 .unwrap_or_else(|| tests[0].name.to_string());
-            run_interp_file_subprocess(&prefix, tests)
+            run_interp_file_subprocess(&prefix, tests, ignore_mode, &opts.skip)
         };
         let batches: Vec<Vec<(Text, TestResult)>> = match &pool {
             Some(p) => p.install(|| file_order.par_iter().map(run_batch).collect()),
@@ -494,6 +552,25 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         }
     };
 
+    // T0365: a deliberately-executed `@ignore`'d test that FAILS must
+    // surface its pin reason — the reason names the tracking class the
+    // failure belongs to, which is the whole point of running pins
+    // (`--ignored` promotion / pin-verification sweeps). Idempotent:
+    // in the file-quarantine topology the child process already ran
+    // this pass on the error text it reported, and the parent must not
+    // stack a second copy.
+    let results: Vec<(Text, TestResult)> = results
+        .into_iter()
+        .map(|(name, result)| {
+            let pinned = active.iter().find(|t| t.name == name && t.ignored);
+            let result = match pinned {
+                Some(t) => attach_ignore_note(result, t.ignore_reason.as_deref()),
+                None => result,
+            };
+            (name, result)
+        })
+        .collect();
+
     // Present each result in the chosen format
     let mut passed = 0usize;
     let mut failed = 0usize;
@@ -505,7 +582,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
     // Non-active (only exists when we're NOT in --ignored-only mode):
     // their names should still appear once, marked ignored, when we
     // are in the default mode (skip ignored).
-    if !opts.ignored_only && !opts.include_ignored {
+    if ignore_mode == IgnoreMode::SkipIgnored {
         for t in filtered.iter().filter(|t| t.ignored) {
             match opts.format {
                 TestFormat::Json => println!(
@@ -717,6 +794,47 @@ fn matches_filter(name: &Text, filter: &Option<Text>, exact: bool) -> bool {
             Some(prefix) => name.as_str().starts_with(prefix),
             None => name.as_str().contains(f.as_str()),
         },
+    }
+}
+
+/// T0365: annotate a failing result from a deliberately-executed
+/// `@ignore`'d test with the pin's reason string (the reason names the
+/// tracking class the failure belongs to). Pass results are untouched.
+/// Idempotent by marker so parent/child topologies can both apply it.
+fn attach_ignore_note(result: TestResult, reason: Option<&str>) -> TestResult {
+    const MARK: &str = "[@ignore]";
+    let note = match reason {
+        Some(r) => format!("{} reason: {}", MARK, r),
+        None => format!("{} (no reason recorded on the pin)", MARK),
+    };
+    let attach = |error: String| -> String {
+        if error.contains(MARK) {
+            error
+        } else if error.is_empty() {
+            note.clone()
+        } else {
+            format!("{}\n  {}", error, note)
+        }
+    };
+    match result {
+        TestResult::Fail {
+            duration,
+            stdout,
+            stderr,
+            exit_code,
+            error,
+        } => TestResult::Fail {
+            duration,
+            stdout,
+            stderr,
+            exit_code,
+            error: attach(error),
+        },
+        TestResult::CompileError { duration, error } => TestResult::CompileError {
+            duration,
+            error: attach(error),
+        },
+        pass => pass,
     }
 }
 
@@ -961,8 +1079,8 @@ struct TestFailure {
 fn run_aot_subprocess(test: &Test) -> TestResult {
     let start = Instant::now();
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("verum"));
-    let out = Command::new(&exe)
-        .arg("test")
+    let mut cmd = Command::new(&exe);
+    cmd.arg("test")
         .arg("--aot")
         .arg("--test-threads")
         .arg("1")
@@ -970,7 +1088,15 @@ fn run_aot_subprocess(test: &Test) -> TestResult {
         .arg("--filter")
         .arg(test.name.as_str())
         .arg("--format")
-        .arg("terse")
+        .arg("terse");
+    // T0365: the parent already SELECTED this test; when it is
+    // `@ignore`'d (an --ignored / --include-ignored run) the child's
+    // own default-mode selection must not re-skip it — pre-fix the
+    // child matched zero tests and exited 0, a silent false PASS.
+    if test.ignored {
+        cmd.arg("--include-ignored");
+    }
+    let out = cmd
         // GENERATE-NATIVE-WORKER-RACE-1: mark the child so it runs its
         // single test in-process (main thread) instead of recursing.
         .env("VERUM_TEST_AOT_CHILD", "1")
@@ -1021,6 +1147,8 @@ fn run_aot_subprocess(test: &Test) -> TestResult {
 fn run_interp_file_subprocess(
     prefix: &str,
     expected: &[&Test],
+    ignore_mode: IgnoreMode,
+    skip: &[Text],
 ) -> Vec<(Text, TestResult)> {
     let start = Instant::now();
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("verum"));
@@ -1037,15 +1165,26 @@ fn run_interp_file_subprocess(
             if needs { vec!['\\', c] } else { vec![c] }
         })
         .collect();
-    let out = Command::new(&exe)
-        .arg("test")
+    let mut cmd = Command::new(&exe);
+    cmd.arg("test")
         .arg("--interp")
         .arg("--format")
         .arg("json")
         .arg("--filter")
-        .arg(format!("^{}::", escaped))
-        .env("VERUM_TEST_INTERP_CHILD", "1")
-        .output();
+        .arg(format!("^{}::", escaped));
+    // T0365: the child re-applies SELECTION over this file's tests, so
+    // the parent's selection flags must ride along. Without them the
+    // child's default mode silently re-skipped every `@ignore`'d test
+    // the parent selected (`--ignored` → "0 passed; N ignored"), and
+    // ran tests the parent's `--skip` excluded (widening a crash's
+    // blast radius past the user's selection).
+    for a in ignore_mode.child_args() {
+        cmd.arg(a);
+    }
+    for p in skip {
+        cmd.arg("--skip").arg(p.as_str());
+    }
+    let out = cmd.env("VERUM_TEST_INTERP_CHILD", "1").output();
     let out = match out {
         Ok(o) => o,
         Err(e) => {
@@ -1105,7 +1244,11 @@ fn run_interp_file_subprocess(
         reported.insert(name.to_string(), result);
     }
     // Attribute the child's death to every unreported test.
-    let crash_note = if reported.len() < expected.iter().filter(|t| !t.ignored).count() {
+    // T0365: `expected` IS the parent's selected set for this file
+    // (the ignore-mode already shaped it), so it needs no re-filtering
+    // here — the old `!t.ignored` guard was the parent-side face of
+    // the executor re-skip.
+    let crash_note = if reported.len() < expected.len() {
         let status = &out.status;
         #[cfg(unix)]
         let sig = {
@@ -1135,7 +1278,6 @@ fn run_interp_file_subprocess(
     };
     expected
         .iter()
-        .filter(|t| !t.ignored)
         .map(|t| {
             let result = reported.remove(t.name.as_str()).unwrap_or_else(|| {
                 TestResult::Fail {
@@ -1518,13 +1660,30 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     // file containing only the original source plus the synthetic
     // `fn main`, preserving the test convention regardless of cog
     // layout.
+    // T0365: an `@ignore`'d test reaches run_test_aot only when an
+    // ignore-inclusive mode (--ignored / --include-ignored) SELECTED
+    // it — its own fn must then survive the merge strip
+    // (IGNORED-FN-IN-MERGE-1 removes every pinned fn otherwise, so the
+    // synthetic main called a function that no longer existed).
+    // Sibling pins still strip: they may pin compile-time gaps.
+    let keep_ignored_fn = if test.ignored {
+        test.fn_name.as_deref()
+    } else {
+        None
+    };
     let test_input = synthesise_test_input_with_crate_root(
         &test.file,
         target_dir,
         test.fn_name.as_deref(),
+        keep_ignored_fn,
     )
     .or_else(|| {
-        synthesise_test_main_only(&test.file, target_dir, test.fn_name.as_deref())
+        synthesise_test_main_only(
+            &test.file,
+            target_dir,
+            test.fn_name.as_deref(),
+            keep_ignored_fn,
+        )
     })
     .unwrap_or_else(|| test.file.clone());
 
@@ -1679,15 +1838,28 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
 /// interpolations (`f"x={y}"`) cancel out, but a lone unmatched `{`
 /// in a plain string inside a pinned body would desync the scan; the
 /// conformance suites do not contain that shape.
-fn strip_ignored_tests(source: &str) -> String {
+/// `keep_fn` (T0365): when the runner is DELIBERATELY executing one
+/// `@ignore`'d test (`--ignored` / `--include-ignored` selected it),
+/// that fn's region is emitted instead of stripped — minus the
+/// `@ignore` attribute line itself — so the merged file still defines
+/// the function the synthetic main invokes. Every OTHER pinned fn is
+/// stripped exactly as before.
+fn strip_ignored_tests(source: &str, keep_fn: Option<&str>) -> String {
     let mut out = String::with_capacity(source.len());
     let mut lines = source.lines().peekable();
     while let Some(line) = lines.next() {
         if line.trim_start().starts_with("@ignore") {
-            // Swallow up to the fn decl…
+            // Swallow up to the fn decl…, buffering the region so it
+            // can be re-emitted when it is the fn under execution.
+            let mut region: Vec<&str> = Vec::new();
+            let mut region_fn: Option<Text> = None;
             let mut depth: i64 = 0;
             let mut seen_body = false;
             for l in lines.by_ref() {
+                region.push(l);
+                if region_fn.is_none() {
+                    region_fn = extract_fn_name(l);
+                }
                 let opens = l.matches('{').count() as i64;
                 let closes = l.matches('}').count() as i64;
                 if opens > 0 {
@@ -1696,6 +1868,16 @@ fn strip_ignored_tests(source: &str) -> String {
                 depth += opens - closes;
                 if seen_body && depth <= 0 {
                     break;
+                }
+            }
+            let keep = matches!(
+                (keep_fn, region_fn.as_ref()),
+                (Some(k), Some(n)) if n.as_str() == k
+            );
+            if keep {
+                for l in region {
+                    out.push_str(l);
+                    out.push('\n');
                 }
             }
             continue;
@@ -1710,6 +1892,7 @@ fn synthesise_test_input_with_crate_root(
     test_file: &Path,
     target_dir: &Path,
     test_fn_name: Option<&str>,
+    keep_ignored_fn: Option<&str>,
 ) -> Option<PathBuf> {
     let mut cur = test_file.parent()?;
     let cog_root = loop {
@@ -1722,7 +1905,8 @@ fn synthesise_test_input_with_crate_root(
     let candidates = [cog_root.join("src/lib.vr"), cog_root.join("src/main.vr")];
     let root_path = candidates.iter().find(|p| p.is_file())?;
 
-    let test_source = strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?);
+    let test_source =
+        strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?, keep_ignored_fn);
     let root_source = std::fs::read_to_string(root_path).ok()?;
 
     // Strip any leading `module …;` declaration from the crate root —
@@ -1825,9 +2009,11 @@ fn synthesise_test_main_only(
     test_file: &Path,
     target_dir: &Path,
     test_fn_name: Option<&str>,
+    keep_ignored_fn: Option<&str>,
 ) -> Option<PathBuf> {
     let test_fn = test_fn_name?;
-    let test_source = strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?);
+    let test_source =
+        strip_ignored_tests(&std::fs::read_to_string(test_file).ok()?, keep_ignored_fn);
     let stem = test_file.file_stem()?.to_str()?;
     let merged_path = target_dir.join(format!(
         "test_{}.merged.vr",
@@ -2279,6 +2465,12 @@ struct Test {
     name: Text,
     file: PathBuf,
     ignored: bool,
+    /// T0365: the human-stated reason on the `@ignore` pin — either an
+    /// attribute argument (`@ignore("…")` / `@ignore(reason = "…")`)
+    /// or the trailing `//` comment on the attribute's line. Surfaced
+    /// when the pin is deliberately executed and fails: the reason
+    /// names the tracking class the failure belongs to.
+    ignore_reason: Option<Text>,
     /// When Some, this is a property-based test — the runner generates
     /// random inputs for each parameter and calls the function N times.
     property: Option<crate::commands::property::PropertyFunc>,
@@ -2368,6 +2560,11 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                         .attributes
                         .iter()
                         .any(|a| a.name.as_str() == "ignore" || a.name.as_str() == "ignored");
+                    let reason = if is_ignored {
+                        ignore_reason(&func.attributes, &source)
+                    } else {
+                        None
+                    };
                     let property = if is_property {
                         property_funcs
                             .iter()
@@ -2384,6 +2581,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                                 name: format!("{}::{}[{}]", name_prefix, func.name, idx).into(),
                                 file: file.to_path_buf(),
                                 ignored: is_ignored,
+                                ignore_reason: reason.clone(),
                                 property: property.clone(),
                                 case_args: Some(args),
                                 fn_name: Some(func.name.to_string()),
@@ -2394,6 +2592,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                             name: format!("{}::{}", name_prefix, func.name).into(),
                             file: file.to_path_buf(),
                             ignored: is_ignored,
+                            ignore_reason: reason,
                             property,
                             case_args: None,
                             fn_name: Some(func.name.to_string()),
@@ -2411,10 +2610,16 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                     let t = l.trim();
                     t.contains("@ignore") || t.contains("@ignored")
                 });
+                let reason = if is_ignored {
+                    file_level_ignore_reason(&source)
+                } else {
+                    None
+                };
                 tests.push(Test {
                     name: name_prefix.clone().into(),
                     file: file.to_path_buf(),
                     ignored: is_ignored,
+                    ignore_reason: reason,
                     property: None,
                     case_args: None,
                     fn_name: None,
@@ -2437,6 +2642,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                         name: format!("{}::{}", module_qualified_prefix(file), name).into(),
                         file: file.to_path_buf(),
                         ignored,
+                        ignore_reason: None,
                         property: None,
                         case_args: None,
                         fn_name: None,
@@ -2455,6 +2661,7 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
                 name: module_qualified_prefix(file).into(),
                 file: file.to_path_buf(),
                 ignored: false,
+                ignore_reason: None,
                 property: None,
                 case_args: None,
                 fn_name: None,
@@ -2462,6 +2669,86 @@ fn discover_tests(file: &Path) -> Result<List<Test>> {
         }
     }
     Ok(tests)
+}
+
+/// T0365: extract the human-stated reason from a fn-level `@ignore`
+/// pin. Two spellings exist across the suites:
+///
+///   * attribute argument — `@ignore("reason …")` or
+///     `@ignore(reason = "…")`;
+///   * trailing comment — `@ignore  // reason …` (the dominant
+///     historical form; the comment never reaches the AST, so it is
+///     recovered from the attribute's source line via its span).
+fn ignore_reason(attrs: &[verum_ast::Attribute], source: &str) -> Option<Text> {
+    use verum_ast::{ExprKind, LiteralKind};
+    let attr = attrs
+        .iter()
+        .find(|a| a.name.as_str() == "ignore" || a.name.as_str() == "ignored")?;
+    match &attr.args {
+        verum_common::Maybe::Some(args) => {
+            for e in args.iter() {
+                match &e.kind {
+                    ExprKind::Literal(lit) => {
+                        if let LiteralKind::Text(s) = &lit.kind {
+                            return Some(Text::from(s.as_str()));
+                        }
+                    }
+                    ExprKind::NamedArg { name, value } if name.name.as_str() == "reason" => {
+                        if let ExprKind::Literal(lit) = &value.kind {
+                            if let LiteralKind::Text(s) = &lit.kind {
+                                return Some(Text::from(s.as_str()));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        // Bare `@ignore` — recover a trailing `// …` comment from the
+        // attribute's own source line. Restricted to the arg-less form
+        // so a `//` INSIDE an attribute-arg string can never be
+        // misread as a comment.
+        _ => {
+            let start = attr.span.start as usize;
+            if start >= source.len() {
+                return None;
+            }
+            let line_end = source[start..]
+                .find('\n')
+                .map(|o| start + o)
+                .unwrap_or(source.len());
+            let line = &source[start..line_end];
+            let reason = line.split_once("//").map(|(_, c)| c.trim())?;
+            if reason.is_empty() {
+                None
+            } else {
+                Some(Text::from(reason))
+            }
+        }
+    }
+}
+
+/// T0365: file-level companion of [`ignore_reason`] for whole-file
+/// tests, whose `@ignore` marker lives in the first ten lines (often
+/// inside a comment): the reason is whatever follows the marker after
+/// separator punctuation, e.g. `// @ignore: CLASS-NAME-1`.
+fn file_level_ignore_reason(source: &str) -> Option<Text> {
+    for l in source.lines().take(10) {
+        let t = l.trim();
+        if let Some(pos) = t.find("@ignore") {
+            let rest = t[pos + "@ignore".len()..]
+                .trim_start_matches('d')
+                .trim_start_matches([':', '(', ' ', '\t'])
+                .trim_end_matches(')')
+                .trim_matches('"')
+                .trim();
+            if !rest.is_empty() {
+                return Some(Text::from(rest));
+            }
+        }
+    }
+    None
 }
 
 fn extract_fn_name(line: &str) -> Option<Text> {
@@ -2798,7 +3085,7 @@ fn live_one() {
     assert(true);
 }
 ";
-        let out = super::strip_ignored_tests(src);
+        let out = super::strip_ignored_tests(src, None);
         assert!(!out.contains("pinned_one"), "pinned fn must be stripped: {}", out);
         assert!(out.contains("live_one"), "live sibling must survive: {}", out);
         assert!(out.contains("mount x.{Y};"), "header must survive");
@@ -2809,7 +3096,43 @@ fn live_one() {
         let src = "@test
 fn a() { assert(true); }
 ";
-        assert_eq!(super::strip_ignored_tests(src), src);
+        assert_eq!(super::strip_ignored_tests(src, None), src);
+    }
+
+    /// T0365 pin: when an ignore-inclusive mode deliberately executes
+    /// one pinned test, `keep_fn` preserves exactly that fn in the
+    /// merged AOT source (minus the `@ignore` line) while sibling pins
+    /// still strip.
+    #[test]
+    fn strip_ignored_tests_keep_fn_preserves_the_test_under_execution() {
+        let src = "@test
+@ignore(\"CLASS-A\")
+fn pinned_keep_me() {
+    assert(false);
+}
+
+@test
+@ignore(\"CLASS-B\")
+fn pinned_drop_me() {
+    assert(false);
+}
+";
+        let out = super::strip_ignored_tests(src, Some("pinned_keep_me"));
+        assert!(
+            out.contains("fn pinned_keep_me"),
+            "kept fn must survive: {}",
+            out
+        );
+        assert!(
+            !out.contains("@ignore"),
+            "the @ignore attribute lines themselves must not survive: {}",
+            out
+        );
+        assert!(
+            !out.contains("fn pinned_drop_me"),
+            "sibling pin must still strip: {}",
+            out
+        );
     }
     use super::*;
 
@@ -2835,6 +3158,70 @@ fn a() { assert(true); }
         assert!(
             !last_line.trim_start().starts_with('@'),
             "dangling attribute before strip marker: {last_line:?}"
+        );
+    }
+
+    /// T0365 pin: the selection truth-table for the three ignore
+    /// modes. `selects` is the ONE authority consulted by the parent's
+    /// selection pass; the child argv fragments must reproduce the
+    /// same mode across a process boundary.
+    #[test]
+    fn ignore_mode_selection_truth_table() {
+        use super::IgnoreMode::*;
+        assert!(SkipIgnored.selects(false) && !SkipIgnored.selects(true));
+        assert!(!OnlyIgnored.selects(false) && OnlyIgnored.selects(true));
+        assert!(IncludeIgnored.selects(false) && IncludeIgnored.selects(true));
+        assert_eq!(SkipIgnored.child_args(), &[] as &[&str]);
+        assert_eq!(OnlyIgnored.child_args(), &["--ignored"][..]);
+        assert_eq!(IncludeIgnored.child_args(), &["--include-ignored"][..]);
+    }
+
+    /// T0365 pin: a failing pinned test surfaces its `@ignore` reason;
+    /// the annotation is idempotent (parent + child topologies may
+    /// both apply it) and passes are untouched.
+    #[test]
+    fn attach_ignore_note_annotates_failures_idempotently() {
+        let failed = fail("assertion failed", Some(1));
+        let annotated = attach_ignore_note(failed, Some("tracked as CLASS-X"));
+        let TestResult::Fail { error, .. } = &annotated else {
+            panic!("expected Fail");
+        };
+        assert!(error.contains("assertion failed"), "original error kept: {error}");
+        assert!(error.contains("[@ignore] reason: tracked as CLASS-X"), "{error}");
+        // Second application must not duplicate the note.
+        let twice = attach_ignore_note(annotated, Some("tracked as CLASS-X"));
+        let TestResult::Fail { error, .. } = &twice else {
+            panic!("expected Fail");
+        };
+        assert_eq!(error.matches("[@ignore]").count(), 1, "{error}");
+        // A pass stays a pass, unannotated.
+        let ok = attach_ignore_note(pass("fine"), Some("irrelevant"));
+        assert!(matches!(ok, TestResult::Pass { ref stdout, .. } if stdout == "fine"));
+    }
+
+    /// T0365 pin: reason extraction covers both real-world spellings —
+    /// the attribute-argument form and the trailing-comment form.
+    #[test]
+    fn ignore_reason_reads_attr_arg_and_trailing_comment() {
+        let src = "@test\n@ignore(\"CLASS-ARG-1 details\")\nfn a() {\n    assert(false);\n}\n\n@test\n@ignore  // CLASS-COMMENT-2 trailing\nfn b() {\n    assert(false);\n}\n";
+        let file_id = verum_ast::FileId::new(0);
+        let parser = verum_fast_parser::VerumParser::new();
+        let lexer = verum_lexer::Lexer::new(src, file_id);
+        let module = parser
+            .parse_module(lexer, file_id)
+            .expect("probe module parses");
+        let mut reasons = Vec::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(f) = &item.kind {
+                reasons.push(super::ignore_reason(&f.attributes, src));
+            }
+        }
+        assert_eq!(
+            reasons,
+            vec![
+                Some(Text::from("CLASS-ARG-1 details")),
+                Some(Text::from("CLASS-COMMENT-2 trailing")),
+            ]
         );
     }
 
@@ -2958,6 +3345,7 @@ fn a() { assert(true); }
             name: "demo_property".into(),
             file: PathBuf::from("/dev/null"),
             ignored: false,
+            ignore_reason: None,
             property: Some(crate::commands::property::PropertyFunc {
                 name: "demo".to_string(),
                 file: PathBuf::from("/dev/null"),
@@ -3157,6 +3545,7 @@ fn a() { assert(true); }
             name: "demo_property".into(),
             file: PathBuf::from("/dev/null"),
             ignored: false,
+            ignore_reason: None,
             property: Some(crate::commands::property::PropertyFunc {
                 name: "demo".to_string(),
                 file: PathBuf::from("/dev/null"),
