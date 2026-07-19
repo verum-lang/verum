@@ -554,6 +554,27 @@ pub struct CodegenContext {
     /// Populated by `process_import_tree` for uppercase-leaf mounts.
     pub mounted_types: HashMap<String, String>,
 
+    /// Mounted FUNCTION bindings: local alias/simple name → the RESOLVED
+    /// registry key the mount bound (`mount core.base.{arg}` ⇒
+    /// `"arg" → "core.base.env.arg"`).
+    ///
+    /// MOUNT-FN-AUTHORITY-1 (T0148): the bare-name `functions` slot is
+    /// last-wins across passive archive/module loads, so a wide umbrella
+    /// mount (`mount core.{List}` pulls the whole `core` re-export tree)
+    /// floods same-named `<Type>.<method>` registrations over the slot
+    /// AFTER `bind_mounted_function`'s authoritative write.  The
+    /// call-site bare-name chain then either misroutes or — when the
+    /// ambiguity-guarded suffix scan sees several free-fn candidates —
+    /// gives up as `UndefinedFunction` even though the user NAMED the
+    /// function they want (base/env: `arg(0)` undefined with 93 tests
+    /// of collateral).  This table carries the explicit mount intent
+    /// name-driven (ids renumber at archive boundaries; the resolved
+    /// KEY is the authority) so the call-site chain can consult it
+    /// ahead of the flood-prone global layers.  Function-side mirror of
+    /// `mounted_types` / the typechecker's MOUNT-TYPE-AUTHORITY step.
+    /// Populated by `bind_mounted_function` (+ deferred twin).
+    pub mounted_fns: HashMap<String, String>,
+
     /// Module aliases populated from bare-path `mount X.Y.Z;` declarations.
     ///
     /// Each entry maps the rightmost path segment (`Z`) to the **full
@@ -1475,6 +1496,7 @@ impl CodegenContext {
             newtype_inner_type: HashMap::new(),
             user_defined_types: HashSet::new(),
             mounted_types: HashMap::new(),
+            mounted_fns: HashMap::new(),
             module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),
             current_fn_escaping_vars: HashSet::new(),

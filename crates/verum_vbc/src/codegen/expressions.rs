@@ -6217,12 +6217,56 @@ impl VbcCodegen {
         } else {
             None
         };
+        // MOUNT-FN-AUTHORITY-1 (T0148): an explicit `mount X.{name}` /
+        // `mount X.name as alias` is the file's authoritative binding
+        // for bare `name` — resolve through the RECORDED mount target,
+        // not the flood-prone global layers.  The bare `functions[name]`
+        // slot is last-wins across passive module loads, so a wide
+        // umbrella mount (`mount core.{List}` pulls the whole `core`
+        // re-export tree) can clobber it with `<Type>.<method>` entries
+        // AFTER the mount's authoritative write; the ambiguity-guarded
+        // suffix scan below then sees several free-fn candidates and
+        // refuses — `arg(0)` in base/env died as UndefinedFunction with
+        // the whole file as collateral.  `mounted_fns` carries the
+        // resolved KEY (name-driven — ids renumber at archive
+        // boundaries), immune to slot clobbering.  Arity policy mirrors
+        // `lookup_function_with_arity`: exact match, then `key#arity`,
+        // then the primary anyway (a wrong-arity explicit mount should
+        // fail LOUD at the arity check, not silently reroute to an
+        // unrelated same-named fn).  Instance methods stay excluded per
+        // the pinned bare-name Call rule.
+        let mount_scoped_lookup: Option<(String, FunctionInfo)> = if !func_name.contains('.')
+            && !func_name.contains("::")
+        {
+            self.ctx.mounted_fns.get(&func_name).and_then(|resolved_key| {
+                let exact = self
+                    .ctx
+                    .functions
+                    .get(resolved_key)
+                    .filter(|info| is_free_fn(info));
+                let picked = match exact {
+                    Some(info) if info.param_count == args.len() => Some(info),
+                    other => {
+                        let alt_key = format!("{}#{}", resolved_key, args.len());
+                        self.ctx
+                            .functions
+                            .get(&alt_key)
+                            .filter(|info| is_free_fn(info))
+                            .or(other)
+                    }
+                };
+                picked.map(|info| (resolved_key.clone(), info.clone()))
+            })
+        } else {
+            None
+        };
         let (resolved_name, func_info) = match lexical_scoped_lookup
             .filter(|(_, info)| is_free_fn(info))
             // Lexical scope outranks EVERYTHING: the call site sits
             // inside the declaring function, so no import/module/global
             // registration may capture it (NESTED-LEXICAL-FIRST-1).
             .or(unit_decl_lookup)
+            .or(mount_scoped_lookup)
             .or_else(|| module_qualified_lookup.filter(|(_, info)| is_free_fn(info)))
             // The pinned rule above applies to EVERY layer: the
             // type-aware overload scan walks qualified `.name` keys and

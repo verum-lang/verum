@@ -9189,6 +9189,14 @@ impl VbcCodegen {
         }
         self.ctx
             .register_function_authoritative(alias_name.to_string(), func_info);
+        // MOUNT-FN-AUTHORITY-1 (T0148): carry the explicit mount intent
+        // out of the flood-prone bare-name slot — later passive module
+        // loads overwrite `functions[alias]` last-wins, but the call-site
+        // bare-name chain can always recover the user's chosen target
+        // through this name-driven record.
+        self.ctx
+            .mounted_fns
+            .insert(alias_name.to_string(), resolved_key.to_string());
         if alias_name != func_name {
             self.mount_aliases_buffer.push((
                 alias_name.to_string(),
@@ -9229,6 +9237,12 @@ impl VbcCodegen {
         }
         self.ctx
             .register_function(alias_name.to_string(), func_info);
+        // MOUNT-FN-AUTHORITY-1 (T0148): same carried mount intent as
+        // `bind_mounted_function` — the deferred pass is still an
+        // explicit user mount.
+        self.ctx
+            .mounted_fns
+            .insert(alias_name.to_string(), resolved_key.to_string());
         if alias_name != func_name {
             self.mount_aliases_buffer.push((
                 alias_name.to_string(),
