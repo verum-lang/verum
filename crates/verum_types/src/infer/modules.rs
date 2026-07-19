@@ -950,19 +950,10 @@ impl TypeChecker {
                 }
 
                 // Track the import source for ambiguity detection
+                // (IMPORT-SOURCE-FUNNEL-1).
                 let name_text = verum_common::Text::from(item_name);
                 let source = verum_common::Text::from(format!("cog.{}", module_name));
-
-                if let Some(sources) = self.imported_names.get_mut(&name_text) {
-                    // Avoid duplicate source entries (same module imported via different paths)
-                    if !sources.iter().any(|s| s == &source) {
-                        sources.push(source);
-                    }
-                } else {
-                    let mut sources = List::new();
-                    sources.push(source);
-                    self.imported_names.insert(name_text.clone(), sources);
-                }
+                self.record_import_source(name_text, source);
 
                 // Register the item type in the environment
                 self.register_imported_item_from_inline_module(&module, item_name)?;
@@ -970,6 +961,46 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    /// IMPORT-SOURCE-FUNNEL-1 (T0236) — the ONE authority that records
+    /// "bare name `name` was imported from module `source`" into
+    /// `imported_names`, the map behind the
+    /// `sources.len() > 1 ⇒ E602 AmbiguousName` checks
+    /// (`resolve_type_name`, expression name resolution,
+    /// `lookup_record_type`) and the mount-scoped single-source
+    /// resolvers.
+    ///
+    /// Returns `true` when the (name, source) pair is NEW, `false`
+    /// when the identical source was already recorded — callers that
+    /// short-circuit duplicate registration key off this.
+    ///
+    /// Every population site MUST route through here.  Duplicated
+    /// push logic is exactly how per-site spelling drift slips in:
+    /// the same target module recorded under two spellings reads as
+    /// two DISTINCT import sources and produces a false E602 (the
+    /// T0236 standalone-verify failure minted `cog.core.math.X` in
+    /// one pass and `cog.X` in another for the SAME file — fixed at
+    /// the identity layer by MODULE-IDENTITY-1 in verum_compiler's
+    /// orchestrators, kept honest here by the single funnel).
+    pub(crate) fn record_import_source(
+        &mut self,
+        name: verum_common::Text,
+        source: verum_common::Text,
+    ) -> bool {
+        if let Some(sources) = self.imported_names.get_mut(&name) {
+            // Avoid duplicate source entries (same module imported via
+            // different mount statements).
+            if sources.iter().any(|s| s == &source) {
+                return false;
+            }
+            sources.push(source);
+        } else {
+            let mut sources = List::new();
+            sources.push(source);
+            self.imported_names.insert(name, sources);
+        }
+        true
     }
 
     /// Bind a braced-mount item ALIAS (`mount X.{Widget as W}`) after
@@ -1035,19 +1066,11 @@ impl TypeChecker {
             verum_common::Text::from(format!("cog.{}", module_name))
         };
 
-        // Skip if already imported from the same source (prevents duplicate registration)
-        if let Some(sources) = self.imported_names.get(&name_text) {
-            if sources.iter().any(|s| s == &source) {
-                return Ok(());
-            }
-        }
-
-        if let Some(sources) = self.imported_names.get_mut(&name_text) {
-            sources.push(source);
-        } else {
-            let mut sources = List::new();
-            sources.push(source);
-            self.imported_names.insert(name_text.clone(), sources);
+        // Skip if already imported from the same source (prevents
+        // duplicate registration) — IMPORT-SOURCE-FUNNEL-1 reports
+        // whether the (name, source) pair is new.
+        if !self.record_import_source(name_text.clone(), source) {
+            return Ok(());
         }
 
         // Register the item type in the environment
@@ -1696,17 +1719,8 @@ impl TypeChecker {
                             "cog.{}",
                             module_path.as_str()
                         ));
-                        if let Some(sources) =
-                            self.imported_names.get_mut(&name_text)
-                        {
-                            if !sources.iter().any(|s| s == &source) {
-                                sources.push(source);
-                            }
-                        } else {
-                            let mut sources = List::new();
-                            sources.push(source);
-                            self.imported_names.insert(name_text, sources);
-                        }
+                        // IMPORT-SOURCE-FUNNEL-1.
+                        self.record_import_source(name_text, source);
                     }
 
                     // Honour `mount X.Y as Z;` at the leaf level — the
@@ -1985,17 +1999,8 @@ impl TypeChecker {
                                 "cog.{}",
                                 module_path.as_str()
                             ));
-                            if let Some(sources) =
-                                self.imported_names.get_mut(&name_text)
-                            {
-                                if !sources.iter().any(|s| s == &source) {
-                                    sources.push(source);
-                                }
-                            } else {
-                                let mut sources = List::new();
-                                sources.push(source);
-                                self.imported_names.insert(name_text, sources);
-                            }
+                            // IMPORT-SOURCE-FUNNEL-1.
+                            self.record_import_source(name_text, source);
                         }
 
                         let import_result = self.import_item_from_module_with_alias_and_span(

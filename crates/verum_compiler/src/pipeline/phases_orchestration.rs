@@ -479,6 +479,28 @@ impl<'s> CompilationPipeline<'s> {
             String::new()
         };
 
+        // MODULE-IDENTITY-1 (T0236): install the computed module path as
+        // the checker's CURRENT module identity, not just a local passed
+        // to `process_import` below.  The checker field is the single
+        // authority every later pass reads — in particular the main
+        // check loop re-processes `ItemKind::Mount` items through
+        // `check_import`, which resolves relative (`super.`/`self.`)
+        // mount paths against `self.current_module_path`.  When the
+        // field stayed at the default `cog` while Pass 0 used the real
+        // path (e.g. `core.math.simple`), the SAME mount minted TWO
+        // import-source spellings for the same target file
+        // (`cog.core.math.tensor` from Pass 0 vs `cog.tensor` from the
+        // check loop), and the ambiguity check reported a false
+        // `E602: ambiguous name` on every name a stdlib file imports
+        // relatively — making 27 theorem-bearing core/ files
+        // unverifiable standalone.  One identity ⇒ both passes mint the
+        // same source string ⇒ the existing exact-string dedup
+        // collapses them.  Pinned by
+        // `verum_compiler/tests/mount_self_ambiguity_e602_tests.rs`.
+        if !current_module_path_str.is_empty() {
+            checker.set_current_module_path(current_module_path_str.as_str());
+        }
+
         // Load imported modules into the registry for single-file checking.
         // This ensures that imported types, functions, and contexts are available
         // for type checking. Without this, imports like `import super.contexts.{Database}`

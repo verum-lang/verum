@@ -980,6 +980,18 @@ impl<'s> CompilationPipeline<'s> {
         // Module paths use dot-separated format (e.g., "handlers.users").
         let current_module_path_str = path.as_str().to_string();
 
+        // MODULE-IDENTITY-1 (T0236): install the module's path as the
+        // checker's CURRENT module identity (single authority) — the
+        // later item-check loop re-resolves `ItemKind::Mount` items
+        // against `self.current_module_path`, and leaving the default
+        // `cog` there makes relative (`super.`/`self.`) mounts mint a
+        // SECOND import-source spelling for the same target module,
+        // tripping the false `E602: ambiguous name`.  See the twin
+        // comment in `phases_orchestration.rs::phase_type_check`.
+        if !current_module_path_str.is_empty() {
+            checker.set_current_module_path(current_module_path_str.as_str());
+        }
+
         // Sub-pass 0: Pre-register all inline modules
         // This enables cross-module imports even when modules are declared after
         // the modules that import from them.

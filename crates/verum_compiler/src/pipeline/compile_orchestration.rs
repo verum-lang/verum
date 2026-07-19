@@ -952,6 +952,20 @@ impl<'s> CompilationPipeline<'s> {
                 // Register built-in types and functions
                 checker.register_builtins();
 
+                // MODULE-IDENTITY-1 (T0236): install this module's path
+                // as the checker's CURRENT module identity (single
+                // authority) — the item-check loop re-resolves
+                // `ItemKind::Mount` items against
+                // `self.current_module_path`, and leaving the default
+                // `cog` there makes relative (`super.`/`self.`) mounts
+                // mint a SECOND import-source spelling for the same
+                // target module, tripping the false `E602: ambiguous
+                // name`.  See the twin comment in
+                // `phases_orchestration.rs::phase_type_check`.
+                if !path.as_str().is_empty() {
+                    checker.set_current_module_path(path.as_str());
+                }
+
                 // Hand the stdlib metadata to this per-module TypeChecker
                 // so the receiver-driven lazy stdlib-type loader fires on
                 // method calls whose receiver type was *inferred* (via
