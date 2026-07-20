@@ -28,9 +28,19 @@ mount core.collections.btree.{BTreeMap};
 // Architectural fix path: investigate `extract_expr_type_name`'s
 // MethodCall arm for `self.root.as_mut()` to verify the return type
 // gets correctly substituted with concrete K=Int, V=Int.
+//
+// RESOLVED 2026-07-20 (T0147) — every §A test above is now live.
+// The root was NOT generic substitution: `compile_match` was the only
+// site that recorded the scrutinee's static type (and applied the
+// Heap<T>/Shared<T> unwrap) before `compile_pattern_bind`.  BTreeMap
+// traverses with `if let Maybe.Some(ref mut r) = self.root` /
+// `while let …`, so the payload binding `r` lost its type and `r.keys`
+// emitted a bare by-name field access on a raw pointer.  The four
+// refutable-binding sites now route through the shared
+// `enter_/exit_scrutinee_type_for_bind` helper, giving them parity with
+// `match`.  All 13 tests in this file pass under `--interp`.
 // =============================================================================
 
-@ignore
 @test
 fn regression_btreemap_insert_returns_prior_on_replacement() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -57,7 +67,6 @@ fn regression_btreemap_contains_key_present_returns_true() {
     assert(m.contains_key(&1));
 }
 
-@ignore
 @test
 fn regression_btreemap_remove_present_returns_value() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -66,7 +75,6 @@ fn regression_btreemap_remove_present_returns_value() {
     assert_eq(r, Maybe.Some(100));
 }
 
-@ignore
 @test
 fn regression_btreemap_clear_after_population() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -76,7 +84,6 @@ fn regression_btreemap_clear_after_population() {
     assert(m.is_empty());
 }
 
-@ignore
 @test
 fn regression_btreemap_first_key_value_returns_min() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -89,7 +96,6 @@ fn regression_btreemap_first_key_value_returns_min() {
     }
 }
 
-@ignore
 @test
 fn regression_btreemap_last_key_value_returns_max() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -101,7 +107,6 @@ fn regression_btreemap_last_key_value_returns_max() {
     }
 }
 
-@ignore
 @test
 fn regression_btreemap_pop_first_yields_min() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -116,7 +121,6 @@ fn regression_btreemap_pop_first_yields_min() {
     }
 }
 
-@ignore
 @test
 fn regression_btreemap_pop_last_yields_max() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -131,7 +135,6 @@ fn regression_btreemap_pop_last_yields_max() {
     }
 }
 
-@ignore
 @test
 fn regression_btreemap_len_tracks_insertions() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();

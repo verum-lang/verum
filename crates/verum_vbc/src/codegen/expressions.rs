@@ -14460,7 +14460,12 @@ impl VbcCodegen {
                         self.ctx.free_temp(match_reg);
 
                         // Bind pattern variables - available for subsequent conditions and then branch
+                        // T0147: carry the scrutinee's static type into the
+                        // bind, exactly as `compile_match` does.
+                        let bind_prev = self
+                            .enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
                         self.compile_pattern_bind(pattern, scrutinee)?;
+                        self.exit_scrutinee_type_for_bind(bind_prev);
                         continue;
                     }
 
@@ -14502,7 +14507,12 @@ impl VbcCodegen {
 
                     // Bind pattern variables - they're available for subsequent conditions
                     // and the then branch
+                    // T0147: carry the scrutinee's static type into the bind,
+                    // exactly as `compile_match` does.
+                    let bind_prev =
+                        self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
                     self.compile_pattern_bind(pattern, scrutinee)?;
+                    self.exit_scrutinee_type_for_bind(bind_prev);
                 }
             }
         }
@@ -14851,7 +14861,12 @@ impl VbcCodegen {
 
         // Pattern matched - enter scope and bind variables
         self.ctx.enter_scope();
+        // T0147: carry the scrutinee's static type into the bind, exactly
+        // as `compile_match` does.
+        let bind_prev =
+            self.enter_scrutinee_type_for_bind(scrutinee_expr, std::iter::once(pattern));
         self.compile_pattern_bind(pattern, scrutinee)?;
+        self.exit_scrutinee_type_for_bind(bind_prev);
 
         // Compile body
         self.compile_block(body)?;
@@ -15465,75 +15480,12 @@ impl VbcCodegen {
             .compile_expr(scrutinee)?
             .or_internal("match scrutinee has no value")?;
 
-        // Try to determine the type of the scrutinee for variant pattern resolution.
-        // Uses extract_expr_type_name which handles variables, field access, method calls etc.
-        let scrutinee_type = self.extract_expr_type_name(scrutinee);
-
-        // TUPLE-TYPE-TRACK-1 oracle: VERUM_TRACE_SCRUT=1 prints every
-        // match-scrutinee type resolution (the input to variant-payload
-        // binding types).
-        if std::env::var("VERUM_TRACE_SCRUT").is_ok() {
-            eprintln!(
-                "[scrut] fn={} type={:?}",
-                self.ctx.current_function.as_deref().unwrap_or("?"),
-                scrutinee_type,
-            );
-        }
-
-        // Store the scrutinee type for pattern binding to use
-        let prev_scrutinee_type = self.ctx.match_scrutinee_type.take();
-        self.ctx.match_scrutinee_type = scrutinee_type;
-
-        // When the scrutinee is a tuple expression `(a, b, …)`, record
-        // each element's type name so the tuple-pattern destructure
-        // path can set `match_scrutinee_type` per-element before
-        // recursing into sub-patterns.  Closes the bug where
-        // `match (self, other) { (Some(a), Some(b)) => a == b }`
-        // inside `impl Eq for Maybe<T>` lost `Maybe<T>` context for
-        // the inner element pattern; payload-type inference in
-        // `Some(a)` then registered `a` with no type → `a == b`
-        // codegen fell through to a primitive `CmpI` on the Maybe
-        // wrapper value (returning `false` for `Some(5) == Some(5)`).
-        let prev_tuple_types = self.ctx.match_tuple_element_types.take();
-        if let ExprKind::Tuple(elems) = &scrutinee.kind {
-            let elem_types: Vec<Option<String>> = elems
-                .iter()
-                .map(|e| self.extract_expr_type_name(e))
-                .collect();
-            self.ctx.match_tuple_element_types = Some(elem_types);
-        }
-
-        // Heap<T>/Shared<T> are transparent wrappers in VBC — no actual heap indirection.
-        // Heap.new(inner) passes through the inner value at LLVM level.
-        // For variant matching, just update the scrutinee type to the inner type
-        // so variant tag lookup resolves against the correct type (e.g., IntList not Heap).
-        if let Some(stype) = self.ctx.match_scrutinee_type.clone() {
-            let base = stype.split('<').next().unwrap_or(&stype);
-            if self.is_allocating_wrapper(base) {
-                // Only unwrap type if arms don't contain Heap(...)/Shared(...) patterns
-                let has_wrapper_pattern = arms.iter().any(|arm| {
-                    if let verum_ast::PatternKind::Variant { path, .. } = &arm.pattern.kind {
-                        path.segments.last().is_some_and(|s| match s {
-                            verum_ast::ty::PathSegment::Name(id) => {
-                                self.is_allocating_wrapper(id.name.as_str())
-                            }
-                            _ => false,
-                        })
-                    } else {
-                        false
-                    }
-                });
-                if !has_wrapper_pattern {
-                    // Update scrutinee type to inner type: "Heap<IntList>" -> "IntList"
-                    // No Deref needed — Heap<T> is transparent (value IS the inner value)
-                    if let Some(inner_start) = stype.find('<')
-                        && let Some(inner) = stype[inner_start + 1..].strip_suffix('>')
-                    {
-                        self.ctx.match_scrutinee_type = Some(inner.to_string());
-                    }
-                }
-            }
-        }
+        // Record the scrutinee's static type (+ tuple element types, +
+        // Heap<T>/Shared<T> unwrap) for the payload-type inference in
+        // `compile_pattern_bind` / `compile_pattern_test`.  Single
+        // authority — shared with every refutable-binding site (T0147).
+        let bind_prev =
+            self.enter_scrutinee_type_for_bind(scrutinee, arms.iter().map(|a| &a.pattern));
 
         let result = self.ctx.alloc_temp();
         let end_label = self.ctx.new_label("match_end");
@@ -15626,12 +15578,130 @@ impl VbcCodegen {
         self.ctx.clear_active_pattern_cache();
 
         // Restore previous scrutinee type
-        self.ctx.match_scrutinee_type = prev_scrutinee_type;
-        self.ctx.match_tuple_element_types = prev_tuple_types;
+        self.exit_scrutinee_type_for_bind(bind_prev);
 
         self.ctx.free_temp(scrutinee_reg);
 
         Ok(Some(result))
+    }
+
+    /// Set [`CodegenContext::match_scrutinee_type`] (+ tuple element types)
+    /// for a pattern binding against `scrutinee`, applying the
+    /// `Heap<T>`/`Shared<T>` transparent-wrapper unwrap.
+    ///
+    /// This is the SINGLE authority for the setup that variant/record
+    /// payload-type inference in `compile_pattern_bind` /
+    /// `compile_pattern_test` consumes.  `compile_match`, `compile_if`
+    /// (both the `Let` condition and the `Is`-binding condition),
+    /// `compile_while_let` and `compile_let_else` all route through it —
+    /// before T0147 only `compile_match` performed the setup, so a
+    /// refutable binding (`if let Some(r) = &self.root`, `while let …`,
+    /// `x is Some(r)`, `let Some(r) = … else`) lost the payload's static
+    /// type and a subsequent field access mis-resolved (global-intern
+    /// field guess, no `Deref` on a `Heap<Record>` payload) → runtime
+    /// "GetFieldNamed: no TypeDescriptor for runtime type_id=…".
+    ///
+    /// Returns the previous `(match_scrutinee_type,
+    /// match_tuple_element_types)`; the caller MUST restore them with
+    /// [`Self::exit_scrutinee_type_for_bind`] once the pattern is bound.
+    /// (The binding's type is recorded PERSISTENTLY into
+    /// `ctx.variable_type_names` by `compile_pattern_bind`, so restoring
+    /// immediately after the bind is correct and keeps `let`-chains
+    /// clean — each condition scopes its own scrutinee.)
+    ///
+    /// `patterns` is the pattern set bound against the scrutinee (one for
+    /// if-let / while-let / let-else / `is`; the arm patterns for match);
+    /// a pattern that explicitly matches `Heap(..)`/`Shared(..)`
+    /// suppresses the unwrap.
+    pub(crate) fn enter_scrutinee_type_for_bind<'p>(
+        &mut self,
+        scrutinee: &Expr,
+        patterns: impl Iterator<Item = &'p verum_ast::Pattern>,
+    ) -> (Option<String>, Option<Vec<Option<String>>>) {
+        // Resolved BEFORE the `take()` below, so a nested scrutinee still
+        // sees the enclosing `match_scrutinee_type` while it resolves —
+        // preserving `compile_match`'s pre-T0147 ordering exactly.
+        // `extract_expr_type_name` handles variables, field access, method
+        // calls etc.
+        let scrutinee_type = self.extract_expr_type_name(scrutinee);
+
+        // TUPLE-TYPE-TRACK-1 oracle: VERUM_TRACE_SCRUT=1 prints every
+        // scrutinee type resolution (the input to variant-payload
+        // binding types).
+        if std::env::var("VERUM_TRACE_SCRUT").is_ok() {
+            eprintln!(
+                "[scrut] fn={} type={:?}",
+                self.ctx.current_function.as_deref().unwrap_or("?"),
+                scrutinee_type,
+            );
+        }
+
+        let prev = (
+            self.ctx.match_scrutinee_type.take(),
+            self.ctx.match_tuple_element_types.take(),
+        );
+        self.ctx.match_scrutinee_type = scrutinee_type;
+
+        // When the scrutinee is a tuple expression `(a, b, …)`, record
+        // each element's type name so the tuple-pattern destructure
+        // path can set `match_scrutinee_type` per-element before
+        // recursing into sub-patterns.  Closes the bug where
+        // `match (self, other) { (Some(a), Some(b)) => a == b }`
+        // inside `impl Eq for Maybe<T>` lost `Maybe<T>` context for
+        // the inner element pattern; payload-type inference in
+        // `Some(a)` then registered `a` with no type → `a == b`
+        // codegen fell through to a primitive `CmpI` on the Maybe
+        // wrapper value (returning `false` for `Some(5) == Some(5)`).
+        if let ExprKind::Tuple(elems) = &scrutinee.kind {
+            let elem_types: Vec<Option<String>> = elems
+                .iter()
+                .map(|e| self.extract_expr_type_name(e))
+                .collect();
+            self.ctx.match_tuple_element_types = Some(elem_types);
+        }
+
+        // Heap<T>/Shared<T> are transparent wrappers in VBC — no actual heap indirection.
+        // Heap.new(inner) passes through the inner value at LLVM level.
+        // For variant matching, just update the scrutinee type to the inner type
+        // so variant tag lookup resolves against the correct type (e.g., IntList not Heap).
+        if let Some(stype) = self.ctx.match_scrutinee_type.clone() {
+            let base = stype.split('<').next().unwrap_or(&stype);
+            if self.is_allocating_wrapper(base) {
+                // Only unwrap type if patterns don't contain Heap(...)/Shared(...) patterns
+                let has_wrapper_pattern = patterns.into_iter().any(|p| {
+                    if let verum_ast::PatternKind::Variant { path, .. } = &p.kind {
+                        path.segments.last().is_some_and(|s| match s {
+                            verum_ast::ty::PathSegment::Name(id) => {
+                                self.is_allocating_wrapper(id.name.as_str())
+                            }
+                            _ => false,
+                        })
+                    } else {
+                        false
+                    }
+                });
+                if !has_wrapper_pattern {
+                    // Update scrutinee type to inner type: "Heap<IntList>" -> "IntList"
+                    // No Deref needed — Heap<T> is transparent (value IS the inner value)
+                    if let Some(inner_start) = stype.find('<')
+                        && let Some(inner) = stype[inner_start + 1..].strip_suffix('>')
+                    {
+                        self.ctx.match_scrutinee_type = Some(inner.to_string());
+                    }
+                }
+            }
+        }
+        prev
+    }
+
+    /// Restore the `(match_scrutinee_type, match_tuple_element_types)`
+    /// pair returned by [`Self::enter_scrutinee_type_for_bind`].
+    pub(crate) fn exit_scrutinee_type_for_bind(
+        &mut self,
+        prev: (Option<String>, Option<Vec<Option<String>>>),
+    ) {
+        self.ctx.match_scrutinee_type = prev.0;
+        self.ctx.match_tuple_element_types = prev.1;
     }
 
     /// Tests if a pattern matches a value.

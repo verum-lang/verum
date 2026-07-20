@@ -1421,7 +1421,12 @@ impl VbcCodegen {
 
         // Bind pattern
         self.ctx.define_label(&bind_label);
+        // T0147: carry the scrutinee's static type into the bind, exactly
+        // as `compile_match` does — otherwise the payload binding loses
+        // its type and a field access on it mis-resolves.
+        let bind_prev = self.enter_scrutinee_type_for_bind(value, std::iter::once(pattern));
         self.compile_pattern_bind(pattern, value_reg)?;
+        self.exit_scrutinee_type_for_bind(bind_prev);
 
         Ok(None)
     }
