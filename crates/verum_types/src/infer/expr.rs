@@ -8644,7 +8644,10 @@ impl TypeChecker {
 
         // Type casts are checked for compatibility
         // Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — (Integer Hierarchy), Section 6 (Reference Safety)
-        self.check_cast(&expr_result.ty, &target_ty, expr.span)?;
+        // Pass the cast's source operand so the Int→Float precision check can
+        // suppress its warning for a compile-time constant that is exactly
+        // representable (the type/refinement legs apply even without it).
+        self.check_cast(&expr_result.ty, &target_ty, expr.span, Some(e))?;
 
         Ok(InferResult::new(target_ty))
     }

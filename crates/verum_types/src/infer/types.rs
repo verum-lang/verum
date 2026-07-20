@@ -6073,13 +6073,179 @@ impl TypeChecker {
     /// - **NO undefined behavior** - all casts are checked
     /// - **NO false negatives** - invalid casts are rejected
     /// - **NO data races** - reference safety preserved
-    pub fn check_cast(&mut self, from_ty: &Type, to_ty: &Type, span: Span) -> Result<()> {
+    /// Decide whether an `Int → Float` (`… as Float`) cast is provably
+    /// precision-preserving, so the "may lose precision" warning can be
+    /// suppressed for provably-safe operands (SYNARC Issue 5 / T0519).
+    ///
+    /// The operand's value is bounded from three independent, sound sources,
+    /// intersected into a single proven range `[lo, hi]`:
+    ///   1. the intrinsic range of a fixed-width integer source type
+    ///      (`Byte`/`Int8..Int32`/`UInt8..UInt32` all fit; `Int`/`Int64`/`UInt`/
+    ///      `UInt64`/`USize`/`Int128`/… deliberately do not);
+    ///   2. a compile-time-constant operand (`7`, `3 + 4`, an `@const`), whose
+    ///      value pins the range to a single point;
+    ///   3. a refinement predicate on the source type (`Int{>= 0 && < 100}`),
+    ///      whose literal comparisons narrow the range.
+    ///
+    /// The cast is lossless exactly when the proven range fits inside the
+    /// exactly-representable IEEE-754 double window `[-2^53, 2^53]` (every
+    /// integer there round-trips through `f64`; `2^53 + 1` is the first that
+    /// does not). Genuinely-unbounded integers narrow nothing and keep the
+    /// warning — no false suppression.
+    fn int_to_float_cast_is_lossless(
+        &mut self,
+        from_base: &Type,
+        from_refinement: Option<&crate::refinement::RefinementPredicate>,
+        from_expr: Option<&Expr>,
+    ) -> bool {
+        const EXACT: i128 = 1_i128 << 53; // 9_007_199_254_740_992
+
+        // Widest possible integer range; every proof below can only narrow it.
+        let mut lo = i128::MIN;
+        let mut hi = i128::MAX;
+
+        // (1) Intrinsic range of a fixed-width integer source type.
+        if let Some(name) = self.get_type_name(from_base) {
+            if let Some((tlo, thi)) = Self::integer_type_range(&name) {
+                lo = lo.max(tlo);
+                hi = hi.min(thi);
+            }
+        }
+
+        // (2) Compile-time-constant source pins the value exactly.
+        if let Some(expr) = from_expr {
+            if let Ok(value) = self.const_eval.eval(expr) {
+                if let Some(v) = value.as_i128() {
+                    lo = lo.max(v);
+                    hi = hi.min(v);
+                }
+            }
+        }
+
+        // (3) Refinement comparisons on the source type narrow the range.
+        if let Some(pred) = from_refinement {
+            let var = pred.bound_variable();
+            Self::narrow_int_range_from_refinement_expr(
+                &pred.predicate,
+                var.as_str(),
+                &mut lo,
+                &mut hi,
+            );
+        }
+
+        // Lossless exactly when the proven range fits the representable window.
+        lo >= -EXACT && hi <= EXACT
+    }
+
+    /// Narrow `[lo, hi]` using literal comparisons over `var` found in a
+    /// refinement predicate expression. Only conjunctions (`&&`) of comparisons
+    /// between the bound variable and an integer literal are understood; every
+    /// other shape is ignored (leaving the bound as-is), which keeps the
+    /// precision warning conservatively enabled — soundness over completeness.
+    fn narrow_int_range_from_refinement_expr(expr: &Expr, var: &str, lo: &mut i128, hi: &mut i128) {
+        fn is_var(e: &Expr, var: &str) -> bool {
+            if let ExprKind::Path(path) = &e.kind {
+                return path.as_ident().is_some_and(|id| id.name.as_str() == var);
+            }
+            false
+        }
+        fn as_int_lit(e: &Expr) -> Option<i128> {
+            if let ExprKind::Literal(lit) = &e.kind {
+                if let LiteralKind::Int(int_lit) = &lit.kind {
+                    return Some(int_lit.value);
+                }
+            }
+            None
+        }
+
+        let ExprKind::Binary { op, left, right } = &expr.kind else {
+            return;
+        };
+
+        // Conjunction: both sides may constrain the same variable.
+        if matches!(op, BinOp::And) {
+            Self::narrow_int_range_from_refinement_expr(left, var, lo, hi);
+            Self::narrow_int_range_from_refinement_expr(right, var, lo, hi);
+            return;
+        }
+
+        // Comparison of the bound variable against an integer literal.
+        // Normalise `k <op> var` into `var <flip> k` so only `var <op> k` remains.
+        let (cmp, k) = if is_var(left, var) {
+            match as_int_lit(right) {
+                Some(k) => (*op, k),
+                None => return,
+            }
+        } else if is_var(right, var) {
+            let k = match as_int_lit(left) {
+                Some(k) => k,
+                None => return,
+            };
+            let flipped = match op {
+                BinOp::Lt => BinOp::Gt,
+                BinOp::Le => BinOp::Ge,
+                BinOp::Gt => BinOp::Lt,
+                BinOp::Ge => BinOp::Le,
+                BinOp::Eq => BinOp::Eq,
+                _ => return,
+            };
+            (flipped, k)
+        } else {
+            return;
+        };
+
+        match cmp {
+            // var < k  ⇒  var <= k - 1
+            BinOp::Lt => {
+                if let Some(u) = k.checked_sub(1) {
+                    *hi = (*hi).min(u);
+                }
+            }
+            // var <= k
+            BinOp::Le => *hi = (*hi).min(k),
+            // var > k  ⇒  var >= k + 1
+            BinOp::Gt => {
+                if let Some(l) = k.checked_add(1) {
+                    *lo = (*lo).max(l);
+                }
+            }
+            // var >= k
+            BinOp::Ge => *lo = (*lo).max(k),
+            // var == k
+            BinOp::Eq => {
+                *lo = (*lo).max(k);
+                *hi = (*hi).min(k);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn check_cast(
+        &mut self,
+        from_ty: &Type,
+        to_ty: &Type,
+        span: Span,
+        // Source operand of the cast, when available. Enables the
+        // compile-time-constant leg of the Int→Float precision heuristic; pass
+        // `None` from type-only contexts (the type/refinement legs still apply).
+        from_expr: Option<&Expr>,
+    ) -> Result<()> {
         use Type::*;
 
         // Strip refinement types for cast checking — casting a refined type
         // should be equivalent to casting its base type (e.g., Int{>= 0} as Float ≡ Int as Float)
+        //
+        // The source refinement is CAPTURED before the strip: the Int→Float
+        // precision heuristic below narrows the operand's proven range with
+        // its literal comparisons, which is the whole point of a bound like
+        // `Int{it >= 0 && it < 100}` (SYNARC Issue 5). Everything else about
+        // cast checking still sees only the base types.
+        let mut from_refinement: Option<crate::refinement::RefinementPredicate> = None;
         let from_ty = match from_ty {
-            Refined { base, .. } => base.as_ref(),
+            Refined { base, predicate } => {
+                from_refinement = Some(predicate.clone());
+                base.as_ref()
+            }
             other => other,
         };
         let to_ty = match to_ty {
@@ -6089,7 +6255,12 @@ impl TypeChecker {
         // Also normalize Named types that are refinement aliases
         let from_ty = &self.normalize_type(from_ty);
         let from_ty = match from_ty {
-            Refined { base, .. } => base.as_ref(),
+            Refined { base, predicate } => {
+                if from_refinement.is_none() {
+                    from_refinement = Some(predicate.clone());
+                }
+                base.as_ref()
+            }
             other => other,
         };
         let to_ty = &self.normalize_type(to_ty);
@@ -6214,6 +6385,19 @@ impl TypeChecker {
             (Int | Named { .. }, Float) => {
                 // Int → Float: allowed with precision loss warning
                 // Spec: Numeric conversions - precision loss detection
+                //
+                // …unless the operand is PROVABLY inside the exactly
+                // representable IEEE-754 window: a fixed-width source type
+                // (Byte/Int32/UInt32/…), a compile-time constant, or a
+                // refinement bound. Warning on `7 as Float` is noise that
+                // trains users to ignore the diagnostic (SYNARC Issue 5).
+                if self.int_to_float_cast_is_lossless(
+                    from_ty,
+                    from_refinement.as_ref(),
+                    from_expr,
+                ) {
+                    return Ok(());
+                }
                 self.emit_diagnostic(
                     DiagnosticBuilder::warning()
                         .message(format!(
