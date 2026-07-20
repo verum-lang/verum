@@ -194,9 +194,25 @@ const BOXED_INT_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER; // bi
 /// This avoids bit 45 which is used as THIN_REF_SUB_MARKER.
 const GENERATOR_ID_MASK: u64 = (1u64 << 45) - 1;
 
-/// Mask for boxed integer index (bits 0-44, 45 bits total).
-/// This avoids bit 45 which is used as FAT_REF_SUB_MARKER.
-const BOXED_INT_INDEX_MASK: u64 = (1u64 << 45) - 1;
+/// Mask for boxed integer index (bits 0-43, 44 bits total).
+///
+/// Narrowed from 45 to 44 bits (T0272): bit 44 is now the boxed-int WIDTH
+/// discriminator (`BOXED_I128_WIDTH_BIT`) that splits the boxed-int family into
+/// the existing `BOXED_INTS: Vec<i64>` (bit 44 = 0) and the new
+/// `BOXED_I128S: Vec<u128>` (bit 44 = 1). Bit 45 stays the FatRef sub-marker.
+/// 44 bits still index ~1.76e13 entries, far beyond any real program.
+const BOXED_INT_INDEX_MASK: u64 = (1u64 << 44) - 1;
+
+/// Width discriminator bit (bit 44) inside the boxed-int family (T0272).
+///
+/// A boxed Value with bits 47+46 set and bit 45 clear (the boxed-int family)
+/// is a 64-bit boxed int when bit 44 is clear and a 128-bit boxed int when bit
+/// 44 is set. There is no free top-level marker slot (bits 47/46/45 are fully
+/// allocated across Generator/ThinRef/boxed-i64/FatRef), so the width lives in
+/// the index field instead. A genuine Int128/UInt128 value ALWAYS boxes — 128
+/// bits cannot inline into a 64-bit NaN box — so there is no fast path to
+/// preserve; every Int128 op pays one table access, the honest cost of the type.
+const BOXED_I128_WIDTH_BIT: u64 = 1u64 << 44;
 
 /// Sub-marker bit (bit 45) to distinguish ThinRef from generators.
 ///
@@ -287,6 +303,14 @@ const CBGR_REGREF_GEN_SHIFT: u32 = CBGR_REGREF_ABS_BITS;
 use std::sync::Mutex;
 static BOXED_INTS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
 
+/// Thread-safe global storage for boxed 128-bit integers (T0272).
+///
+/// Stores the RAW 128-bit bit pattern as `u128`, not a signed `i128`: a signed
+/// payload could not hold `UInt128::MAX` (2^128−1). Callers decide signed vs
+/// unsigned interpretation, exactly as the boxed-i64 path leaves that to the
+/// `signed: bool` idiom in `arith_helpers.rs`.
+static BOXED_I128S: Mutex<Vec<u128>> = Mutex::new(Vec::new());
+
 // Thread-safe global storage for CBGR references
 static THIN_REFS: Mutex<Vec<ThinRef>> = Mutex::new(Vec::new());
 static FAT_REFS: Mutex<Vec<FatRef>> = Mutex::new(Vec::new());
@@ -324,6 +348,10 @@ static FAT_REFS: Mutex<Vec<FatRef>> = Mutex::new(Vec::new());
 /// and is about to start a fresh one.
 pub fn reset_global_value_tables() {
     if let Ok(mut t) = BOXED_INTS.lock() {
+        t.clear();
+        t.shrink_to_fit();
+    }
+    if let Ok(mut t) = BOXED_I128S.lock() {
         t.clear();
         t.shrink_to_fit();
     }
@@ -724,6 +752,44 @@ impl Value {
         Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | BOXED_INT_MARKER | index)
     }
 
+    /// Creates a boxed 128-bit integer value from its raw bit pattern (T0272).
+    ///
+    /// A 128-bit value cannot inline into a 64-bit NaN box, so it ALWAYS boxes
+    /// into `BOXED_I128S` and tags with the boxed-int-family marker plus the
+    /// width bit. `raw` is the raw 128 bits; the signed/unsigned reading is the
+    /// caller's (`Int128` vs `UInt128`) decision, mirroring the boxed-i64 path.
+    #[inline]
+    pub fn from_i128_raw(raw: u128) -> Self {
+        let mut table = BOXED_I128S.lock().unwrap();
+        let index = table.len() as u64;
+        if index > BOXED_INT_INDEX_MASK {
+            // Prevent OOM: wrap index to stay within table bounds (lossy but safe),
+            // mirroring the boxed-i64 overflow guard.
+            let wrapped = index & BOXED_INT_INDEX_MASK;
+            return Value(
+                NAN_BITS
+                    | (TAG_POINTER << TAG_SHIFT)
+                    | BOXED_INT_MARKER
+                    | BOXED_I128_WIDTH_BIT
+                    | wrapped,
+            );
+        }
+        table.push(raw);
+        Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | BOXED_INT_MARKER | BOXED_I128_WIDTH_BIT | index)
+    }
+
+    /// Creates a signed 128-bit integer value.
+    #[inline]
+    pub fn from_i128(i: i128) -> Self {
+        Self::from_i128_raw(i as u128)
+    }
+
+    /// Creates an unsigned 128-bit integer value.
+    #[inline]
+    pub fn from_u128(u: u128) -> Self {
+        Self::from_i128_raw(u)
+    }
+
     /// Creates a boolean value.
     #[inline]
     pub fn from_bool(b: bool) -> Self {
@@ -977,12 +1043,27 @@ impl Value {
         self.tag() == Some(TAG_POINTER as u8)
             && (self.0 & BOXED_INT_MARKER) == BOXED_INT_MARKER // bits 47 and 46 set
             && (self.0 & FAT_REF_SUB_MARKER) == 0 // bit 45 clear: a FatRef sets 47|46|45 and must NOT be misread as a boxed int (mirrors is_thin_ref/is_generator, which require the higher sub-marker bit clear)
+            && (self.0 & BOXED_I128_WIDTH_BIT) == 0 // bit 44 clear: a boxed-i128 (T0272) shares the 47|46 prefix and must NOT be misread as a boxed-i64
     }
 
-    /// Returns true if this is an integer (inline or boxed).
+    /// Returns true if this is a boxed 128-bit integer (T0272).
+    ///
+    /// Same boxed-int-family prefix as `is_boxed_int` (bits 47+46 set, bit 45
+    /// clear) but with the width bit (bit 44) set, so the two are disjoint.
+    #[inline]
+    pub fn is_boxed_i128(&self) -> bool {
+        self.tag() == Some(TAG_POINTER as u8)
+            && (self.0 & BOXED_INT_MARKER) == BOXED_INT_MARKER // bits 47 and 46 set
+            && (self.0 & FAT_REF_SUB_MARKER) == 0 // bit 45 clear: not a FatRef
+            && (self.0 & BOXED_I128_WIDTH_BIT) != 0 // bit 44 set: the 128-bit split
+    }
+
+    /// Returns true if this is an integer of any width (inline, boxed-i64, or
+    /// boxed-i128). Widened for T0272 in this one predicate so every "is this an
+    /// integer" call site extends to Int128 without per-site edits.
     #[inline]
     pub fn is_int(&self) -> bool {
-        self.is_inline_int() || self.is_boxed_int()
+        self.is_inline_int() || self.is_boxed_int() || self.is_boxed_i128()
     }
 
     /// Returns true if this is a boolean.
@@ -1183,6 +1264,13 @@ impl Value {
     #[inline]
     pub fn as_i64(&self) -> i64 {
         debug_assert!(self.is_int(), "Expected int, got {:?}", self.tag());
+        if self.is_boxed_i128() {
+            // A 128-bit value read through the i64 window: return the low 64
+            // bits (a deliberate, lossy narrowing — full-width reads go through
+            // `as_i128_raw`). Without this branch is_boxed_i128 would fall to
+            // the inline arm below and decode the tagged bits as garbage.
+            return self.as_i128_raw() as i64;
+        }
         if self.is_boxed_int() {
             // Boxed: look up in global table
             let index = (self.0 & BOXED_INT_INDEX_MASK) as usize;
@@ -1192,6 +1280,27 @@ impl Value {
             // Inline: sign-extend from 48 bits to 64 bits
             let payload = (self.0 & PAYLOAD_MASK) as i64;
             (payload << 16) >> 16
+        }
+    }
+
+    /// Reads a 128-bit integer's raw bit pattern (T0272).
+    ///
+    /// For a boxed-i128 Value, indexes `BOXED_I128S`. For any narrower integer
+    /// (inline or boxed-i64) it widens the i64 value with SIGN extension — the
+    /// signed default; an unsigned caller that needs zero-extension of a narrow
+    /// value should mask before widening. Non-integers read as 0, mirroring
+    /// `as_i64`.
+    #[inline]
+    pub fn as_i128_raw(&self) -> u128 {
+        if self.is_boxed_i128() {
+            let index = (self.0 & BOXED_INT_INDEX_MASK) as usize;
+            let table = BOXED_I128S.lock().unwrap();
+            table.get(index).copied().unwrap_or(0)
+        } else if self.is_int() {
+            // Sign-extend the narrower integer into 128 bits.
+            (self.as_i64() as i128) as u128
+        } else {
+            0
         }
     }
 
@@ -2542,6 +2651,57 @@ mod tests {
             abs_field | gen_field | CBGR_REGREF_MUT_BIT | CBGR_REGREF_MARKER,
             PAYLOAD_MASK,
             "abs|gen|mut|marker must tile the whole 48-bit payload",
+        );
+    }
+
+    // ========================================================================
+    // Boxed 128-bit integers (T0272)
+    // ========================================================================
+
+    #[test]
+    fn test_boxed_i128_round_trips_extremes() {
+        // The values that motivate a real 128-bit representation: they cannot
+        // survive an i64 collapse.
+        for raw in [
+            0u128,
+            1u128,
+            u128::MAX,                 // UInt128::MAX — unrepresentable if stored as i128
+            (i128::MAX as u128),       // Int128::MAX
+            (i128::MIN as u128),       // Int128::MIN
+            0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128,
+            (u64::MAX as u128) + 1,    // just past the 64-bit boundary
+        ] {
+            let v = Value::from_i128_raw(raw);
+            assert!(v.is_boxed_i128(), "raw {raw:#x} must be a boxed i128");
+            assert!(v.is_int(), "boxed i128 must count as an integer");
+            assert!(!v.is_boxed_int(), "boxed i128 must NOT read as a boxed i64");
+            assert_eq!(v.as_i128_raw(), raw, "raw {raw:#x} must round-trip");
+            // The i64 window is a deliberate low-64-bit narrowing.
+            assert_eq!(v.as_i64() as u64, raw as u64, "i64 window is the low 64 bits");
+        }
+    }
+
+    #[test]
+    fn test_boxed_i128_disjoint_from_boxed_i64_and_fatref() {
+        // A boxed i64 must never satisfy is_boxed_i128, and vice versa — the
+        // bit-44 width split is what keeps the two boxed-int families disjoint.
+        let big_i64 = Value::from_i64(i64::MAX); // forces the boxed-i64 path
+        assert!(big_i64.is_boxed_int() || big_i64.is_inline_int());
+        assert!(!big_i64.is_boxed_i128(), "a boxed/inline i64 is not a boxed i128");
+
+        let i128v = Value::from_u128(u128::MAX);
+        assert!(i128v.is_boxed_i128());
+        assert!(!i128v.is_boxed_int(), "the i128 is excluded from the i64 family");
+    }
+
+    #[test]
+    fn test_from_i128_and_from_u128_sign_agnostic_storage() {
+        // -1 as i128 and u128::MAX share the same raw bit pattern; storage is
+        // raw, so both produce the same Value bits and the caller's type decides
+        // the reading.
+        assert_eq!(
+            Value::from_i128(-1).as_i128_raw(),
+            Value::from_u128(u128::MAX).as_i128_raw()
         );
     }
 }

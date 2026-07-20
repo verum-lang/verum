@@ -73,6 +73,12 @@ impl TypeId {
     /// `s.chars()`, …) — VBC pre-fix stored Char as Int and the
     /// alias info was lost in archive descriptors.
     pub const CHAR: TypeId = TypeId(16);
+    /// 128-bit signed integer (T0272).  Always heap-boxed at runtime — 128 bits
+    /// cannot inline into a 64-bit NaN box.  Added at slot 17 with `FIRST_USER`
+    /// bumped to match, exactly as `CHAR` was added at 16.
+    pub const I128: TypeId = TypeId(17);
+    /// 128-bit unsigned integer (T0272).
+    pub const U128: TypeId = TypeId(18);
     /// Single byte (8-bit unsigned, alias for U8).
     pub const BYTE: TypeId = TypeId(6);
 
@@ -97,7 +103,8 @@ impl TypeId {
     pub const USIZE: TypeId = TypeId(14);
 
     /// First user-defined type ID.
-    pub const FIRST_USER: u32 = 17;
+    /// Bumped 17 -> 19 for T0272 (I128=17, U128=18), mirroring the CHAR=16 bump.
+    pub const FIRST_USER: u32 = 19;
 
     // ========================================================================
     // Well-Known Meta System Type IDs (256-511)
@@ -340,13 +347,15 @@ impl TypeId {
     }
 
     /// Checks if this is a primitive numeric type.
+    /// 17 = I128, 18 = U128 (T0272).
     pub fn is_numeric(self) -> bool {
-        matches!(self.0, 2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13)
+        matches!(self.0, 2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 17 | 18)
     }
 
     /// Checks if this is an integer type.
+    /// 17 = I128, 18 = U128 (T0272).
     pub fn is_integer(self) -> bool {
-        matches!(self.0, 2 | 6 | 7 | 8 | 9 | 10 | 11 | 12)
+        matches!(self.0, 2 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 17 | 18)
     }
 
     /// Checks if this is a floating point type.
@@ -1151,8 +1160,14 @@ mod tests {
 
     #[test]
     fn test_type_id_first_user() {
-        assert_eq!(TypeId::FIRST_USER, 17);
+        // T0272 bumped FIRST_USER 17 -> 19 (I128=17, U128=18), mirroring the
+        // CHAR=16 bump that took it 16 -> 17.
+        assert_eq!(TypeId::FIRST_USER, 19);
         assert_eq!(TypeId::CHAR.0, 16);
+        assert_eq!(TypeId::I128.0, 17);
+        assert_eq!(TypeId::U128.0, 18);
+        assert!(TypeId::I128.is_integer() && TypeId::I128.is_numeric());
+        assert!(TypeId::U128.is_integer() && TypeId::U128.is_numeric());
     }
 
     #[test]
@@ -1174,10 +1189,13 @@ mod tests {
         assert!(TypeId::F32.is_builtin());
         assert!(TypeId::PTR.is_builtin());
         assert!(TypeId::RESERVED.is_builtin());
+        // I128=17 / U128=18 are builtin as of T0272.
+        assert!(TypeId::I128.is_builtin());
+        assert!(TypeId::U128.is_builtin());
 
-        // User types should return false (FIRST_USER bumped from
-        // 16 to 17 when TypeId::CHAR was added at slot 16).
-        assert!(!TypeId(17).is_builtin());
+        // User types should return false (FIRST_USER bumped to 19 when
+        // TypeId::I128=17 / U128=18 were added — cf. the CHAR=16 bump to 17).
+        assert!(!TypeId(19).is_builtin());
         assert!(!TypeId(100).is_builtin());
         assert!(!TypeId(u32::MAX).is_builtin());
     }
@@ -2575,11 +2593,13 @@ mod tests {
 
     #[test]
     fn test_type_id_boundary_builtin() {
-        // TypeId 16 is the last builtin (CHAR — added when the
-        // primitive set was extended from 15→16 builtins).
-        assert!(TypeId(16).is_builtin());
-        // TypeId 17 is first user type (FIRST_USER == 17).
-        assert!(!TypeId(17).is_builtin());
+        // TypeId 18 is the last builtin (U128 — T0272 extended the primitive
+        // set 16→18, after CHAR extended it 15→16).
+        assert!(TypeId(16).is_builtin()); // CHAR
+        assert!(TypeId(17).is_builtin()); // I128 (T0272)
+        assert!(TypeId(18).is_builtin()); // U128 (T0272)
+        // TypeId 19 is the first user type (FIRST_USER == 19).
+        assert!(!TypeId(19).is_builtin());
     }
 
     #[test]
