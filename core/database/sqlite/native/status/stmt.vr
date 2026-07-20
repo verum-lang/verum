@@ -70,14 +70,14 @@ implement StmtStatus {
         }
     }
 
-    public fn note_full_scan_step(&mut self) { self.fullscan_step.add1_i64; }
-    public fn note_sort(&mut self) { self.sort.add1_i64; }
-    public fn note_autoindex(&mut self) { self.autoindex.add1_i64; }
-    public fn note_vm_step(&mut self) { self.vm_step.add1_i64; }
-    public fn note_reprepare(&mut self) { self.reprepare.add1_i64; }
-    public fn note_run(&mut self) { self.run.add1_i64; }
-    public fn note_filter_hit(&mut self) { self.filter_hit.add1_i64; }
-    public fn note_filter_miss(&mut self) { self.filter_miss.add1_i64; }
+    public fn note_full_scan_step(&mut self) { self.fullscan_step.add(1_i64); }
+    public fn note_sort(&mut self) { self.sort.add(1_i64); }
+    public fn note_autoindex(&mut self) { self.autoindex.add(1_i64); }
+    public fn note_vm_step(&mut self) { self.vm_step.add(1_i64); }
+    public fn note_reprepare(&mut self) { self.reprepare.add(1_i64); }
+    public fn note_run(&mut self) { self.run.add(1_i64); }
+    public fn note_filter_hit(&mut self) { self.filter_hit.add(1_i64); }
+    public fn note_filter_miss(&mut self) { self.filter_miss.add(1_i64); }
 
     /// Cheap "did this statement spend more time in scans than indexed
     /// access" predicate.
