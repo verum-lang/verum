@@ -35740,10 +35740,21 @@ impl VbcCodegen {
                     "verum_grad_zero" => MlSubOpcode::ZeroGrad as u8,
                     _ => 0,
                 };
-                let mut data = vec![sub_op, dest.0 as u8];
-                for arg in args {
-                    data.push(arg.0 as u8);
+                // Wire: [sub_op][varint operand_len][operands], matching every
+                // other extended carrier so the interpreter can route through the
+                // envelope authority and the structural decoder can advance past
+                // the operands without knowing per-sub-op arity (T0419). Registers
+                // use the canonical variable-width form — the previous
+                // `reg.0 as u8` truncated any register >= 128 that `read_reg`
+                // then mis-read as a two-byte index.
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                for &arg in args {
+                    Self::write_reg(&mut operands, arg.0);
                 }
+                let mut data = vec![sub_op];
+                crate::encoding::encode_varint(operands.len() as u64, &mut data);
+                data.extend_from_slice(&operands);
                 self.ctx.emit(Instruction::Raw {
                     opcode: Opcode::MlExtended,
                     data,
@@ -35752,10 +35763,16 @@ impl VbcCodegen {
             "verum_grad_clip_norm" => {
                 // ClipGradNorm via MlExtended sub-opcode
                 use crate::instruction::{MlSubOpcode, Opcode};
-                let mut data = vec![MlSubOpcode::ClipGradNorm as u8];
-                for arg in args {
-                    data.push(arg.0 as u8);
+                // ClipGradNorm deliberately carries NO dest (the handler mutates
+                // its params register in place); same envelope + canonical register
+                // encoding as the sibling above.
+                let mut operands = Vec::<u8>::new();
+                for &arg in args {
+                    Self::write_reg(&mut operands, arg.0);
                 }
+                let mut data = vec![MlSubOpcode::ClipGradNorm as u8];
+                crate::encoding::encode_varint(operands.len() as u64, &mut data);
+                data.extend_from_slice(&operands);
                 self.ctx.emit(Instruction::Raw {
                     opcode: Opcode::MlExtended,
                     data,

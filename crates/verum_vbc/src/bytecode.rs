@@ -5015,6 +5015,25 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             Ok(Instruction::MemExtended { sub_op, operands })
         }
 
+        // ML carrier (0xFD). Codegen emits it as `Instruction::Raw` rather than
+        // a typed variant, but the BYTES are the standard envelope
+        // `[sub_op][varint len][operands]` (T0419). Without an arm here it fell
+        // to the trailing wildcard, which returns `Raw { data: vec![] }` WITHOUT
+        // advancing past the operands — desynchronising sequential decode for
+        // the linker and disassembler on any module containing one. Re-emitting
+        // the consumed bytes keeps encode/decode a faithful round-trip.
+        Opcode::MlExtended => {
+            let sub_op = decode_u8(data, offset)?;
+            let operands = decode_extended_operands(data, offset)?;
+            let mut raw = vec![sub_op];
+            crate::encoding::encode_varint(operands.len() as u64, &mut raw);
+            raw.extend_from_slice(&operands);
+            Ok(Instruction::Raw {
+                opcode,
+                data: raw,
+            })
+        }
+
         // ====================================================================
         // Generic Extended Operations (#167 Part A)
         // ====================================================================

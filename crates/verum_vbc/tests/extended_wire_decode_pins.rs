@@ -1,5 +1,5 @@
 //! Wire-contract pins for the extended carriers' STRUCTURAL decoder (T0430,
-//! T0420).
+//! T0420, T0419).
 //!
 //! `decode_instruction` is what the linker, disassembler and archive
 //! round-trip use to ADVANCE past an instruction. Unlike the interpreter —
@@ -117,4 +117,42 @@ fn reserved_extended_sub_op_stays_a_zero_operand_carrier() {
     assert_eq!(offset, 2, "Reserved must consume only opcode + sub_op");
     // …and the following instruction still decodes.
     decode_instruction(&bc, &mut offset).expect("following instruction");
+}
+
+// ============================================================================
+// T0419 — MlExtended is length-prefixed and has a real decode arm.
+// ============================================================================
+
+#[test]
+fn ml_extended_leaves_the_next_instruction_aligned() {
+    // The ML carrier had no length prefix and no decode arm, so it fell to the
+    // wildcard, which returns an empty `Raw` WITHOUT advancing past the
+    // operands — every following instruction then decoded from inside them.
+    //
+    // Codegen emits it as `Raw`, but the bytes are the standard envelope:
+    // [sub_op][varint operand_len][operands], with variable-width registers.
+    let operands = vec![0x80u8, 130, 0x80, 131]; // two wide registers
+    let mut data = vec![0x6A_u8]; // MlSubOpcode::ZeroGrad
+    data.push(operands.len() as u8); // varint, single byte at this size
+    data.extend_from_slice(&operands);
+
+    let bc = encode(&[
+        Instruction::Raw {
+            opcode: Opcode::MlExtended,
+            data,
+        },
+        Instruction::LoadSmallI {
+            dst: Reg(2),
+            value: 55,
+        },
+    ]);
+
+    let mut offset = 0;
+    decode_instruction(&bc, &mut offset).expect("ml carrier");
+    let next = decode_instruction(&bc, &mut offset).expect("following instruction");
+    match next {
+        Instruction::LoadSmallI { dst, value } => assert_eq!((dst, value), (Reg(2), 55)),
+        other => panic!("stream desynchronised, decoded {other:?}"),
+    }
+    assert_eq!(offset, bc.len());
 }

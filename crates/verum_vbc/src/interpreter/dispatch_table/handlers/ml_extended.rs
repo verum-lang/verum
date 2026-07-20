@@ -6,6 +6,7 @@ use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::{alloc_tensor_value, tensor_handle_ptr};
 use super::bytecode_io::*;
+use super::envelope::dispatch_enveloped;
 use super::string_helpers::{alloc_string_value, extract_string};
 use crate::value::Value;
 
@@ -17,9 +18,23 @@ use crate::value::Value;
 pub(in super::super) fn handle_ml_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    dispatch_enveloped(state, ml_extended_body)
+}
+
+/// `MlExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition.
+///
+/// This carrier used to be the odd one out: it had no length prefix at all, so
+/// nothing could absorb an arity disagreement and the structural decoder had no
+/// arm to advance past its operands (T0419). It is now length-prefixed like its
+/// siblings rather than being special-cased.
+fn ml_extended_body(
+    state: &mut InterpreterState,
+    sub_op_byte: u8,
+) -> InterpreterResult<DispatchResult> {
     use crate::instruction::MlSubOpcode;
 
-    let sub_op_byte = read_u8(state)?;
     let sub_op = MlSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {
@@ -67,6 +82,9 @@ pub(in super::super) fn handle_ml_extended(
         }
 
         Some(MlSubOpcode::GradZeroTangent) => {
+            // The emitter packs [dst][tangents]; reading only one register left
+            // the second operand unconsumed (T0419).
+            let _dst = read_reg(state)?;
             let _tangents_reg = read_reg(state)?;
 
             // Zero out all tangent vectors in the current scope
@@ -91,6 +109,8 @@ pub(in super::super) fn handle_ml_extended(
         // Existing ML Operations (delegate to kernel dispatchers)
         // ====================================================================
         Some(MlSubOpcode::ZeroGrad) => {
+            // Emitter packs [dst][params] — see GradZeroTangent above.
+            let _dst = read_reg(state)?;
             let _params_reg = read_reg(state)?;
 
             // Zero all gradients in current scope
