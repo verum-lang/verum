@@ -5037,8 +5037,9 @@ pub enum SystemSubOpcode {
     /// Marshal array to C pointer.
     ///
 
-    /// Format: `ptr:reg, len:reg, src:reg`
-    /// Returns pointer to array data and length.
+    /// Format: `dst:reg, arr:reg, idx:reg, element_type:u8, is_mutable:u8`
+    /// `dst` receives a pointer to the array data. The trailing two bytes are
+    /// inline immediates, not registers.
     ArrayToC = 0x24,
 
     /// Marshal C array to Verum List.
@@ -5106,7 +5107,7 @@ pub enum SystemSubOpcode {
     /// Free C memory (free).
     ///
 
-    /// Format: `ptr:reg`
+    /// Format: `ptr:reg, size:reg`
     /// Frees memory allocated by CAlloc.
     CFree = 0x41,
 
@@ -5518,7 +5519,7 @@ pub enum SystemSubOpcode {
     /// Sleep for the given number of MILLISECONDS (`sleep_ms`).  The
     /// millisecond form gets its own sub-op so the ms→ns scaling lives in
     /// ONE place per tier instead of in every emitter.
-    /// Format: `dst:reg, ms:reg` (dst receives unit/0).
+    /// Format: `ms:reg` — this sub-op takes no destination register.
     TimeSleepMillis = 0x76,
 
     // ========================================================================

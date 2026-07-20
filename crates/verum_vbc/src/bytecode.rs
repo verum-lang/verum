@@ -2933,10 +2933,18 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         Instruction::CubicalExtended { sub_op, dst, args } => {
             output.push(Opcode::CubicalExtended.to_byte());
             output.push(*sub_op);
-            output.push(dst.0 as u8);
+            // Canonical variable-width registers (T0420). The interpreter reads
+            // these through `read_reg`, which spends TWO bytes on any register
+            // >= 128, so the previous `dst.0 as u8` truncation disagreed with
+            // its own reader: it corrupted the register value, and whenever the
+            // truncated byte happened to land >= 128 `read_reg` also consumed a
+            // following byte that was never a register, desynchronising the
+            // stream. `args.len()` stays a plain u8 — it is a small count, not
+            // a register, and all three sides already agree on that width.
+            encode_reg(*dst, output);
             output.push(args.len() as u8);
             for arg in args {
-                output.push(arg.0 as u8);
+                encode_reg(*arg, output);
             }
         }
     }
@@ -5178,13 +5186,27 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let operands = decode_extended_reg_operands(data, offset, 5)?;
                     Ok(Instruction::Extended { sub_op, operands })
                 }
-                // Reserved (0x00) and unknown future sub-ops remain
-                // zero-operand carriers; the dispatch handler reads any
-                // operands from the stream at execution time.
-                _ => Ok(Instruction::Extended {
+                // `Reserved` (0x00) is the forward-compat anchor: encoders MUST
+                // NOT emit it and it carries no operands, so decoding it as a
+                // zero-operand carrier keeps sequential decode exact.
+                Some(ExtendedSubOpcode::Reserved) => Ok(Instruction::Extended {
                     sub_op,
                     operands: vec![],
                 }),
+                // No wildcard, deliberately (T0430). The DISPATCHER is already
+                // exhaustive, so rustc forces an arm there for every new
+                // sub-op — but this decoder used to end in `_ => operands:
+                // vec![]`, which meant a sub-op could be wired correctly into
+                // the dispatcher (required to compile) while its decode arm was
+                // forgotten (not required). The linker, disassembler and
+                // archive round-trip would then decode it with zero operands
+                // and leave `*offset` INSIDE its operand bytes, corrupting
+                // every subsequent instruction — the same failure already
+                // documented for TypeRef tag 0x08 in this file. Making the
+                // match exhaustive turns a forgotten arm into a compile error;
+                // an unknown BYTE stays a loud decode error, never a silent
+                // zero-operand guess.
+                None => Err(VbcError::InvalidOpcode(sub_op)),
             }
         }
 
@@ -5694,33 +5716,24 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         // ---------- Cubical type theory (0xDE) ----------
-        // Encoder format (bytecode.rs:2873):
-        //   `opcode + sub_op:u8 + dst:u8 + args_len:u8 + args[0..N]:u8`
-        // Each arg is a single byte (raw register index, low 8 bits)
-        // — the Cubical lowering uses a fixed small register space so
-        // the compact encoding is sufficient.  Decoder mirrors the
-        // exact byte layout so sequential decoding through the linker
-        // stays in sync.
+        // Format: `opcode + sub_op:u8 + dst:reg + args_len:u8 + args:reg[N]`.
+        // Registers use the canonical variable-width encoding (T0420) — the
+        // same one the interpreter's `read_cubical_args` has always read with.
+        // The family is not length-prefixed by design: all its arms funnel
+        // through that single helper, so no arm can miscount relative to
+        // another, and this decoder mirrors the layout exactly to keep
+        // sequential decoding through the linker in sync.
         Opcode::CubicalExtended => {
             let sub_op = decode_u8(data, offset)?;
-            let dst = Reg(decode_u8(data, offset)? as u16);
+            let dst = decode_reg(data, offset)?;
             let args_len = decode_u8(data, offset)? as usize;
             let mut args = Vec::with_capacity(args_len);
             for _ in 0..args_len {
-                args.push(Reg(decode_u8(data, offset)? as u16));
+                args.push(decode_reg(data, offset)?);
             }
             Ok(Instruction::CubicalExtended { sub_op, dst, args })
         }
 
-        // GpuExtended deliberately falls through to the wildcard —
-        // its per-sub-op encoder writes layouts WITHOUT a generic
-        // length prefix (parity with the structured TensorExtended
-        // decoder above).  Adding a generic length-varint arm here
-        // would mis-decode the first operand byte.  Per-sub-op
-        // structured decoder for the carrier remains a separate task;
-        // for now sequential decoding on a module that emits a Gpu
-        // op will surface as a downstream error rather than silent
-        // miscompile.
 
         // ====================================================================
         // Reserved Opcodes
@@ -8284,28 +8297,35 @@ mod tests {
     }
 
     #[test]
-    fn test_extended_unknown_subop_roundtrip() {
-        // Future sub-ops (e.g. 0x01 = MakeVariantTyped, #146 Phase 3)
-        // round-trip through the generic Instruction::Extended carrier
-        // even before they have a dedicated typed variant. The decoder
-        // intentionally returns operands=vec![] because operand bytes
-        // are consumed by the sub-op-specific handler at execution time.
-        // 0x7F is an as-yet-undefined sub-op (the defined scripting ops occupy
-        // up to 0x44); pick an unassigned byte so this exercises the generic
-        // carrier rather than a typed sub-op's operand decode.
-        let instr = Instruction::Extended {
-            sub_op: 0x7F,
-            operands: vec![],
-        };
-        let mut encoded = Vec::new();
-        encode_instruction(&instr, &mut encoded);
-        // Wire format: [0x1F (Extended)] [0x7F (sub_op)]
-        assert_eq!(encoded, vec![0x1F, 0x7F]);
-
+    fn test_extended_unknown_subop_is_rejected() {
+        // CONTRACT CHANGE (T0430). This test previously asserted that an
+        // undefined sub-op round-trips as a zero-operand carrier, on the
+        // rationale that "operand bytes are consumed by the sub-op-specific
+        // handler at execution time". That rationale holds for the
+        // INTERPRETER, which reads operands inline as it executes — but not
+        // for this decoder, which the linker, disassembler and archive
+        // round-trip use to ADVANCE past an instruction.
+        //
+        // `Instruction::Extended` carries no length prefix, so an unrecognised
+        // sub-op's width is genuinely unknowable here. Returning zero operands
+        // did not preserve the instruction, it silently left `*offset` inside
+        // the operand bytes and misaligned every subsequent decode. The old
+        // test only passed because it encoded an EMPTY carrier, so there were
+        // no operand bytes to strand.
+        //
+        // Tolerating unknown sub-ops in a variable-length instruction space
+        // therefore is not forward compatibility, it is silent corruption;
+        // real forward compatibility would require a length prefix. Rejecting
+        // is the honest outcome. `Reserved` (0x00) remains accepted — it is
+        // contractually zero-operand (see the sibling test above), so its
+        // width IS known.
+        let encoded = vec![0x1F, 0x7F, 0x01, 0x02];
         let mut offset = 0;
-        let decoded = decode_instruction(&encoded, &mut offset).expect("decode");
-        assert_eq!(offset, encoded.len());
-        assert_eq!(decoded, instr);
+        assert!(
+            decode_instruction(&encoded, &mut offset).is_err(),
+            "an undefined Extended sub-op must be rejected, not decoded as an \
+             empty carrier that strands the offset mid-instruction"
+        );
     }
 
     #[test]
