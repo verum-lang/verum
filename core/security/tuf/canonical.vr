@@ -51,7 +51,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount collections.List;
 mount encoding.json.{
-    JsonValue, JsonObject, json_object, json_string, json_bool,
+    JsonValue, JsonMap, json_object, json_string, json_bool,
     json_number, json_null, json_array,
 };
 mount encoding.jcs.{canonicalize, JcsError};
@@ -108,7 +108,7 @@ public fn canonical_signing_payload(signed: &JsonValue) -> Result<List<Byte>, Ca
 /// Note that `keyid_hash_algorithms` was removed from the modern TUF
 /// spec (it was an obsolete field). We follow the current spec.
 public fn compute_keyid(key: &TufKey) -> Result<KeyId, CanonicalError> {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("keytype".to_text(), json_string(keytype_to_text(&key.keytype)));
     obj.insert("scheme".to_text(),  json_string(scheme_to_text(&key.scheme)));
     obj.insert("keyval".to_text(),  key.keyval.clone());

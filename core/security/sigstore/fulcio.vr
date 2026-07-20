@@ -72,7 +72,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{
-    JsonValue, JsonObject, json_object, json_string, decode,
+    JsonValue, JsonMap, json_object, json_string, decode,
     encode,
 };
 mount encoding.base64.{
@@ -271,18 +271,18 @@ fn build_request_body(
     pub_bytes: &List<Byte>,
     pop_bytes: &List<Byte>,
 ) -> JsonValue {
-    let mut creds: JsonObject = JsonObject.new();
+    let mut creds: JsonMap = JsonMap.new();
     creds.insert("oidcIdentityToken".to_text(), json_string(oidc_id_token.clone()));
 
-    let mut public_key_obj: JsonObject = JsonObject.new();
+    let mut public_key_obj: JsonMap = JsonMap.new();
     public_key_obj.insert("algorithm".to_text(), json_string(fulcio_key_algorithm_text(key)));
     public_key_obj.insert("content".to_text(), json_string(b64_encode(pub_bytes)));
 
-    let mut public_key_request: JsonObject = JsonObject.new();
+    let mut public_key_request: JsonMap = JsonMap.new();
     public_key_request.insert("publicKey".to_text(), json_object(public_key_obj));
     public_key_request.insert("proofOfPossession".to_text(), json_string(b64_encode(pop_bytes)));
 
-    let mut top: JsonObject = JsonObject.new();
+    let mut top: JsonMap = JsonMap.new();
     top.insert("credentials".to_text(), json_object(creds));
     top.insert("publicKeyRequest".to_text(), json_object(public_key_request));
     json_object(top)

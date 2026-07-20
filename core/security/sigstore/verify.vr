@@ -66,7 +66,7 @@ module core.security.sigstore.verify;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Set};
-mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
+mount encoding.json.{JsonValue, decode as json_decode};
 mount encoding.base64.{decode_standard as b64_decode};
 mount encoding.pem.{decode_all as pem_decode_all};
 mount security.x509.certificate.{X509Certificate, parse_certificate};

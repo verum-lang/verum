@@ -66,7 +66,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{
-    JsonValue, JsonObject, json_object, json_string, json_number,
+    JsonValue, JsonMap, json_object, json_string, json_number,
     json_array, decode, encode,
 };
 mount encoding.base64.{
@@ -193,7 +193,7 @@ public async fn submit_entry<C: HttpClient>(
 }
 
 fn build_submit_body(kind: &EntryKind, api_ver: &ApiVersion, spec: &JsonValue) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("kind".to_text(), json_string(entry_kind_to_text(kind)));
     obj.insert("apiVersion".to_text(), json_string(api_ver.0.clone()));
     obj.insert("spec".to_text(), spec.clone());
@@ -291,7 +291,7 @@ public fn verify_entry_set(
 }
 
 fn build_set_payload(entry: &LogEntry) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("body".to_text(), json_string(entry.body_b64.clone()));
     obj.insert("integratedTime".to_text(), json_number(entry.integrated_time as Float));
     obj.insert("logID".to_text(), json_string(entry.log_id_hex.clone()));

@@ -61,6 +61,18 @@ public type JsonValue is
 // `core.net.weft.json_extractor.Json<T>` per net-framework spec §5.3.
 // Encoding-layer code uses the canonical `JsonValue`.
 
+// The members of a JSON object, as a type. Consumers used to copy-paste a
+// module-private `type JsonObject is Map<Text, JsonValue>;` (oidc, tuf/client,
+// webauthn/register) or — worse — mount the *variant constructor* `JsonObject`
+// above and use it in type position, which resolves to
+// `Map<Text, __opaque_type_N>` and makes `.new()`/`.len()`/`.insert()` fail.
+// Named `JsonMap`, not `JsonObject`: a type alias sharing the variant's bare
+// name clashes at export extraction, because variants flatten into the parent
+// module's namespace. Distinct concepts, distinct names — the variant
+// `JsonValue.JsonObject` says "this value is an object", `JsonMap` is the
+// object's members.
+public type JsonMap is Map<Text, JsonValue>;
+
 // Error position and cause.
 public type JsonError is {
     kind: JsonErrorKind,

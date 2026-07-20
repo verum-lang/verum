@@ -44,7 +44,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int, Float};
 mount collections.{List, Map};
 mount encoding.json.{
-    JsonValue, JsonObject,
+    JsonValue, JsonMap,
     json_object, json_string, json_array, json_number, json_bool,
     encode, decode,
 };
@@ -122,7 +122,7 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
     }
 
     async fn delete_by_filter(&self, filter: &SearchFilter) -> Result<Int, SearchError> {
-        let mut body_obj: JsonObject = JsonObject.new();
+        let mut body_obj: JsonMap = JsonMap.new();
         body_obj.insert("filter".to_text(), json_string(filter_to_text(filter)));
         let url = compose_url(&self.config,
             &f"/indexes/{self.config.index_uid}/documents/delete");
@@ -155,7 +155,7 @@ implement<C: HttpClient> SearchIndex for MeiliClient<C> {
 // =============================================================================
 
 fn build_search_body(q: &SearchQuery) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("q".to_text(), json_string(q.q.clone()));
     obj.insert("limit".to_text(), json_number(q.limit as Float));
     obj.insert("offset".to_text(), json_number(q.offset as Float));
@@ -249,7 +249,7 @@ fn escape_quotes(s: &Text) -> Text {
 // =============================================================================
 
 fn config_to_json(c: &IndexConfig) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     if !c.searchable_attributes.is_empty() {
         obj.insert("searchableAttributes".to_text(), text_list_to_json(&c.searchable_attributes));
     }
@@ -263,7 +263,7 @@ fn config_to_json(c: &IndexConfig) -> JsonValue {
         obj.insert("stopWords".to_text(), text_list_to_json(&c.stop_words));
     }
     if !c.synonyms.is_empty() {
-        let mut syn_obj: JsonObject = JsonObject.new();
+        let mut syn_obj: JsonMap = JsonMap.new();
         let mut i: Int = 0;
         while i < c.synonyms.len() {
             let (canonical, alts) = &c.synonyms[i];

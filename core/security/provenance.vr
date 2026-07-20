@@ -76,7 +76,7 @@ mount security.ecc.ed25519.{
 };
 mount security.hash.sha256.{digest};
 mount encoding.json.{
-    JsonValue, JsonObject, json_object, json_string, json_number,
+    JsonValue, JsonMap, json_object, json_string, json_number,
     json_array, json_null, json_bool,
     encode, decode,
 };
@@ -167,16 +167,16 @@ public fn statement_new(
 }
 
 public fn statement_to_json(s: &Statement) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("_type".to_text(), json_string(s.type_uri.clone()));
 
     let mut subjects_arr: List<JsonValue> = List.new();
     let mut i: Int = 0;
     while i < s.subjects.len() {
         let subj = &s.subjects[i];
-        let mut subj_obj: JsonObject = JsonObject.new();
+        let mut subj_obj: JsonMap = JsonMap.new();
         subj_obj.insert("name".to_text(), json_string(subj.name.clone()));
-        let mut digest_obj: JsonObject = JsonObject.new();
+        let mut digest_obj: JsonMap = JsonMap.new();
         let mut j: Int = 0;
         while j < subj.digests.len() {
             let d = &subj.digests[j];
@@ -300,14 +300,14 @@ public type SlsaProvenance is {
 };
 
 public fn slsa_provenance_to_json(p: &SlsaProvenance) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("buildDefinition".to_text(), build_definition_to_json(&p.build_definition));
     obj.insert("runDetails".to_text(), run_details_to_json(&p.run_details));
     json_object(obj)
 }
 
 fn build_definition_to_json(bd: &BuildDefinition) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("buildType".to_text(), json_string(bd.build_type.clone()));
     obj.insert("externalParameters".to_text(), bd.external_parameters.clone());
     obj.insert("internalParameters".to_text(), bd.internal_parameters.clone());
@@ -322,7 +322,7 @@ fn build_definition_to_json(bd: &BuildDefinition) -> JsonValue {
 }
 
 fn run_details_to_json(rd: &RunDetails) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("builder".to_text(), builder_to_json(&rd.builder));
     obj.insert("metadata".to_text(), build_metadata_to_json(&rd.metadata));
     let mut bps: List<JsonValue> = List.new();
@@ -336,9 +336,9 @@ fn run_details_to_json(rd: &RunDetails) -> JsonValue {
 }
 
 fn builder_to_json(b: &Builder) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("id".to_text(), json_string(b.id.clone()));
-    let mut version_obj: JsonObject = JsonObject.new();
+    let mut version_obj: JsonMap = JsonMap.new();
     for (k, v) in b.version.iter() {
         version_obj.insert(k.clone(), json_string(v.clone()));
     }
@@ -354,7 +354,7 @@ fn builder_to_json(b: &Builder) -> JsonValue {
 }
 
 fn build_metadata_to_json(m: &BuildMetadata) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     if let Maybe.Some(id) = &m.invocation_id { obj.insert("invocationId".to_text(), json_string(id.clone())); }
     if let Maybe.Some(t)  = &m.started_on    { obj.insert("startedOn".to_text(),    json_string(format_rfc3339(t))); }
     if let Maybe.Some(t)  = &m.finished_on   { obj.insert("finishedOn".to_text(),   json_string(format_rfc3339(t))); }
@@ -362,10 +362,10 @@ fn build_metadata_to_json(m: &BuildMetadata) -> JsonValue {
 }
 
 fn resource_descriptor_to_json(rd: &ResourceDescriptor) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     if let Maybe.Some(n) = &rd.name { obj.insert("name".to_text(), json_string(n.clone())); }
     if let Maybe.Some(u) = &rd.uri  { obj.insert("uri".to_text(),  json_string(u.clone())); }
-    let mut digest_obj: JsonObject = JsonObject.new();
+    let mut digest_obj: JsonMap = JsonMap.new();
     let mut i: Int = 0;
     while i < rd.digest.len() {
         digest_obj.insert(rd.digest[i].algorithm.clone(), json_string(rd.digest[i].hex.clone()));
@@ -373,7 +373,7 @@ fn resource_descriptor_to_json(rd: &ResourceDescriptor) -> JsonValue {
     }
     obj.insert("digest".to_text(), json_object(digest_obj));
     if !rd.annotations.is_empty() {
-        let mut ann_obj: JsonObject = JsonObject.new();
+        let mut ann_obj: JsonMap = JsonMap.new();
         for (k, v) in rd.annotations.iter() { ann_obj.insert(k.clone(), v.clone()); }
         obj.insert("annotations".to_text(), json_object(ann_obj));
     }
@@ -394,8 +394,8 @@ public fn slsa_provenance_for_cog(
     let predicate = SlsaProvenance {
         build_definition: BuildDefinition {
             build_type,
-            external_parameters: json_object(JsonObject.new()),
-            internal_parameters: json_object(JsonObject.new()),
+            external_parameters: json_object(JsonMap.new()),
+            internal_parameters: json_object(JsonMap.new()),
             resolved_dependencies,
         },
         run_details: RunDetails {
@@ -576,14 +576,14 @@ pub fn dsse_verify_statement(
 }
 
 public fn dsse_envelope_to_json(env: &DsseEnvelope) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("payload".to_text(), json_string(env.payload_b64.clone()));
     obj.insert("payloadType".to_text(), json_string(env.payload_type.clone()));
     let mut sigs: List<JsonValue> = List.new();
     let mut i: Int = 0;
     while i < env.signatures.len() {
         let s = &env.signatures[i];
-        let mut so: JsonObject = JsonObject.new();
+        let mut so: JsonMap = JsonMap.new();
         so.insert("keyid".to_text(), json_string(s.keyid.clone()));
         so.insert("sig".to_text(), json_string(s.sig_b64.clone()));
         sigs.push(json_object(so));
@@ -683,7 +683,7 @@ public fn sigstore_bundle_new(
 }
 
 public fn sigstore_bundle_to_json(b: &SigstoreBundle) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("mediaType".to_text(), json_string(b.media_type.clone()));
     obj.insert("verificationMaterial".to_text(), verification_material_to_json(&b.verification_material));
     obj.insert("dsseEnvelope".to_text(), dsse_envelope_to_json(&b.envelope));
@@ -698,10 +698,10 @@ public fn sigstore_bundle_to_json(b: &SigstoreBundle) -> JsonValue {
 }
 
 fn verification_material_to_json(m: &VerificationMaterial) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     match m {
         VerificationMaterial.RawPublicKey { hint, key_b64 } => {
-            let mut pk_obj: JsonObject = JsonObject.new();
+            let mut pk_obj: JsonMap = JsonMap.new();
             pk_obj.insert("hint".to_text(), json_string(hint.clone()));
             pk_obj.insert("rawBytes".to_text(), json_string(key_b64.clone()));
             obj.insert("publicKey".to_text(), json_object(pk_obj));
@@ -710,12 +710,12 @@ fn verification_material_to_json(m: &VerificationMaterial) -> JsonValue {
             let mut chain_arr: List<JsonValue> = List.new();
             let mut i: Int = 0;
             while i < certs_b64.len() {
-                let mut c_obj: JsonObject = JsonObject.new();
+                let mut c_obj: JsonMap = JsonMap.new();
                 c_obj.insert("rawBytes".to_text(), json_string(certs_b64[i].clone()));
                 chain_arr.push(json_object(c_obj));
                 i = i + 1;
             }
-            let mut chain_obj: JsonObject = JsonObject.new();
+            let mut chain_obj: JsonMap = JsonMap.new();
             chain_obj.insert("certificates".to_text(), json_array(chain_arr));
             obj.insert("x509CertificateChain".to_text(), json_object(chain_obj));
         }
@@ -724,15 +724,15 @@ fn verification_material_to_json(m: &VerificationMaterial) -> JsonValue {
 }
 
 fn tlog_entry_to_json(e: &TlogEntry) -> JsonValue {
-    let mut obj: JsonObject = JsonObject.new();
+    let mut obj: JsonMap = JsonMap.new();
     obj.insert("logIndex".to_text(), json_string(f"{e.log_index}"));
-    let mut id_obj: JsonObject = JsonObject.new();
+    let mut id_obj: JsonMap = JsonMap.new();
     id_obj.insert("keyId".to_text(), json_string(e.log_id_hex.clone()));
     obj.insert("logId".to_text(), json_object(id_obj));
     obj.insert("canonicalizedBody".to_text(), json_string(e.canonicalized_body_b64.clone()));
     obj.insert("integratedTime".to_text(), json_string(format_rfc3339(&e.integrated_time)));
     if let Maybe.Some(proof) = &e.inclusion_proof {
-        let mut p_obj: JsonObject = JsonObject.new();
+        let mut p_obj: JsonMap = JsonMap.new();
         p_obj.insert("treeSize".to_text(), json_string(f"{proof.tree_size}"));
         p_obj.insert("logIndex".to_text(), json_string(f"{proof.log_index}"));
         let mut hashes_arr: List<JsonValue> = List.new();
@@ -742,7 +742,7 @@ fn tlog_entry_to_json(e: &TlogEntry) -> JsonValue {
             i = i + 1;
         }
         p_obj.insert("hashes".to_text(), json_array(hashes_arr));
-        let mut c_obj: JsonObject = JsonObject.new();
+        let mut c_obj: JsonMap = JsonMap.new();
         c_obj.insert("envelope".to_text(), json_string(proof.checkpoint_sig_hex.clone()));
         p_obj.insert("checkpoint".to_text(), json_object(c_obj));
         obj.insert("inclusionProof".to_text(), json_object(p_obj));
