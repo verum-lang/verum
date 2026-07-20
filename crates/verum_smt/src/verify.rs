@@ -7,8 +7,8 @@
 use crate::context::Context;
 use crate::cost::CostMeasurement;
 pub use crate::cost::VerificationCost;
-use crate::counterexample::{CounterExample, CounterExampleExtractor, generate_suggestions};
-use crate::translate::{TranslationError, Translator};
+use crate::counterexample::{CounterExample, generate_suggestions};
+use crate::translate::TranslationError;
 use crate::verification_cache::VerificationCache;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -285,7 +285,7 @@ impl VerificationError {
 pub fn verify_refinement(
     context: &Context,
     ty: &Type,
-    _value_expr: Option<&Expr>,
+    value_expr: Option<&Expr>,
     mode: VerifyMode,
 ) -> VerificationResult {
     // Extract refinement predicate
@@ -305,91 +305,76 @@ pub fn verify_refinement(
         return Ok(ProofResult::new(cost));
     }
 
-    // PERFORMANCE: Try cache first (10-100x speedup for incremental builds)
-    let cache = get_verification_cache();
+    let Some(value_expr) = value_expr else {
+        // Inhabitation is a pure function of (predicate, base type), so
+        // it is cacheable.
+        // PERFORMANCE: Try cache first (10-100x speedup for incremental builds)
+        let cache = get_verification_cache();
+        return cache.get_or_verify(predicate, base_type, || {
+            verify_refinement_uncached(context, base_type, predicate, None)
+        });
+    };
 
-    cache.get_or_verify(predicate, base_type, || {
-        verify_refinement_uncached(context, base_type, predicate, mode)
-    })
+    // A membership claim depends on the value expression, which the
+    // cache key (predicate, base_type) does not carry — caching it
+    // would hand a later, different value the earlier value's verdict.
+    verify_refinement_uncached(context, base_type, predicate, Some(value_expr))
 }
 
 /// Uncached verification (internal helper).
 ///
 
-/// This function performs the actual SMT verification without caching.
-/// It is called by verify_refinement when a cache miss occurs.
+/// Performs the actual SMT verification without caching. Which judgment
+/// is asked follows `value_expr`: `None` is a declaration-site
+/// *inhabitation* claim, `Some(e)` a use-site *membership* claim — see
+/// [`crate::refinement_judgment`], the single authority for both
+/// (T0457).
 fn verify_refinement_uncached(
     context: &Context,
     base_type: &Type,
     predicate: &Expr,
-    _mode: VerifyMode,
+    value_expr: Option<&Expr>,
 ) -> VerificationResult {
+    use crate::refinement_judgment::{
+        JudgmentOutcome, RefinementJudgment, discharge_refinement_judgment,
+        uninhabited_suggestions,
+    };
+
+    let judgment = match value_expr {
+        Some(expr) => RefinementJudgment::Satisfies(expr),
+        None => RefinementJudgment::Inhabited,
+    };
+
     // Start cost measurement
-    let measurement = CostMeasurement::start("refinement_check");
+    let measurement = CostMeasurement::start(judgment.label());
 
-    // Create translator
-    let translator = Translator::new(context);
-
-    // Create a variable for the value being checked (use 'it' as convention)
-    let var_name = "it";
-
-    // Create Z3 variable for the base type
-    let z3_var = translator.create_var(var_name, base_type)?;
-
-    // Bind the variable
-    let mut translator = translator;
-    translator.bind(var_name.to_text(), z3_var.clone());
-
-    // Translate the predicate
-    let z3_predicate = translator.translate_expr(predicate)?;
-
-    // Convert to boolean
-    let z3_bool = z3_predicate
-        .as_bool()
-        .ok_or_else(|| VerificationError::SolverError("predicate is not boolean".to_text()))?;
-
-    // Create solver and check if there exists a value that violates the constraint
     let solver = context.solver();
+    let outcome =
+        discharge_refinement_judgment(context, &solver, base_type, predicate, judgment)?;
 
-    // We want to find if there's a value where the predicate is FALSE
-    // (i.e., a counterexample)
-    solver.assert(z3_bool.not());
-
-    // Check satisfiability
-    let check_result = solver.check();
-
-    match check_result {
-        z3::SatResult::Unsat => {
-            // No counterexample exists - the constraint always holds!
+    match outcome {
+        JudgmentOutcome::Holds => {
             let cost = measurement.finish(true);
             Ok(ProofResult::new(cost))
         }
 
-        z3::SatResult::Sat => {
-            // Found a counterexample - constraint can be violated
-            let model = solver
-                .get_model()
-                .ok_or_else(|| VerificationError::SolverError("no model available".to_text()))?;
-
-            // Extract counterexample
-            let extractor = CounterExampleExtractor::new(&model);
-            let counterexample =
-                extractor.extract(&[var_name.to_text()], &format!("{:?}", predicate));
-
-            // Generate suggestions
-            let suggestions = generate_suggestions(&counterexample, &format!("{:?}", predicate));
+        JudgmentOutcome::Refuted { counterexample } => {
+            let suggestions = match &counterexample {
+                Some(ce) => generate_suggestions(ce, &format!("{:?}", predicate)),
+                None => uninhabited_suggestions(),
+            };
 
             let cost = measurement.finish(false);
 
             Err(VerificationError::CannotProve {
                 constraint: format!("{:?}", predicate).into(),
-                counterexample: Some(counterexample),
+                counterexample,
                 cost,
                 suggestions,
             })
         }
 
-        z3::SatResult::Unknown => {
+        JudgmentOutcome::Unknown { reason: _ } => {
             // Solver couldn't determine result (timeout or too complex)
             let cost = measurement.finish(false);
 

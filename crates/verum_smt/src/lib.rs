@@ -231,6 +231,10 @@ pub mod variable_extraction; // Shared utilities for extracting variables from Z
 // Refinement type verification (Tier 1)
 pub mod refinement;
 
+// The two refinement judgments (inhabitation / membership) and the
+// single routine that discharges them — see T0457.
+pub mod refinement_judgment;
+
 // Static verification for AOT tier (CBGR elimination)
 pub mod static_verification;
 
@@ -332,6 +336,12 @@ pub use verify::{
 pub use refinement::{
     PredicateComplexity, RefinementVerifier, categorize_complexity, extract_predicate,
     is_refinement_type, needs_smt_verification,
+};
+
+// Re-export the refinement judgment surface
+pub use refinement_judgment::{
+    JudgmentOutcome, REFINEMENT_VALUE_VAR, RefinementJudgment, discharge_refinement_judgment,
+    uninhabited_suggestions,
 };
 
 // Re-export pattern quantifier types

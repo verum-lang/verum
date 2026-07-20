@@ -800,12 +800,19 @@ mod solver_stats_tests {
 }
 
 #[cfg(test)]
+/// Declaration-site refinement checks (`value_expr = None`).
+///
+/// These ask whether a declared refinement type is INHABITED, so a
+/// satisfiable predicate is accepted and only a contradictory one is
+/// rejected. Before T0457 the same calls asked whether the predicate
+/// held for *every* inhabitant of the base type and rejected all of
+/// these; the assertions below used to read `is_err`. See
+/// `refinement_judgment_pins.rs` for the dedicated family pins.
 mod real_world_verification_tests {
     use super::*;
     use z3::ast::Int;
 
-    /// Test: Verify that positive integers are always > 0
-    /// This should succeed - there's no counterexample
+    /// Test: `Int{> 0}` is inhabited (e.g. by 1)
     #[test]
     fn test_verify_positive_int_always_holds() {
         let ctx = Context::new();
@@ -815,13 +822,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Gt, ident_expr("it"), int_lit(0));
         let positive_int = refined_type(base, predicate);
 
-        // Try to verify this type (should find that it CAN be violated)
         let result = verify_refinement(&ctx, &positive_int, None, VerifyMode::Proof);
 
-        // This should fail because there exist integers <= 0
         assert!(
-            result.is_err(),
-            "Should find counterexample for 'it > 0' without constraints"
+            result.is_ok(),
+            "'it > 0' is satisfiable, so the declaration is well-formed; got {:?}",
+            result.err()
         );
     }
 
@@ -835,24 +841,13 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Ge, ident_expr("it"), int_lit(0));
         let non_negative = refined_type(base, predicate);
 
-        // Try to verify (should fail - negative numbers exist)
         let result = verify_refinement(&ctx, &non_negative, None, VerifyMode::Proof);
 
         assert!(
-            result.is_err(),
-            "Should find counterexample (negative number)"
+            result.is_ok(),
+            "'it >= 0' is satisfiable (e.g. 0); got {:?}",
+            result.err()
         );
-
-        if let Err(VerificationError::CannotProve { counterexample, .. }) = result
-            && let Some(ce) = counterexample
-        {
-            // Should have a negative value for 'it'
-            if let Some(val) = ce.get("it")
-                && let Some(i) = val.as_int()
-            {
-                assert!(i < 0, "Counterexample should be negative, got {}", i);
-            }
-        }
     }
 
     /// Test: Verify bounded integers (range constraint)
@@ -867,9 +862,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::And, lower, upper);
         let bounded = refined_type(base, predicate);
 
-        // This should fail - integers outside [0, 100) exist
         let result = verify_refinement(&ctx, &bounded, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample outside range");
+        assert!(
+            result.is_ok(),
+            "[0, 100) is a non-empty range; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Verify non-zero constraint for division
@@ -882,17 +880,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Ne, ident_expr("it"), int_lit(0));
         let non_zero = refined_type(base, predicate);
 
-        // This should fail - zero exists
         let result = verify_refinement(&ctx, &non_zero, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample: zero");
-
-        if let Err(VerificationError::CannotProve { counterexample, .. }) = result
-            && let Some(ce) = counterexample
-            && let Some(val) = ce.get("it")
-            && let Some(i) = val.as_int()
-        {
-            assert_eq!(i, 0, "Counterexample should be zero for != 0 constraint");
-        }
+        assert!(
+            result.is_ok(),
+            "'it != 0' is satisfiable by every non-zero Int; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Complex predicate with multiple conditions
@@ -909,9 +902,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::And, cond1, ne15);
         let complex = refined_type(base, predicate);
 
-        // Should fail - many counterexamples exist
         let result = verify_refinement(&ctx, &complex, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample");
+        assert!(
+            result.is_ok(),
+            "(10, 20) minus 15 still admits 11..14 and 16..19; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Boolean refinement
@@ -924,9 +920,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Eq, ident_expr("it"), bool_lit(true));
         let always_true = refined_type(base, predicate);
 
-        // Should fail - false exists
         let result = verify_refinement(&ctx, &always_true, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample: false");
+        assert!(
+            result.is_ok(),
+            "'it == true' is inhabited by true; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Arithmetic relationship
@@ -940,21 +939,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Gt, doubled, int_lit(10));
         let arithmetic = refined_type(base, predicate);
 
-        // Should fail - numbers where 2*it <= 10 exist (like 0, 1, 5, etc.)
         let result = verify_refinement(&ctx, &arithmetic, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample");
-
-        if let Err(VerificationError::CannotProve { counterexample, .. }) = result
-            && let Some(ce) = counterexample
-            && let Some(val) = ce.get("it")
-            && let Some(i) = val.as_int()
-        {
-            assert!(
-                i * 2 <= 10,
-                "Counterexample should satisfy: 2*it <= 10, got it={}",
-                i
-            );
-        }
+        assert!(
+            result.is_ok(),
+            "'2*it > 10' is satisfiable (e.g. 6); got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Negation
@@ -974,11 +964,11 @@ mod real_world_verification_tests {
         );
         let not_negative = refined_type(base, predicate);
 
-        // Should fail - negative numbers exist
         let result = verify_refinement(&ctx, &not_negative, None, VerifyMode::Proof);
         assert!(
-            result.is_err(),
-            "Should find counterexample: negative number"
+            result.is_ok(),
+            "'!(it < 0)' is satisfiable (e.g. 0); got {:?}",
+            result.err()
         );
     }
 
@@ -1046,9 +1036,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Gt, minus_five, int_lit(0));
         let gt_five = refined_type(base, predicate);
 
-        // Should fail - numbers <= 5 exist
         let result = verify_refinement(&ctx, &gt_five, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample <= 5");
+        assert!(
+            result.is_ok(),
+            "'it - 5 > 0' is satisfiable (e.g. 6); got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Division constraint (modulo)
@@ -1062,9 +1055,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Eq, mod_two, int_lit(0));
         let even = refined_type(base, predicate);
 
-        // Should fail - odd numbers exist
         let result = verify_refinement(&ctx, &even, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample: odd number");
+        assert!(
+            result.is_ok(),
+            "'it % 2 == 0' is satisfiable by every even Int; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Verify with short timeout
@@ -1110,9 +1106,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::And, ge10, le20);
         let range = refined_type(base, predicate);
 
-        // Should fail - numbers outside [10, 20] exist
         let result = verify_refinement(&ctx, &range, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample outside range");
+        assert!(
+            result.is_ok(),
+            "[10, 20] is a non-empty range; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: OR condition
@@ -1127,21 +1126,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Or, lt_zero, gt_hundred);
         let outside_range = refined_type(base, predicate);
 
-        // Should fail - numbers in [0, 100] exist
         let result = verify_refinement(&ctx, &outside_range, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample in [0, 100]");
-
-        if let Err(VerificationError::CannotProve { counterexample, .. }) = result
-            && let Some(ce) = counterexample
-            && let Some(val) = ce.get("it")
-            && let Some(i) = val.as_int()
-        {
-            assert!(
-                (0..=100).contains(&i),
-                "Counterexample should be in [0, 100], got {}",
-                i
-            );
-        }
+        assert!(
+            result.is_ok(),
+            "'it < 0 || it > 100' is satisfiable (e.g. -1); got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Nested arithmetic
@@ -1156,9 +1146,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Gt, times_two, int_lit(20));
         let nested = refined_type(base, predicate);
 
-        // Should fail - numbers where (it+5)*2 <= 20 exist
         let result = verify_refinement(&ctx, &nested, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample");
+        assert!(
+            result.is_ok(),
+            "'(it + 5) * 2 > 20' is satisfiable (e.g. 6); got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Verify power constraint
@@ -1172,9 +1165,14 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Gt, squared, int_lit(100));
         let power_constraint = refined_type(base, predicate);
 
-        // Should fail - numbers where it^2 <= 100 exist (like -10 to 10)
+        // Non-linear, so the solver may legitimately answer `unknown`;
+        // what must NOT happen is a refutation, because 'it**2 > 100'
+        // is satisfiable (e.g. 11).
         let result = verify_refinement(&ctx, &power_constraint, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample");
+        assert!(
+            !matches!(result, Err(VerificationError::CannotProve { .. })),
+            "'it**2 > 100' is satisfiable (e.g. 11) and must not be refuted"
+        );
     }
 
     /// Test: Verify logical equivalence
@@ -1187,17 +1185,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Eq, ident_expr("it"), bool_lit(true));
         let is_true = refined_type(base, predicate);
 
-        // Should fail - false exists
         let result = verify_refinement(&ctx, &is_true, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample: false");
-
-        if let Err(VerificationError::CannotProve { counterexample, .. }) = result
-            && let Some(ce) = counterexample
-            && let Some(val) = ce.get("it")
-            && let Some(b) = val.as_bool()
-        {
-            assert!(!b, "Counterexample should be false");
-        }
+        assert!(
+            result.is_ok(),
+            "'it == true' is inhabited by true; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Multiple variables (simulating function with two parameters)
@@ -1241,7 +1234,8 @@ mod real_world_verification_tests {
         let impossible = binary_expr(BinOp::And, gt10, lt5);
         let contradictory = refined_type(base, impossible);
 
-        // This should fail - all integers violate this
+        // No Int satisfies this, so the declared type is uninhabited —
+        // the one shape that must stay rejected.
         let result = verify_refinement(&ctx, &contradictory, None, VerifyMode::Proof);
         assert!(
             result.is_err(),
@@ -1259,12 +1253,13 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Eq, ident_expr("it"), ident_expr("it"));
         let tautology = refined_type(base, predicate);
 
-        // This should fail - we're checking if there exists a value where it != it
-        // But such a value doesn't exist, so the negation is UNSAT
-        // However, our API checks if the predicate CAN be violated, not if it's always true
-        // So this will depend on implementation details
+        // A tautology is inhabited by every Int.
         let result = verify_refinement(&ctx, &tautology, None, VerifyMode::Proof);
-        // Could be either OK (no counterexample) or depends on what we're verifying
+        assert!(
+            result.is_ok(),
+            "'it == it' is inhabited by every Int; got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Division by a constant
@@ -1278,9 +1273,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Gt, div_two, int_lit(5));
         let divided = refined_type(base, predicate);
 
-        // Should fail - numbers where it/2 <= 5 exist
         let result = verify_refinement(&ctx, &divided, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample <= 10");
+        assert!(
+            result.is_ok(),
+            "'it / 2 > 5' is satisfiable (e.g. 12); got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Verify solver can handle negative numbers properly
@@ -1300,9 +1298,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::Gt, ident_expr("it"), neg_ten);
         let gt_neg_ten = refined_type(base, predicate);
 
-        // Should fail - numbers <= -10 exist
         let result = verify_refinement(&ctx, &gt_neg_ten, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample <= -10");
+        assert!(
+            result.is_ok(),
+            "'it > -10' is satisfiable (e.g. 0); got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Complex boolean expression
@@ -1319,9 +1320,12 @@ mod real_world_verification_tests {
         let predicate = binary_expr(BinOp::And, or_part, ne50);
         let complex = refined_type(base, predicate);
 
-        // Should fail - many counterexamples exist (like numbers in [-100, 0])
         let result = verify_refinement(&ctx, &complex, None, VerifyMode::Proof);
-        assert!(result.is_err(), "Should find counterexample in [-100, 0]");
+        assert!(
+            result.is_ok(),
+            "'(it > 0 || it < -100) && it != 50' is satisfiable (e.g. 1); got {:?}",
+            result.err()
+        );
     }
 
     /// Test: Verify batch processing
@@ -1345,9 +1349,15 @@ mod real_world_verification_tests {
         let results = verify_batch(&ctx, &constraints, VerifyMode::Proof);
         assert_eq!(results.len(), 4);
 
-        // All should fail (find counterexamples) since we're checking unbounded types
+        // Every predicate in the batch is satisfiable, so each
+        // declaration is well-formed.
         for (idx, result) in results.iter().enumerate() {
-            assert!(result.is_err(), "Constraint {} should fail", idx);
+            assert!(
+                result.is_ok(),
+                "Constraint {} is satisfiable and should be accepted; got {:?}",
+                idx,
+                result.as_ref().err()
+            );
         }
     }
 

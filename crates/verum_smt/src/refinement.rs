@@ -29,9 +29,12 @@ use crate::context::Context;
 use crate::cost::{CostMeasurement, VerificationCost};
 use crate::count_o_dispatch::{CountOResult, dispatch_count_o};
 use crate::count_o_recognizer::try_extract_count_o_query;
-use crate::counterexample::{CounterExampleExtractor, generate_suggestions};
+use crate::counterexample::generate_suggestions;
 use crate::pattern_quantifiers::{PatternConfig, PatternGenerator, needs_patterns};
 use crate::proof_extraction::{ProofExtractor, ProofGenerationConfig, ProofTerm};
+use crate::refinement_judgment::{
+    JudgmentOutcome, RefinementJudgment, discharge_refinement_judgment,
+};
 use crate::subsumption::{CheckMode, SubsumptionChecker, SubsumptionConfig, SubsumptionResult};
 use crate::translate::Translator;
 use crate::verify::{
@@ -183,50 +186,37 @@ impl RefinementVerifier {
     }
 
     /// Verify using SMT solver
+    ///
+    /// Routes through [`discharge_refinement_judgment`], the ONE
+    /// authority on which judgment a refinement check asks (T0457):
+    /// `value_expr = None` is a declaration-site *inhabitation* claim,
+    /// `Some(e)` is a use-site *membership* claim. This function only
+    /// decorates the outcome with cost and proof metadata.
     fn verify_with_smt(
         &self,
         base_type: &Type,
         predicate: &Expr,
-        _value_expr: Option<&Expr>,
+        value_expr: Option<&Expr>,
     ) -> VerificationResult {
-        let measurement = CostMeasurement::start("smt_verification");
+        let judgment = match value_expr {
+            Some(expr) => RefinementJudgment::Satisfies(expr),
+            None => RefinementJudgment::Inhabited,
+        };
+        let measurement = CostMeasurement::start(judgment.label());
 
-        // Create translator
-        let translator = Translator::new(&self.context);
-
-        // Create variable for the value being checked (use 'it' as convention)
-        let var_name = "it";
-
-        // Create Z3 variable for the base type
-        let z3_var = translator.create_var(var_name, base_type)?;
-
-        // Bind the variable
-        let mut translator = translator;
-        translator.bind(var_name.to_text(), z3_var.clone());
-
-        // Translate the predicate
-        let z3_predicate = translator.translate_expr(predicate)?;
-
-        // Convert to boolean
-        let z3_bool = z3_predicate
-            .as_bool()
-            .ok_or_else(|| VerificationError::SolverError("predicate is not boolean".to_text()))?;
-
-        // Create solver and check if there exists a value that violates the constraint
+        // The solver is created here rather than inside the judgment
+        // routine so `get_proof()` below can interrogate it.
         let solver = self.context.solver();
+        let outcome = discharge_refinement_judgment(
+            &self.context,
+            &solver,
+            base_type,
+            predicate,
+            judgment,
+        )?;
 
-        // We want to find if there's a value where the predicate is FALSE
-        // (i.e., a counterexample)
-        solver.assert(z3_bool.not());
-
-        // Check satisfiability. Route through Context::check so routing
-        // stats are recorded automatically when a collector is installed
-        // (see verum_build --smt-stats).
-        let check_result = self.context.check(&solver);
-
-        match check_result {
-            z3::SatResult::Unsat => {
-                // No counterexample exists - the constraint always holds!
+        match outcome {
+            JudgmentOutcome::Holds => {
                 let cost = measurement.finish(true);
 
                 // Try to extract proof if available
@@ -277,32 +267,25 @@ impl RefinementVerifier {
                 Ok(result)
             }
 
-            z3::SatResult::Sat => {
-                // Found a counterexample - constraint can be violated
-                let model = solver.get_model().ok_or_else(|| {
-                    VerificationError::SolverError("no model available".to_text())
-                })?;
-
-                // Extract counterexample
-                let extractor = CounterExampleExtractor::new(&model);
-                let counterexample =
-                    extractor.extract(&[var_name.to_text()], &format!("{:?}", predicate));
-
-                // Generate suggestions
-                let suggestions =
-                    generate_suggestions(&counterexample, &format!("{:?}", predicate));
-
+            JudgmentOutcome::Refuted { counterexample } => {
                 let cost = measurement.finish(false);
+
+                // An uninhabited refinement has no model to report, so
+                // the counterexample-driven suggestions do not apply.
+                let suggestions = match &counterexample {
+                    Some(ce) => generate_suggestions(ce, &format!("{:?}", predicate)),
+                    None => crate::refinement_judgment::uninhabited_suggestions(),
+                };
 
                 Err(VerificationError::CannotProve {
                     constraint: format!("{:?}", predicate).into(),
-                    counterexample: Some(counterexample),
+                    counterexample,
                     cost,
                     suggestions,
                 })
             }
 
-            z3::SatResult::Unknown => {
+            JudgmentOutcome::Unknown { reason: _ } => {
                 // Solver couldn't determine result (timeout or too complex)
                 let cost = measurement.finish(false);
 
