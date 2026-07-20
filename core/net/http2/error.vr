@@ -57,7 +57,12 @@ public type Http2Error is
     /// HPACK decoding failed (RFC 7541 §4.4 / §8.2).
     | HpackError(Text)
     /// Frame exceeded the negotiated MAX_FRAME_SIZE.
-    | FrameSizeExceeded { size: Int, limit: Int };
+    | FrameSizeExceeded { size: Int, limit: Int }
+    /// The underlying transport failed (read or write on the socket).
+    /// NOT a protocol fault: no RFC 7540 error code describes it, the
+    /// peer is usually already gone, and no GOAWAY can be delivered —
+    /// so it must not be reported as ConnectionError/StreamError.
+    | IoFailure(Text);
 
 // Convenience constructors.
 public fn connection_error(code: UInt32, reason: &Text) -> Http2Error {
@@ -107,6 +112,8 @@ implement Display for Http2Error {
                 f.write_str(f"HTTP/2 HPACK decode failed: {reason}".as_str()),
             Http2Error.FrameSizeExceeded { size, limit } =>
                 f.write_str(f"HTTP/2 frame size {size} exceeds limit {limit}".as_str()),
+            Http2Error.IoFailure(reason) =>
+                f.write_str(f"HTTP/2 transport I/O failure: {reason}".as_str()),
         }
     }
 }
@@ -128,6 +135,8 @@ implement Debug for Http2Error {
                 f.write_str(f"HpackError({reason})".as_str()),
             Http2Error.FrameSizeExceeded { size, limit } =>
                 f.write_str(f"FrameSizeExceeded {{ size: {size}, limit: {limit} }}".as_str()),
+            Http2Error.IoFailure(reason) =>
+                f.write_str(f"IoFailure({reason})".as_str()),
         }
     }
 }
@@ -145,6 +154,7 @@ implement Eq for Http2Error {
             (Http2Error.HpackError(a),        Http2Error.HpackError(b))        => a == b,
             (Http2Error.FrameSizeExceeded { size: sa, limit: la },
              Http2Error.FrameSizeExceeded { size: sb, limit: lb })             => sa == sb && la == lb,
+            (Http2Error.IoFailure(a),         Http2Error.IoFailure(b))         => a == b,
             _ => false,
         }
     }

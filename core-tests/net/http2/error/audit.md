@@ -2,7 +2,7 @@
 
 Module: `core/net/http2/error.vr` (~151 LOC) — RFC 7540 §7 error
 surface: `ErrorCode` (14 wire constants + new/value) and
-`Http2Error` (7-variant scope-tagged ADT) with Display/Debug/Eq.
+`Http2Error` (8-variant scope-tagged ADT) with Display/Debug/Eq.
 
 ## 1. Cross-stdlib usage
 
@@ -28,8 +28,8 @@ vs StreamError) is verified disjoint.
 
 ## 4. Action items landed in this branch
 
-* `unit_test.vr` — 29 tests: 14 ErrorCode constant pins; new/
-  value/Eq; 7 Http2Error variants incl. constructor helpers,
+* `unit_test.vr` — 33 tests: 14 ErrorCode constant pins; new/
+  value/Eq; 8 Http2Error variants incl. constructor helpers,
   scope disjointness, payload preservation, Eq, Display.
 
 ## 5. Action items deferred

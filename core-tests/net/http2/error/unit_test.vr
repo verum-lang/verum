@@ -5,7 +5,8 @@
 // `core/net/http2/error.vr`:
 //
 //   * ErrorCode — 14 RFC 7540 §7 wire constants + new/value + Eq/Display.
-//   * Http2Error — 7-variant scope-tagged protocol error ADT + Eq.
+//   * Http2Error — 8-variant scope-tagged protocol error ADT + Eq
+//     (7 protocol variants + IoFailure for transport failures).
 //   * connection_error / stream_error convenience constructors.
 // =============================================================================
 
@@ -117,6 +118,12 @@ fn test_h2err_frame_size_exceeded_payload() {
     assert(e is Http2Error.FrameSizeExceeded);
 }
 
+@test
+fn test_h2err_io_failure_payload() {
+    let e = Http2Error.IoFailure("read frame header".into());
+    assert(e is Http2Error.IoFailure);
+}
+
 // =============================================================================
 // Section 4: Http2Error — Eq
 // =============================================================================
@@ -145,6 +152,25 @@ fn test_h2err_frame_size_exceeded_eq_payload() {
     let a = Http2Error.FrameSizeExceeded { size: 100, limit: 50 };
     let b = Http2Error.FrameSizeExceeded { size: 100, limit: 50 };
     assert_eq(a, b);
+}
+
+@test
+fn test_h2err_io_failure_eq_payload() {
+    let a = Http2Error.IoFailure("write GOAWAY".into());
+    let b = Http2Error.IoFailure("write GOAWAY".into());
+    assert_eq(a, b);
+}
+
+@test
+fn test_h2err_io_failure_neq_distinct_reason() {
+    let a = Http2Error.IoFailure("write GOAWAY".into());
+    let b = Http2Error.IoFailure("read frame header".into());
+    assert(!(a == b));
+}
+
+@test
+fn test_h2err_io_failure_not_a_protocol_variant() {
+    assert(!(Http2Error.IoFailure("x".into()) == Http2Error.NeedMore));
 }
 
 @test

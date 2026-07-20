@@ -441,7 +441,8 @@ pub async fn run_h2_session<H: Handler>(
     let mut out: List<Byte> = List.new();
     core.net.http2.encode_frame(&settings_frame, &mut out);
     match stream.write_async(&out).await {
-        Result.Err(_) => return Result.Err(Http2Error.IoError),
+        Result.Err(_) => return Result.Err(
+            Http2Error.IoFailure("write server SETTINGS".into())),
         Result.Ok(_) => {}
     }
 
@@ -634,7 +635,8 @@ async fn read_frame(
     token: &CancellationToken,
 ) -> Result<Frame, Http2Error> {
     let hdr_bytes = match read_exact_bytes(stream, FRAME_HEADER_SIZE, token).await {
-        Maybe.None => return Result.Err(Http2Error.IoError),
+        Maybe.None => return Result.Err(
+            Http2Error.IoFailure("read frame header".into())),
         Maybe.Some(b) => b,
     };
     let header = FrameHeader.decode(&hdr_bytes)?;
@@ -642,7 +644,8 @@ async fn read_frame(
         return Result.Err(Http2Error.FrameTooLarge);
     }
     let payload = match read_exact_bytes(stream, header.length, token).await {
-        Maybe.None => return Result.Err(Http2Error.IoError),
+        Maybe.None => return Result.Err(
+            Http2Error.IoFailure("read frame payload".into())),
         Maybe.Some(b) => b,
     };
     Frame.decode_payload(&header, &payload)
@@ -698,7 +701,7 @@ async fn send_goaway(
     let mut out: List<Byte> = List.new();
     core.net.http2.encode_frame(&frame, &mut out);
     match stream.write_async(&out).await {
-        Result.Err(_) => Result.Err(Http2Error.IoError),
+        Result.Err(_) => Result.Err(Http2Error.IoFailure("write GOAWAY".into())),
         Result.Ok(_)  => Result.Ok(()),
     }
 }
@@ -729,7 +732,8 @@ async fn send_minimal_response(
     let mut out: List<Byte> = List.new();
     core.net.http2.encode_frame(&headers_frame, &mut out);
     match stream.write_async(&out).await {
-        Result.Err(_) => Result.Err(Http2Error.IoError),
+        Result.Err(_) => Result.Err(
+            Http2Error.IoFailure("write response HEADERS".into())),
         Result.Ok(_)  => Result.Ok(()),
     }
 }
