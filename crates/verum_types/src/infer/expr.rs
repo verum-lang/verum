@@ -525,6 +525,11 @@ impl TypeChecker {
                 expr: scrutinee,
                 arms,
             } => {
+                // T0264: bound the scrutinee borrow's region to the match. A
+                // borrow taken directly in a scrutinee (`match &v { .. }`) must
+                // end at match end; the result is value-typed (auto-deref), so
+                // no reference escapes and releasing it here is sound.
+                self.borrow_tracker.enter_scope();
                 let scrutinee_ty = self.synth_expr(scrutinee)?.ty;
                 // Resolve any associated-type projection in the scrutinee (e.g.
                 // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding and
@@ -538,6 +543,8 @@ impl TypeChecker {
                     }
                     self.check_expr(&arm.body, expected)?;
                 }
+
+                self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
 
                 // Exhaustiveness check (check_expr path)
                 // Only for variant/bool types without guards to avoid false positives
@@ -4714,6 +4721,8 @@ impl TypeChecker {
                     // NOTE: Affine tracking for scrutinee is handled by synth_expr
                     // Do NOT add explicit use_value here - it would cause double-consume errors
                     // since infer_path_expr already calls use_value for Path expressions
+                    // T0264: scope the scrutinee borrow to the match (released below).
+                    self.borrow_tracker.enter_scope();
                     let scrut_result = self.synth_expr(scrutinee)?;
                     // Resolve associated-type projections in the scrutinee (e.g.
                     // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding
@@ -4753,7 +4762,10 @@ impl TypeChecker {
                     if self.dependent_enabled {
                         let is_dependent = self.is_dependent_type(&scrut_ty);
                         if is_dependent {
-                            return self.check_dependent_match(&scrut_ty, arms, expr.span);
+                            let dep_result =
+                                self.check_dependent_match(&scrut_ty, arms, expr.span);
+                            self.borrow_tracker.exit_scope(); // T0264: balance the match scope
+                            return dep_result;
                         }
                     }
 
@@ -4889,6 +4901,7 @@ impl TypeChecker {
                         }
                     }
 
+                    self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
                     Ok(InferResult::new(result_ty))
     }
 
