@@ -44,7 +44,7 @@ what the ML "value restriction warnings" family covers. Verum has neither today.
 
 ## 3. The guards (each a filed task; G2 is the general net)
 
-### G1 — Loud undefined field/member access  (task T0562)
+### G1 — Loud undefined field/member access  (task T0563)
 A `receiver.member` access where `member` is neither a declared field of the
 receiver's type, an associated function, nor a protocol method in scope, is a
 typed error (`E-field`), with a did-you-mean over the type's real members. This
@@ -53,7 +53,7 @@ receiver's type to be *known* — which is why it must run under a real typechec
 (G3), and why the record-field-swallow (`verum-types-resolution-traps`) is
 removed rather than softened.
 
-### G2 — No-effect expression statement  (task T0563)  ★ the class-killer
+### G2 — No-effect expression statement  (task T0564)  ★ the class-killer
 A statement that is a *pure* expression whose value is discarded — a path,
 field access, literal, or an operator/call chain the effect system proves has
 no side effect and is not `must_use` — is a diagnostic (`W-noeffect`, promotable
@@ -80,7 +80,7 @@ blocking in CI. Without it, G1/G2 protect user code but not the stdlib — and t
 stdlib is where this incident, T0516's 18 unchecked functions, and T0527's ~130
 calls to nonexistent `JsonValue` methods all hid.
 
-### G4 — Mechanical-refactor gate  (process, task T0564)
+### G4 — Mechanical-refactor gate  (process, task T0565)
 Any bulk/scripted edit over N>1 files must be followed by a re-typecheck of the
 touched set (made meaningful by G1–G3) and a paren/bracket-balance +
 diff-multiset check (the technique in `mechanical-refactor-corruption-repair`).
