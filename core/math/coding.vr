@@ -140,6 +140,27 @@ public fn fano_lines() -> List<Int> {
     lines
 }
 
+/// The seven Fano lines as explicit 3-point subsets of `{0..6}`, using the
+/// canonical labelling `ℓ_p = {p, (p+1) mod 7, (p+3) mod 7}` for `p ∈ 0..6`.
+/// A companion to the bitmask-valued `fano_lines()` above for callers that want
+/// point subsets rather than weight-3 codeword masks (e.g. the SYNARC M1 Fano
+/// cross-check). Structurally the projective plane PG(2,2): 7 lines, 3 points
+/// each, every pair of lines meets in exactly one point, and every point lies
+/// on exactly three lines. Pure, total.
+public fn fano_lines_points() -> List<List<Int>> {
+    let mut lines: List<List<Int>> = List.new();
+    let mut p = 0;
+    while p < 7 {
+        let mut line: List<Int> = List.new();
+        line.push(p);
+        line.push((p + 1) % 7);
+        line.push((p + 3) % 7);
+        lines.push(line);
+        p = p + 1;
+    }
+    lines
+}
+
 /// All 16 codewords in increasing order.
 public fn hamming_codewords() -> List<Int> {
     let mut out: List<Int> = List.new();
