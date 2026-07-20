@@ -9,9 +9,9 @@ use verum_llvm::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use verum_llvm::{AtomicOrdering, AtomicRMWBinOp, FloatPredicate, IntPredicate};
 use verum_vbc::instruction::{
-    ArithSubOpcode, BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CmpSubOpcode,
-    CompareOp, SystemSubOpcode, FloatToIntMode, Instruction, MathSubOpcode, Reg, SimdSubOpcode,
-    UnaryFloatOp, UnaryIntOp,
+    ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp,
+    CmpSubOpcode, CompareOp, SystemSubOpcode, FloatToIntMode, Instruction, MathSubOpcode, Reg,
+    SimdSubOpcode, UnaryFloatOp, UnaryIntOp,
 };
 use verum_vbc::module::{CType, ConstId, Constant, FfiSymbolId, FunctionId};
 use verum_vbc::types::{StringId, TypeId, TypeParamId, TypeRef};
@@ -28899,6 +28899,104 @@ fn lower_ffi_extended<'ctx>(
 
             let module = ctx.get_module();
             ffi.lower_memcpy(ctx.builder(), &module, dst_ptr, src_ptr, size)?;
+            Ok(())
+        }
+
+        // ================================================================
+        // Atomic read-modify-write (0xBC)
+        // ================================================================
+        Some(SystemSubOpcode::AtomicRmw) => {
+            // Format: dst:reg, ptr:reg, val:reg, op:u8, size:u8
+            //
+            // The Tier-0 twin runs a hardware RMW (or, for NaN-boxed
+            // 8-byte slots, a CAS retry loop). Here LLVM's `atomicrmw`
+            // is exactly the same indivisible operation. Registers hold
+            // raw integers on this path — unlike Tier-0 there is no
+            // NaN-box to unwrap, matching `lower_atomic_load` /
+            // `lower_atomic_store` which also read and write raw words.
+            if operands.len() < 5 {
+                return Err(LlvmLoweringError::internal(
+                    "AtomicRmw: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let ptr_reg = op_reg(operands, 1);
+            let val_reg = op_reg(operands, 2);
+
+            let mut pos = 0usize;
+            for _ in 0..3 {
+                read_reg_varlen(operands, &mut pos)
+                    .map_err(|_| LlvmLoweringError::internal("AtomicRmw: malformed operands"))?;
+            }
+            let op_byte = operands.get(pos).copied().unwrap_or(0);
+            let size = operands.get(pos + 1).copied().unwrap_or(8);
+
+            let rmw_op = match AtomicRmwOp::from_byte(op_byte) {
+                Some(AtomicRmwOp::Add) => AtomicRMWBinOp::Add,
+                Some(AtomicRmwOp::Sub) => AtomicRMWBinOp::Sub,
+                Some(AtomicRmwOp::And) => AtomicRMWBinOp::And,
+                Some(AtomicRmwOp::Or) => AtomicRMWBinOp::Or,
+                Some(AtomicRmwOp::Xor) => AtomicRMWBinOp::Xor,
+                Some(AtomicRmwOp::Xchg) => AtomicRMWBinOp::Xchg,
+                None => {
+                    return Err(LlvmLoweringError::internal(format!(
+                        "AtomicRmw: invalid op byte {}",
+                        op_byte
+                    )));
+                }
+            };
+
+            let llvm_ctx = ctx.types().context();
+            let int_type = match size {
+                1 => ctx.types().i8_type(),
+                2 => llvm_ctx.i16_type(),
+                4 => ctx.types().i32_type(),
+                8 => ctx.types().i64_type(),
+                _ => {
+                    return Err(LlvmLoweringError::internal(format!(
+                        "AtomicRmw: unsupported size {}",
+                        size
+                    )));
+                }
+            };
+
+            let ptr_val = as_ptr(ctx, ctx.get_register(ptr_reg)?, "atomic_rmw_ptr")?;
+            let val_i64 = as_i64(ctx, ctx.get_register(val_reg)?, "atomic_rmw_val")?;
+            let sized_val = if size < 8 {
+                ctx.builder()
+                    .build_int_truncate(val_i64, int_type, "atomic_rmw_trunc")
+                    .map_err(|e| {
+                        LlvmLoweringError::internal(format!("AtomicRmw: truncate failed: {}", e))
+                    })?
+            } else {
+                val_i64
+            };
+
+            let result = ctx
+                .builder()
+                .build_atomicrmw(
+                    rmw_op,
+                    ptr_val,
+                    sized_val,
+                    AtomicOrdering::SequentiallyConsistent,
+                )
+                .map_err(|e| {
+                    LlvmLoweringError::BuilderError(format!("atomicrmw: {}", e).into())
+                })?;
+
+            // The old value is returned zero-extended, matching
+            // `lower_atomic_load`'s convention for sub-word widths.
+            let i64_type = ctx.types().i64_type();
+            let old = if size < 8 {
+                ctx.builder()
+                    .build_int_z_extend(result, i64_type, "atomic_rmw_ext")
+                    .map_err(|e| {
+                        LlvmLoweringError::internal(format!("AtomicRmw: extend failed: {}", e))
+                    })?
+            } else {
+                result
+            };
+            ctx.set_register(dst_reg, old.into());
             Ok(())
         }
 

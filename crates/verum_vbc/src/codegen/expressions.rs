@@ -34,8 +34,8 @@ use super::context::ExprId;
 use super::error::CodegenOptionExt;
 use super::{CodegenError, CodegenErrorKind, CodegenResult, FunctionInfo, VbcCodegen};
 use crate::instruction::{
-    ArithSubOpcode, BinaryFloatOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp, FloatToIntMode,
-    Instruction, Reg, RegRange, UnaryFloatOp, UnaryIntOp,
+    ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp,
+    FloatToIntMode, Instruction, Reg, RegRange, UnaryFloatOp, UnaryIntOp,
 };
 use crate::intrinsics::{IntrinsicInfo, lookup_intrinsic};
 use crate::module::FfiSymbolId;
@@ -30752,90 +30752,35 @@ impl VbcCodegen {
                 }
             }
 
-            // Atomic fetch operations — width-aware inline emit.
+            // Atomic fetch operations — ONE indivisible RMW opcode.
             //
-
-            // Earlier this arm dispatched through
-            // `emit_intrinsic_library_call("verum_atomic_fetch_*", ...)`
-            // whose handlers hardcoded `size: 8` regardless of the
-            // intrinsic's actual width. That meant `atomic_fetch_or_u8`
-            // emitted an 8-byte AtomicLoad on a byte-aligned pointer —
-            // misaligned-atomic error in the interpreter (silent zero on
-            // load, then InvalidOperand on the cas), and a 7-byte read
-            // past the AtomicU8's storage in AOT.
+            // `byte_width` comes from the registry's
+            // `InlineSequenceWithWidth(..., width)` strategy, so
+            // `atomic_fetch_or_u8` accesses one byte and not eight (an
+            // 8-byte access on a byte-aligned cell used to fault the
+            // interpreter and read past the cell in AOT).
             //
-
-            // We now plumb `byte_width` (passed in from the registry's
-            // `InlineSequenceWithWidth(..., width)` strategy) through to
-            // both AtomicLoad and AtomicCas so the size byte matches the
-            // declared width. Single-attempt CAS pattern is functionally
-            // correct for single-threaded execution; multi-threaded
-            // contention would need a real CAS-loop (separate follow-up).
+            // These used to expand to `AtomicLoad` + arithmetic + a
+            // single `AtomicCas` whose result was discarded. Each step
+            // was atomic but the sequence was not: two threads that
+            // interleave both read the same old value and one update
+            // vanishes, silently. `AtomicRmw` is indivisible.
             InlineSequenceId::AtomicFetchAdd
             | InlineSequenceId::AtomicFetchSub
             | InlineSequenceId::AtomicFetchAnd
             | InlineSequenceId::AtomicFetchOr
             | InlineSequenceId::AtomicFetchXor => {
                 if args.len() >= 2 {
-                    let ptr = args[0];
-                    let val = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: byte_width,
-                    });
-                    let new_val = self.ctx.alloc_temp();
-                    match seq_id {
-                        InlineSequenceId::AtomicFetchAdd => self.ctx.emit(Instruction::BinaryI {
-                            op: BinaryIntOp::Add,
-                            dst: new_val,
-                            a: old_val,
-                            b: val,
-                        }),
-                        InlineSequenceId::AtomicFetchSub => self.ctx.emit(Instruction::BinaryI {
-                            op: BinaryIntOp::Sub,
-                            dst: new_val,
-                            a: old_val,
-                            b: val,
-                        }),
-                        InlineSequenceId::AtomicFetchAnd => self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::And,
-                            dst: new_val,
-                            a: old_val,
-                            b: val,
-                        }),
-                        InlineSequenceId::AtomicFetchOr => self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::Or,
-                            dst: new_val,
-                            a: old_val,
-                            b: val,
-                        }),
-                        InlineSequenceId::AtomicFetchXor => self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::Xor,
-                            dst: new_val,
-                            a: old_val,
-                            b: val,
-                        }),
+                    let op = match seq_id {
+                        InlineSequenceId::AtomicFetchAdd => AtomicRmwOp::Add,
+                        InlineSequenceId::AtomicFetchSub => AtomicRmwOp::Sub,
+                        InlineSequenceId::AtomicFetchAnd => AtomicRmwOp::And,
+                        InlineSequenceId::AtomicFetchOr => AtomicRmwOp::Or,
+                        InlineSequenceId::AtomicFetchXor => AtomicRmwOp::Xor,
                         _ => unreachable!(),
-                    }
-                    let cas_result = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: cas_result,
-                        ptr,
-                        expected: old_val,
-                        desired: new_val,
-                        ordering: 4,
-                        size: byte_width,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(cas_result);
-                    self.ctx.free_temp(new_val);
-                    self.ctx.free_temp(old_val);
+                    };
+                    self.ctx
+                        .emit(op.encode(dest, args[0], args[1], byte_width));
                 } else {
                     self.ctx.emit(Instruction::LoadI {
                         dst: dest,
@@ -31900,36 +31845,14 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call("verum_global_allocator", args, dest)?;
             }
 
-            // Atomic exchange — width-aware single-attempt CAS.
-            // Same width-bug as the AtomicFetch* arm above: prior
-            // dispatch hardcoded `size: 8`. Now uses `byte_width`
-            // from `InlineSequenceWithWidth(..., width)`.
+            // Atomic exchange — the swap form of the same indivisible
+            // RMW opcode. Previously an `AtomicLoad` plus one
+            // discarded `AtomicCas`, which under contention returned an
+            // old value that was never actually swapped out.
             InlineSequenceId::AtomicExchange => {
                 if args.len() >= 2 {
-                    let ptr = args[0];
-                    let new_val = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: byte_width,
-                    });
-                    let cas_result = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: cas_result,
-                        ptr,
-                        expected: old_val,
-                        desired: new_val,
-                        ordering: 4,
-                        size: byte_width,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(cas_result);
-                    self.ctx.free_temp(old_val);
+                    self.ctx
+                        .emit(AtomicRmwOp::Xchg.encode(dest, args[0], args[1], byte_width));
                 } else {
                     self.ctx.emit(Instruction::LoadI {
                         dst: dest,
@@ -35311,204 +35234,33 @@ impl VbcCodegen {
                 });
             }
 
-            // Atomic fetch-and-add: CAS loop pattern
-            // dst = atomic_fetch_add(ptr, delta) — returns old value
-            "verum_atomic_fetch_add" | "verum_atomic_fetch_add_i64" => {
+            // Atomic read-modify-write: `dst = atomic_fetch_OP(ptr, val)`,
+            // returning the value read BEFORE the update.
+            //
+            // Each of these used to expand to `AtomicLoad` + arithmetic
+            // + one `AtomicCas` whose result was then overwritten by a
+            // `Mov dst, old_val` — a read-modify-write with no retry and
+            // no way to notice it had failed. Two threads racing on a
+            // counter produced one increment instead of two. One
+            // indivisible opcode replaces the sequence.
+            "verum_atomic_fetch_add" | "verum_atomic_fetch_add_i64"
+            | "verum_atomic_fetch_sub" | "verum_atomic_fetch_sub_i64"
+            | "verum_atomic_fetch_and" | "verum_atomic_fetch_and_i64"
+            | "verum_atomic_fetch_or" | "verum_atomic_fetch_or_i64"
+            | "verum_atomic_fetch_xor" | "verum_atomic_fetch_xor_i64" => {
                 if args.len() >= 2 {
-                    let ptr = args[0];
-                    let delta = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    let new_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add,
-                        dst: new_val,
-                        a: old_val,
-                        b: delta,
-                    });
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest,
-                        ptr,
-                        expected: old_val,
-                        desired: new_val,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(new_val);
-                    self.ctx.free_temp(old_val);
-                } else {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: 0,
-                    });
-                }
-            }
-
-            // Atomic fetch-and-sub: CAS loop pattern
-            "verum_atomic_fetch_sub" | "verum_atomic_fetch_sub_i64" => {
-                if args.len() >= 2 {
-                    let ptr = args[0];
-                    let delta = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    let new_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub,
-                        dst: new_val,
-                        a: old_val,
-                        b: delta,
-                    });
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest,
-                        ptr,
-                        expected: old_val,
-                        desired: new_val,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(new_val);
-                    self.ctx.free_temp(old_val);
-                } else {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: 0,
-                    });
-                }
-            }
-
-            // Atomic fetch-and-AND: CAS loop pattern
-            "verum_atomic_fetch_and" | "verum_atomic_fetch_and_i64" => {
-                if args.len() >= 2 {
-                    let ptr = args[0];
-                    let mask = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    let new_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::And,
-                        dst: new_val,
-                        a: old_val,
-                        b: mask,
-                    });
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest,
-                        ptr,
-                        expected: old_val,
-                        desired: new_val,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(new_val);
-                    self.ctx.free_temp(old_val);
-                } else {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: 0,
-                    });
-                }
-            }
-
-            // Atomic fetch-and-OR: CAS loop pattern
-            "verum_atomic_fetch_or" | "verum_atomic_fetch_or_i64" => {
-                if args.len() >= 2 {
-                    let ptr = args[0];
-                    let mask = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    let new_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::Or,
-                        dst: new_val,
-                        a: old_val,
-                        b: mask,
-                    });
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest,
-                        ptr,
-                        expected: old_val,
-                        desired: new_val,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(new_val);
-                    self.ctx.free_temp(old_val);
-                } else {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: 0,
-                    });
-                }
-            }
-
-            // Atomic fetch-and-XOR: CAS loop pattern
-            "verum_atomic_fetch_xor" | "verum_atomic_fetch_xor_i64" => {
-                if args.len() >= 2 {
-                    let ptr = args[0];
-                    let mask = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    let new_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::Xor,
-                        dst: new_val,
-                        a: old_val,
-                        b: mask,
-                    });
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest,
-                        ptr,
-                        expected: old_val,
-                        desired: new_val,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(new_val);
-                    self.ctx.free_temp(old_val);
+                    let op = if func_name.starts_with("verum_atomic_fetch_add") {
+                        AtomicRmwOp::Add
+                    } else if func_name.starts_with("verum_atomic_fetch_sub") {
+                        AtomicRmwOp::Sub
+                    } else if func_name.starts_with("verum_atomic_fetch_and") {
+                        AtomicRmwOp::And
+                    } else if func_name.starts_with("verum_atomic_fetch_or") {
+                        AtomicRmwOp::Or
+                    } else {
+                        AtomicRmwOp::Xor
+                    };
+                    self.ctx.emit(op.encode(dest, args[0], args[1], 8));
                 } else {
                     self.ctx.emit(Instruction::LoadI {
                         dst: dest,
@@ -35657,32 +35409,21 @@ impl VbcCodegen {
                 sub_op: ArithSubOpcode::RotateRight as u8,
                 operands: encode_operands(dest, args),
             }),
-            // Atomic exchange: CAS loop pattern
-            // dst = atomic_exchange(ptr, new_val) — returns old value
+            // Atomic exchange — the swap form of the ONE indivisible RMW
+            // opcode. Previously an `AtomicLoad` plus a single discarded
+            // `AtomicCas`, which under contention returned an old value
+            // that was never actually swapped out (if a racing writer won
+            // the cell between the load and the CAS, the CAS failed, the
+            // swap never happened, yet `old_val` was still returned as
+            // though it had). The registry routes every `atomic_exchange_*`
+            // through `InlineSequenceId::AtomicExchange`, so this
+            // library-call spelling is currently unreached — but it is kept
+            // in lockstep with its live sibling so no future caller can
+            // resurrect the racy shape.
             "verum_atomic_exchange" => {
                 if args.len() >= 2 {
-                    let ptr = args[0];
-                    let new_desired = args[1];
-                    let old_val = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val,
-                        ptr,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest,
-                        ptr,
-                        expected: old_val,
-                        desired: new_desired,
-                        ordering: 4,
-                        size: 8,
-                    });
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: old_val,
-                    });
-                    self.ctx.free_temp(old_val);
+                    self.ctx
+                        .emit(AtomicRmwOp::Xchg.encode(dest, args[0], args[1], 8));
                 } else {
                     self.ctx.emit(Instruction::LoadI {
                         dst: dest,

@@ -467,6 +467,12 @@ fn ffi_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        // Every `atomic_fetch_*` / `atomic_exchange` intrinsic lands
+        // here. The implementation lives with the other atomic handlers
+        // in `system.rs` so the load / store / CAS / RMW semantics stay
+        // in one file.
+        Some(SystemSubOpcode::AtomicRmw) => super::system::handle_atomic_rmw(state),
+
         // ================================================================
         // Byte Array Allocation
         // ================================================================

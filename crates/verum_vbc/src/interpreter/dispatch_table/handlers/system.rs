@@ -319,46 +319,40 @@ pub(in super::super) fn handle_atomic_cas(
                 }
             }
             8 => {
-                // Wrap expected/desired as NaN-boxed Value bit-
-                // patterns so the atomic CAS compares the WHOLE 8
-                // bytes including tag header (task #39). Then
-                // unwrap the returned old_u64 back to an i64
-                // payload for the user.
+                // An 8-byte slot holds a NaN-boxed Value, so "equals
+                // `expected`" is a question about the UNBOXED payload,
+                // not about the 64 raw bits: a never-written cell is
+                // raw zero while a stored zero is `boxed(0)`, and both
+                // read back as the value 0.  Compare on the payload and
+                // swap against the raw word actually observed, retrying
+                // only while the bits moved but the payload still
+                // matches — that is exactly strong-CAS semantics
+                // (failure only when the value differs) expressed over
+                // the boxed representation.
+                //
+                // The previous formulation compared `boxed(expected)`
+                // against the raw word and special-cased the single
+                // raw-zero-vs-boxed-zero collision it had been bitten
+                // by (a `static mut` counter cell whose first
+                // transition could never happen).  Comparing payloads
+                // makes that special case unnecessary.
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
-                let expected_boxed = i64_to_nan_box_payload(expected);
                 let desired_boxed = i64_to_nan_box_payload(desired);
-                match atomic.compare_exchange(
-                    expected_boxed,
-                    desired_boxed,
-                    success_ord,
-                    failure_ord,
-                ) {
-                    Ok(old) => (nan_box_payload_to_i64(old), true),
-                    // **ATOMIC-CAS-ZEROINIT-1**: a freshly-allocated
-                    // static-mut cell (`static_mut_cell_addr`) is RAW
-                    // zero — the payload-equivalent of boxed 0 (loads
-                    // unbox raw 0 to 0) but bit-distinct from
-                    // `i64_to_nan_box_payload(0)`.  A caller CAS-ing
-                    // `expected == 0` against the never-stored cell
-                    // must therefore accept the raw-zero pattern, or
-                    // the first transition can never happen — the
-                    // cap_audit_ring NEXT_SEQ fetch_add (inlined as
-                    // Load+Add+Cas) silently lost every increment and
-                    // `count()` stayed 0 forever.  Retry once against
-                    // raw 0; a concurrent writer landing in between
-                    // simply fails the retry (correct CAS semantics).
-                    Err(old) if old == 0 && expected == 0 => {
-                        match atomic.compare_exchange(
-                            0,
-                            desired_boxed,
-                            success_ord,
-                            failure_ord,
-                        ) {
-                            Ok(_) => (0, true),
-                            Err(old2) => (nan_box_payload_to_i64(old2), false),
-                        }
+                let mut raw = atomic.load(failure_ord);
+                loop {
+                    let observed = nan_box_payload_to_i64(raw);
+                    if observed != expected {
+                        break (observed, false);
                     }
-                    Err(old) => (nan_box_payload_to_i64(old), false),
+                    match atomic.compare_exchange(
+                        raw,
+                        desired_boxed,
+                        success_ord,
+                        failure_ord,
+                    ) {
+                        Ok(_) => break (expected, true),
+                        Err(actual) => raw = actual,
+                    }
                 }
             }
             _ => {
@@ -389,6 +383,138 @@ pub(in super::super) fn handle_atomic_cas(
         std::ptr::write(slot_ptr.add(1), Value::from_bool(success));
     }
     state.set_reg(dst, Value::from_ptr(obj.as_ptr()));
+    Ok(DispatchResult::Continue)
+}
+
+/// AtomicRmw — `FfiExtended` sub-op `SystemSubOpcode::AtomicRmw` (0xBC).
+///
+/// Format: `dst:reg, ptr:reg, val:reg, op:u8, size:u8`.  `dst` receives
+/// the value read BEFORE the update (the C11 / LLVM `atomicrmw`
+/// convention shared with Tier-1).
+///
+/// The whole point of this opcode is that the read-modify-write is
+/// INDIVISIBLE.  Its predecessor — an `AtomicLoad`, an arithmetic
+/// instruction and one `AtomicCas` emitted inline, with the CAS result
+/// thrown away — is atomic in each of its three steps and racy as a
+/// whole: when two threads interleave, both read the same old value and
+/// one update is silently lost.  Nothing observes the failure, and a
+/// single-threaded test can never see it.
+pub(in super::super) fn handle_atomic_rmw(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    use crate::instruction::AtomicRmwOp;
+    use std::sync::atomic::Ordering;
+
+    let dst = read_reg(state)?;
+    let ptr_reg = read_reg(state)?;
+    let val_reg = read_reg(state)?;
+    let op_byte = read_u8(state)?;
+    let size = read_u8(state)?;
+
+    let op = AtomicRmwOp::from_byte(op_byte).ok_or(InterpreterError::InvalidOperand {
+        message: format!("invalid atomic RMW op: {}", op_byte),
+    })?;
+
+    // Same dual pointer extraction as the sibling atomic handlers:
+    // `StructFieldAddr` yields a Pointer-tagged value, older callers an Int.
+    let ptr_val = state.get_reg(ptr_reg);
+    let ptr = if ptr_val.is_ptr() {
+        ptr_val.as_ptr::<u8>() as usize
+    } else {
+        ptr_val.as_i64() as usize
+    };
+    // BOXED-INT-OPERAND-SWEEP-1: the operand comes from user
+    // expressions (`val as UInt64`) which may arrive boxed.
+    let operand = state.get_reg(val_reg).as_integer_compatible();
+
+    if ptr == 0 || ptr < 0x1000 {
+        return Err(InterpreterError::NullPointer);
+    }
+    if size > 1 && !ptr.is_multiple_of(size as usize) {
+        return Err(InterpreterError::InvalidOperand {
+            message: format!("misaligned atomic RMW: ptr=0x{:x}, size={}", ptr, size),
+        });
+    }
+
+    // SAFETY: `ptr` is non-null, above the reserved low page and
+    // aligned for `size`; the caller owns a live atomic cell of that
+    // width there, which is the same contract the sibling
+    // AtomicLoad/Store/Cas handlers rely on.
+    let old = unsafe {
+        match size {
+            1 => {
+                let a = &*(ptr as *const std::sync::atomic::AtomicU8);
+                let v = operand as u8;
+                match op {
+                    AtomicRmwOp::Add => a.fetch_add(v, Ordering::SeqCst),
+                    AtomicRmwOp::Sub => a.fetch_sub(v, Ordering::SeqCst),
+                    AtomicRmwOp::And => a.fetch_and(v, Ordering::SeqCst),
+                    AtomicRmwOp::Or => a.fetch_or(v, Ordering::SeqCst),
+                    AtomicRmwOp::Xor => a.fetch_xor(v, Ordering::SeqCst),
+                    AtomicRmwOp::Xchg => a.swap(v, Ordering::SeqCst),
+                }
+                .into()
+            }
+            2 => {
+                let a = &*(ptr as *const std::sync::atomic::AtomicU16);
+                let v = operand as u16;
+                match op {
+                    AtomicRmwOp::Add => a.fetch_add(v, Ordering::SeqCst),
+                    AtomicRmwOp::Sub => a.fetch_sub(v, Ordering::SeqCst),
+                    AtomicRmwOp::And => a.fetch_and(v, Ordering::SeqCst),
+                    AtomicRmwOp::Or => a.fetch_or(v, Ordering::SeqCst),
+                    AtomicRmwOp::Xor => a.fetch_xor(v, Ordering::SeqCst),
+                    AtomicRmwOp::Xchg => a.swap(v, Ordering::SeqCst),
+                }
+                .into()
+            }
+            4 => {
+                let a = &*(ptr as *const std::sync::atomic::AtomicU32);
+                let v = operand as u32;
+                match op {
+                    AtomicRmwOp::Add => a.fetch_add(v, Ordering::SeqCst),
+                    AtomicRmwOp::Sub => a.fetch_sub(v, Ordering::SeqCst),
+                    AtomicRmwOp::And => a.fetch_and(v, Ordering::SeqCst),
+                    AtomicRmwOp::Or => a.fetch_or(v, Ordering::SeqCst),
+                    AtomicRmwOp::Xor => a.fetch_xor(v, Ordering::SeqCst),
+                    AtomicRmwOp::Xchg => a.swap(v, Ordering::SeqCst),
+                }
+                .into()
+            }
+            8 => {
+                // An 8-byte slot stores a NaN-boxed Value, so a hardware
+                // RMW on the raw word would corrupt the tag header the
+                // moment an add carried (or a subtract borrowed) across
+                // bit 48.  Unbox, apply, re-box, and swap against the
+                // exact word observed — a lock-free CAS retry loop.  It
+                // also makes an untouched raw-zero cell behave like a
+                // stored zero for free, since the comparison is against
+                // the observed bits rather than a synthesized box.
+                let a = &*(ptr as *const std::sync::atomic::AtomicU64);
+                let mut raw = a.load(Ordering::SeqCst);
+                loop {
+                    let current = nan_box_payload_to_i64(raw);
+                    let next = i64_to_nan_box_payload(op.apply(current, operand));
+                    match a.compare_exchange_weak(
+                        raw,
+                        next,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => break current,
+                        Err(actual) => raw = actual,
+                    }
+                }
+            }
+            _ => {
+                return Err(InterpreterError::InvalidOperand {
+                    message: format!("invalid atomic RMW size: {}", size),
+                });
+            }
+        }
+    };
+
+    state.set_reg(dst, Value::from_i64(old));
     Ok(DispatchResult::Continue)
 }
 
