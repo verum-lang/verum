@@ -17377,7 +17377,7 @@ mod tests {
                 "duplicate mnemonic {:?} on variant {:?}", m, op);
             seen.push(m);
         });
-        assert_eq!(seen.len(), 110);
+        assert_eq!(seen.len(), 111);
     }
 
     // ========================================================================
