@@ -686,7 +686,7 @@ fn is_power_of_two_or_sentinel(n: Int) -> Bool {
 fn io_error(context: &str, e: VfsError) -> PagerError {
     let _ = e;
     PagerError {
-        kind: IoError,
+        kind: IoFailure,
         message: context.to_owned(),
     }
 }

@@ -467,10 +467,13 @@ public type EngineIoError is
     | Other(Text)
     ;
 
-/// Public alias — short canonical name. Distinct from
-/// `core.io.protocols.IoError` (which is an interface trait);
-/// this concrete enum is the io-engine-side error variant.
-public type IoError is EngineIoError;
+// NOTE (T0509): this module deliberately does NOT alias its error type
+// to the bare name `IoError`.  Stdlib-wide, `IoError` means
+// `core.io.IoError` (= `core.io.protocols.StreamError`, the user-facing
+// record).  The bake shares one flat name table, so a second binding of
+// the same bare name made `IoError` resolve by emission order rather
+// than by meaning.  The engine-side error is `EngineIoError` and must
+// be spelled so at every use site.
 
 implement Display for EngineIoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

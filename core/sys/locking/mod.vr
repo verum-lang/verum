@@ -14,7 +14,7 @@ module sys.locking;
 //  * `LockRegion` — explicit start/length (length == -1 ≡ to EOF)
 //  * `FileLockKind` — Shared | Exclusive (no Unlock variant; unlock
 //  is expressed by consuming the affine handle)
-//  * `LockError` — Conflict(owner_pid) | IoError(OSError); the
+//  * `LockError` — Conflict(owner_pid) | IoFailure(OSError); the
 //  backend's EAGAIN/EWOULDBLOCK maps to Conflict
 //  * `LockHandle` — @affine RAII resource; `unlock` consumes it
 //
@@ -66,11 +66,11 @@ public type LockRegion is {
 
 /// `Conflict(owner_pid)` — another holder has an incompatible lock.
 /// The owning PID is `Maybe.Some(pid)` when the platform can report it via
-/// `F_GETLK` / `F_OFD_GETLK`, otherwise `Maybe.None`. `IoError` wraps any
+/// `F_GETLK` / `F_OFD_GETLK`, otherwise `Maybe.None`. `IoFailure` wraps any
 /// non-conflict OS failure (EBADF, ENOLCK, etc.).
 public type LockError is
       Conflict(owner_pid: Maybe<Int>)
-    | IoError(err: OSError);
+    | IoFailure(err: OSError);
 
 implement Display for LockError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -81,7 +81,7 @@ implement Display for LockError {
                 } else {
                     f.write_str("file lock conflict (owner unknown)")
                 },
-            IoError(err) => f.write_str(f"file lock I/O error: {err}".as_str()),
+            IoFailure(err) => f.write_str(f"file lock I/O error: {err}".as_str()),
         }
     }
 }
@@ -90,7 +90,7 @@ implement Debug for LockError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             Conflict(owner_pid) => f.write_str(f"Conflict(owner_pid: {owner_pid})".as_str()),
-            IoError(err)        => f.write_str(f"IoError(err: {err})".as_str()),
+            IoFailure(err)      => f.write_str(f"IoFailure(err: {err})".as_str()),
         }
     }
 }
@@ -98,8 +98,8 @@ implement Debug for LockError {
 implement Eq for LockError {
     fn eq(&self, other: &LockError) -> Bool {
         match (self, other) {
-            (Conflict(a), Conflict(b)) => a == b,
-            (IoError(a),  IoError(b))  => a == b,
+            (Conflict(a),  Conflict(b))  => a == b,
+            (IoFailure(a), IoFailure(b)) => a == b,
             _ => false,
         }
     }
@@ -178,7 +178,7 @@ implement LockHandle {
 /// On success returns a fresh `LockHandle` that must be consumed by
 /// `unlock`. On conflict (EAGAIN / EWOULDBLOCK / ERROR_LOCK_VIOLATION)
 /// returns `Result.Err(Conflict(...))`. Any other OS failure returns
-/// `Result.Err(IoError(OSError))`.
+/// `Result.Err(LockError.IoFailure(OSError))`.
 ///
 
 /// Implementation: dispatches to `core.sys.try_lock_region`,
@@ -203,7 +203,7 @@ public fn try_lock(
             if e.would_block() {
                 Result.Err(Conflict(Maybe.None))
             } else {
-                Result.Err(IoError(e))
+                Result.Err(LockError.IoFailure(e))
             }
         }
     }
@@ -224,7 +224,7 @@ public fn unlock(mut handle: LockHandle) -> Result<(), LockError> {
     handle.active = false;
     match res {
         Result.Ok(_)  => Result.Ok(()),
-        Result.Err(e) => Result.Err(IoError(e)),
+        Result.Err(e) => Result.Err(LockError.IoFailure(e)),
     }
 }
 

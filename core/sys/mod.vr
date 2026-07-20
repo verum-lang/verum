@@ -138,7 +138,7 @@ public mount .common.{
 // Export unified I/O engine protocol
 public mount .io_engine.{
     IOEngine,
-    IoError,
+    EngineIoError,
     CompletionOp,
     CompletionResult,
     Duration as IoDuration,
@@ -295,7 +295,6 @@ public mount .linux.io.{
     IoUringDriver,
     EpollDriver,
     IoDriver,
-    IoError,
     create_io_driver,
     is_io_uring_available,
 };
@@ -463,7 +462,6 @@ public mount .darwin.{
 @cfg(target_os = "macos")
 public mount .darwin.{
     // I/O Types
-    IoError,
     IoOpKind,
     IoToken,
     IoOp,
@@ -678,7 +676,6 @@ public mount .windows.{
 @cfg(target_os = "windows")
 public mount .windows.{
     // I/O Types
-    IoError,
     IocpDriver,
     OverlappedEntry,
     IoOperation,

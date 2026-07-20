@@ -118,7 +118,7 @@ public type ConnectionError is
     | NotAdmin
     | TxAlreadyActive
     | TxNotActive
-    | IoError(Text);
+    | IoFailure(Text);
 
 implement Display for ConnectionError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -127,7 +127,7 @@ implement Display for ConnectionError {
             NotAdmin        => f.write_str("sqlite connection not admin"),
             TxAlreadyActive => f.write_str("sqlite transaction already active"),
             TxNotActive     => f.write_str("sqlite no active transaction"),
-            IoError(m)      => f.write_str(f"sqlite connection I/O error: {m}".as_str()),
+            IoFailure(m)    => f.write_str(f"sqlite connection I/O error: {m}".as_str()),
         }
     }
 }
@@ -139,7 +139,7 @@ implement Debug for ConnectionError {
             NotAdmin        => f.write_str("NotAdmin"),
             TxAlreadyActive => f.write_str("TxAlreadyActive"),
             TxNotActive     => f.write_str("TxNotActive"),
-            IoError(m)      => f.write_str(f"IoError({m})".as_str()),
+            IoFailure(m)    => f.write_str(f"IoFailure({m})".as_str()),
         }
     }
 }
@@ -151,7 +151,7 @@ implement Eq for ConnectionError {
             (NotAdmin,        NotAdmin)        => true,
             (TxAlreadyActive, TxAlreadyActive) => true,
             (TxNotActive,     TxNotActive)     => true,
-            (IoError(a),      IoError(b))      => a == b,
+            (IoFailure(a),    IoFailure(b))    => a == b,
             _ => false,
         }
     }
@@ -200,7 +200,7 @@ public type SqliteConnection is {
 public fn open_memory(mode: ConnectionMode) -> Result<SqliteConnection, ConnectionError> {
     let pager = match pager_open_memory() {
         Result.Ok(p)  => p,
-        Result.Err(_) => { return Result.Err(IoError("pager_open_memory failed".clone())); }
+        Result.Err(_) => { return Result.Err(ConnectionError.IoFailure("pager_open_memory failed".clone())); }
     };
     Result.Ok(SqliteConnection {
         mode: mode,
@@ -234,11 +234,11 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<SqliteConnectio
     let pager = match mode {
         CmRead => match pager_open_file_ro(path) {
             Result.Ok(p)  => p,
-            Result.Err(_) => { return Result.Err(IoError("pager_open_file_ro failed".clone())); }
+            Result.Err(_) => { return Result.Err(ConnectionError.IoFailure("pager_open_file_ro failed".clone())); }
         },
         CmWrite | CmAdmin => match pager_open_file_rwc(path) {
             Result.Ok(p)  => p,
-            Result.Err(_) => { return Result.Err(IoError("pager_open_file_rwc failed".clone())); }
+            Result.Err(_) => { return Result.Err(ConnectionError.IoFailure("pager_open_file_rwc failed".clone())); }
         },
     };
     Result.Ok(SqliteConnection {
@@ -308,10 +308,10 @@ implement SqliteConnection {
             }
             Maybe.Some(msg) => {
                 // Commit aborted by hook → rollback the tx and emit
-                // the hook's rejection reason via IoError until a
+                // the hook's rejection reason via ConnectionError.IoFailure until a
                 // dedicated "constraint by hook" error variant lands.
                 self.tx = tx_state_autocommit();
-                Result.Err(IoError(msg))
+                Result.Err(ConnectionError.IoFailure(msg))
             }
         }
     }

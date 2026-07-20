@@ -62,7 +62,7 @@ mount core.security.x509.name.{DistinguishedName};
 public type TrustError is
       NoSystemStore
     | InvalidCertificate(Int)         // index
-    | IoError(Text);
+    | IoFailure(Text);
 
 // Display + Debug + Eq for TrustError — standard stdlib
 // protocol impls.
@@ -72,7 +72,7 @@ implement Display for TrustError {
         match self {
             TrustError.NoSystemStore         => f.write_str("X.509 trust store unavailable on this platform"),
             TrustError.InvalidCertificate(i) => f.write_str(f"X.509 trust anchor at index {i} failed to parse".as_str()),
-            TrustError.IoError(msg)          => f.write_str(f"X.509 trust store I/O error: {msg}".as_str()),
+            TrustError.IoFailure(msg)        => f.write_str(f"X.509 trust store I/O error: {msg}".as_str()),
         }
     }
 }
@@ -82,7 +82,7 @@ implement Debug for TrustError {
         match self {
             TrustError.NoSystemStore         => f.write_str("NoSystemStore"),
             TrustError.InvalidCertificate(i) => f.write_str(f"InvalidCertificate({i})".as_str()),
-            TrustError.IoError(msg)          => f.write_str(f"IoError({msg})".as_str()),
+            TrustError.IoFailure(msg)        => f.write_str(f"IoFailure({msg})".as_str()),
         }
     }
 }
@@ -92,7 +92,7 @@ implement Eq for TrustError {
         match (self, other) {
             (TrustError.NoSystemStore,         TrustError.NoSystemStore)         => true,
             (TrustError.InvalidCertificate(a), TrustError.InvalidCertificate(b)) => a == b,
-            (TrustError.IoError(a),            TrustError.IoError(b))            => a == b,
+            (TrustError.IoFailure(a),          TrustError.IoFailure(b))          => a == b,
             _ => false,
         }
     }
@@ -213,7 +213,7 @@ fn try_load_linux_bundle() -> Result<TrustStore, TrustError> {
 fn read_file_to_text(path: &Text) -> Result<Text, TrustError> {
     match core.io.file.File.read_to_text(path) {
         Result.Ok(t) => Result.Ok(t),
-        Result.Err(e) => Result.Err(TrustError.IoError(Text.from_str(f"read {path} failed"))),
+        Result.Err(e) => Result.Err(TrustError.IoFailure(Text.from_str(f"read {path} failed"))),
     }
 }
 
@@ -258,7 +258,7 @@ fn load_bundled_mozilla() -> Result<TrustStore, TrustError> {
 fn parse_pem_bundle(pem: &Text) -> Result<List<List<Byte>>, TrustError> {
     let blocks: List<PemBlock> = match pem_decode_all(pem) {
         Result.Ok(b)  => b,
-        Result.Err(_) => return Result.Err(TrustError.IoError(Text.from_str("PEM decode failed"))),
+        Result.Err(_) => return Result.Err(TrustError.IoFailure(Text.from_str("PEM decode failed"))),
     };
     let mut out: List<List<Byte>> = [];
     let mut i: Int = 0;

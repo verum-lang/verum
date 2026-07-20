@@ -56,7 +56,7 @@ public fn btree_kind_root_page_kind_interior(kind: BtreeKind) -> PageKind {
 public type BtreeError is
       InvalidRootPage(pn: Int)
     | InvalidPageSize(ps: Int)
-    | IoError(msg: Text)
+    | IoFailure(msg: Text)
     | Corrupt(msg: Text)
     // Added by #140 — needed by cursor_seek + btree_ops:
     | PageNotFound(pn: Int)
@@ -71,7 +71,7 @@ implement Display for BtreeError {
         match self {
             InvalidRootPage(pn)     => f.write_str(f"sqlite btree: invalid root page {pn}".as_str()),
             InvalidPageSize(ps)     => f.write_str(f"sqlite btree: invalid page size {ps}".as_str()),
-            IoError(msg)            => f.write_str(f"sqlite btree I/O error: {msg}".as_str()),
+            IoFailure(msg)          => f.write_str(f"sqlite btree I/O error: {msg}".as_str()),
             Corrupt(msg)            => f.write_str(f"sqlite btree corruption: {msg}".as_str()),
             PageNotFound(pn)        => f.write_str(f"sqlite btree: page {pn} not found".as_str()),
             CorruptPage(pn)         => f.write_str(f"sqlite btree: page {pn} corrupt".as_str()),
@@ -88,7 +88,7 @@ implement Debug for BtreeError {
         match self {
             InvalidRootPage(pn)     => f.write_str(f"InvalidRootPage(pn: {pn})".as_str()),
             InvalidPageSize(ps)     => f.write_str(f"InvalidPageSize(ps: {ps})".as_str()),
-            IoError(msg)            => f.write_str(f"IoError(msg: {msg})".as_str()),
+            IoFailure(msg)          => f.write_str(f"IoFailure(msg: {msg})".as_str()),
             Corrupt(msg)            => f.write_str(f"Corrupt(msg: {msg})".as_str()),
             PageNotFound(pn)        => f.write_str(f"PageNotFound(pn: {pn})".as_str()),
             CorruptPage(pn)         => f.write_str(f"CorruptPage(pn: {pn})".as_str()),
@@ -105,7 +105,7 @@ implement Eq for BtreeError {
         match (self, other) {
             (InvalidRootPage(a),    InvalidRootPage(b))    => a == b,
             (InvalidPageSize(a),    InvalidPageSize(b))    => a == b,
-            (IoError(a),            IoError(b))            => a == b,
+            (IoFailure(a),          IoFailure(b))          => a == b,
             (Corrupt(a),            Corrupt(b))            => a == b,
             (PageNotFound(a),       PageNotFound(b))       => a == b,
             (CorruptPage(a),        CorruptPage(b))        => a == b,

@@ -136,7 +136,7 @@ public type VfsErrorKind is
     | AlreadyExists
     | InvalidArgument
     | Interrupted
-    | IoError
+    | IoFailure
     | ShortRead
     | WriteFault
     | LockConflict
@@ -152,7 +152,7 @@ fn vfs_error_kind_name(k: &VfsErrorKind) -> Text {
         AlreadyExists     => "AlreadyExists".clone(),
         InvalidArgument   => "InvalidArgument".clone(),
         Interrupted       => "Interrupted".clone(),
-        IoError           => "IoError".clone(),
+        IoFailure         => "IoFailure".clone(),
         ShortRead         => "ShortRead".clone(),
         WriteFault        => "WriteFault".clone(),
         LockConflict      => "LockConflict".clone(),
@@ -167,7 +167,7 @@ fn vfs_error_kind_tag(k: &VfsErrorKind) -> Int {
     match k {
         NotFound         => 0,  PermissionDenied => 1,
         AlreadyExists    => 2,  InvalidArgument  => 3,
-        Interrupted      => 4,  IoError          => 5,
+        Interrupted      => 4,  IoFailure        => 5,
         ShortRead        => 6,  WriteFault       => 7,
         LockConflict     => 8,  Unsupported      => 9,
         DiskFull         => 10, Corrupt          => 11,
@@ -338,7 +338,7 @@ public type VfsProtocol is protocol {
     fn access(&self, path: &Text, kind: AccessKind) -> Result<Bool, VfsError>;
     fn full_pathname(&self, path: &Text) -> Result<Text, VfsError>;
     /// Cryptographic-grade entropy from the OS. Errors are
-    /// surfaced as `Result.Err(VfsError.IoError)` rather than swallowed
+    /// surfaced as `Result.Err(VfsError.IoFailure)` rather than swallowed
     /// — pre-fix the signature returned a bare `List<Byte>` and
     /// callers receiving an empty list (entropy-source failure)
     /// silently used zero bytes for WAL salts, an exploitable

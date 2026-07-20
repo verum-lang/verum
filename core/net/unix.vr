@@ -75,7 +75,7 @@ mount core.sys.darwin.libsystem.{
 
 /// Error from AF_UNIX operations.
 public type UnixError is
-    | IoError(Text)
+    | IoFailure(Text)
     | PathTooLong { limit: Int, actual: Int }
     | InvalidPath(Text)
     | PermissionDenied
@@ -90,7 +90,7 @@ implement UnixError {
     /// platforms (ECONNRESET, ENOTCONN, ENAMETOOLONG) are
     /// gated by @cfg matches that ship the per-platform
     /// integer values. Unknown errnos fall through to
-    /// `IoError(<formatted>)` so the caller still sees the
+    /// `UnixError.IoFailure(<formatted>)` so the caller still sees the
     /// raw code in the message.
     public fn from_os_error(e: OsError) -> UnixError {
         // POSIX-stable mappings — same integer values on
@@ -130,7 +130,7 @@ implement UnixError {
             }
         }
 
-        UnixError.IoError(f"{e}")
+        UnixError.IoFailure(f"{e}")
     }
 
     /// Lift a `UnixError` into the cross-stdlib `IoError`
@@ -141,14 +141,14 @@ implement UnixError {
     /// `IoErrorKind`; the original detail is preserved
     /// through the `message` field. Pre-#103, async
     /// adapters (`poll_shutdown` / `poll_*`) collapsed
-    /// every UnixError into `IoError.Other(f"{e}")`,
+    /// every UnixError into `IoError.Other(f"{e}")` (the io-side error),
     /// throwing away the variant tag and forcing
     /// downstream callers to substring-match the message
     /// string. Now downstream `match err.kind { … }`
     /// works directly on the typed kinds.
     public fn to_io_error(self) -> IoError {
         match self {
-            UnixError.IoError(msg) =>
+            UnixError.IoFailure(msg) =>
                 IoError { kind: IoErrorKind.Other,            message: Maybe.Some(msg) },
             UnixError.PathTooLong { limit, actual } =>
                 IoError {
@@ -177,7 +177,7 @@ implement UnixError {
 implement Display for UnixError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnixError.IoError(msg)            => f.write_str(msg.as_str()),
+            UnixError.IoFailure(msg)          => f.write_str(msg.as_str()),
             UnixError.PathTooLong { limit, actual } =>
                 f.write_str(f"unix path exceeds platform limit: limit={limit} actual={actual}".as_str()),
             UnixError.InvalidPath(msg)        => {
@@ -201,8 +201,8 @@ implement Display for UnixError {
 implement Debug for UnixError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnixError.IoError(msg) => {
-                f.write_str("IoError(")?;
+            UnixError.IoFailure(msg) => {
+                f.write_str("IoFailure(")?;
                 f.write_str(msg.as_str())?;
                 f.write_str(")")
             },
@@ -232,7 +232,7 @@ implement Debug for UnixError {
 implement Eq for UnixError {
     fn eq(&self, other: &UnixError) -> Bool {
         match (self, other) {
-            (UnixError.IoError(a),     UnixError.IoError(b))     => a == b,
+            (UnixError.IoFailure(a),   UnixError.IoFailure(b))   => a == b,
             (
                 UnixError.PathTooLong { limit: la, actual: aa },
                 UnixError.PathTooLong { limit: lb, actual: ab },
@@ -870,7 +870,7 @@ implement UnixStream {
             &mut buf, &mut len,
         ) {
             Result.Ok(()) => {}
-            Result.Err(_) => return Result.Err(UnixError.IoError("SO_PEERCRED failed".into())),
+            Result.Err(_) => return Result.Err(UnixError.IoFailure("SO_PEERCRED failed".into())),
         }
         let pid = ((buf[0] as Int32)
                  | ((buf[1] as Int32) << 8)
@@ -915,13 +915,13 @@ implement UnixStream {
             &mut buf, &mut len,
         ) {
             Result.Ok(()) => {}
-            Result.Err(_) => return Result.Err(UnixError.IoError("LOCAL_PEERCRED failed".into())),
+            Result.Err(_) => return Result.Err(UnixError.IoFailure("LOCAL_PEERCRED failed".into())),
         }
         // We accept any xucred version; fields at offset 4 (uid) and 12
         // (gid_t cr_groups[0] = effective gid) have been stable since
         // 10.4. Reject obviously-malformed short replies.
         if len < 16 {
-            return Result.Err(UnixError.IoError("LOCAL_PEERCRED short reply".into()));
+            return Result.Err(UnixError.IoFailure("LOCAL_PEERCRED short reply".into()));
         }
         let uid = ((buf[4]  as UInt32)
                  | ((buf[5]  as UInt32) << 8)
@@ -950,7 +950,7 @@ implement UnixStream {
 
     @cfg(target_os = "windows")
     public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
-        Result.Err(UnixError.IoError("peer_cred: not available on Windows".into()))
+        Result.Err(UnixError.IoFailure("peer_cred: not available on Windows".into()))
     }
 }
 

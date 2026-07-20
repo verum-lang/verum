@@ -187,7 +187,6 @@ public mount .io.{
     IoUringSqe,
     IoUringCqe,
     IoUringParams,
-    IoError,
 
     // Epoll driver (fallback)
     EpollDriver,

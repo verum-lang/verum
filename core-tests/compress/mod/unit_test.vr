@@ -230,6 +230,6 @@ fn test_compress_error_output_too_large() {
 
 @test
 fn test_compress_error_io_error() {
-    let e: CompressError = CompressError.IoError("disk full".clone());
-    assert(e is CompressError.IoError);
+    let e: CompressError = CompressError.IoFailure("disk full".clone());
+    assert(e is CompressError.IoFailure);
 }

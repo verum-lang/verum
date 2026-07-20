@@ -283,7 +283,7 @@ public fn mock_sync(
     {
         // Fire exactly once — disarm before raising.
         vfs.faults.crash_after_sync_count = -1;
-        return Result.Err(VfsError { kind: IoError, message: "mock crash after fsync" });
+        return Result.Err(VfsError { kind: IoFailure, message: "mock crash after fsync" });
     }
     Result.Ok(())
 }

@@ -347,7 +347,7 @@ implement VfsProtocol for MemDbVfs {
         // features that depend on randomness (`RANDOMBLOB()`, WAL
         // salts in shared-cache memory mode) is exploitable, so the
         // memdb backend signals "predictable entropy only" via
-        // `Result.Err(VfsError.IoError)` — callers that legitimately want
+        // `Result.Err(VfsError.IoFailure)` — callers that legitimately want
         // the deterministic counter (DST replay) can ignore the
         // error variant by predicate-matching on `MemDbVfs` first.
         //
@@ -361,7 +361,7 @@ implement VfsProtocol for MemDbVfs {
             return Result.Ok(List.new());
         }
         Result.Err(VfsError {
-            kind: IoError,
+            kind: IoFailure,
             message: "MemDbVfs.random_bytes: deterministic placeholder; inject a CSPRNG-backed VFS for production".clone(),
         })
     }

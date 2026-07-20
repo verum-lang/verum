@@ -28,7 +28,7 @@ mount sys.common.{OSError, FileDesc};
 mount sys.io_engine.{
     IOEngine, CompletionOp, CompletionResult, Duration,
     ValidFd, Fd, RawSocketAddr, TimeSpec as EngineTimeSpec, MsgHdr,
-    IoError as EngineIoError,
+    EngineIoError,
 };
 mount super.libsystem.{
     kqueue as raw_kqueue, kevent, kevent64, close as raw_close, read, write,
@@ -681,22 +681,22 @@ public fn is_kqueue_available() -> Bool {
 // Note: kqueue is a readiness-based API, so we wrap it in completion semantics.
 // This means we register interest and perform actual I/O when fd is ready.
 
-/// Convert local DarwinIoDriverError to IOEngine's IoError
+/// Convert local DarwinIoDriverError to IOEngine's EngineIoError
 fn convert_error(err: DarwinIoDriverError) -> EngineIoError {
     match err {
-        WouldBlock => IoError.WouldBlock,
-        Interrupted => IoError.Interrupted,
-        NotFound { path } => IoError.NotFound { path: path },
-        AlreadyExists => IoError.AlreadyExists,
-        InvalidInput { reason } => IoError.InvalidInput { reason: reason },
-        PermissionDenied => IoError.PermissionDenied,
-        ConnectionRefused => IoError.ConnectionRefused,
-        ConnectionReset => IoError.ConnectionReset,
-        BrokenPipe => IoError.BrokenPipe,
-        TimedOut => IoError.TimedOut,
-        QueueFull => IoError.SubmissionQueueFull,
-        DarwinIoDriverError.Closed => IoError.Closed,
-        Other { code, message } => IoError.Other(message),
+        WouldBlock => EngineIoError.WouldBlock,
+        Interrupted => EngineIoError.Interrupted,
+        NotFound { path } => EngineIoError.NotFound { path: path },
+        AlreadyExists => EngineIoError.AlreadyExists,
+        InvalidInput { reason } => EngineIoError.InvalidInput { reason: reason },
+        PermissionDenied => EngineIoError.PermissionDenied,
+        ConnectionRefused => EngineIoError.ConnectionRefused,
+        ConnectionReset => EngineIoError.ConnectionReset,
+        BrokenPipe => EngineIoError.BrokenPipe,
+        TimedOut => EngineIoError.TimedOut,
+        QueueFull => EngineIoError.SubmissionQueueFull,
+        DarwinIoDriverError.Closed => EngineIoError.Closed,
+        Other { code, message } => EngineIoError.Other(message),
     }
 }
 

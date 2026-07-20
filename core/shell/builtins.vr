@@ -37,8 +37,9 @@ mount core.io.fs.{
     read_to_string as fs_read_to_string,
     write as fs_write,
     write_str as fs_write_str,
-    IoResult, IoError,
+    IoResult,
 };
+mount core.io.{IoError};
 mount core.shell.context.{ShellContext};
 mount core.shell.result.{ShellError};
 

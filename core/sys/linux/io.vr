@@ -235,11 +235,8 @@ public type IoUringDriver is {
     wake_fd: Int,
 };
 
-/// Re-export IoError from io_engine for convenience
-public type LinuxIoError is EngineIoError;
-
 /// I/O error types for Linux-specific io_uring/epoll drivers.
-/// Named LinuxIoDriverError to avoid shadowing the general IoError from sys.io_engine.
+/// Named LinuxIoDriverError to avoid shadowing `EngineIoError` from sys.io_engine.
 public type LinuxIoDriverError is
     | UringSetupFailed { code: Int }
     | MmapFailed { code: Int }

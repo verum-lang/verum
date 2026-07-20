@@ -10,7 +10,7 @@
 
 mount core.net.udp.UdpSocket;
 mount core.net.{SocketAddr, SocketAddrV4, Ipv4Addr};
-mount core.sys.io_engine.IoError;
+mount core.io.{IoError};
 mount core.io.protocols.{IoResult, StreamError, IoErrorKind};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -108,7 +108,7 @@ fn test_set_timeout_result_ok() {
 
 @test
 fn test_set_timeout_result_err() {
-    let result: Result<(), IoError> = Err(IoError.InvalidInput { reason: "Invalid timeout value" });
+    let result: Result<(), IoError> = Err(IoError.with_message(IoErrorKind.InvalidInput, "Invalid timeout value"));
     assert(result.is_err());
 }
 
@@ -155,7 +155,7 @@ fn test_udp_socket_type_for_timeout() {
 
 @test
 fn test_timed_out_error() {
-    let err = IoError.TimedOut;
+    let err = IoError.new(IoErrorKind.TimedOut);
     let result: Result<Int, IoError> = Err(err);
     assert(result.is_err());
 }
@@ -163,14 +163,11 @@ fn test_timed_out_error() {
 @test
 fn test_timeout_error_handling_pattern() {
     // Pattern: match on timeout error
-    let result: Result<Int, IoError> = Err(IoError.TimedOut);
+    let result: Result<Int, IoError> = Err(IoError.new(IoErrorKind.TimedOut));
     let is_timeout = match result {
         Ok(_) => false,
         Err(e) => {
-            match e {
-                IoError.TimedOut => true,
-                _ => false,
-            }
+            e.kind() == IoErrorKind.TimedOut
         }
     };
     assert(is_timeout);

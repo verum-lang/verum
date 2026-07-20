@@ -13,7 +13,7 @@ module core.database.sqlite.native.l1_pager.dst_wrapped_pager;
 //       sqlite-native.md §4.10 (VFS injection)
 //
 // Pre-fix: `pager_open_with_vfs(ViDstWrapped(...))` returned
-// `Result.Err(PagerError { kind: IoError, "DST harness wiring tracked
+// `Result.Err(PagerError { kind: IoFailure, "DST harness wiring tracked
 // under #137 follow-up" })` — the DST harness existed but had no
 // path to actually inject faults into a live pager.  The bridge
 // in `dst/bridge.vr` ran in "execution-replay only" mode and
@@ -198,31 +198,31 @@ fn clone_fault(f: &Fault) -> Fault {
 /// Map a Fault to the PagerError the wrapper returns.  Distinct
 /// kinds map to distinct PagerError messages so the recovery path
 /// can branch on the cause via message inspection (PagerErrorKind
-/// itself is too coarse; only IoError / CorruptHeader available).
+/// itself is too coarse; only IoFailure / CorruptHeader available).
 fn fault_to_pager_error(f: &Fault) -> PagerError {
     match f {
         FaultPowerLoss => PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "DST: power loss",
         },
         FaultDiskFull => PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "DST: disk full",
         },
         FaultIoError(_) => PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "DST: I/O error",
         },
         FaultSlowFsync(_) => PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "DST: slow fsync (timeout)",
         },
         FaultPartialWrite(_) => PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "DST: partial write (torn)",
         },
         FaultClockSkew(_) => PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "DST: clock skew detected",
         },
     }
@@ -249,7 +249,7 @@ fn record_fault(
 /// fault returns this without touching the inner pager.
 fn crashed_error() -> PagerError {
     PagerError {
-        kind: IoError,
+        kind: IoFailure,
         message: "DST: pager is in crashed state — recovery required",
     }
 }

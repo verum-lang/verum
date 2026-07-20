@@ -94,7 +94,7 @@ public type RepoError is
     | TargetNotFound(Text)
     | TooLarge { role: Text, size: Int, limit: Int }
     | NetworkError(HttpError)
-    | IoError(Text)
+    | IoFailure(Text)
     | InvalidUrl(Text)
     | InvalidStatus(StatusCode);
 
@@ -107,7 +107,7 @@ implement Display for RepoError {
             TooLarge { role, size, limit } => f.write_str(
                 f"tuf/repo: {role} too large ({size} > {limit})".as_str()),
             NetworkError(e)            => f.write_str(f"tuf/repo: network error: {e}".as_str()),
-            IoError(reason)            => f.write_str(f"tuf/repo: io error: {reason}".as_str()),
+            IoFailure(reason)          => f.write_str(f"tuf/repo: io error: {reason}".as_str()),
             InvalidUrl(reason)         => f.write_str(f"tuf/repo: invalid url: {reason}".as_str()),
             InvalidStatus(s)           => f.write_str(f"tuf/repo: HTTP {s}".as_str()),
         }

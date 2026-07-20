@@ -24,8 +24,8 @@ mount core.net.unix.{UnixError, ShutdownKind, PeerCred, FdPassingError};
 
 @test
 fn prop_unix_error_io_error_eq_reflexive() {
-    let a = UnixError.IoError("io".clone());
-    let b = UnixError.IoError("io".clone());
+    let a = UnixError.IoFailure("io".clone());
+    let b = UnixError.IoFailure("io".clone());
     assert(a == b);
 }
 
@@ -82,21 +82,21 @@ fn prop_unix_error_peer_closed_eq_reflexive() {
 
 @test
 fn prop_unix_error_disjoint_io_vs_invalid_path() {
-    let a = UnixError.IoError("x".clone());
+    let a = UnixError.IoFailure("x".clone());
     let b = UnixError.InvalidPath("x".clone());
     assert(!(a == b));
 }
 
 @test
 fn prop_unix_error_disjoint_io_vs_path_too_long() {
-    let a = UnixError.IoError("x".clone());
+    let a = UnixError.IoFailure("x".clone());
     let b = UnixError.PathTooLong { limit: 108, actual: 200 };
     assert(!(a == b));
 }
 
 @test
 fn prop_unix_error_disjoint_io_vs_permission_denied() {
-    let a = UnixError.IoError("x".clone());
+    let a = UnixError.IoFailure("x".clone());
     let b = UnixError.PermissionDenied;
     assert(!(a == b));
 }
@@ -159,7 +159,7 @@ fn prop_unix_error_disjoint_not_found_vs_peer_closed() {
 
 @test
 fn prop_unix_error_disjoint_io_vs_peer_closed() {
-    let a = UnixError.IoError("x".clone());
+    let a = UnixError.IoFailure("x".clone());
     let b = UnixError.PeerClosed;
     assert(!(a == b));
 }

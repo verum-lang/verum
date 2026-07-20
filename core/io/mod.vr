@@ -43,7 +43,12 @@ public mount .protocols.StreamError;
 public mount .protocols.IoErrorKind;
 public mount .protocols.IoResult;
 
-// Convenience alias: IoError is StreamError (used across the codebase)
+// The ONE stdlib binding of the bare name `IoError` (T0509): it means
+// `core.io.protocols.StreamError` and nothing else.  The bake shares a
+// single flat name table, so any second declaration of this name —
+// another alias, or a sum-type variant spelled `IoError` — makes the
+// name resolve by emission order instead of by meaning.  Consumers
+// bind it with `mount core.io.{IoError};`.
 public type IoError is StreamError;
 public mount .protocols.SeekFrom;
 

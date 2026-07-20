@@ -28,7 +28,7 @@ mount core.net.http_parser.{
 mount core.async.cancellation.{CancellationToken};
 mount core.async.timer.{timeout_ms as future_timeout_ms, TimeoutError};
 mount core.async.panic_fence.{panic_safe};
-mount core.io.protocols.{IoError};
+mount core.io.{IoError};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError, IntoResponse};
 mount core.net.weft.response_ext.{

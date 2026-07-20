@@ -24,6 +24,7 @@
 module hyperlink;
 
 mount core.io.IoResult;
+mount core.io.{IoError, IoErrorKind};
 mount super.super.raw.escape.EscapeWriter;
 mount super.super.widget.paragraph.Span;
 
@@ -96,8 +97,9 @@ public fn is_safe_uri_for_osc(uri: &Text) -> Bool {
 /// then closes with OSC 8 ;; ST.
 ///
 
-/// Returns `Result.Err(IoError.InvalidInput(...))` if `uri` contains a
-/// control character that would close the OSC sequence early — see
+/// Returns `Result.Err(IoError.with_message(IoErrorKind.InvalidInput, ...))`
+/// if `uri` contains a control character that would close the OSC
+/// sequence early — see
 /// `is_safe_uri_for_osc` for the threat model. Without this check a
 /// caller-controlled URI could inject arbitrary escape sequences
 /// into the terminal (window-title spoofing, screen clear, color
@@ -108,9 +110,10 @@ public fn write_hyperlink(
     text: &Text,
 ) -> IoResult<()> {
     if !is_safe_uri_for_osc(uri) {
-        return Result.Err(IoError.InvalidInput {
-            reason: "hyperlink URI contains control character; refusing to emit OSC 8 escape (would let URI close the sequence early and inject terminal commands)".into(),
-        });
+        return Result.Err(IoError.with_message(
+            IoErrorKind.InvalidInput,
+            "hyperlink URI contains control character; refusing to emit OSC 8 escape (would let URI close the sequence early and inject terminal commands)".into(),
+        ));
     }
     writer.write_osc(8, &f";{uri}").map_err(|e| IoError.Other(e.to_string()))?;
     let _ = writer.write(text.as_bytes()).map_err(|e| IoError.Other(e.to_string()))?;

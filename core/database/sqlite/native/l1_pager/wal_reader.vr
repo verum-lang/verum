@@ -217,7 +217,7 @@ public fn read_frame(
     let page_size = writer.state.page_size;
     if frame_no < 1 || frame_no > writer.state.mx_frame {
         return Result.Err(PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "wal read: frame out of range",
         });
     }
@@ -229,7 +229,7 @@ public fn read_frame(
     match backend_read(&mut writer.backend, &mut hdr_buf, off) {
         Result.Ok(_) => {}
         Result.Err(_) => return Result.Err(PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "wal read: header read failed",
         }),
     }
@@ -241,7 +241,7 @@ public fn read_frame(
     match backend_read(&mut writer.backend, &mut payload, off + frame_header_size()) {
         Result.Ok(_) => {}
         Result.Err(_) => return Result.Err(PagerError {
-            kind: IoError,
+            kind: IoFailure,
             message: "wal read: payload read failed",
         }),
     }

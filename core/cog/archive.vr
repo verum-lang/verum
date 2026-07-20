@@ -133,7 +133,7 @@ public type ArchiveError is
     | TruncatedModule { module: Text, offset: Int, size: Int, total: Int }
     | InvalidIndexEncoding(Text)
     | KernelBridge(Text)
-    | IoError(Text);
+    | IoFailure(Text);
 
 implement Display for ArchiveError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -150,7 +150,7 @@ implement Display for ArchiveError {
                 f"vbca: truncated module {m} (offset={offset} size={size} total={total})".as_str()),
             InvalidIndexEncoding(reason) => f.write_str(f"vbca: invalid index encoding ({reason})".as_str()),
             KernelBridge(reason)         => f.write_str(f"vbca: kernel bridge: {reason}".as_str()),
-            IoError(reason)              => f.write_str(f"vbca: io error: {reason}".as_str()),
+            IoFailure(reason)            => f.write_str(f"vbca: io error: {reason}".as_str()),
         }
     }
 }
@@ -243,7 +243,7 @@ public async fn read_archive(path: &Path) -> Result<CogArchive, ArchiveError>
     using [Filesystem]
 {
     let bytes = Filesystem.read_file_bytes(path).await
-        .map_err(|e| IoError(f"{e}"))?;
+        .map_err(|e| ArchiveError.IoFailure(f"{e}"))?;
     read_archive_bytes(&bytes)
 }
 

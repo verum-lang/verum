@@ -72,10 +72,10 @@ fn remote_alert_does_not_emit_outgoing() {
 }
 
 fn io_error_does_not_emit_outgoing() {
-    let e = TlsError.IoError(f"write timeout");
+    let e = TlsError.IoFailure(f"write timeout");
     match e.to_alert() {
         None => {},
-        _ => panic("IoError → no alert"),
+        _ => panic("TlsError.IoFailure → no alert"),
     }
 }
 

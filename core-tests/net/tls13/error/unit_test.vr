@@ -73,8 +73,8 @@ fn test_tls_error_internal_error_distinct_payload() {
 
 @test
 fn test_tls_error_io_error_payload() {
-    let e: TlsError = TlsError.IoError("eof");
-    assert(e == TlsError.IoError("eof"));
+    let e: TlsError = TlsError.IoFailure("eof");
+    assert(e == TlsError.IoFailure("eof"));
 }
 @test
 fn test_tls_error_bad_certificate() {

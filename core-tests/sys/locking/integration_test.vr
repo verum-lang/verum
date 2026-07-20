@@ -122,7 +122,7 @@ fn integration_lock_error_dispatch_table() {
                     Maybe.None    => ErrorOutcome.ConflictUnknownOwner,
                 }
             }
-            LockError.IoError(_) => ErrorOutcome.IoFailed,
+            LockError.IoFailure(_) => ErrorOutcome.IoFailed,
         }
     }
     let with_pid    = classify(&LockError.Conflict(Maybe.Some(12345)));

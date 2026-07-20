@@ -366,9 +366,6 @@ public mount tls.{
 // =============================================================================
 
 public mount io.{
-    // Error types
-    IoError,
-
     // Types
     IocpDriver,
     OverlappedEntry,

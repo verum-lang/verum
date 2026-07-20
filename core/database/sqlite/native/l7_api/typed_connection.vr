@@ -172,11 +172,11 @@ implement<C: CanRead> TypedConnection<C> {
     /// `&TypedConnection<C>` directly the underlying ensure_*
     /// runtime checks become dead code.
     ///
-    /// Stub: returns `Result.Err(IoError("typed-read not yet wired"))` for
+    /// Stub: returns `Result.Err(ConnectionError.IoFailure("typed-read not yet wired"))` for
     /// the foundation pass.  The wiring is mechanical and tracked
     /// as a #134 follow-up.
     public fn execute_query_stub(&self, _sql: &Text) -> Result<(), ConnectionError> {
-        Result.Err(IoError("typed read-execute not yet wired".clone()))
+        Result.Err(ConnectionError.IoFailure("typed read-execute not yet wired".clone()))
     }
 }
 
@@ -189,11 +189,11 @@ implement<C: CanWrite> TypedConnection<C> {
     /// rejected for `TypedConnection<ReadCap>` — no runtime
     /// `ensure_writable` is consulted.
     ///
-    /// Stub: returns `Result.Err(IoError("typed-write not yet wired"))`
+    /// Stub: returns `Result.Err(ConnectionError.IoFailure("typed-write not yet wired"))`
     /// for the foundation pass.  The wiring is mechanical and
     /// tracked as a #134 follow-up.
     public fn execute_dml_stub(&mut self, _sql: &Text) -> Result<(), ConnectionError> {
-        Result.Err(IoError("typed write-execute not yet wired".clone()))
+        Result.Err(ConnectionError.IoFailure("typed write-execute not yet wired".clone()))
     }
 }
 
@@ -208,7 +208,7 @@ implement<C: CanDdl> TypedConnection<C> {
     ///
     /// Stub for the foundation pass; tracked as a #134 follow-up.
     public fn execute_ddl_stub(&mut self, _sql: &Text) -> Result<(), ConnectionError> {
-        Result.Err(IoError("typed DDL-execute not yet wired".clone()))
+        Result.Err(ConnectionError.IoFailure("typed DDL-execute not yet wired".clone()))
     }
 }
 

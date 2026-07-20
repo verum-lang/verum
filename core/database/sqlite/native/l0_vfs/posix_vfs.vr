@@ -150,7 +150,7 @@ fn to_vfs_err(e: OSError) -> VfsError {
     } else if e.code == 28 {
         VfsErrorKind.DiskFull   // ENOSPC
     } else {
-        VfsErrorKind.IoError
+        VfsErrorKind.IoFailure
     };
     VfsError { kind: kind, message: e.message.clone() }
 }
@@ -534,7 +534,7 @@ implement VfsProtocol for PosixVfs {
         // which callers (WAL salt generator) would silently use as
         // zero bytes — letting an attacker forge WAL frames with
         // predictable checksums. Now every entropy-fetch failure
-        // surfaces as `Result.Err(VfsError.IoError)` so callers MUST
+        // surfaces as `Result.Err(VfsError.IoFailure)` so callers MUST
         // explicitly handle the no-entropy case.
         if len <= 0 {
             return Result.Ok(List.new());
@@ -545,7 +545,7 @@ implement VfsProtocol for PosixVfs {
         match core.sys.common.random_bytes(slice) {
             Result.Ok(_) => Result.Ok(out),
             Result.Err(_) => Result.Err(VfsError {
-                kind: IoError,
+                kind: IoFailure,
                 message: "PosixVfs.random_bytes: kernel entropy fetch failed".clone(),
             }),
         }

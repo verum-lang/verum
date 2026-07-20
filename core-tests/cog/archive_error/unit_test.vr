@@ -68,10 +68,10 @@ fn test_archive_error_kernel_bridge_variant() {
 
 @test
 fn test_archive_error_io_error_variant() {
-    let e: ArchiveError = ArchiveError.IoError(
+    let e: ArchiveError = ArchiveError.IoFailure(
         "permission denied".to_text(),
     );
-    assert(e is ArchiveError.IoError);
+    assert(e is ArchiveError.IoFailure);
 }
 
 // =============================================================================
@@ -82,13 +82,13 @@ fn test_archive_error_io_error_variant() {
 fn test_archive_error_unsupported_version_disjoint() {
     let e: ArchiveError = ArchiveError.UnsupportedVersion { major: 2, minor: 0 };
     assert(!(e is ArchiveError.TruncatedHeader));
-    assert(!(e is ArchiveError.IoError));
+    assert(!(e is ArchiveError.IoFailure));
     assert(!(e is ArchiveError.KernelBridge));
 }
 
 @test
 fn test_archive_error_io_error_disjoint() {
-    let e: ArchiveError = ArchiveError.IoError("x".to_text());
+    let e: ArchiveError = ArchiveError.IoFailure("x".to_text());
     assert(!(e is ArchiveError.UnsupportedVersion));
     assert(!(e is ArchiveError.TruncatedHeader));
     assert(!(e is ArchiveError.KernelBridge));
@@ -111,11 +111,11 @@ fn test_archive_error_kernel_bridge_payload_round_trip() {
 
 @test
 fn test_archive_error_io_error_payload_round_trip() {
-    let e: ArchiveError = ArchiveError.IoError("ENOENT".to_text());
+    let e: ArchiveError = ArchiveError.IoFailure("ENOENT".to_text());
     match e {
-        ArchiveError.IoError(reason) =>
+        ArchiveError.IoFailure(reason) =>
             assert_eq(reason, "ENOENT"),
-        _ => panic("expected IoError"),
+        _ => panic("expected ArchiveError.IoFailure"),
     }
 }
 

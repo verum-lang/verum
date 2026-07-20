@@ -16,6 +16,7 @@
 module cursor;
 
 mount core.io.IoResult;
+mount core.io.{IoError};
 mount super.escape.EscapeWriter;
 mount super.CursorShape;
 

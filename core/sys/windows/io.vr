@@ -75,9 +75,6 @@ public const DEFAULT_TIMEOUT_NS: Int = 1_000_000_000;
 // Error Type
 // =============================================================================
 
-/// Re-export IoError from io_engine for convenience
-public type WindowsIoError is EngineIoError;
-
 /// I/O operation error
 public type WindowsIoDriverError is
     | WouldBlock

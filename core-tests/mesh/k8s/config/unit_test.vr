@@ -47,8 +47,8 @@ fn test_kube_config_error_no_auth() {
 
 @test
 fn test_kube_config_error_io_error() {
-    let e: KubeConfigError = KubeConfigError.IoError(Text.from("permission denied"));
-    assert(e is KubeConfigError.IoError);
+    let e: KubeConfigError = KubeConfigError.IoFailure(Text.from("permission denied"));
+    assert(e is KubeConfigError.IoFailure);
 }
 
 @test
@@ -57,13 +57,13 @@ fn test_kube_config_error_pairwise_disjoint() {
     let iy: KubeConfigError = KubeConfigError.InvalidYaml(Text.from("X"));
     let cn: KubeConfigError = KubeConfigError.ContextNotFound(Text.from("X"));
     let na: KubeConfigError = KubeConfigError.NoAuth(Text.from("X"));
-    let io: KubeConfigError = KubeConfigError.IoError(Text.from("X"));
+    let io: KubeConfigError = KubeConfigError.IoFailure(Text.from("X"));
 
     assert(nf is KubeConfigError.NotFound && !(nf is KubeConfigError.InvalidYaml));
     assert(iy is KubeConfigError.InvalidYaml && !(iy is KubeConfigError.ContextNotFound));
     assert(cn is KubeConfigError.ContextNotFound && !(cn is KubeConfigError.NoAuth));
-    assert(na is KubeConfigError.NoAuth && !(na is KubeConfigError.IoError));
-    assert(io is KubeConfigError.IoError && !(io is KubeConfigError.NotFound));
+    assert(na is KubeConfigError.NoAuth && !(na is KubeConfigError.IoFailure));
+    assert(io is KubeConfigError.IoFailure && !(io is KubeConfigError.NotFound));
 }
 
 // =============================================================================
@@ -88,7 +88,7 @@ fn test_kube_config_error_eq_invalid_yaml_payload_differs() {
 fn test_kube_config_error_eq_cross_variant_inequality() {
     // Same payload Text, different variant → not equal.
     let a: KubeConfigError = KubeConfigError.NotFound(Text.from("oops"));
-    let b: KubeConfigError = KubeConfigError.IoError(Text.from("oops"));
+    let b: KubeConfigError = KubeConfigError.IoFailure(Text.from("oops"));
     assert(!(a == b));
 }
 

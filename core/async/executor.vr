@@ -85,7 +85,7 @@ mount sys.windows.time.{monotonic_nanos, Instant as SysInstant, Duration as SysD
 mount sys.io_engine.{
     IOEngine, CompletionOp, CompletionResult, Duration as IoDuration,
     create_io_engine, DEFAULT_SQ_ENTRIES, WAKE_TOKEN,
-    IoError, POLLIN, POLLOUT,
+    EngineIoError, POLLIN, POLLOUT,
 };
 
 // =============================================================================

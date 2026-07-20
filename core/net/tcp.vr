@@ -196,7 +196,7 @@ mount sys.common.{FileDesc, OSError};
 
 // Import I/O engine for async operations
 mount sys.io_engine.{IOEngine, IOInterest};
-mount core.io.{IoError};
+mount core.io.{IoError, IoErrorKind};
 
 // Unified TCP-listen intrinsic family (#25 cascade). These dispatch
 // through the same opcode in interpreter and AOT mode — the
@@ -1619,7 +1619,7 @@ fn serialize_socket_addr(addr: &SocketAddr) -> List<Byte> {
 /// Deserialize a socket address from kernel sockaddr bytes.
 fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
     if buf.len() < 2 {
-        return Result.Err(IoError.InvalidInput { reason: "Address buffer too small" });
+        return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, "Address buffer too small"));
     }
 
     // BSD (macOS) `sockaddr_in` is `{ sin_len@0, sin_family@1, ... }`; Linux/
@@ -1633,7 +1633,7 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
 
     if family == AF_INET {
         if buf.len() < 8 {
-            return Result.Err(IoError.InvalidInput { reason: "Invalid IPv4 address buffer" });
+            return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, "Invalid IPv4 address buffer"));
         }
 
         // Port is in network byte order (big-endian)
@@ -1643,7 +1643,7 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
         Result.Ok(SocketAddr.new_v4(ip, port))
     } else if family == AF_INET6 {
         if buf.len() < SOCKADDR_IN6_SIZE {
-            return Result.Err(IoError.InvalidInput { reason: "Invalid IPv6 address buffer" });
+            return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, "Invalid IPv6 address buffer"));
         }
 
         let port = ((buf[2] as Int) << 8) | (buf[3] as Int);
@@ -1667,6 +1667,6 @@ fn deserialize_socket_addr(buf: &[Byte]) -> Result<SocketAddr, IoError> {
 
         Result.Ok(SocketAddr.V6(SocketAddrV6.new(ip, port, 0, scope_id)))
     } else {
-        Result.Err(IoError.InvalidInput { reason: f"Unsupported address family: {family}" })
+        Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Unsupported address family: {family}"))
     }
 }

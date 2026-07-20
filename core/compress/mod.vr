@@ -141,7 +141,7 @@ public type CompressError is
     /// Decompressed output would exceed `max_output_bytes` (DoS guard).
     | OutputTooLarge { limit: Int }
     /// Underlying I/O error propagated from inner writer/reader.
-    | IoError(Text);
+    | IoFailure(Text);
 
 fn algorithm_name(a: &Algorithm) -> Text {
     match a {
@@ -191,7 +191,7 @@ implement Display for CompressError {
             CompressError.InvalidLevel { algo, level }   => f.write_str(f"compress {algo}: invalid level {level}".as_str()),
             CompressError.DictionaryMismatch             => f.write_str("compress: dictionary mismatch"),
             CompressError.OutputTooLarge { limit }       => f.write_str(f"compress: decompressed output exceeds limit {limit}".as_str()),
-            CompressError.IoError(reason)                => f.write_str(f"compress I/O error: {reason}".as_str()),
+            CompressError.IoFailure(reason)              => f.write_str(f"compress I/O error: {reason}".as_str()),
         }
     }
 }
@@ -205,7 +205,7 @@ implement Debug for CompressError {
             CompressError.InvalidLevel { algo, level }   => f.write_str(f"InvalidLevel {{ algo: {algo}, level: {level} }}".as_str()),
             CompressError.DictionaryMismatch             => f.write_str("DictionaryMismatch"),
             CompressError.OutputTooLarge { limit }       => f.write_str(f"OutputTooLarge {{ limit: {limit} }}".as_str()),
-            CompressError.IoError(reason)                => f.write_str(f"IoError({reason})".as_str()),
+            CompressError.IoFailure(reason)              => f.write_str(f"IoFailure({reason})".as_str()),
         }
     }
 }
@@ -221,7 +221,7 @@ implement Eq for CompressError {
              CompressError.InvalidLevel { algo: ab, level: lb })                         => aa == ab && la == lb,
             (CompressError.DictionaryMismatch,            CompressError.DictionaryMismatch)            => true,
             (CompressError.OutputTooLarge { limit: a },   CompressError.OutputTooLarge { limit: b })   => a == b,
-            (CompressError.IoError(a),                    CompressError.IoError(b))                    => a == b,
+            (CompressError.IoFailure(a),                  CompressError.IoFailure(b))                  => a == b,
             _ => false,
         }
     }

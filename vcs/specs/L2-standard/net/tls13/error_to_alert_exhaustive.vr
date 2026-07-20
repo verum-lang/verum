@@ -69,10 +69,10 @@ fn remote_alert_returns_none() {
 }
 
 fn io_error_returns_none() {
-    let e = TlsError.IoError(f"broken pipe");
+    let e = TlsError.IoFailure(f"broken pipe");
     match e.to_alert() {
         None => {},
-        _ => panic("IoError must not emit outgoing"),
+        _ => panic("TlsError.IoFailure must not emit outgoing"),
     }
 }
 

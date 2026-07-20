@@ -77,11 +77,11 @@ fn regression_unix_stream_fd_passing_scm_rights() {
 
 @test
 fn regression_unix_error_io_error_payload_preserved_through_clone() {
-    // `IoError("x".clone())` constructs from a freshly-cloned Text;
+    // `UnixError.IoFailure("x".clone())` constructs from a freshly-cloned Text;
     // the variant Eq impl at unix.vr:235 compares `a == b` on the
     // payload — Eq must see identical payloads after the clone.
-    let a = UnixError.IoError("x".clone());
-    let b = UnixError.IoError("x".clone());
+    let a = UnixError.IoFailure("x".clone());
+    let b = UnixError.IoFailure("x".clone());
     assert(a == b);
 }
 

@@ -52,7 +52,7 @@ mount core.net.tls.{TlsStream, TlsConfig, TlsError};
 mount core.net.addr.{SocketAddr};
 mount core.async.cancellation.{CancellationToken, CancellationError};
 mount core.sync.atomic.{AtomicBool};
-mount core.io.protocols.{IoError};
+mount core.io.{IoError};
 mount core.net.weft.transport.{WeftTransport};
 mount core.net.weft.handler.{Handler};
 mount core.net.weft.connection.{serve_http1, ConnectionConfig};

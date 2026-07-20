@@ -8,7 +8,7 @@
 //
 //   FileLockKind            — Shared | Exclusive
 //   LockRegion              — { start, length }
-//   LockError               — Conflict(Maybe<Int>) | IoError(OSError)
+//   LockError               — Conflict(Maybe<Int>) | IoFailure(OSError)
 //   LockError.eq            — explicit Eq impl
 //
 // What we do NOT exercise:
@@ -78,7 +78,7 @@ fn test_lock_error_conflict_with_pid() {
                 Maybe.None => panic("expected Maybe.Some(pid)"),
             }
         }
-        LockError.IoError(_) => panic("expected Conflict, got IoError"),
+        LockError.IoFailure(_) => panic("expected Conflict, got IoError"),
     }
 }
 
@@ -92,7 +92,7 @@ fn test_lock_error_conflict_with_none_owner() {
                 Maybe.None => {}
             }
         }
-        LockError.IoError(_) => panic("expected Conflict, got IoError"),
+        LockError.IoFailure(_) => panic("expected Conflict, got IoError"),
     }
 }
 

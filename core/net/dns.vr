@@ -85,7 +85,7 @@ mount sys.darwin.libsystem.{
 };
 @cfg(target_os = "macos")
 mount sys.common.{FileDesc, OSError};
-mount core.io.protocols.{IoError, IoErrorKind};
+mount core.io.{IoError, IoErrorKind};
 
 // Windows: Use GetNetworkParams from iphlpapi.dll to read system DNS servers.
 // No file-based resolv.conf on Windows — DNS config is in the registry,

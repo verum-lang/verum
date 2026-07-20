@@ -737,7 +737,7 @@ public type HttpError is
     /// Invalid response from server.
     | InvalidResponse(Text)
     /// I/O error during communication.
-    | IoError(Text)
+    | IoFailure(Text)
     /// TLS/SSL error.
     | TlsError(Text)
     /// Too many redirects.
@@ -753,7 +753,7 @@ implement Debug for HttpError {
             Timeout => f.write_str("HttpError.Timeout"),
             InvalidUrl(msg) => f.write_str(f"HttpError.InvalidUrl({msg})"),
             InvalidResponse(msg) => f.write_str(f"HttpError.InvalidResponse({msg})"),
-            IoError(msg) => f.write_str(f"HttpError.IoError({msg})"),
+            IoFailure(msg) => f.write_str(f"HttpError.IoFailure({msg})"),
             TlsError(msg) => f.write_str(f"HttpError.TlsError({msg})"),
             TooManyRedirects => f.write_str("HttpError.TooManyRedirects"),
             BodyTooLarge => f.write_str("HttpError.BodyTooLarge"),
@@ -769,7 +769,7 @@ implement Display for HttpError {
             Timeout => f.write_str("request timed out"),
             InvalidUrl(msg) => f.write_str(f"invalid URL: {msg}"),
             InvalidResponse(msg) => f.write_str(f"invalid response: {msg}"),
-            IoError(msg) => f.write_str(f"I/O error: {msg}"),
+            IoFailure(msg) => f.write_str(f"I/O error: {msg}"),
             TlsError(msg) => f.write_str(f"TLS error: {msg}"),
             TooManyRedirects => f.write_str("too many redirects"),
             BodyTooLarge => f.write_str("request body too large"),
@@ -785,7 +785,7 @@ implement Describable for HttpError {
             Timeout => "request timed out",
             InvalidUrl(msg) => f"invalid URL: {msg}",
             InvalidResponse(msg) => f"invalid response: {msg}",
-            IoError(msg) => f"I/O error: {msg}",
+            IoFailure(msg) => f"I/O error: {msg}",
             TlsError(msg) => f"TLS error: {msg}",
             TooManyRedirects => "too many redirects",
             BodyTooLarge => "request body too large",
@@ -801,7 +801,7 @@ implement Eq for HttpError {
             (HttpError.Timeout,             HttpError.Timeout)             => true,
             (HttpError.InvalidUrl(a),       HttpError.InvalidUrl(b))       => a == b,
             (HttpError.InvalidResponse(a),  HttpError.InvalidResponse(b))  => a == b,
-            (HttpError.IoError(a),          HttpError.IoError(b))          => a == b,
+            (HttpError.IoFailure(a),        HttpError.IoFailure(b))        => a == b,
             (HttpError.TlsError(a),         HttpError.TlsError(b))         => a == b,
             (HttpError.TooManyRedirects,    HttpError.TooManyRedirects)    => true,
             (HttpError.BodyTooLarge,        HttpError.BodyTooLarge)        => true,

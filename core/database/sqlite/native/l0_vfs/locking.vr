@@ -126,7 +126,7 @@ fn to_vfs_error(e: OSError) -> VfsError {
     if e.would_block() {
         VfsError { kind: LockConflict, message: e.message.clone() }
     } else {
-        VfsError { kind: IoError, message: e.message.clone() }
+        VfsError { kind: IoFailure, message: e.message.clone() }
     }
 }
 
@@ -315,7 +315,7 @@ public fn acquire_exclusive(manager: &mut SqliteLockManager) -> Result<(), VfsEr
                             // the caller closes the file.
                             manager.state = Unlocked;
                             Result.Err(VfsError {
-                                kind: IoError,
+                                kind: IoFailure,
                                 message: "acquire_exclusive: SHARED rollback failed; lock state diverged — close file",
                             })
                         }

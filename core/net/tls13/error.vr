@@ -44,7 +44,7 @@ public type TlsError is
     // Peer abort
     | RemoteAlert(AlertDescription)
     // IO
-    | IoError(Text);
+    | IoFailure(Text);
 
 // Display + Debug + Eq for TlsError — standard stdlib
 // protocol impls. Cryptographic-failure variants
@@ -88,7 +88,7 @@ implement Display for TlsError {
             },
             TlsError.RemoteAlert(desc) =>
                 f.write_str(f"TLS peer alert: code={desc.to_u8()}".as_str()),
-            TlsError.IoError(msg) => {
+            TlsError.IoFailure(msg) => {
                 f.write_str("TLS IO error: ")?;
                 f.write_str(msg.as_str())
             },
@@ -129,8 +129,8 @@ implement Debug for TlsError {
             },
             TlsError.RemoteAlert(desc) =>
                 f.write_str(f"RemoteAlert(<u8>{desc.to_u8()})".as_str()),
-            TlsError.IoError(msg) => {
-                f.write_str("IoError(")?;
+            TlsError.IoFailure(msg) => {
+                f.write_str("IoFailure(")?;
                 f.write_str(msg.as_str())?;
                 f.write_str(")")
             },
@@ -166,7 +166,7 @@ implement Eq for TlsError {
             (TlsError.UnknownPskIdentity,      TlsError.UnknownPskIdentity)      => true,
             (TlsError.InternalError(a),        TlsError.InternalError(b))        => a == b,
             (TlsError.RemoteAlert(a),          TlsError.RemoteAlert(b))          => a.to_u8() == b.to_u8(),
-            (TlsError.IoError(a),              TlsError.IoError(b))              => a == b,
+            (TlsError.IoFailure(a),            TlsError.IoFailure(b))            => a == b,
             _ => false,
         }
     }
@@ -202,7 +202,7 @@ implement TlsError {
             TlsError.UnknownPskIdentity      => Maybe.Some(AlertDescription.UnknownPskIdentity),
             TlsError.InternalError(_)        => Maybe.Some(AlertDescription.InternalError),
             TlsError.RemoteAlert(_)          => Maybe.None,
-            TlsError.IoError(_)              => Maybe.None,
+            TlsError.IoFailure(_)            => Maybe.None,
         }
     }
 }

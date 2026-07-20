@@ -39,7 +39,7 @@ mount core.*;
 mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 mount core.async.cancellation.{CancellationToken, CancellationError};
-mount core.io.protocols.{IoError};
+mount core.io.{IoError};
 
 /// Transport protocol — a byte duplex that the HTTP/1.1 pipeline can
 /// drive without knowing whether it sits above TCP, TLS, UDS, or

@@ -37,7 +37,7 @@ fn regression_lock_error_conflict_carries_maybe_pid() {
     let e = LockError.Conflict(Maybe.Some(42));
     let pid: Maybe<Int> = match e {
         LockError.Conflict(p) => p,
-        LockError.IoError(_) => panic("wrong arm"),
+        LockError.IoFailure(_) => panic("wrong arm"),
     };
     match pid {
         Maybe.Some(p) => assert_eq(p, 42),

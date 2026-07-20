@@ -483,8 +483,8 @@ fn prop_tls13_err_internal_error_payload_preserved() {
 
 @test
 fn prop_tls13_err_io_error_payload_preserved() {
-    let a = TlsError.IoError("connection reset".clone());
-    let b = TlsError.IoError("connection reset".clone());
+    let a = TlsError.IoFailure("connection reset".clone());
+    let b = TlsError.IoFailure("connection reset".clone());
     assert(a == b);
 }
 
@@ -503,6 +503,6 @@ fn prop_tls13_err_handshake_vs_protocol_version_disjoint() {
 @test
 fn prop_tls13_err_internal_vs_io_error_same_payload_disjoint() {
     let i = TlsError.InternalError("x".clone());
-    let o = TlsError.IoError("x".clone());
+    let o = TlsError.IoFailure("x".clone());
     assert(!(i == o));
 }

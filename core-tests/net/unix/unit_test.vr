@@ -23,15 +23,15 @@ mount core.net.unix.{UnixError, ShutdownKind, PeerCred, FdPassingError};
 
 @test
 fn test_unix_error_io_error_eq() {
-    let a = UnixError.IoError("connection reset".clone());
-    let b = UnixError.IoError("connection reset".clone());
+    let a = UnixError.IoFailure("connection reset".clone());
+    let b = UnixError.IoFailure("connection reset".clone());
     assert(a == b);
 }
 
 @test
 fn test_unix_error_io_error_disjoint_payloads() {
-    let a = UnixError.IoError("a".clone());
-    let b = UnixError.IoError("b".clone());
+    let a = UnixError.IoFailure("a".clone());
+    let b = UnixError.IoFailure("b".clone());
     assert(!(a == b));
 }
 
@@ -103,7 +103,7 @@ fn test_unix_error_disjoint_peer_closed_vs_path_in_use() {
 
 @test
 fn test_unix_error_disjoint_io_vs_invalid_path() {
-    let a = UnixError.IoError("x".clone());
+    let a = UnixError.IoFailure("x".clone());
     let b = UnixError.InvalidPath("x".clone());
     assert(!(a == b));
 }

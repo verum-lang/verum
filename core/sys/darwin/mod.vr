@@ -280,7 +280,6 @@ public mount .tls.{
 
 public mount .io.{
     // Types
-    IoError,
     IoOpKind,
     IoToken,
     IoOp,

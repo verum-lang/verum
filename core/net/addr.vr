@@ -19,7 +19,7 @@
 module core.net.addr;
 mount core.*;
 mount net.dns.{resolve as dns_resolve};
-mount core.io.protocols.{IoErrorKind};
+mount core.io.{IoError, IoErrorKind};
 
 // =============================================================================
 // IPv4 Address
@@ -949,14 +949,10 @@ implement ToSocketAddrs for Text {
             Maybe.Some((host, port_str)) => {
                 let port = match port_str.parse_int() {
                     Result.Ok(p) => p,
-                    Result.Err(_) => return Result.Err(IoError.InvalidInput {
-                        reason: f"Invalid port: {port_str}",
-                    }),
+                    Result.Err(_) => return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Invalid port: {port_str}")),
                 };
                 if port < 0 || port > 65535 {
-                    return Result.Err(IoError.InvalidInput {
-                        reason: f"Port out of range: {port}",
-                    });
+                    return Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Port out of range: {port}"));
                 }
                 match dns_resolve(&host, port) {
                     Result.Ok(addrs) => {
@@ -975,9 +971,7 @@ implement ToSocketAddrs for Text {
                     }),
                 }
             }
-            Maybe.None => Result.Err(IoError.InvalidInput {
-                reason: f"Invalid address (missing port): {self}",
-            }),
+            Maybe.None => Result.Err(IoError.with_message(IoErrorKind.InvalidInput, f"Invalid address (missing port): {self}")),
         }
     }
 }

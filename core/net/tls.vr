@@ -643,7 +643,7 @@ implement TlsStream {
         while written < data.len() {
             let n = self.write(&data[written..]).await?;
             if n == 0 {
-                return Err(LegacyTlsError.IoError("write returned 0 bytes"));
+                return Err(LegacyTlsError.IoFailure("write returned 0 bytes"));
             }
             written = written + n;
         }
@@ -880,7 +880,7 @@ implement TlsConnector {
     public async fn connect(&self, host: &Text, port: Int) -> Result<TlsStream, LegacyTlsError> {
         let addr = f"{host}:{port}";
         let tcp = TcpStream.connect(&addr).await
-            .map_err(|e| LegacyTlsError.IoError(f"TCP connect failed: {e}"))?;
+            .map_err(|e| LegacyTlsError.IoFailure(f"TCP connect failed: {e}"))?;
         TlsStream.connect(tcp, host, &self.config).await
     }
 }
@@ -982,7 +982,7 @@ public type LegacyTlsError is
     /// The peer sent an alert.
     | AlertReceived(Int, Text)
     /// I/O error during TLS operations.
-    | IoError(Text)
+    | IoFailure(Text)
     /// Protocol version not supported.
     | UnsupportedVersion(TlsVersion)
     /// No shared cipher suites.
@@ -998,7 +998,7 @@ implement Debug for LegacyTlsError {
             CertificateExpired => f.write_str("LegacyTlsError.CertificateExpired"),
             HostnameMismatch(name) => f.write_str(f"LegacyTlsError.HostnameMismatch({name})"),
             AlertReceived(code, msg) => f.write_str(f"LegacyTlsError.AlertReceived({code}, {msg})"),
-            IoError(msg) => f.write_str(f"LegacyTlsError.IoError({msg})"),
+            IoFailure(msg) => f.write_str(f"LegacyTlsError.IoFailure({msg})"),
             UnsupportedVersion(v) => f.write_str(f"LegacyTlsError.UnsupportedVersion({v})"),
             NoCipherSuites => f.write_str("LegacyTlsError.NoCipherSuites"),
         }
@@ -1015,7 +1015,7 @@ implement Display for LegacyTlsError {
             CertificateExpired => f.write_str("certificate has expired"),
             HostnameMismatch(name) => f.write_str(f"hostname mismatch: {name}"),
             AlertReceived(code, msg) => f.write_str(f"TLS alert {code}: {msg}"),
-            IoError(msg) => f.write_str(f"TLS I/O error: {msg}"),
+            IoFailure(msg) => f.write_str(f"TLS I/O error: {msg}"),
             UnsupportedVersion(v) => f.write_str(f"unsupported TLS version: {v}"),
             NoCipherSuites => f.write_str("no shared cipher suites"),
         }
@@ -1032,7 +1032,7 @@ implement Describable for LegacyTlsError {
             CertificateExpired => "certificate has expired",
             HostnameMismatch(name) => f"hostname mismatch: {name}",
             AlertReceived(code, msg) => f"TLS alert {code}: {msg}",
-            IoError(msg) => f"TLS I/O error: {msg}",
+            IoFailure(msg) => f"TLS I/O error: {msg}",
             UnsupportedVersion(v) => f"unsupported TLS version: {v}",
             NoCipherSuites => "no shared cipher suites",
         }
@@ -1056,8 +1056,8 @@ implement Eq for LegacyTlsError {
              LegacyTlsError.HostnameMismatch(b)) => a == b,
             (LegacyTlsError.AlertReceived(ca, ma),
              LegacyTlsError.AlertReceived(cb, mb)) => ca == cb && ma == mb,
-            (LegacyTlsError.IoError(a),
-             LegacyTlsError.IoError(b)) => a == b,
+            (LegacyTlsError.IoFailure(a),
+             LegacyTlsError.IoFailure(b)) => a == b,
             (LegacyTlsError.UnsupportedVersion(a),
              LegacyTlsError.UnsupportedVersion(b)) => a == b,
             (LegacyTlsError.NoCipherSuites,

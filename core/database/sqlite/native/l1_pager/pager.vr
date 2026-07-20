@@ -150,7 +150,7 @@ public type PagerError is {
 public type PagerErrorKind is
       InvalidPageSize
     | PageOutOfRange
-    | IoError
+    | IoFailure
     | Corrupt
     | Closed
     | Busy           // Another writer holds the reserved/exclusive lock
@@ -162,7 +162,7 @@ fn pager_error_kind_name(k: &PagerErrorKind) -> Text {
     match k {
         InvalidPageSize => "InvalidPageSize".clone(),
         PageOutOfRange  => "PageOutOfRange".clone(),
-        IoError         => "IoError".clone(),
+        IoFailure       => "IoFailure".clone(),
         Corrupt         => "Corrupt".clone(),
         Closed          => "Closed".clone(),
         Busy            => "Busy".clone(),
@@ -174,7 +174,7 @@ fn pager_error_kind_name(k: &PagerErrorKind) -> Text {
 fn pager_error_kind_tag(k: &PagerErrorKind) -> Int {
     match k {
         InvalidPageSize => 0, PageOutOfRange => 1,
-        IoError         => 2, Corrupt        => 3,
+        IoFailure       => 2, Corrupt        => 3,
         Closed          => 4, Busy           => 5,
         Locked          => 6, ReadOnly       => 7,
     }
@@ -291,7 +291,7 @@ public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerErro
         Result.Ok(f) => f,
         Result.Err(e) => {
             return Result.Err(PagerError {
-                kind: IoError,
+                kind: IoFailure,
                 message: f"MemDbVfs.open_memory_rwc failed: {e.message}",
             });
         }
@@ -322,7 +322,7 @@ public fn pager_open_file(path: &Text, page_size: Int, flags: OpenFlags) -> Resu
         Result.Ok(f)  => f,
         Result.Err(e) => {
             return Result.Err(PagerError {
-                kind: IoError,
+                kind: IoFailure,
                 message: f"PosixVfs.open failed: {e.message}",
             });
         }
@@ -659,7 +659,7 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
                         match memdb_write(f, cached.data.as_slice(), offset) {
                             Result.Ok(_)  => Result.Ok(()),
                             Result.Err(_) => Result.Err(PagerError {
-                                kind: IoError,
+                                kind: IoFailure,
                                 message: "memdb_write failed in flush",
                             }),
                         }
@@ -668,7 +668,7 @@ public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
                         match f.write(cached.data.as_slice(), offset) {
                             Result.Ok(_)  => Result.Ok(()),
                             Result.Err(_) => Result.Err(PagerError {
-                                kind: IoError,
+                                kind: IoFailure,
                                 message: "PosixFile.write failed in flush",
                             }),
                         }

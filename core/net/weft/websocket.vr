@@ -92,7 +92,7 @@ mount core.net.websocket.{
 };
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
-mount core.io.protocols.{IoError};
+mount core.io.{IoError};
 mount core.net.weft.transport.{WeftTransport};
 mount core.net.weft.listener.{ConnectionRunner, Server, accept_loop};
 mount core.net.weft.connection.{ConnectionConfig};
