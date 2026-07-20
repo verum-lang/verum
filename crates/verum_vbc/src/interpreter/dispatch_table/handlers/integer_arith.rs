@@ -11,6 +11,27 @@ use crate::value::Value;
 // Handler Implementations - Integer Arithmetic
 // ============================================================================
 
+/// Coerce an operand to `f64` for the generic-arithmetic float arms
+/// (T0497).
+///
+/// Generic arithmetic erases `a: T, b: T` (with `T = Float`) to a
+/// type-param `TypeKind`, so codegen emits the integer `AddI/SubI/…`
+/// opcodes rather than their float twins. The handlers below add a
+/// float arm that fires when either operand is a real NaN-box float, so
+/// the value is computed in `f64` instead of being truncated through
+/// `as_integer_compatible`. A real float decodes via `as_f64`; an
+/// integer-tagged operand (a mixed `Float`/`Int` generic instantiation)
+/// converts through its integer value — never `as_f64` on an int
+/// bitcast, whose bit pattern reads back as `NaN`.
+#[inline]
+fn operand_as_f64(v: Value) -> f64 {
+    if v.is_float() {
+        v.as_f64()
+    } else {
+        v.as_integer_compatible() as f64
+    }
+}
+
 pub(in super::super) fn handle_addi(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -39,6 +60,20 @@ pub(in super::super) fn handle_addi(
     // inline ints, so the fast path above is unaffected.
     let val_a = super::cbgr_helpers::resolve_arg_value(state, val_a);
     let val_b = super::cbgr_helpers::resolve_arg_value(state, val_b);
+
+    // FLOAT arm (T0497): a generic `a + b` on `Float` type-params reaches
+    // AddI (codegen sees a non-`Float` type-param `TypeKind` and never
+    // emits AddF), so without this arm the integer path below truncates
+    // both operands (`add_them(2.5, 1.0)` → 3). Placed alongside the
+    // string-concat arm, after the reference resolve. Real floats reach
+    // AddI only via that generic erasure — the typechecker never feeds
+    // AddI two concrete floats — so this is strictly-better, and the
+    // both-inline-int fast path above is left untouched (zero cost).
+    if val_a.is_float() || val_b.is_float() {
+        let result = operand_as_f64(val_a) + operand_as_f64(val_b);
+        state.set_reg(dst, Value::from_f64(result));
+        return Ok(DispatchResult::Continue);
+    }
 
     // Slow path: string concatenation fallback.  Heap Texts count —
     // an accumulator that outgrew the 6-byte small-string form must
@@ -78,6 +113,14 @@ pub(in super::super) fn handle_subi(
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
+    // FLOAT arm (T0497): generic `a - b` on `Float` type-params erases to
+    // SubI; without this the integer path truncates the operands. See
+    // `handle_addi` for the full rationale.
+    if va.is_float() || vb.is_float() {
+        let result = operand_as_f64(va) - operand_as_f64(vb);
+        state.set_reg(dst, Value::from_f64(result));
+        return Ok(DispatchResult::Continue);
+    }
     // Use `as_integer_compatible` (matches `handle_addi`) so operands that
     // are not tagged Int — pointer-tagged values from compiled stdlib,
     // Unit/Nil holes, small-string residuals — do not panic. The CBGR
@@ -99,6 +142,13 @@ pub(in super::super) fn handle_muli(
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
+    // FLOAT arm (T0497): generic `a * b` on `Float` type-params erases to
+    // MulI; see `handle_addi`.
+    if va.is_float() || vb.is_float() {
+        let result = operand_as_f64(va) * operand_as_f64(vb);
+        state.set_reg(dst, Value::from_f64(result));
+        return Ok(DispatchResult::Continue);
+    }
     // Same tag-robustness as handle_addi / handle_subi.
     let result = va
         .as_integer_compatible()
@@ -113,14 +163,24 @@ pub(in super::super) fn handle_divi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let divisor = state.get_reg(b).as_integer_compatible();
+    let va = state.get_reg(a);
+    let vb = state.get_reg(b);
+    // FLOAT arm (T0497): generic `a / b` on `Float` type-params erases to
+    // DivI; see `handle_addi`. Divide-by-zero is guarded consistently with
+    // the integer path below.
+    if va.is_float() || vb.is_float() {
+        let divisor = operand_as_f64(vb);
+        if divisor == 0.0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        state.set_reg(dst, Value::from_f64(operand_as_f64(va) / divisor));
+        return Ok(DispatchResult::Continue);
+    }
+    let divisor = vb.as_integer_compatible();
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let result = state
-        .get_reg(a)
-        .as_integer_compatible()
-        .wrapping_div(divisor);
+    let result = va.as_integer_compatible().wrapping_div(divisor);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -131,14 +191,24 @@ pub(in super::super) fn handle_modi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let divisor = state.get_reg(b).as_integer_compatible();
+    let va = state.get_reg(a);
+    let vb = state.get_reg(b);
+    // FLOAT arm (T0497): generic `a % b` on `Float` type-params erases to
+    // ModI; see `handle_addi`. Divide-by-zero is guarded consistently with
+    // the integer path below.
+    if va.is_float() || vb.is_float() {
+        let divisor = operand_as_f64(vb);
+        if divisor == 0.0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        state.set_reg(dst, Value::from_f64(operand_as_f64(va) % divisor));
+        return Ok(DispatchResult::Continue);
+    }
+    let divisor = vb.as_integer_compatible();
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let result = state
-        .get_reg(a)
-        .as_integer_compatible()
-        .wrapping_rem(divisor);
+    let result = va.as_integer_compatible().wrapping_rem(divisor);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -195,7 +265,14 @@ pub(in super::super) fn handle_negi(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let result = state.get_reg(src).as_integer_compatible().wrapping_neg();
+    let sv = state.get_reg(src);
+    // FLOAT arm (T0497): generic unary `-x` on a `Float` type-param erases
+    // to NegI; see `handle_addi`.
+    if sv.is_float() {
+        state.set_reg(dst, Value::from_f64(-sv.as_f64()));
+        return Ok(DispatchResult::Continue);
+    }
+    let result = sv.as_integer_compatible().wrapping_neg();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -211,8 +288,17 @@ pub(in super::super) fn handle_powi(
     let dst = read_reg(state)?;
     let base = read_reg(state)?;
     let exp = read_reg(state)?;
-    let base_val = state.get_reg(base).as_integer_compatible();
-    let exp_val = state.get_reg(exp).as_integer_compatible();
+    let base_v = state.get_reg(base);
+    let exp_v = state.get_reg(exp);
+    // FLOAT arm (T0497): generic `a ** b` on `Float` type-params erases to
+    // PowI; compute via `f64::powf`. See `handle_addi`.
+    if base_v.is_float() || exp_v.is_float() {
+        let result = operand_as_f64(base_v).powf(operand_as_f64(exp_v));
+        state.set_reg(dst, Value::from_f64(result));
+        return Ok(DispatchResult::Continue);
+    }
+    let base_val = base_v.as_integer_compatible();
+    let exp_val = exp_v.as_integer_compatible();
     // Use checked power to handle overflow
     let result = if exp_val >= 0 && exp_val <= u32::MAX as i64 {
         base_val.wrapping_pow(exp_val as u32)
@@ -230,6 +316,12 @@ pub(in super::super) fn handle_absi(
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let src_val = state.get_reg(src);
+    // FLOAT arm (T0497): generic `|x|` on a `Float` type-param erases to
+    // AbsI; see `handle_addi`.
+    if src_val.is_float() {
+        state.set_reg(dst, Value::from_f64(src_val.as_f64().abs()));
+        return Ok(DispatchResult::Continue);
+    }
     let result = src_val.as_integer_compatible().wrapping_abs();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
