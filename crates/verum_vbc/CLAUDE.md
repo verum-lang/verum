@@ -132,15 +132,31 @@ obligation was discharged by the static verifier.
 ## Refinement Runtime Asserts (T1-F)
 
 `Int{ it > 0 }` and `where`-form refinements compile to
-`Instruction::Assert` at three sites:
-parameter entry (commit 8e04295), implicit tail-expression return
-(978db38), explicit `return expr;` (e483b4f). The binding name
-(`it` or explicit) is aliased to the value register via
-`enter_scope + define_var + Mov`, with VarTypeKind + type-name
-mirrored so predicate compilation selects integer-vs-float
-comparisons correctly. Violations raise `AssertionFailed` with
-`refinement violation: parameter \`x\` of \`f\`` or
-`refinement violation: return value of \`f\``.
+`Instruction::Assert` at every binding form. Which form a value
+arrives through must not change whether its refinement is enforced:
+
+| Site | Message |
+|------|---------|
+| parameter entry | ``refinement violation: parameter `x` of `f` `` |
+| implicit tail-expression return / explicit `return expr;` | ``refinement violation: return value of `f` `` |
+| record-field write (literal, ctor, assignment, compound) | ``refinement violation: field `T.x` `` |
+| `let` annotation, incl. tuple/array destructuring (T0262) | ``refinement violation: binding `x` `` |
+
+All of them lower through one emitter,
+`emit_refinement_assert_on_reg` — the binding name (`it` or the
+explicit binding of the `where` forms) is aliased to the value
+register via `enter_scope + define_var + Mov`, with VarTypeKind +
+type-name mirrored so predicate compilation selects
+integer-vs-float comparisons rather than an `Unknown` comparator
+that always yields true. Parameter entry keeps a no-alias fast path
+for the case where the predicate already names the parameter.
+
+The `let` site is emitted from `compile_stmt`'s `Let` arm *after*
+`compile_let`, not inside it: `compile_let` binds the pattern on
+several different paths, and one interception after it covers them
+all. Unrecognized pattern/annotation shapes emit nothing — the
+gradual-verification policy is to fail open rather than assert
+something unintended.
 
 ## Work-Stealing TaskQueue (T1-I)
 

@@ -1,0 +1,113 @@
+// @test: unit
+// @level: L1
+// @tags: refinement, let-binding, destructuring, runtime-assert
+// @timeout: 30000
+//
+// T0262 — refined LET BINDINGS carry runtime asserts, at parity with
+// parameters, returns and record fields. Before this, whether a
+// refinement was enforced depended on how the binding was spelled:
+// `fn f(x: Int{it > 0})` was checked, `let x: Int{it > 0} = e;` was
+// not, so the same predicate meant two different things.
+//
+// This suite pins the PASSING side: in-range dynamic values flow
+// through every annotated-binding shape without tripping the assert.
+// The TRAPPING side cannot be expressed under the `verum test` harness
+// (no should-panic) — it is pinned by
+// vcs/specs/L1-core/refinement/let_dynamic_range_trap.vr (@expect:
+// fail) and its destructuring twin.
+
+fn dyn_small() -> Int {
+    2 + 3
+}
+
+fn dyn_gain() -> Float {
+    0.25 + 0.25
+}
+
+fn dyn_pair() -> (Int, Int) {
+    (4, 9)
+}
+
+@test
+fn test_refined_let_literal_in_range() {
+    let n: Int{it >= 0, it <= 10} = 7;
+    assert_eq(n, 7);
+}
+
+@test
+fn test_refined_let_dynamic_in_range() {
+    // The SMT gate only sees literals; this value arrives through a
+    // function return and is checked by the runtime assert.
+    let n: Int{it >= 0, it <= 10} = dyn_small();
+    assert_eq(n, 5);
+}
+
+@test
+fn test_refined_let_boundary_values_pass() {
+    // Closed bounds: exactly-on-boundary is in range.
+    let lo: Int{it >= 0, it <= 10} = 0;
+    let hi: Int{it >= 0, it <= 10} = 10;
+    assert_eq(lo, 0);
+    assert_eq(hi, 10);
+}
+
+@test
+fn test_refined_let_conjunction_spelling() {
+    // The `&&` spelling of the same conjunction (grammar admits both
+    // the comma-separated and the `&&` forms).
+    let n: Int{>= 0 && <= 5} = 3;
+    assert_eq(n, 3);
+}
+
+@test
+fn test_refined_let_float_in_range() {
+    let g: Float{it >= 0.0, it <= 1.0} = dyn_gain();
+    assert(g > 0.49);
+    assert(g < 0.51);
+}
+
+@test
+fn test_refined_let_tuple_destructuring_in_range() {
+    // Each leaf of the annotation is enforced against its own element.
+    let (a, b): (Int{it >= 0, it <= 5}, Int{it >= 0, it <= 10}) = dyn_pair();
+    assert_eq(a, 4);
+    assert_eq(b, 9);
+}
+
+@test
+fn test_refined_let_tuple_mixed_annotation() {
+    // A tuple where only one element carries a refinement: the
+    // unrefined element is bound normally.
+    let (a, b): (Int{it > 0}, Text) = (3, "ok");
+    assert_eq(a, 3);
+    assert_eq(b, "ok");
+}
+
+@test
+fn test_refined_let_predicate_reads_outer_local() {
+    // A let predicate may reference variables in scope, unlike a field
+    // predicate (which is checked in the constructor's scope and so is
+    // restricted to its own binding).
+    let limit = 10;
+    let n: Int{it < limit} = dyn_small();
+    assert_eq(n, 5);
+}
+
+@test
+fn test_unrefined_let_unaffected() {
+    // A plain annotated binding compiles and behaves identically.
+    let n: Int = dyn_small();
+    let g: Float = dyn_gain();
+    assert_eq(n, 5);
+    assert(g > 0.49);
+}
+
+@test
+fn test_refined_let_in_nested_block() {
+    // Block-scoped bindings go through the same statement path.
+    let outer = {
+        let inner: Int{it >= 0, it <= 10} = dyn_small();
+        inner * 2
+    };
+    assert_eq(outer, 10);
+}

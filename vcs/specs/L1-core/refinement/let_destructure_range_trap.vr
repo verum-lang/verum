@@ -1,0 +1,24 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: refinement, destructuring, runtime-assert, red-team
+// @timeout: 30000
+// @expect: fail
+//
+// T0262 red-team pin, destructuring leg: a tuple annotation carries one
+// refinement per element, and each MUST be enforced against its own
+// element. Here the first element is in range and the second is not, so
+// the trap must come from the SECOND leaf — a walk that only checked
+// the first (or that gave up on compound annotations altogether, as the
+// pre-fix code did) would let this program exit 0.
+
+fn pair() -> (Int, Int) {
+    (3, 99)
+}
+
+fn main() {
+    let (a, b): (Int{it >= 0, it <= 5}, Int{it >= 0, it <= 10}) = pair();
+    // Unreachable when the runtime assert works; reaching this print
+    // (and exiting 0) is the FAILURE mode this pin guards against.
+    print(f"bound out-of-range element a={a} b={b}");
+}

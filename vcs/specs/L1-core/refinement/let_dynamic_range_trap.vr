@@ -1,0 +1,24 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: refinement, let-binding, runtime-assert, red-team
+// @timeout: 30000
+// @expect: fail
+//
+// T0262 red-team pin: an out-of-range value smuggled through a function
+// return into a `let n: Int{it >= 0, it <= 10}` MUST trap at runtime
+// with `refinement violation: binding ...`. Pre-fix the binding
+// succeeded and `n` read back 99 — literals were SMT-rejected, dynamic
+// values were unchecked, so the refinement was decorative on this
+// binding form while being enforced on the parameter form.
+
+fn out_of_range() -> Int {
+    90 + 9
+}
+
+fn main() {
+    let n: Int{it >= 0, it <= 10} = out_of_range();
+    // Unreachable when the runtime assert works; reaching this print
+    // (and exiting 0) is the FAILURE mode this pin guards against.
+    print(f"bound out-of-range value n={n}");
+}

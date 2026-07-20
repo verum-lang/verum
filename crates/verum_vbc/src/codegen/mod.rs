@@ -17059,33 +17059,15 @@ impl VbcCodegen {
             _ => String::new(),
         };
 
-        let message_id = {
-            let msg = format!("refinement violation: return value of `{}`", fn_name);
-            self.intern_string(&msg)
-        };
-
-        self.ctx.enter_scope();
-        let alias_reg = self.ctx.define_var(&binding_name, false);
-        self.ctx.emit(Instruction::Mov {
-            dst: alias_reg,
-            src: result_reg,
-        });
-
-        self.ctx.register_variable_type(&binding_name, base_vt);
-        if !base_type_name.is_empty() && base_type_name != "()" {
-            self.ctx
-                .variable_type_names
-                .insert(binding_name.clone(), base_type_name);
-        }
-
-        if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
-            self.ctx.emit(Instruction::Assert {
-                cond: cond_reg,
-                message_id,
-            });
-            self.ctx.free_temp(cond_reg);
-        }
-        self.ctx.exit_scope(false);
+        let message = format!("refinement violation: return value of `{}`", fn_name);
+        self.emit_refinement_assert_on_reg(
+            result_reg,
+            &pred_expr,
+            &binding_name,
+            base_vt,
+            &base_type_name,
+            &message,
+        );
     }
 
     /// META-INTRINSIC-NILSTUB-1: table-driven synthesized bodies for
@@ -17248,27 +17230,61 @@ impl VbcCodegen {
             return;
         }
 
-        let message_id = {
-            let msg = format!(
-                "refinement violation: field `{}.{}`",
-                stripped, field_name
-            );
-            self.intern_string(&msg)
-        };
+        let message = format!("refinement violation: field `{}.{}`", stripped, field_name);
+        self.emit_refinement_assert_on_reg(
+            value_reg,
+            &info.pred_expr,
+            &info.binding,
+            info.base_var_type,
+            &info.base_type_name,
+            &message,
+        );
+    }
+
+    /// The alias + VarType-mirror idiom, in one place.
+    ///
+    /// Every runtime refinement obligation lowers the same way: bind the
+    /// predicate's variable (`it`, or the explicit binding of the
+    /// `T where |x| p` / `x: T where p` forms) to a scoped alias of the
+    /// register holding the value, mirror the value's VarType and
+    /// type-name onto that alias so `compile_expr` selects the right
+    /// comparison ops, compile the predicate, and `Assert` on it.
+    ///
+    /// Without the mirror, `Int { it > 0 }` compiles against an `Unknown`
+    /// comparator that always yields true, i.e. an Assert that can never
+    /// fire. The scope is entered and exited around the alias so it can
+    /// neither leak into the surrounding code nor shadow a user variable
+    /// of the same name.
+    ///
+    /// Callers: return sites, record-field writes, and let-binding /
+    /// destructuring sites. Parameter entry keeps its own no-alias fast
+    /// path for the case where the predicate already names the parameter.
+    pub(super) fn emit_refinement_assert_on_reg(
+        &mut self,
+        value_reg: Reg,
+        pred_expr: &verum_ast::Expr,
+        binding_name: &str,
+        base_var_type: context::VarTypeKind,
+        base_type_name: &str,
+        message: &str,
+    ) {
+        let message_id = self.intern_string(message);
 
         self.ctx.enter_scope();
-        let alias_reg = self.ctx.define_var(&info.binding, false);
+        let alias_reg = self.ctx.define_var(binding_name, false);
         self.ctx.emit(Instruction::Mov {
             dst: alias_reg,
             src: value_reg,
         });
-        self.ctx
-            .register_variable_type(&info.binding, info.base_var_type);
-        self.ctx
-            .variable_type_names
-            .insert(info.binding.clone(), info.base_type_name.clone());
 
-        if let Ok(Some(cond_reg)) = self.compile_expr(&info.pred_expr) {
+        self.ctx.register_variable_type(binding_name, base_var_type);
+        if !base_type_name.is_empty() && base_type_name != "()" {
+            self.ctx
+                .variable_type_names
+                .insert(binding_name.to_string(), base_type_name.to_string());
+        }
+
+        if let Ok(Some(cond_reg)) = self.compile_expr(pred_expr) {
             self.ctx.emit(Instruction::Assert {
                 cond: cond_reg,
                 message_id,
@@ -17276,6 +17292,107 @@ impl VbcCodegen {
             self.ctx.free_temp(cond_reg);
         }
         self.ctx.exit_scope(false);
+    }
+
+    /// T0262: emit runtime refinement Asserts for a `let` binding's type
+    /// annotation, including through destructuring patterns.
+    ///
+    /// Refinements were enforced at parameter entry, at return sites and
+    /// on record-field writes, but not here — so `let x: Int{> 0} = e;`
+    /// and `let (a, b): (Int{> 0}, Int{< 10}) = e;` went unchecked, and
+    /// whether the same predicate was enforced depended on how the
+    /// binding happened to be spelled.
+    ///
+    /// Called from `compile_stmt`'s `Let` arm AFTER `compile_let`, so
+    /// every bound name is already a defined variable regardless of which
+    /// of `compile_let`'s several bind paths ran.
+    ///
+    /// Walks the pattern and the annotation in lockstep; each leaf that
+    /// pairs a named binding with a `Refined` type produces one Assert.
+    /// Any shape the walk does not recognize emits nothing — the
+    /// gradual-verification policy is to fail open rather than assert
+    /// something unintended.
+    pub(super) fn emit_let_refinement_asserts(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        ty: &verum_ast::Type,
+    ) {
+        use verum_ast::PatternKind;
+        use verum_ast::ty::TypeKind;
+
+        match (&pattern.kind, &ty.kind) {
+            // Peel pattern-side grouping and reference layers first, so
+            // the type-side arms below cannot swallow them.
+            (PatternKind::Paren(inner), _) => self.emit_let_refinement_asserts(inner, ty),
+            (PatternKind::Reference { inner, .. }, TypeKind::Reference { inner: ity, .. }) => {
+                self.emit_let_refinement_asserts(inner, ity)
+            }
+            (PatternKind::Reference { inner, .. }, _) => {
+                self.emit_let_refinement_asserts(inner, ty)
+            }
+
+            // A refined leaf: the obligation this function exists for.
+            (PatternKind::Ident { .. }, TypeKind::Refined { base, predicate }) => {
+                let Some(var_name) = self.extract_pattern_name(pattern) else {
+                    return;
+                };
+                let Ok(var_reg) = self.ctx.get_var_reg(&var_name) else {
+                    return;
+                };
+
+                let binding_name = match &predicate.binding {
+                    verum_common::Maybe::Some(id) => id.name.to_string(),
+                    verum_common::Maybe::None => "it".to_string(),
+                };
+                let base_vt = self.type_kind_to_var_type(&base.kind);
+                let base_type_name = Self::extract_type_name_from_ast(base);
+                let message = format!("refinement violation: binding `{}`", var_name);
+                let pred_expr = predicate.expr.clone();
+
+                if binding_name == var_name {
+                    // The predicate already names the binding — no alias
+                    // needed, and introducing one would shadow it.
+                    let message_id = self.intern_string(&message);
+                    if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
+                        self.ctx.emit(Instruction::Assert {
+                            cond: cond_reg,
+                            message_id,
+                        });
+                        self.ctx.free_temp(cond_reg);
+                    }
+                } else {
+                    self.emit_refinement_assert_on_reg(
+                        var_reg,
+                        &pred_expr,
+                        &binding_name,
+                        base_vt,
+                        &base_type_name,
+                        &message,
+                    );
+                }
+            }
+
+            // Destructuring: recurse pairwise. A length mismatch means
+            // the annotation does not describe this pattern, so nothing
+            // is asserted.
+            (PatternKind::Tuple(pats), TypeKind::Tuple(tys)) if pats.len() == tys.len() => {
+                for (p, t) in pats.iter().zip(tys.iter()) {
+                    self.emit_let_refinement_asserts(p, t);
+                }
+            }
+            (PatternKind::Array(pats), TypeKind::Array { element, .. }) => {
+                for p in pats.iter() {
+                    self.emit_let_refinement_asserts(p, element);
+                }
+            }
+
+            // Peel type-side reference / ownership layers.
+            (_, TypeKind::Reference { inner, .. }) | (_, TypeKind::Ownership { inner, .. }) => {
+                self.emit_let_refinement_asserts(pattern, inner)
+            }
+
+            _ => {}
+        }
     }
 
     /// Free-variable check for field-refinement predicates: true iff

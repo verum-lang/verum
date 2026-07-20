@@ -31,7 +31,24 @@ impl VbcCodegen {
 
         match &stmt.kind {
             StmtKind::Let { pattern, ty, value } => {
-                self.compile_let(pattern, ty.as_ref(), value.as_ref())
+                let result = self.compile_let(pattern, ty.as_ref(), value.as_ref())?;
+                // T0262: enforce the annotation's refinement predicates
+                // at runtime, the same way parameter entry, return sites
+                // and record-field writes already do. Emitted here rather
+                // than inside `compile_let` because that function binds
+                // the pattern on several different paths; by this point
+                // every bound name is a defined variable on all of them.
+                //
+                // Only when the binding has an initializer: the grammar
+                // admits `let x: T;`, and asserting a predicate against a
+                // register that has not been written yet would test
+                // whatever happened to be in it. The obligation for a
+                // deferred-initialization binding belongs at its
+                // assignment, not here.
+                if let (Some(annotation), Some(_)) = (ty.as_ref(), value.as_ref()) {
+                    self.emit_let_refinement_asserts(pattern, annotation);
+                }
+                Ok(result)
             }
 
             StmtKind::LetElse {
