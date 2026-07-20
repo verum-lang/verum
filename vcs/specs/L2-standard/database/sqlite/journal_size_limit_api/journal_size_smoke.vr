@@ -20,9 +20,9 @@ fn test_default_value() {
 }
 
 fn test_from_pragma_value_round_trip() {
-    match from_pragma_value-1_i64 { LmUnlimited => {}, _ => assert(false) }
-    match from_pragma_value0_i64  { LmTruncate  => {}, _ => assert(false) }
-    match from_pragma_value4096_i64 {
+    match from_pragma_value(-1_i64) { LmUnlimited => {}, _ => assert(false) }
+    match from_pragma_value(0_i64)  { LmTruncate  => {}, _ => assert(false) }
+    match from_pragma_value(4096_i64) {
         LmCap(n) => assert_eq(n, 4096 as Int64),
         _ => assert(false),
     }

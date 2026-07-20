@@ -66,10 +66,10 @@ fn test_output_format() {
 }
 
 fn test_valid_weekday() {
-    assert(valid_weekday0_i64);
-    assert(valid_weekday6_i64);
-    assert(!valid_weekday7_i64);
-    assert(!valid_weekday-1_i64);
+    assert(valid_weekday(0_i64));
+    assert(valid_weekday(6_i64));
+    assert(!valid_weekday(7_i64));
+    assert(!valid_weekday(-1_i64));
 }
 
 fn main() {

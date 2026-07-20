@@ -82,7 +82,7 @@ fn test_from_ymd_hms_has_fraction() {
 }
 
 fn test_unix_round_trip() {
-    let i = from_unix_seconds1000000_i64;
+    let i = from_unix_seconds(1000000_i64);
     let s = i.unix_seconds();
     // Tolerate ±1s drift from sub-day arithmetic.
     let diff = s - 1000000_i64;

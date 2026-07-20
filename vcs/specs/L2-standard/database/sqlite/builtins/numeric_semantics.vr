@@ -114,7 +114,7 @@ fn test_zero_blob_size() {
 }
 
 fn test_random_blob_size() {
-    let mut rng = rng_new1234_i64;
+    let mut rng = rng_new(1234_i64);
     match random_blob(&RInt(16_i64), &mut rng) {
         RBlob(b) => assert_eq(b.len(), 16),
         _        => panic("RANDOMBLOB should return RBlob"),

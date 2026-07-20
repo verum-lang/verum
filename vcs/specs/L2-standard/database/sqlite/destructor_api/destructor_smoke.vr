@@ -48,7 +48,7 @@ fn test_will_invoke_callback_only_custom() {
 fn test_from_ptr_round_trip() {
     match from_ptr(SQLITE_STATIC)    { DStatic     => {}, _ => assert(false) }
     match from_ptr(SQLITE_TRANSIENT) { DTransient  => {}, _ => assert(false) }
-    match from_ptr999_i64     { DCustom(_)  => {}, _ => assert(false) }
+    match from_ptr(999_i64)     { DCustom(_)  => {}, _ => assert(false) }
 }
 
 fn test_engine_observes() {

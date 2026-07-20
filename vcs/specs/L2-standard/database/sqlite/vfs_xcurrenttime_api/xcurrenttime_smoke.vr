@@ -30,7 +30,7 @@ fn test_constants() {
 }
 
 fn test_millis_to_julian_zero() {
-    assert_eq(millis_to_julian_x100000_i64, unix_epoch_julian_x10000());
+    assert_eq(millis_to_julian_x10000(0_i64), unix_epoch_julian_x10000());
 }
 
 fn test_millis_to_julian_one_day() {
@@ -60,7 +60,7 @@ fn test_outcome_names_and_is_ok() {
 }
 
 fn test_millis_value() {
-    assert_eq(millis_value(&OkTime1700_000_000_(000_i64)), 1700_000_000_000 as Int64);
+    assert_eq(millis_value(&OkTime(1700_000_000_000_i64)), 1700_000_000_000 as Int64);
     assert_eq(millis_value(&ErrUnavailable),                    0 as Int64);
 }
 

@@ -23,15 +23,15 @@ mount core.database.sqlite.native.errors.code.{
 mount base.{Bool};
 
 fn test_new_group_fresh() {
-    let g = new_group1_i64;
+    let g = new_group(1_i64);
     assert(!g.has_schema());
     assert_eq(g.output_bytes_estimate, 0 as Int64);
     assert(!g.released);
 }
 
 fn test_attach_schema_and_note_table() {
-    let mut g = new_group1_i64;
-    g.attach_schema99_i64;
+    let mut g = new_group(1_i64);
+    g.attach_schema(99_i64);
     assert(g.has_schema());
     g.note_table("users".clone());
     g.note_table("users".clone());  // idempotent
@@ -41,9 +41,9 @@ fn test_attach_schema_and_note_table() {
 }
 
 fn test_note_bytes_accumulates() {
-    let mut g = new_group1_i64;
-    g.note_bytes128_i64;
-    g.note_bytes64_i64;
+    let mut g = new_group(1_i64);
+    g.note_bytes(128_i64);
+    g.note_bytes(64_i64);
     assert_eq(g.output_bytes_estimate, 192 as Int64);
 }
 
@@ -83,7 +83,7 @@ fn test_output_is_ok_and_bytes() {
 }
 
 fn test_release_flag() {
-    let mut g = new_group1_i64;
+    let mut g = new_group(1_i64);
     g.release();
     assert(g.released);
 }

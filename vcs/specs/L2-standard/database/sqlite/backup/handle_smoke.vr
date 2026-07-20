@@ -138,7 +138,7 @@ fn test_adaptive_load_backoff_on_writes() {
 fn test_progress_snapshot_renders() {
     let mut h = handle_new("main->dest".clone(), 100, 4096);
     let _ = h.step(47);
-    let mut tr = tracker_new0_i64;
+    let mut tr = tracker_new(0_i64);
     let snap = tr.snapshot(&h, 1000000000 as Int64);   // 1 second elapsed
     assert_eq(snap.percent, 47);
     let line = render(&snap);
@@ -148,7 +148,7 @@ fn test_progress_snapshot_renders() {
 fn test_progress_throughput() {
     let mut h = handle_new("x".clone(), 100, 4096);
     let _ = h.step(50);
-    let mut tr = tracker_new0_i64;
+    let mut tr = tracker_new(0_i64);
     // 1 second → 50 pages/sec
     let snap = tr.snapshot(&h, 1000000000 as Int64);
     assert(snap.avg_pages_per_sec >= 49.0);

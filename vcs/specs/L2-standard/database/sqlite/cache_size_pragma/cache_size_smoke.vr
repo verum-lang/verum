@@ -19,12 +19,12 @@ fn test_default_constants() {
 }
 
 fn test_from_pragma_value_branches() {
-    match from_pragma_value0_i64 { CsDefault => {}, _ => assert(false) }
-    match from_pragma_value500_i64 {
+    match from_pragma_value(0_i64) { CsDefault => {}, _ => assert(false) }
+    match from_pragma_value(500_i64) {
         CsPages(n) => assert_eq(n, 500 as Int64),
         _ => assert(false),
     }
-    match from_pragma_value-2000_i64 {
+    match from_pragma_value(-2000_i64) {
         CsKibibytes(k) => assert_eq(k, 2000 as Int64),
         _ => assert(false),
     }

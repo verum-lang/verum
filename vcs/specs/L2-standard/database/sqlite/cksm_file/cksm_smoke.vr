@@ -57,8 +57,8 @@ fn test_verify_with_corrupt_pages_returns_corrupt() {
     let mut e = new_engine();
     let _ = e.set_reserve_bytes(8);
     let mut bad: List<Int64> = List.new();
-    bad.push7_i64;
-    bad.push19_i64;
+    bad.push(7_i64);
+    bad.push(19_i64);
     assert_eq(e.sqlite3_file_control_cksm_file(100 as Int64, bad), 11);  // SQLITE_CORRUPT
     assert(!is_ok(&e.status));
     assert_eq(corrupt_count(&e.status), 2);

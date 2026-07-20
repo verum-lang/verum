@@ -50,13 +50,13 @@ fn test_counter_inc_add() {
     assert(c.get() == 0_i64);
     c.inc();
     c.inc();
-    c.add5_i64;
+    c.add(5_i64);
     assert(c.get() == 7_i64);
 }
 
 fn test_gauge_set_inc_dec() {
     let mut g = gauge_new("cursors".clone());
-    g.set10_i64;
+    g.set(10_i64);
     g.inc();
     g.dec();
     g.dec();
@@ -69,25 +69,25 @@ fn test_gauge_set_inc_dec() {
 
 fn test_histogram_bucket_placement() {
     let mut h = histogram_default("latency".clone());
-    h.observe5_i64;                  // 5 ns → 10us bucket
-    h.observe50000_i64;              // 50µs → 100us bucket
-    h.observe500000000_i64;          // 500ms → 1s bucket
+    h.observe(5_i64);                  // 5 ns → 10us bucket
+    h.observe(50000_i64);              // 50µs → 100us bucket
+    h.observe(500000000_i64);          // 500ms → 1s bucket
     assert(h.count() == 3_i64);
     assert(h.cumulative(0) >= 1_i64); // 10us bucket has at least 1
 }
 
 fn test_histogram_mean() {
     let mut h = histogram_default("latency".clone());
-    h.observe100_i64;
-    h.observe200_i64;
-    h.observe300_i64;
+    h.observe(100_i64);
+    h.observe(200_i64);
+    h.observe(300_i64);
     assert(h.mean_ns() == 200_i64);
 }
 
 fn test_histogram_quantile_picks_bucket() {
     let mut h = histogram_default("latency".clone());
     let mut i: Int = 0;
-    while i < 10 { h.observe50_i64; i = i + 1; }
+    while i < 10 { h.observe(50_i64); i = i + 1; }
     let q50 = h.approx_quantile_ns(0.5);
     // p50 falls in the 10us bucket
     assert(q50 == 10_i64 * NS_PER_US);
@@ -167,7 +167,7 @@ fn test_span_lifecycle() {
     assert(!s.is_ended());
     s.set_attribute(attr_text("sql".clone(), "SELECT 1".clone()));
     s.set_attribute(attr_int("rows".clone(), 1 as Int64));
-    s.end500_i64;
+    s.end(500_i64);
     assert(s.is_ended());
     assert(s.duration_ns() == 500_i64);
     match &s.status { SsOk => {}, _ => panic("end-clean defaults to Ok") };
@@ -194,7 +194,7 @@ fn test_buffering_sink_collects() {
     let mut sink = buffering_sink();
     let ctx = trace_ctx_root(0 as Int64, 0 as Int64);
     let mut s = span_start("a".clone(), SkInternal, &ctx, 1 as Int64, 0 as Int64);
-    s.end10_i64;
+    s.end(10_i64);
     sink.on_span_end(&s);
     sink.on_span_end(&s);
     assert_eq(sink.buffered_count(), 2);

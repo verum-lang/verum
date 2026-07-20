@@ -89,7 +89,7 @@ fn test_entry_touch_increments() {
     let k = key_for(&"SELECT 1".clone());
     let mut e = entry_new(k, 7, 100 as Int64);
     assert_eq(e.use_count, 0);
-    e.touch200_i64;
+    e.touch(200_i64);
     assert_eq(e.use_count, 1);
     assert_eq(e.last_used_ns, 200 as Int64);
 }
