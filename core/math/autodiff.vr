@@ -201,9 +201,15 @@ where
     In: Differentiable,
     Out: Differentiable,
 {
-    @vbc(GRAD_BEGIN, 0x00);  // mode: reverse
+    // GRAD_BEGIN records `x` as the leaf being differentiated with respect to;
+    // forward arithmetic then records onto the tape until GRAD_END.
+    @vbc(GRAD_BEGIN, x);
     let primal = f(x);
-    let pullback = @vbc(GRAD_END);
+    // GRAD_END stops recording and retains the tape, yielding the handle that
+    // reaches it. Reverse mode runs the backward sweep only when the pullback
+    // is applied, so the tape must outlive this call.
+    let tape = @vbc(GRAD_END, primal);
+    let pullback = |seed| @vbc(GRAD_BACKWARD, tape, seed);
     VJPResult { primal, pullback }
 }
 
@@ -267,9 +273,16 @@ where
     F: Fn(In) -> Float,
     In: Differentiable,
 {
+    // Drives the tape directly instead of going through `vjp`'s VJPResult.
+    // Reading `.pullback` off `VJPResult<In, Out>` requires `Out` to be bound,
+    // and `Out` is not inferable from `F: Fn(In) -> Out` today, so the field
+    // access resolves against an unresolved record type and yields the wrong
+    // field. The gradient semantics live in the tape runtime either way.
     |x| {
-        let vjp_result = vjp(f, x);
-        vjp_result.pullback(1.0)
+        @vbc(GRAD_BEGIN, x);
+        let primal = f(x);
+        let tape = @vbc(GRAD_END, primal);
+        @vbc(GRAD_BACKWARD, tape, 1.0)
     }
 }
 
@@ -289,9 +302,13 @@ where
     F: Fn(In) -> Float,
     In: Differentiable,
 {
+    // Same direct-tape form as `grad`, keeping the primal that the forward
+    // pass already produced rather than recomputing it.
     |x| {
-        let vjp_result = vjp(f, x);
-        (vjp_result.primal, vjp_result.pullback(1.0))
+        @vbc(GRAD_BEGIN, x);
+        let primal = f(x);
+        let tape = @vbc(GRAD_END, primal);
+        (primal, @vbc(GRAD_BACKWARD, tape, 1.0))
     }
 }
 
@@ -306,7 +323,7 @@ where
 {
     |args| {
         let vjp_result = vjp(f, args);
-        let all_grads = vjp_result.pullback(1.0);
+        let all_grads = (vjp_result.pullback)(1.0);
         argnums.iter().map(|&i| all_grads.get(i).clone()).collect()
     }
 }
@@ -407,7 +424,7 @@ where
     // J^T J v = J^T (J v) using two JVP/VJP passes
     let jv = jvp(f, x.clone(), v.clone()).tangent;  // J v
     let vjp_result = vjp(f, x.clone());
-    vjp_result.pullback(jv)  // J^T (J v)
+    (vjp_result.pullback)(jv)  // J^T (J v)
 }
 
 // =============================================================================
@@ -971,15 +988,10 @@ public fn accumulated_backward<T: Numeric>(
     accumulation_steps: USize,
     should_sync: Bool,
 ) using [AutodiffContext] {
-    let scale_val = 1.0 / (accumulation_steps as Float);
-    let scale_tensor = full_like(loss, scale_val as T);
-    let scaled_loss = mul(loss, &scale_tensor);
-
-    @vbc(GRAD_BACKWARD, &scaled_loss);
-
-    if should_sync {
-        @vbc(GRAD_SYNC);
-    }
+    // Tensor-level gradient accumulation needs a working tensor backward()
+    // (see backward() above) — not yet wired (T0460 AOT / T0179). Fail loudly
+    // rather than silently skip the backward pass and desync training.
+    panic("accumulated_backward() is not yet implemented — see T0460 (AOT) / T0179 (tensor autodiff)")
 }
 
 // =============================================================================
@@ -1264,8 +1276,14 @@ fn unsqueeze<T: Numeric>(x: &DynTensor<T>, axis: USize) -> DynTensor<T> {
 }
 
 // Backward pass (computes gradients)
+//
+// Tensor-level reverse mode needs forward recording of tensor ops onto the tape,
+// which is not yet wired at either tier (tensor autodiff = T0460 AOT / T0179).
+// GRAD_BACKWARD now drives the SCALAR tape (grad()/vjp), taking a tape handle +
+// seed; routing a tensor through it would misread the handle. Fail loudly rather
+// than silently mis-differentiate.
 fn backward<T: Numeric>(loss: &DynTensor<T>) {
-    @vbc(GRAD_BACKWARD, loss)
+    panic("tensor-level backward() is not yet implemented — see T0460 (AOT) / T0179 (tensor autodiff)")
 }
 
 // Greater-than comparison for masks (tensor-level)

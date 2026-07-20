@@ -219,6 +219,9 @@ pub(in super::super) fn handle_return(
 ) -> InterpreterResult<DispatchResult> {
     let src = read_reg(state)?;
     let value = state.get_reg(src);
+    // Capture any tape binding while the callee frame is still current;
+    // `do_return` re-attaches it in the caller's frame.
+    super::super::super::autodiff_record::capture_return(state, src);
     do_return(state, value)
 }
 

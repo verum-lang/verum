@@ -4,6 +4,7 @@
 //! Handles: Call (0x5B), CallR (0x5F), CallG (0x80), CallV (0x81),
 //! CallC (0x82), CallClosure (0x5E), TailCall (0x5C), NewClosure (0x8A)
 
+use super::super::super::autodiff_record::{propagate_arg, propagate_tail_args};
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
@@ -506,10 +507,11 @@ pub(in super::super) fn handle_call(
 
     // Copy arguments from caller to callee
     for i in 0..args.count {
-        let arg_value = state
-            .registers
-            .get(caller_base, Reg(args.start.0 + i as u16));
-        state.registers.set(new_base, Reg(i as u16), arg_value);
+        let src = Reg(args.start.0 + i as u16);
+        let dst_reg = Reg(i as u16);
+        let arg_value = state.registers.get(caller_base, src);
+        state.registers.set(new_base, dst_reg, arg_value);
+        propagate_arg(state, caller_base, src, new_base, dst_reg);
     }
 
     // Reset PC to start of function
@@ -557,10 +559,11 @@ pub(in super::super) fn handle_call_indirect(
 
         // Copy arguments from caller to callee
         for i in 0..args.count {
-            let arg_value = state
-                .registers
-                .get(caller_base, Reg(args.start.0 + i as u16));
-            state.registers.set(new_base, Reg(i as u16), arg_value);
+            let src = Reg(args.start.0 + i as u16);
+            let dst_reg = Reg(i as u16);
+            let arg_value = state.registers.get(caller_base, src);
+            state.registers.set(new_base, dst_reg, arg_value);
+            propagate_arg(state, caller_base, src, new_base, dst_reg);
         }
 
         // Reset PC to start of function
@@ -718,10 +721,11 @@ pub(in super::super) fn handle_call_generic(
 
     // Copy arguments from caller to callee
     for i in 0..args.count {
-        let arg_value = state
-            .registers
-            .get(caller_base, Reg(args.start.0 + i as u16));
-        state.registers.set(new_base, Reg(i as u16), arg_value);
+        let src = Reg(args.start.0 + i as u16);
+        let dst_reg = Reg(i as u16);
+        let arg_value = state.registers.get(caller_base, src);
+        state.registers.set(new_base, dst_reg, arg_value);
+        propagate_arg(state, caller_base, src, new_base, dst_reg);
     }
 
     // Reset PC to start of function
@@ -933,10 +937,11 @@ pub(in super::super) fn handle_call_cached(
 
     // Copy arguments from caller to callee
     for i in 0..args.count {
-        let arg_value = state
-            .registers
-            .get(caller_base, Reg(args.start.0 + i as u16));
-        state.registers.set(new_base, Reg(i as u16), arg_value);
+        let src = Reg(args.start.0 + i as u16);
+        let dst_reg = Reg(i as u16);
+        let arg_value = state.registers.get(caller_base, src);
+        state.registers.set(new_base, dst_reg, arg_value);
+        propagate_arg(state, caller_base, src, new_base, dst_reg);
     }
 
     // Reset PC to start of function
@@ -1036,9 +1041,15 @@ pub(in super::super) fn handle_call_closure(
 
     // Copy arguments after captures
     for (i, val) in arg_values.into_iter().enumerate() {
-        state
-            .registers
-            .set(new_base, Reg((capture_count + i) as u16), val);
+        let dst_reg = Reg((capture_count + i) as u16);
+        state.registers.set(new_base, dst_reg, val);
+        propagate_arg(
+            state,
+            caller_base,
+            Reg(args_start.0 + i as u16),
+            new_base,
+            dst_reg,
+        );
     }
 
     // Jump to function start
@@ -1081,6 +1092,7 @@ pub(in super::super) fn handle_tail_call_op(
     for (i, value) in arg_values.into_iter().enumerate() {
         state.registers.set(current_base, Reg(i as u16), value);
     }
+    propagate_tail_args(state, current_base, args.start, args.count as u16);
 
     // Reset PC to start of new function (also in frame)
     state.set_pc(0);

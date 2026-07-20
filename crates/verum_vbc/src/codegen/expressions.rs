@@ -30682,6 +30682,40 @@ impl VbcCodegen {
                 });
             }
 
+            // Autodiff scope control. Without these arms the default fallback
+            // below emitted `LoadNil`, so `@vbc(GRAD_BEGIN, x)` opened no
+            // scope and `@vbc(GRAD_END, primal)` handed the pullback a nil
+            // tape handle — every gradient came back 0 with no diagnostic.
+            Opcode::GradBegin => {
+                self.ctx.emit(Instruction::GradBegin {
+                    scope_id: 0,
+                    mode: crate::instruction::GradMode::Reverse,
+                    wrt: args.to_vec(),
+                });
+            }
+            Opcode::GradEnd => {
+                self.ctx.emit(Instruction::GradEnd {
+                    scope_id: 0,
+                    // First argument is the scope's primal result; the handle
+                    // to the retained tape lands in `dest`.
+                    output: args.first().copied().unwrap_or(dest),
+                    grad_out: dest,
+                    grad_regs: Vec::new(),
+                });
+            }
+            Opcode::GradStop => {
+                self.ctx.emit(Instruction::GradStop {
+                    dst: dest,
+                    src: args.first().copied().unwrap_or(dest),
+                });
+            }
+            Opcode::GradCheckpoint => {
+                self.ctx.emit(Instruction::GradCheckpoint {
+                    id: 0,
+                    tensors: args.to_vec(),
+                });
+            }
+
             // Default fallback
             _ => {
                 self.ctx.emit(Instruction::LoadNil { dst: dest });

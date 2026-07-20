@@ -95,7 +95,7 @@ fn tensor_extended_body(
         dispatch_function_schema_to_json, dispatch_gather, dispatch_gather_nd,
         dispatch_generate_request_id, dispatch_get_grad, dispatch_inverse, dispatch_irfft,
         dispatch_json_schema_to_json, dispatch_kron, dispatch_logm, dispatch_lstsq, dispatch_lu,
-        dispatch_matrix_power, dispatch_mesh_select, dispatch_module_backward, dispatch_nanmean,
+        dispatch_matrix_power, dispatch_mesh_select, dispatch_nanmean,
         dispatch_nansum, dispatch_norm, dispatch_p2p_recv, dispatch_p2p_send,
         dispatch_paged_attention, dispatch_parse_function_calls, dispatch_parse_tool_call,
         dispatch_pmap_all_gather, dispatch_pmap_pmax, dispatch_pmap_pmean, dispatch_pmap_psum,
@@ -2834,25 +2834,51 @@ fn tensor_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        // GRAD_BACKWARD: apply a pullback to a cotangent seed.
+        //
+        // `tape_reg` holds the handle `GRAD_END` produced and `seed_reg` the
+        // output cotangent. This is the backward half of reverse mode; the
+        // forward half recorded the tape between GRAD_BEGIN and GRAD_END.
         Some(TensorSubOpcode::ModuleBackward) => {
             let dst = read_reg(state)?;
-            let _module_reg = read_reg(state)?;
-            let grad_output_reg = read_reg(state)?;
+            let tape_reg = read_reg(state)?;
+            let seed_reg = read_reg(state)?;
 
-            let grad_output_val = state.get_reg(grad_output_reg);
-            let grad_output_ptr = tensor_handle_ptr(grad_output_val);
+            let handle = state.get_reg(tape_reg).as_i64();
+            let seed = state.get_reg(seed_reg).as_f64();
 
-            if !grad_output_ptr.is_null() {
-                let grad_output_handle = unsafe { &*grad_output_ptr };
-                // Module is just a unit type placeholder for now
-                if let Some(result) = dispatch_module_backward(&(), grad_output_handle) {
-                    let carrier = alloc_tensor_value(state, result)?;
-                    state.set_reg(dst, carrier);
-                } else {
-                    state.set_reg(dst, Value::nil());
+            // An op with no VJP rule ran inside the scope, so the chain is
+            // broken. Report it rather than returning a plausible wrong number.
+            if let Some(what) = state.grad_unsupported {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "autodiff: {what} ran inside a gradient scope, so the \
+                         gradient would be silently wrong"
+                    ),
+                });
+            }
+
+            if handle <= 0 || handle > u32::MAX as i64 {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "autodiff: pullback applied to invalid tape handle {handle} \
+                         (GRAD_END did not produce a live tape)"
+                    ),
+                });
+            }
+
+            match state.grad_tape.run_pullback(handle as u32, seed) {
+                Some(grads) => {
+                    let grad = grads.first().copied().unwrap_or(0.0);
+                    state.set_reg(dst, Value::from_f64(grad));
                 }
-            } else {
-                state.set_reg(dst, Value::nil());
+                None => {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "autodiff: backward sweep failed for tape handle {handle}"
+                        ),
+                    });
+                }
             }
             Ok(DispatchResult::Continue)
         }

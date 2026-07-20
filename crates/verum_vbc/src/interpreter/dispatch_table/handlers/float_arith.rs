@@ -1,5 +1,9 @@
 //! Float arithmetic handlers for VBC interpreter dispatch.
 
+use super::super::super::autodiff::TapeOp;
+use super::super::super::autodiff_record::{
+    note_unsupported, record_binop, record_unop, unary_float_tape_op,
+};
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
@@ -16,8 +20,11 @@ pub(in super::super) fn handle_addf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() + state.get_reg(b).as_f64();
+    let av = state.get_reg(a).as_f64();
+    let bv = state.get_reg(b).as_f64();
+    let result = av + bv;
     state.set_reg(dst, Value::from_f64(result));
+    record_binop(state, TapeOp::Add, dst, a, b, av, bv, result);
     Ok(DispatchResult::Continue)
 }
 
@@ -27,8 +34,11 @@ pub(in super::super) fn handle_subf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() - state.get_reg(b).as_f64();
+    let av = state.get_reg(a).as_f64();
+    let bv = state.get_reg(b).as_f64();
+    let result = av - bv;
     state.set_reg(dst, Value::from_f64(result));
+    record_binop(state, TapeOp::Sub, dst, a, b, av, bv, result);
     Ok(DispatchResult::Continue)
 }
 
@@ -38,8 +48,11 @@ pub(in super::super) fn handle_mulf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() * state.get_reg(b).as_f64();
+    let av = state.get_reg(a).as_f64();
+    let bv = state.get_reg(b).as_f64();
+    let result = av * bv;
     state.set_reg(dst, Value::from_f64(result));
+    record_binop(state, TapeOp::Mul, dst, a, b, av, bv, result);
     Ok(DispatchResult::Continue)
 }
 
@@ -49,8 +62,11 @@ pub(in super::super) fn handle_divf(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = state.get_reg(a).as_f64() / state.get_reg(b).as_f64();
+    let av = state.get_reg(a).as_f64();
+    let bv = state.get_reg(b).as_f64();
+    let result = av / bv;
     state.set_reg(dst, Value::from_f64(result));
+    record_binop(state, TapeOp::Div, dst, a, b, av, bv, result);
     Ok(DispatchResult::Continue)
 }
 
@@ -160,6 +176,10 @@ pub(in super::super) fn handle_negf(
     };
 
     state.set_reg(dst, Value::from_f64(result));
+    match unary_float_tape_op(sub_op) {
+        Some(op) => record_unop(state, op, dst, src, x, result),
+        None => note_unsupported(state, "float unary operation without a VJP rule"),
+    }
     Ok(DispatchResult::Continue)
 }
 
@@ -174,11 +194,11 @@ pub(in super::super) fn handle_powf(
     let dst = read_reg(state)?;
     let base = read_reg(state)?;
     let exp = read_reg(state)?;
-    let result = state
-        .get_reg(base)
-        .as_f64()
-        .powf(state.get_reg(exp).as_f64());
+    let bv = state.get_reg(base).as_f64();
+    let ev = state.get_reg(exp).as_f64();
+    let result = bv.powf(ev);
     state.set_reg(dst, Value::from_f64(result));
+    record_binop(state, TapeOp::Pow, dst, base, exp, bv, ev, result);
     Ok(DispatchResult::Continue)
 }
 
@@ -191,6 +211,7 @@ pub(in super::super) fn handle_modf(
     let b = read_reg(state)?;
     let result = state.get_reg(a).as_f64() % state.get_reg(b).as_f64();
     state.set_reg(dst, Value::from_f64(result));
+    note_unsupported(state, "float modulo has no VJP rule");
     Ok(DispatchResult::Continue)
 }
 
@@ -200,7 +221,9 @@ pub(in super::super) fn handle_absf(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let result = state.get_reg(src).as_f64().abs();
+    let x = state.get_reg(src).as_f64();
+    let result = x.abs();
     state.set_reg(dst, Value::from_f64(result));
+    record_unop(state, TapeOp::Abs, dst, src, x, result);
     Ok(DispatchResult::Continue)
 }

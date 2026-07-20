@@ -16,8 +16,26 @@
 // =============================================================================
 
 mount core.math.autodiff.{
-    DiffMode, OpType,
+    DiffMode, OpType, grad,
 };
+
+// =============================================================================
+// Float comparison helpers
+// =============================================================================
+
+// Gradients are computed in floating point, so every check is a tolerance
+// check. `tol` is absolute; the values under test are all O(1).
+fn approx(actual: Float, expected: Float, tol: Float) -> Bool {
+    let d = actual - expected;
+    if d < 0.0 { (0.0 - d) < tol } else { d < tol }
+}
+
+// Central finite difference — the independent oracle the analytic gradients
+// are cross-checked against. Second-order accurate, so O(h^2) error.
+fn finite_diff(f: fn(Float) -> Float, x: Float) -> Float {
+    let h = 0.0001;
+    (f(x + h) - f(x - h)) / (2.0 * h)
+}
 
 // =============================================================================
 // Section 1: DiffMode simple-variant
@@ -191,6 +209,189 @@ fn test_op_type_matmul_disjoint_from_transpose() {
     let t: OpType = OpType.Transpose;
     assert(!(mm is OpType.Transpose));
     assert(!(t is OpType.Matmul));
+}
+
+// =============================================================================
+// Section 6: scalar gradients — polynomials
+// =============================================================================
+
+fn f_square(x: Float) -> Float { x * x }
+fn f_cube(x: Float) -> Float { x * x * x }
+fn f_affine(x: Float) -> Float { 2.0 * x + 5.0 }
+fn f_poly(x: Float) -> Float { 3.0 * x * x + 2.0 * x + 7.0 }
+fn f_diff(x: Float) -> Float { x * x - x }
+
+// The headline case: d/dx (x^2) = 2x, so 6.0 at x = 3.
+@test
+fn test_grad_square() {
+    let g = grad(f_square);
+    assert(approx(g(3.0), 6.0, 0.000001));
+}
+
+@test
+fn test_grad_square_at_other_points() {
+    let g = grad(f_square);
+    assert(approx(g(0.0), 0.0, 0.000001));
+    assert(approx(g(1.0), 2.0, 0.000001));
+    assert(approx(g(-2.0), -4.0, 0.000001));
+}
+
+// d/dx (x^3) = 3x^2 = 12 at x = 2. Exercises a two-deep product chain.
+@test
+fn test_grad_cube() {
+    let g = grad(f_cube);
+    assert(approx(g(2.0), 12.0, 0.000001));
+}
+
+// A constant term must not leak into the gradient: d/dx (2x + 5) = 2.
+@test
+fn test_grad_affine() {
+    let g = grad(f_affine);
+    assert(approx(g(4.0), 2.0, 0.000001));
+    assert(approx(g(-1.0), 2.0, 0.000001));
+}
+
+// d/dx (3x^2 + 2x + 7) = 6x + 2 = 14 at x = 2. Gradients from three separate
+// paths must accumulate into the one leaf.
+@test
+fn test_grad_polynomial() {
+    let g = grad(f_poly);
+    assert(approx(g(2.0), 14.0, 0.000001));
+}
+
+// d/dx (x^2 - x) = 2x - 1 = 5 at x = 3. Checks subtraction's sign.
+@test
+fn test_grad_subtraction() {
+    let g = grad(f_diff);
+    assert(approx(g(3.0), 5.0, 0.000001));
+}
+
+// =============================================================================
+// Section 7: transcendental gradients
+// =============================================================================
+
+fn f_exp(x: Float) -> Float { x.exp() }
+fn f_ln(x: Float) -> Float { x.ln() }
+fn f_sqrt(x: Float) -> Float { x.sqrt() }
+fn f_sin(x: Float) -> Float { x.sin() }
+fn f_cos(x: Float) -> Float { x.cos() }
+fn f_tanh(x: Float) -> Float { x.tanh() }
+fn f_recip(x: Float) -> Float { 1.0 / x }
+
+// d/dx exp(x) = exp(x) = e at x = 1.
+@test
+fn test_grad_exp() {
+    let g = grad(f_exp);
+    assert(approx(g(1.0), 2.718281828, 0.000001));
+    assert(approx(g(0.0), 1.0, 0.000001));
+}
+
+// d/dx ln(x) = 1/x = 0.25 at x = 4.
+@test
+fn test_grad_ln() {
+    let g = grad(f_ln);
+    assert(approx(g(4.0), 0.25, 0.000001));
+}
+
+// d/dx sqrt(x) = 0.5/sqrt(x) = 0.25 at x = 4.
+@test
+fn test_grad_sqrt() {
+    let g = grad(f_sqrt);
+    assert(approx(g(4.0), 0.25, 0.000001));
+}
+
+// d/dx sin(x) = cos(x); d/dx cos(x) = -sin(x).
+@test
+fn test_grad_sin_cos() {
+    let gs = grad(f_sin);
+    assert(approx(gs(0.0), 1.0, 0.000001));
+    let gc = grad(f_cos);
+    assert(approx(gc(0.0), 0.0, 0.000001));
+}
+
+// d/dx tanh(x) = 1 - tanh(x)^2 = 1 at x = 0.
+@test
+fn test_grad_tanh() {
+    let g = grad(f_tanh);
+    assert(approx(g(0.0), 1.0, 0.000001));
+}
+
+// d/dx (1/x) = -1/x^2 = -0.25 at x = 2. Checks division's quotient rule.
+@test
+fn test_grad_reciprocal() {
+    let g = grad(f_recip);
+    assert(approx(g(2.0), -0.25, 0.000001));
+}
+
+// =============================================================================
+// Section 8: chain rule — compositions
+// =============================================================================
+
+fn f_exp_of_square(x: Float) -> Float { (x * x).exp() }
+fn f_ln_of_square(x: Float) -> Float { (x * x).ln() }
+fn f_square_of_sin(x: Float) -> Float { let s = x.sin(); s * s }
+fn f_deep_chain(x: Float) -> Float { ((x * x + 1.0).sqrt()).ln() }
+
+// d/dx exp(x^2) = 2x*exp(x^2) = 2e at x = 1.
+@test
+fn test_grad_chain_exp_of_square() {
+    let g = grad(f_exp_of_square);
+    assert(approx(g(1.0), 5.436563657, 0.00001));
+}
+
+// d/dx ln(x^2) = 2/x = 0.5 at x = 4. exp and ln cancel down to a simple form,
+// which is a sharp check that the chain is multiplying, not accumulating.
+@test
+fn test_grad_chain_ln_of_square() {
+    let g = grad(f_ln_of_square);
+    assert(approx(g(4.0), 0.5, 0.000001));
+}
+
+// d/dx sin(x)^2 = 2*sin(x)*cos(x) = sin(2x) = 0 at x = 0.
+@test
+fn test_grad_chain_square_of_sin() {
+    let g = grad(f_square_of_sin);
+    assert(approx(g(0.0), 0.0, 0.000001));
+}
+
+// d/dx ln(sqrt(x^2+1)) = x/(x^2+1) = 0.4 at x = 2 — four nested operations.
+@test
+fn test_grad_deep_chain() {
+    let g = grad(f_deep_chain);
+    assert(approx(g(2.0), 0.4, 0.00001));
+}
+
+// =============================================================================
+// Section 9: analytic vs finite-difference cross-checks
+// =============================================================================
+//
+// These do not hardcode a derivative: they compare reverse-mode AD against a
+// central difference of the same function. Agreement to ~1e-5 is strong
+// evidence the tape is differentiating the function actually executed.
+
+@test
+fn test_fd_agrees_polynomial() {
+    let g = grad(f_poly);
+    assert(approx(g(2.0), finite_diff(f_poly, 2.0), 0.0001));
+    assert(approx(g(-1.5), finite_diff(f_poly, -1.5), 0.0001));
+}
+
+@test
+fn test_fd_agrees_transcendental() {
+    let ge = grad(f_exp);
+    assert(approx(ge(0.5), finite_diff(f_exp, 0.5), 0.0001));
+    let gl = grad(f_ln);
+    assert(approx(gl(2.5), finite_diff(f_ln, 2.5), 0.0001));
+    let gt = grad(f_tanh);
+    assert(approx(gt(0.75), finite_diff(f_tanh, 0.75), 0.0001));
+}
+
+@test
+fn test_fd_agrees_deep_chain() {
+    let g = grad(f_deep_chain);
+    assert(approx(g(2.0), finite_diff(f_deep_chain, 2.0), 0.0001));
+    let gc = grad(f_exp_of_square);
+    assert(approx(gc(0.8), finite_diff(f_exp_of_square, 0.8), 0.0001));
 }
 
 fn main() {}

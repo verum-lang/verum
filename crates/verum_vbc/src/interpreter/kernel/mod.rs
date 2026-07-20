@@ -2826,11 +2826,16 @@ pub fn dispatch_set_grad(param: &mut ParameterHandle, grad: TensorHandle) {
     param.grad = Some(grad);
 }
 
-/// Execute backward pass on a module.
-/// Stub: Returns the grad_output unchanged (identity backward).
-pub fn dispatch_module_backward(_module: &(), grad_output: &TensorHandle) -> Option<TensorHandle> {
-    Some(grad_output.clone())
-}
+// `dispatch_module_backward` used to live here and returned `grad_output`
+// unchanged — a silent identity Jacobian that made every module gradient
+// wrong without any diagnostic. It took `_module: &()`, so it never had a
+// module to propagate through and could not be implemented as written.
+//
+// Reverse-mode AD now runs over the gradient tape: GRAD_BEGIN records the
+// `wrt` leaves, forward arithmetic records operations (see
+// `interpreter::autodiff_record`), GRAD_END retains the tape, and
+// GRAD_BACKWARD applies the pullback. The module-object entry points report
+// `NotImplemented` rather than a plausible wrong answer.
 
 // ============================================================================
 // Actor Mesh Operations (Single-Process Stubs)

@@ -1145,28 +1145,22 @@ fn ml_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        // Backward through a neural-network module object. The wire carries no
+        // module the interpreter can differentiate, so there is nothing to
+        // propagate through; this used to return grad_output unchanged, which
+        // silently reported an identity Jacobian. Reverse-mode AD over recorded
+        // arithmetic goes through GRAD_BEGIN/GRAD_END and the tensor-extended
+        // GRAD_BACKWARD instead.
         Some(MlSubOpcode::ModuleBackward) => {
-            let dst = read_reg(state)?;
+            let _dst = read_reg(state)?;
             let _module_reg = read_reg(state)?;
-            let grad_output_reg = read_reg(state)?;
+            let _grad_output_reg = read_reg(state)?;
 
-            let grad_val = state.get_reg(grad_output_reg);
-            let grad_ptr = tensor_handle_ptr(grad_val);
-
-            if !grad_ptr.is_null() {
-                let grad = unsafe { &*grad_ptr };
-                if let Some(result) =
-                    super::super::super::kernel::dispatch_module_backward(&(), grad)
-                {
-                    let carrier = alloc_tensor_value(state, result)?;
-                    state.set_reg(dst, carrier);
-                } else {
-                    state.set_reg(dst, Value::nil());
-                }
-            } else {
-                state.set_reg(dst, Value::nil());
-            }
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "ML_MODULE_BACKWARD: backward through a module object \
+                          (use GRAD_BEGIN/GRAD_END with GRAD_BACKWARD)",
+                opcode: None,
+            })
         }
 
         // ====================================================================

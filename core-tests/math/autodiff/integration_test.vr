@@ -1,0 +1,204 @@
+// =============================================================================
+// core-tests/math/autodiff/integration_test.vr
+// =============================================================================
+//
+// `core/math/autodiff.vr` — reverse-mode gradients through composite,
+// neural-network-shaped computations.
+//
+// Where unit_test.vr checks one primitive rule at a time, these drive the tape
+// through whole layers: a linear layer with squared error, a softmax
+// cross-entropy, a tanh MLP, and a single-head attention block. Each is a
+// scalar-parameterised slice of the real layer, which is what reverse mode
+// over `Float` arithmetic can express today.
+//
+// Every case is cross-checked against a central finite difference. That oracle
+// is independent of the tape, so agreement is real evidence the gradient
+// matches the function actually executed rather than a rederivation of the
+// same assumption.
+// =============================================================================
+
+mount core.math.autodiff.{grad};
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn approx(actual: Float, expected: Float, tol: Float) -> Bool {
+    let d = actual - expected;
+    if d < 0.0 { (0.0 - d) < tol } else { d < tol }
+}
+
+// Central difference: second-order accurate, so O(h^2) truncation error.
+fn finite_diff(f: fn(Float) -> Float, x: Float) -> Float {
+    let h = 0.0001;
+    (f(x + h) - f(x - h)) / (2.0 * h)
+}
+
+// =============================================================================
+// Section 1: linear layer with squared error
+// =============================================================================
+
+// L(w) = (w*x + b - y)^2 with x = 2, b = 0.5, y = 3.
+// dL/dw = 2*(w*x + b - y)*x.
+fn linear_layer_loss(w: Float) -> Float {
+    let x = 2.0;
+    let b = 0.5;
+    let y = 3.0;
+    let pred = w * x + b;
+    let err = pred - y;
+    err * err
+}
+
+// At w = 1: pred = 2.5, err = -0.5, so dL/dw = 2*(-0.5)*2 = -2.
+@test
+fn test_linear_layer_gradient() {
+    let g = grad(linear_layer_loss);
+    assert(approx(g(1.0), -2.0, 0.00001));
+}
+
+@test
+fn test_linear_layer_gradient_vanishes_at_optimum() {
+    // The loss is minimised where pred == y, i.e. w = 1.25.
+    let g = grad(linear_layer_loss);
+    assert(approx(g(1.25), 0.0, 0.00001));
+}
+
+@test
+fn test_linear_layer_matches_finite_difference() {
+    let g = grad(linear_layer_loss);
+    assert(approx(g(0.3), finite_diff(linear_layer_loss, 0.3), 0.0001));
+    assert(approx(g(2.0), finite_diff(linear_layer_loss, 2.0), 0.0001));
+}
+
+// =============================================================================
+// Section 2: softmax cross-entropy
+// =============================================================================
+
+// Two-class softmax with the competing logit pinned at 0, scored by
+// cross-entropy against the first class:
+//   p(z) = exp(z) / (exp(z) + 1),  L(z) = -ln p(z).
+// The classic result is dL/dz = p - 1.
+fn softmax_ce_loss(z: Float) -> Float {
+    let e = z.exp();
+    let p = e / (e + 1.0);
+    0.0 - p.ln()
+}
+
+// At z = 0 the two logits tie, so p = 0.5 and dL/dz = -0.5.
+@test
+fn test_softmax_cross_entropy_gradient_at_tie() {
+    let g = grad(softmax_ce_loss);
+    assert(approx(g(0.0), -0.5, 0.00001));
+}
+
+// The p - 1 identity has to hold away from the tie too: at z = 1,
+// p = e/(e+1) = 0.7310585786, so dL/dz = -0.2689414214.
+@test
+fn test_softmax_cross_entropy_gradient_off_tie() {
+    let g = grad(softmax_ce_loss);
+    assert(approx(g(1.0), -0.2689414214, 0.00001));
+}
+
+@test
+fn test_softmax_cross_entropy_matches_finite_difference() {
+    let g = grad(softmax_ce_loss);
+    assert(approx(g(0.4), finite_diff(softmax_ce_loss, 0.4), 0.0001));
+    assert(approx(g(-1.2), finite_diff(softmax_ce_loss, -1.2), 0.0001));
+}
+
+// =============================================================================
+// Section 3: tanh MLP
+// =============================================================================
+
+// One hidden unit with a tanh nonlinearity, a linear read-out, and squared
+// error: L(w) = (2*tanh(1.5w + 0.25) - 0.5 - 1)^2.
+// Gradient flows through the read-out, the saturating nonlinearity, and the
+// input weight in turn.
+fn mlp_loss(w: Float) -> Float {
+    let h = (w * 1.5 + 0.25).tanh();
+    let out = h * 2.0 - 0.5;
+    let target = 1.0;
+    let err = out - target;
+    err * err
+}
+
+@test
+fn test_mlp_matches_finite_difference() {
+    let g = grad(mlp_loss);
+    assert(approx(g(0.0), finite_diff(mlp_loss, 0.0), 0.0001));
+    assert(approx(g(0.7), finite_diff(mlp_loss, 0.7), 0.0001));
+    assert(approx(g(-1.3), finite_diff(mlp_loss, -1.3), 0.0001));
+}
+
+// Deep in tanh saturation the gradient must decay towards zero rather than
+// blow up — the standard vanishing-gradient signature.
+@test
+fn test_mlp_gradient_saturates() {
+    let g = grad(mlp_loss);
+    let far = g(8.0);
+    assert(approx(far, 0.0, 0.001));
+}
+
+// =============================================================================
+// Section 4: single-head attention block
+// =============================================================================
+
+// One query against two key/value pairs: score, softmax over the two scores,
+// then the value-weighted sum.
+//   s_i = q*k_i,  w = softmax(s),  out = w1*v1 + w2*v2
+// The analytic derivative runs through the softmax Jacobian, so the finite
+// difference is the honest oracle here.
+fn attention_out(q: Float) -> Float {
+    let k1 = 0.5;
+    let k2 = 1.5;
+    let v1 = 2.0;
+    let v2 = 0.0 - 1.0;
+
+    let s1 = q * k1;
+    let s2 = q * k2;
+
+    let e1 = s1.exp();
+    let e2 = s2.exp();
+    let denom = e1 + e2;
+
+    let w1 = e1 / denom;
+    let w2 = e2 / denom;
+
+    w1 * v1 + w2 * v2
+}
+
+@test
+fn test_attention_matches_finite_difference() {
+    let g = grad(attention_out);
+    assert(approx(g(0.0), finite_diff(attention_out, 0.0), 0.0001));
+    assert(approx(g(0.6), finite_diff(attention_out, 0.6), 0.0001));
+    assert(approx(g(-0.9), finite_diff(attention_out, -0.9), 0.0001));
+}
+
+// Attention output is a convex combination of v1 and v2, so raising q shifts
+// weight towards the larger key k2 and therefore towards v2 = -1. The
+// derivative must be negative.
+@test
+fn test_attention_gradient_direction() {
+    let g = grad(attention_out);
+    assert(g(0.0) < 0.0);
+    assert(g(1.0) < 0.0);
+}
+
+// A single attention head composed into a squared-error loss — the smallest
+// end-to-end block that exercises softmax and the read-out together.
+fn attention_loss(q: Float) -> Float {
+    let out = attention_out(q);
+    let target = 0.25;
+    let err = out - target;
+    err * err
+}
+
+@test
+fn test_attention_loss_matches_finite_difference() {
+    let g = grad(attention_loss);
+    assert(approx(g(0.2), finite_diff(attention_loss, 0.2), 0.0001));
+    assert(approx(g(1.1), finite_diff(attention_loss, 1.1), 0.0001));
+}
+
+fn main() {}

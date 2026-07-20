@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/math/autodiff/primitive_grads_test.vr
+// =============================================================================
+//
+// `core/math/autodiff.vr` — reverse-mode gradient VALUES on the polynomial
+// primitive family (Add/Sub/Mul/Div/Neg/Pow). Where unit_test.vr checks the
+// tape's enum surface and integration_test.vr drives composite layers, this
+// asserts the exact gradient a single reverse sweep must produce for the
+// simplest functions — the headline `grad(|x| x*x)(3) == 6` first.
+//
+// Every case pins BOTH an independently-derived analytic value AND a central
+// finite difference. The finite difference is computed by the same interpreter
+// but WITHOUT the tape, so agreement is real evidence the sweep matches the
+// executed function rather than re-deriving one assumption from another. A
+// gradient that comes back 0.0 (the pre-T0180 behaviour where the tape never
+// recorded) fails the analytic assert immediately.
+// =============================================================================
+
+mount core.math.autodiff.{grad, value_and_grad};
+
+fn approx(actual: Float, expected: Float, tol: Float) -> Bool {
+    let d = actual - expected;
+    if d < 0.0 { (0.0 - d) < tol } else { d < tol }
+}
+
+// Central difference: second-order accurate, O(h^2) truncation error.
+fn finite_diff(f: fn(Float) -> Float, x: Float) -> Float {
+    let h = 0.0001;
+    (f(x + h) - f(x - h)) / (2.0 * h)
+}
+
+// =============================================================================
+// Section 1: the headline case — d/dx (x*x) = 2x
+// =============================================================================
+
+fn square(x: Float) -> Float {
+    x * x
+}
+
+@test
+fn test_grad_square_at_three_is_six() {
+    // The canonical acceptance for T0180: grad(|x| x*x)(3.0) == 6.0.
+    let g = grad(square);
+    assert(approx(g(3.0), 6.0, 0.00001));
+}
+
+@test
+fn test_grad_square_is_two_x_everywhere() {
+    let g = grad(square);
+    assert(approx(g(0.0), 0.0, 0.00001));
+    assert(approx(g(-2.0), -4.0, 0.00001));
+    assert(approx(g(5.5), 11.0, 0.00001));
+}
+
+@test
+fn test_grad_square_matches_finite_difference() {
+    let g = grad(square);
+    assert(approx(g(3.0), finite_diff(square, 3.0), 0.0001));
+    assert(approx(g(-2.0), finite_diff(square, -2.0), 0.0001));
+}
+
+// =============================================================================
+// Section 2: higher-degree polynomials via repeated Mul
+// =============================================================================
+
+// d/dx (x*x*x) = 3x^2
+fn cube(x: Float) -> Float {
+    x * x * x
+}
+
+@test
+fn test_grad_cube_is_three_x_squared() {
+    let g = grad(cube);
+    assert(approx(g(2.0), 12.0, 0.00001));
+    assert(approx(g(1.0), 3.0, 0.00001));
+    assert(approx(g(2.0), finite_diff(cube, 2.0), 0.0001));
+}
+
+// d/dx (x*x*x*x) = 4x^3 — exercises a chain of Muls through the tape.
+fn quartic(x: Float) -> Float {
+    let sq = x * x;
+    sq * sq
+}
+
+@test
+fn test_grad_quartic_is_four_x_cubed() {
+    let g = grad(quartic);
+    assert(approx(g(1.0), 4.0, 0.00001));
+    assert(approx(g(1.5), 13.5, 0.0001));
+    assert(approx(g(1.5), finite_diff(quartic, 1.5), 0.0001));
+}
+
+// d/dx (3x^2 + 2x + 1) = 6x + 2 — Add and Mul with constants.
+fn quadratic(x: Float) -> Float {
+    3.0 * x * x + 2.0 * x + 1.0
+}
+
+@test
+fn test_grad_quadratic_add_and_mul() {
+    let g = grad(quadratic);
+    assert(approx(g(0.0), 2.0, 0.00001));
+    assert(approx(g(1.0), 8.0, 0.00001));
+    assert(approx(g(-1.0), -4.0, 0.00001));
+    assert(approx(g(2.5), finite_diff(quadratic, 2.5), 0.0001));
+}
+
+// =============================================================================
+// Section 3: Sub, Neg, Div in the sweep
+// =============================================================================
+
+// d/dx (1 - x*x) = -2x — Sub and the constant-minus pattern.
+fn one_minus_sq(x: Float) -> Float {
+    1.0 - x * x
+}
+
+@test
+fn test_grad_sub_and_neg() {
+    let g = grad(one_minus_sq);
+    assert(approx(g(3.0), -6.0, 0.00001));
+    assert(approx(g(-1.5), 3.0, 0.00001));
+    assert(approx(g(3.0), finite_diff(one_minus_sq, 3.0), 0.0001));
+}
+
+// d/dx (x*x / 2) = x — Div by a constant.
+fn half_sq(x: Float) -> Float {
+    (x * x) / 2.0
+}
+
+@test
+fn test_grad_div_by_constant() {
+    let g = grad(half_sq);
+    assert(approx(g(4.0), 4.0, 0.00001));
+    assert(approx(g(4.0), finite_diff(half_sq, 4.0), 0.0001));
+}
+
+// =============================================================================
+// Section 4: value_and_grad returns BOTH the value and the gradient
+// =============================================================================
+
+@test
+fn test_value_and_grad_returns_both() {
+    let vg = value_and_grad(square);
+    let (v, g) = vg(3.0);
+    // f(3) = 9, f'(3) = 6.
+    assert(approx(v, 9.0, 0.00001));
+    assert(approx(g, 6.0, 0.00001));
+}

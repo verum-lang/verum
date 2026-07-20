@@ -516,6 +516,31 @@ pub struct InterpreterState {
     /// Gradient tape for autodiff operations.
     pub grad_tape: GradientTape,
 
+    /// Whether a gradient scope is currently recording.
+    ///
+    /// This is the single gate for forward tape recording. Every arithmetic
+    /// handler tests it and, while false (the overwhelmingly common case),
+    /// does no autodiff work at all — see `interpreter::autodiff_record`.
+    pub grad_recording: bool,
+
+    /// Maps an absolute register slot (`reg_base + reg`) to the tape node the
+    /// slot currently holds, stamped with the value bits recorded at the time.
+    ///
+    /// The stamp is what makes the mapping safe against register reuse: a slot
+    /// whose bits no longer match was overwritten by some untracked
+    /// instruction, so the entry is treated as absent rather than trusted.
+    /// Only populated while `grad_recording` is set.
+    pub grad_reg_nodes: std::collections::HashMap<u32, (super::autodiff::TensorId, u64)>,
+
+    /// Binding of a value being returned, held across the frame pop so it can
+    /// be re-attached in the caller's frame.
+    pub grad_pending_return: Option<(super::autodiff::TensorId, u64)>,
+
+    /// Name of the first operation without a VJP rule that ran inside the
+    /// active gradient scope, if any. Such an operation breaks the chain, so
+    /// the pullback reports it instead of returning a silently wrong zero.
+    pub grad_unsupported: Option<&'static str>,
+
     /// GPU execution context for device/stream/buffer tracking.
     pub gpu_context: GpuContext,
 
@@ -2676,6 +2701,10 @@ impl InterpreterState {
             log_level: 2, // Default: Info
             nurseries: NurseryRegistry::new(),
             grad_tape: GradientTape::new(),
+            grad_recording: false,
+            grad_reg_nodes: std::collections::HashMap::new(),
+            grad_pending_return: None,
+            grad_unsupported: None,
             gpu_context: GpuContext::new(),
             gpu_thread_ctx: None,
             gpu_shared_memory: None,

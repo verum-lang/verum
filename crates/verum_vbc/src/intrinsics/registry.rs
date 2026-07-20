@@ -11119,21 +11119,21 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GRAD_BEGIN",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::SideEffect],
-        param_count: 1, // mode byte (0x00=reverse, 0x01=forward)
+        param_count: 1, // value to differentiate with respect to
         return_count: 0,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GradBegin),
         mlir_op: Some("verum.grad_begin"),
-        doc: "Enter gradient computation scope",
+        doc: "Enter gradient scope, recording its argument as the wrt leaf",
     },
     Intrinsic {
         name: "GRAD_END",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::SideEffect],
-        param_count: 0,
-        return_count: 1, // pullback function
+        param_count: 1,  // the scope's primal result
+        return_count: 1, // handle to the retained tape, for GRAD_BACKWARD
         strategy: CodegenStrategy::DirectOpcode(Opcode::GradEnd),
         mlir_op: Some("verum.grad_end"),
-        doc: "Exit gradient scope and return pullback function",
+        doc: "Stop recording and return a handle to the retained tape",
     },
     Intrinsic {
         name: "JVP_BEGIN",
@@ -11232,11 +11232,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GRAD_BACKWARD",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::SideEffect],
-        param_count: 1, // loss tensor
-        return_count: 0,
+        param_count: 2,  // tape handle from GRAD_END, output cotangent seed
+        return_count: 1, // gradient with respect to the scope's wrt leaf
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ModuleBackward),
         mlir_op: Some("verum.grad_backward"),
-        doc: "Execute backward pass from loss",
+        doc: "Apply a pullback: run the backward sweep over a recorded tape",
     },
     Intrinsic {
         name: "GRAD_SYNC",

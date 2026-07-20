@@ -8,6 +8,7 @@
 //! GradAccumulate (0xEE), GradStop (0xEF)
 
 use super::super::super::autodiff::GradMode as AutodiffGradMode;
+use super::super::super::autodiff_record::{begin_recording, finish_recording};
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
@@ -564,15 +565,25 @@ pub(in super::super) fn handle_tls_set(
 // ============================================================================
 
 /// GradBegin (0xEB) - Begin a gradient computation scope
+///
+/// The `wrt` registers name the values being differentiated with respect to.
+/// Each becomes a leaf node on the tape, and forward arithmetic records against
+/// them until the matching `GradEnd`.
 pub(in super::super) fn handle_grad_begin(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let _scope_id = read_u32(state)?;
+    // scope_id and the wrt count are varint-encoded by the serializer
+    // (encode_varint / encode_reg_vec at bytecode.rs GradBegin); read them at
+    // the same width or the stream desyncs (a 1-byte varint read as 4-byte u32
+    // shifted the stream and surfaced as "invalid TypeRef tag" — this handler
+    // was never exercised until grad() was wired end-to-end).
+    let _scope_id = read_varint(state)? as u32;
     let mode_byte = read_u8(state)?;
-    let num_wrt = read_u8(state)? as usize;
+    let num_wrt = read_varint(state)? as usize;
 
+    let mut wrt = Vec::with_capacity(num_wrt);
     for _ in 0..num_wrt {
-        let _reg = read_reg(state)?;
+        wrt.push(read_reg(state)?);
     }
 
     let mode = match mode_byte {
@@ -583,59 +594,48 @@ pub(in super::super) fn handle_grad_begin(
     };
 
     state.grad_tape.begin_scope(mode);
+    begin_recording(state, &wrt);
 
     Ok(DispatchResult::Continue)
 }
 
-/// GradEnd (0xEC) - End gradient scope and compute gradients
+/// GradEnd (0xEC) - Stop recording and hand back a pullback handle
+///
+/// Reverse mode separates the forward recording from the backward sweep, so
+/// this does not run backward. It closes the scope, retains the tape, and
+/// writes the handle that reaches it into `handle_reg`; the pullback closure
+/// carries that handle to `GRAD_BACKWARD` when it is finally applied to a
+/// cotangent seed.
+///
+/// When the caller supplied explicit gradient destinations, the eager form
+/// applies the pullback immediately with a unit seed instead.
 pub(in super::super) fn handle_grad_end(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let _scope_id = read_u32(state)?;
-    let _output_reg = read_reg(state)?;
-    let _grad_out_reg = read_reg(state)?;
-    let num_grads = read_u8(state)? as usize;
+    // Same varint contract as GradBegin (bytecode.rs GradEnd serializer).
+    let _scope_id = read_varint(state)? as u32;
+    let output_reg = read_reg(state)?;
+    let handle_reg = read_reg(state)?;
+    let num_grads = read_varint(state)? as usize;
 
     let mut grad_regs = Vec::with_capacity(num_grads);
     for _ in 0..num_grads {
         grad_regs.push(read_reg(state)?);
     }
 
-    state.grad_tape.backward();
+    let handle = finish_recording(state, output_reg).unwrap_or(0);
+    state.set_reg(handle_reg, Value::from_i64(handle as i64));
 
-    // Collect gradient values from scope before mutating state
-    let mut grad_values: Vec<f64> = Vec::with_capacity(grad_regs.len());
-    if let Some(scope) = state.grad_tape.current_scope() {
-        let tensor_ids: Vec<super::super::super::autodiff::TensorId> = scope.all_tensor_ids();
-        for i in 0..grad_regs.len() {
-            let val = if i < tensor_ids.len() {
-                if let Some(grad_tensor) = scope.get_grad(tensor_ids[i]) {
-                    if grad_tensor.numel == 1 {
-                        if let Some(data) = &grad_tensor.data {
-                            let ptr = data.as_ptr() as *const f64;
-                            unsafe { *ptr }
-                        } else {
-                            0.0
-                        }
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            };
-            grad_values.push(val);
+    if !grad_regs.is_empty() {
+        let grads = state
+            .grad_tape
+            .run_pullback(handle, 1.0)
+            .unwrap_or_default();
+        for (i, grad_reg) in grad_regs.iter().enumerate() {
+            let val = grads.get(i).copied().unwrap_or(0.0);
+            state.set_reg(*grad_reg, Value::from_f64(val));
         }
     }
-
-    for (i, grad_reg) in grad_regs.iter().enumerate() {
-        let val = grad_values.get(i).copied().unwrap_or(0.0);
-        state.set_reg(*grad_reg, Value::from_f64(val));
-    }
-
-    state.grad_tape.end_scope();
 
     Ok(DispatchResult::Continue)
 }
@@ -644,8 +644,10 @@ pub(in super::super) fn handle_grad_end(
 pub(in super::super) fn handle_grad_checkpoint(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let _checkpoint_id = read_u32(state)?;
-    let num_tensors = read_u8(state)? as usize;
+    // Varint-encoded by the serializer (bytecode.rs GradCheckpoint), like the
+    // other grad scope-ops.
+    let _checkpoint_id = read_varint(state)? as u32;
+    let num_tensors = read_varint(state)? as usize;
 
     for _ in 0..num_tensors {
         let _reg = read_reg(state)?;

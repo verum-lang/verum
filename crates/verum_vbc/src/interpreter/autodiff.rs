@@ -425,6 +425,13 @@ pub struct GradScope {
     next_checkpoint_id: u32,
     /// Tensors marked with gradient stop (detached).
     pub stopped: std::collections::HashSet<TensorId>,
+    /// Leaf nodes this scope differentiates with respect to, in the order
+    /// `GradBegin` supplied them. The pullback reads gradients back in the
+    /// same order.
+    pub wrt: Vec<TensorId>,
+    /// The node holding the scope's primal result, recorded by `GradEnd`.
+    /// Backward seeds this node's gradient.
+    pub output: Option<TensorId>,
 }
 
 impl GradScope {
@@ -442,6 +449,8 @@ impl GradScope {
             checkpoints: HashMap::new(),
             next_checkpoint_id: 0,
             stopped: std::collections::HashSet::new(),
+            wrt: Vec::new(),
+            output: None,
         }
     }
 
@@ -597,6 +606,12 @@ pub struct GradientTape {
     in_backward: bool,
     /// Registry for custom VJP/JVP rules.
     custom_rules: CustomGradRegistry,
+    /// Scopes that finished recording but are retained so a pullback can run
+    /// backward over them later. `GradEnd` moves a scope here and hands out the
+    /// key; the pullback closure passes that key back to `run_pullback`.
+    completed: HashMap<u32, GradScope>,
+    /// Next handle to hand out for a completed tape.
+    next_handle: u32,
 }
 
 impl Default for GradientTape {
@@ -613,6 +628,8 @@ impl GradientTape {
             next_scope_id: 0,
             custom_rules: CustomGradRegistry::new(),
             in_backward: false,
+            completed: HashMap::new(),
+            next_handle: 1,
         }
     }
 
@@ -630,6 +647,91 @@ impl GradientTape {
     /// Ends the current gradient scope.
     pub fn end_scope(&mut self) -> Option<ScopeId> {
         self.scopes.pop().map(|s| s.id)
+    }
+
+    /// Records the leaf nodes the active scope differentiates with respect to.
+    pub fn set_wrt(&mut self, wrt: Vec<TensorId>) -> Option<()> {
+        self.current_scope_mut()?.wrt = wrt;
+        Some(())
+    }
+
+    /// Finishes the current scope's recording and retains the tape, returning
+    /// the handle a pullback uses to reach it.
+    ///
+    /// Unlike `end_scope`, the tape stays alive: reverse mode separates the
+    /// forward recording from the backward sweep, and the sweep only runs when
+    /// the pullback closure is applied to a cotangent seed.
+    pub fn finish_scope(&mut self, output: Option<TensorId>) -> Option<u32> {
+        let mut scope = self.scopes.pop()?;
+        scope.output = output;
+        scope.active = false;
+        let handle = self.next_handle;
+        // Handle 0 is reserved as "no tape", so skip it on wrap.
+        self.next_handle = self.next_handle.wrapping_add(1).max(1);
+        self.completed.insert(handle, scope);
+        Some(handle)
+    }
+
+    /// Runs the backward sweep over a completed tape, returning one gradient
+    /// per `wrt` entry in the order `GradBegin` recorded them.
+    ///
+    /// `seed` is the cotangent of the scope output (1.0 for a plain `grad`).
+    /// The tape is retained, so a pullback may be applied repeatedly.
+    pub fn run_pullback(&mut self, handle: u32, seed: f64) -> Option<Vec<f64>> {
+        let mut scope = self.completed.remove(&handle)?;
+
+        let output = match scope.output {
+            Some(o) => o,
+            None => {
+                // The scope result never reached the tape, so it does not
+                // depend on any `wrt` leaf — every gradient is exactly zero.
+                let zeros = vec![0.0; scope.wrt.len()];
+                self.completed.insert(handle, scope);
+                return Some(zeros);
+            }
+        };
+        let dtype = scope
+            .tensors
+            .get(&output)
+            .map(|t| t.dtype)
+            .unwrap_or(DType::F64);
+        let seed_tensor = match TensorHandle::full(&[], dtype, seed) {
+            Some(t) => t,
+            None => {
+                self.completed.insert(handle, scope);
+                return None;
+            }
+        };
+
+        // Start each application from a clean cotangent state so repeated
+        // pullback calls cannot accumulate into one another.
+        scope.gradients.clear();
+        scope.set_grad(output, seed_tensor);
+        let wrt = scope.wrt.clone();
+
+        // Reuse the one reverse engine by making the completed scope current
+        // for the duration of the sweep.
+        self.scopes.push(scope);
+        let swept = self.backward();
+        let scope = self.scopes.pop()?;
+
+        let grads = swept.map(|_| {
+            wrt.iter()
+                .map(|w| {
+                    scope
+                        .get_grad(*w)
+                        .and_then(|g| g.get_scalar_f64())
+                        .unwrap_or(0.0)
+                })
+                .collect::<Vec<f64>>()
+        });
+        self.completed.insert(handle, scope);
+        grads
+    }
+
+    /// Releases a completed tape once its pullback can no longer be applied.
+    pub fn release_tape(&mut self, handle: u32) -> bool {
+        self.completed.remove(&handle).is_some()
     }
 
     /// Gets the current (innermost) scope.
@@ -924,7 +1026,9 @@ impl GradientTape {
     /// clear everything including custom rules.
     pub fn reset(&mut self) {
         self.scopes.clear();
+        self.completed.clear();
         self.next_scope_id = 0;
+        self.next_handle = 1;
         self.in_backward = false;
     }
 

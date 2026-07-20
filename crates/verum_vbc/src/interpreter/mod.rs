@@ -58,6 +58,7 @@
 //! ```
 
 pub mod autodiff;
+mod autodiff_record;
 mod cbgr_heap;
 mod dispatch_table;
 mod error;

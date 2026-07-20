@@ -42,6 +42,7 @@ pub(in super::super) fn handle_mov(
         }
     }
     state.set_reg(dst, value);
+    super::super::super::autodiff_record::propagate_move(state, src, dst);
     Ok(DispatchResult::Continue)
 }
 

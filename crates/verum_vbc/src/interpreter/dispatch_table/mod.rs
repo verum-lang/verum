@@ -664,6 +664,12 @@ pub(crate) fn do_return(
     // Store return value in caller's register
     let caller_base = frame.caller_base;
     state.registers.set(caller_base, frame.return_reg, value);
+    super::autodiff_record::restore_return(
+        state,
+        caller_base,
+        frame.return_reg,
+        value.as_f64().to_bits(),
+    );
 
     // Restore caller's PC
     state.set_pc(frame.return_pc);

@@ -3244,7 +3244,8 @@ fn registry_driven_tensor_arity(sub_op: u8) -> Option<usize> {
         // Autodiff / actor.
         T::GetGrad => 2,
         T::SetGrad => 3,
-        T::ModuleBackward => 2,
+        // GRAD_BACKWARD: dst + tape handle + cotangent seed.
+        T::ModuleBackward => 3,
         T::BucketGradients => 3,
         T::ActorNewId => 1,
         // Regex (under tensor sub-op space).
