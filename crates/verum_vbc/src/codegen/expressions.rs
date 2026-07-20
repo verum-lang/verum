@@ -6578,6 +6578,43 @@ impl VbcCodegen {
         // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
         // to work when the intrinsic isn't wired yet.
 
+        // T0452 — pointer-arithmetic intrinsic WRAPPERS must be inlined with
+        // the CALL-SITE pointee, not called as a generic body.
+        //
+        // `core/intrinsics/memory.vr` declares
+        //   `fn ptr_offset<T>(ptr: *const T, count: ISize) -> *const T
+        //        { @intrinsic("ptr_offset", ptr, count) }`
+        // — an @intrinsic BODY meta-call, NOT an @intrinsic declaration
+        // attribute. So `func_info.intrinsic_name` is None, the block above
+        // does not fire, the name resolves to a concrete function, and the
+        // body is compiled ONCE with T erased. Inside that body the stride
+        // detector sees only `*const T`, fails the `&unsafe ` pointee test,
+        // and falls back to the 8-byte NaN-boxed-Value stride. The concrete
+        // pointee is knowable ONLY here, at the call site — which is why
+        // `ptr_offset(base, -HEADER_SIZE)` over a `&unsafe Byte` walked
+        // 8x too far (ptr-256 instead of ptr-32) on every header/base
+        // recovery path.
+        //
+        // Reroute to the inline emission EXACTLY when the call-site pointee
+        // is a genuine packed byte buffer (`ptr_intrinsic_byte_stride` == 1,
+        // which demands the literal `&unsafe <1-byte scalar>` spelling).
+        // Every other call — including every stride-8 call and every
+        // non-arithmetic intrinsic wrapper — keeps today's emission
+        // bit-identical, so no call site that is green today changes shape.
+        // That narrowness is deliberate: the rolled-back T0108 attempt
+        // failed precisely by rerouting call sites that already worked.
+        if !Self::ptr_arith_inline_disabled()
+            && Self::is_ptr_arith_intrinsic_wrapper(&func_name)
+            && self.ptr_intrinsic_byte_stride(
+                Self::call_leaf_name(&func_name),
+                args.first(),
+            ) == 1
+            && let Some(intrinsic_info) =
+                lookup_intrinsic(Self::call_leaf_name(&func_name))
+        {
+            return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+        }
+
         // Handle type constructors with sentinel IDs.  These are
         // registered by `compile_type_decl` at `FunctionId(u32::MAX / 2)`
         // and have no compiled body — their semantics are encoded by
@@ -30125,6 +30162,44 @@ impl VbcCodegen {
         }
 
         Ok(Some(dest))
+    }
+
+    /// T0452 kill-switch. `VERUM_PTR_ARITH_LEGACY_STRIDE=1` restores the
+    /// pre-T0452 emission bit-for-bit: byte-pointee `ptr_offset`/`ptr_add`/
+    /// `ptr_sub` calls go back to Calling the generic-T body (and its 8-byte
+    /// stride) instead of inlining with the call-site stride. Read once and
+    /// cached; the call-site inline is the default.
+    fn ptr_arith_inline_disabled() -> bool {
+        static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *LEGACY.get_or_init(|| {
+            std::env::var("VERUM_PTR_ARITH_LEGACY_STRIDE")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+        })
+    }
+
+    /// Leaf identifier of a possibly-qualified call name — both
+    /// `core::intrinsics::memory::ptr_offset` and the dotted spelling
+    /// yield `ptr_offset`.
+    fn call_leaf_name(func_name: &str) -> &str {
+        let after_colons = func_name.rsplit("::").next().unwrap_or(func_name);
+        after_colons.rsplit('.').next().unwrap_or(after_colons)
+    }
+
+    /// The pointer-ARITHMETIC intrinsic wrappers whose correct stride is
+    /// knowable only from the call-site pointee (T0452).
+    ///
+    /// Deliberately narrower than [`Self::ptr_intrinsic_byte_stride`]'s own
+    /// name list: that one also covers the `slice_from_raw_parts` producers,
+    /// which are not address arithmetic and must keep their existing
+    /// emission. Widening this set is how a "green today" call site gets
+    /// silently re-shaped — the failure mode the rolled-back T0108 attempt
+    /// hit — so add to it only with a probe that proves the new member.
+    fn is_ptr_arith_intrinsic_wrapper(func_name: &str) -> bool {
+        matches!(
+            Self::call_leaf_name(func_name),
+            "ptr_offset" | "ptr_offset_mut" | "intrinsic_ptr_offset" | "ptr_add" | "ptr_sub"
+        )
     }
 
     /// Element stride (bytes) for a pointer-arithmetic intrinsic call.
