@@ -51,8 +51,16 @@ fn log_extended_body(
     match sub_op {
         // ================================================================
         // Log Levels (0x00-0x04)
+        //
+        // Wire is [dst][msg]. The canonical `encode_operands` helper
+        // prefixes the destination register unconditionally — even for
+        // void-returning sub-ops like these, which never write it. Reading
+        // `msg` first therefore consumed the DST byte and logged the
+        // uninitialised destination temp instead of the message, leaving
+        // the real operand unread (T0418).
         // ================================================================
         Some(LogSubOpcode::Info) => {
+            let _dst = read_reg(state)?;
             let msg_reg = read_reg(state)?;
             let msg = state.get_reg(msg_reg);
             let msg_str = format_value_for_log(&msg);
@@ -62,6 +70,7 @@ fn log_extended_body(
         }
 
         Some(LogSubOpcode::Warning) => {
+            let _dst = read_reg(state)?;
             let msg_reg = read_reg(state)?;
             let msg = state.get_reg(msg_reg);
             let msg_str = format_value_for_log(&msg);
@@ -70,6 +79,7 @@ fn log_extended_body(
         }
 
         Some(LogSubOpcode::Error) => {
+            let _dst = read_reg(state)?;
             let msg_reg = read_reg(state)?;
             let msg = state.get_reg(msg_reg);
             let msg_str = format_value_for_log(&msg);
@@ -78,6 +88,7 @@ fn log_extended_body(
         }
 
         Some(LogSubOpcode::Debug) => {
+            let _dst = read_reg(state)?;
             let msg_reg = read_reg(state)?;
             let msg = state.get_reg(msg_reg);
             if state.log_level >= 3 {
@@ -88,6 +99,7 @@ fn log_extended_body(
         }
 
         Some(LogSubOpcode::Trace) => {
+            let _dst = read_reg(state)?;
             let msg_reg = read_reg(state)?;
             let msg = state.get_reg(msg_reg);
             if state.log_level >= 4 {

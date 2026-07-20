@@ -63,7 +63,13 @@ fn simd_extended_body(
             // Extract single lane from vector
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let _lane = read_u8(state)?;
+            // The lane index is a REGISTER on the wire, not an immediate:
+            // `encode_operands` packs every intrinsic argument as a register,
+            // and `simd_extract(vec, idx)` passes `idx` as an ordinary
+            // argument. Reading it with `read_u8` consumed one byte and
+            // treated the register NUMBER as the lane, which also mis-sized
+            // the operand for any register >= 128 (two-byte encoding).
+            let _lane_reg = read_reg(state)?;
             // Scalar fallback: just return the value
             let val = state.get_reg(src_reg);
             state.set_reg(dst, val);
@@ -74,7 +80,13 @@ fn simd_extended_body(
             // Insert into single lane
             let dst = read_reg(state)?;
             let vec_reg = read_reg(state)?;
-            let _lane = read_u8(state)?;
+            // The lane index is a REGISTER on the wire, not an immediate:
+            // `encode_operands` packs every intrinsic argument as a register,
+            // and `simd_extract(vec, idx)` passes `idx` as an ordinary
+            // argument. Reading it with `read_u8` consumed one byte and
+            // treated the register NUMBER as the lane, which also mis-sized
+            // the operand for any register >= 128 (two-byte encoding).
+            let _lane_reg = read_reg(state)?;
             let val_reg = read_reg(state)?;
             // Scalar fallback: use the inserted value
             let _ = state.get_reg(vec_reg);
@@ -370,6 +382,11 @@ fn simd_extended_body(
 
         Some(SimdSubOpcode::StoreAligned) | Some(SimdSubOpcode::StoreUnaligned) => {
             // Vector store to memory
+            // Void sub-op, but the wire still carries a leading dst:
+            // `encode_operands` prefixes the destination register
+            // unconditionally, regardless of `return_count`. Skipping that
+            // read made every call under-consume by one register.
+            let _dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let ptr_reg = read_reg(state)?;
             // Scalar fallback: no-op in interpreter
@@ -388,6 +405,11 @@ fn simd_extended_body(
         }
 
         Some(SimdSubOpcode::MaskedStore) => {
+            // Void sub-op, but the wire still carries a leading dst:
+            // `encode_operands` prefixes the destination register
+            // unconditionally, regardless of `return_count`. Skipping that
+            // read made every call under-consume by one register.
+            let _dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let ptr_reg = read_reg(state)?;
             let _mask_reg = read_reg(state)?;
@@ -409,6 +431,11 @@ fn simd_extended_body(
 
         Some(SimdSubOpcode::Scatter) => {
             // Scatter to indices
+            // Void sub-op, but the wire still carries a leading dst:
+            // `encode_operands` prefixes the destination register
+            // unconditionally, regardless of `return_count`. Skipping that
+            // read made every call under-consume by one register.
+            let _dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let _base_reg = read_reg(state)?;
             let _indices_reg = read_reg(state)?;
@@ -420,6 +447,12 @@ fn simd_extended_body(
         // Shuffle/Permute (0x60-0x6F)
         // ================================================================
         Some(SimdSubOpcode::Shuffle) => {
+            // Arity is call-site dependent: the method form
+            // `shuffle<MASK: meta>(self, other)` packs 3 registers while the free
+            // function `simd_shuffle(a, b, mask)` packs 4. The scalar fallback
+            // returns `a` either way, so a trailing indices operand is left
+            // unread — safe because the envelope, not this arm, decides where
+            // the next instruction starts.
             let dst = read_reg(state)?;
             let a_reg = read_reg(state)?;
             let _b_reg = read_reg(state)?;
@@ -447,9 +480,11 @@ fn simd_extended_body(
         }
 
         Some(SimdSubOpcode::Rotate) => {
+            // `rotate_left<COUNT: meta USize>(self)` resolves COUNT at compile
+            // time, so the wire is [dst][self] with no rotate-amount operand.
+            // The `read_u8` here consumed a byte that was never emitted.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let _amount = read_u8(state)?;
             let src = state.get_reg(src_reg);
             state.set_reg(dst, src);
             Ok(DispatchResult::Continue)

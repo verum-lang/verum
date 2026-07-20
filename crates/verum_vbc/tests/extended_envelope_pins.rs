@@ -19,7 +19,7 @@
 use std::sync::Arc;
 use verum_vbc::bytecode;
 use verum_vbc::instruction::{
-    ArithSubOpcode, CharSubOpcode, Instruction, MathSubOpcode, Reg, SimdSubOpcode,
+    ArithSubOpcode, CharSubOpcode, Instruction, LogSubOpcode, MathSubOpcode, Reg, SimdSubOpcode,
 };
 use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
@@ -196,4 +196,87 @@ fn wide_register_operands_survive_the_envelope() {
         256,
     );
     assert_eq!(result.as_i64(), 4242);
+}
+
+// ============================================================================
+// Operand-shape pins: the arm must consume what the emitter packs.
+// ============================================================================
+
+#[test]
+fn simd_insert_reads_the_lane_as_a_register_not_a_u8_immediate() {
+    // T0411. `encode_operands` packs the lane index as a REGISTER, so a lane
+    // register >= 128 occupies two bytes. Reading it with `read_u8` consumed
+    // only the first, and the following `val` operand was then decoded from
+    // the leftover byte — yielding a completely different register.
+    //
+    // Wire: [dst=r5][vec=r6][lane=r130 (0x80,130)][val=r7].
+    // Correct read  -> val = r7   -> dst receives 777.
+    // read_u8 lane  -> val = r519 -> dst receives that register's contents.
+    let result = run_with_regs(
+        &[
+            Instruction::LoadI {
+                dst: Reg(7),
+                value: 777,
+            },
+            Instruction::SimdExtended {
+                sub_op: SimdSubOpcode::Insert as u8,
+                operands: vec![5, 6, 0x80, 130, 7],
+            },
+            Instruction::Mov {
+                dst: Reg(0),
+                src: Reg(5),
+            },
+            Instruction::Ret { value: Reg(0) },
+        ],
+        600,
+    );
+    assert_eq!(
+        result.as_i64(),
+        777,
+        "Insert must consume the lane operand as a register"
+    );
+}
+
+/// T0418: the level arms must log the MESSAGE operand, not the destination
+/// temp. stderr is the only observable, so the assertion runs against a
+/// re-exec of this same test binary — dependency-free, no fd plumbing.
+#[test]
+fn log_info_logs_the_message_operand_not_the_dst_temp() {
+    const CHILD: &str = "VBC_T0418_LOG_PIN_CHILD";
+    const TEST: &str = "log_info_logs_the_message_operand_not_the_dst_temp";
+
+    if std::env::var(CHILD).is_ok() {
+        // r3 carries the message; r2 is the dst slot the emitter always packs
+        // and this void sub-op never writes.
+        run_with_regs(
+            &[
+                Instruction::LoadI {
+                    dst: Reg(3),
+                    value: 987_654,
+                },
+                Instruction::LogExtended {
+                    sub_op: LogSubOpcode::Info as u8,
+                    operands: vec![2, 3],
+                },
+                Instruction::LoadSmallI {
+                    dst: Reg(0),
+                    value: 1,
+                },
+                Instruction::Ret { value: Reg(0) },
+            ],
+            32,
+        );
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().expect("test binary path"))
+        .args([TEST, "--exact", "--nocapture"])
+        .env(CHILD, "1")
+        .output()
+        .expect("re-exec test binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("[INFO] 987654"),
+        "log must emit the message operand; stderr was: {stderr}"
+    );
 }
