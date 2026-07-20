@@ -32,8 +32,8 @@
 
 use super::registry::{CodegenStrategy, InlineSequenceId, Intrinsic};
 use crate::instruction::{
-    ArithSubOpcode, BinaryFloatOp, BinaryIntOp, BitwiseOp, CompareOp, FloatToIntMode, Instruction,
-    Opcode, Reg, UnaryFloatOp, UnaryIntOp,
+    ArithSubOpcode, AtomicRmwOp, BinaryFloatOp, BinaryIntOp, BitwiseOp, CompareOp, FloatToIntMode,
+    Instruction, Opcode, Reg, UnaryFloatOp, UnaryIntOp,
 };
 
 /// A synthesized wrapper body: straight-line instructions ending in
@@ -490,61 +490,24 @@ fn expand_sequence(
         | InlineSequenceId::AtomicFetchXor
             if args.len() >= 2 =>
         {
-            let ptr = args[0];
-            let val = args[1];
-            let old_val = e.alloc_temp();
-            e.emit(Instruction::AtomicLoad {
-                dst: old_val,
-                ptr,
-                ordering: 4,
-                size: byte_width,
-            });
-            let new_val = e.alloc_temp();
-            match seq {
-                InlineSequenceId::AtomicFetchAdd => e.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Add,
-                    dst: new_val,
-                    a: old_val,
-                    b: val,
-                }),
-                InlineSequenceId::AtomicFetchSub => e.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Sub,
-                    dst: new_val,
-                    a: old_val,
-                    b: val,
-                }),
-                InlineSequenceId::AtomicFetchAnd => e.emit(Instruction::Bitwise {
-                    op: BitwiseOp::And,
-                    dst: new_val,
-                    a: old_val,
-                    b: val,
-                }),
-                InlineSequenceId::AtomicFetchOr => e.emit(Instruction::Bitwise {
-                    op: BitwiseOp::Or,
-                    dst: new_val,
-                    a: old_val,
-                    b: val,
-                }),
-                _ => e.emit(Instruction::Bitwise {
-                    op: BitwiseOp::Xor,
-                    dst: new_val,
-                    a: old_val,
-                    b: val,
-                }),
-            }
-            let cas_result = e.alloc_temp();
-            e.emit(Instruction::AtomicCas {
-                dst: cas_result,
-                ptr,
-                expected: old_val,
-                desired: new_val,
-                ordering: 4,
-                size: byte_width,
-            });
-            e.emit(Instruction::Mov {
-                dst: dest,
-                src: old_val,
-            });
+            // Mirrors the codegen arm: ONE indivisible RMW opcode, not
+            // a load / modify / single-shot-CAS sequence that drops
+            // updates when threads interleave.
+            let op = match seq {
+                InlineSequenceId::AtomicFetchAdd => AtomicRmwOp::Add,
+                InlineSequenceId::AtomicFetchSub => AtomicRmwOp::Sub,
+                InlineSequenceId::AtomicFetchAnd => AtomicRmwOp::And,
+                InlineSequenceId::AtomicFetchOr => AtomicRmwOp::Or,
+                _ => AtomicRmwOp::Xor,
+            };
+            e.emit(op.encode(dest, args[0], args[1], byte_width));
+        }
+        InlineSequenceId::AtomicExchange if args.len() >= 2 => {
+            // The swap form of the same indivisible RMW opcode. Kept in
+            // lockstep with the codegen inline path and the fetch arm
+            // above so the wrapper-synthesis and call-site emitters can
+            // never disagree on how an atomic exchange lowers.
+            e.emit(AtomicRmwOp::Xchg.encode(dest, args[0], args[1], byte_width));
         }
         InlineSequenceId::Clz => arith_extended(e, ArithSubOpcode::Clz, dest, args),
         InlineSequenceId::Ctz => arith_extended(e, ArithSubOpcode::Ctz, dest, args),

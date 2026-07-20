@@ -5824,6 +5824,111 @@ pub enum SystemSubOpcode {
     WaitgroupWait = 0xB9,
     WaitgroupTryWait = 0xBA,
     WaitgroupDestroy = 0xBB,
+    /// Atomic read-modify-write — the ONE authority for every
+    /// `atomic_fetch_*` / `atomic_exchange` intrinsic at both tiers.
+    ///
+    /// Format: `dst:reg, ptr:reg, val:reg, op:u8, size:u8` where `op`
+    /// is an [`AtomicRmwOp`] byte and `size` is the access width in
+    /// bytes (1/2/4/8).  `dst` receives the value read BEFORE the
+    /// update, per the C11 / LLVM `atomicrmw` convention.
+    ///
+    /// History: fetch_add and its five siblings used to be lowered
+    /// inline as `AtomicLoad` + arithmetic + a SINGLE `AtomicCas`
+    /// whose result was then discarded by a `Mov dst, old_val`.  With
+    /// no retry on CAS failure that sequence silently DROPS the update
+    /// whenever two threads interleave — a lost counter increment with
+    /// no error anywhere, invisible to any single-threaded test.  The
+    /// update must be one indivisible operation, so it is one opcode:
+    /// the interpreter uses a hardware RMW (or a bounded CAS retry
+    /// loop for NaN-boxed 8-byte slots) and AOT emits `atomicrmw`.
+    AtomicRmw = 0xBC,
+}
+
+/// Which read-modify-write an [`SystemSubOpcode::AtomicRmw`] performs.
+///
+/// Byte values are wire format — they are serialized into VBC operand
+/// bytes and must never be renumbered.  The set mirrors the LLVM
+/// `atomicrmw` binary operators Verum exposes through `core/sync/atomic.vr`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AtomicRmwOp {
+    /// `*ptr += val`
+    Add = 0,
+    /// `*ptr -= val`
+    Sub = 1,
+    /// `*ptr &= val`
+    And = 2,
+    /// `*ptr |= val`
+    Or = 3,
+    /// `*ptr ^= val`
+    Xor = 4,
+    /// `*ptr = val` (atomic exchange)
+    Xchg = 5,
+}
+
+impl AtomicRmwOp {
+    /// Decode a wire byte into an operation, or `None` if unknown.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Add),
+            1 => Some(Self::Sub),
+            2 => Some(Self::And),
+            3 => Some(Self::Or),
+            4 => Some(Self::Xor),
+            5 => Some(Self::Xchg),
+            _ => None,
+        }
+    }
+
+    /// Wire byte for this operation.
+    #[inline]
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// Apply the operation to a loaded value — the ONE definition of
+    /// what each `AtomicRmwOp` computes, shared by the interpreter's
+    /// retry loop and by the opcode's own conformance tests so the two
+    /// cannot drift.
+    #[inline]
+    pub fn apply(self, current: i64, operand: i64) -> i64 {
+        match self {
+            Self::Add => current.wrapping_add(operand),
+            Self::Sub => current.wrapping_sub(operand),
+            Self::And => current & operand,
+            Self::Or => current | operand,
+            Self::Xor => current ^ operand,
+            Self::Xchg => operand,
+        }
+    }
+
+    /// Build the `FfiExtended` instruction performing this RMW.
+    ///
+    /// The ONE place that knows the operand layout
+    /// (`dst, ptr, val, op:u8, size:u8`); every emitter goes through
+    /// here so a wire change cannot land in one codegen path and miss
+    /// another, and so the interpreter and AOT decoders have a single
+    /// producer to agree with.
+    pub fn encode(self, dst: Reg, ptr: Reg, val: Reg, size: u8) -> Instruction {
+        fn write_reg(out: &mut Vec<u8>, reg: u16) {
+            if reg < 128 {
+                out.push(reg as u8);
+            } else {
+                out.push(0x80 | ((reg >> 8) as u8));
+                out.push((reg & 0xFF) as u8);
+            }
+        }
+        let mut operands = Vec::with_capacity(8);
+        write_reg(&mut operands, dst.0);
+        write_reg(&mut operands, ptr.0);
+        write_reg(&mut operands, val.0);
+        operands.push(self.to_byte());
+        operands.push(size);
+        Instruction::FfiExtended {
+            sub_op: SystemSubOpcode::AtomicRmw as u8,
+            operands,
+        }
+    }
 }
 
 /// Backward-compatibility alias.  The enum was renamed
@@ -6224,6 +6329,7 @@ impl SystemSubOpcode {
             0xB9 => Some(Self::WaitgroupWait),
             0xBA => Some(Self::WaitgroupTryWait),
             0xBB => Some(Self::WaitgroupDestroy),
+            0xBC => Some(Self::AtomicRmw),
             _ => None,
         }
     }
@@ -6406,6 +6512,7 @@ impl SystemSubOpcode {
             Self::WaitgroupWait          => m!("SYNC_WG_WAIT",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
             Self::WaitgroupTryWait          => m!("SYNC_WG_TRY_WAIT",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
             Self::WaitgroupDestroy          => m!("SYNC_WG_DESTROY",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
+            Self::AtomicRmw                 => m!("SYNC_ATOMIC_RMW",        SynchronizationPrimitives, call=false, marshal=false, alloc=false, dealloc=false),
         }
     }
 
@@ -17112,15 +17219,15 @@ mod tests {
     }
 
     #[test]
-    fn system_meta_count_pinned_at_seventy_seven() {
-        // 77 currently reachable variants spread over twelve 16-byte
+    fn system_meta_count_pinned_at_one_hundred_eleven() {
+        // 111 currently reachable variants spread over twelve 16-byte
         // bands.  Bumping this assertion is the explicit signal that
         // a new SystemSubOpcode entry has landed and the
         // corresponding meta() arm is in place.
         let mut count = 0;
         for_every_system_sub_opcode(|_| count += 1);
-        assert_eq!(count, 110,
-            "SystemSubOpcode variant count drift: expected 110, got {}",
+        assert_eq!(count, 111,
+            "SystemSubOpcode variant count drift: expected 111, got {}",
             count);
     }
 
