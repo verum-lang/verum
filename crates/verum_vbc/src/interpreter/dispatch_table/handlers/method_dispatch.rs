@@ -9223,23 +9223,39 @@ pub(super) fn dispatch_primitive_method(
                 return Ok(Some(Value::unit()));
             }
             "generation" | "stored_generation" => {
-                // For CBGR data pointers: go back 32 bytes to the AllocationHeader,
-                // read u32 at offset 8 (generation field)
-                // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
-                let header_addr = ptr_addr.wrapping_sub(32);
+                // For CBGR data pointers: step back to the AllocationHeader
+                // that precedes the payload and read the generation field.
+                // Offsets come from `verum_common::layout` — the single
+                // authority every other header consumer reads.  These were
+                // open-coded `32` / `+8` magic numbers, which is exactly
+                // what that module's drift contract forbids (T0451).
+                let header_addr = ptr_addr
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
                 if state.cbgr_allocations.contains(&header_addr) {
-                    let generation = unsafe { *((header_addr + 8) as *const u32) };
+                    let generation = unsafe {
+                        *((header_addr
+                            + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
+                            as *const u32)
+                    };
                     return Ok(Some(Value::from_i64(generation as i64)));
                 }
                 // Fall through for non-CBGR pointers
             }
             "is_valid" => {
-                // Check if the CBGR allocation is still valid (not freed)
-                // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
-                let header_addr = ptr_addr.wrapping_sub(32);
+                // Check if the CBGR allocation is still valid (not freed).
+                // The FREED bit is the canonical `verum_common::cbgr::flags`
+                // constant, not a bare `& 1` (T0451).
+                let header_addr = ptr_addr
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
                 if state.cbgr_allocations.contains(&header_addr) {
-                    let flags = unsafe { *((header_addr + 20) as *const u32) };
-                    return Ok(Some(Value::from_bool(flags & 1 == 0)));
+                    let flags = unsafe {
+                        *((header_addr
+                            + verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET as usize)
+                            as *const u32)
+                    };
+                    return Ok(Some(Value::from_bool(
+                        flags & verum_common::cbgr::flags::FREED == 0,
+                    )));
                 }
                 // Non-CBGR pointer: always valid
                 return Ok(Some(Value::from_bool(true)));
@@ -9248,11 +9264,16 @@ pub(super) fn dispatch_primitive_method(
                 // References capture epoch at creation time (current epoch)
                 // For Heap pointers called via .epoch(), return allocation-time epoch
                 // from AllocationHeader for the allocation itself, but current epoch
-                // for reference-style access
-                // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
-                let header_addr = ptr_addr.wrapping_sub(32);
+                // for reference-style access.  Offsets via
+                // `verum_common::layout` (T0451 — see "generation" above).
+                let header_addr = ptr_addr
+                    .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
                 if state.cbgr_allocations.contains(&header_addr) {
-                    let epoch = unsafe { *((header_addr + 12) as *const u16) };
+                    let epoch = unsafe {
+                        *((header_addr
+                            + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
+                            as *const u16)
+                    };
                     return Ok(Some(Value::from_i64(epoch as i64)));
                 }
                 return Ok(Some(Value::from_i64(state.cbgr_epoch as i64)));

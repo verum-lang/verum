@@ -3387,18 +3387,45 @@ fn ffi_extended_body(
 
         // In the Tier 0 interpreter we bypass the stdlib allocator
         // (allocator.vr -> os_mmap -> FFI mmap) entirely and allocate
-        // through Rust's std allocator, then register the allocation in
-        // `state.cbgr_allocations` so that subsequent CBGR validation
-        // ops (ChkRef, GetGeneration, etc.) see a live allocation.
+        // through `cbgr_user_allocate` — the SAME header-model allocator
+        // the public `cbgr_allocate` bridge (0xA5) uses — then register
+        // the allocation in `state.cbgr_allocations` so that subsequent
+        // CBGR validation ops (ChkRef, GetGeneration, etc.) see a live
+        // allocation.
+        //
+
+        // T0451: this arm used to hand back the RAW `std::alloc` block
+        // with NO `AllocationHeader` in front of it, and to register the
+        // DATA address in `cbgr_allocations`.  Both halves were wrong.
+        // Every other consumer of that set derives the header address as
+        // `ptr - ALLOCATION_HEADER_SIZE` (see `handle_deref`,
+        // `handle_chk_ref`, `validate_ref_bool`, the `generation` /
+        // `epoch` / `is_valid` method intercepts), so a header recovered
+        // from a `cbgr_alloc` pointer landed on unrelated bytes:
+        // generation/epoch reads returned garbage and
+        // `increment_generation` wrote through a header that was never
+        // materialised.  Routing through `cbgr_user_allocate` gives ONE
+        // allocation model in the interpreter: a real 32-byte header at
+        // `user - 32`, the HEADER address tracked in `cbgr_allocations`,
+        // and a self-describing `{base_offset, total}` reserved word that
+        // lets `CbgrDealloc` actually free (see there).
         //
 
         // The result is a tuple `(ptr, generation, epoch)` matching the
         // shape of `AllocResult` in `core/mem/allocator.vr`. We package it
         // as a heap-allocated tuple object so pattern-matching
         // `Ok((ptr, gen, epoch))` continues to work unchanged in user
-        // code.
+        // code.  The generation/epoch reported here are READ BACK from the
+        // header just written, so the tuple and the header can never drift.
         // =================================================================
         Some(SystemSubOpcode::CbgrAlloc) | Some(SystemSubOpcode::CbgrAllocZeroed) => {
+            // Both spellings allocate zero-initialised memory:
+            // `cbgr_user_allocate` uses `alloc_zeroed` unconditionally so
+            // uninitialised reads stay deterministic under the interpreter.
+            // Zeroing the non-`_zeroed` spelling is a strengthening, never
+            // an observable regression.  (The distinction still matters on
+            // the `VERUM_CBGR_LEGACY_ALLOC` path, which reproduces the old
+            // alloc/alloc_zeroed split exactly.)
             let zeroed = matches!(sub_op, Some(SystemSubOpcode::CbgrAllocZeroed));
             let dst = read_reg(state)?;
             let size_reg = read_reg(state)?;
@@ -3427,51 +3454,37 @@ fn ffi_extended_body(
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
-            let size = raw_size as usize;
-            let align: usize = (raw_align as usize).next_power_of_two().max(8);
-            // `Layout::from_size_align` rejects size+align combinations
-            // that overflow isize::MAX — possible with adversarial
-            // bytecode requesting a near-max size. The previous
-            // implementation chained two attempts, the second of which
-            // unwrapped — meaning a hostile size could still panic the
-            // interpreter (DoS via crafted CbgrAlloc operand). Treat
-            // any unrepresentable layout as an OOM-equivalent: return
-            // nil so the caller's `Err(e) => ...` arm fires, matching
-            // the existing pattern at the null-pointer branch below.
-            let layout = match std::alloc::Layout::from_size_align(size, align)
-                .or_else(|_| std::alloc::Layout::from_size_align(size, 8))
-            {
-                Ok(layout) => layout,
-                Err(_) => {
-                    state.set_reg(dst, Value::nil());
-                    return Ok(DispatchResult::Continue);
-                }
+            // ONE header-model authority (T0451).  `cbgr_user_allocate`
+            // lays down the 32-byte `AllocationHeader` at `user - 32`,
+            // registers the HEADER address in `cbgr_allocations`, and
+            // records `{base_offset, total}` in the reserved word so the
+            // exact `Layout` is reconstructible at free time.  Layouts
+            // that overflow `isize::MAX` (adversarial bytecode requesting
+            // a near-max size) return 0 rather than panicking the
+            // interpreter — the same OOM-equivalent the null-pointer
+            // branch modelled before.
+            let legacy = cbgr_legacy_alloc();
+            let ptr = if legacy {
+                cbgr_legacy_allocate(state, raw_size, raw_align, zeroed)
+            } else {
+                cbgr_user_allocate(state, raw_size, raw_align)
             };
-            // SAFETY: layout has non-zero size and valid alignment by
-            // construction. The allocator contract requires matching the
-            // layout on dealloc; callers are expected to route through
-            // CbgrDealloc (which currently leaks — see below).
-            let ptr = unsafe {
-                if zeroed {
-                    std::alloc::alloc_zeroed(layout)
-                } else {
-                    std::alloc::alloc(layout)
-                }
-            };
-            if ptr.is_null() {
+            if ptr == 0 {
                 // Model `AllocError::OutOfMemory` as returning a nil Value
                 // so pattern-match `Err(e) => ...` fires. The tuple shape
                 // matching below is only materialised on success.
                 state.set_reg(dst, Value::nil());
                 return Ok(DispatchResult::Continue);
             }
-            // Track so CBGR validation ops see the allocation.
-            state.cbgr_allocations.insert(ptr as usize);
-            // Build (ptr, generation, epoch) tuple. Fresh generation = 1
-            // (0 is reserved "unallocated" in CBGR conventions), fresh
-            // epoch = current interpreter epoch counter.
-            let generation = 1i64;
-            let epoch = state.cbgr_epoch as i64;
+            // Report the generation/epoch the header actually carries —
+            // reading them back keeps the returned tuple and the in-memory
+            // header from ever drifting apart.  The legacy path has no
+            // header to read, so it keeps synthesising the old constants.
+            let (generation, epoch) = if legacy {
+                (1i64, state.cbgr_epoch as i64)
+            } else {
+                cbgr_header_generation_epoch(ptr)
+            };
             // Materialise a 3-tuple matching `Pack` layout so
             // `let (ptr, g, e) = …` destructures each field at its
             // expected offset.
@@ -3503,14 +3516,29 @@ fn ffi_extended_body(
 
         Some(SystemSubOpcode::CbgrDealloc) => {
             let _dst = read_reg(state)?;
-            let _ptr_reg = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
             let _size_reg = read_reg(state)?;
             let _align_reg = read_reg(state)?;
-            // Intentional leak in the interpreter: the stdlib tracks
-            // Shared refcount / drop ordering at a level above us, but
-            // the interpreter has no way to match the exact Layout
-            // passed at allocation time without carrying extra metadata.
-            // Preferring leak over double-free matches __dealloc_raw.
+            // T0451: this used to be an unconditional leak, justified by
+            // "the interpreter has no way to match the exact Layout passed
+            // at allocation time without carrying extra metadata".  With
+            // the header model that justification is gone: every block is
+            // self-describing (`{base_offset, total}` in the header's
+            // reserved word), so the exact `Layout` IS reconstructible.
+            //
+
+            // `cbgr_user_deallocate` also sets the FREED flag and removes
+            // the header address from `cbgr_allocations`, which is what
+            // makes `increment_generation` and the use-after-free probes
+            // observe a real transition instead of writing through a
+            // header that never existed.  It is defensively a no-op on 0,
+            // on untracked pointers, and on double-free (the tracked-set
+            // removal is the gate), so the leak-over-double-free safety
+            // property the old comment cared about is preserved.
+            if !cbgr_legacy_alloc() {
+                let user = state.get_reg(ptr_reg).as_integer_compatible();
+                cbgr_user_deallocate(state, user);
+            }
             Ok(DispatchResult::Continue)
         }
 
@@ -3821,20 +3849,18 @@ fn ffi_extended_body(
                 state.set_reg(dst, err_val);
                 return Ok(DispatchResult::Continue);
             }
-            let size = new_size as usize;
-            let align: usize = (raw_align as usize).next_power_of_two().max(8);
-            let layout = match std::alloc::Layout::from_size_align(size, align)
-                .or_else(|_| std::alloc::Layout::from_size_align(size, 8))
-            {
-                Ok(layout) => layout,
-                Err(_) => {
-                    state.set_reg(dst, Value::nil());
-                    return Ok(DispatchResult::Continue);
-                }
+            // T0451: header-model allocation, same ONE authority as
+            // CbgrAlloc.  The copy is driven by the caller-supplied
+            // `old_size` (not the header's) so this keeps working for an
+            // old pointer that never came from the bridge — e.g. bytecode
+            // that reallocs a block obtained some other way.
+            let legacy = cbgr_legacy_alloc();
+            let ptr = if legacy {
+                cbgr_legacy_allocate(state, new_size, raw_align, false)
+            } else {
+                cbgr_user_allocate(state, new_size, raw_align)
             };
-            // SAFETY: non-zero size and valid alignment by construction.
-            let ptr = unsafe { std::alloc::alloc(layout) };
-            if ptr.is_null() {
+            if ptr == 0 {
                 state.set_reg(dst, Value::nil());
                 return Ok(DispatchResult::Continue);
             }
@@ -3844,12 +3870,26 @@ fn ffi_extended_body(
                 // SAFETY: caller-supplied old block; the copy length is
                 // bounded by both the old and the fresh allocation sizes.
                 unsafe {
-                    std::ptr::copy_nonoverlapping(old_ptr as *const u8, ptr, copy);
+                    std::ptr::copy_nonoverlapping(
+                        old_ptr as usize as *const u8,
+                        ptr as usize as *mut u8,
+                        copy,
+                    );
                 }
             }
-            state.cbgr_allocations.insert(ptr as usize);
-            let generation = 1i64;
-            let epoch = state.cbgr_epoch as i64;
+            // Release the old block once its contents are safe.  This is a
+            // no-op unless the old pointer was itself a tracked bridge
+            // allocation, so an untracked old pointer keeps the historical
+            // leak-over-double-free behaviour instead of freeing memory we
+            // do not own.
+            if !legacy {
+                cbgr_user_deallocate(state, old_ptr);
+            }
+            let (generation, epoch) = if legacy {
+                (1i64, state.cbgr_epoch as i64)
+            } else {
+                cbgr_header_generation_epoch(ptr)
+            };
             let tuple_size = 3 * std::mem::size_of::<Value>();
             let tuple_obj =
                 state
@@ -4061,6 +4101,75 @@ fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i6
     }
     state.cbgr_allocations.insert(header_addr);
     user as i64
+}
+
+/// T0451 kill-switch.  `VERUM_CBGR_LEGACY_ALLOC=1` restores the
+/// pre-T0451 behaviour of the internal CBGR allocation family
+/// bit-for-bit: a raw `std::alloc` block with NO `AllocationHeader`, the
+/// DATA address (not the header address) registered in
+/// `cbgr_allocations`, and an unconditional leak on dealloc.
+///
+/// This exists so a regression can be attributed to this change with ONE
+/// binary — run the suite twice, once with the switch — rather than
+/// requiring a second build of the unmodified tree.  Read once and cached;
+/// the header model is the default.
+fn cbgr_legacy_alloc() -> bool {
+    static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LEGACY.get_or_init(|| {
+        std::env::var("VERUM_CBGR_LEGACY_ALLOC").map(|v| v == "1").unwrap_or(false)
+    })
+}
+
+/// Pre-T0451 raw allocation, retained solely as the kill-switch path (see
+/// [`cbgr_legacy_alloc`]).  Returns the user address or 0.
+fn cbgr_legacy_allocate(
+    state: &mut InterpreterState,
+    raw_size: i64,
+    raw_align: i64,
+    zeroed: bool,
+) -> i64 {
+    let size = raw_size as usize;
+    let align: usize = (raw_align as usize).next_power_of_two().max(8);
+    let layout = match std::alloc::Layout::from_size_align(size, align)
+        .or_else(|_| std::alloc::Layout::from_size_align(size, 8))
+    {
+        Ok(layout) => layout,
+        Err(_) => return 0,
+    };
+    // SAFETY: layout has non-zero size and valid alignment by construction.
+    let ptr = unsafe {
+        if zeroed {
+            std::alloc::alloc_zeroed(layout)
+        } else {
+            std::alloc::alloc(layout)
+        }
+    };
+    if ptr.is_null() {
+        return 0;
+    }
+    state.cbgr_allocations.insert(ptr as usize);
+    ptr as i64
+}
+
+/// Read back the `(generation, epoch)` pair a `cbgr_user_allocate` block
+/// actually carries, from the header at `user - ALLOCATION_HEADER_SIZE`.
+///
+/// Callers that report an allocation's generation/epoch to Verum code use
+/// this instead of re-deriving the values they *believe* were written, so
+/// the reported pair and the in-memory header cannot drift (T0451).  Field
+/// offsets come from `verum_common::layout` — the same constants every
+/// other header consumer reads — never magic numbers.
+fn cbgr_header_generation_epoch(user: i64) -> (i64, i64) {
+    use verum_common::layout as l;
+    let header_addr = user as usize - l::ALLOCATION_HEADER_SIZE as usize;
+    // SAFETY: `user` is a pointer just returned by `cbgr_user_allocate`,
+    // which wrote both fields into the header immediately below it.
+    unsafe {
+        let generation =
+            *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *const u32);
+        let epoch = *((header_addr + l::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *const u16);
+        (generation as i64, epoch as i64)
+    }
 }
 
 /// Free a `cbgr_user_allocate` block.  Defensive no-op on 0, on unknown
