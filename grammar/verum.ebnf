@@ -635,11 +635,24 @@ fn_keyword      = 'fn' , [ '*' ] ;
 function_def    = visibility , function_modifiers , fn_keyword , identifier
                 , [ generics ] , '(' , param_list , ')'
                 , [ throws_clause ]
-                , [ '->' , type_expr , [ ensures_clause ] ]
+                , [ '->' , type_expr ]
+                , { function_contract_clause }
                 , [ context_clause ]
                 , [ generic_where_clause ]
                 , [ meta_where_clause ]
                 , function_body ;
+
+(* Runtime-function contracts. The parser (verum_fast_parser decl.rs) consumes a
+   SEQUENCE of these after the signature, INDEPENDENT of the return type — the
+   stdlib uses bare `requires`/`ensures` on ordinary `public fn` pervasively
+   (384 `requires`, 801 `ensures` across core/). `where_ensures_clause` and the
+   `contract#"…"` literal are the alternative surface forms the parser also
+   accepts; `@ghost` may prefix any clause (proof-only, erased at runtime). *)
+function_contract_clause =
+      [ '@ghost' ] , requires_clause
+    | [ '@ghost' ] , ensures_clause
+    | [ '@ghost' ] , where_ensures_clause
+    | contract_literal ;
 
 (* Typed throws clause - typed error boundaries *)
 (* Example: fn parse(input: Text) throws(ParseError) -> AST *)
@@ -964,7 +977,11 @@ meta_constraint      = expression ;
 value_where_clause   = 'where' , [ 'value' ] , refinement_expr ;
 refinement_expr      = expression ;
 
-ensures_clause       = 'where' , ensures_item , { ',' , ensures_item } ;
+(* `where ensures …` surface form (sugar). Renamed from `ensures_clause` to
+   resolve the former duplicate definition — the canonical contract forms are the
+   bare `requires_clause` / `ensures_clause` below, which the parser and stdlib
+   actually use (see `function_contract_clause`). *)
+where_ensures_clause = 'where' , ensures_item , { ',' , ensures_item } ;
 ensures_item         = 'ensures' , expression ;
 
 (* 2.5 Protocol Implementations *)
