@@ -80,56 +80,21 @@ pub(in super::super) fn try_intercept_env_runtime(
         "get_env_impl" if arg_count == 1 => {
             let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
             let key = String::from_utf8_lossy(&name_bytes).into_owned();
-            match std::env::var(&key) {
-                Ok(value) => {
-                    let text = alloc_string_value(state, &value)?;
-                    Ok(Some(wrap_in_variant(state, "Maybe", 1, &[text])?))
-                }
-                Err(_) => Ok(Some(wrap_in_variant(state, "Maybe", 0, &[])?)),
-            }
+            env_get_maybe(state, &key)
         }
         "set_env_impl" if arg_count == 2 => {
             let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
             let value_bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base);
             let key = String::from_utf8_lossy(&name_bytes).into_owned();
             let value = String::from_utf8_lossy(&value_bytes).into_owned();
-            use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
-            let tid = target_id_for(&key);
-            if state.check_permission(PermissionScope::Process, tid)
-                != PermissionDecision::Allow
-                && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
-                    == PermissionDecision::Deny
-            {
-                let unit = Value::unit();
-                return Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?));
-            }
-            // SAFETY: single-threaded interpreter dispatch — same
-            // contract as intercept_set_var above.
-            unsafe {
-                std::env::set_var(&key, &value);
-            }
-            let unit = Value::unit();
-            Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?))
+            env_set_raw(state, &key, &value);
+            Ok(Some(env_unit_ok(state)?))
         }
         "unset_env_impl" if arg_count == 1 => {
             let name_bytes = extract_byte_list_arg(state, args_start_reg, caller_base);
             let key = String::from_utf8_lossy(&name_bytes).into_owned();
-            use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
-            let tid = target_id_for(&key);
-            if state.check_permission(PermissionScope::Process, tid)
-                != PermissionDecision::Allow
-                && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
-                    == PermissionDecision::Deny
-            {
-                let unit = Value::unit();
-                return Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?));
-            }
-            // SAFETY: single-threaded interpreter dispatch.
-            unsafe {
-                std::env::remove_var(&key);
-            }
-            let unit = Value::unit();
-            Ok(Some(wrap_in_variant(state, "Result", 0, &[unit])?))
+            env_unset_raw(state, &key);
+            Ok(Some(env_unit_ok(state)?))
         }
         "set_var" => {
             if arg_count != 2 || !is_env_qualified(func_name) {
@@ -215,6 +180,89 @@ fn is_env_qualified(func_name: &str) -> bool {
 }
 
 // ============================================================================
+// Shared environment authority
+//
+// The environment has TWO entry points: the Call-level name intercepts below,
+// and the `FfiExtended` EnvGet/EnvSet/EnvUnset arms that `core/base/env.vr`'s
+// `@intrinsic` bodies lower to when they are inlined. Both funnel through
+// these functions so the `std::env` call and the VBC-PERM-1 permission gate
+// exist in exactly one place.
+//
+// Callers own only the Verum-level return SHAPE, which genuinely differs
+// between them: `env.set_var` returns unit, while `set_env_impl` is declared
+// `Result<(), Text>`.
+// ============================================================================
+
+/// `get_env_impl(name) -> Maybe<Text>` result shape, shared by the Call-level
+/// intercept and the `FfiExtended::EnvGet` arm.
+pub(super) fn env_get_maybe(
+    state: &mut InterpreterState,
+    key: &str,
+) -> InterpreterResult<Option<Value>> {
+    match env_get_raw(key) {
+        Ok(value) => {
+            let text = alloc_string_value(state, &value)?;
+            Ok(Some(wrap_in_variant(state, "Maybe", 1, &[text])?))
+        }
+        Err(_) => Ok(Some(wrap_in_variant(state, "Maybe", 0, &[])?)),
+    }
+}
+
+/// `Result.Ok(())` — the shape `set_env_impl` / `unset_env_impl` are declared
+/// to return (`Result<(), Text>`). A permission denial is reported as `Ok`
+/// here, preserving the pre-existing behaviour of the Call-level intercepts:
+/// the stdlib discards this value (`let _ = set_env_impl(...)`), so surfacing
+/// a denial as `Err` would be a user-visible semantic change that belongs to
+/// the permission-policy surface, not to this wiring.
+pub(super) fn env_unit_ok(state: &mut InterpreterState) -> InterpreterResult<Value> {
+    let unit = Value::unit();
+    wrap_in_variant(state, "Result", 0, &[unit])
+}
+
+/// Read an environment variable. Reads are ungated — the permission boundary
+/// is on mutation. The full `VarError` is preserved so callers that
+/// distinguish `NotPresent` from `NotUnicode` still can.
+pub(super) fn env_get_raw(key: &str) -> Result<String, std::env::VarError> {
+    std::env::var(key)
+}
+
+/// VBC-PERM-1 gate for environment mutation. A script frontmatter
+/// `permissions = ["env=PATH"]` grants only the named variable via the hashed
+/// target id; a bare `"env"` grant falls through to the wildcard check.
+fn env_mutation_allowed(state: &mut InterpreterState, key: &str) -> bool {
+    use crate::interpreter::permission::{WILDCARD_TARGET_ID, target_id_for};
+    state.check_permission(PermissionScope::Process, target_id_for(key)) == PermissionDecision::Allow
+        || state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+            != PermissionDecision::Deny
+}
+
+/// Set an environment variable. Returns `false` when the permission router
+/// denied the write, in which case the variable is left untouched.
+pub(super) fn env_set_raw(state: &mut InterpreterState, key: &str, value: &str) -> bool {
+    if !env_mutation_allowed(state, key) {
+        return false;
+    }
+    // SAFETY: `set_var` is unsafe in newer Rust because concurrent readers in
+    // other threads would race; the interpreter is single-threaded here.
+    unsafe {
+        std::env::set_var(key, value);
+    }
+    true
+}
+
+/// Remove an environment variable. Returns `false` when denied.
+pub(super) fn env_unset_raw(state: &mut InterpreterState, key: &str) -> bool {
+    if !env_mutation_allowed(state, key) {
+        return false;
+    }
+    // SAFETY: see `env_set_raw`.
+    unsafe {
+        std::env::remove_var(key);
+    }
+    true
+}
+
+// ============================================================================
 // Per-function intercepts
 // ============================================================================
 
@@ -224,7 +272,7 @@ fn intercept_var_opt(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let key = extract_text_arg(state, args_start_reg, caller_base);
-    match std::env::var(&key) {
+    match env_get_raw(&key) {
         Ok(value) => {
             let text = alloc_string_value(state, &value)?;
             Ok(Some(wrap_in_variant(state, "Maybe", 1, &[text])?))
@@ -239,7 +287,7 @@ fn intercept_var(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let key = extract_text_arg(state, args_start_reg, caller_base);
-    match std::env::var(&key) {
+    match env_get_raw(&key) {
         Ok(value) => {
             let text = alloc_string_value(state, &value)?;
             Ok(Some(wrap_in_variant(state, "Result", 0, &[text])?))
@@ -268,25 +316,9 @@ fn intercept_set_var(
 ) -> InterpreterResult<Option<Value>> {
     let key = extract_text_arg(state, args_start_reg, caller_base);
     let value = extract_text_arg(state, args_start_reg + 1, caller_base);
-    // VBC-PERM-1 — granular target_id: hash the env-var key so a
-    // script frontmatter `permissions = ["env=PATH"]` grants only
-    // the named variable.  Falls through to the WILDCARD check
-    // for scripts that grant `"env"` without a target.
-    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
-    let tid = target_id_for(&key);
-    if state.check_permission(PermissionScope::Process, tid) != PermissionDecision::Allow
-        && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
-            == PermissionDecision::Deny
-    {
-        return Ok(Some(Value::unit()));
-    }
-    // SAFETY: `set_var` is unsafe in newer Rust due to threading
-    // concerns, but the interpreter is single-threaded at this point.
-    // The safety contract is met by the surrounding interpreter
-    // invariant.
-    unsafe {
-        std::env::set_var(&key, &value);
-    }
+    // `env.set_var` is declared to return unit, so a permission denial is
+    // silent here — the gate itself lives in `env_set_raw`.
+    env_set_raw(state, &key, &value);
     Ok(Some(Value::unit()))
 }
 
@@ -296,19 +328,8 @@ fn intercept_remove_var(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let key = extract_text_arg(state, args_start_reg, caller_base);
-    // VBC-PERM-1 — same granular env-key pattern as set_var.
-    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
-    let tid = target_id_for(&key);
-    if state.check_permission(PermissionScope::Process, tid) != PermissionDecision::Allow
-        && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
-            == PermissionDecision::Deny
-    {
-        return Ok(Some(Value::unit()));
-    }
-    // SAFETY: see set_var above.
-    unsafe {
-        std::env::remove_var(&key);
-    }
+    // `env.remove_var` returns unit; the gate lives in `env_unset_raw`.
+    env_unset_raw(state, &key);
     Ok(Some(Value::unit()))
 }
 

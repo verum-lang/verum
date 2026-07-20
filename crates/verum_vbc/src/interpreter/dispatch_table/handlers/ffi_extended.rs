@@ -3917,6 +3917,62 @@ fn ffi_extended_body(
             Ok(DispatchResult::Continue)
         }
 
+        // ================================================================
+        // Environment access (0x88-0x8A) — T0450.
+        //
+        // `core/base/env.vr`'s `get_env_impl` / `set_env_impl` /
+        // `unset_env_impl` are `@intrinsic` bodies. When the call survives as
+        // a call, `env_runtime::try_intercept_env_runtime` catches it by
+        // name; when the body is INLINED it lowers to these sub-ops instead,
+        // and the missing arms made that path hard-error at Tier-0 through
+        // the catch-all below (the AOT tier has always implemented them).
+        //
+        // Both paths funnel through the same `env_runtime` authority, so the
+        // `std::env` call, the permission gate and the Maybe/Result shapes
+        // are defined once.
+        //
+        // Wire: [dst][name] for get/unset, [dst][name][value] for set, with
+        // the `&[Byte]` arguments decoded the same way the name intercept
+        // decodes them.
+        Some(SystemSubOpcode::EnvGet) => {
+            let dst = read_reg(state)?;
+            let name_reg = read_reg(state)?;
+            let base = state.reg_base();
+            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
+            let key = String::from_utf8_lossy(&name).into_owned();
+            let value = super::env_runtime::env_get_maybe(state, &key)?
+                .expect("env_get_maybe always yields a Maybe value");
+            state.set_reg(dst, value);
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(SystemSubOpcode::EnvSet) => {
+            let dst = read_reg(state)?;
+            let name_reg = read_reg(state)?;
+            let value_reg = read_reg(state)?;
+            let base = state.reg_base();
+            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
+            let val = super::file_runtime::extract_byte_list_arg(state, value_reg.0, base);
+            let key = String::from_utf8_lossy(&name).into_owned();
+            let value = String::from_utf8_lossy(&val).into_owned();
+            super::env_runtime::env_set_raw(state, &key, &value);
+            let ok = super::env_runtime::env_unit_ok(state)?;
+            state.set_reg(dst, ok);
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(SystemSubOpcode::EnvUnset) => {
+            let dst = read_reg(state)?;
+            let name_reg = read_reg(state)?;
+            let base = state.reg_base();
+            let name = super::file_runtime::extract_byte_list_arg(state, name_reg.0, base);
+            let key = String::from_utf8_lossy(&name).into_owned();
+            super::env_runtime::env_unset_raw(state, &key);
+            let ok = super::env_runtime::env_unit_ok(state)?;
+            state.set_reg(dst, ok);
+            Ok(DispatchResult::Continue)
+        }
+
         // Unimplemented sub-opcodes
         _ => Err(InterpreterError::NotImplemented {
             feature: "ffi_extended sub-opcode",
