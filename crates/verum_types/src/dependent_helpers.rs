@@ -300,8 +300,62 @@ pub fn collect_type_vars(ty: &InternalType) -> Set<crate::ty::TypeVar> {
         | InternalType::Text
         | InternalType::Never => {}
 
-        // Other types - traverse nested types if present
-        _ => {}
+        // ── Leaf constructors with no nested Type → nothing to collect.
+        //    (`Placeholder` carries only name+span, never a Type payload,
+        //    so despite T0251's title there is no var inside it to drop.)
+        InternalType::Unknown
+        | InternalType::Lifetime { .. }
+        | InternalType::TypeConstructor { .. }
+        | InternalType::Interval
+        | InternalType::Universe { .. }
+        | InternalType::Prop
+        | InternalType::Placeholder { .. } => {}
+
+        // ── Var-bearing constructors that are DELIBERATELY opaque here.
+        //
+        // `collect_type_vars` is not a general free-variable traversal: its
+        // consumers use the result as a *generalization / dependency gate*,
+        // and each relies on vars nested inside these constructors staying
+        // INVISIBLE:
+        //  • infer/core.rs (metadata method-scheme birth) uses the set as a
+        //    `vars.contains(tv)` membership gate deciding which captured
+        //    scope-vars are universally quantified (`TypeScheme::poly`).
+        //    Recursing re-quantifies vars that must stay bound to the impl /
+        //    associated-type context (`Self.Item`, transducer reducers …);
+        //    freshened per instantiation ⇒ `expected Item<Int> found Int`,
+        //    `no method map for Transducer`.  Measured: base/iterator
+        //    11 fail → 282 fail (recurse-in-place attempt, reverted 07-17).
+        //  • infer/types.rs and `is_dependent_type` (this file) test
+        //    `ret_vars ∩ param_vars` to classify a Pi (dependent) function.
+        //    Recursing over-classifies parametric polymorphism as
+        //    value-dependency and forces spurious dependent verification.
+        //
+        // Intentional no-ops, spelled out EXHAUSTIVELY (no `_ => {}`) so a
+        // new `Type` variant fails to compile here and forces a decision.
+        // A genuinely complete free-var traversal — when a caller needs one
+        // — belongs in a SEPARATE `collect_type_vars_deep`, never folded
+        // into this gate.  See task T0251.
+        InternalType::Record(_)
+        | InternalType::ExtensibleRecord { .. }
+        | InternalType::Variant(_)
+        | InternalType::VolatilePointer { .. }
+        | InternalType::Exists { .. }
+        | InternalType::DynProtocol { .. }
+        | InternalType::Forall { .. }
+        | InternalType::Meta { .. }
+        | InternalType::Future { .. }
+        | InternalType::Generator { .. }
+        | InternalType::Tensor { .. }
+        | InternalType::GenRef { .. }
+        | InternalType::TypeApp { .. }
+        | InternalType::Eq { .. }
+        | InternalType::PathType { .. }
+        | InternalType::Partial { .. }
+        | InternalType::Inductive { .. }
+        | InternalType::Coinductive { .. }
+        | InternalType::HigherInductive { .. }
+        | InternalType::Quantified { .. }
+        | InternalType::CapabilityRestricted { .. } => {}
     }
 
     vars
