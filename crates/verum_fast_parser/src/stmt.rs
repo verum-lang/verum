@@ -343,6 +343,19 @@ impl<'a> RecursiveParser<'a> {
         // Parse pattern using hand-written parser
         let pattern = self.parse_pattern_adapter()?;
 
+        // UPPERCASE-LET-BINDING (T0253): the shared pattern grammar parses
+        // a bare capitalized `let` target as a unit-variant pattern (the
+        // `first_name` uppercase arm in pattern.rs). That name-shape guess
+        // is right for a *refutable* match arm but wrong for the
+        // *irrefutable* target of a plain `let`, where it is really a fresh
+        // variable binding (`let A_scaled = mul(...)`, `let Lambda = ...` —
+        // the pervasive core/math idiom). Reinterpret it as the `Ident`
+        // binding the programmer meant so BOTH type checking and codegen
+        // (which handle `Ident` bindings, not bare unit-variant patterns)
+        // see the binding rather than failing with "not a defined constant"
+        // / "undefined variable".
+        let pattern = Self::rebind_bare_unit_variant_let_target(pattern);
+
         // E088: Check for guard in let (guards only in match)
         if self.stream.check(&TokenKind::If) {
             return Err(ParseError::pattern_invalid_let(
@@ -475,6 +488,56 @@ impl<'a> RecursiveParser<'a> {
         let span = Span::new(start_span.start, end_span.end, start_span.file_id);
 
         Ok(Stmt::new(StmtKind::Let { pattern, ty, value }, span))
+    }
+
+    /// Reinterpret a bare unit-variant `let` target as the `Ident`
+    /// binding it truly is (UPPERCASE-LET-BINDING, T0253).
+    ///
+    /// The shared pattern grammar applies a name-shape heuristic: a bare
+    /// capitalized identifier with no payload parses as a unit-variant
+    /// pattern (`PatternKind::Variant { data: None }`). That is correct
+    /// for a *refutable* match arm — it tells `Add` (variant) from `add`
+    /// (binding) apart — but wrong for the *irrefutable* target of a
+    /// plain `let`: a bare unit-variant binds nothing, so it is never a
+    /// useful destructure. The payload / record destructures
+    /// (`let Some(x)`, `let Point { .. }`) carry `data: Some(..)` and are
+    /// left untouched, and `mut` / `ref` targets already parse straight
+    /// to `Ident` (pattern.rs: the "ref or mut ⇒ binding pattern" arm),
+    /// so none of them reach here. What the programmer wrote is a fresh
+    /// variable (`let A_scaled = mul(...)`, `let Lambda = ...` — the
+    /// pervasive core/math idiom) which otherwise fails downstream as
+    /// "Pattern 'A_scaled' is not a defined constant" (type check) and
+    /// "undefined variable" (codegen). Refutable matching keeps its own
+    /// syntax (`if let`, `let … else`, `match`), none of which route
+    /// through `parse_let_stmt`; qualified targets (`Ns.Variant`) are
+    /// multi-segment, so `as_ident()` returns `None` and they are
+    /// preserved.
+    fn rebind_bare_unit_variant_let_target(pattern: Pattern) -> Pattern {
+        use verum_ast::PatternKind;
+        // `path.as_ident()` yields `Some` only for a single unqualified
+        // `Name` segment, so qualified `Ns.Variant` targets (multi-segment)
+        // are preserved. `data: Maybe::None` restricts this to bare unit
+        // variants; payload / record forms keep their destructure.
+        let rebound_name: Option<verum_ast::Ident> = match &pattern.kind {
+            PatternKind::Variant {
+                path,
+                data: Maybe::None,
+            } => path.as_ident().cloned(),
+            _ => None,
+        };
+        if let Some(name) = rebound_name {
+            let span = pattern.span;
+            return Pattern::new(
+                PatternKind::Ident {
+                    by_ref: false,
+                    mutable: false,
+                    name,
+                    subpattern: Maybe::None,
+                },
+                span,
+            );
+        }
+        pattern
     }
 
     /// Parse a let-else statement: `let pattern = expr else { block };`
