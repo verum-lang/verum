@@ -5540,6 +5540,35 @@ pub(super) fn dispatch_primitive_method(
                 }
             }
 
+            // ── UInt64 comparison ops (T0247) ──
+            // The CallM dispatcher normalises `UInt64.eq` → `uint64$eq`
+            // (width-suffix rewrite above) to keep width-correct semantics.
+            // Without these arms a *direct* `.eq()`/`.lt()` on a UInt64
+            // receiver falls through to "method 'uint64$eq' not found"
+            // (the generic protocol path via `primitives.eq` still works, so
+            // only typed-receiver method calls were affected). lt/le/gt/ge
+            // MUST use UNSIGNED comparison so u64-max ranks as the maximum,
+            // not as the i64 bit-pattern -1.
+            // The `&other` arg is a CBGR ThinRef — it MUST go through
+            // `resolve_arg_value` to deref to the underlying value; a raw
+            // `as_i64()` on the ref panics "Expected int" (the ref's tag).
+            "uint64$eq" | "uint64$ne" | "uint64$lt" | "uint64$le"
+            | "uint64$gt" | "uint64$ge" => {
+                let cb = state.reg_base();
+                let raw = state.registers.get(cb, Reg(args.start.0));
+                let rhs = resolve_arg_value(state, raw).as_i64() as u64;
+                let lhs = v as u64;
+                let result = match method {
+                    "uint64$eq" => lhs == rhs,
+                    "uint64$ne" => lhs != rhs,
+                    "uint64$lt" => lhs < rhs,
+                    "uint64$le" => lhs <= rhs,
+                    "uint64$gt" => lhs > rhs,
+                    _ => lhs >= rhs, // uint64$ge
+                };
+                Value::from_bool(result)
+            }
+
             // ── UInt32 (u32-width) methods ──
             "uint32$to_le_bytes" => {
                 let bytes = (v as u32).to_le_bytes();
