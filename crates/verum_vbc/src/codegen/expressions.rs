@@ -6288,7 +6288,28 @@ impl VbcCodegen {
                     .filter(|(_, info)| is_free_fn(info))
             })
         {
-            Some(result) => result,
+            // CALL-BIND diagnostic (T0114/T0144): report WHICH spelling
+            // a bare-name call bound to, under WHICH module scope. A
+            // cross-module bare-name collision (two modules each
+            // declaring a free `fn <name>`) is invisible in the emitted
+            // `Call { func_id }` — the misbinding only surfaces far
+            // away as a wrong-body execution. Filter substring:
+            // `VERUM_TRACE_CALLBIND=<name>`.
+            Some(result) => {
+                if let Ok(filter) = std::env::var("VERUM_TRACE_CALLBIND")
+                    && func_name.contains(&filter)
+                {
+                    eprintln!(
+                        "[callbind] call '{}' (argc={}) → bound '{}' id={} | scope={:?}",
+                        func_name,
+                        args.len(),
+                        result.0,
+                        result.1.id.0,
+                        self.ctx.current_source_module
+                    );
+                }
+                result
+            }
             None => {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
                 // try just the simple function name "init_main_thread_tls". Functions are often

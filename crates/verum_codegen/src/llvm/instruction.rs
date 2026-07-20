@@ -3516,16 +3516,25 @@ pub fn lower_instruction<'ctx>(
             // bound silently included).
             let is_by_name_ref = verum_vbc::stub_ranges::is_xmod_name_reference(*func_id)
                 || verum_vbc::stub_ranges::is_stub_id(*func_id);
-            let xmod_closure_fid = if is_by_name_ref {
-                vbc_mod
-                    .external_function_names
-                    .iter()
-                    .find(|(fid, _)| fid.0 == *func_id)
-                    .and_then(|(_, sid)| vbc_mod.get_string(*sid))
-                    .and_then(|name| vbc_mod.find_function_by_name(name))
-            } else {
-                None
-            };
+            // T0144: consult the ONE authority (the carried-fact band
+            // map, computed once at module assembly with the RANKED
+            // resolver) before the legacy per-site chase below, which
+            // is strictly weaker — it only does an EXACT
+            // `find_function_by_name`, so a name recorded under a
+            // different-but-equivalent spelling resolved here and not
+            // there, splitting closure targets between the tiers.
+            let xmod_closure_fid = vbc_mod.resolve_band_id(*func_id).or_else(|| {
+                if is_by_name_ref {
+                    vbc_mod
+                        .external_function_names
+                        .iter()
+                        .find(|(fid, _)| fid.0 == *func_id)
+                        .and_then(|(_, sid)| vbc_mod.get_string(*sid))
+                        .and_then(|name| vbc_mod.find_function_by_name(name))
+                } else {
+                    None
+                }
+            });
             let effective_fn_id = xmod_closure_fid.map(|f| f.0).unwrap_or(*func_id);
             let func_desc = match vbc_mod.get_function(FunctionId(effective_fn_id)) {
                 Some(d) => d,
@@ -6071,7 +6080,14 @@ pub fn lower_instruction<'ctx>(
             // leak to a later Call.
             let _ = ctx.take_pending_call_witness();
             let vbc_mod = ctx.vbc_module().or_internal("CallG requires VBC module for function resolution")?;
-            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!("CallG: function id {} not found", func_id))?;
+            // T0144 (LEG-2b): a generic call can carry a band/stub
+            // operand exactly like a direct Call — it is a BY-NAME
+            // reference, not a table index.  Normalise it through the
+            // ONE authority first; pre-fix a band id missed the table
+            // and the `or_internal_else` hard-error SKIPPED lowering of
+            // the whole enclosing function.
+            let resolved_g = vbc_mod.resolved_function_id(*func_id);
+            let func_desc = vbc_mod.get_function(resolved_g).or_internal_else(|| format!("CallG: function id {} not found", func_id))?;
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
             // Clone what we need before the mutable-ctx calls below (func_desc
             // borrows ctx immutably via vbc_module()).
@@ -6828,8 +6844,13 @@ pub fn lower_instruction<'ctx>(
 
             // Resolve the generator function name and get its LLVM function pointer
             let func_ptr_val = if let Some(vbc_mod) = ctx.vbc_module() {
+                // T0144: normalise a band/stub generator target through
+                // the ONE authority — a raw band operand missed the
+                // table and fell through to the `const_int(*func_id)`
+                // arm below, which materialises the SENTINEL NUMBER as
+                // the generator's function pointer.
                 if let Some(func_desc) =
-                    vbc_mod.get_function(verum_vbc::module::FunctionId(*func_id))
+                    vbc_mod.get_function(vbc_mod.resolved_function_id(*func_id))
                 {
                     let func_name = vbc_mod
                         .get_string(func_desc.name)
@@ -40025,7 +40046,10 @@ fn lower_spawn<'ctx>(
     let module = ctx.get_module();
 
     if let Some(vbc_mod) = ctx.vbc_module() {
-        if let Some(func_desc) = vbc_mod.get_function(FunctionId(func_id)) {
+        // T0144: a spawned callee re-homed into the XMOD band is a
+        // BY-NAME reference, not a table index — resolve it through
+        // the ONE authority before the lookup.
+        if let Some(func_desc) = vbc_mod.get_function(vbc_mod.resolved_function_id(func_id)) {
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
             if let Some(llvm_fn) = module.get_function(func_name) {
                 // Get function pointer as i64

@@ -828,6 +828,43 @@ impl VbcModule {
         self.resolved_band_map.get(&id).copied()
     }
 
+    /// **T0144** — the ONE id-normalisation entry point every
+    /// call-resolving consumer goes through before touching the
+    /// function table: map a band/stub *reference* id through the
+    /// carried-fact resolution ([`Self::resolve_band_id`]) to the
+    /// concrete merged-table id. Ids the map does not cover (ordinary
+    /// in-table ids, and band ids whose target is genuinely absent)
+    /// pass through unchanged, so each consumer's own miss handling
+    /// still fires.
+    ///
+    /// Consumers must use this instead of indexing the table with a
+    /// raw instruction operand: a band id is a BY-NAME reference, not
+    /// a table index (see [`crate::stub_ranges::is_xmod_name_reference`]),
+    /// so a bare `get_function(operand)` misses for every cross-module
+    /// reference — which historically degraded to a whole-function
+    /// lowering skip (AOT) or a bare `FunctionNotFound` (Tier 0).
+    #[inline]
+    pub fn resolved_function_id(&self, id: u32) -> FunctionId {
+        self.resolve_band_id(id).unwrap_or(FunctionId(id))
+    }
+
+    /// **T0144** — the qualified callee name the precompile recorded
+    /// in [`Self::external_function_names`] for a band/stub reference
+    /// id, for diagnostics.
+    ///
+    /// A band id that survives resolution is a load-time resolution
+    /// defect, never a legitimate call target (`stub_ranges` §XMOD),
+    /// so the diagnostic that reports it must NAME the callee instead
+    /// of printing a raw sentinel number the reader has to reverse by
+    /// hand.
+    #[inline]
+    pub fn band_reference_name(&self, id: u32) -> Option<&str> {
+        self.external_function_names
+            .iter()
+            .find(|(fid, _)| fid.0 == id)
+            .and_then(|(_, sid)| self.get_string(*sid))
+    }
+
     /// **T0106** — consult the carried-fact protocol dispatch. Returns
     /// the concrete FunctionId implementing `bare_method` for the
     /// runtime receiver's concrete `type_id`, when

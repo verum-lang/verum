@@ -485,9 +485,15 @@ impl Interpreter {
         // `global_ctors: FunctionNotFound(0x2000_00xx)`.  Same lenient
         // discipline as the stage bands: skip with a trace; a test that
         // actually touches the static hits a clear null-deref naming it.
+        // T0144: gate on the CANONICAL by-name-reference predicate.
+        // `in_xmod_call_band` covers only the EMISSION band, so a
+        // ctor id in the merge-time FRESH band (0x3000_0000+) was
+        // recognised as a band reference nowhere and fell through to
+        // execution — exactly the blind spot
+        // `is_xmod_name_reference` exists to close.
         let is_stub_id = |id: u32| -> bool {
             crate::stub_ranges::is_stub_id(id)
-                || (crate::stub_ranges::in_xmod_call_band(id)
+                || (crate::stub_ranges::is_xmod_name_reference(id)
                     && self.state.module.get_function(FunctionId(id)).is_none())
         };
         let mut ctors: Vec<(u32, FunctionId)> = self
@@ -566,7 +572,19 @@ impl Interpreter {
                     || matches!(
                         &e,
                         crate::interpreter::error::InterpreterError::FunctionNotFound(fid)
-                            if crate::stub_ranges::in_xmod_call_band(fid.0)
+                            if crate::stub_ranges::is_xmod_name_reference(fid.0)
+                    )
+                    // T0144: the SAME class, now reported by the
+                    // dispatch handlers with the callee's qualified
+                    // NAME (`[xmod-unresolved] …`) instead of a bare
+                    // sentinel id.  Classifying it here keeps the
+                    // CTOR-UNWIND contract intact — naming the callee
+                    // must not promote a lenient ctor skip into a
+                    // fatal error that aborts every test in the file.
+                    || matches!(
+                        &e,
+                        crate::interpreter::error::InterpreterError::Panic { message }
+                            if message.starts_with("[xmod-unresolved]")
                     );
                     if is_lenient_stub_panic {
                         let ctor_name = self
