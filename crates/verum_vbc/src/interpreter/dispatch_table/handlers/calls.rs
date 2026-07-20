@@ -17,6 +17,42 @@ use crate::value::Value;
 // Call Operations
 // ============================================================================
 
+/// **T0144** — the loud, NAMED diagnostic for a cross-module call the
+/// ONE resolution authority ([`crate::module::VbcModule::resolve_external_bands`]
+/// → [`crate::module::VbcModule::resolve_band_id`]) could not bind.
+///
+/// A band/stub id is a BY-NAME reference, never a function-table index
+/// (`stub_ranges` §XMOD): one that survives to dispatch is a load-time
+/// resolution defect. Pre-fix it surfaced as the bare
+/// `FunctionNotFound(0x2000_00xx)` — band ids are deliberately not
+/// `is_stub_id`, so the named stage-N lenient panic did not cover them
+/// and the reader had to reverse a sentinel integer back to a call
+/// site by hand. The precompile already recorded the qualified callee
+/// in `external_function_names`, so the diagnostic states it.
+///
+/// The `[xmod-unresolved]` prefix is load-bearing: `run_global_ctors`
+/// classifies it as the lenient ctor class, so one unresolved static
+/// still cannot abort a whole test file (CTOR-UNWIND contract).
+fn unresolved_xmod_call(
+    module: &crate::module::VbcModule,
+    func_id: FunctionId,
+) -> InterpreterError {
+    let callee = match module.band_reference_name(func_id.0) {
+        Some(name) => format!("'{}'", name),
+        None => "<no name recorded in external_function_names>".to_string(),
+    };
+    InterpreterError::Panic {
+        message: format!(
+            "[xmod-unresolved] cross-module call to {} never resolved (band id {}): \
+             the callee's body is absent from the assembled module — its producing \
+             module was pruned from the merge set, or its name was never registered. \
+             Re-run with VERUM_TRACE_REMAP_FALLBACK=1 to see the merge-time \
+             resolution attempt.",
+            callee, func_id.0
+        ),
+    }
+}
+
 /// Call function: `dst = fn(args...)`
 ///
 
@@ -118,6 +154,12 @@ pub(in super::super) fn handle_call(
                         stage, stub_class, func_id.0
                     ),
                 });
+            }
+            // T0144: a BY-NAME cross-module reference that survived the
+            // carried-fact resolution — say WHICH callee never resolved
+            // instead of leaving the reader a bare sentinel id.
+            if crate::stub_ranges::is_xmod_name_reference(func_id.0) {
+                return Err(unresolved_xmod_call(&state.module, func_id));
             }
             return Err(InterpreterError::FunctionNotFound(func_id));
         }
@@ -608,6 +650,12 @@ pub(in super::super) fn handle_call_generic(
                         stage, stub_class, func_id.0
                     ),
                 });
+            }
+            // T0144: same NAMED diagnostic as `handle_call` — a band
+            // reference reaching CallG dispatch is the identical
+            // load-time resolution defect.
+            if crate::stub_ranges::is_xmod_name_reference(func_id.0) {
+                return Err(unresolved_xmod_call(&state.module, func_id));
             }
             return Err(InterpreterError::FunctionNotFound(func_id));
         }
