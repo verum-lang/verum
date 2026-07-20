@@ -17429,6 +17429,27 @@ impl VbcCodegen {
         if self.record_key_is_authoritative(name) {
             return None;
         }
+        // T0525 — ALIAS IDENTITY.  `type Ali is Rec;` records
+        // `type_aliases["Ali"] = "Rec"` and emits a
+        // TypeKind::Alias descriptor, but a record LITERAL written
+        // through the alias never chased it: `record_key` stayed
+        // "Ali", `type_field_layouts` had no "Ali", the field-index
+        // loop fell to the global by-name intern table and the
+        // emitted SetF wrote past the allocation.  An alias is a
+        // NAME, not a type — resolve it before any layout question.
+        // `resolve_type_alias` is the canonical cycle-safe chain
+        // walker WITH mount provenance; it returns a fixpoint, so the
+        // recursive call's `resolve_type_alias(aliased) == aliased`
+        // and this block is skipped (recursion terminates at depth 2).
+        let aliased = self.resolve_type_alias(name);
+        if aliased != name {
+            if self.record_key_is_authoritative(&aliased) {
+                return Some(aliased);
+            }
+            if let Some(q) = self.resolve_record_type_key(&aliased) {
+                return Some(q);
+            }
+        }
         if let Some(path) = self.ctx.mounted_types.get(name) {
             let segs: Vec<&str> = path.split('.').collect();
             if segs.len() >= 2 {

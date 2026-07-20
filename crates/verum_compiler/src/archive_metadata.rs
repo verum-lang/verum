@@ -106,6 +106,12 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
     // determinism; the collision POLICY lives at the insert.
     let mut sorted_index: Vec<_> = archive.index.iter().collect();
     sorted_index.sort_by(|a, b| a.name.cmp(&b.name));
+    // T0525 — ARCHIVE-WIDE TypeId → name index, harvested during the
+    // same single decode pass the walk already performs.  `Some(name)`
+    // = exactly one type carries that id archive-wide; `None` = the id
+    // is ambiguous (two modules disagree) and must stay opaque.
+    // See `resolve_opaque_type_ids_in_alias_targets` for what it fixes.
+    let mut archive_type_names: HashMap<u32, Option<String>> = HashMap::new();
     for entry in sorted_index {
         let module = match archive.load_module(&entry.name) {
             Ok(m) => m,
@@ -118,10 +124,127 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> CoreMetadata {
                 continue;
             }
         };
+        for t in module.types.iter() {
+            let Some(n) = module.strings.get(t.name) else {
+                continue;
+            };
+            let (known, conflicting) = match archive_type_names.get(&t.id.0) {
+                None => (false, false),
+                Some(None) => (true, true),
+                Some(Some(existing)) => (true, existing.as_str() != n),
+            };
+            if conflicting {
+                archive_type_names.insert(t.id.0, None);
+            } else if !known {
+                archive_type_names.insert(t.id.0, Some(n.to_string()));
+            }
+        }
         register_module_metadata(&module, &entry.name, &mut meta);
     }
+    resolve_opaque_type_ids_in_alias_targets(&mut meta, &archive_type_names);
 
     meta
+}
+
+/// T0525 — restore the NAME of a cross-module alias target.
+///
+/// `register_module_metadata` renders every `TypeRef` through a
+/// **per-module** `type_id_to_name` map, so an alias whose target is
+/// declared in a DIFFERENT module of the same archive
+/// (`core/io/mod.vr`'s `public type IoError is StreamError;` →
+/// `StreamError` lives in `core/io/protocols.vr`) rendered as the
+/// placeholder `__opaque_type_<id>`.  The typechecker's
+/// `parse_descriptor_type_string` maps that placeholder to a FRESH
+/// `Type::Var` — i.e. the alias ends up with no type identity at all.
+///
+/// Measured consequences before this pass (Tier 0, shipped stdlib):
+///   * `mount core.io.{IoError}; fn f(x: IoError) -> Int { 1 }` then
+///     `f(42)` COMPILED AND RAN — a type-safety hole, the annotation
+///     unified with anything.  The same file's same-module alias
+///     (`core.meta.span.Span is MetaSpan`) correctly rejected `42`.
+///   * `IoError { kind, message }` in a user module failed
+///     `Expected record type, found: _` (the `_` IS that fresh var),
+///     and `ctx.lookup_type("IoError")` returning `Type::Var`
+///     disarmed the mount-authority lexical guard, handing
+///     `IoError.WouldBlock` to the ambient bare variant-constructor
+///     table (`fn(Text) -> CompressError`).
+///
+/// The pass rewrites `__opaque_type_<id>` tokens ANYWHERE inside an
+/// alias target string, so generic-instantiated targets
+/// (`Result<T, __opaque_type_1234>`) are repaired too.  Ids that are
+/// ambiguous archive-wide keep the placeholder — never guess.
+///
+/// Scope note: the same per-module rendering limitation also affects
+/// record FIELD types and function param/return types; those carriers
+/// are a wider surface and are tracked separately.
+fn resolve_opaque_type_ids_in_alias_targets(
+    meta: &mut CoreMetadata,
+    archive_type_names: &HashMap<u32, Option<String>>,
+) {
+    if archive_type_names.is_empty() {
+        return;
+    }
+    for desc in meta.types.values_mut() {
+        let TypeDescriptorKind::Alias { target } = &mut desc.kind else {
+            continue;
+        };
+        if let Some(fixed) =
+            substitute_opaque_type_ids(target.as_str(), archive_type_names)
+        {
+            *target = Text::from(fixed.as_str());
+        }
+    }
+}
+
+/// T0525 helper — replace every `__opaque_type_<digits>` token in
+/// `raw` whose id resolves to exactly one archive-wide type name.
+/// Returns `None` when nothing was substituted, so callers can skip
+/// the write.
+fn substitute_opaque_type_ids(
+    raw: &str,
+    archive_type_names: &HashMap<u32, Option<String>>,
+) -> Option<String> {
+    const MARKER: &str = "__opaque_type_";
+    if !raw.contains(MARKER) {
+        return None;
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    let mut changed = false;
+    while let Some(pos) = rest.find(MARKER) {
+        let (head, tail) = rest.split_at(pos);
+        out.push_str(head);
+        let after = &tail[MARKER.len()..];
+        let digits_len = after
+            .bytes()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        if digits_len == 0 {
+            // Malformed placeholder — emit verbatim and move past
+            // the marker so the scan always makes progress.
+            out.push_str(MARKER);
+            rest = after;
+            continue;
+        }
+        let (digits, remainder) = after.split_at(digits_len);
+        match digits
+            .parse::<u32>()
+            .ok()
+            .and_then(|id| archive_type_names.get(&id))
+        {
+            Some(Some(name)) => {
+                out.push_str(name);
+                changed = true;
+            }
+            _ => {
+                out.push_str(MARKER);
+                out.push_str(digits);
+            }
+        }
+        rest = remainder;
+    }
+    out.push_str(rest);
+    if changed { Some(out) } else { None }
 }
 
 fn register_module_metadata(

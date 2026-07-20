@@ -11831,7 +11831,22 @@ impl TypeChecker {
         // Named case is also the deliberate alias/record indirection
         // shape, for which the mount-scoped result would be the
         // IDENTICAL `Named(name)` anyway, so skipping loses nothing.
-        if let Some(existing) = self.ctx.lookup_type(name) {
+        //
+        // T0525: read the FLAT TYPE-DEF SLOT DIRECTLY, never
+        // `ctx.lookup_type` — that accessor falls back to
+        // `resolve_alias`, so an ALIAS whose target failed to resolve
+        // (a cross-module stdlib alias renders `__opaque_type_N`,
+        // which `parse_descriptor_type_string` turns into a fresh
+        // `Type::Var`) was indistinguishable here from a lexically
+        // scoped generic parameter and DISARMED mount authority for
+        // its own name.  Measured: `mount core.sys.io_engine.{IoError}`
+        // → `[mount-auth] 'IoError': lexical guard (Var)` → the
+        // ambient bare variant-constructor table then answered
+        // `IoError` as `fn(Text) -> CompressError`.  Only names
+        // written into `type_defs` by an actual binder
+        // (`ctx.define_type`) are lexical bindings; alias-resolution
+        // RESULTS are not, and must never gate this path.
+        if let Some(existing) = self.ctx.type_defs.get(&name_text) {
             match existing {
                 Type::Var(_) => {
                     if trace_guard {
@@ -13763,6 +13778,93 @@ impl TypeChecker {
         }
     }
 
+    /// T0525 — the ONE module an explicit `mount` binds `name` from
+    /// at this call site, or `None` when the name was not imported,
+    /// or was imported from several modules (ambiguous — the caller's
+    /// own `E602 AmbiguousName` check owns that case).
+    ///
+    /// Read-only companion to [`Self::resolve_type_name_mount_scoped`]:
+    /// same `imported_names` source of truth
+    /// (`record_import_source` is its single writer), no ctx
+    /// mutation, so `&self` resolvers can consult the mount set.
+    pub(crate) fn single_import_source(
+        &self,
+        name: &verum_common::Text,
+    ) -> Option<verum_common::Text> {
+        let sources = self.imported_names.get(name)?;
+        if sources.len() != 1 {
+            return None;
+        }
+        sources.iter().next().cloned()
+    }
+
+    /// T0525 — does module `module_path` DECLARE or RE-EXPORT a type
+    /// named `type_name`?
+    ///
+    /// The question "which namespace does this bare name belong to at
+    /// this call site" is answered from module surfaces, never from a
+    /// spelling heuristic.  Three authorities, cheapest first:
+    ///   1. the checker's own qualified type slot
+    ///      (`<module>.<name>` — written by
+    ///      `define_type_in_current_module` for source-compiled
+    ///      modules, and by the mount-scoped metadata loader),
+    ///   2. `core_metadata`'s qualified type key (the archive's
+    ///      per-module descriptor — the ranked slot documented in
+    ///      `archive_metadata`'s collision policy),
+    ///   3. `core_metadata.module_reexports` — a `public mount`
+    ///      chain makes the leaf part of this module's surface even
+    ///      though the declaration lives elsewhere.
+    ///
+    /// `cog.`-prefixed module spellings are normalised, matching
+    /// `lookup_type_mount_scoped`'s canonicalisation.
+    pub(crate) fn module_publishes_type(
+        &self,
+        module_path: &str,
+        type_name: &str,
+    ) -> bool {
+        let canonical = module_path
+            .strip_prefix("cog.")
+            .unwrap_or(module_path);
+        if canonical.is_empty() || canonical == "cog" {
+            return false;
+        }
+        let qualified: verum_common::Text =
+            format!("{}.{}", canonical, type_name).into();
+        if self.ctx.type_defs.contains_key(&qualified) {
+            return true;
+        }
+        let Maybe::Some(metadata) = &self.core_metadata else {
+            return false;
+        };
+        if metadata.types.contains_key(&qualified) {
+            return true;
+        }
+        // Declared here under the SIMPLE key: the simple slot is
+        // first-wins archive-wide, so it only counts when the
+        // descriptor's own `module_path` names this module.
+        let simple: verum_common::Text = type_name.into();
+        if let Some(td) = metadata.types.get(&simple) {
+            let owner = td
+                .module_path
+                .as_str()
+                .strip_prefix("cog.")
+                .unwrap_or(td.module_path.as_str());
+            if owner == canonical {
+                return true;
+            }
+        }
+        // Re-export surface: `(local_name, true_name, source_module)`.
+        if let Some(leaves) =
+            metadata.module_reexports.get(&verum_common::Text::from(canonical))
+            && leaves.iter().any(|(local, true_name, _src)| {
+                local.as_str() == type_name || true_name.as_str() == type_name
+            })
+        {
+            return true;
+        }
+        false
+    }
+
     /// Try to build a variant type from inductive constructors.
     /// STDLIB-AGNOSTIC: This enables pattern matching on generic types like Maybe<T>
     /// when the variant info is stored in inductive_constructors rather than as Type::Variant.
@@ -13830,6 +13932,82 @@ impl TypeChecker {
         if crate::ctor_trace_enabled() {
             eprintln!("[ctor-trace]   parents={:?}", parents.iter().map(|p| p.as_str()).collect::<Vec<_>>());
         }
+        // ── T0525: NAMESPACE PRECEDENCE ───────────────────────────
+        // `variant_constructor_parents` is an AMBIENT, flat, bare-name
+        // table: every sum type in the loaded stdlib publishes each of
+        // its variant spellings into it with no regard for the call
+        // site's scope.  It is therefore the OUTERMOST binding — a
+        // prelude — and must LOSE to every explicit binding, exactly
+        // as `define_type_in_current_module` already makes a file's
+        // own `type` declaration evict a same-named ambient
+        // constructor shadow (infer/env.rs, "evict stale
+        // variant-constructor shadow") and as
+        // `resolve_type_name_mount_scoped` already makes an explicit
+        // `mount` authoritative for TYPE-annotation resolution
+        // (MOUNT-TYPE-AUTHORITY-1).  Enforcing the rule HERE — in the
+        // table's own resolver — covers every consumer at once
+        // (`bare_payload_ctor_as_fn`, the Call arm, pattern
+        // resolution, …) instead of one call site.
+        //
+        // Two ordered rules, both keyed on the call site's own
+        // EXPLICIT mount set (globs are excluded by construction —
+        // `collect_explicit_import_names` skips `MountTreeKind::Glob`):
+        //
+        //  (1) MOUNT-SCOPED SELECTION — when exactly one module is
+        //      recorded as the source of `name` and one registered
+        //      parent is declared in / re-exported by that module,
+        //      THAT parent wins outright.  Replaces the arbitrary
+        //      `parents.first()` (bake-declaration-order) pick with
+        //      the owner the author actually named.
+        //
+        //  (2) TYPE-NAMESPACE PRECEDENCE — when `name` is explicitly
+        //      mounted, the mounted item IS a type, and NO registered
+        //      parent comes from that module, then `name` denotes
+        //      that TYPE at this site, not an ambient constructor.
+        //      Decline, so the caller falls through to type-namespace
+        //      resolution instead of answering with a stranger sum
+        //      type's constructor.
+        //
+        // Measured pre-fix (shipped stdlib, Tier 0, T0509 census): 14
+        // sum types spell a variant `IoError`; with
+        // `mount core.sys.io_engine.{IoError, EngineIoError};` the
+        // expression `IoError.WouldBlock` inferred its OBJECT as
+        // `fn(Text) -> CompressError` (core/compress/mod.vr's variant
+        // owned the bare key) and failed E103.  196 stdlib type names
+        // collide with some other type's variant name, so this is a
+        // class, not one name.
+        // Same in-flight guard `resolve_type_name_mount_scoped` uses:
+        // mid-import the checker resolves OTHER modules' signatures,
+        // and the requesting file's mount set must not leak into a
+        // stranger module's own-name resolution.
+        let mount_source: Option<Text> = if self.imports_in_progress.is_empty()
+            && self.glob_imports_in_progress.is_empty()
+            && self.explicit_imports.contains(name)
+        {
+            self.single_import_source(&ctor_text)
+        } else {
+            None
+        };
+        let mount_scoped: Option<Text> = mount_source.as_ref().and_then(|src| {
+            parents
+                .iter()
+                .find(|p| self.module_publishes_type(src.as_str(), p.as_str()))
+                .cloned()
+        });
+        if mount_scoped.is_none()
+            && let Some(src) = mount_source.as_ref()
+            && self.module_publishes_type(src.as_str(), name)
+        {
+            if crate::ctor_trace_enabled() {
+                eprintln!(
+                    "[ctor-trace]   T0525 decline: '{}' is an explicitly mounted TYPE from '{}'; \
+                     no ambient parent belongs to that module",
+                    name,
+                    src.as_str()
+                );
+            }
+            return None;
+        }
         // Pick the parent whose constructor for `name` accepts the
         // expected arity, when arity context is available AND multiple
         // parents are in the registry.  Otherwise fall through to the
@@ -13845,6 +14023,8 @@ impl TypeChecker {
         });
         let parent_name = if let Some(h) = hinted {
             h
+        } else if let Some(m) = mount_scoped {
+            m
         } else if let (Some(arity), true) =
             (expected_arity, parents.len() > 1)
         {
