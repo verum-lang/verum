@@ -5,6 +5,7 @@ use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::dispatch_loop_table_with_entry_depth;
 use super::bytecode_io::*;
+use super::envelope::dispatch_enveloped;
 use crate::instruction::Reg;
 use crate::module::FunctionId;
 use crate::value::Value;
@@ -21,26 +22,28 @@ use crate::value::Value;
 pub(in super::super) fn handle_gpu_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
+    dispatch_enveloped(state, gpu_extended_body)
+}
+
+/// `GpuExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition — the
+/// hardening that retired the `gpu_memset` SIGSEGV of T0177.
+///
+/// Unlike the previous tail-local correction, the authority now lives in the
+/// caller, so an arm that exits early on a non-error path can no longer bypass
+/// it. `KernelLaunch` depends on that: it drives a nested dispatch loop per
+/// simulated GPU thread, and the reposition afterwards is what restores pc.
+fn gpu_extended_body(
+    state: &mut InterpreterState,
+    sub_op_byte: u8,
+) -> InterpreterResult<DispatchResult> {
     use super::super::super::kernel::device::{Vendor, get_registry};
     use crate::instruction::GpuSubOpcode;
 
-    let sub_op_byte = read_u8(state)?;
-    // Length-prefix that the carrier encoder writes after sub_op (same
-    // convention as FfiExtended/MathExtended/…).
-    //
-    // T0193-style hardening (T0177): the envelope is AUTHORITATIVE for
-    // stream advance. After the sub-op arm runs, the dispatcher
-    // repositions pc to `operands_start + operand_byte_count` — an arm
-    // that reads fewer or more registers than the emitter packed can
-    // produce a wrong value, but can no longer desync the instruction
-    // stream (the gpu_memset SIGSEGV mechanism of T0177). Arms therefore
-    // must not exit the match early on a non-error path; errors abort
-    // interpretation, so their bypass of the repositioning is moot.
-    let operand_byte_count = read_varint(state)?;
-    let operands_start = state.pc();
     let sub_op = GpuSubOpcode::from_byte(sub_op_byte);
 
-    let result = match sub_op {
+    match sub_op {
         // ================================================================
         // Device Enumeration (0x90-0x93)
         // ================================================================
@@ -1153,12 +1156,7 @@ pub(in super::super) fn handle_gpu_extended(
             feature: "unknown GPU sub-opcode",
             opcode: Some(crate::instruction::Opcode::GpuExtended),
         }),
-    };
-    // Envelope-authoritative continuation (see the header comment): the
-    // next instruction starts exactly past the encoded operand bytes,
-    // regardless of how many registers the arm consumed.
-    state.set_pc(operands_start.wrapping_add(operand_byte_count as u32));
-    result
+    }
 }
 
 // ============================================================================

@@ -6,6 +6,7 @@ use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use super::envelope::dispatch_enveloped;
 use super::cbgr_helpers::{
     CBGR_NO_CHECK_GENERATION, EPOCH_WINDOW_SIZE, decode_cbgr_ref, encode_cbgr_ref,
     encode_cbgr_ref_mut, is_cbgr_ref, is_cbgr_ref_mutable, regref_generation_matches,
@@ -1138,14 +1139,18 @@ pub(in super::super) fn container_to_slice_fat_ref(
 pub(in super::super) fn handle_cbgr_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let sub_op_byte = read_u8(state)?;
-    // Skip operand-length varint that the encoder writes after
-    // sub_op (see encode_instruction's `Instruction::CbgrExtended`
-    // arm).  Without this, the operand-length bytes get
-    // misinterpreted as register indices.  The length is only
-    // consumed by sequential decoders (linker, disassembler);
-    // dispatch reads operands per-sub_op below.
-    let _operand_len = read_varint(state)?;
+    dispatch_enveloped(state, cbgr_extended_body)
+}
+
+/// `CbgrExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition — an arm may
+/// read any number of operands, and may `return` early, without desynchronising
+/// the instruction stream.
+fn cbgr_extended_body(
+    state: &mut InterpreterState,
+    sub_op_byte: u8,
+) -> InterpreterResult<DispatchResult> {
     let sub_op = CbgrSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {

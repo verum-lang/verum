@@ -5,6 +5,7 @@ use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::arith_helpers::*;
 use super::bytecode_io::*;
+use super::envelope::dispatch_enveloped;
 use crate::instruction::ArithSubOpcode;
 use crate::types::TypeId;
 use crate::value::Value;
@@ -19,10 +20,18 @@ use crate::value::Value;
 pub(in super::super) fn handle_arith_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let sub_op_byte = read_u8(state)?;
-    // Skip operand-length varint (see encode_instruction's
-    // `Instruction::ArithExtended` arm).
-    let _operand_len = read_varint(state)?;
+    dispatch_enveloped(state, arith_extended_body)
+}
+
+/// `ArithExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition — an arm may
+/// read any number of operands, and may `return` early, without desynchronising
+/// the instruction stream.
+fn arith_extended_body(
+    state: &mut InterpreterState,
+    sub_op_byte: u8,
+) -> InterpreterResult<DispatchResult> {
     let sub_op = ArithSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {

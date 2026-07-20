@@ -187,6 +187,9 @@ pub(super) mod meta;
 pub(super) mod arith_extended;
 pub(super) mod char_extended;
 pub(super) mod cubical;
+// The single authority for extended-carrier stream advance — every
+// length-prefixed family routes through `envelope::dispatch_enveloped`.
+pub(super) mod envelope;
 pub(super) mod extended;
 pub(super) mod ffi_extended;
 // Embedded scripting engine (Extended sub-ops 0x20-0x2F) — `core.script`.

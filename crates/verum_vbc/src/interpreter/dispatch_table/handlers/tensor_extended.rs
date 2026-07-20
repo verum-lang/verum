@@ -5,6 +5,7 @@ use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::{alloc_list_from_values, alloc_tensor_value, tensor_handle_ptr};
 use super::bytecode_io::*;
+use super::envelope::dispatch_enveloped;
 use super::method_dispatch::{make_none_value, make_some_value};
 use super::string_helpers::{alloc_string_value, extract_string};
 use crate::instruction::{
@@ -24,28 +25,22 @@ use crate::value::Value;
 pub(in super::super) fn handle_tensor_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let sub_op_byte = read_u8(state)?;
-    // Wire format: `opcode + sub_op + varint(operand_byte_count) +
-    // operand_bytes`.  The varint is consumed here so existing
-    // per-sub_op inline reads below operate exactly as before — they
-    // know how many register operands to read for their specific
-    // sub-op based on the structured arms (Pool, Argmin, …) or, for
-    // the registry-driven `Instruction::TensorExtended` carrier
-    // emitted by `emit_intrinsic_tensor_extended`, the operand
-    // unpacker reads exactly the operands packed at codegen time.
-    // The varint length prefix is needed by the sequential bytecode
-    // decoder (linker round-trip / disassembler) to advance past the
-    // operand bytes without knowing per-intrinsic arity, since the
-    // same sub_op byte is shared by intrinsics with different param
-    // counts (TENSOR_UNOP vs TENSOR_SIGMOID, etc.).
-    // T0193 hardening: the envelope is AUTHORITATIVE for stream
-    // advance. After the sub-op arm runs, the dispatcher repositions
-    // pc to `operands_start + operand_byte_count` — an arm that
-    // reads fewer or more bytes than the emitter packed can produce
-    // a wrong value, but can no longer desync the instruction
-    // stream (the GPU-memset SIGSEGV mechanism of T0177).
-    let operand_byte_count = read_varint(state)?;
-    let operands_start = state.pc();
+    dispatch_enveloped(state, tensor_extended_body)
+}
+
+/// `TensorExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition (T0193).
+///
+/// The envelope matters more here than anywhere else: one `sub_op` byte is
+/// shared by intrinsics with DIFFERENT param counts (`TENSOR_UNOP` vs
+/// `TENSOR_SIGMOID`), so the arm's read count genuinely cannot be derived from
+/// the sub-op alone. Only the emitter-written length knows how many bytes the
+/// instruction occupies.
+fn tensor_extended_body(
+    state: &mut InterpreterState,
+    sub_op_byte: u8,
+) -> InterpreterResult<DispatchResult> {
     // `0xFF`-marker dispatch: `emit_intrinsic_tensor_ext_extended` emits
     // `TensorExtended { sub_op: 0xFF, operands: [ext_sub_op, dst, ...] }`
     // for entry-point intrinsics (regex_find / regex_replace /
@@ -121,7 +116,7 @@ pub(in super::super) fn handle_tensor_extended(
         tensor_softmax, tensor_topk,
     };
 
-    let result = match sub_op {
+    match sub_op {
         Some(TensorSubOpcode::Pool) => {
             let op_byte = read_u8(state)?;
             let dst = read_reg(state)?;
@@ -4613,12 +4608,7 @@ pub(in super::super) fn handle_tensor_extended(
                 }),
             }
         }
-    };
-    // Envelope-authoritative advance (see the header comment): the
-    // arm's reads no longer decide where the next instruction
-    // begins. Error results skip this — the frame unwinds anyway.
-    state.set_pc(operands_start.wrapping_add(operand_byte_count as u32));
-    result
+    }
 }
 
 // ============================================================================

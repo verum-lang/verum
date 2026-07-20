@@ -4,6 +4,7 @@ use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use super::envelope::dispatch_enveloped;
 use crate::instruction::{LogSubOpcode, Opcode};
 use crate::value::Value;
 // LIST-REALLOC-CANONICAL-1: realloc must recognise interpreter-heap backing
@@ -33,10 +34,18 @@ use crate::types::TypeId;
 pub(in super::super) fn handle_log_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let sub_op_byte = read_u8(state)?;
-    // Skip operand-length varint (see encode_instruction's
-    // `Instruction::LogExtended` arm).
-    let _operand_len = read_varint(state)?;
+    dispatch_enveloped(state, log_extended_body)
+}
+
+/// `LogExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition — an arm may
+/// read any number of operands, and may `return` early, without desynchronising
+/// the instruction stream.
+fn log_extended_body(
+    state: &mut InterpreterState,
+    sub_op_byte: u8,
+) -> InterpreterResult<DispatchResult> {
     let sub_op = LogSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {
@@ -153,45 +162,34 @@ pub(in super::super) fn handle_log_extended(
 pub(in super::super) fn handle_mem_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let sub_op = read_u8(state)?;
-    // **Task #8 fundamental fix** — operand-length is AUTHORITATIVE.
-    //
-    // Each sub-op handler below reads a fixed number of register
-    // operands matching the **registry's** declared param shape
-    // (e.g. AllocZeroed reads dst + size + align = 3 regs).  But the
-    // Verum-source forward declaration of an intrinsic may bind a
-    // SUBSET of the registry's params — the canonical example is
-    // `core/intrinsics/runtime/os.vr::__alloc_zeroed_raw(size: Int)`
-    // which is annotated `@intrinsic("alloc_zeroed")` with a
-    // single-arg signature even though the registry's
-    // `alloc_zeroed` declares `param_count: 2 (size, align)`.
-    // `compile_intrinsic_call`'s
-    // `for &arg in args.iter().take(N)` then emits FEWER operand
-    // bytes than the sub-op handler reads — the handler's
-    // `read_reg` overshoots into the next instruction's opcode
-    // byte, desynchronising the PC for the remainder of the
-    // function and surfacing as a `NullPointer` at a downstream
-    // `SetF` whose obj-register now holds garbage.
-    //
-    // Live failure mode: `GenerationalArena.new(N)`'s body emits
-    // `MemExtended { sub_op: 0x01, operands: [dst, size] }` (2
-    // operand bytes), the handler reads 3 regs, PC overshoots by
-    // 1, and the next `New { type_id, field_count }` decodes from
-    // a misaligned offset → returns a non-pointer Value → the
-    // first SetF after it panics with "Null pointer dereference"
-    // at the GenerationalArena.new pc=70 site.
-    //
-    // Fundamental fix: read the operand-byte budget here, capture
-    // the post-operand PC, and force-set PC to that boundary
-    // after the sub-op handler returns.  Sub-handlers can read
-    // any number of bytes — codegen drift can no longer leak
-    // past this instruction's boundary.  Same discipline as the
-    // explicit `_operand_len`-bounded loop in `encode_instruction`
-    // on the serialise side.
-    let operand_len = read_varint(state)? as u32;
-    let operand_end = state.pc() + operand_len;
+    dispatch_enveloped(state, mem_extended_body)
+}
 
-    let result = match sub_op {
+/// `MemExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition.
+///
+/// This family is the canonical instance of the defect the envelope exists to
+/// kill, and the reason the authority is unconditional. Each arm reads the
+/// register count of the **registry's** declared param shape (`AllocZeroed`
+/// reads dst + size + align = 3), but a Verum-source forward declaration may
+/// bind a SUBSET of those params — `core/intrinsics/runtime/os.vr`'s
+/// `__alloc_zeroed_raw(size: Int)` is annotated `@intrinsic("alloc_zeroed")`
+/// with one argument while the registry declares two. Codegen then emits FEWER
+/// operand bytes than the arm reads, the arm's `read_reg` overshoots into the
+/// next instruction's opcode byte, and the pc stays misaligned for the rest of
+/// the function: `GenerationalArena.new(N)` surfaced this as a "Null pointer
+/// dereference" at a downstream `SetF` whose object register had become
+/// garbage.
+///
+/// Arms may therefore read any number of bytes, in any order, and may `return`
+/// early — the envelope re-establishes the instruction boundary afterwards, so
+/// codegen drift can no longer leak past it.
+fn mem_extended_body(
+    state: &mut InterpreterState,
+    sub_op: u8,
+) -> InterpreterResult<DispatchResult> {
+    match sub_op {
         // Alloc: [dst, size, align]
         0x00 => {
             let dst = read_reg(state)?;
@@ -319,6 +317,14 @@ pub(in super::super) fn handle_mem_extended(
                     }
                 }
                 state.set_reg(dst, Value::from_ptr(new_ptr as *mut ()));
+                // T0429 — this early return is safe BY CONSTRUCTION, and the
+                // reason is structural, not local: the pc reposition lives in
+                // `dispatch_enveloped`, our CALLER, so returning from this
+                // function cannot bypass it. When the correction still lived at
+                // the tail of this handler, this exact `return` skipped it and
+                // re-opened the desync the handler was written to close. Any
+                // future fast path may return freely for the same reason —
+                // just never reintroduce a pc fixup here.
                 return Ok(DispatchResult::Continue);
             }
 
@@ -466,17 +472,7 @@ pub(in super::super) fn handle_mem_extended(
             feature: "mem_extended sub-opcode",
             opcode: Some(Opcode::MemExtended),
         }),
-    };
-
-    // **Task #8 force-PC-correction.**  See the rationale block at
-    // function entry.  Sub-handlers may have advanced PC past or
-    // short of `operand_end`; either way, force-realign to the
-    // instruction boundary so the next dispatch tick decodes from
-    // the correct offset.  Performed even on `Err` so that the
-    // panic message's PC reflects the failing instruction rather
-    // than the next misaligned one.
-    state.set_pc(operand_end);
-    result
+    }
 }
 
 /// Format a Value for logging output.

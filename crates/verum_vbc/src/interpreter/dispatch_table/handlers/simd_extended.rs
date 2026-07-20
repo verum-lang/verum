@@ -4,6 +4,7 @@ use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use super::envelope::dispatch_enveloped;
 use crate::instruction::{Opcode, SimdSubOpcode};
 use crate::value::Value;
 
@@ -30,10 +31,18 @@ use crate::value::Value;
 pub(in super::super) fn handle_simd_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let sub_op_byte = read_u8(state)?;
-    // Skip operand-length varint (see encode_instruction's
-    // `Instruction::SimdExtended` arm).
-    let _operand_len = read_varint(state)?;
+    dispatch_enveloped(state, simd_extended_body)
+}
+
+/// `SimdExtended` sub-op arms. Invoked through
+/// [`dispatch_enveloped`](super::envelope::dispatch_enveloped), which owns the
+/// sub-op byte, the operand-length envelope and the pc reposition — an arm may
+/// read any number of operands, and may `return` early, without desynchronising
+/// the instruction stream.
+fn simd_extended_body(
+    state: &mut InterpreterState,
+    sub_op_byte: u8,
+) -> InterpreterResult<DispatchResult> {
     let sub_op = SimdSubOpcode::from_byte(sub_op_byte);
 
     match sub_op {
