@@ -26,7 +26,10 @@ mount core.sys.windows.ntdll.{
 // the type. Same class as the Duration single-field-record unboxing
 // (memory: duration_single_field_record_unboxing_2026-05-27). Deep fix is
 // VBC codegen newtype-boxing parity; pinned here until then.
-@ignore("NEWTYPE-UNBOX-1: IoStatusBlock.status().is_success() unboxes NtStatus to Int and loses dispatch. See audit.md §B.")
+// T0160: FIXED — the transparent-wrapper parent-compat gate now honours a
+// codegen-committed qualified newtype method dispatched on its bare-inner
+// receiver (was rejected because the wrapper NAME wasn't in the primitive
+// allowlist), so this cross-module unbox dispatch resolves.
 @test
 fn wx_ntdll_reg_iosb_status_is_success_newtype_unbox() {
     let iosb = IoStatusBlock.new();

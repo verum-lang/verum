@@ -256,6 +256,59 @@ const ITER_TYPE_RANGE: i64 = 3;
 // Method Dispatch Handlers
 // ============================================================================
 
+/// NEWTYPE-UNBOX-1 (T0160): does transparent-wrapper newtype `td` wrap an
+/// inner type whose NaN-box class matches `receiver`?
+///
+/// A transparent newtype (`type NtStatus is (Int32);`, `type Celsius is (Float);`)
+/// is stored at runtime as its BARE inner value — the type tag is intentionally
+/// dropped (`is_transparent_wrapper`, SOURCE OF TRUTH; types.rs). Codegen records
+/// the inner type as the first field of the wrapper descriptor; both the flag and
+/// the field survive the archive round-trip. A wrapper-qualified method dispatched
+/// on such a value arrives with the receiver classified as the inner primitive;
+/// this confirms the inner shares the receiver's box class so the parent-compat
+/// gate can honour the codegen-committed target with no cross-class mis-dispatch.
+/// Any non-concrete / non-primitive / mismatched inner returns `false`, leaving
+/// the existing loud "method not found" path intact (strictly monotonic).
+fn transparent_wrapper_inner_matches_receiver(
+    td: &crate::types::TypeDescriptor,
+    receiver: &Value,
+) -> bool {
+    let Some(inner_field) = td.fields.first() else {
+        return false;
+    };
+    let inner_tid = match &inner_field.type_ref {
+        crate::types::TypeRef::Concrete(id) => *id,
+        _ => return false,
+    };
+    if receiver.is_int() {
+        // Every integer width that inlines into a 64-bit NaN box, plus Char
+        // (boxes as Int). I128/U128 are heap-boxed — excluded, matching the
+        // sibling name allowlist for `is_int()` receivers.
+        return inner_tid == TypeId::INT
+            || inner_tid == TypeId::U8
+            || inner_tid == TypeId::U16
+            || inner_tid == TypeId::U32
+            || inner_tid == TypeId::U64
+            || inner_tid == TypeId::I8
+            || inner_tid == TypeId::I16
+            || inner_tid == TypeId::I32
+            || inner_tid == TypeId::CHAR;
+    }
+    if receiver.is_float() {
+        return inner_tid == TypeId::FLOAT || inner_tid == TypeId::F32;
+    }
+    if receiver.is_bool() {
+        return inner_tid == TypeId::BOOL;
+    }
+    if receiver.is_small_string() || is_heap_string(receiver) {
+        return inner_tid == TypeId::TEXT;
+    }
+    if receiver.is_unit() {
+        return inner_tid == TypeId::UNIT;
+    }
+    false
+}
+
 /// Call method: `dst = receiver.method(args...)`
 pub(in super::super) fn handle_call_method(
     state: &mut InterpreterState,
@@ -3292,7 +3345,30 @@ pub(in super::super) fn handle_call_method(
                                             .strings
                                             .get(td.name)
                                             .unwrap_or("");
-                                        if std::env::var("VERUM_SUFFIX_COMPAT_LEGACY").is_ok() {
+                                        // NEWTYPE-UNBOX-1 (T0160): a transparent-wrapper
+                                        // newtype is stored at runtime as its BARE inner
+                                        // value (no type tag; is_transparent_wrapper, SOURCE
+                                        // OF TRUTH in types.rs). When the wrapper's impl is
+                                        // out of the caller's scope (value returned cross-
+                                        // module, e.g. IoStatusBlock.status() -> NtStatus),
+                                        // codegen emits a CallM with the COMMITTED qualified
+                                        // name; the receiver classifies as the inner primitive,
+                                        // so the wrapper-NAME allowlists below (never list
+                                        // "NtStatus") rejected the one correct candidate.
+                                        // Honour it, triple-gated so no bare-name guess is
+                                        // admitted: parent is a transparent wrapper, the call
+                                        // arrived already qualified (codegen committed THIS
+                                        // type), and the inner shares the receiver's box class.
+                                        // A miss falls through to the loud path — monotonic.
+                                        if td.is_transparent_wrapper
+                                            && is_already_qualified
+                                            && transparent_wrapper_inner_matches_receiver(
+                                                td,
+                                                &dispatch_receiver,
+                                            )
+                                        {
+                                            true
+                                        } else if std::env::var("VERUM_SUFFIX_COMPAT_LEGACY").is_ok() {
                                             matches!(
                                                 tname,
                                                 "Int" | "Bool" | "Float"
