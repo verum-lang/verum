@@ -1,0 +1,16 @@
+# Canonical identity for this repository.
+#
+# Every commit here is authored by old8man; three different e-mail addresses
+# were used over time (a global git config leaked `luxquant@gst.st` for a
+# handful of 2026-04-26 / 2026-06-01 commits, and `taaliman@protonmail.com`
+# for a few later ones). This file maps them all onto the canonical address
+# so `git log`, `git shortlog -sne`, `git blame` and friends show one author.
+#
+# NOTE: .mailmap fixes git's own tooling. GitHub's web attribution instead
+# maps a commit's raw e-mail to whichever account has verified it, so to make
+# the historical commits show as old8man there, add `luxquant@gst.st` and
+# `taaliman@protonmail.com` as verified e-mails on the old8man GitHub account
+# (Settings -> Emails). That needs no history rewrite.
+old8man <oldman@gst.st> <luxquant@gst.st>
+old8man <oldman@gst.st> <taaliman@protonmail.com>
+old8man <oldman@gst.st> <oldman@gst.st>
