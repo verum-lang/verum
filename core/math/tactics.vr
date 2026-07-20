@@ -1025,61 +1025,61 @@ theorem group_cancel_left(a: Int, b: Int, c: Int)
 /// Meet idempotence: `a ∧ a = a`
 @verify(formal)
 theorem lattice_meet_idempotent(a: Bool)
-    ensures a && a == a
+    ensures (a && a) == a
     proof by auto;
 
 /// Join idempotence: `a ∨ a = a`
 @verify(formal)
 theorem lattice_join_idempotent(a: Bool)
-    ensures a || a == a
+    ensures (a || a) == a
     proof by auto;
 
 /// Meet absorbs join: `a ∧ (a ∨ b) = a`
 @verify(formal)
 theorem lattice_absorption_meet_join(a: Bool, b: Bool)
-    ensures a && (a || b) == a
+    ensures (a && (a || b)) == a
     proof by auto;
 
 /// Join absorbs meet: `a ∨ (a ∧ b) = a`
 @verify(formal)
 theorem lattice_absorption_join_meet(a: Bool, b: Bool)
-    ensures a || (a && b) == a
+    ensures (a || (a && b)) == a
     proof by auto;
 
 /// Meet commutativity: `a ∧ b = b ∧ a`
 @verify(formal)
 theorem lattice_meet_comm(a: Bool, b: Bool)
-    ensures a && b == b && a
+    ensures (a && b) == (b && a)
     proof by auto;
 
 /// Join commutativity: `a ∨ b = b ∨ a`
 @verify(formal)
 theorem lattice_join_comm(a: Bool, b: Bool)
-    ensures a || b == b || a
+    ensures (a || b) == (b || a)
     proof by auto;
 
 /// Meet associativity: `(a ∧ b) ∧ c = a ∧ (b ∧ c)`
 @verify(formal)
 theorem lattice_meet_assoc(a: Bool, b: Bool, c: Bool)
-    ensures (a && b) && c == a && (b && c)
+    ensures ((a && b) && c) == (a && (b && c))
     proof by auto;
 
 /// Join associativity: `(a ∨ b) ∨ c = a ∨ (b ∨ c)`
 @verify(formal)
 theorem lattice_join_assoc(a: Bool, b: Bool, c: Bool)
-    ensures (a || b) || c == a || (b || c)
+    ensures ((a || b) || c) == (a || (b || c))
     proof by auto;
 
 /// Distributivity of meet over join: `a ∧ (b ∨ c) = (a ∧ b) ∨ (a ∧ c)`
 @verify(formal)
 theorem lattice_distrib_meet_over_join(a: Bool, b: Bool, c: Bool)
-    ensures a && (b || c) == (a && b) || (a && c)
+    ensures (a && (b || c)) == ((a && b) || (a && c))
     proof by auto;
 
 /// Distributivity of join over meet: `a ∨ (b ∧ c) = (a ∨ b) ∧ (a ∨ c)`
 @verify(formal)
 theorem lattice_distrib_join_over_meet(a: Bool, b: Bool, c: Bool)
-    ensures a || (b && c) == (a || b) && (a || c)
+    ensures (a || (b && c)) == ((a || b) && (a || c))
     proof by auto;
 
 /// De Morgan — and: `¬(a ∧ b) = ¬a ∨ ¬b`
@@ -1097,25 +1097,25 @@ theorem lattice_de_morgan_or(a: Bool, b: Bool)
 /// Complement meet: `a ∧ ¬a = false`
 @verify(formal)
 theorem lattice_complement_meet(a: Bool)
-    ensures a && !a == false
+    ensures (a && !a) == false
     proof by auto;
 
 /// Complement join: `a ∨ ¬a = true`
 @verify(formal)
 theorem lattice_complement_join(a: Bool)
-    ensures a || !a == true
+    ensures (a || !a) == true
     proof by auto;
 
 /// Top meet: `true ∧ a = a`
 @verify(formal)
 theorem lattice_top_meet(a: Bool)
-    ensures true && a == a
+    ensures (true && a) == a
     proof by auto;
 
 /// Bottom join: `false ∨ a = a`
 @verify(formal)
 theorem lattice_bot_join(a: Bool)
-    ensures false || a == a
+    ensures (false || a) == a
     proof by auto;
 
 // --- Category laws (integer-model encoding) ----------------------------------
@@ -1198,31 +1198,31 @@ theorem descent_obstruction_nonneg(deviation: Int)
 /// `true ∧ a = a`
 @verify(formal)
 theorem heyting_true_and(a: Bool)
-    ensures true && a == a
+    ensures (true && a) == a
     proof by auto;
 
 /// `false ∨ a = a`
 @verify(formal)
 theorem heyting_false_or(a: Bool)
-    ensures false || a == a
+    ensures (false || a) == a
     proof by auto;
 
 /// `a ∧ false = false`
 @verify(formal)
 theorem heyting_and_false(a: Bool)
-    ensures a && false == false
+    ensures (a && false) == false
     proof by auto;
 
 /// `a ∨ true = true`
 @verify(formal)
 theorem heyting_or_true(a: Bool)
-    ensures a || true == true
+    ensures (a || true) == true
     proof by auto;
 
 /// Excluded middle (classical / Boolean topos): `a ∨ ¬a = true`
 @verify(formal)
 theorem excluded_middle(a: Bool)
-    ensures a || !a == true
+    ensures (a || !a) == true
     proof by auto;
 
 /// Double negation elimination (classical): `¬¬a = a`
