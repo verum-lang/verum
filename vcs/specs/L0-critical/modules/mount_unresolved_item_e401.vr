@@ -1,0 +1,12 @@
+// @test: typecheck-fail
+// @level: L0
+// @tags: modules, mount, name-resolution, totality
+// @expected-error: E401
+// @description: T0528 pin - mounting an item the target module does not
+// publish is a loud E401 (name-resolution.md section 3.4 totality), never a
+// silent drop. Ordering's module publishes Ordering/Less/Equal/Greater;
+// ZzzNotAnItem exists nowhere.
+
+mount core.base.ordering.{ZzzNotAnItem};
+
+fn main() {}

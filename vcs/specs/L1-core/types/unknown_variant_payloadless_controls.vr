@@ -1,0 +1,68 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, variants, name-resolution, qualified-access, regression
+// @expect: pass
+// @expected-exit: 0
+
+/// T0545 positive controls — the strict-qualified-access diagnostic
+/// (name-resolution §3.3) must NOT fire on any of these legitimate
+/// payload-less qualified accesses:
+///
+///   1. declared unit variant of a local sum,
+///   2. stdlib prelude sums (`Maybe.None`, `Ordering.Less`),
+///   3. a payloadful variant constructed through the qualified
+///      called form,
+///   4. a SCREAMING_CASE associated const on a sum type (the
+///      CamelCase gate must exclude all-caps members — 40 such
+///      consts exist in core/),
+///   5. a CamelCase associated static fn on a sum type (the
+///      inherent-methods decline probe).
+
+type Signal is
+    Hup
+  | Kill
+  | Custom(Int);
+
+implement Signal {
+    const MAX_SIGNALS: Int = 32;
+
+    fn Describe() -> Text {
+        "signal set".to_text()
+    }
+}
+
+fn main() {
+    // 1. Local unit variant.
+    let k = Signal.Kill;
+    let tagged = match k {
+        Signal.Kill => 1,
+        _ => 0,
+    };
+    assert_eq(tagged, 1);
+
+    // 2. Prelude sums.
+    let n: Maybe<Int> = Maybe.None;
+    assert(n.is_none());
+    let o = Ordering.Less;
+    assert(o == Ordering.Less);
+
+    // 3. Payloadful variant through the qualified called form.
+    let c = Signal.Custom(7);
+    let got = match c {
+        Signal.Custom(v) => v,
+        _ => -1,
+    };
+    assert_eq(got, 7);
+
+    // 4. SCREAMING_CASE associated const on a sum qualifier.
+    assert_eq(Signal.MAX_SIGNALS, 32);
+
+    // 5. CamelCase associated static fn on a sum qualifier
+    //    (payload-less reference resolves through the
+    //    inherent-methods bucket, not the variant list).
+    let d = Signal.Describe();
+    assert_eq(d, "signal set".to_text());
+
+    print("controls-ok");
+}

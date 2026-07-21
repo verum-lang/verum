@@ -666,6 +666,18 @@ impl From<TypeError> for VerumError {
                     ).into(),
                 }
             }
+
+            // Campaign integration: T0545 introduced this variant (loud
+            // nonexistent-variant); this pristine-HEAD From impl's exhaustive
+            // match must cover it. Mirrors the sibling mappings to Other.
+            TypeError::UnknownVariantConstructor { ty, variant, available, .. } => {
+                VerumError::Other {
+                    message: format!(
+                        "unknown variant constructor '{}' for type '{}' (available: {})",
+                        variant, ty, available
+                    ).into(),
+                }
+            }
         }
     }
 }

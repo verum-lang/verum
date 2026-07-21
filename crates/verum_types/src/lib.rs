@@ -1941,6 +1941,35 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
+    /// T0545 (name-resolution §3.3 strict qualified access / §3.4
+    /// totality): qualified EXPRESSION-position access `Q.m` where `Q`
+    /// resolved to a sum type whose declared variant list does not
+    /// contain `m`, and `m` is not an associated function/constant of
+    /// `Q` either.
+    ///
+    /// Before this variant existed only the CALLED form `Q.m(args)`
+    /// was diagnosed; the payload-less form fell through to the
+    /// lenient fresh-var arms of `infer_expr_field` and VBC codegen
+    /// then FABRICATED a variant tag (the interned-string id of
+    /// `"Q.m"` — `Http2Error.ZzzNotAVariant` lowered to
+    /// `MakeVariant { tag: 58770 }`, matching no arm at runtime).
+    ///
+    /// The message shape deliberately mirrors the pattern-side
+    /// diagnostic (`infer/patterns.rs` "Unknown variant constructor
+    /// '{}' … Available variants: […]") per
+    /// docs/architecture/name-resolution.md §3.4 — grep-stable for
+    /// `pipeline/audit.rs` classification and vtest @expected-error
+    /// substring matching.
+    #[error(
+        "Unknown variant constructor '{variant}' on sum type '{ty}'. Available variants: [{available}]"
+    )]
+    UnknownVariantConstructor {
+        ty: Text,
+        variant: Text,
+        available: Text,
+        span: verum_ast::span::Span,
+    },
+
     #[error("{msg}")]
     OtherWithCode { code: Text, msg: Text },
 
@@ -2069,6 +2098,7 @@ impl TypeError {
             RecursionLimit(_) | Other(_) | OtherWithCode { .. } => verum_ast::span::Span::dummy(),
             OtherWithCodeSpanned { span, .. } => *span,
             PositivityViolation { span, .. } => *span,
+            UnknownVariantConstructor { span, .. } => *span,
         }
     }
 
@@ -2655,6 +2685,29 @@ impl TypeError {
                 // VCS tests rely on the code to select the expected-error
                 // bucket (see `readonly_write_fail.vr` @expected-error: E400).
                 let mut builder = DiagnosticBuilder::error().code("E400").message(msg);
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder.build()
+            }
+
+            UnknownVariantConstructor {
+                ty,
+                variant,
+                available,
+                span,
+            } => {
+                // T0545: same E400 family as MethodNotFound — a
+                // qualified member the receiver type does not declare.
+                // Message prefix is pinned ("Unknown variant
+                // constructor") — the audit classifier and the
+                // pattern-side twin diagnostic both key on it.
+                let mut builder = DiagnosticBuilder::error().code("E400").message(format!(
+                    "Unknown variant constructor '{}' on sum type '{}'. Available variants: [{}]\n  \
+                     help: `{}.{}` does not name a declared variant or associated item of `{}`\n  \
+                     help: check the variant name against the type declaration",
+                    variant, ty, available, ty, variant, ty
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }

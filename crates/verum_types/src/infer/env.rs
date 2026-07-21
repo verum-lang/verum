@@ -708,6 +708,7 @@ impl TypeChecker {
             stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
+            builtin_ambient_names: std::collections::HashSet::new(),
             alias_scope: None,
             in_explicit_import_registration: false,
             skolem_tracker: crate::existential::SkolemTracker::new(),
@@ -836,6 +837,7 @@ impl TypeChecker {
             stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
+            builtin_ambient_names: std::collections::HashSet::new(),
             alias_scope: None,
             in_explicit_import_registration: false,
             skolem_tracker: crate::existential::SkolemTracker::new(),
@@ -965,6 +967,7 @@ impl TypeChecker {
             stdlib_single_file_mode: false,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
+            builtin_ambient_names: std::collections::HashSet::new(),
             alias_scope: None,
             in_explicit_import_registration: false,
             skolem_tracker: crate::existential::SkolemTracker::new(),
@@ -5895,6 +5898,11 @@ impl TypeChecker {
             verum_common::Text::from("monotonic_nanos"),
             TypeScheme::mono(Type::function(List::new(), Type::Int)),
         );
+
+        // T0528 — record everything this constructor-time registration
+        // seeded; see `builtin_ambient_names`.  Union semantics: the
+        // normal path calls this again from `register_builtins()`.
+        self.snapshot_builtin_ambient_names();
     }
 
     /// Register built-in types and functions.
@@ -6389,6 +6397,28 @@ impl TypeChecker {
         // Register CBGR type aliases (RawPtr, Epoch, u32) — these are compiler
         // intrinsic types used by core/ stdlib files, not user-defined types.
         self.ctx.add_cbgr_type_aliases();
+
+        // T0528 — see `builtin_ambient_names`.
+        self.snapshot_builtin_ambient_names();
+    }
+
+    /// T0528 — union-snapshot of every name the checker itself has
+    /// registered so far, in BOTH namespaces: `type_defs` keys (the
+    /// primitive and sized-integer types seeded by
+    /// [`Self::register_primitives`]) and the value environment's
+    /// binding names (builtin/intrinsic/meta functions).  Runs while
+    /// only the root scope exists, before any source or archive module
+    /// is processed, so the snapshot is exactly the LANGUAGE-ambient
+    /// universe — never stdlib-loaded names.
+    fn snapshot_builtin_ambient_names(&mut self) {
+        let type_names: Vec<verum_common::Text> =
+            self.ctx.type_defs.keys().cloned().collect();
+        for name in type_names {
+            self.builtin_ambient_names.insert(name);
+        }
+        for name in self.ctx.env.binding_names() {
+            self.builtin_ambient_names.insert(name);
+        }
     }
 }
 

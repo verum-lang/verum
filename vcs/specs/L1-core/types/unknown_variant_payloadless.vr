@@ -1,0 +1,32 @@
+// @test: typecheck-fail
+// @tier: all
+// @level: L1
+// @tags: types, variants, errors, name-resolution, qualified-access
+// @expected-error: E400 "Unknown variant constructor"
+
+/// T0545 negative control — name-resolution §3.3 strict qualified
+/// access, §3.4 totality (docs/architecture/name-resolution.md).
+///
+/// A payload-less member access on a sum type that does NOT declare
+/// that variant must be a loud typed error naming the available
+/// variants — the same diagnostic the CALLED form and the pattern
+/// matcher already emit.  Before the fix it was silently lowered to
+/// a fabricated variant tag (the interned-string id of the qualified
+/// name: `Http2Error.ZzzNotAVariant` -> `MakeVariant { tag: 58770 }`)
+/// whose value matched no arm at runtime, Display fell out of its
+/// last arm, and the inferred type was a fresh var that unified with
+/// anything (`let y: Int = x + 1;` compiled and produced pointer
+/// bits as an integer).
+
+type Http2Error is
+    NeedMore
+  | BadFrame
+  | IoFailure(Text);
+
+fn main() {
+    // ERROR: E400 - `ZzzNotAVariant` is not a variant of `Http2Error`.
+    // Diagnostic must list the declared variants:
+    // [NeedMore, BadFrame, IoFailure].
+    let x = Http2Error.ZzzNotAVariant;
+    print("unreachable: fabricated variant must not compile");
+}

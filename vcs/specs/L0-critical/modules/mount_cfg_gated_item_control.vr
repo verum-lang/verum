@@ -1,0 +1,13 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: modules, mount, name-resolution, cfg
+// @description: T0528 control - an item declared behind @cfg for another
+// platform still RESOLVES as a mount item on every host: the export surface
+// is built from the full unfiltered AST (extract_exports_from_module checks
+// only visibility). read_dir is @cfg(target_os = "linux") in core/io/fs.vr;
+// this spec must stay green on macOS/Windows hosts too. The item is only
+// mounted, never called - use stays platform-gated.
+
+mount core.io.fs.{read_dir};
+
+fn main() {}

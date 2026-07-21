@@ -1,0 +1,15 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: modules, mount, name-resolution, builtins
+// @description: T0528 control - mounting language builtins (Bool, Int64)
+// from base stays lenient: no stdlib module declares them, the checker
+// itself does (builtin_ambient_names snapshot). ~1700 such mounts exist.
+
+mount base.{Bool, Int64};
+
+fn main() {
+    let b: Bool = true;
+    let x: Int64 = 5 as Int64;
+    assert(b);
+    assert_eq(x, 5 as Int64);
+}

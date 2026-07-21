@@ -1293,6 +1293,20 @@ impl TypeEnv {
         }
     }
 
+    /// Every binding NAME visible in this environment — current scope
+    /// plus all parent scopes.  Read-only; added for the T0528
+    /// builtin-ambient snapshot, which runs right after
+    /// `register_builtins()` while only the root scope exists.
+    pub fn binding_names(&self) -> Vec<Text> {
+        let mut out = Vec::new();
+        let mut cur = Some(self);
+        while let Some(env) = cur {
+            out.extend(env.bindings.keys().cloned());
+            cur = env.parent.as_deref();
+        }
+        out
+    }
+
     /// Set the current module context
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports
     pub fn set_current_module(&mut self, module_id: ModuleId) {

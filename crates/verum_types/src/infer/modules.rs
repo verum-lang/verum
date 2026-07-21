@@ -2013,15 +2013,34 @@ impl TypeChecker {
                         if let Err(e) = import_result {
                             let check_name = local_name.unwrap_or(item_name.as_str());
                             let check_text = verum_common::Text::from(check_name);
-                            let found_in_env = self.ctx.env.lookup(&check_text).is_some();
-                            let found_in_types = self.ctx.type_defs.contains_key(&check_text);
-                            if !found_in_env && !found_in_types {
+                            // T0528 — this leniency exists for ONE case:
+                            // `mount base.{Bool}`-style mounts of LANGUAGE
+                            // builtins (primitives, sized integers, builtin
+                            // fns), which no stdlib module declares.  It
+                            // used to test env/`type_defs` membership —
+                            // i.e. "SOMETHING ambient has this name" —
+                            // which also swallowed every wrong mount whose
+                            // name collided with a stranger module's item.
+                            // Measured (baked flow): mounting nonexistent
+                            // `Config` raised E402, then core.context's
+                            // ambient `Config` ate it — the vacuous-green
+                            // instrument.  Narrowed to the checker's OWN
+                            // registration snapshot: only names seeded by
+                            // `register_primitives`/`register_builtins`
+                            // may suppress an explicit-mount resolution
+                            // error (name-resolution.md §3.4, stage B).
+                            let is_checker_builtin =
+                                self.builtin_ambient_names.contains(&check_text);
+                            if !is_checker_builtin {
                                 // Collect error but continue processing remaining items
                                 if first_error.is_none() {
                                     first_error = Some(e);
                                 }
                             }
-                            // Item exists as builtin, skip the import error
+                            // Language builtin: the mount is redundant but
+                            // harmless — the ambient binding is the
+                            // checker's own, so the name means exactly what
+                            // the author assumes.
                         }
                     }
                     // Other kinds (Glob, Nested) can be handled recursively if needed
@@ -2295,6 +2314,51 @@ impl TypeChecker {
                             item_name,
                             self.ctx.env.lookup(&Text::from(bind_name)).is_some(),
                         );
+                    }
+                    // T0528 — TOTALITY (name-resolution.md §3.4, stage
+                    // B).  This gate is the SOURCE-REGISTRY drop site:
+                    // for an EXPLICIT `mount m.{X}` (import_span=Some)
+                    // whose `X` is in neither the module's export table
+                    // nor its inline-module surface, and which the
+                    // metadata free-fn fallback above did not bind,
+                    // returning `Ok(())` silently dropped the item —
+                    // the measured vacuous-green instrument (52 sqlite
+                    // specs mount nonexistent names and report green;
+                    // progress_smoke.vr mounts a nonexistent `Config`
+                    // and exits 0).  Emit the SAME structured E401 the
+                    // in-body `found_in_submodule` site already owns —
+                    // one diagnostic authority; its renderer carries
+                    // the did-you-mean and the exports preview.
+                    //
+                    // Deliberately narrow:
+                    //  * transitive imports (span=None) keep the
+                    //    lenient skip — later passes surface unresolved
+                    //    names at their use sites;
+                    //  * an env binding installed above (metadata
+                    //    free-fn) or pre-existing means the name IS
+                    //    resolved — no error;
+                    //  * `stdlib_single_file_mode` mirrors the in-body
+                    //    E401's opt-out;
+                    //  * @cfg'd-out items never reach here: the export
+                    //    table is built from the FULL unfiltered AST
+                    //    (`extract_exports_from_module` checks only
+                    //    visibility), so a linux-only item still
+                    //    export-resolves when checking on macOS.
+                    if let Some(span) = import_span
+                        && self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                        && !self.stdlib_single_file_mode
+                    {
+                        let available_items: List<Text> = probed_module_info
+                            .exports
+                            .public_exports()
+                            .map(|e| e.name.clone())
+                            .collect();
+                        return Err(TypeError::ImportItemNotFound {
+                            item_name: Text::from(item_name),
+                            module_path: module_path.clone(),
+                            available_items,
+                            span,
+                        });
                     }
                     return Ok(());
                 }
@@ -3178,6 +3242,26 @@ impl TypeChecker {
 
             // Module still not found - return error if span is provided (user import)
             if let Some(span) = import_span {
+                // T0528 — BAKED-ARCHIVE drop site (second half of the
+                // vacuous-green instrument).  In the embedded-stdlib
+                // flow no `ModuleInfo` exists for archive modules, so a
+                // missing ITEM fell through to E402 "module not found"
+                // — misleading when the archive plainly knows the
+                // module — and for names that happened to be ambient
+                // the Nested-arm leniency then ate the error entirely.
+                // When the metadata KNOWS this module, the failure is
+                // the ITEM's: emit the item diagnostic (E401) with the
+                // module's real surface for the did-you-mean.
+                if let Some(available_items) =
+                    self.metadata_known_module_items(module_path.as_str())
+                {
+                    return Err(TypeError::ImportItemNotFound {
+                        item_name: Text::from(item_name),
+                        module_path: module_path.clone(),
+                        available_items,
+                        span,
+                    });
+                }
                 // Collect similar module names for suggestions
                 let all_modules: Vec<Text> = registry
                     .all_modules()
@@ -3197,6 +3281,70 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    /// T0528 — the archive metadata's view of module `module_path`:
+    /// `Some(items)` when the baked stdlib KNOWS the module (at least
+    /// one type/function/protocol descriptor claims it, or it has a
+    /// recorded re-export surface), `None` when the module is genuinely
+    /// unknown and the caller should keep reporting E402.
+    ///
+    /// The list feeds E401's did-you-mean, so it collects the module's
+    /// real public surface from every descriptor family (free functions
+    /// only — inherent methods are not mountable items) plus the
+    /// `module_reexports` leaves.  `std.`-prefix spelling normalises to
+    /// `core.`; `cog.` prefixes are stripped, matching the descriptors'
+    /// own `module_path` spelling.
+    fn metadata_known_module_items(&self, module_path: &str) -> Option<List<Text>> {
+        let Maybe::Some(metadata) = &self.core_metadata else {
+            return None;
+        };
+        let stripped = module_path.strip_prefix("cog.").unwrap_or(module_path);
+        let canonical_owned;
+        let canonical: &str = if let Some(rest) = stripped.strip_prefix("std.") {
+            canonical_owned = format!("core.{}", rest);
+            canonical_owned.as_str()
+        } else {
+            stripped
+        };
+        if canonical.is_empty() {
+            return None;
+        }
+        let owns = |mp: &Text| -> bool {
+            mp.as_str().strip_prefix("cog.").unwrap_or(mp.as_str()) == canonical
+        };
+        let mut seen: std::collections::HashSet<Text> = std::collections::HashSet::new();
+        let mut items: List<Text> = List::new();
+        for td in metadata.types.values() {
+            if owns(&td.module_path) && seen.insert(td.name.clone()) {
+                items.push(td.name.clone());
+            }
+        }
+        for fd in metadata.functions.values() {
+            if owns(&fd.module_path)
+                && matches!(fd.parent_type, Maybe::None)
+                && seen.insert(fd.name.clone())
+            {
+                items.push(fd.name.clone());
+            }
+        }
+        for pd in metadata.protocols.values() {
+            if owns(&pd.module_path) && seen.insert(pd.name.clone()) {
+                items.push(pd.name.clone());
+            }
+        }
+        let reexports = metadata.module_reexports.get(&Text::from(canonical));
+        if let Some(leaves) = reexports {
+            for (local, _true_name, _src) in leaves.iter() {
+                if seen.insert(local.clone()) {
+                    items.push(local.clone());
+                }
+            }
+        }
+        if items.is_empty() && reexports.is_none() {
+            return None;
+        }
+        Some(items)
     }
 
     /// Find a type declaration in a module's AST by name.
@@ -14309,7 +14457,12 @@ impl TypeChecker {
     /// when it isn't an alias at all, so callers can compare BOTH the
     /// original and canonical name and this is always safe to call
     /// speculatively.
-    fn canonical_alias_target(&self, name: &str) -> Text {
+    ///
+    /// `pub(crate)` (was private): campaign integration added a cross-module
+    /// call from `infer::expr` (T0545's UnknownVariantConstructor path); a
+    /// private method is unreachable from a sibling `impl TypeChecker` block in
+    /// another module.
+    pub(crate) fn canonical_alias_target(&self, name: &str) -> Text {
         let mut current: Text = Text::from(name);
         let mut seen = std::collections::HashSet::new();
         while seen.insert(current.clone()) {

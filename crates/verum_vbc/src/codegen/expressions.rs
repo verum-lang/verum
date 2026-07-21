@@ -20310,9 +20310,177 @@ impl VbcCodegen {
                     }
                 }
 
-                // If not registered, emit a MakeVariant instruction with the qualified name
-                // This handles dynamically created or imported variants
+                // ── T0545 STRICT QUALIFIED ACCESS (name-resolution
+                // §3.3, totality §3.4) ───────────────────────────────
+                // Every resolution rung above missed: `Type.field` is
+                // not a registered variant ctor, associated const,
+                // static constant, or in-scope bare ctor.  The legacy
+                // behaviour was to FABRICATE a variant with
+                // `tag = intern_string("Type.field")` — a string-pool
+                // id that matches no arm at runtime and shifts with
+                // the interned-string layout.  Measured (T0545):
+                // `Http2Error.ZzzNotAVariant` → `MakeVariant { tag:
+                // 58770 }`; Display fell out of its last arm; a match
+                // over every real variant hit the wildcard.  This is
+                // the ONLY diagnostic surface for stdlib bodies —
+                // `core/` function bodies are typechecked on no path
+                // (T0124), so the typechecker twin
+                // (`TypeError::UnknownVariantConstructor`) never sees
+                // them.
+                //
+                // Verdict ladder, declaration authority first:
+                //  1. descriptor (alias-chased) declares the variant
+                //     but the qualified function table lost it →
+                //     EMIT properly (declaration beats registration
+                //     drift);
+                //  2. qualifier is a KNOWN sum (descriptor kind Sum,
+                //     or ≥1 registered `Type.`-prefixed variant ctor)
+                //     → LOUD error naming the declared variants;
+                //  3. qualifier is a KNOWN non-sum (record of consts,
+                //     newtype, …: the `ErrorCode.EnhanceYourCalm`
+                //     class) → LOUD error naming its associated
+                //     items;
+                //  4. genuinely unknown qualifier (cross-module
+                //     forward ref mid-bake: no descriptor, no
+                //     registered ctors) → keep the legacy fabrication
+                //     as the migration-period fallback, now with a
+                //     loud warning naming the guess (§3.4).
                 let qualified_variant = format!("{}.{}", type_name, field);
+                let (descriptor_known, descriptor_is_sum, declared_variant_names, declared_tag) = {
+                    // Declaration authority: the TypeDescriptor
+                    // registered for `type_name`, alias-chased
+                    // (bounded — alias cycles cannot loop us).
+                    let mut descriptor = self
+                        .type_name_to_id
+                        .get(type_name)
+                        .copied()
+                        .and_then(|tid| self.types.iter().find(|d| d.id == tid));
+                    for _ in 0..4 {
+                        let Some(d) = descriptor else { break };
+                        if d.kind != crate::types::TypeKind::Alias {
+                            break;
+                        }
+                        descriptor = match &d.alias_target {
+                            Some(crate::types::TypeRef::Concrete(tid)) => {
+                                self.types.iter().find(|t| t.id == *tid)
+                            }
+                            _ => None,
+                        };
+                    }
+                    let known = descriptor.is_some();
+                    let is_sum = descriptor
+                        .map(|d| d.kind == crate::types::TypeKind::Sum)
+                        .unwrap_or(false);
+                    let names: Vec<String> = if is_sum {
+                        descriptor
+                            .map(|d| {
+                                d.variants
+                                    .iter()
+                                    .filter_map(|v| {
+                                        self.ctx
+                                            .strings
+                                            .get(v.name.0 as usize)
+                                            .cloned()
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    let tag: Option<u32> = if is_sum {
+                        descriptor.and_then(|d| {
+                            d.variants.iter().find_map(|v| {
+                                (self
+                                    .ctx
+                                    .strings
+                                    .get(v.name.0 as usize)
+                                    .map(|s| s.as_str())
+                                    == Some(field))
+                                    .then_some(v.tag)
+                            })
+                        })
+                    } else {
+                        None
+                    };
+                    (known, is_sum, names, tag)
+                };
+                if let Some(tag) = declared_tag {
+                    // Rung 1: the declaration knows this variant even
+                    // though every function-table spelling missed.
+                    return self.compile_variant_constructor_with_tag_named_and_parent(
+                        Some(field),
+                        tag,
+                        &verum_common::List::new(),
+                        Some(type_name),
+                    );
+                }
+                // Registration authority: `Type.`-prefixed function
+                // entries (the same table the real emission rungs
+                // above consult — agreement by construction).
+                let type_prefix = format!("{}.", type_name);
+                let mut registered_variant_names: Vec<String> = Vec::new();
+                let mut associated_member_names: Vec<String> = Vec::new();
+                for (fn_name, info) in self.ctx.functions.iter() {
+                    if let Some(member) = fn_name.strip_prefix(&type_prefix) {
+                        if member.contains('.') || member.contains(':') {
+                            // Deeper-qualified stranger key
+                            // (`Type.Sub.x`) — not a direct member.
+                            continue;
+                        }
+                        if info.variant_tag.is_some() {
+                            registered_variant_names.push(member.to_string());
+                        } else {
+                            associated_member_names.push(member.to_string());
+                        }
+                    }
+                }
+                registered_variant_names.sort();
+                registered_variant_names.dedup();
+                associated_member_names.sort();
+                associated_member_names.dedup();
+                if descriptor_is_sum || !registered_variant_names.is_empty() {
+                    // Rung 2: known sum, member provably not a
+                    // variant of it. Declared (declaration-ordered)
+                    // names when the descriptor has them; registered
+                    // ones otherwise.
+                    let available = if !declared_variant_names.is_empty() {
+                        declared_variant_names.join(", ")
+                    } else {
+                        registered_variant_names.join(", ")
+                    };
+                    return Err(CodegenError::with_span(
+                        CodegenErrorKind::UnknownVariantConstructor {
+                            type_name: type_name.to_string(),
+                            variant: field.to_string(),
+                            available,
+                        },
+                        base.span,
+                    ));
+                }
+                if descriptor_known {
+                    // Rung 3: known NON-sum qualifier.
+                    return Err(CodegenError::with_span(
+                        CodegenErrorKind::NotASumType {
+                            type_name: type_name.to_string(),
+                            member: field.to_string(),
+                            associated: associated_member_names.join(", "),
+                        },
+                        base.span,
+                    ));
+                }
+                // Rung 4: genuinely unknown qualifier — legacy
+                // fabrication retained for cross-module forward refs,
+                // now observable.
+                tracing::warn!(
+                    "[T0545] unresolved qualifier '{}': fabricating legacy \
+                     MakeVariant tag intern('{}') for a payload-less member \
+                     access — no descriptor and no registered '{}'-prefixed \
+                     constructors at this point of the compile",
+                    type_name,
+                    qualified_variant,
+                    type_prefix
+                );
                 let result = self.ctx.alloc_temp();
                 let variant_tag = self.intern_string(&qualified_variant);
                 // We know the parent type name (it's `type_name`),

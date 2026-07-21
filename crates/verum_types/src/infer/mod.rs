@@ -1194,6 +1194,24 @@ pub struct TypeChecker {
     /// conflict where `core.base.ordering.Ordering` (Less|Equal|Greater) gets overwritten
     /// by `core.sync.atomic.Ordering` (Relaxed|Acquire|Release|AcqRel|SeqCst).
     explicit_imports: std::collections::HashSet<String>,
+    /// T0528 — names the CHECKER ITSELF seeded (primitive types, sized
+    /// integers, builtin/intrinsic/meta functions) before any source or
+    /// archive module was processed.  Union-snapshot taken at the end of
+    /// `register_primitives()` and `register_builtins()`, so both the
+    /// bootstrap and the normal construction path fill it.
+    ///
+    /// SOLE consumer: the unresolved-mount-item leniency in
+    /// `process_import`'s Nested arm.  An explicit `mount m.{X}` whose
+    /// `X` the target module does not publish is `E401` (totality,
+    /// docs/architecture/name-resolution.md §3.4 stage B / T0528); the
+    /// ONLY exemption is a name in this set (`mount base.{Bool}` — the
+    /// language's own ambient builtins, mounted as documentation by
+    /// ~1700 sites across core/ and the spec suites).  A name that is
+    /// merely ambient because SOME OTHER module registered it must NOT
+    /// suppress the error — that broad leniency was the vacuous-green
+    /// instrument (52 sqlite specs mounting nonexistent names, all
+    /// green).
+    builtin_ambient_names: std::collections::HashSet<Text>,
     /// ALIAS-VS-MARKER scope (#41 semaphore class): the set of type names
     /// the CURRENTLY-REGISTERING module can see LOCALLY — its own type
     /// declarations plus braced/leaf mount imports. `type_defs` is a

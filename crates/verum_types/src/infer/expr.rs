@@ -7555,6 +7555,21 @@ impl TypeChecker {
                 return Ok(InferResult::new(ty));
             }
 
+            // T0545 (name-resolution §3.3/§3.4) — when either
+            // resolution authority below (mount-scoped, then the flat
+            // slot) identifies `type_name` as a SUM TYPE whose variant
+            // list does NOT contain `field_name`, the strict gate
+            // after both strategies raises the same "Unknown variant
+            // constructor … Available variants" diagnostic the called
+            // form and the pattern matcher already emit — instead of
+            // falling through to the lenient fresh-var arms at the
+            // bottom of this function, which let VBC codegen fabricate
+            // an interned-string tag (`Http2Error.ZzzNotAVariant` →
+            // `MakeVariant { tag: 58770 }`, matching no arm at
+            // runtime).  Mount authority outranks the flat slot, so
+            // the capture is first-wins.
+            let mut qualifier_sum_variants: Option<Vec<verum_common::Text>> = None;
+
             // Strategy 1.5 (MOUNT-TYPE-AUTHORITY-1): when the file
             // explicitly MOUNTS `type_name`, the mounted module's
             // type is authoritative for `Type.Variant` ctor syntax
@@ -7600,12 +7615,44 @@ impl TypeChecker {
                     }
                     _ => mounted_ty.clone(),
                 };
-                if let Type::Variant(variants) = &resolved
-                    && let Some(payload_ty) = variants.get(field_name)
-                {
+                if let Type::Variant(variants) = &resolved {
+                    if let Some(payload_ty) = variants.get(field_name) {
+                        if matches!(payload_ty, Type::Unit) {
+                            return Ok(InferResult::new(resolved.clone()));
+                        } else {
+                            let params = match payload_ty {
+                                Type::Tuple(tuple_types) => tuple_types.clone(),
+                                _ => {
+                                    let mut p = List::new();
+                                    p.push(payload_ty.clone());
+                                    p
+                                }
+                            };
+                            let constructor_ty =
+                                Type::function(params, resolved.clone());
+                            return Ok(InferResult::new(constructor_ty));
+                        }
+                    }
+                    // T0545: the mounted authority answered with a sum
+                    // body that does NOT declare `field_name` — record
+                    // it for the strict-qualified-access gate below.
+                    qualifier_sum_variants =
+                        Some(variants.keys().cloned().collect::<Vec<_>>());
+                }
+            }
+
+            // Strategy 2: Look up type name and check if it's a Variant
+            // This handles cross-file imported variant types like RegistryError
+            if let Maybe::Some(ty) = self.ctx.lookup_type(type_name)
+                && let Type::Variant(variants) = &ty
+            {
+                if let Some(payload_ty) = variants.get(field_name) {
+                    // Found variant constructor - return function type
                     if matches!(payload_ty, Type::Unit) {
-                        return Ok(InferResult::new(resolved.clone()));
+                        // Nullary variant - return the variant type itself
+                        return Ok(InferResult::new(ty.clone()));
                     } else {
+                        // Constructor function: fn(payload_ty) -> VariantType
                         let params = match payload_ty {
                             Type::Tuple(tuple_types) => tuple_types.clone(),
                             _ => {
@@ -7614,34 +7661,109 @@ impl TypeChecker {
                                 p
                             }
                         };
-                        let constructor_ty = Type::function(params, resolved.clone());
+                        let constructor_ty = Type::function(params, ty.clone());
                         return Ok(InferResult::new(constructor_ty));
                     }
                 }
+                // T0545: flat-slot authority — captured only when the
+                // mount-scoped authority did not already answer.
+                if qualifier_sum_variants.is_none() {
+                    qualifier_sum_variants =
+                        Some(variants.keys().cloned().collect::<Vec<_>>());
+                }
             }
 
-            // Strategy 2: Look up type name and check if it's a Variant
-            // This handles cross-file imported variant types like RegistryError
-            if let Maybe::Some(ty) = self.ctx.lookup_type(type_name)
-                && let Type::Variant(variants) = &ty
-                && let Some(payload_ty) = variants.get(field_name)
+            // ── T0545 STRICT QUALIFIED ACCESS (name-resolution §3.3,
+            // totality §3.4) ─────────────────────────────────────────
+            // `type_name` RESOLVED to a sum type and `field_name` is
+            // not among its declared variants.  For a VARIANT-SHAPED
+            // member — leading uppercase AND at least one lowercase
+            // character (CamelCase) — fail loudly with the called-
+            // form/pattern-side diagnostic instead of reaching the
+            // lenient fresh-var arms below.
+            //
+            // SCREAMING_CASE members are deliberately excluded: 40
+            // sum types in core/ carry all-caps associated consts
+            // (`Signal.MAX_SIGNALS`, `KeyCode.CTRL`, …) whose env
+            // registration may exist only under a MODULE-QUALIFIED
+            // key (`core.sys.signal.Signal.MAX_SIGNALS`), so Strategy
+            // 1's exact `"Type.field"` env probe can miss a REAL
+            // const; the codegen's three-spelling probe then resolves
+            // it fine.  Firing here on those would reject working
+            // code.  Variant names are CamelCase by stdlib-wide
+            // convention, and every measured fabrication
+            // (ZzzNotAVariant, IoError, FrameTooLarge,
+            // ExcessiveRstStream, EnhanceYourCalm, NoError) is
+            // CamelCase.
+            //
+            // Probes that legitimately DECLINE the error (associated
+            // items are members of `Q` per §3.3):
+            //  * env `"Type.field"` — associated consts and static
+            //    methods (`import_impl_blocks` registers both under
+            //    the dot form) — already probed by Strategy 1 above,
+            //    which returned on a hit;
+            //  * the inherent-methods bucket (bare + `$static$` keys)
+            //    — source-local `implement Type { … }` items live
+            //    there, not in env;
+            //  * `variant_constructor_parents` naming `type_name` (or
+            //    its canonical alias target) as a parent of
+            //    `field_name` — a registered constructor the resolved
+            //    body is missing means the registries DISAGREE
+            //    (partially-built Variant body, colliding same-name
+            //    types): never guess, keep the legacy path.
+            //
+            // Bare (unqualified) variant names are T0525's rib model
+            // and stay untouched here.  A RECORD-typed qualifier
+            // (`ErrorCode.EnhanceYourCalm` — a record of consts) keeps
+            // its existing arms below; the VBC codegen twin guard
+            // (codegen/expressions.rs `compile_field_access`) rejects
+            // that shape at lowering, which also covers stdlib bodies
+            // that the typechecker never sees (T0124).
+            if let Some(available) = qualifier_sum_variants
+                && field_name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase())
+                && field_name.chars().any(|c| c.is_ascii_lowercase())
             {
-                // Found variant constructor - return function type
-                if matches!(payload_ty, Type::Unit) {
-                    // Nullary variant - return the variant type itself
-                    return Ok(InferResult::new(ty.clone()));
-                } else {
-                    // Constructor function: fn(payload_ty) -> VariantType
-                    let params = match payload_ty {
-                        Type::Tuple(tuple_types) => tuple_types.clone(),
-                        _ => {
-                            let mut p = List::new();
-                            p.push(payload_ty.clone());
-                            p
-                        }
-                    };
-                    let constructor_ty = Type::function(params, ty.clone());
-                    return Ok(InferResult::new(constructor_ty));
+                let field_text = verum_common::Text::from(field_name);
+                let canonical = self.canonical_alias_target(type_name);
+                let ctor_of_receiver = self
+                    .variant_constructor_parents
+                    .get(&field_text)
+                    .is_some_and(|parents| {
+                        parents.iter().any(|p| {
+                            p.as_str() == type_name
+                                || p.as_str() == canonical.as_str()
+                        })
+                    });
+                let inherent_member = {
+                    let static_key: verum_common::Text =
+                        format!("$static${}", field_name).into();
+                    let inherents = self.inherent_methods.read();
+                    [type_name, canonical.as_str()].iter().any(|owner| {
+                        inherents
+                            .get(&verum_common::Text::from(*owner))
+                            .is_some_and(|bucket| {
+                                bucket.contains_key(&field_text)
+                                    || bucket.contains_key(&static_key)
+                            })
+                    })
+                };
+                if !ctor_of_receiver && !inherent_member {
+                    return Err(TypeError::UnknownVariantConstructor {
+                        ty: verum_common::Text::from(type_name),
+                        variant: field_text,
+                        available: verum_common::Text::from(
+                            available
+                                .iter()
+                                .map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                                .as_str(),
+                        ),
+                        span: expr.span,
+                    });
                 }
             }
         }

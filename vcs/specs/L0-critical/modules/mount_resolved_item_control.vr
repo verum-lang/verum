@@ -1,0 +1,11 @@
+// @test: typecheck-pass
+// @level: L0
+// @tags: modules, mount, name-resolution, totality
+// @description: T0528 control - a mount whose items all exist stays clean.
+
+mount core.base.ordering.{Ordering};
+
+fn main() {
+    let o = Ordering.Less;
+    match o { Ordering.Less => {}, _ => {} }
+}

@@ -144,6 +144,41 @@ pub enum CodegenErrorKind {
         method: String,
     },
 
+    // === Variant Resolution Errors ===
+    /// T0545 (name-resolution §3.3 strict qualified access / §3.4
+    /// totality): payload-less `Type.Member` access where `Type` is a
+    /// sum type this codegen affirmatively knows and `Member` is not
+    /// among its declared variants (nor any resolvable associated
+    /// item).  Replaces the silent fabrication of an interned-string
+    /// variant tag (`Http2Error.ZzzNotAVariant` →
+    /// `MakeVariant { tag: 58770 }`, matching no arm at runtime).
+    /// Message shape mirrors the typechecker's
+    /// `TypeError::UnknownVariantConstructor` and the pattern-side
+    /// twin so every surfacing path carries the same grep-stable
+    /// prefix.
+    UnknownVariantConstructor {
+        /// The sum type the qualifier resolved to.
+        type_name: String,
+        /// The member that is not one of its variants.
+        variant: String,
+        /// Comma-joined declared variant names.
+        available: String,
+    },
+
+    /// T0545 companion: payload-less `Type.Member` access where
+    /// `Type` is a KNOWN non-sum type (record/newtype/…) — nothing
+    /// can be constructed from it, and every associated-item
+    /// resolution rung missed (`ErrorCode.EnhanceYourCalm` class:
+    /// a record of consts accessed as if it were an enum).
+    NotASumType {
+        /// The non-sum type the qualifier resolved to.
+        type_name: String,
+        /// The member that was requested.
+        member: String,
+        /// Comma-joined associated items registered for the type.
+        associated: String,
+    },
+
     // === Internal Errors ===
     /// Internal compiler error.
     Internal(String),
@@ -442,6 +477,34 @@ impl fmt::Display for CodegenErrorKind {
                     func = function,
                 )
             }
+            Self::UnknownVariantConstructor {
+                type_name,
+                variant,
+                available,
+            } => {
+                // T0545: prefix pinned — the typechecker twin
+                // (`TypeError::UnknownVariantConstructor`), the
+                // pattern-side diagnostic, and pipeline/audit.rs all
+                // key on "Unknown variant constructor".
+                write!(
+                    f,
+                    "Unknown variant constructor '{}' on sum type '{}'. \
+                     Available variants: [{}]",
+                    variant, type_name, available
+                )
+            }
+            Self::NotASumType {
+                type_name,
+                member,
+                associated,
+            } => {
+                write!(
+                    f,
+                    "'{}' is not a sum type — no variant '{}' can be \
+                     constructed from it. Associated items: [{}]",
+                    type_name, member, associated
+                )
+            }
             Self::Internal(msg) => write!(f, "internal compiler error: {}", msg),
             Self::NotImplemented(feature) => write!(f, "not yet implemented: {}", feature),
         }
@@ -496,6 +559,21 @@ mod tests {
                 context: "Logger".into(),
                 function: "caller".into(),
                 method: "log".into(),
+            },
+            // T0545: fabricated-variant replacements are loud by
+            // design — an Irreducible classification would silently
+            // drop the body and re-open the silent-garbage channel
+            // (`MakeVariant { tag: <interned-string id> }`) they
+            // exist to close.
+            CodegenErrorKind::UnknownVariantConstructor {
+                type_name: "Http2Error".into(),
+                variant: "ZzzNotAVariant".into(),
+                available: "NeedMore, BadFrame".into(),
+            },
+            CodegenErrorKind::NotASumType {
+                type_name: "ErrorCode".into(),
+                member: "EnhanceYourCalm".into(),
+                associated: "new, value, NO_ERROR".into(),
             },
         ];
         for k in cases {
