@@ -317,3 +317,36 @@ fn test_alternative_regex_syntax() {
         ty3
     );
 }
+
+// T0252: abs/min/max/clamp are polymorphic over the numeric type — they
+// resolve to the type of their arguments (Int or Float), not Int-only. They
+// were registered mono `Int`, which shadowed the poly form and failed the
+// arg-check on a Float argument (`abs(1.0)`).
+#[test]
+fn t0252_numeric_builtins_resolve_to_arg_numeric_type() {
+    // abs/min/max/clamp are registered in register_meta_builtins (via
+    // register_builtins), so the checker must load the builtins.
+    fn infer_num(code: &str) -> String {
+        let mut parser = Parser::new(code);
+        let expr = parser.parse_expr().expect("parse failed");
+        let mut checker = TypeChecker::new();
+        checker.register_builtins();
+        let result = checker
+            .infer(&expr, InferMode::Synth)
+            .expect("infer failed");
+        format!("{}", result.ty)
+    }
+    assert_eq!(infer_num("abs(1)"), "Int", "abs(Int) → Int");
+    assert_eq!(
+        infer_num("abs(1.0)"),
+        "Float",
+        "abs(Float) → Float (was Int-shadowed)"
+    );
+    assert_eq!(infer_num("min(1.0, 2.0)"), "Float", "min(Float,Float) → Float");
+    assert_eq!(infer_num("max(1, 2)"), "Int", "max(Int,Int) → Int");
+    assert_eq!(
+        infer_num("clamp(1.0, 0.0, 2.0)"),
+        "Float",
+        "clamp(Float,Float,Float) → Float"
+    );
+}

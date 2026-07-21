@@ -7419,6 +7419,24 @@ impl TypeChecker {
                 self.ctx.env.insert(verum_common::Text::from($name), scheme);
             }};
         }
+        // T0252: numeric builtins (abs/min/max/clamp) are polymorphic over the
+        // numeric type — `<T>(T,…) -> T` with a FRESH T per call, so abs(1.0)
+        // yields Float and abs(1) yields Int. reg! registered them Int-only,
+        // which shadowed the poly form and failed the arg-check on Float. These
+        // names live in IO_AND_NUMERIC_BUILTIN_NAMES, so the guarded-insert
+        // channels skip them and this direct registration stays authoritative.
+        macro_rules! reg_num_poly {
+            ($name:expr, $arity:expr) => {{
+                let tv = TypeVar::fresh();
+                let params: List<Type> =
+                    std::iter::repeat(Type::Var(tv)).take($arity).collect();
+                let ty = Type::function(params, Type::Var(tv));
+                self.ctx.env.insert(
+                    verum_common::Text::from($name),
+                    TypeScheme::poly(List::from_iter([tv]), ty),
+                );
+            }};
+        }
         // ---- Debugging ----
         reg!("meta_trace_on", List::new(), Type::Unit);
         reg!("meta_trace_off", List::new(), Type::Unit);
@@ -7926,14 +7944,10 @@ impl TypeChecker {
         reg_generic!("is_generic", List::from_iter([Type::Unknown]), Type::Bool);
 
         // ---- Arithmetic ----
-        reg!("abs", List::from_iter([Type::Int]), Type::Int);
-        reg!("min", List::from_iter([Type::Int, Type::Int]), Type::Int);
-        reg!("max", List::from_iter([Type::Int, Type::Int]), Type::Int);
-        reg!(
-            "clamp",
-            List::from_iter([Type::Int, Type::Int, Type::Int]),
-            Type::Int
-        );
+        reg_num_poly!("abs", 1);
+        reg_num_poly!("min", 2);
+        reg_num_poly!("max", 2);
+        reg_num_poly!("clamp", 3);
         reg!("pow", List::from_iter([Type::Int, Type::Int]), Type::Int);
 
         // ---- Type properties (generic + optional regular arg) ----
