@@ -72,6 +72,11 @@ public module util {
 // SPIFFE workload identity (SVID + Workload API client).
 public module spiffe;
 
+// AWS credential material (IAM-user keys / STS session credentials) —
+// the single authority shared by the Secrets Manager client and S3 SigV4
+// signing, neither of which may depend on the other.
+public module aws_credentials;
+
 // Secret-manager clients (Vault / AWS Secrets Manager / GCP Secret Manager)
 // + the shared SecretStore protocol.
 public module secrets;

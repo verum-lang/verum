@@ -12,8 +12,8 @@
 // The catalogue below ships:
 //
 
-//  • A canonical Monad protocol with `pure` / `bind`.
-//  • A StrongMonad protocol extending Monad with `strength`.
+//  • A canonical EffectMonad protocol with `pure` / `bind`.
+//  • A StrongMonad protocol extending EffectMonad with `strength`.
 //  • A `Commutative` marker protocol (no extra methods) gating the
 //  concurrent-coherence theorem (Theorem 17.C2).
 //  • Eight standard effects with their classifications:
@@ -49,11 +49,11 @@ mount core.action.articulation.{Articulation};
 mount core.action.enactments.{Enactment};
 
 // =============================================================================
-// Monad / StrongMonad protocols
+// EffectMonad / StrongMonad protocols
 // =============================================================================
 
 /// Standard monad protocol. Every effect type implements it.
-public type Monad is protocol {
+public type EffectMonad is protocol {
     /// Lift a pure value into the effect.
     fn pure<A>(self, a: A) -> Self;
 
@@ -61,7 +61,7 @@ public type Monad is protocol {
     fn bind<A, B>(self, f: fn(A) -> Self) -> Self;
 };
 
-/// Strong monad — extends Monad with strength operator allowing
+/// Strong monad — extends EffectMonad with strength operator allowing
 /// commutation with cartesian products (canonical for any cartesian
 /// monad; Moggi 1991 §2).
 public type StrongMonad is protocol {

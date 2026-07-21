@@ -60,13 +60,18 @@ public module verify;
 // Re-exports — types
 public mount .types.{
     EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
-    LogEntry, SignedEntryTimestamp, RekorInclusionProof, Digest,
+    LogEntry, SignedEntryTimestamp, RekorInclusionProof,
     FulcioCertResponse, FulcioIdentity, SigstoreBundle,
     SIGSTORE_BUNDLE_MEDIA_TYPE,
     REKOR_PUBLIC_URL, FULCIO_PUBLIC_URL, SIGSTORE_PUBLIC_OIDC_ISSUER,
     digest_sha256_hex, validate_digest, SigstoreTypeError,
     entry_kind_to_text, entry_kind_from_text,
 };
+
+// `Digest` is re-exported straight from its authority rather than
+// through `.types`: metadata re-export chains are followed ONE hop
+// only, so an umbrella-of-a-re-export would not resolve (T0155).
+public mount security.provenance.{Digest};
 
 // Re-exports — Rekor
 public mount .rekor.{

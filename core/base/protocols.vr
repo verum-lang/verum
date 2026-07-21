@@ -319,7 +319,13 @@ public type Display is protocol {
 // Drop Protocol
 // =============================================================================
 
-/// Protocol for resource cleanup on value destruction.
+/// Protocol for resource cleanup on value destruction — the foundation
+/// for RAII-style resource management (file handles, GPU buffers, locks).
+/// When a value implementing `Drop` goes out of scope the CBGR runtime
+/// calls `drop()` automatically, exactly once per owned value.
+///
+/// This is the SINGLE authority for the `Drop` protocol (T0500); the
+/// byte-identical copy that lived in `core.base.ops` was removed.
 public type Drop is protocol {
     /// Clean up resources owned by this value.
     fn drop(&mut self);

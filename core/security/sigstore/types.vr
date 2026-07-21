@@ -69,6 +69,12 @@ mount collections.{List, Map};
 mount encoding.json.{JsonValue};
 mount time.rfc3339.{Rfc3339Time};
 
+// `Digest` (algorithm + hex) has a single authority in
+// `core.security.provenance`. Re-exported publicly here so that every
+// `mount security.sigstore.types.{... Digest ...}` consumer keeps
+// resolving unchanged after twin unification (T0155).
+public mount security.provenance.{Digest};
+
 // =============================================================================
 // Constants — Sigstore well-known issuers + endpoints
 // =============================================================================
@@ -216,13 +222,6 @@ public type DsseBody is {
 // =============================================================================
 // Common
 // =============================================================================
-
-@derive(Eq, Clone, Debug)
-public type Digest is {
-    algorithm: Text,
-    /// Hex-encoded digest.
-    hex:       Text,
-};
 
 @derive(Eq, Clone, Debug)
 public type EntryBody is

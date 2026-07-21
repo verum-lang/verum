@@ -78,6 +78,10 @@ mount super.nn.{
     cross_entropy_loss, mse_loss,
     AdamW, SGD,
 };
+// Re-export nn's Module protocol as THE module protocol of the simple API:
+// one source of truth, not a stripped parallel copy. Downstream code keeps
+// `mount core.math.simple.Module` working, but it resolves to core.math.nn.Module.
+public mount super.nn.Module;
 mount super.autodiff.{grad, value_and_grad, with_no_grad};
 mount super.gpu.{default_device, has_gpu};
 mount super.random.RandomKey;
@@ -449,10 +453,9 @@ public type DataLoader is protocol {
     fn len(&self) -> USize;
 };
 
-// Protocol for simple modules
-public type Module<In, Out> is protocol {
-    fn forward(&self, input: In) -> Out;
-};
+// The simple-API `Module<In, Out>` is re-exported from `core.math.nn`
+// (see `public mount super.nn.Module;` at the top of this module) — a single
+// source of truth for the NN module protocol, not a stripped parallel copy.
 
 // =============================================================================
 // Sequential Container (For Simple Models)
@@ -490,6 +493,26 @@ implement Module<SimpleTensor, SimpleTensor> for Sequential {
             x = lyr.forward(x);
         }
         x
+    }
+
+    // Collect parameters from every contained layer. Mirrors the composite
+    // `parameters()` idiom used by nn.vr's FeedForward / TransformerBlock, so
+    // Sequential is a first-class trainable Module (the stripped forward-only
+    // protocol it used to implement could not expose parameters at all).
+    fn parameters(&self) -> List<&DynTensor<Float>> {
+        let mut params: List<&DynTensor<Float>> = List.new();
+        for lyr in &self.layers {
+            params.extend(lyr.parameters());
+        }
+        params
+    }
+
+    fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
+        let mut params: List<&mut DynTensor<Float>> = List.new();
+        for lyr in &mut self.layers {
+            params.extend(lyr.parameters_mut());
+        }
+        params
     }
 }
 

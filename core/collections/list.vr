@@ -39,8 +39,12 @@ mount core.base.coercion.{IntCoercible, Indexable, ArrayCoercible};
 // `try_with_capacity` and friends.
 mount core.base.memory.{try_alloc, try_realloc};
 
-// Shadow MemoryOrdering conflict: explicitly re-bind Ordering to comparison ordering
-type Ordering is Less | Equal | Greater;
+// Comparison Ordering — canonical `core.base.ordering` (T0502 dedup;
+// the atomics `MemoryOrdering` rename means `mount core.*` surfaces
+// exactly one `Ordering`). All 4 names mounted: `list.vr` uses the
+// bare variant `Equal` (e.g. the `cmp` chain), so the variants must
+// come in alongside the type.
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
 
 // =============================================================================
 // List<T>

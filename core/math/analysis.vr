@@ -12,7 +12,7 @@
 
 // Hierarchy:
 //  Sequence -> CauchySequence -> Convergent
-//  ContinuousFunction -> Differentiable -> SmoothFunction
+//  ContinuousFunction -> DifferentiableFunction -> SmoothFunction
 //  MeasurableSpace -> MeasureSpace -> ProbabilitySpace
 //  NormedSpace -> BanachSpace -> HilbertSpace
 // =============================================================================
@@ -106,7 +106,7 @@ public type UniformlyContinuous<X, Y> is protocol extends ContinuousFunction<X, 
 };
 
 /// A differentiable function has a well-defined derivative at each point.
-public type Differentiable is protocol {
+public type DifferentiableFunction is protocol {
     /// Evaluate the function at x.
     fn eval(&self, x: Float) -> Float;
 
@@ -120,7 +120,7 @@ public type Differentiable is protocol {
 };
 
 /// A smooth function is infinitely differentiable.
-public type SmoothFunction is protocol extends Differentiable {
+public type SmoothFunction is protocol extends DifferentiableFunction {
     /// The n-th derivative exists and is continuous for all n.
     @verify(formal)
     fn nth_derivative_exists(&self, n: Int) -> Bool;

@@ -73,13 +73,10 @@ mount security.mac.hmac.{hmac_sha256};
 // Credentials
 // =============================================================================
 
-@derive(Eq, Clone, Debug)
-public type AwsCredentials is {
-    access_key_id:     Text,
-    secret_access_key: Text,
-    /// IAM-role / STS session token. Maybe.None for permanent IAM-user keys.
-    session_token:     Maybe<Text>,
-};
+// Single authority: `core.security.aws_credentials` (T0155). Re-exported
+// publicly so that every `mount storage.s3.signing.{AwsCredentials}`
+// keeps resolving.
+public mount security.aws_credentials.{AwsCredentials};
 
 // =============================================================================
 // Signed-request output

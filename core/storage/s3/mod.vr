@@ -24,5 +24,8 @@ module core.storage.s3;
 public module signing;
 public module client;
 
-public mount .signing.{AwsCredentials, sign_request, presign as sigv4_presign};
+public mount .signing.{sign_request, presign as sigv4_presign};
+// Straight from the authority, not through `.signing`: metadata re-export
+// chains are followed ONE hop only (T0155).
+public mount security.aws_credentials.{AwsCredentials};
 public mount .client.{S3Config, S3Client, s3_config, s3_client};
