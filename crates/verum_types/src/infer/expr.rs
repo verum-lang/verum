@@ -9308,19 +9308,45 @@ impl TypeChecker {
                                     Option::Some(Type::Record(field_types)) => {
                                         field_types.clone()
                                     }
-                                    Option::Some(Type::Named { .. }) => {
-                                        // Type is nominal - infer fields structurally but return Named type
-                                        // This handles types defined in other modules where __struct_fields_ isn't registered
-                                        let base_maybe = base
-                                            .as_ref()
-                                            .map(|b| Heap::new((**b).clone()));
-                                        let _inferred = self.infer_structural_record(
-                                            fields,
-                                            &base_maybe,
-                                            expr.span,
-                                        )?;
-                                        // Return the Named type (nominal) instead of the structural record
-                                        return Ok(InferResult::new(record_ty.clone()));
+                                    Option::Some(Type::Named { .. }) | Option::None => {
+                                        // A nominal placeholder (or an as-yet-
+                                        // unresolved type name) whose field-type
+                                        // map is not registered locally — a mounted
+                                        // cross-module record such as Migration is
+                                        // Named-without-local-fields until its
+                                        // module materializes. Before accepting it
+                                        // UNCHECKED, force the same lazy-load the
+                                        // variant-constructor path uses
+                                        // (resolve_type_name -> ensure_stdlib_type_loaded)
+                                        // and re-probe the field slots. If the
+                                        // fields materialize, yield them and fall
+                                        // through to the Step-4 value / missing /
+                                        // extra check, which returns record_ty (the
+                                        // Named) so nominal identity — and
+                                        // affine-ness — is preserved (T0572). Only
+                                        // the genuinely opaque case keeps the
+                                        // best-effort structural inference.
+                                        let _ =
+                                            self.resolve_type_name(name.as_str(), expr.span);
+                                        if let Option::Some(Type::Record(field_types)) =
+                                            self.ctx.lookup_type(struct_key.as_str())
+                                        {
+                                            field_types.clone()
+                                        } else if let Option::Some(Type::Record(field_types)) =
+                                            self.ctx.lookup_type(name.as_str())
+                                        {
+                                            field_types.clone()
+                                        } else {
+                                            let base_maybe = base
+                                                .as_ref()
+                                                .map(|b| Heap::new((**b).clone()));
+                                            let _inferred = self.infer_structural_record(
+                                                fields,
+                                                &base_maybe,
+                                                expr.span,
+                                            )?;
+                                            return Ok(InferResult::new(record_ty.clone()));
+                                        }
                                     }
                                     Option::Some(other_ty) => {
                                         return Err(TypeError::Other(
@@ -9329,20 +9355,6 @@ impl TypeChecker {
                                                 other_ty
                                             )),
                                         ));
-                                    }
-                                    Option::None => {
-                                        // Not a pre-defined type but path has a type name
-                                        // Infer fields structurally but return Named type (nominal)
-                                        let base_maybe = base
-                                            .as_ref()
-                                            .map(|b| Heap::new((**b).clone()));
-                                        let _inferred = self.infer_structural_record(
-                                            fields,
-                                            &base_maybe,
-                                            expr.span,
-                                        )?;
-                                        // Return Named type to preserve nominal type identity
-                                        return Ok(InferResult::new(record_ty.clone()));
                                     }
                                 }
                             } // close else block for variant_fields
