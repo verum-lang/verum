@@ -620,6 +620,184 @@ pub(crate) fn get_or_declare_internal_i64_to_decimal<'ctx>(
     func
 }
 
+/// Get or declare `verum_internal_u64_to_decimal(buf: ptr, value: i64)
+/// -> i64` — the UNSIGNED sibling of `verum_internal_i64_to_decimal`
+/// (T0364).
+///
+/// Writes the decimal digits of `value` REINTERPRETED AS `u64` (no
+/// sign, no `-`) into `buf` and returns the digit count.  Used by
+/// `emit_verum_uint_to_text` so a `UInt64`/`Byte`/… with the high bit
+/// set renders its full unsigned magnitude instead of the i64 two's
+/// complement negative.  Structurally this is the i64 writer minus the
+/// sign branch and the `prepend_minus` block — the digit loop already
+/// used UNSIGNED div/rem, so the magnitude is simply `value` itself and
+/// there is never a sign to emit.
+///
+/// **Libc-free** (T-DEFER-AOT-NO-LIBC): same open-coded contract as the
+/// i64 sibling; no snprintf dependency.
+pub(crate) fn get_or_declare_internal_u64_to_decimal<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_u64_to_decimal";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i64_type = llvm_ctx.i64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let zero_branch = llvm_ctx.append_basic_block(func, "zero");
+    let digit_loop = llvm_ctx.append_basic_block(func, "digit_loop");
+    let after_digits = llvm_ctx.append_basic_block(func, "after_digits");
+    let reverse_loop = llvm_ctx.append_basic_block(func, "reverse_loop");
+    let reverse_swap = llvm_ctx.append_basic_block(func, "reverse_swap");
+    let return_val = llvm_ctx.append_basic_block(func, "return_val");
+
+    let builder = llvm_ctx.create_builder();
+
+    let buf_param = func.get_first_param().expect("buf").into_pointer_value();
+    let val_param = func.get_nth_param(1).expect("value").into_int_value();
+
+    let zero_i64 = i64_type.const_zero();
+    let one_i64 = i64_type.const_int(1, false);
+    let ten_i64 = i64_type.const_int(10, false);
+    let zero_ch = i8_type.const_int(b'0' as u64, false);
+
+    // entry: branch on value == 0.  Nonzero → straight into the digit
+    // loop (no sign detection — the raw bits ARE the magnitude).
+    builder.position_at_end(entry);
+    let is_zero = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, val_param, zero_i64, "is_zero")
+        .expect("is_zero");
+    builder
+        .build_conditional_branch(is_zero, zero_branch, digit_loop)
+        .expect("zero br");
+
+    // zero: buf[0] = '0'; return 1.
+    builder.position_at_end(zero_branch);
+    builder.build_store(buf_param, zero_ch).expect("store zero");
+    builder.build_return(Some(&one_i64)).expect("ret 1");
+
+    // digit_loop: PHI(mag, i); buf[i] = '0' + (mag % 10);
+    //             mag /= 10; i++; while mag != 0.  UNSIGNED div/rem so
+    //             every u64 (including those with the high bit set)
+    //             yields the correct decimal digits.
+    builder.position_at_end(digit_loop);
+    let mag_phi = builder.build_phi(i64_type, "mag").expect("mag phi");
+    let i_phi = builder.build_phi(i64_type, "i").expect("i phi");
+    mag_phi.add_incoming(&[(&val_param, entry)]);
+    i_phi.add_incoming(&[(&zero_i64, entry)]);
+    let mag_v = mag_phi.as_basic_value().into_int_value();
+    let i_v = i_phi.as_basic_value().into_int_value();
+
+    let digit = builder
+        .build_int_unsigned_rem(mag_v, ten_i64, "digit")
+        .expect("rem");
+    let digit_i8 = builder
+        .build_int_truncate(digit, i8_type, "digit_i8")
+        .expect("trunc");
+    let digit_ch = builder
+        .build_int_add(digit_i8, zero_ch, "digit_ch")
+        .expect("digit add");
+    let buf_i = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[i_v], "buf_i")
+            .expect("gep")
+    };
+    builder
+        .build_store(buf_i, digit_ch)
+        .expect("store digit");
+    let mag_next = builder
+        .build_int_unsigned_div(mag_v, ten_i64, "mag_next")
+        .expect("div");
+    let i_next = builder
+        .build_int_add(i_v, one_i64, "i_next")
+        .expect("i++");
+    let cont = builder
+        .build_int_compare(verum_llvm::IntPredicate::NE, mag_next, zero_i64, "cont")
+        .expect("cont");
+    builder
+        .build_conditional_branch(cont, digit_loop, after_digits)
+        .expect("loop br");
+    mag_phi.add_incoming(&[(&mag_next, digit_loop)]);
+    i_phi.add_incoming(&[(&i_next, digit_loop)]);
+
+    // after_digits: len = i_next (digit count); set up the in-place
+    // reverse (digits were written least-significant first).  No sign
+    // to prepend, so `after_digits` is the single predecessor of the
+    // reverse loop and `len` needs no PHI.
+    builder.position_at_end(after_digits);
+    let len_v = i_next;
+    let hi_init = builder
+        .build_int_sub(len_v, one_i64, "hi_init")
+        .expect("hi-1");
+    builder
+        .build_unconditional_branch(reverse_loop)
+        .expect("→ rev loop");
+
+    // reverse_loop: PHI(lo, hi); if lo < hi → swap; else → return.
+    builder.position_at_end(reverse_loop);
+    let lo_phi = builder.build_phi(i64_type, "lo").expect("lo phi");
+    let hi_phi = builder.build_phi(i64_type, "hi").expect("hi phi");
+    lo_phi.add_incoming(&[(&zero_i64, after_digits)]);
+    hi_phi.add_incoming(&[(&hi_init, after_digits)]);
+    let lo_v = lo_phi.as_basic_value().into_int_value();
+    let hi_v = hi_phi.as_basic_value().into_int_value();
+    let need_swap = builder
+        .build_int_compare(verum_llvm::IntPredicate::SLT, lo_v, hi_v, "need_swap")
+        .expect("lo<hi");
+    builder
+        .build_conditional_branch(need_swap, reverse_swap, return_val)
+        .expect("rev br");
+
+    // reverse_swap: tmp = buf[lo]; buf[lo] = buf[hi]; buf[hi] = tmp;
+    //               lo++; hi--; back.
+    builder.position_at_end(reverse_swap);
+    let buf_lo = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[lo_v], "buf_lo")
+            .expect("gep lo")
+    };
+    let buf_hi = unsafe {
+        builder
+            .build_gep(i8_type, buf_param, &[hi_v], "buf_hi")
+            .expect("gep hi")
+    };
+    let tmp = builder
+        .build_load(i8_type, buf_lo, "tmp")
+        .expect("load lo")
+        .into_int_value();
+    let other = builder
+        .build_load(i8_type, buf_hi, "other")
+        .expect("load hi")
+        .into_int_value();
+    builder.build_store(buf_lo, other).expect("store lo");
+    builder.build_store(buf_hi, tmp).expect("store hi");
+    let lo_next = builder
+        .build_int_add(lo_v, one_i64, "lo_next")
+        .expect("lo++");
+    let hi_next = builder
+        .build_int_sub(hi_v, one_i64, "hi_next")
+        .expect("hi--");
+    builder
+        .build_unconditional_branch(reverse_loop)
+        .expect("rev back");
+    lo_phi.add_incoming(&[(&lo_next, reverse_swap)]);
+    hi_phi.add_incoming(&[(&hi_next, reverse_swap)]);
+
+    // return_val: return len.
+    builder.position_at_end(return_val);
+    builder.build_return(Some(&len_v)).expect("ret len");
+
+    func
+}
+
 /// Get or declare a libc-free `strtod` replacement —
 /// `verum_internal_strtod(nptr: ptr) -> f64`.
 ///
@@ -22548,6 +22726,53 @@ fn lower_text_extended<'ctx>(
                     let i64_val = ctx
                         .builder()
                         .build_ptr_to_int(pv, i64_ty, "int_text_ptr")
+                        .or_llvm_err()?;
+                    BasicValueEnum::IntValue(i64_val)
+                }
+                other => other,
+            };
+            ctx.set_register(dst, normalized);
+            ctx.mark_text_register(dst);
+            Ok(())
+        }
+        0x22 => {
+            // UIntToText (T0364): unsigned sibling of IntToText. Renders
+            // the operand's raw bits as a u64 decimal, so a UInt64 with
+            // the high bit set prints its full magnitude instead of the
+            // i64 two's-complement negative. Codegen selects this sub-op
+            // (via `emit_value_to_text`) when the display operand's
+            // static type is an unsigned integer. Mirror of the 0x20
+            // arm, but calls `verum_uint_to_text`.
+            if operands.len() < 2 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let val = ctx.get_register(op_reg(operands, 1))?;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
+            let to_text_fn =
+                super::error::get_or_declare_function(module, "verum_uint_to_text", fn_type);
+            let coerced = coerce_value(
+                ctx,
+                val,
+                to_text_fn.get_type().get_param_types()[0]
+                    .try_into()
+                    .ok()
+                    .or_internal("param type conversion failed")?,
+                "uint_coerce",
+            )?;
+            let result = ctx
+                .builder()
+                .build_call(to_text_fn, &[coerced.into()], "uint_to_text")
+                .or_llvm_err()?
+                .basic_value_or("UIntToText: expected return value")?;
+            // Normalize pointer return to i64
+            let normalized = match result {
+                BasicValueEnum::PointerValue(pv) => {
+                    let i64_val = ctx
+                        .builder()
+                        .build_ptr_to_int(pv, i64_ty, "uint_text_ptr")
                         .or_llvm_err()?;
                     BasicValueEnum::IntValue(i64_val)
                 }

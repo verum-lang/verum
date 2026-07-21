@@ -1993,6 +1993,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
             self.emit_verum_int_to_text(module)
         );
         step!(
+            "emit_verum_uint_to_text",
+            self.emit_verum_uint_to_text(module)
+        );
+        step!(
             "emit_verum_float_to_text",
             self.emit_verum_float_to_text(module)
         );
@@ -5026,6 +5030,91 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
+    /// verum_uint_to_text(value: i64) -> i64 (returns Text object pointer as i64)
+    ///
+    /// **Libc-free** UNSIGNED sibling of `verum_int_to_text` (T0364).
+    /// Renders the argument's raw bits as a `u64` decimal via the
+    /// open-coded `verum_internal_u64_to_decimal`, so a `UInt64` with
+    /// the high bit set prints its full magnitude instead of the i64
+    /// two's-complement negative.  Same allocation contract as the i64
+    /// sibling — stack buffer, decimal writer, malloc, memcpy, NUL,
+    /// `verum_text_alloc`.
+    fn emit_verum_uint_to_text(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_uint_to_text") {
+            if f.count_basic_blocks() > 0 {
+                return Ok(());
+            }
+        }
+
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let func = super::error::get_or_declare_function(module, "verum_uint_to_text", fn_type);
+
+        let entry = ctx.append_basic_block(func, "entry");
+        let builder = ctx.create_builder();
+        builder.position_at_end(entry);
+
+        let value = func
+            .get_nth_param(0)
+            .or_internal("missing param 0")?
+            .into_int_value();
+
+        // Stack buffer — 24 bytes is comfortably above the 20-char
+        // worst case (`18446744073709551615`).
+        let buf_size: u64 = 24;
+        let buf = builder
+            .build_array_alloca(ctx.i8_type(), i64_type.const_int(buf_size, false), "buf")
+            .or_llvm_err()?;
+
+        // verum_internal_u64_to_decimal(buf, value) -> i64 length.
+        let to_dec_fn = self.get_or_declare_internal_u64_to_decimal(module);
+        let len = builder
+            .build_call(to_dec_fn, &[buf.into(), value.into()], "len")
+            .or_llvm_err()?
+            .basic_value_or("call returned void")?
+            .into_int_value();
+
+        // Allocate new heap buffer + 1 for trailing NUL.
+        let len_plus1 = builder
+            .build_int_add(len, i64_type.const_int(1, false), "len1")
+            .or_llvm_err()?;
+        let new_buf = self.emit_checked_malloc(&builder, module, len_plus1, "newbuf")?;
+
+        // memcpy(new_buf, buf, len) — copy the digits we wrote.
+        let memcpy_fn = self.get_or_declare_memcpy(module);
+        builder
+            .build_call(memcpy_fn, &[new_buf.into(), buf.into(), len.into()], "")
+            .or_llvm_err()?;
+
+        // Stamp NUL at new_buf[len].
+        let nul_ptr = unsafe {
+            builder
+                .build_gep(ctx.i8_type(), new_buf, &[len], "nul_p")
+                .or_llvm_err()?
+        };
+        builder
+            .build_store(nul_ptr, ctx.i8_type().const_zero())
+            .or_llvm_err()?;
+
+        // Allocate Text object: verum_text_alloc(new_buf, len, len)
+        let text_alloc = module
+            .get_function("verum_text_alloc")
+            .or_missing_fn("verum_text_alloc")?;
+        let result = builder
+            .build_call(
+                text_alloc,
+                &[new_buf.into(), len.into(), len.into()],
+                "text_obj",
+            )
+            .or_llvm_err()?
+            .basic_value_or("call returned void")?;
+
+        builder.build_return(Some(&result)).or_llvm_err()?;
+        Ok(())
+    }
+
     /// Materialize `verum_internal_i64_to_decimal` directly via
     /// `instruction.rs::get_or_declare_internal_i64_to_decimal`.
     /// This emits the FULL body (basic blocks + IR), not just a
@@ -5037,6 +5126,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module: &Module<'ctx>,
     ) -> FunctionValue<'ctx> {
         super::instruction::get_or_declare_internal_i64_to_decimal(self.context, module)
+    }
+
+    /// Materialize `verum_internal_u64_to_decimal` (unsigned sibling of
+    /// the i64 bridge above) directly via
+    /// `instruction.rs::get_or_declare_internal_u64_to_decimal`.
+    /// Emits the FULL body on first call; idempotent thereafter. (T0364)
+    fn get_or_declare_internal_u64_to_decimal(
+        &self,
+        module: &Module<'ctx>,
+    ) -> FunctionValue<'ctx> {
+        super::instruction::get_or_declare_internal_u64_to_decimal(self.context, module)
     }
 
     /// Materialize `verum_internal_strtod` (libc-free open-coded

@@ -10517,6 +10517,22 @@ pub enum TextSubOpcode {
     /// Returns decimal string representation.
     FloatToText = 0x21,
 
+    /// Convert an UNSIGNED integer to Text.
+    ///
+
+    /// Format: `dst:reg, value:reg`
+    /// Sibling of `IntToText` (0x20) that renders the operand's raw
+    /// bits as a `u64` decimal — a `UInt64`/`Byte`/… value with the
+    /// high bit set prints as its full unsigned magnitude, not the
+    /// i64 two's-complement negative.  Emitted by codegen's
+    /// `emit_value_to_text` when the display operand's static type is
+    /// an unsigned integer (the one signedness authority,
+    /// `is_unsigned_integer_type`).  Value/tag carry no signedness at
+    /// runtime, so the choice must be carried in the bytecode — the
+    /// same design rule the `FloatToText` leg follows so AOT formats
+    /// correctly without register marks. (T0364)
+    UIntToText = 0x22,
+
     /// Get Text length in bytes.
     ///
 
@@ -10619,6 +10635,7 @@ impl TextSubOpcode {
             0x11 => Some(Self::ParseFloat),
             0x20 => Some(Self::IntToText),
             0x21 => Some(Self::FloatToText),
+            0x22 => Some(Self::UIntToText),
             0x30 => Some(Self::ByteLen),
             0x31 => Some(Self::CharLen),
             0x32 => Some(Self::IsEmpty),
@@ -10658,6 +10675,7 @@ impl TextSubOpcode {
             // ===== Convert to Text (0x20-0x2F) =====
             Self::IntToText    => m!("TEXT_INT_TO_TEXT",    ConvertToText,  rtext=true,  parse=false),
             Self::FloatToText  => m!("TEXT_FLOAT_TO_TEXT",  ConvertToText,  rtext=true,  parse=false),
+            Self::UIntToText   => m!("TEXT_UINT_TO_TEXT",   ConvertToText,  rtext=true,  parse=false),
 
             // ===== Manipulation (0x30-0x3F) =====
             Self::ByteLen      => m!("TEXT_BYTE_LEN",       Manipulation,   rtext=false, parse=false),

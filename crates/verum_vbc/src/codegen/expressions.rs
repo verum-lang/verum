@@ -35302,6 +35302,10 @@ impl VbcCodegen {
                 sub_op: TextSubOpcode::IntToText as u8,
                 operands: encode_operands(dest, args),
             }),
+            "verum_uint_to_text" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::UIntToText as u8,
+                operands: encode_operands(dest, args),
+            }),
             "verum_float_to_text" => self.ctx.emit(Instruction::TextExtended {
                 sub_op: TextSubOpcode::FloatToText as u8,
                 operands: encode_operands(dest, args),
@@ -37380,6 +37384,35 @@ impl VbcCodegen {
             });
         } else if type_name == "Float" {
             self.emit_intrinsic_library_call("verum_float_to_text", &[expr_reg], str_reg)?;
+        } else if self.infer_expr_is_unsigned(expr)
+            && self
+                .infer_expr_type_name(expr)
+                .as_deref()
+                .and_then(type_names::numeric_bit_width)
+                != Some(128)
+        {
+            // Unsigned-integer display (T0364).  A `UInt64`/`Byte`/…
+            // value with the high bit set carries correct BITS but no
+            // signedness tag at runtime, so the signed `ToString` /
+            // `IntToText` path renders it as an i64 two's-complement
+            // negative (`u64::MAX` → "-1").  Exactly like the `Float`
+            // leg above, carry the decision in the bytecode here — the
+            // one codegen site that still knows the operand's static
+            // type — via the unsigned sibling render op.  Reuses the
+            // ordered-compare gate's OWN signedness authority
+            // (`infer_expr_is_unsigned` → `is_unsigned_integer_type`),
+            // never a fourth ad-hoc derivation; a signed `Int` fails
+            // this predicate and stays on the unchanged path below.
+            //
+            // The 128-bit exclusion (`numeric_bit_width != 128`, the
+            // canonical width authority — covers `UInt128`/`u128`/`U128`)
+            // is a T0272 INTERLOCK: a `UInt128` is boxed wider than the
+            // nan-box i64, so `verum_uint_to_text`'s `as_i64() as u64`
+            // would silently narrow it.  128-bit display stays on its
+            // own path until T0272 lands a width-aware arm.  An unknown
+            // width (nested `u64` arithmetic → `None`) is NOT 128 and
+            // correctly takes the u64 path.
+            self.emit_intrinsic_library_call("verum_uint_to_text", &[expr_reg], str_reg)?;
         } else if !self.try_emit_display_dispatch(expr, expr_reg, str_reg)? {
             self.ctx.emit(Instruction::ToString {
                 dst: str_reg,

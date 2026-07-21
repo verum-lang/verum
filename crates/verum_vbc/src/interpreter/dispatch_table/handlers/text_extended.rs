@@ -119,6 +119,21 @@ fn text_extended_body(
             let text_val = super::string_helpers::alloc_string_value(state, &s)?;
             state.set_reg(dst, text_val);
         }
+        Some(TextSubOpcode::UIntToText) => {
+            // Unsigned sibling of IntToText — the display leg of the
+            // sized-int signedness contract (T0364).  The nan-box tag
+            // carries no signedness, so codegen picks this op (via
+            // `emit_value_to_text`) whenever the operand's static type
+            // is an unsigned integer; here we simply reinterpret the
+            // raw 64 bits as `u64` before rendering, so a `UInt64` with
+            // the high bit set prints its full magnitude instead of the
+            // i64 two's-complement negative.
+            let value_reg = read_reg(state)?;
+            let n = state.get_reg(value_reg).as_i64() as u64;
+            let s = format!("{}", n);
+            let text_val = super::string_helpers::alloc_string_value(state, &s)?;
+            state.set_reg(dst, text_val);
+        }
         Some(TextSubOpcode::FloatToText) => {
             let value_reg = read_reg(state)?;
             let f = state.get_reg(value_reg).as_f64();

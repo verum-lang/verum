@@ -2921,6 +2921,49 @@ mod const_generic_value_carry_tests {
         );
     }
 
+    /// T0364 — a `UInt64` whose high bit is set (> `i64::MAX`) must
+    /// DISPLAY as its full unsigned magnitude, not the i64 two's
+    /// complement negative.  The nan-box tag carries no signedness, so
+    /// the fix carries the decision in the bytecode: codegen's
+    /// `emit_value_to_text` routes an unsigned operand to
+    /// `verum_uint_to_text` → `TextSubOpcode::UIntToText`, whose
+    /// interpreter arm reinterprets the raw bits as `u64`.
+    ///
+    /// The assertion is done ENTIRELY in-Verum (Text `==`, which lowers
+    /// to the interpreter-native `CmpG` and needs no stdlib) so the
+    /// bare e2e harness — which loads no stdlib and whose heap is
+    /// dropped after the run — can check the exact rendered digits.
+    ///
+    /// RED (pre-fix): `f"{m}"` fell to the signed `ToString`/`IntToText`
+    /// path, printing "-1" / "-9223372036854775808"; the equality was
+    /// false and `main` returned 0.  GREEN (post-fix): returns 1.
+    #[test]
+    fn uint64_high_bit_displays_unsigned_t0364() {
+        // u64::MAX — a small-int-boxed -1, reinterpreted as u64 at the
+        // display op (20 digits; signed render would be "-1").
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let m: UInt64 = 18446744073709551615;
+                if f"{m}" == "18446744073709551615" { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+        // 1<<63 == i64::MIN's bit pattern — heap-boxed (outside the
+        // small-int range), so this exercises the boxed-int render leg.
+        // Signed render would be "-9223372036854775808".
+        assert_main_returns_int(
+            r#"
+            fn main() -> Int {
+                let n: UInt64 = 9223372036854775808;
+                if f"{n}" == "9223372036854775808" { 1 } else { 0 }
+            }
+            "#,
+            1,
+        );
+    }
+
     /// Receiver-driven const witness: `let b = B<7>.new(); b.cap()` — the
     /// let-binding carries "B<7>" (constructor full-instantiation carry),
     /// the method callsite parses it back into [ConstValue(7)], and the
