@@ -132,6 +132,21 @@ impl<'s> CompilationPipeline<'s> {
                     }
                 }
             }
+            // T0489 soundness gate: an entry whose body names an
+            // undeclared symbol poisons the entire SMT-LIB block. The
+            // registry now closes itself under the call graph and omits
+            // such entries; report each omission loudly so it is never
+            // silent.
+            for skip in registry.open_entry_drops() {
+                tracing::warn!(
+                    "refinement reflection: skipping `{}` — its body references `{}`, \
+                     which is neither a parameter nor another reflected function; \
+                     reflecting it would invalidate the module's entire SMT block. \
+                     Other reflections are unaffected.",
+                    skip.name.as_str(),
+                    skip.missing_symbol.as_str(),
+                );
+            }
             if !registry.is_empty() {
                 tracing::debug!(
                     "Refinement reflection: {} function(s) reflected as SMT axioms",

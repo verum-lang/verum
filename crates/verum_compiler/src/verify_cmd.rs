@@ -326,6 +326,24 @@ impl<'s> VerifyCommand<'s> {
                 ));
             }
         }
+        // Refinement-reflection soundness gate (T0489): a reflected
+        // function whose body names a symbol the SMT-LIB block never
+        // declares — a callee that is itself body-less or multi-statement,
+        // hence not reflected — makes Z3's `from_string` reject the WHOLE
+        // block, silently disabling every reflection axiom in the module.
+        // `to_smtlib_block` now closes the registry under its call graph
+        // and omits such entries; surface each omission loudly so the skip
+        // is never silent.
+        for skip in reflection_registry.open_entry_drops() {
+            tracing::warn!(
+                "refinement reflection: skipping `{}` — its body references `{}`, \
+                 which is neither a parameter nor another reflected function; \
+                 reflecting it would invalidate the module's entire SMT block. \
+                 Other reflections are unaffected.",
+                skip.name.as_str(),
+                skip.missing_symbol.as_str(),
+            );
+        }
         // Variant disjointness axioms: for every `type T is A | B
         // | C;`, emit `T.A != T.B`, `T.A != T.C`, `T.B != T.C`.
         // These are asserted on the solver so claims like

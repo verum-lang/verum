@@ -128,6 +128,48 @@ impl ReflectedFunction {
     }
 }
 
+/// A reflected-function entry that the closure pass removed from the
+/// emitted SMT-LIB block, together with the symbol that forced the
+/// removal.
+///
+/// Surfaced to the caller (verify CLI / verification pipeline) so a
+/// *loud* diagnostic can name the skipped function and the undeclared
+/// symbol. Skipping the one open entry keeps the rest of the module's
+/// reflection intact — before this gate a single such entry made Z3's
+/// `from_string` reject the whole block, silently disabling *all*
+/// refinement reflection for the module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflectionDrop {
+    /// Name of the function that could not be reflected soundly.
+    pub name: Text,
+    /// The first body symbol that is neither an SMT-LIB builtin, one of
+    /// the function's formal parameters, nor another reflected function.
+    pub missing_symbol: Text,
+}
+
+/// True for the fixed set of SMT-LIB operators / atoms that
+/// [`crate::expr_to_smtlib`] can emit as application heads (see
+/// `binop_to_smtlib` plus the `Unary` / `If` arms) together with numeric
+/// and boolean literals. Every *other* symbol appearing in a reflected
+/// body must be a formal parameter or another reflected function —
+/// otherwise the emitted block references a symbol it never declares and
+/// Z3 rejects the block wholesale.
+fn is_smtlib_builtin_symbol(tok: &str) -> bool {
+    // Numeric literal (int or float): the translator renders these via
+    // `format!("{}", value)`, which always starts with an ASCII digit;
+    // no SMT operator or Verum identifier does.
+    if tok.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        return true;
+    }
+    matches!(
+        tok,
+        "+" | "-" | "*" | "div" | "mod"
+            | "=" | "<" | "<=" | ">" | ">="
+            | "and" | "or" | "not" | "=>" | "ite" | "distinct"
+            | "true" | "false"
+    )
+}
+
 /// The registry of reflected user-function definitions.
 ///
 
@@ -187,8 +229,18 @@ impl RefinementReflectionRegistry {
     /// references resolve.
     pub fn to_smtlib_block(&self) -> Text {
         let mut out = String::new();
+        // Close the registry under its call graph and omit any open entry
+        // (T0489): a body naming a symbol the block never declares would
+        // make Z3 reject the *entire* block. Emitting only the closed
+        // subset makes that poisoning structurally impossible — one bad
+        // axiom degrades exactly one function, not the whole module.
+        let (dropped, _drops) = self.dropped_entry_names();
         // Stable ordering so runs are deterministic for proof_stability.
-        let mut names: Vec<&Text> = self.by_name.keys().collect();
+        let mut names: Vec<&Text> = self
+            .by_name
+            .keys()
+            .filter(|n| !dropped.contains(n.as_str()))
+            .collect();
         names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 
         for n in &names {
@@ -209,7 +261,14 @@ impl RefinementReflectionRegistry {
     where
         F: FnMut(&str),
     {
-        let mut names: Vec<&Text> = self.by_name.keys().collect();
+        // Same closure gate as `to_smtlib_block` (T0489): only entries
+        // that are closed under the call graph are handed to the solver.
+        let (dropped, _drops) = self.dropped_entry_names();
+        let mut names: Vec<&Text> = self
+            .by_name
+            .keys()
+            .filter(|n| !dropped.contains(n.as_str()))
+            .collect();
         names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         for n in &names {
             sink(self.by_name[*n].to_smtlib_decl().as_str());
@@ -217,6 +276,90 @@ impl RefinementReflectionRegistry {
         for n in &names {
             sink(self.by_name[*n].to_smtlib_axiom().as_str());
         }
+    }
+
+    /// Compute the entries that must be dropped to close the registry
+    /// under its call graph, together with the first undeclared symbol
+    /// that forced each drop. Pure — never mutates the registry, so an
+    /// omitted function keeps its entry (and thus its sort signature via
+    /// [`Self::iter`]) and simply stays an *opaque* symbol at use sites.
+    ///
+    /// A reflected function is *open* when its body names a symbol that is
+    /// neither an SMT-LIB builtin, one of its own formal parameters, nor
+    /// another **still-live** reflected function. Dropping one entry can
+    /// open another (a caller of the dropped function), so the pass
+    /// iterates to a fixpoint. Drops are returned in a deterministic
+    /// order independent of map iteration order.
+    fn dropped_entry_names(&self) -> (std::collections::BTreeSet<String>, Vec<ReflectionDrop>) {
+        use std::collections::BTreeSet;
+        let mut live: BTreeSet<String> =
+            self.by_name.keys().map(|n| n.as_str().to_string()).collect();
+        let mut drops: Vec<ReflectionDrop> = Vec::new();
+        loop {
+            let mut newly_dropped: Vec<(String, String)> = Vec::new();
+            for f in self.by_name.values() {
+                let name = f.name.as_str();
+                if !live.contains(name) {
+                    continue; // already dropped in an earlier pass
+                }
+                if let Some(sym) = Self::first_undeclared_symbol(f, &live) {
+                    newly_dropped.push((name.to_string(), sym));
+                }
+            }
+            if newly_dropped.is_empty() {
+                break;
+            }
+            newly_dropped.sort();
+            for (name, sym) in newly_dropped {
+                live.remove(&name);
+                drops.push(ReflectionDrop {
+                    name: Text::from(name.as_str()),
+                    missing_symbol: Text::from(sym.as_str()),
+                });
+            }
+        }
+        let dropped: BTreeSet<String> =
+            drops.iter().map(|d| d.name.as_str().to_string()).collect();
+        (dropped, drops)
+    }
+
+    /// First symbol in `f`'s body that is not an SMT-LIB builtin, not one
+    /// of `f`'s formal parameters, and not a currently-live reflected
+    /// function. `None` ⇒ `f` is closed under `live`.
+    fn first_undeclared_symbol(
+        f: &ReflectedFunction,
+        live: &std::collections::BTreeSet<String>,
+    ) -> Option<String> {
+        // The translator emits no binders (no `forall`/`exists`/`let`),
+        // so every whitespace/paren-delimited token is either an operator,
+        // a literal, or an applied/referenced symbol — splitting on parens
+        // and whitespace yields exactly the referenced-symbol set.
+        for tok in f
+            .body_smtlib
+            .as_str()
+            .split(|c: char| c == '(' || c == ')' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+        {
+            if is_smtlib_builtin_symbol(tok) {
+                continue;
+            }
+            if f.parameters.iter().any(|p| p.as_str() == tok) {
+                continue;
+            }
+            if live.contains(tok) {
+                continue;
+            }
+            return Some(tok.to_string());
+        }
+        None
+    }
+
+    /// The entries the SMT-LIB block will omit, for a loud caller-side
+    /// diagnostic. Each names the skipped function and the undeclared
+    /// symbol that forced the skip. Empty ⇒ the whole registry is closed
+    /// and every reflected function is emitted.
+    pub fn open_entry_drops(&self) -> Vec<ReflectionDrop> {
+        self.dropped_entry_names().1
     }
 }
 
@@ -446,5 +589,92 @@ mod tests {
     fn reflectable_open_rejected() {
         let r = is_reflectable(&Text::from("f"), true, true, false);
         assert!(matches!(r, Err(ReflectionError::NotReflectable { .. })));
+    }
+
+    // ----------------------------------------------------------------
+    // T0489 — one open axiom must not poison the whole block.
+    // ----------------------------------------------------------------
+
+    /// Body references `helper_unreflected`, which is neither a parameter
+    /// nor another reflected function — the poison shape from the
+    /// reproducer (a caller of a body-less / multi-statement function).
+    fn uses_helper_reflected() -> ReflectedFunction {
+        ReflectedFunction {
+            name: Text::from("uses_helper"),
+            parameters: List::from_iter([Text::from("x")]),
+            body_smtlib: Text::from("(helper_unreflected x)"),
+            return_sort: Text::from("Int"),
+            parameter_sorts: List::from_iter([Text::from("Int")]),
+        }
+    }
+
+    #[test]
+    fn block_drops_open_entry_keeps_closed() {
+        // add (closed) + uses_helper (open): the block must keep add's
+        // decl+axiom and OMIT uses_helper entirely, so Z3 never sees the
+        // undeclared `helper_unreflected` and the good axiom survives.
+        let mut reg = RefinementReflectionRegistry::new();
+        reg.register(add_reflected()).unwrap();
+        reg.register(uses_helper_reflected()).unwrap();
+
+        let block = reg.to_smtlib_block();
+        let s = block.as_str();
+        assert!(s.contains("(declare-fun add"));
+        assert!(s.contains("(= (add a b) (+ a b))"));
+        assert!(!s.contains("uses_helper"));
+        assert!(!s.contains("helper_unreflected"));
+    }
+
+    #[test]
+    fn open_entry_drops_names_function_and_symbol() {
+        let mut reg = RefinementReflectionRegistry::new();
+        reg.register(add_reflected()).unwrap();
+        reg.register(uses_helper_reflected()).unwrap();
+
+        let drops = reg.open_entry_drops();
+        assert_eq!(drops.len(), 1);
+        assert_eq!(drops[0].name.as_str(), "uses_helper");
+        assert_eq!(drops[0].missing_symbol.as_str(), "helper_unreflected");
+    }
+
+    #[test]
+    fn closure_is_transitive_to_fixpoint() {
+        // chain_a -> chain_b -> helper_unreflected(undeclared). Removing
+        // chain_b opens chain_a, so BOTH must be dropped; add is untouched.
+        let mut reg = RefinementReflectionRegistry::new();
+        reg.register(add_reflected()).unwrap();
+        let mk = |name: &str, body: &str| ReflectedFunction {
+            name: Text::from(name),
+            parameters: List::from_iter([Text::from("x")]),
+            body_smtlib: Text::from(body),
+            return_sort: Text::from("Int"),
+            parameter_sorts: List::from_iter([Text::from("Int")]),
+        };
+        reg.register(mk("chain_a", "(chain_b x)")).unwrap();
+        reg.register(mk("chain_b", "(helper_unreflected x)")).unwrap();
+
+        assert_eq!(reg.open_entry_drops().len(), 2);
+        let block = reg.to_smtlib_block();
+        let s = block.as_str();
+        assert!(s.contains("(declare-fun add"));
+        assert!(!s.contains("chain_a"));
+        assert!(!s.contains("chain_b"));
+    }
+
+    #[test]
+    fn self_recursion_is_kept() {
+        // A function may reference its OWN name (recursion): the name is
+        // declared in the block, so it does not poison and must be kept.
+        let mut reg = RefinementReflectionRegistry::new();
+        let fact = ReflectedFunction {
+            name: Text::from("fact"),
+            parameters: List::from_iter([Text::from("n")]),
+            body_smtlib: Text::from("(ite (= n 0) 1 (* n (fact (- n 1))))"),
+            return_sort: Text::from("Int"),
+            parameter_sorts: List::from_iter([Text::from("Int")]),
+        };
+        reg.register(fact).unwrap();
+        assert!(reg.open_entry_drops().is_empty());
+        assert!(reg.to_smtlib_block().as_str().contains("(declare-fun fact"));
     }
 }
