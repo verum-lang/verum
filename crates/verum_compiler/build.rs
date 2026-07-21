@@ -48,18 +48,46 @@ fn acquire_bake_lock(lock_path: &std::path::Path) -> bool {
                 return true;
             }
             Err(_) => {
-                // Stale-steal: a holder older than 30 minutes is presumed dead.
-                let stale = std::fs::read_to_string(lock_path)
-                    .ok()
-                    .and_then(|s| {
-                        s.trim()
-                            .rsplit('@')
-                            .next()
-                            .and_then(|ts| ts.parse::<u64>().ok())
+                // Stale-steal: a lock is stale when its holder PID is no
+                // longer alive, OR (fallback) when it is older than 8
+                // minutes. The lock records `{pid}@{secs}`.
+                //
+                // PID-liveness matters because a killed/crashed bake (the
+                // common case — T0536) otherwise blocks every other build.
+                // We probe the PID with the portable `kill -0` shell builtin
+                // (exit 0 → alive, non-zero → dead/ours-not) rather than
+                // linking libc into this build script (build.rs has no libc
+                // build-dependency, and the no-libc invariant discourages
+                // adding one for a liveness poke).
+                //
+                // The 8-minute age fallback is deliberately BELOW the 600s
+                // (10-minute) wait below, so a genuinely-abandoned lock whose
+                // writer left no reachable PID is still reclaimed within one
+                // wait cycle instead of the old 30-minute floor that the wait
+                // could never reach.
+                let contents = std::fs::read_to_string(lock_path).ok();
+                let holder_pid: Option<u32> = contents.as_deref().and_then(|s| {
+                    s.trim().split('@').next().and_then(|p| p.parse::<u32>().ok())
+                });
+                let held_at: Option<u64> = contents.as_deref().and_then(|s| {
+                    s.trim().rsplit('@').next().and_then(|t| t.parse::<u64>().ok())
+                });
+                let holder_dead = holder_pid
+                    .filter(|p| *p > 1)
+                    .map(|pid| {
+                        !std::process::Command::new("kill")
+                            .arg("-0")
+                            .arg(pid.to_string())
+                            .stderr(std::process::Stdio::null())
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false) // probe failed → don't claim dead
                     })
-                    .map(|held_at| now_secs().saturating_sub(held_at) > 30 * 60)
+                    .unwrap_or(false);
+                let too_old = held_at
+                    .map(|t| now_secs().saturating_sub(t) > 8 * 60)
                     .unwrap_or(true); // unreadable/empty lock counts as stale
-                if stale {
+                if holder_dead || too_old {
                     let _ = std::fs::remove_file(lock_path);
                     continue;
                 }
