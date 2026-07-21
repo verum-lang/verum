@@ -2865,11 +2865,11 @@ impl VbcCodegen {
                     // stdlib code with `UInt64` magnitudes ≥ 2^63 depend
                     // on this — pre-fix it silently emitted signed `/`
                     // and `(u64::MAX) / radix` collapsed to `0`.
-                    let use_unsigned = self
-                        .infer_expr_type_name(left)
-                        .as_deref()
-                        .map(is_unsigned_int_type_name)
-                        .unwrap_or(false);
+                    // One unsignedness authority (see `infer_expr_is_unsigned`);
+                    // also picks up nested-arithmetic unsigned dividends such as
+                    // `(a + b) / c`, which the former inline `infer_expr_type_name`
+                    // copy silently divided signed.
+                    let use_unsigned = self.infer_expr_is_unsigned(left);
                     let op = if use_unsigned {
                         BinaryIntOp::UDiv
                     } else {
@@ -2894,11 +2894,8 @@ impl VbcCodegen {
                 } else {
                     // Same unsignedness gate as `BinOp::Div` — `(u64::MAX)
                     // % 10 = 5` whereas `(i64)(-1) % 10 = -1`.
-                    let use_unsigned = self
-                        .infer_expr_type_name(left)
-                        .as_deref()
-                        .map(is_unsigned_int_type_name)
-                        .unwrap_or(false);
+                    // Same one unsignedness authority as `BinOp::Div`.
+                    let use_unsigned = self.infer_expr_is_unsigned(left);
                     let op = if use_unsigned {
                         BinaryIntOp::UMod
                     } else {
@@ -3156,11 +3153,8 @@ impl VbcCodegen {
                 // operand's inferred type name and emit `BitwiseOp::Ushr`
                 // (which the interpreter lowers to `handle_ushr`, the u64
                 // zero-filling shift).
-                let use_logical = self
-                    .infer_expr_type_name(left)
-                    .as_deref()
-                    .map(is_unsigned_int_type_name)
-                    .unwrap_or(false);
+                // Same one unsignedness authority as `BinOp::Div`/`Rem`.
+                let use_logical = self.infer_expr_is_unsigned(left);
                 let op = if use_logical {
                     BitwiseOp::Ushr
                 } else {
@@ -9642,12 +9636,16 @@ impl VbcCodegen {
         receiver: &Expr,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Option<Reg>>> {
-        let dot = qualified_name.find('.');
-        let type_name = match dot {
-            Some(pos) => &qualified_name[..pos],
+        // The TYPE component is the segment before the final `.method`,
+        // tolerating a mount-upgraded `module.path.Type.method` form
+        // (qualify_method_with_module_authority) — reading the first
+        // path segment (`core`) instead of `List` here let a qualified
+        // WKT method slip past this redirect and devirtualise past the
+        // runtime intercept (T0439; see VbcCodegen::method_id_type_name).
+        let base_type = match VbcCodegen::method_id_type_name(qualified_name) {
+            Some(t) => t,
             None => return Ok(None),
         };
-        let base_type = VbcCodegen::strip_generic_args(type_name);
         if !verum_common::well_known_types::WellKnownType::has_runtime_inline_dispatch(base_type) {
             return Ok(None);
         }
@@ -12906,11 +12904,20 @@ impl VbcCodegen {
         // dispatch" classification; adding a new well-known type
         // updates this branch automatically.
         fn type_prefix_intercepted_by_runtime(qualified: &str) -> bool {
-            let prefix = match qualified.find('.') {
-                Some(p) => &qualified[..p],
-                None => return false,
-            };
-            verum_common::well_known_types::WellKnownType::has_runtime_inline_dispatch(prefix)
+            // The TYPE component is the segment before the final
+            // `.method`, NOT the first path segment: an explicit mount
+            // upgrades `List.push` to `core.collections.List.push`
+            // (qualify_method_with_module_authority), and reading `core`
+            // instead of `List` here made the denylist miss the WKT and
+            // devirtualise the call past the runtime intercept (T0439).
+            match VbcCodegen::method_id_type_name(qualified) {
+                Some(type_name) => {
+                    verum_common::well_known_types::WellKnownType::has_runtime_inline_dispatch(
+                        type_name,
+                    )
+                }
+                None => false,
+            }
         }
 
         // `lookup_function_with_arity` handles overload sets via the
@@ -26459,25 +26466,54 @@ impl VbcCodegen {
         }
     }
 
-    /// Checks whether an expression has an unsigned integer type (UInt8/Byte, UInt64, etc.).
-    /// Used to select unsigned comparison instructions (CmpU) instead of signed (CmpI).
+    /// Is the *value* of `expr` an unsigned integer?  Drives
+    /// signed-vs-unsigned opcode selection for ordering comparisons
+    /// (`<`/`<=`/`>`/`>=`, the gate in `compile_binary`) and, via the
+    /// same authority, for `/`, `%` and `>>`.
+    ///
+    /// Signedness must follow the *type* of the operand, never its
+    /// syntactic shape.  Every shape therefore routes through the one
+    /// rich type-name oracle (`infer_expr_type_name` +
+    /// `is_unsigned_int_type_name`), which already resolves a bare
+    /// local (`variable_type_names` — every unsigned *width*, not just
+    /// the coarse `VarTypeKind::UInt64`/`Byte`), a field access
+    /// (`type_field_type_names`), a call result (the callee
+    /// `return_type_name`) and a suffixed literal (`7_u64`).  The
+    /// former `Path`-only / `UInt64`|`Byte`-only predicate silently
+    /// emitted a SIGNED compare whenever neither operand was a bare
+    /// local — call results, field accesses and literals all missed
+    /// the gate, so `a < b` on large `u64` values gave wrong answers.
     pub fn infer_expr_is_unsigned(&self, expr: &Expr) -> bool {
-        use crate::codegen::context::VarTypeKind;
-        use verum_ast::expr::ExprKind;
+        use verum_ast::expr::{BinOpCategory, ExprKind};
 
         match &expr.kind {
-            ExprKind::Path(path) => {
-                use verum_ast::ty::PathSegment;
-                if path.segments.len() == 1
-                    && let PathSegment::Name(ident) = &path.segments[0]
-                {
-                    let var_type = self.ctx.get_variable_type(&ident.name);
-                    return matches!(var_type, VarTypeKind::UInt64 | VarTypeKind::Byte);
-                }
-                false
+            // Nested arithmetic / bitwise sub-expression.  `infer_expr_type_name`'s
+            // own `Binary` arm intentionally bails to `None` for primitive operands
+            // (it is written for operator-method dispatch such as `Instant - Instant`,
+            // not raw scalar math), so `(getbig() + 1_u64)` would otherwise resolve
+            // to unknown-signedness and fall to a signed compare/divide.  Verum is
+            // statically typed — mixed signed/unsigned arithmetic cannot survive the
+            // type checker without an explicit cast — so if EITHER operand of an
+            // already-checked arithmetic/bitwise expression is unsigned, its result
+            // is unsigned too.  Mirrors the compare gate's own
+            // `is_unsigned(left) || is_unsigned(right)` policy.
+            ExprKind::Binary { op, left, right }
+                if matches!(
+                    op.category(),
+                    BinOpCategory::Arithmetic | BinOpCategory::Bitwise
+                ) =>
+            {
+                self.infer_expr_is_unsigned(left) || self.infer_expr_is_unsigned(right)
             }
             ExprKind::Paren(inner) => self.infer_expr_is_unsigned(inner),
-            _ => false,
+            // Every other shape (bare local, field access, call result, suffixed
+            // literal, static const, …) — one authority, not a shape-specific,
+            // width-narrow re-derivation.
+            _ => self
+                .infer_expr_type_name(expr)
+                .as_deref()
+                .map(is_unsigned_int_type_name)
+                .unwrap_or(false),
         }
     }
 

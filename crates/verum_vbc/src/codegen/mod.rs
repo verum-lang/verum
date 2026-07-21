@@ -1495,6 +1495,45 @@ impl VbcCodegen {
         }
     }
 
+    /// Extracts the TYPE component from a method-dispatch id, tolerating
+    /// a module-qualified prefix.
+    ///
+    /// A dispatch id is `Type.method` or — when the receiver's type was
+    /// explicitly mounted and upgraded by
+    /// `qualify_method_with_module_authority` — the fully-qualified
+    /// `module.path.Type.method`.  The type is the segment immediately
+    /// before the final `.method`, NOT the first path segment.  Any
+    /// generic args on that segment are stripped:
+    ///
+    /// - `"List.push"`                  → `Some("List")`
+    /// - `"core.collections.List.push"` → `Some("List")`
+    /// - `"List<Int>.push"`             → `Some("List")`
+    /// - `"push"`                       → `None`
+    ///
+    /// Reading the FIRST segment (the module head `core`) instead was
+    /// the T0439 / LIST-INDEX-BARENAME-LOWER defect: the devirt denylist
+    /// (`type_prefix_intercepted_by_runtime`) and the resolved-target
+    /// redirect (`try_redirect_resolved_to_builtin`) both feed the
+    /// extracted type to `WellKnownType::has_runtime_inline_dispatch`;
+    /// when `mount core.collections.List` upgraded `List.push` to
+    /// `core.collections.List.push`, the first-segment reading yielded
+    /// `core` (never a well-known type), so the denylist missed, the
+    /// call was devirtualised to a direct `CallG` onto the record-layout
+    /// stdlib body, and the runtime `list_push` intercept was bypassed —
+    /// pushed elements read back as `0.0` while `len()` stayed correct.
+    pub fn method_id_type_name(method_id: &str) -> Option<&str> {
+        // Drop the trailing `.method`, leaving the (possibly qualified)
+        // type path.
+        let type_path = &method_id[..method_id.rfind('.')?];
+        // The type name is the last segment of that path.
+        let type_seg = match type_path.rfind('.') {
+            Some(p) => &type_path[p + 1..],
+            None => type_path,
+        };
+        // Strip any generic args so the exact-name WKT lookup matches.
+        Some(Self::strip_generic_args(type_seg))
+    }
+
     /// Substitute a generic-param-shaped payload type (`"T"` / `"E"` /
     /// generic name) with the concrete arg from `receiver_type`'s
     /// `<...>` syntax, consulting the TypeDescriptor for parent type's
