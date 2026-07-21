@@ -1416,12 +1416,18 @@ impl TypeEnv {
         let env_vars = self.free_vars();
         let ty_vars = ty.free_vars();
 
-        // Only quantify over vars not in environment
+        // Only quantify over vars not in the environment, in a DETERMINISTIC
+        // order: free_vars() returns a hash Set, so iterating it directly makes
+        // the quantifier list — and every scheme generalized here — depend on
+        // hash iteration order. Sort the fresh vars by TypeVar id (T0368).
+        let mut fresh: Vec<_> = ty_vars
+            .into_iter()
+            .filter(|v| !env_vars.contains(v))
+            .collect();
+        fresh.sort_by_key(|v| v.id());
         let mut quantified = List::new();
-        for v in ty_vars {
-            if !env_vars.contains(&v) {
-                quantified.push(v);
-            }
+        for v in fresh {
+            quantified.push(v);
         }
 
         if quantified.is_empty() {
@@ -1448,13 +1454,17 @@ impl TypeEnv {
         let mut quantified = List::new();
         let mut implicit_quantified = Set::new();
 
-        for v in ty_vars {
-            if !env_vars.contains(&v) {
-                quantified.push(v);
-                // Track if this var was marked as implicit
-                if implicit_var_names.contains(&v) {
-                    implicit_quantified.insert(v);
-                }
+        // Deterministic quantifier order (see generalize; T0368).
+        let mut fresh: Vec<_> = ty_vars
+            .into_iter()
+            .filter(|v| !env_vars.contains(v))
+            .collect();
+        fresh.sort_by_key(|v| v.id());
+        for v in fresh {
+            quantified.push(v);
+            // Track if this var was marked as implicit
+            if implicit_var_names.contains(&v) {
+                implicit_quantified.insert(v);
             }
         }
 
@@ -2135,11 +2145,16 @@ impl TypeContext {
             }
         }
 
-        // Add any remaining free vars not in the ordered list (should be rare)
-        for v in ty_vars.iter() {
-            if !quantified.contains(v) {
-                quantified.push(*v);
-            }
+        // Add any remaining free vars not in the ordered list (should be
+        // rare), in a deterministic order — ty_vars is a hash Set (T0368).
+        let mut remaining: Vec<_> = ty_vars
+            .iter()
+            .filter(|&v| !quantified.contains(v))
+            .copied()
+            .collect();
+        remaining.sort_by_key(|v| v.id());
+        for v in remaining {
+            quantified.push(v);
         }
 
         if quantified.is_empty() {
@@ -2178,10 +2193,16 @@ impl TypeContext {
             quantified.push(*v);
         }
 
-        for v in ty_vars.iter() {
-            if !quantified.contains(v) {
-                quantified.push(*v);
-            }
+        // Deterministic order for the remaining free vars — ty_vars is a hash
+        // Set (T0368).
+        let mut remaining: Vec<_> = ty_vars
+            .iter()
+            .filter(|&v| !quantified.contains(v))
+            .copied()
+            .collect();
+        remaining.sort_by_key(|v| v.id());
+        for v in remaining {
+            quantified.push(v);
         }
 
         if quantified.is_empty() {

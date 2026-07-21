@@ -7030,13 +7030,22 @@ impl ProtocolChecker {
         let type_key = self.make_type_key(ty);
         let mut impls = List::new();
 
-        // First try exact match
+        // First try exact match. `impl_index` is a HashMap, so iterating it
+        // directly pushes matches in hash order — nondeterministic when a type
+        // has more than one exact impl (e.g. several protocols). Collect the
+        // matches and push them in declaration order (by impl index) so the
+        // returned list is stable across runs (T0368).
+        let mut exact: Vec<(usize, &ProtocolImpl)> = Vec::new();
         for ((tk, _), &idx) in &self.impl_index {
             if tk == &type_key
                 && let Some(impl_) = self.impls.get(idx)
             {
-                impls.push(impl_);
+                exact.push((idx, impl_));
             }
+        }
+        exact.sort_by_key(|(idx, _)| *idx);
+        for (_, impl_) in exact {
+            impls.push(impl_);
         }
 
         // If no exact match, try to find generic implementations
