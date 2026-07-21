@@ -2900,9 +2900,24 @@ impl RefinementChecker {
         {
             if self.expr_syntactically_equal(left1, left2) {
                 match (op1, op2) {
-                    // x > n implies x >= n
+                    // x > n1 implies x >= n2 iff n1 + 1 >= n2. For integers
+                    // `x > n1` means `x >= n1 + 1`, which implies `x >= n2`
+                    // exactly when n1 + 1 >= n2. This covers evidence that is
+                    // STRONGER than the refinement's lower bound — e.g.
+                    // `x > 5` implies `x >= 0` (T0174) — of which the
+                    // same-literal `x > n implies x >= n` was only the n2 == n1
+                    // special case. Non-literal bounds fall back to syntactic
+                    // equality (`x > k` implies `x >= k` for any k, since
+                    // k + 1 >= k).
                     (BinOp::Gt, BinOp::Ge) => {
-                        if self.expr_syntactically_equal(right1, right2) {
+                        if let (Some(n1), Some(n2)) = (
+                            self.extract_int_literal(right1),
+                            self.extract_int_literal(right2),
+                        ) {
+                            if n1.saturating_add(1) >= n2 {
+                                return true;
+                            }
+                        } else if self.expr_syntactically_equal(right1, right2) {
                             return true;
                         }
                     }
