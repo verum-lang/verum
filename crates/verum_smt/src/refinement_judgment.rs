@@ -75,6 +75,28 @@ impl RefinementJudgment<'_> {
             RefinementJudgment::Satisfies(_) => "refinement_membership",
         }
     }
+
+    /// Whether an *undecided* solver verdict ([`z3::SatResult::Unknown`])
+    /// must be rendered as a rejection.
+    ///
+    /// The two judgments are asymmetric under non-decision, and the
+    /// asymmetry is the judgment's own — not a caller policy — so it lives
+    /// here where both consumers read it once:
+    ///
+    ///  * **Membership** (`∀. P[it := e]`) is a *universal* claim the
+    ///    user's code created, discharged by requiring that no
+    ///    counterexample exist. Leaving it undecided is a genuine open
+    ///    proof obligation, and conservative rejection is sound.
+    ///
+    ///  * **Inhabitation** (`∃x. P(x)`) is an *existential* claim, only
+    ///    ever volunteered at a declaration site. A witness suffices to
+    ///    prove it, so failing to find one within a timeout is no evidence
+    ///    the type is empty. Rejecting on `Unknown` here would reinstate
+    ///    T0457 for every predicate the solver cannot decide and make the
+    ///    verdict depend on machine load — so it must not reject.
+    pub fn rejects_on_unknown(&self) -> bool {
+        matches!(self, RefinementJudgment::Satisfies(_))
+    }
 }
 
 /// Outcome of discharging a [`RefinementJudgment`].

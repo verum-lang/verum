@@ -286,10 +286,19 @@ impl RefinementVerifier {
             }
 
             JudgmentOutcome::Unknown { reason: _ } => {
-                // Solver couldn't determine result (timeout or too complex)
-                let cost = measurement.finish(false);
+                // The two judgments are asymmetric when the solver cannot
+                // decide (see RefinementJudgment::rejects_on_unknown).
+                // Inhabitation is existential and volunteered at a
+                // declaration site, so an undecided witness search is no
+                // evidence the type is empty — accept, rather than reinstate
+                // T0457 for every predicate the solver cannot decide.
+                if !judgment.rejects_on_unknown() {
+                    return Ok(ProofResult::new(measurement.finish(true)));
+                }
 
-                // Check if this was a timeout
+                // Membership is a universal proof obligation the user's code
+                // created; an undecided result is a sound conservative refusal.
+                let cost = measurement.finish(false);
                 if let Some(timeout) = self.context.config().timeout
                     && cost.duration >= timeout
                 {

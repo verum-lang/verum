@@ -16,7 +16,7 @@
 
 use verum_ast::{BinOp, Expr, ExprKind, Ident, Literal, RefinementPredicate, Span, Type, TypeKind};
 use verum_common::Heap;
-use verum_smt::{Context, VerifyMode, verify_refinement};
+use verum_smt::{Context, RefinementJudgment, VerifyMode, verify_refinement};
 
 // ── AST helpers ────────────────────────────────────────────────────
 
@@ -281,4 +281,42 @@ fn t0457_runtime_mode_defers_both_judgments() {
     let ty = bounded_int(BinOp::Gt, 10, BinOp::Lt, 5);
     assert!(verify_refinement(&ctx, &ty, None, VerifyMode::Runtime).is_ok());
     assert!(verify_refinement(&ctx, &ty, Some(&int_lit(3)), VerifyMode::Runtime).is_ok());
+}
+
+// ── Guard: an undecided verdict splits by judgment ──────────────────
+//
+// When the solver returns `SatResult::Unknown`, the two judgments must
+// diverge, and the divergence is a property of the judgment itself —
+// read once through `RefinementJudgment::rejects_on_unknown` and applied
+// verbatim at both call sites (refinement.rs, verify.rs) — not a policy
+// each caller re-decides. Membership is a *universal* obligation the
+// user's code created (`∀. P[it := e]`), so an undecided verdict leaves a
+// real proof obligation open and conservative rejection is sound.
+// Inhabitation is *existential* (`∃x. P(x)`) and only ever volunteered at
+// a declaration site, so failing to find a witness within the solver's
+// budget is no evidence the type is empty; rejecting there would reinstate
+// T0457 for every predicate the solver cannot decide and make the verdict
+// depend on machine load.
+//
+// This is pinned at the policy level rather than end-to-end on a real
+// `Unknown` deliberately: an `Unknown` cannot be forced deterministically.
+// z3 decides these predicates in microseconds, and the only levers that
+// provoke `Unknown` — a genuinely hard predicate, or a wall-clock/memory
+// budget (there is no deterministic step-limit knob on `ContextConfig`) —
+// are precisely the load-flaky constructs a regression pin must not carry.
+#[test]
+fn t0457_unknown_verdict_splits_by_judgment() {
+    assert!(
+        !RefinementJudgment::Inhabited.rejects_on_unknown(),
+        "an undecided inhabitation check must NOT reject: a declaration \
+         site volunteered it, and no witness within budget is not proof \
+         the type is uninhabited (T0457 guard)"
+    );
+
+    let value = int_lit(0);
+    assert!(
+        RefinementJudgment::Satisfies(&value).rejects_on_unknown(),
+        "an undecided membership check must reject: it is a universal \
+         proof obligation the program itself created"
+    );
 }

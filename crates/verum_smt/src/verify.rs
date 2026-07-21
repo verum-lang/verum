@@ -375,10 +375,16 @@ fn verify_refinement_uncached(
         }
 
         JudgmentOutcome::Unknown { reason: _ } => {
-            // Solver couldn't determine result (timeout or too complex)
-            let cost = measurement.finish(false);
+            // Existential inhabitation volunteered at a declaration site must
+            // not reject on an undecided solver verdict (see
+            // RefinementJudgment::rejects_on_unknown); only a universal
+            // membership obligation does. Keeps T0457 from creeping back in
+            // for predicates the solver cannot decide.
+            if !judgment.rejects_on_unknown() {
+                return Ok(ProofResult::new(measurement.finish(true)));
+            }
 
-            // Check if this was a timeout
+            let cost = measurement.finish(false);
             if let Some(timeout) = context.config().timeout
                 && cost.duration >= timeout
             {
