@@ -244,6 +244,9 @@ impl<'a> RecursiveParser<'a> {
             }
 
             let pos_before = self.stream.position();
+            // Cleared each iteration; parse_stmt sets it only when a recovery
+            // consumed a complete construct (see `recovered_clean_boundary`).
+            self.recovered_clean_boundary = false;
 
             // Try to parse a statement
             // Note: E048 (empty statement) is checked inside parse_stmt
@@ -299,10 +302,24 @@ impl<'a> RecursiveParser<'a> {
                 }
                 Err(e) => {
                     self.error(e);
-                    let skipped = self.synchronize();
-                    // If no progress was made, skip at least one token to avoid infinite loop
-                    if skipped == 0 && self.stream.position() == pos_before {
-                        self.stream.advance();
+                    // A recovery that consumed a COMPLETE construct (a Rust-bang
+                    // macro) leaves the cursor at the next statement. If that
+                    // token can start a statement, don't synchronize — doing so
+                    // would swallow it and under-report its error (T0390). When
+                    // the construct was nested inside a larger failing statement
+                    // the cursor is NOT at a statement start (e.g. a dangling
+                    // `)`), so we still synchronize and never over-report (T0270).
+                    let at_clean_boundary = self.recovered_clean_boundary
+                        && self
+                            .stream
+                            .peek()
+                            .is_some_and(|t| crate::recovery::can_start_statement(&t.kind));
+                    if !at_clean_boundary {
+                        let skipped = self.synchronize();
+                        // If no progress was made, skip at least one token to avoid infinite loop
+                        if skipped == 0 && self.stream.position() == pos_before {
+                            self.stream.advance();
+                        }
                     }
                 }
             }

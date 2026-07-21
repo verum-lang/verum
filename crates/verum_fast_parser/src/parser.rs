@@ -350,6 +350,16 @@ pub struct RecursiveParser<'a> {
     /// when the source begins with a `#!` shebang or carries the
     /// `@![__verum_kind("script")]` attribute.
     pub script_mode: bool,
+    /// Set by an error-recovery site that consumed a COMPLETE bad construct —
+    /// currently only the Rust-style `name!(…)` macro recovery in
+    /// [`Self::parse_macro_call`] — and so left the cursor at a clean
+    /// statement boundary. `parse_block_inner` reads it to SKIP
+    /// `synchronize()` for that one statement, so the statements that follow
+    /// are still parsed and diagnosed instead of being swallowed (T0390).
+    /// Reset per statement; because only the complete-construct path sets it,
+    /// ordinary mid-construct parse errors keep synchronizing and never
+    /// over-report (T0270).
+    pub(crate) recovered_clean_boundary: bool,
 }
 
 impl<'a> RecursiveParser<'a> {
@@ -374,6 +384,7 @@ impl<'a> RecursiveParser<'a> {
             recursion_depth: 0,
             in_meta_body: false,
             script_mode: false,
+            recovered_clean_boundary: false,
         }
     }
 

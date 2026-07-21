@@ -7860,6 +7860,10 @@ impl<'a> RecursiveParser<'a> {
                 // Skip the delimited args as a balanced token tree so the
                 // parser lands immediately after the macro invocation.
                 self.skip_balanced_macro_args();
+                // The whole `name ! ( … )` was consumed, so recovery is at a
+                // clean statement boundary: let parse_block_inner keep the
+                // following statements instead of synchronizing past them (T0390).
+                self.recovered_clean_boundary = true;
                 return Err(ParseError::rust_macro_syntax_with_equivalent(
                     name_str.as_str(),
                     verum_equiv,
@@ -9092,6 +9096,36 @@ mod tests {
                 errs.iter().collect::<Vec<_>>()
             );
         }
+    }
+
+    // ── T0390: consecutive no-semicolon bang macros each report ─────────
+    //
+    // Without semicolons, synchronize() after the first `assert!(a)` used to
+    // skip past `assert!(b)` and `assert!(c)` (no `;` to stop at) → only one
+    // E0E2. The bang recovery now marks a clean boundary so the block keeps
+    // parsing the following statements. The with-semicolon case pins that this
+    // did NOT flip into over-reporting (T0270): still exactly three, not six.
+    #[test]
+    fn t0390_consecutive_nosemi_bangs_each_report_e0e2() {
+        use verum_common::Text;
+        let e0e2 = Some(Text::from("E0E2"));
+        let count_e0e2 = |src: &str| -> usize {
+            let parser = VerumParser::new();
+            match parser.parse_module_str(src, FileId::new(0)) {
+                Ok(_) => 0,
+                Err(errs) => errs.iter().filter(|e| e.code == e0e2).count(),
+            }
+        };
+        assert_eq!(
+            count_e0e2("fn f() { assert!(a)\n assert!(b)\n assert!(c) }"),
+            3,
+            "three no-semicolon bangs must each report E0E2 (T0390)"
+        );
+        assert_eq!(
+            count_e0e2("fn f() { assert!(a); assert!(b); assert!(c); }"),
+            3,
+            "three semicolon-terminated bangs must report exactly three E0E2, not more (T0270 guard)"
+        );
     }
 
     #[test]
