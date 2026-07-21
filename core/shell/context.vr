@@ -34,7 +34,7 @@ mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.base.env.{var_opt as env_var_opt, shell as host_shell, temp_dir as host_temp_dir};
 mount core.text.format.{Formatter, FormatError};
-mount core.io.fs.{Path, PathBuf, current_dir as fs_current_dir};
+mount core.io.fs.{current_dir as fs_current_dir};
 mount core.shell.escape.{ShellFlavour, default_flavour};
 mount core.shell.result.{ShellResult, ShellError};
 

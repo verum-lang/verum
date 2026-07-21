@@ -76,7 +76,6 @@ mount core.math.frameworks.owl2_fs.types.{
     DataPropertyExpression,
     DataRange,
     Individual,
-    Literal,
 };
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -67,7 +67,6 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Set};
 mount encoding.json.{JsonValue, decode as json_decode};
-mount encoding.base64.{decode_standard as b64_decode};
 mount encoding.pem.{decode_all as pem_decode_all};
 mount security.x509.certificate.{X509Certificate, parse_certificate};
 mount security.x509.trust_store.{TrustStore};
@@ -372,7 +371,7 @@ fn log_entry_from_provenance(p: &core.security.provenance.TlogEntry) -> LogEntry
     LogEntry {
         uuid:            "".to_text(),
         body_b64:        p.canonicalized_body_b64.clone(),
-        body:            EntryBody.Raw(JsonValue.Null),
+        body:            EntryBody.Raw(JsonValue.JsonNull),
         integrated_time: time.rfc3339.to_epoch(&p.integrated_time),
         log_id_hex:      p.log_id_hex.clone(),
         log_index:       p.log_index,

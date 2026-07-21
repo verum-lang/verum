@@ -25,7 +25,7 @@
 // regression that reverts to the broken sort fails the order
 // check.
 
-mount core.encoding.json.{JsonValue, JsonObject, json_parse};
+mount core.encoding.json.{JsonValue, JsonObject};
 mount core.encoding.jcs.{canonicalize_value, canonicalize_str};
 
 // 16-key object with deliberately reversed insertion order — JCS

@@ -27,10 +27,10 @@ mount myorg.myproject.core.utils.{helper1, helper2, helper3};
 mount mymod.{my_item, other_item, third_item};
 
 // Group with mixed case
-mount types.{Point, Vector, Matrix, complex.ComplexNumber};
+mount types.{Point, Vector, complex.ComplexNumber};
 
 // Multiple group mounts
-mount core.io.{Read, Write, BufRead, BufWrite};
+mount core.io.{Read, Write, BufRead};
 mount core.fs.{File, OpenOptions, Metadata};
 mount core.net.{TcpStream, TcpListener, UdpSocket};
 

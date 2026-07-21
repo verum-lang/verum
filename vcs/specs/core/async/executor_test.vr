@@ -12,11 +12,10 @@
 
 mount core.async.executor.{
     AsyncRuntimeConfig, AsyncRuntime, RuntimeBuilder,
-    Sleep, ExecutorTimeoutError, Timeout,
+    Sleep, ExecutorTimeoutError,
     AsyncExecutionEnv,
     sleep_ms, sleep_secs,
     block_on,
-    timeout,
 };
 mount core.async.future.Future;
 mount core.async.poll.{Poll, Ready, Pending};

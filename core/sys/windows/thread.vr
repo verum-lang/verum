@@ -807,7 +807,7 @@ public fn futex_wait(addr: &Int, expected: Int, timeout: Maybe<UInt64>) -> Resul
     };
     let result: Int = @intrinsic("futex_wait", addr as &unsafe Byte, expected, t);
     if result == -110 {
-        Result.Err(OSError.Timeout)
+        Result.Err(OSError.from_code(-result))
     } else {
         // 0 = woken; -11 = value changed; anything else is treated as
         // a spurious wakeup — return Ok like the WaitOnAddress path

@@ -54,7 +54,7 @@ mount core.*;
 mount core.collections.List;
 mount core.security.x509.certificate.{X509Certificate};
 mount core.security.x509.algorithm.{SignatureAlg, RsaPssHash};
-mount core.security.x509.spki.{SubjectPublicKey, RsaPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
+mount core.security.x509.spki.{SubjectPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
 mount core.security.x509.time.{is_valid_at};
 mount core.security.x509.ext.{ExtensionSet};
 mount core.security.x509.ext.name_constraints.{NameConstraints};
@@ -65,7 +65,7 @@ mount core.security.hash.sha384.{Sha384};
 mount core.security.hash.sha512.{Sha512};
 mount core.security.ecc.ed25519.{Ed25519, Ed25519PublicKey, Ed25519Signature};
 mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
-mount core.security.sig.rsa.{RsaPublicKey as RsaVerifyKey, RsaHash, verify_pkcs1_v15_prehashed, verify_pss_prehashed};
+mount core.security.sig.rsa.{RsaHash, verify_pkcs1_v15_prehashed, verify_pss_prehashed};
 
 // =============================================================================
 // Hostile-chain safety cap

@@ -31,9 +31,9 @@
 module test.stdlib.sys.darwin.libsystem_test;
 
 mount core.sys.darwin.{
-    read, write, close, mmap, munmap, madvise,
+    read, write, mmap, munmap,
     madvise_willneed, madvise_dontneed, madvise_free,
-    getpid, gettid, kqueue, nanosleep, clock_gettime,
+    getpid, gettid,
     monotonic_nanos, monotonic_micros, monotonic_millis,
 };
 

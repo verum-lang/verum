@@ -32,7 +32,7 @@ mount core.*;
 mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.sqlite.native.alter.op.{
-    AlterOp, ColumnDef,
+    AlterOp,
     AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
 };
 

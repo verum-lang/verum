@@ -40,7 +40,7 @@
 // # Output
 //
 
-// `assemble_stream_frames(...)` returns a list of Frame.StreamFrame
+// `assemble_stream_frames(...)` returns a list of QuicFrame.StreamFrame
 // values the caller appends to the outbound packet's frame list.
 // It mutates:
 //  * SendStream.send_buf — drained by the emitted byte count.
@@ -59,7 +59,7 @@ module core.net.quic.connection_sm.stream_assembler;
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.stream_sm.{SendStream, RecvStream, SendState, ConnFlowControl};
 mount core.net.quic.recovery.{CongestionCtrl};
 
@@ -103,8 +103,8 @@ public fn assemble_stream_frames(
     flow:         &mut ConnFlowControl,
     budget:       AssemblyBudget,
     cursor_start: UInt64,
-) -> (List<Frame>, UInt64) {
-    let mut frames: List<Frame> = [];
+) -> (List<QuicFrame>, UInt64) {
+    let mut frames: List<QuicFrame> = [];
     let mut remaining = budget.packet_bytes;
     let n = send_streams.len();
     if n == 0 || remaining <= 0 { return (frames, cursor_start); }
@@ -154,7 +154,7 @@ fn emit_one_stream_frame(
     stream:    &mut SendStream,
     flow:      &mut ConnFlowControl,
     room:      Int,
-) -> Maybe<(Frame, Int)> {
+) -> Maybe<(QuicFrame, Int)> {
     let buf_len = stream.send_buf.len();
     if buf_len == 0 { return Maybe.None; }
 
@@ -194,7 +194,7 @@ fn emit_one_stream_frame(
     // Conn-level FC accounting.
     flow.on_bytes_sent(take as UInt64);
 
-    let frame = Frame.StreamFrame {
+    let frame = QuicFrame.StreamFrame {
         stream_id: stream_id,
         offset:    offset,
         data:      data,
@@ -217,14 +217,14 @@ public fn maybe_emit_flow_control_updates(
     recv_streams: &mut List<(UInt64, RecvStream)>,
     flow:         &mut ConnFlowControl,
     window:       UInt64,
-) -> List<Frame> {
-    let mut out: List<Frame> = [];
+) -> List<QuicFrame> {
+    let mut out: List<QuicFrame> = [];
 
     // QuicConnection-level MAX_DATA.
     let suggested = flow.suggested_max_data(window);
     if suggested > flow.max_data_local {
         flow.update_max_data_local(suggested);
-        out.push(Frame.MaxData(suggested));
+        out.push(QuicFrame.MaxData(suggested));
     }
 
     // Per-stream MAX_STREAM_DATA.
@@ -235,7 +235,7 @@ public fn maybe_emit_flow_control_updates(
         let new_limit = rs.suggested_max_stream_data(per_stream_window);
         if new_limit > rs.max_data_recv {
             rs.update_flow_control(new_limit);
-            out.push(Frame.MaxStreamData {
+            out.push(QuicFrame.MaxStreamData {
                 stream_id: *sid,
                 limit:     new_limit,
             });

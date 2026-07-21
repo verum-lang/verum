@@ -39,8 +39,8 @@
 )
 module core.math.tactics;
 
-mount core.math.category.{Category, Functor, NatTrans, Monad};
-mount core.math.algebra.{Ring, Field, Group, Lattice, CommRing};
+mount core.math.category.{Category, Functor, Monad};
+mount core.math.algebra.{Ring, Field, Group, Lattice};
 mount core.math.giry.{Giry, giry_unit, sample_above};
 mount core.base.protocols.{Eq, Ord};
 

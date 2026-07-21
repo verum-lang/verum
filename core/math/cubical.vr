@@ -40,7 +40,7 @@ mount core.math.hott.{
     I, i0, i1, Path, refl, transport, hcomp,
     sym, trans, ap, apd, cong, concat,
     IsEquiv, Equiv, equiv_id, equiv_inv, equiv_compose,
-    ua, ua_inv, funext, happly,
+    ua, ua_inv, happly,
     PathOver,
 };
 

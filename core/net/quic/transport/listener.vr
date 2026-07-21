@@ -55,7 +55,7 @@ mount core.net.quic.error.{QuicError};
 mount core.net.quic.packet.{LongPacketType};
 mount core.net.quic.version as qv;
 mount core.net.quic.crypto.initial.{derive_initial_secrets, derive_initial_keys};
-mount core.net.quic.connection_sm.{ConnState, Role, QuicSpaceKeys, QuicKeys};
+mount core.net.quic.connection_sm.{ConnState, QuicRole, QuicSpaceKeys, QuicKeys};
 mount core.net.quic.connection_sm.handshake_driver.{HandshakeDriver};
 mount core.net.quic.recovery.{LossDetection, NewReno};
 mount core.net.quic.stream_sm.{ConnFlowControl};
@@ -318,7 +318,7 @@ implement ServerListener {
         ));
 
         let conn_state = ConnState {
-            role:          Role.Server,
+            role:          QuicRole.ServerEnd,
             version:       qv.VERSION_1,
             dcid_peer:     peer_dcid.clone(),         // client's SCID becomes our DCID-to-peer
             scid_local:    local_cid.clone(),

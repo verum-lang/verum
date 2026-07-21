@@ -55,7 +55,6 @@ mount sys.darwin.thread.{
 @cfg(target_os = "windows")
 mount sys.windows.thread.{
     Thread as PlatformThread,
-    thread_spawn as platform_spawn,
 };
 
 // =============================================================================

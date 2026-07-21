@@ -35,7 +35,7 @@ mount core.*;
 mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
-mount core.net.quic.frame.{AckRange, Frame};
+mount core.net.quic.frame.{AckRange, QuicFrame};
 mount core.net.quic.ack_ranges.{AckRanges};
 
 // =============================================================================
@@ -49,7 +49,7 @@ public type SentPacketInfo is {
     size_bytes:         UInt32,
     in_flight:          Bool,     // counts against CC window
     ack_eliciting:      Bool,     // triggers ACK by peer
-    frames:             List<Frame>,   // frames to retransmit on loss
+    frames:             List<QuicFrame>,   // frames to retransmit on loss
 };
 
 // =============================================================================
@@ -208,7 +208,7 @@ implement PnSpace {
 
     /// Build an ACK frame ready to ship, or Maybe.None if we have no
     /// outstanding received packets to acknowledge.
-    public fn build_ack_frame(&self, ack_delay_us: UInt64) -> Maybe<Frame> {
+    public fn build_ack_frame(&self, ack_delay_us: UInt64) -> Maybe<QuicFrame> {
         let largest = match self.largest_acked_received { Maybe.Some(v) => v, Maybe.None => return Maybe.None };
         // Emit ECN counts only if any counter is non-zero. Some peers
         // require explicit ECN counts to be absent when none are seen.
@@ -221,7 +221,7 @@ implement PnSpace {
         // (codec-friendly); we convert from the invariant-carrying
         // wrapper at the emission boundary. The V3 invariant therefore
         // witnesses the wire list is well-formed on exit.
-        Maybe.Some(Frame.AckFrame {
+        Maybe.Some(QuicFrame.AckFrame {
             largest_acked: largest,
             ack_delay:     ack_delay_us,
             ranges:        self.ack_ranges.as_list().clone(),

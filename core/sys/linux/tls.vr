@@ -244,8 +244,8 @@ public fn init_thread_tls_with_size(tls_size: USize) -> Result<(), ThreadLocalEr
             SYS_MMAP,
             0,  // addr: kernel chooses
             total_size as Int,
-            (MemProt.Read | MemProt.Write).to_unix_flags(),
-            (MapFlags.Private | MapFlags.Anonymous).to_unix_flags(),
+            MemProt.READ_WRITE.to_unix_flags(),
+            MapFlags.PRIVATE_ANON.to_unix_flags(),
             -1,  // fd: not file-backed
             0    // offset
         )

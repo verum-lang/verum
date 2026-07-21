@@ -13,7 +13,7 @@ mount core.*;
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode};
 mount core.net.http2.hpack.{HeaderField};
-mount core.net.quic.{QuicListener, Connection, QuicConfig};
+mount core.net.quic.{QuicListener, QuicConfig};
 mount core.net.http3.error.{Http3Error};
 
 public type Http3Request is {

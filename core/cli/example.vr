@@ -25,7 +25,7 @@ module example;
 mount core.{Maybe, Result, List, Text, Bool};
 mount core.io.stdio;
 mount core.cli.spec.{
-    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity, Example,
+    CommandSpec, ArgSpec, FlagSpec, GroupKind, Arity, Example,
     HandlerRef,
 };
 mount core.cli.builder.{AppBuilder, ArgBuilder, FlagBuilder};

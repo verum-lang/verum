@@ -33,7 +33,7 @@ mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.{
     VdbeProgram, ResultColumn,
-    Register, RNull, RInt, RReal, RText, RBlob, RRowId,
+    Register, RNull,
     RegisterKind,
     register_kind, register_clone,
     StepResult, VdbeState, vdbe_state_new, step,

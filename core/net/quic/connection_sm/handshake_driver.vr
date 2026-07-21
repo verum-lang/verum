@@ -48,7 +48,7 @@ module core.net.quic.connection_sm.handshake_driver;
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.recovery.{PnSpaceKind};
 mount core.net.quic.connection_sm.dispatch.{CryptoChunk};
 
@@ -167,7 +167,7 @@ public type HandshakeDriver is {
     handshake:  CryptoStream,
     application: CryptoStream,
     /// Queued outbound CRYPTO frames, tagged with target PN space.
-    outbound:   List<(PnSpaceKind, Frame)>,
+    outbound:   List<(PnSpaceKind, QuicFrame)>,
     /// Populated once the handshake produces the application
     /// (1-RTT) traffic secrets.
     connected_secrets: Maybe<HandshakeOutput>,
@@ -306,15 +306,15 @@ implement HandshakeDriver {
     fn enqueue_outbound(&mut self, space: PnSpaceKind, wire: List<Byte>) {
         if wire.len() == 0 { return; }
         let offset = self.stream_for(&space).reserve_outbound(wire.len());
-        let frame = Frame.CryptoFrame { offset: offset, data: wire };
+        let frame = QuicFrame.CryptoFrame { offset: offset, data: wire };
         self.outbound.push((space, frame));
     }
 
     /// Pull all queued outbound CRYPTO frames by PN space. Returns
     /// them batched so the caller can route to the right packet type
     /// (Initial / Handshake packets for their respective frames).
-    public fn take_outbound(&mut self) -> List<(PnSpaceKind, Frame)> {
-        let mut out: List<(PnSpaceKind, Frame)> = [];
+    public fn take_outbound(&mut self) -> List<(PnSpaceKind, QuicFrame)> {
+        let mut out: List<(PnSpaceKind, QuicFrame)> = [];
         while self.outbound.len() > 0 {
             let item = self.outbound.remove(0);
             out.push(item);

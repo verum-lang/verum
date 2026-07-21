@@ -22,8 +22,7 @@
 /// refactors can't silently break the export shape.
 
 mount core.diagnostics.{
-    CapEvent, CapEventKind,
-    commit_cap_event, recent_cap_events, cap_event_count,
+    CapEvent, CapEventKind, cap_event_count,
     enable_cap_audit, disable_cap_audit, cap_audit_is_enabled,
     CAP_AUDIT_RING_CAPACITY,
     record_revoke, record_attenuate,

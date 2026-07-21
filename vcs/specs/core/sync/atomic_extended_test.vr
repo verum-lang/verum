@@ -5,7 +5,7 @@
 //               Default impls, get_mut methods, and missing API coverage.
 
 mount core.sync.atomic.{
-    Ordering, Relaxed, Acquire, Release, AcqRel, SeqCst,
+    Relaxed, Acquire, Release, AcqRel, SeqCst,
     AtomicInt, AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicBool,
     AtomicPtr, SpinLock, FutexLock, fence,
 };

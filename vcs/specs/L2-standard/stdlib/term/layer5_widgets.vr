@@ -7,7 +7,7 @@
 /// Layer 5: Widget Library — all 18 widgets with builder APIs.
 
 mount core.term.widget.*;
-mount core.term.style.{Style, Color, Modifier};
+mount core.term.style.{Style, Color};
 mount core.term.layout.{Rect, Margin, Constraint};
 mount core.term.render.Buffer;
 

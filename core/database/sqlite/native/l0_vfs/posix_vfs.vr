@@ -41,8 +41,7 @@ mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount sys.common.{
     FileDesc, OSError,
-    pread, pread_raw, pwrite, full_fsync,
-    monotonic_nanos, realtime_nanos,
+    pread, pread_raw, pwrite, full_fsync, realtime_nanos,
     ACCESS_F_OK, ACCESS_R_OK, ACCESS_W_OK,
 };
 // `mount X as Y` rename-aliases don't surface to AOT codegen (task #11).

@@ -72,7 +72,7 @@ mount core.security.kdf.hkdf.{
     hkdf_extract_sha256, hkdf_expand_sha256, HkdfError,
 };
 mount core.security.aead.chacha20_poly1305.{
-    ChaCha20Poly1305, ChaChaKey, ChaChaNonce, AeadError,
+    ChaCha20Poly1305, ChaChaNonce, AeadError,
 };
 
 // =============================================================================

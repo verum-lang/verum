@@ -81,7 +81,7 @@ module core.security.x509.ocsp_client;
 
 mount core.*;
 mount core.collections.{List, Map};
-mount core.encoding.der.{DerWriter, DerError, Time as DerTime};
+mount core.encoding.der.{DerWriter, DerError};
 mount core.encoding.base64.{encode_url_no_pad as b64url_encode};
 mount core.security.x509.certificate.{X509Certificate};
 mount core.security.x509.ocsp.{

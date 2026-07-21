@@ -79,7 +79,7 @@ mount core.database.sqlite.native.l7_api.database.{
     DbCannotOpen, DbIoError, DbCorrupt, DbReadonly,
     open_path_admin,
 };
-mount core.database.sqlite.native.l6_session.{ ConnectionMode, CmAdmin };
+mount core.database.sqlite.native.l6_session.{ ConnectionMode};
 
 // -----------------------------------------------------------------------------
 // BackupSession — affine handle binding the source / destination pair

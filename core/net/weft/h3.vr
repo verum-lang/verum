@@ -238,7 +238,7 @@ async fn dispatch_one_request<H: Handler>(
     // Cancellation propagates to the user handler's first await
     // boundary if the server is shutting down mid-request.
     let result = if token.is_cancelled() {
-        Result.Err(WeftError.Cancelled)
+        Result.Err(WeftError.Overloaded)
     } else {
         app.handle(&weft_req).await
     };
@@ -312,19 +312,17 @@ fn weft_to_h3_response(resp: Response) -> H3Response {
 // by the legacy http3.vr adapter.
 implement IntoResponse for WeftError {
     public fn into_h3_response(self) -> H3Response {
+        // Maps every real WeftError variant (see core.net.weft.error) to its
+        // HTTP/3 status, mirroring the canonical WeftError.status() surface.
         let status = match self {
-            WeftError.NotFound          => H3Status.NotFound,
-            WeftError.MethodNotAllowed  => H3Status.MethodNotAllowed,
-            WeftError.BadRequest(_)     => H3Status.BadRequest,
-            WeftError.Unauthorized      => H3Status.Unauthorized,
-            WeftError.Forbidden         => H3Status.Forbidden,
-            WeftError.PayloadTooLarge   => H3Status.PayloadTooLarge,
-            WeftError.UnsupportedMedia  => H3Status.UnsupportedMediaType,
-            WeftError.Internal(_)       => H3Status.InternalServerError,
-            WeftError.NotImplemented    => H3Status.NotImplemented,
-            WeftError.ServiceUnavailable => H3Status.ServiceUnavailable,
-            WeftError.Cancelled         => H3Status.ServiceUnavailable,
-            WeftError.Timeout           => H3Status.GatewayTimeout,
+            WeftError.BadRequest(_)         => H3Status.BadRequest,          // 400
+            WeftError.RouteNotFound         => H3Status.NotFound,            // 404
+            WeftError.MethodNotAllowed      => H3Status.MethodNotAllowed,    // 405
+            WeftError.ExtractionRejected(_) => H3Status.BadRequest,          // 400
+            WeftError.Timeout               => H3Status.GatewayTimeout,      // 504
+            WeftError.Overloaded            => H3Status.ServiceUnavailable,  // 503
+            WeftError.UpstreamIo(_)         => H3Status.BadGateway,          // 502
+            WeftError.Internal(_)           => H3Status.InternalServerError, // 500
         };
         H3Response.status(status).text(self.to_text())
     }

@@ -23,7 +23,7 @@ module verify;
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.text.regex.{Regex};
-mount core.text.format.{Formatter, FormatError};
+mount core.text.format.{Formatter};
 mount core.shell.escape.{Escaper, ShellEscape, ShellFlavour};
 mount core.shell.result.{ShellError};
 

@@ -73,7 +73,18 @@ public type JwtAlgorithm is
       HS256
     | HS384
     | HS512
-    | EdDSA;
+    | EdDSA
+    // Asymmetric JOSE algorithms (RFC 7518 §3.1) plus the unsecured
+    // "none" alg (RFC 7519 §6 / RFC 8725 §3.1). Required by OIDC token
+    // verification (core.security.oidc), which distinguishes symmetric
+    // (never accepted) from asymmetric algorithms. RS*/PS*/ES* signing and
+    // verification are not yet implemented in this module — sign()/verify()
+    // reject them via their WrongKeyKind catch-all until an RSA/ECDSA
+    // backend lands. `None` MUST be rejected by verifiers per RFC 8725.
+    | RS256 | RS384 | RS512
+    | PS256 | PS384 | PS512
+    | ES256 | ES384 | ES512
+    | None;
 
 fn algo_name(a: &JwtAlgorithm) -> &str {
     match a {
@@ -81,6 +92,16 @@ fn algo_name(a: &JwtAlgorithm) -> &str {
         JwtAlgorithm.HS384 => "HS384",
         JwtAlgorithm.HS512 => "HS512",
         JwtAlgorithm.EdDSA => "EdDSA",
+        JwtAlgorithm.RS256 => "RS256",
+        JwtAlgorithm.RS384 => "RS384",
+        JwtAlgorithm.RS512 => "RS512",
+        JwtAlgorithm.PS256 => "PS256",
+        JwtAlgorithm.PS384 => "PS384",
+        JwtAlgorithm.PS512 => "PS512",
+        JwtAlgorithm.ES256 => "ES256",
+        JwtAlgorithm.ES384 => "ES384",
+        JwtAlgorithm.ES512 => "ES512",
+        JwtAlgorithm.None  => "none",
     }
 }
 

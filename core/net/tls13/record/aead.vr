@@ -47,11 +47,9 @@ mount core.collections.List;
 mount core.security.aead.aes_gcm.{
     aes128_gcm_seal, aes128_gcm_open,
     aes256_gcm_seal, aes256_gcm_open,
-    AesGcmError,
 };
 mount core.security.aead.chacha20_poly1305.{
     chacha20_poly1305_seal, chacha20_poly1305_open,
-    ChaCha20Poly1305Error,
 };
 mount core.net.tls13.cipher_suite.{AeadKind};
 mount core.net.tls13.record.content_type.{ContentType};

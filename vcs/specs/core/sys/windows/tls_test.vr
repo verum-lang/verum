@@ -30,9 +30,6 @@ module test.stdlib.sys.windows.tls_test;
 
 mount core.sys.windows.tls.{
     TlsError,
-    ThreadControlBlock,
-    ContextEntry,
-    ContextSlots,
 
     MAX_CONTEXT_SLOTS,
     CONTEXT_STACK_DEPTH,

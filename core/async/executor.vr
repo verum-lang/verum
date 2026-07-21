@@ -73,13 +73,13 @@ mount sys.common.{
 
 // Platform-specific time functions
 @cfg(target_os = "linux")
-mount sys.linux.time.{monotonic_nanos, Instant as SysInstant, Duration as SysDuration};
+mount sys.linux.time.{monotonic_nanos, Duration as SysDuration};
 
 @cfg(target_os = "macos")
-mount sys.darwin.time.{monotonic_nanos, Instant as SysInstant, Duration as SysDuration};
+mount sys.darwin.time.{monotonic_nanos, Duration as SysDuration};
 
 @cfg(target_os = "windows")
-mount sys.windows.time.{monotonic_nanos, Instant as SysInstant, Duration as SysDuration};
+mount sys.windows.time.{monotonic_nanos, Duration as SysDuration};
 
 // Platform-specific I/O engine
 mount sys.io_engine.{

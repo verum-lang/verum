@@ -5,7 +5,7 @@
 // @description: Cell equality (used by diff), EMPTY constant, reset semantics.
 
 mount core.term.render.Cell;
-mount core.term.style.{Style, Color, Modifier};
+mount core.term.style.{Style, Color};
 
 fn test_empty_is_single_space() {
     let e = Cell.EMPTY;

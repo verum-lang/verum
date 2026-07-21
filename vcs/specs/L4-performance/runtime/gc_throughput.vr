@@ -181,7 +181,7 @@ fn benchmark_generational() -> GenerationalResult {
 /// Benchmark: Concurrent GC (if supported)
 fn benchmark_concurrent_gc() -> ConcurrentGCResult {
     mount std.thread;
-    mount std.sync.atomic.{AtomicInt, Ordering};
+    mount std.sync.atomic.{AtomicInt};
 
     let total_allocated = AtomicInt.new(0);
     let gc_happened = AtomicInt.new(0);

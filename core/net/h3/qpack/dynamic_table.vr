@@ -53,7 +53,7 @@ module core.net.h3.qpack.dynamic_table;
 
 mount core.*;
 mount core.collections.List;
-mount core.net.h3.qpack.static_table.{StaticEntry, find as static_find, find_name as static_find_name, STATIC_TABLE_SIZE};
+mount core.net.h3.qpack.static_table.{find as static_find, find_name as static_find_name, STATIC_TABLE_SIZE};
 
 public type DynEntry is {
     name:  Text,

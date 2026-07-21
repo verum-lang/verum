@@ -27,7 +27,7 @@
 /// these classes via a single `verum check`, even before runtime
 /// execution lands in the differential harness (#196).
 
-mount core.mem.{Heap, ThinRef, FatRef};
+mount core.mem.{ThinRef, FatRef};
 mount core.mem.fat_ref.FatRef;
 
 fn main() {

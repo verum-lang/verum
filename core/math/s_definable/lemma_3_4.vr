@@ -61,9 +61,6 @@ mount core.math.s_definable.class_s_s.{SSMembership};
 mount core.math.syn_mod.{
     SubTheoryInclusion,
     GrothendieckOverMod,
-    formally_s_definable_to_inclusion,
-    lurie_htt_5_1_4_syn_is_grothendieck,
-    msfs_definition_3_3_o2_lands_in_global,
     syn_mod_lemma_3_4_steps_2_3,
 };
 

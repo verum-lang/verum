@@ -28,9 +28,8 @@
 module test.stdlib.sys.darwin.io_test;
 
 mount core.sys.darwin.io.{
-    IoDriverError, IoOpKind, IoToken, IoOp, IoCqe,
+    IoDriverError, IoOpKind,
     KqueueDriver, KqueueEventIter,
-    IoDriver,
     create_io_driver, is_kqueue_available,
     MAX_EVENTS, DEFAULT_TIMEOUT_NS,
 };

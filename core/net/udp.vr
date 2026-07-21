@@ -84,7 +84,7 @@ mount sys.linux.syscall.{
     socket, bind, connect, close,
     send, recv, sendto, recvfrom,
     // Socket options
-    setsockopt_int, getsockopt, getsockname,
+    setsockopt_int, getsockname,
     set_nonblocking, set_reuseaddr, set_broadcast,
     set_send_buffer_size, set_recv_buffer_size,
     set_socket_timeout,
@@ -97,7 +97,7 @@ mount sys.linux.syscall.{
     // File operations
     fcntl,
     // Types
-    FileDesc, OSError,
+    FileDesc,
     // Constants
     AF_INET, AF_INET6, SOCK_DGRAM, SOCK_CLOEXEC,
     SOL_SOCKET, SO_ERROR,
@@ -117,7 +117,7 @@ mount sys.windows.winsock2.{
     winsock_sendto as sendto,
     winsock_recvfrom as recvfrom,
     // Socket options
-    setsockopt_int, getsockopt, winsock_getsockname as getsockname,
+    setsockopt_int, winsock_getsockname as getsockname,
     set_nonblocking, set_reuseaddr, set_broadcast,
     set_send_buffer_size, set_recv_buffer_size,
     set_socket_timeout,
@@ -128,7 +128,7 @@ mount sys.windows.winsock2.{
     // Peek and non-blocking
     peek, recv_nonblock, send_nonblock,
     // Types
-    FileDesc, OSError,
+    FileDesc,
     // Constants
     AF_INET, AF_INET6, SOCK_DGRAM, SOCK_CLOEXEC,
     SOL_SOCKET, SO_ERROR,
@@ -178,7 +178,7 @@ mount sys.darwin.libsystem.{
 };
 
 @cfg(target_os = "macos")
-mount sys.common.{FileDesc, OSError};
+mount sys.common.{FileDesc};
 
 @cfg(target_os = "windows")
 mount sys.windows.winsock2.{
@@ -186,7 +186,7 @@ mount sys.windows.winsock2.{
     socket, bind, connect, close,
     send, recv, sendto, recvfrom,
     // Socket options
-    setsockopt_int, getsockopt, getsockname,
+    setsockopt_int, getsockname,
     set_nonblocking, set_reuseaddr, set_broadcast,
     set_send_buffer_size, set_recv_buffer_size,
     set_socket_timeout,
@@ -199,7 +199,7 @@ mount sys.windows.winsock2.{
     // File operations
     fcntl,
     // Types
-    FileDesc, OSError,
+    FileDesc,
     // Constants
     AF_INET, AF_INET6, SOCK_DGRAM, SOCK_CLOEXEC,
     SOL_SOCKET, SO_ERROR,
@@ -207,7 +207,7 @@ mount sys.windows.winsock2.{
 };
 
 @cfg(target_os = "windows")
-mount sys.common.{FileDesc, OSError};
+mount sys.common.{FileDesc};
 
 // Import I/O engine for async operations
 mount sys.io_engine.{IOEngine, IOInterest};

@@ -29,7 +29,7 @@
 module verify;
 
 mount core.{Maybe, Result, List, Set, Text, Char, Int, Bool};
-mount core.cli.spec.{CommandSpec, ArgSpec, FlagSpec, Group, GroupKind};
+mount core.cli.spec.{CommandSpec, ArgSpec, FlagSpec, GroupKind};
 
 // =============================================================================
 // VerificationReport — collected findings

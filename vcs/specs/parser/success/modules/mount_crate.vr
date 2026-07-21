@@ -90,4 +90,4 @@ module visibility_test {
 // Cog alias for crate (from CLAUDE.md - cog is the Verum term)
 mount cog.helpers;
 mount cog.utils.format;
-mount cog.{core, lib, ext};
+mount cog.{core};

@@ -29,7 +29,7 @@
 module test.stdlib.sys.linux.thread_test;
 
 mount core.sys.linux.thread.{
-    Thread, ThreadFn, ThreadError,
+    Thread, ThreadError,
     spawn,
 
     CLONE_VM, CLONE_FS, CLONE_FILES, CLONE_SIGHAND,

@@ -33,7 +33,7 @@ mount core.runtime.env.{
     DeferHandler,
 };
 mount core.base.maybe.{Maybe, Some, None};
-mount core.sync.{AtomicU64, Ordering};
+mount core.sync.{AtomicU64};
 
 // =============================================================================
 // Section 1: ExecutionTier Variant Construction

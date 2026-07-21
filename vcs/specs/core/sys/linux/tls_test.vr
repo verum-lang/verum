@@ -31,7 +31,6 @@ module test.stdlib.sys.linux.tls_test;
 
 mount core.sys.linux.tls.{
     ThreadControlBlock,
-    ContextSlots,
     TlsError,
 
     get_current_tcb,

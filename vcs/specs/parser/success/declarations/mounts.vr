@@ -20,7 +20,7 @@ mount verum.runtime.async as async_runtime;
 // Multiple items from same path
 mount core.collections.{List, Map, Set};
 
-mount core.io.{read, write, flush};
+mount core.io.{read, write};
 
 // Many items
 mount core.collections.{
@@ -29,7 +29,6 @@ mount core.collections.{
     Set,
     Deque,
     BinaryHeap,
-    LinkedList,
     BTreeMap,
     BTreeSet
 };
@@ -60,9 +59,7 @@ mount core.collections.{List as L, Map as M, Set as S};
 // Mixed aliases and plain
 mount core.io.{
     read as r,
-    write as w,
-    flush
-};
+    write as w};
 
 // Glob import (import all)
 mount core.prelude.*;

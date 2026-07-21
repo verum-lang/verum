@@ -25,7 +25,7 @@
 //   3. The coercion path correctly promotes to VReal.
 
 mount core.database.sqlite.native.l2_record.type_coercion.{
-    CoercionSqliteValue, VInt, VReal, VText, VNull, VBlob,
+    VInt, VReal, VText, VNull, VBlob,
     parse_int64, parse_int64_checked, coerce,
 };
 mount core.database.sqlite.native.l2_record.affinity.Affinity;

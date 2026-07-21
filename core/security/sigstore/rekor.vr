@@ -70,7 +70,7 @@ mount encoding.json.{
     json_array, decode, encode,
 };
 mount encoding.base64.{
-    encode_standard, decode_standard,
+    decode_standard,
 };
 mount encoding.hex.{encode as hex_encode, decode as hex_decode};
 mount encoding.jcs.{canonicalize};

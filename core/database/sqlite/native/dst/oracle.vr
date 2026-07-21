@@ -32,8 +32,7 @@ mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.dst.op.{
-    DbOp, OpInsert, OpUpdate, OpDelete, OpCommit, OpRollback,
-    DstDstOpStream, is_mutation,
+    DbOp, OpInsert, OpUpdate, OpDelete, OpCommit, OpRollback, is_mutation,
 };
 
 // -----------------------------------------------------------------------------

@@ -235,7 +235,7 @@ fn json_to_filter_lit(v: &JsonValue) -> Text {
         JsonValue.String(s) => f"\"{escape_quotes(s)}\"",
         JsonValue.Number(n) => f"{n}",
         JsonValue.Bool(b)   => if *b { "true".to_text() } else { "false".to_text() },
-        JsonValue.Null      => "null".to_text(),
+        JsonValue.JsonNull      => "null".to_text(),
         other               => encoding.json.encode(other), // arrays/objects — pass through (caller's problem)
     }
 }
@@ -460,7 +460,7 @@ async fn handle_response(resp: Response) -> Result<JsonValue, SearchError> {
         return Result.Err(SearchError.Backend(f"HTTP {resp.status} body={text}"));
     }
     if resp.body.is_empty() {
-        return Result.Ok(JsonValue.Null);
+        return Result.Ok(JsonValue.JsonNull);
     }
     encoding.json.decode(resp.body.as_slice())
         .map_err(|e| SearchError.Backend(f"json: {e}"))

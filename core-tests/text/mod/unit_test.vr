@@ -24,7 +24,7 @@ mount core.text.{
     Text, Utf8Error, Utf16Error, ParseError,
     Chars, Lines,
     GeneralCategory, CharPattern, AnyChar, CharRange, any_of, char_range,
-    Formatter, FormatSpec, Alignment, Sign,
+    Formatter, FormatSpec, Sign,
     TextBuilder,
     Regex,
     SSO_CAPACITY, MAX_UTF8_BYTES, REPLACEMENT_CHARACTER,

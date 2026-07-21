@@ -77,7 +77,7 @@ mount security.jwt.{
     decode_header_only,
 };
 mount encoding.json.{
-    JsonValue, json_encode, decode,
+    JsonValue, decode,
 };
 // JsonObject is Map<Text, JsonValue> — the inner map of a JsonValue.JsonObject(map) match arm.
 type JsonObject is Map<Text, JsonValue>;

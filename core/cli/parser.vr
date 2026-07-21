@@ -43,7 +43,7 @@ module parser;
 
 mount core.{Maybe, Result, List, Map, Set, Text, Char, Int, Bool};
 mount core.cli.spec.{
-    CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity,
+    CommandSpec, ArgSpec, FlagSpec, GroupKind, Arity,
     TopicSeparator, CommandSettings,
 };
 mount core.cli.error.{ParseError, ParseErrorKind, ParseDiagnostic};

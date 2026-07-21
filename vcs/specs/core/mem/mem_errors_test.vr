@@ -11,7 +11,7 @@
 mount core.mem.{UseAfterFreeError, RevocationError};
 mount core.mem.header.{ValidationError};
 mount core.base.protocols.{Display, Debug};
-mount core.text.format.{Formatter, FormatError, format_display, format_debug};
+mount core.text.format.{Formatter, format_display, format_debug};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.maybe.{Maybe, None};
 

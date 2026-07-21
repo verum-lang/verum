@@ -44,7 +44,6 @@ mount core.math.epistemic.{
     EpistemicTopology, propagate_status, StatusChange,
     compute_kan_extension as epistemic_kan,
     compute_obstruction as epistemic_obstruction,
-    theory_site, theory_universe,
     theory_category, epistemic_topology,
 };
 mount core.math.infinity_topos.{

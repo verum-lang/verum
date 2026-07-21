@@ -60,15 +60,7 @@ mount sys.linux.syscall.{
 
 @cfg(target_os = "macos")
 mount sys.darwin.libsystem.{
-    safe_open as sys_open,
     safe_close as sys_close,
-    safe_read as sys_read,
-    safe_write as sys_write,
-    safe_lseek as sys_lseek,
-    safe_fstat as sys_fstat,
-    safe_fsync as sys_fsync,
-    safe_ftruncate as sys_ftruncate,
-    safe_dup as sys_dup,
     Stat,
     O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
     SEEK_SET, SEEK_CUR, SEEK_END,
@@ -78,15 +70,7 @@ mount sys.common.FileDesc;
 
 @cfg(target_os = "windows")
 mount sys.windows.kernel32.{
-    safe_open as sys_open,
     safe_close as sys_close,
-    safe_read as sys_read,
-    safe_write as sys_write,
-    safe_lseek as sys_lseek,
-    safe_fstat as sys_fstat,
-    safe_fsync as sys_fsync,
-    safe_ftruncate as sys_ftruncate,
-    safe_dup as sys_dup,
     Stat,
     O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
     SEEK_SET, SEEK_CUR, SEEK_END,

@@ -45,7 +45,7 @@ mount core.*;
 mount core.collections.List;
 mount core.net.addr.{SocketAddr};
 
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.packet.{LongPacketType};
 mount core.net.quic.connection_id.{ConnectionId};
 mount core.net.quic.connection_sm.{QuicSpaceKeys};
@@ -68,14 +68,14 @@ public const MIN_INITIAL_DATAGRAM_SIZE: Int = 1200;
 // =============================================================================
 
 public type CoalescedPacket is
-      InitialPkt   { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+      InitialPkt   { frames: List<QuicFrame>, pn: UInt64, pn_len: UInt8,
                      largest_acked: Maybe<UInt64>, token: List<Byte>,
                      keys: QuicSpaceKeys }
-    | HandshakePkt { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+    | HandshakePkt { frames: List<QuicFrame>, pn: UInt64, pn_len: UInt8,
                      largest_acked: Maybe<UInt64>, keys: QuicSpaceKeys }
-    | ZeroRttPkt   { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+    | ZeroRttPkt   { frames: List<QuicFrame>, pn: UInt64, pn_len: UInt8,
                      largest_acked: Maybe<UInt64>, keys: QuicSpaceKeys }
-    | OneRttPkt    { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+    | OneRttPkt    { frames: List<QuicFrame>, pn: UInt64, pn_len: UInt8,
                      largest_acked: Maybe<UInt64>, keys: QuicSpaceKeys,
                      spin_bit: Bool, key_phase: Bool };
 
@@ -275,7 +275,7 @@ fn map_tx_err(which: &str, e: TxError) -> CoalesceError {
 /// datagram-level minimum. Caller measures the already-accumulated
 /// datagram size from the other coalesced packets (handshake, 0-RTT)
 /// and asks this helper for the rest.
-public fn pad_initial_frames(initial_frames: &mut List<Frame>, padding_bytes: Int) {
+public fn pad_initial_frames(initial_frames: &mut List<QuicFrame>, padding_bytes: Int) {
     if padding_bytes <= 0 { return; }
-    initial_frames.push(Frame.PaddingRun(padding_bytes));
+    initial_frames.push(QuicFrame.PaddingRun(padding_bytes));
 }

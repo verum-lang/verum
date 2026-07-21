@@ -69,7 +69,7 @@ mount core.net.quic.error.{QuicError, TransportErrorCode};
 mount core.net.quic.path.{QuicPath, PathManager};
 
 mount core.net.quic.connection_sm.{
-    QuicConnection, ConnState, Role, QuicSpaceKeys,
+    ConnState, QuicSpaceKeys,
 };
 mount core.net.quic.connection_sm.state.{Initial, Handshake, OneRtt, Closing, Draining};
 mount core.net.quic.connection_sm.tx.{

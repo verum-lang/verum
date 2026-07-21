@@ -49,7 +49,7 @@ mount core.math.infinity_category.{
 };
 mount core.math.simplicial.{Simplex, KanComplex, InfinityGroupoid};
 mount core.math.category.{Category, Presheaf, Sheaf, Topos, SubobjectClassifier};
-mount core.math.hott.{Equiv, IsContr, Path, refl, transport};
+mount core.math.hott.{Equiv, IsContr, refl, transport};
 
 // =============================================================================
 // §1. Sieves and Grothendieck Topologies

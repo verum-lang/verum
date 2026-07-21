@@ -35,7 +35,7 @@ mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
-    Statement, Expr, SqlLiteral, UnOp, BinOp, TableRef,
+    Expr, SqlLiteral, UnOp, BinOp, TableRef,
     SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
     FromItem, OrderTerm, LimitClause,
     InsertStmt, InsertSource, UpdateStmt, UpdateAssignment, DeleteStmt,

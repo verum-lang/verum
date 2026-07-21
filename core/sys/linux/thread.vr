@@ -213,8 +213,8 @@ public fn spawn(entry: LinuxThreadFn, arg: &unsafe Byte, stack_size: USize) -> R
             SYS_MMAP,
             0,
             total_size as Int,
-            (MemProt.Read | MemProt.Write).to_unix_flags(),
-            (MapFlags.Private | MapFlags.Anonymous).to_unix_flags(),
+            MemProt.READ_WRITE.to_unix_flags(),
+            MapFlags.PRIVATE_ANON.to_unix_flags(),
             -1,
             0
         )

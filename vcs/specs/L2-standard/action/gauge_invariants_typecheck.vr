@@ -15,9 +15,9 @@
 //   • monitor_is_coherent on no-divergence
 
 mount core.action.{
-    EpsilonObserve, EpsilonProve, primitive_as_text,
+    EpsilonObserve,
     Articulation, Enactment, Primitive,
-    canonicalise, gauge_equivalent,
+    canonicalise,
     canonical_size, is_canonical, canonicalise_idempotent,
     CoherenceMonitor, monitor_new, monitor_observe, monitor_report,
     monitor_is_coherent, ConsistencyReport,

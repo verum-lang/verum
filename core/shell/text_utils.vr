@@ -17,7 +17,7 @@
 module text_utils;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
-mount core.text.regex.{Regex, RegexError, Match};
+mount core.text.regex.{Regex, RegexError};
 mount core.shell.transducer.{Transducer, Reducer, mapping, filtering};
 
 // =============================================================================

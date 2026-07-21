@@ -61,7 +61,7 @@ module core.net.quic.address_token;
 mount core.*;
 mount core.collections.List;
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};
-mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open, AesGcmError};
+mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open};
 mount core.security.util.rng.{fill_secure};
 
 // =============================================================================

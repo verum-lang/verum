@@ -28,8 +28,6 @@ module test.stdlib.sys.darwin.thread_test;
 
 mount core.sys.darwin.thread.{
     ThreadError,
-    Thread,
-    ThreadFn,
     Mutex,
     Condvar,
     SpinLock,

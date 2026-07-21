@@ -34,7 +34,7 @@ mount core.*;
 mount base.{Text, Bool, Maybe};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
-    Fts5VtabTokenizer, Token, TokenizerOptions, options_default,
+    Fts5VtabTokenizer, TokenizerOptions, options_default,
 };
 mount core.database.sqlite.native.vtabs.fts5.index.{Fts5Index};
 

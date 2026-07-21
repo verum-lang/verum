@@ -85,7 +85,7 @@ mount encoding.base64.{
     encode_standard, decode_standard,
 };
 mount encoding.hex.{encode as hex_encode};
-mount time.rfc3339.{Rfc3339Time, now_utc, format_rfc3339, parse_rfc3339};
+mount time.rfc3339.{Rfc3339Time, now_utc, format_rfc3339};
 
 // =============================================================================
 // Predicate types — registry of well-known in-toto predicateType URIs

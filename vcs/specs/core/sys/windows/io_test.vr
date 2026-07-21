@@ -30,7 +30,6 @@ mount core.sys.windows.io.{
     IocpDriver,
     OverlappedEntry,
     IoOperation,
-    IoCompletionCallback,
     FileReadOp,
     FileWriteOp,
     SocketAcceptOp,

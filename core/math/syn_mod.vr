@@ -88,7 +88,6 @@ mount core.math.accessible.{
     AccessibleInfCategory,
     accessible_closed_under_kappa_filtered_colimits,
     kappa_accessible_lands_in_s_s_global,
-    presentable_implies_accessible,
 };
 
 // =============================================================================

@@ -75,9 +75,6 @@ mount encoding.json.{
     JsonValue, JsonMap, json_object, json_string, decode,
     encode,
 };
-mount encoding.base64.{
-    encode_standard as b64_encode, decode_standard as b64_decode,
-};
 mount encoding.pem.{decode_all as pem_decode_all, PemBlock};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount security.ecc.ed25519.{

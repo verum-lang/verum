@@ -51,7 +51,7 @@ mount encoding.hex.{encode as hex_encode};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount security.hash.sha256.{Sha256, digest};
 mount time.system_time.epoch_seconds;
-mount time.rfc3339.{Rfc3339Time, parse_rfc3339};
+mount time.rfc3339.{Rfc3339Time};
 
 mount core.storage.types.{
     ObjectStore, StorageError, ObjectMetadata,

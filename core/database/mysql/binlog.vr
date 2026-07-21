@@ -86,7 +86,7 @@ mount core.database.mysql.wire.frame.{
 };
 mount core.database.mysql.wire.backend.{
     classify, parse_err, parse_ok,
-    SkOk, SkError, SkEof, SkResultSet,
+    SkOk, SkError, SkEof,
 };
 mount core.database.mysql.connection.connect as mysql_connect;
 mount core.database.mysql.gtid.{

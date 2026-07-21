@@ -17,40 +17,16 @@
 mount core.theory_interop.bridges.owl2_to_htt.{
     // Tier 1 — class-level (5)
     class_to_presheaf,
-    named_individual_to_object,
-    subclass_to_monomorphism,
-    equivalent_classes_to_isomorphism,
-    disjoint_classes_to_initial_pullback,
     // Tier 2 — object-property (6)
     object_property_to_functor,
-    object_property_chain_to_composition,
-    inverse_object_properties_to_adjoint,
-    object_property_domain_to_restriction,
-    object_property_range_to_restriction,
-    haskey_to_representable_presheaf,
     // Tier 3 — characteristic flags (8 incl. NEW has_self)
     symmetric_to_self_inverse_functor,
-    transitive_to_idempotent_composition,
-    asymmetric_to_empty_intersection,
-    reflexive_to_identity_nt,
-    irreflexive_to_empty_diagonal,
-    functional_to_monomorphism,
-    inverse_functional_to_epimorphism,
-    has_self_to_diagonal_nt,
     // Tier 4 — class-expression ctors (7 incl. NEW complement, has_value, max_cardinality)
     intersection_to_limit,
-    union_to_colimit,
-    complement_to_lex_coreflection,
-    some_values_to_existential_image,
-    all_values_to_universal_image,
-    has_value_to_slice_presheaf,
-    max_cardinality_to_bounded_fibre,
     // Tier 5 — individual axioms (NEW)
     same_individual_to_equalizer,
-    different_individuals_to_disjoint_coproduct,
     // Tier 6 — data-property bridge (NEW)
     data_property_to_enriched_functor,
-    data_some_values_to_existential_image,
 };
 
 fn main() {

@@ -103,7 +103,6 @@ mount super.supervisor.{
 };
 mount core.intrinsics.{
             FutureHandle,
-    JoinHandleOpaque,
 };
 
 // =============================================================================

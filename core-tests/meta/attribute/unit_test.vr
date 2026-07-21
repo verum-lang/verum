@@ -18,7 +18,7 @@
 // =============================================================================
 
 mount core.meta.attribute.{
-    AttributeStyle, MetaAttributeValue, AttributeValue, AttributeArg,
+    AttributeStyle, MetaAttributeValue, AttributeArg,
     CfgPredicate, ReprKind,
 };
 

@@ -223,7 +223,7 @@ where V: SqliteVfs
     };
     if bytes.len() < 8 {
         return Result.Err(PagerError {
-            kind: PagerErrorKind.CorruptHeader,
+            kind: PagerErrorKind.Corrupt,
             message: "WAL create: vfs.random_bytes returned < 8 bytes",
         });
     }
@@ -262,7 +262,7 @@ public fn wal_writer_open(
     let hdr = decode_file_header(&buf);
     if hdr.magic != magic_little() {
         return Result.Err(PagerError {
-            kind: PagerErrorKind.CorruptHeader,
+            kind: PagerErrorKind.Corrupt,
             message: "WAL file magic mismatch",
         });
     }
@@ -501,7 +501,7 @@ where V: SqliteVfs
     };
     if bytes.len() < 8 {
         return Result.Err(PagerError {
-            kind: PagerErrorKind.CorruptHeader,
+            kind: PagerErrorKind.Corrupt,
             message: "WAL reset: vfs.random_bytes returned < 8 bytes",
         });
     }

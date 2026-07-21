@@ -8,7 +8,7 @@
 /// SIMD (Single Instruction, Multiple Data) operations
 /// for high-performance vectorized computation.
 
-mount std.simd.{f32x4, f32x8, i32x4, i32x8, mask32x4, mask32x8};
+mount std.simd.{f32x4, i32x4, mask32x4};
 
 /// Basic SIMD arithmetic
 fn simd_arithmetic() {

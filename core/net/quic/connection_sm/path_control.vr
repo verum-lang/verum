@@ -41,7 +41,7 @@ module core.net.quic.connection_sm.path_control;
 mount core.*;
 mount core.collections.List;
 mount core.time.instant.{Instant};
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame};
 mount core.net.quic.path.{QuicPath, PathManager, PathError, TimerOutcome};
 
 // =============================================================================
@@ -72,13 +72,13 @@ public fn on_outbound_bytes(pm: &mut PathManager, n: UInt64) {
 // PATH_CHALLENGE / PATH_RESPONSE handling
 // =============================================================================
 
-/// Emit a PATH_RESPONSE echo. Returns the Frame the caller must
+/// Emit a PATH_RESPONSE echo. Returns the QuicFrame the caller must
 /// enqueue for the next outbound packet. Separate from the generic
 /// dispatch module so callers can route the response through a
 /// probing packet on the standby path when appropriate (RFC 9000
 /// §9.3.1).
-public fn on_path_challenge(data: &[Byte; 8]) -> Frame {
-    Frame.PathResponse(data.clone())
+public fn on_path_challenge(data: &[Byte; 8]) -> QuicFrame {
+    QuicFrame.PathResponse(data.clone())
 }
 
 /// Peer sent a PATH_RESPONSE. Checks against both active and

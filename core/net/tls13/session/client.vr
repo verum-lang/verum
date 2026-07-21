@@ -56,7 +56,7 @@ mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.net.tls13.error.{TlsError};
 mount core.net.tls13.cipher_suite.{AeadKind};
-mount core.net.tls13.record.{AeadState, ContentType, RecordError,
+mount core.net.tls13.record.{AeadState, ContentType,
                               MAX_PLAINTEXT_SIZE};
 mount core.net.tls13.keyschedule.{TrafficSecret, TrafficKeys, TrafficDirection};
 mount core.net.tls13.handshake.client_sm.{

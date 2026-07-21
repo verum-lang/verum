@@ -36,7 +36,7 @@ mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.segment.{Fts5SegmentPosting, Fts5SegmentPostingList};
 mount core.database.sqlite.native.vtabs.fts5.index.{Fts5Index};
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
-    Fts5VtabTokenizer, Token, options_default,
+    Fts5VtabTokenizer, options_default,
 };
 
 // -----------------------------------------------------------------------------

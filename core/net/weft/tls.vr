@@ -48,7 +48,7 @@ module core.net.weft.tls;
 mount core.*;
 mount core.collections.list.{List};
 mount core.net.tcp.{TcpStream};
-mount core.net.tls.{TlsStream, TlsConfig, TlsError};
+mount core.net.tls.{TlsStream, TlsConfig};
 mount core.net.addr.{SocketAddr};
 mount core.async.cancellation.{CancellationToken, CancellationError};
 mount core.sync.atomic.{AtomicBool};

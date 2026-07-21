@@ -6,7 +6,7 @@
 // @expect: pass
 
 mount core.security.x509.{
-    Certificate, ServerIdentityError, verify_server_identity,
+    ServerIdentityError, verify_server_identity,
     parse_certificate,
 };
 mount core.collections.List;

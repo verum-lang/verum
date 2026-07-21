@@ -123,17 +123,6 @@ mount sys.common.FileDesc;
 mount sys.windows.kernel32.{
     // Windows uses different APIs for filesystem operations
     GetFileAttributesW,
-    CreateDirectoryW,
-    RemoveDirectoryW,
-    DeleteFileW,
-    MoveFileW,
-    CreateHardLinkW,
-    CreateSymbolicLinkW,
-    GetCurrentDirectoryW,
-    SetCurrentDirectoryW,
-    FindFirstFileW,
-    FindNextFileW,
-    FindClose,
 };
 @cfg(target_os = "windows")
 mount sys.common.FileDesc;

@@ -12,7 +12,7 @@
 // broadcast-based notification pattern.
 
 mount core.async.broadcast.{
-    BroadcastSender, BroadcastReceiver, RecvError,
+    BroadcastSender, BroadcastReceiver,
     broadcast_channel,
 };
 

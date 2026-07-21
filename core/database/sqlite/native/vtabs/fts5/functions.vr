@@ -27,7 +27,7 @@ mount core.*;
 mount base.{Text, Maybe, Bool};
 mount collections.List;
 mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
-    Fts5VtabTokenizer, Token, options_default,
+    Fts5VtabTokenizer, options_default,
 };
 mount core.database.sqlite.native.vtabs.fts5.query.{RowMatch};
 

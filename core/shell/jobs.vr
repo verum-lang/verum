@@ -65,9 +65,8 @@ implement JobHandle {
             Result.Err(e) => Result.Err(ShellError.SpawnFailed {
                 command: self.command,
                 reason:  match e {
-                    JoinError.Panic(msg)   => f"task panicked: {msg}",
-                    JoinError.Cancelled    => "task cancelled".into(),
-                    JoinError.Aborted      => "task aborted".into(),
+                    JoinError.Panicked  => "task panicked".into(),
+                    JoinError.Cancelled => "task cancelled".into(),
                 },
             }),
         }

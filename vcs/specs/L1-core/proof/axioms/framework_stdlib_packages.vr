@@ -19,27 +19,21 @@
 mount core.math.frameworks.lurie_htt.{
     Site,
     InfinityTopos,
-    sheafification_is_infinity_topos,
 };
 mount core.math.frameworks.schreiber_dcct.{
     CohesiveInfinityTopos,
-    cohesive_hexagon,
 };
 mount core.math.frameworks.connes_reconstruction.{
     SpectralTriple,
-    ax_first_order,
 };
 mount core.math.frameworks.petz_classification.{
     OperatorMonotoneFunction,
-    petz_classification_theorem,
 };
 mount core.math.frameworks.arnold_catastrophe.{
     FunctionGerm,
-    codim_le_4_classification,
 };
 mount core.math.frameworks.baez_dolan.{
     Tricategory,
-    gps_coherence,
 };
 
 fn main() {

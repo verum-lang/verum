@@ -35,7 +35,6 @@ mount core.base.protocols.{Display, Debug, Clone};
 mount core.async.channel.{Sender, Receiver, bounded};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
 mount core.async.task.{spawn};
-mount core.async.task.{TaskHandle};
 mount core.async.timer.{sleep};
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{metadata as fs_metadata, Metadata};

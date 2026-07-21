@@ -28,13 +28,11 @@ module test.stdlib.sys.windows.thread_test;
 
 mount core.sys.windows.thread.{
     ThreadError,
-    Thread, ThreadId, ThreadFunc, ThreadHandle,
+    Thread, ThreadFunc, ThreadHandle,
     Mutex, Condvar, SpinLock, RwLock,
-    Semaphore, Once, OnceState, Barrier,
+    Semaphore, Once,
 
     DEFAULT_THREAD_STACK_SIZE,
-
-    thread_spawn, thread_join, thread_detach,
     thread_yield, thread_sleep_ms,
     current_thread_id,
 };

@@ -47,13 +47,13 @@ mount core.security.hash.sha384.{Sha384};
 mount core.security.hash.sha512.{Sha512};
 mount core.security.mac.hmac.{HmacSha256, HmacSha384, hmac_sha256, hmac_sha384};
 mount core.security.x509.{Certificate, TrustStore, ChainError, parse_certificate, validate_chain};
-mount core.security.x509.spki.{SubjectPublicKey, RsaPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
+mount core.security.x509.spki.{SubjectPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
 mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
 mount core.security.ecc.p256.{P256, P256PrivateKey, P256PublicKey, P256Signature};
 mount core.security.ecc.ed25519.{Ed25519, Ed25519PublicKey as Ed25519Pk, Ed25519Signature};
 mount core.security.util.constant_time.{constant_time_eq};
 mount core.security.sig.rsa.{
-    RsaPublicKey as RsaVerifyKey, RsaHash,
+    RsaHash,
     verify_pkcs1_v15_prehashed, verify_pss_prehashed,
 };
 mount core.net.tls13.version.{ProtocolVersion, LEGACY_VERSION_TLS_1_2, TLS_1_3, DOWNGRADE_SENTINEL_TLS12, DOWNGRADE_SENTINEL_TLS11};

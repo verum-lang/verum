@@ -27,9 +27,8 @@
 module test.stdlib.sys.intrinsics.panic_test;
 
 mount core.intrinsics.{
-    unreachable, panic, abort,
-    debug_assert, unreachable_unchecked,
-    panic_impl,
+    unreachable, panic,
+    debug_assert,
     is_debug,
 };
 

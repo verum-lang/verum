@@ -27,7 +27,7 @@ module sys.windows.io;
 mount sys.common.{OSError, FileDesc};
 mount sys.io_engine.{
     IOEngine, CompletionOp, CompletionResult, Duration,
-    ValidFd, Fd, SocketAddr, TimeSpec, MsgHdr,
+    ValidFd, Fd, TimeSpec, MsgHdr,
     EngineIoError,
     WAKE_TOKEN,
 };
