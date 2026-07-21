@@ -111,6 +111,18 @@ P3 nice-to-have.
    post a `tp note`, wait, and only then recover the MINIMAL scope
    with the owner's work preserved (a conflicted stash-pop keeps its
    stash entry — restoring the two conflicted files loses nothing).
+   * **Engine (`crates/**`) landings go through a dedicated worktree,
+     never the shared checkout** — build + verify + commit THERE, then
+     fast-forward main. Measured why (T0571, 2026-07-21): an external
+     `git restore` on the shared checkout wiped two agents' uncommitted
+     engine diffs in one stroke (uniform mtime, no stash — unrecoverable),
+     and the bake that had already started then produced an INCOHERENT
+     artefact from the half-wiped source (a `runtime.vbca` whose opaque
+     tokens showed the reverted leg never ran). A build reading a
+     live-churning shared tree is non-committable even when it "Finished".
+   * **A build must snapshot before it starts**: commit, or build inside a
+     worktree that no other actor mutates. Bakes are long; anything that
+     touches the tree mid-bake corrupts the result silently.
 6. **Task files are append-mostly**: fix typos freely in your own
    claimed task, but never rewrite another session's journal; never
    delete task files (the ID space depends on them).
