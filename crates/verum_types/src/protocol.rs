@@ -4955,9 +4955,22 @@ impl ProtocolChecker {
         // implementations like Sub<Duration> and Sub<Instant> for the same type
         let type_key = self.make_type_key(&impl_.for_type);
         let protocol_key = self.make_full_protocol_key(&impl_.protocol, &impl_.protocol_args);
-        let idx = self.impls.len();
+        let key = (type_key, protocol_key);
 
-        self.impl_index.insert((type_key, protocol_key), idx);
+        // Idempotence: the stdlib lazy-loader re-registers the same impl once
+        // per lazy-load call, so without this `impls` accumulates 24-66 identical
+        // copies — bloating the generic/blanket scan in get_implementations and
+        // re-running the O(n) coherence check each time. If this exact (type,
+        // protocol, protocol_args) key is already indexed, the impl is present,
+        // so skip the duplicate push. Strict coherence already rejects a same-key
+        // NON-duplicate above (check_overlap), so a collision surviving to here is
+        // a re-registration, not a new overlap (T0305).
+        if self.impl_index.contains_key(&key) {
+            return Ok(());
+        }
+
+        let idx = self.impls.len();
+        self.impl_index.insert(key, idx);
         self.impls.push(impl_);
 
         // Invalidate implementation cache since we added a new impl
