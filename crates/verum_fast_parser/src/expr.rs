@@ -8924,6 +8924,24 @@ mod tests {
             .unwrap_or_else(|errs| panic!("Parse failed for '{}': {:?}", source, errs))
     }
 
+    /// Parse a single `mount …;` item and return its path segments.
+    fn mount_path_segments(source: &str) -> Vec<verum_ast::ty::PathSegment> {
+        use verum_ast::decl::{ItemKind, MountTreeKind};
+        let parser = VerumParser::new();
+        let module = parser
+            .parse_module_str(source, FileId::new(0))
+            .unwrap_or_else(|errs| panic!("Parse failed for '{}': {:?}", source, errs));
+        let item = module.items.iter().next().expect("expected one item");
+        let mount = match &item.kind {
+            ItemKind::Mount(m) => m,
+            other => panic!("expected a Mount item, got {:?}", other),
+        };
+        match &mount.tree.kind {
+            MountTreeKind::Path(p) => p.segments.iter().cloned().collect(),
+            other => panic!("expected a simple Path mount, got {:?}", other),
+        }
+    }
+
     #[test]
     fn test_simple_tuple_index() {
         let expr = parse_expr("pair.0");
@@ -9013,6 +9031,40 @@ mod tests {
             ),
             other => panic!("expected Range, got {:?}", other),
         }
+    }
+
+    // ── T0397: `super` navigates in continuation path segments ──────────
+    //
+    // `super.super.Foo` must yield two `Super` segments — not `Super` then a
+    // literal `Name("super")` — or every consumer that pops `PathSegment::Super`
+    // mis-resolves the parent depth by one. `cog`/`self` stay literal names.
+
+    #[test]
+    fn t0397_continuation_super_is_navigation() {
+        use verum_ast::ty::PathSegment;
+        let segs = mount_path_segments("mount super.super.foo;");
+        assert_eq!(segs.len(), 3, "expected 3 segments, got {:?}", segs);
+        assert!(matches!(segs[0], PathSegment::Super), "seg0 must be Super, got {:?}", segs[0]);
+        assert!(
+            matches!(segs[1], PathSegment::Super),
+            "seg1 must be Super too (T0397), got {:?}",
+            segs[1]
+        );
+        assert!(matches!(segs[2], PathSegment::Name(_)), "seg2 must be Name, got {:?}", segs[2]);
+    }
+
+    #[test]
+    fn t0397_mid_path_cog_stays_a_literal_name() {
+        // `cog` mid-path must remain a Name, else extract_path's
+        // `Cog => parts.clear()` collapses `core.cog.manifest` (the workaround
+        // the super fix must not regress).
+        use verum_ast::ty::PathSegment;
+        let segs = mount_path_segments("mount core.cog.manifest;");
+        assert!(
+            segs.iter().all(|s| matches!(s, PathSegment::Name(_))),
+            "core.cog.manifest must be all Name segments, got {:?}",
+            segs
+        );
     }
 
     #[test]

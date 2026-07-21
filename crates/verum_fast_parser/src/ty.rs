@@ -3029,10 +3029,26 @@ impl<'a> RecursiveParser<'a> {
         Ok(Path::new(segments.into_iter().collect::<List<_>>(), span))
     }
 
-    /// Parse a non-leading path segment.  Treats `cog` / `super` /
-    /// `self` / `Self` as ordinary module-name identifiers; only the
-    /// FIRST segment of a path can carry their navigation semantics.
+    /// Parse a non-leading path segment.
+    ///
+    /// The grammar makes every segment the same production —
+    /// `path_segment = identifier | 'self' | 'super' | 'crate'` — so `super`
+    /// navigates in a continuation exactly as it does leading. A module can
+    /// never be *named* `super`, so the spelling is unambiguous: `super.super.x`
+    /// must parse as `[Super, Super, Name(x)]`, not `[Super, Name("super"),
+    /// Name(x)]` — otherwise every consumer that pops `PathSegment::Super`
+    /// (extract_path, re-export collectors) mis-resolves the parent depth by
+    /// one (T0397).
+    ///
+    /// `cog`/`crate` and `self` deliberately stay literal names here: crate-root
+    /// navigation is only meaningful leading, and `mount core.cog.manifest.X`
+    /// relies on a mid-path `cog` remaining a name — otherwise extract_path's
+    /// `Cog => parts.clear()` collapses the whole path. A mid-path `self` is a
+    /// no-op only a real module directory of that name would carry.
     pub(crate) fn parse_path_continuation_segment(&mut self) -> ParseResult<PathSegment> {
+        if self.stream.consume(&TokenKind::Super).is_some() {
+            return Ok(PathSegment::Super);
+        }
         let name = self.consume_ident_or_any_keyword()?;
         let span = self.stream.current_span();
         Ok(PathSegment::Name(Ident::new(name, span)))
