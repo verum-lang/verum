@@ -245,7 +245,7 @@ fn is_known_meta_function(name: &str) -> bool {
 
 /// Map Rust macro names to their Verum equivalents.
 /// Returns None if the name is not a known Rust macro.
-fn rust_macro_to_verum(name: &str) -> Option<&'static str> {
+pub(crate) fn rust_macro_to_verum(name: &str) -> Option<&'static str> {
     match name {
         "println" => Some("print(...)"),
         "print" => Some("print(...) (without !)"),
@@ -7951,7 +7951,7 @@ impl<'a> RecursiveParser<'a> {
     /// Used by the Issue-#5 recovery path in `parse_macro_call` so that a
     /// `assert!(x)` / `println!(...)` diagnostic doesn't leave the parser
     /// pointed back at the same token for the next recovery iteration.
-    fn skip_balanced_macro_args(&mut self) {
+    pub(crate) fn skip_balanced_macro_args(&mut self) {
         let (open, close) = match self.stream.peek_kind() {
             Some(TokenKind::LParen) => (TokenKind::LParen, TokenKind::RParen),
             Some(TokenKind::LBracket) => (TokenKind::LBracket, TokenKind::RBracket),
@@ -9065,6 +9065,33 @@ mod tests {
             "core.cog.manifest must be all Name segments, got {:?}",
             segs
         );
+    }
+
+    // ── T0389: a Rust-style bang at module top level is ONE E0E2 ────────
+    //
+    // `assert!(x)` outside any fn used to report "expected item" (regular
+    // mode), and in script mode the retry's E0E2 was discarded in favour of
+    // that generic error. parse_item now emits the migration diagnostic and
+    // steps past the whole invocation, so both modes surface exactly one E0E2.
+    #[test]
+    fn t0389_toplevel_bang_macro_is_one_e0e2_in_both_modes() {
+        use verum_common::Text;
+        for script in [false, true] {
+            let parser = VerumParser::new();
+            let result = if script {
+                parser.parse_module_script_str("assert!(x);", FileId::new(0))
+            } else {
+                parser.parse_module_str("assert!(x);", FileId::new(0))
+            };
+            let errs = result.expect_err("top-level `assert!(x)` must be a parse error");
+            let codes: Vec<Option<Text>> = errs.iter().map(|e| e.code.clone()).collect();
+            assert_eq!(
+                codes,
+                vec![Some(Text::from("E0E2"))],
+                "script={script}: expected exactly one E0E2, got {:?}",
+                errs.iter().collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]

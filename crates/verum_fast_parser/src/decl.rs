@@ -331,6 +331,29 @@ impl<'a> RecursiveParser<'a> {
         // Parse attributes first (common to many items)
         let attrs = self.parse_attributes()?;
 
+        // Rust-style bang macro at item position — `assert!(x)` / `println!(…)`
+        // written as a top-level statement. Emit the E0E2 migration diagnostic
+        // and step past the whole `name ! ( … )` invocation so recovery lands
+        // on fresh ground: exactly one error per real mistake, in both regular
+        // and script mode (T0389). Mirrors parse_macro_call's expression-position
+        // handling; a bare `assert(x)` (valid Verum, no bang) is untouched.
+        if let Some(TokenKind::Ident(name)) = self.stream.peek_kind() {
+            let macro_name = name.clone();
+            if self.stream.peek_nth_kind(1) == Some(&TokenKind::Bang)
+                && let Some(verum_equiv) = crate::expr::rust_macro_to_verum(macro_name.as_str())
+            {
+                let span = self.stream.current_span();
+                self.stream.advance(); // name
+                self.stream.advance(); // !
+                self.skip_balanced_macro_args();
+                return Err(ParseError::rust_macro_syntax_with_equivalent(
+                    macro_name.as_str(),
+                    verum_equiv,
+                    span,
+                ));
+            }
+        }
+
         // FFI boundary (can have visibility modifiers and cfg attributes)
         // Handles: ffi, pub ffi, internal ffi, protected ffi
         if self.stream.check(&TokenKind::Ffi)
