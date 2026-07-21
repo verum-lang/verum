@@ -1158,7 +1158,10 @@ impl<'a> RecursiveParser<'a> {
                     })) {
                 Maybe::None
             } else {
-                Maybe::Some(Box::new(self.parse_expr_bp_no_struct(15)?))
+                // Endpoint of a startless range (`..end`): parse a full
+                // `logical_or_expr` so `as`/arithmetic bind into it, matching
+                // the infix range (T0307). See RANGE_ENDPOINT_BP.
+                Maybe::Some(Box::new(self.parse_expr_bp_no_struct(Self::RANGE_ENDPOINT_BP)?))
             };
 
             let span = self.stream.make_span(start_pos);
@@ -1847,6 +1850,19 @@ impl<'a> RecursiveParser<'a> {
         }
     }
 
+    /// Binding power at which a range **endpoint** is parsed — the `end` of
+    /// `..end`, `start..end`, and `start..=end` alike.
+    ///
+    /// The grammar draws no distinction between the prefix (`..end`) and infix
+    /// (`start..end`) forms: `range_expr = logical_or_expr , [ range_op ,
+    /// logical_or_expr ]` — both endpoints are a full `logical_or_expr`. So a
+    /// following `as` or arithmetic operator binds *into* the endpoint:
+    /// `..n as Int` is `..(n as Int)`, never `(..n) as Int` (T0307). This is
+    /// the single source for that binding power; it MUST equal the right
+    /// binding power of `DotDot`/`DotDotEq` in [`Self::infix_binding_power`],
+    /// so prefix and infix ranges stay identical.
+    const RANGE_ENDPOINT_BP: u8 = 4;
+
     /// Get the binding power for an infix operator.
     /// Returns (left_binding_power, right_binding_power).
     /// For left-associative: (n, n+1)
@@ -1941,7 +1957,7 @@ impl<'a> RecursiveParser<'a> {
             // comparison so `0..n - 1` parses as `0..(n - 1)` rather
             // than `(0..n) - 1`. Matches Rust's convention — ranges are
             // structural delimiters, not arithmetic operators.
-            TokenKind::DotDot | TokenKind::DotDotEq => (3, 4),
+            TokenKind::DotDot | TokenKind::DotDotEq => (3, Self::RANGE_ENDPOINT_BP),
 
             // Level 16: Cast (special case, parsed separately)
             TokenKind::As => (16, 17),
@@ -2077,9 +2093,11 @@ impl<'a> RecursiveParser<'a> {
                     self.stream.consume(&TokenKind::DotDot);
                 }
 
-                // Parse optional end - use parse_prefix_expr recursively for the range end.
-                // This is safe because we've already consumed all the prefix operators
-                // before the range operator, so this is a fresh prefix expression.
+                // Endpoint of a startless range (`..end`): parse a full
+                // `logical_or_expr` (RANGE_ENDPOINT_BP) so a trailing `as` or
+                // arithmetic binds INTO the endpoint — `..n as Int` is
+                // `..(n as Int)`, matching the infix range, not the former
+                // `(..n) as Int` (T0307).
                 // Inside comprehensions, `if`/`for`/`let` are clause keywords.
                 let end = if self.stream.at_end()
                     || !self.stream.peek().is_some_and(|t| t.starts_expr())
@@ -2089,7 +2107,7 @@ impl<'a> RecursiveParser<'a> {
                         })) {
                     Maybe::None
                 } else {
-                    Maybe::Some(Box::new(self.parse_prefix_expr()?))
+                    Maybe::Some(Box::new(self.parse_expr_bp(Self::RANGE_ENDPOINT_BP)?))
                 };
 
                 let span = self.stream.make_span(range_start_pos);
@@ -8912,6 +8930,88 @@ mod tests {
         match &expr.kind {
             ExprKind::TupleIndex { index, .. } => assert_eq!(*index, 0),
             other => panic!("Expected TupleIndex, got {:?}", other),
+        }
+    }
+
+    // ── T0307: `as` (and arithmetic) binds INTO a range endpoint ────────
+    //
+    // A startless range (`..end`) inside a subscript used to stop its
+    // endpoint before `as`, so `buf[..n as Int]` parsed as the whole range
+    // cast to Int — `Index(buf, (..n) as Int)` — while the infix for-loop
+    // form `0..n as Int` parsed correctly. Both forms must bind the cast to
+    // the ENDPOINT (grammar: `range_expr = logical_or_expr [range_op
+    // logical_or_expr]`), i.e. `..(n as Int)`.
+
+    #[test]
+    fn t0307_subscript_prefix_range_binds_cast_to_endpoint() {
+        let expr = parse_expr("buf[..n as Int]");
+        let index = match &expr.kind {
+            ExprKind::Index { index, .. } => index,
+            other => panic!("expected Index, got {:?}", other),
+        };
+        match &index.kind {
+            ExprKind::Range {
+                end: Maybe::Some(end),
+                ..
+            } => assert!(
+                matches!(end.kind, ExprKind::Cast { .. }),
+                "range endpoint must be the cast `n as Int`, got {:?}",
+                end.kind
+            ),
+            // A `Cast` here is the T0307 bug: `as` bound to the whole range.
+            other => panic!(
+                "expected the index to be a Range whose endpoint is a Cast; \
+                 got {:?} (a Cast(Range) means `as` bound to the whole range)",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn t0307_prefix_and_infix_range_bind_cast_identically() {
+        for src in ["..n as Int", "0..n as Int"] {
+            match &parse_expr(src).kind {
+                ExprKind::Range {
+                    end: Maybe::Some(end),
+                    ..
+                } => assert!(
+                    matches!(end.kind, ExprKind::Cast { .. }),
+                    "`{}`: endpoint must be a Cast, got {:?}",
+                    src,
+                    end.kind
+                ),
+                other => panic!("`{}`: expected Range with Cast endpoint, got {:?}", src, other),
+            }
+        }
+    }
+
+    #[test]
+    fn t0307_bare_ranges_unaffected() {
+        assert!(matches!(
+            parse_expr("..n").kind,
+            ExprKind::Range {
+                end: Maybe::Some(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse_expr("..").kind,
+            ExprKind::Range {
+                end: Maybe::None,
+                ..
+            }
+        ));
+        // Arithmetic binds into the endpoint too (`..a + b` is `..(a + b)`).
+        match &parse_expr("..a + b").kind {
+            ExprKind::Range {
+                end: Maybe::Some(end),
+                ..
+            } => assert!(
+                matches!(end.kind, ExprKind::Binary { .. }),
+                "`..a + b` endpoint must be the sum `a + b`, got {:?}",
+                end.kind
+            ),
+            other => panic!("expected Range, got {:?}", other),
         }
     }
 
