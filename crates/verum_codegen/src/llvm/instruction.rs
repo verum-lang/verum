@@ -2788,8 +2788,15 @@ pub fn lower_instruction<'ctx>(
                 CompareOp::Ge => IntPredicate::SGE,
             };
 
-            let result = if a_is_str || b_is_str {
-                // String comparison via strcmp on the underlying char* data.
+            let result = if (a_is_str || b_is_str)
+                && !matches!(op, CompareOp::Eq | CompareOp::Ne)
+            {
+                // Ordering (`<`/`<=`/`>`/`>=`) on genuine strings via strcmp
+                // on the underlying char* data. Equality (`==`/`!=`) on a
+                // string/Text-marked operand is handled STRUCTURALLY below via
+                // `verum_generic_eq` (T0273) — so a heap operand that is really
+                // a record / error-ADT (mis-marked string/Text) is never
+                // byte-`strcmp`'d as if it were Text.
                 // Registers hold Text* (i64 pointer to {ptr, len, cap}).
                 // Must extract char* via verum_text_get_ptr before calling strcmp.
                 let lhs_raw = ctx.get_register(a.0)?;
@@ -2864,7 +2871,9 @@ pub fn lower_instruction<'ctx>(
                 && (ctx.is_variant_register(a.0)
                     || ctx.is_variant_register(b.0)
                     || ctx.get_obj_register_type(a.0).is_some()
-                    || ctx.get_obj_register_type(b.0).is_some())
+                    || ctx.get_obj_register_type(b.0).is_some()
+                    || a_is_str
+                    || b_is_str)
             {
                 // CMPI-HEAP-STRUCTURAL-1 (tier coherence): the interpreter's
                 // CmpI Eq/Ne compares heap values STRUCTURALLY (value_eq —
@@ -37611,16 +37620,38 @@ fn lower_cmp_generic<'ctx>(
     let rhs = deref_if_lone_ref(ctx, b.0, a.0, "cmpg_rhs")?;
 
     // ============================================================
-    // task #10: VARIANT / enum / record structural equality.
-    // `Maybe`/`Result`/enum/record `==` must compare tag + payloads,
-    // not object identity. Without this, two distinct `Maybe.Some(30)`
-    // heap objects compare unequal under AOT (every `assert_eq` on a
-    // Maybe return). The CmpG operands here reach this fn before the
-    // int/pointer/fallback branches below could mis-handle them, so
-    // route an EQ on a variant-marked register straight through
-    // `verum_generic_eq` (which now does the structural compare).
+    // task #10 + T0273: VARIANT / enum / RECORD / error-ADT / Text
+    // structural equality. `Maybe`/`Result`/enum/record/error `==`
+    // must compare tag + payloads, not object identity. Route EVERY
+    // heap `==` — variant-marked, obj-typed (records via `New` →
+    // `set_obj_register_type`), or string/Text-marked — through
+    // `verum_generic_eq`, the ONE structural+text authority (the AOT
+    // twin of the interpreter's `deep_value_eq`). Inside it,
+    // `verum_is_text_object` strcmps a genuine header-less Text, while
+    // every self-describing heap object (record / error-ADT / variant /
+    // tuple — all carry a 24-byte ObjectHeader, which `is_text_object`
+    // rejects because the object size sits in the high word of its
+    // `len` probe) is compared field-wise. This is why a non-Text heap
+    // is NEVER byte-`strcmp`'d as if it were Text (T0273
+    // RECORD-EQ-STRCMP): it subsumes the former variant-only routing AND
+    // the `is_text_register`→strcmp mis-route residual, and it also
+    // rescues records that would otherwise fall to the pointer-identity
+    // fallback below. Gate on a KNOWN-heap mark (never a bare register)
+    // so a raw large integer is not wild-dereferenced by
+    // `is_text_object`; float-marked generic `==` keeps the dedicated
+    // `fcmp` path below.
     // ============================================================
-    if eq && (ctx.is_variant_register(a.0) || ctx.is_variant_register(b.0)) {
+    if eq
+        && !(ctx.is_float_register(a.0) || ctx.is_float_register(b.0))
+        && (ctx.is_variant_register(a.0)
+            || ctx.is_variant_register(b.0)
+            || ctx.is_string_register(a.0)
+            || ctx.is_text_register(a.0)
+            || ctx.is_string_register(b.0)
+            || ctx.is_text_register(b.0)
+            || ctx.get_obj_register_type(a.0).is_some()
+            || ctx.get_obj_register_type(b.0).is_some())
+    {
         let i64_type = ctx.types().i64_type();
         let la = as_i64(ctx, lhs, "veq_a")?;
         let lb = as_i64(ctx, rhs, "veq_b")?;
