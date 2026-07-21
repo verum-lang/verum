@@ -1367,6 +1367,7 @@ mod tests {
         let field1 = FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: module.intern_string("x"),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -1375,6 +1376,7 @@ mod tests {
         let field2 = FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: module.intern_string("y"),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 8,
@@ -1476,6 +1478,7 @@ mod tests {
         let field = FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: module.intern_string("value"),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -1523,6 +1526,7 @@ mod tests {
                 let field = FieldDescriptor {
                     refinement_src: StringId::EMPTY,
                     refinement_binding: StringId::EMPTY,
+                    type_name: StringId::EMPTY,
                     name: module.intern_string(&format!("field{}_{}", i, j)),
                     type_ref: TypeRef::Concrete(TypeId::INT),
                     offset: (j * 8) as u32,

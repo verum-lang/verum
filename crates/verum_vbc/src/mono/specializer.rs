@@ -1000,6 +1000,11 @@ impl<'a> BytecodeSpecializer<'a> {
             protocols: base_desc.map(|d| d.protocols.clone()).unwrap_or_default(),
             visibility: base_desc.map(|d| d.visibility).unwrap_or_default(),
             alias_target: base_desc.and_then(|d| d.alias_target.clone()),
+            // T0533 — the base's `alias_target_name` StringId is interned in
+            // the BASE module's string table; re-interning it into this
+            // specialised descriptor is a follow-up. `None` keeps the legacy
+            // TypeRef-only render (sound: only the name-carry is deferred).
+            alias_target_name: None,
             // Specialised types inherit the wrapper policy of the base.
             // `List<Int>` mono'd from `List<T>` stays a record;
             // `Meters<Int>` (hypothetical) from a transparent base

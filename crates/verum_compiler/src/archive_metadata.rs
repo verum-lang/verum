@@ -305,21 +305,43 @@ fn register_module_metadata(
                 let fields: List<FieldDescriptor> = ty
                     .fields
                     .iter()
-                    .map(|f| FieldDescriptor {
-                        name: module
-                            .strings
-                            .get(f.name)
-                            .map(Text::from)
-                            .unwrap_or_default(),
-                        ty: Text::from(type_ref_to_text_with_params(
+                    .map(|f| {
+                        // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533/T0109):
+                        // a cross-module field type that codegen collapsed to
+                        // `TypeRef::Concrete(TypeId::PTR)` renders
+                        // `__opaque_type_14` (PTR is the shared unknown-carrier
+                        // sentinel, never in the per-module `type_id_to_name`,
+                        // so no id->name rewrite recovers it — why leg-3 was
+                        // inert here).  Prefer the source-verbatim name codegen
+                        // carried so the typechecker gets a rigid `Type::Named`
+                        // instead of a fresh Var (the fresh Var makes records
+                        // swallow every field and a stored-variant
+                        // `match e.status` hash-fall-back to a wrong tag).
+                        let rendered = type_ref_to_text_with_params(
                             &f.type_ref,
                             &type_id_to_name,
                             &record_param_id_to_name,
-                        )),
-                        is_public: matches!(
-                            f.visibility,
-                            verum_vbc::types::Visibility::Public
-                        ),
+                        );
+                        let ty = if rendered.contains("__opaque_type_") {
+                            match module.strings.get(f.type_name) {
+                                Some(carried) if !carried.is_empty() => carried.to_string(),
+                                _ => rendered,
+                            }
+                        } else {
+                            rendered
+                        };
+                        FieldDescriptor {
+                            name: module
+                                .strings
+                                .get(f.name)
+                                .map(Text::from)
+                                .unwrap_or_default(),
+                            ty: Text::from(ty),
+                            is_public: matches!(
+                                f.visibility,
+                                verum_vbc::types::Visibility::Public
+                            ),
+                        }
                     })
                     .collect();
                 TypeDescriptorKind::Record { fields }
@@ -612,6 +634,25 @@ fn register_module_metadata(
                         &param_id_to_name,
                     )))
                     .unwrap_or_default();
+                // T0533 — the alias TypeRef render is opaque
+                // (`__opaque_type_<PTR>`) exactly when the target is a
+                // cross-module type codegen collapsed to
+                // `TypeRef::Concrete(TypeId::PTR)`.  Id PTR(14) is the
+                // shared "unknown carrier" sentinel, never in the
+                // per-module `type_id_to_name`, so no id->name rewrite can
+                // recover it (why T0525 leg-3 / the first T0533 were
+                // inert).  Prefer the source-verbatim name codegen carried:
+                // `IoError` -> "StreamError", which
+                // `parse_descriptor_type_string` turns into a rigid
+                // `Type::Named` instead of a fresh var — closing the hole.
+                let target = if target.as_str().contains("__opaque_type_") {
+                    match ty.alias_target_name.and_then(|sid| module.strings.get(sid)) {
+                        Some(carried) => Text::from(carried),
+                        None => target,
+                    }
+                } else {
+                    target
+                };
                 TypeDescriptorKind::Alias { target }
             }
         };

@@ -61,7 +61,15 @@ pub const VERSION_MAJOR: u16 = 2;
 /// const params (`SIZE`) at Tier-0 via the #44-B generic-witness channel.
 /// Additive: old readers reject the new tag via `is_version_compatible`,
 /// new readers accept all 2.x archives.
-pub const VERSION_MINOR: u16 = 8;
+/// Version 2.9: additive `TypeDescriptor.alias_target_name` (trailing,
+/// version-gated `Option<StringId>`) — ALIAS-TARGET-NAME-CARRY (T0533).
+/// A cross-module alias target (`core/io/mod.vr`'s `type IoError is
+/// StreamError;`, StreamError declared in `core/io/protocols.vr`) that
+/// codegen cannot resolve to a local `TypeId` collapses to
+/// `TypeRef::Concrete(TypeId::PTR)` and loses its identity; this field
+/// preserves the source-verbatim name so `archive_metadata` renders the
+/// real name instead of the fresh-var `__opaque_type_<PTR>` placeholder.
+pub const VERSION_MINOR: u16 = 9;
 
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +

@@ -935,6 +935,20 @@ impl<'a> Deserializer<'a> {
  } else {
  false
  };
+
+ // v2.9 — ALIAS-TARGET-NAME-CARRY (T0533): version-gated trailing
+ // Option<StringId>.  Pre-2.9 archives decode as `None` and keep
+ // the legacy TypeRef-only render.  Mirrors `return_type_name`.
+ let alias_target_name = if self
+ .header
+ .as_ref()
+ .map_or(0, |h| h.version_minor)
+ >= 9
+ {
+ self.parse_optional_u32()?.map(StringId)
+ } else {
+ None
+ };
  Ok(TypeDescriptor {
  id,
  name,
@@ -949,6 +963,7 @@ impl<'a> Deserializer<'a> {
  protocols,
  visibility,
  alias_target,
+ alias_target_name,
  is_transparent_wrapper,
  })
  }
@@ -1025,6 +1040,18 @@ impl<'a> Deserializer<'a> {
  (StringId::EMPTY, StringId::EMPTY)
  };
 
+ // v2.9 — UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533/T0109): field type
+ // NAME; pre-2.9 archives have no trailing name → EMPTY.
+ let type_name = if self
+ .header
+ .as_ref()
+ .map_or(false, |h| h.version_minor >= 9)
+ {
+ StringId(decode_u32(self.data, &mut self.offset)?)
+ } else {
+ StringId::EMPTY
+ };
+
  Ok(FieldDescriptor {
  name,
  type_ref,
@@ -1032,6 +1059,7 @@ impl<'a> Deserializer<'a> {
  visibility,
  refinement_src,
  refinement_binding,
+ type_name,
  })
  }
 

@@ -31,6 +31,7 @@ fn make_type_with_variants(name_idx: u32, variants: Vec<VariantDescriptor>) -> T
         // `Sum` types are not transparent wrappers — variant tags
         // and payloads must persist at runtime.
         alias_target: None,
+        alias_target_name: None,
         is_transparent_wrapper: false,
     }
 }
@@ -74,6 +75,7 @@ fn make_field(name_idx: u32) -> FieldDescriptor {
         type_ref: TypeRef::concrete(TypeId::INT),
         offset: 0,
         visibility: Visibility::Public,
+        ..Default::default()
     }
 }
 

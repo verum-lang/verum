@@ -708,6 +708,7 @@ mod make_variant_typed_validation_tests {
             visibility: crate::types::Visibility::Public,
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
         };
         let td = TypeDescriptor {
             id: TypeId(4000),
@@ -723,6 +724,8 @@ mod make_variant_typed_validation_tests {
             protocols: smallvec::SmallVec::new(),
             visibility: crate::types::Visibility::Public,
             alias_target: None,
+            // T0533 — test descriptor: no alias target.
+            alias_target_name: None,
             is_transparent_wrapper: false,
         };
         module.add_type(td);

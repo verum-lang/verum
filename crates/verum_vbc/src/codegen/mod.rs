@@ -5436,8 +5436,24 @@ impl VbcCodegen {
         // the proper `Constructor(payload...)` form.
         if let Some(idx) = self.types.iter().position(|t| t.id == ty.id) {
             let existing = &self.types[idx];
-            let existing_empty = existing.variants.is_empty() && existing.fields.is_empty();
-            let new_richer = !ty.variants.is_empty() || !ty.fields.is_empty();
+            // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533) — the LINCHPIN. An
+            // alias descriptor (`type IoError is StreamError;`) carries no
+            // variants and no fields, so the historic `new_richer` never
+            // treated it as richer than a prior empty placeholder (the
+            // pre-alloc / protocol stub occupying the same id) — the alias
+            // was silently dropped and IoError survived as an empty
+            // placeholder, never `kind==Alias`. That is exactly why
+            // T0533-v2's `alias_target_name` carry was build-verified INERT
+            // (it rode the dropped descriptor), and why leg-3 never found an
+            // Alias to repair. An alias carries IDENTITY (`alias_target`); it
+            // is neither "empty" nor "less rich" than a placeholder that
+            // carries nothing.
+            let existing_empty = existing.variants.is_empty()
+                && existing.fields.is_empty()
+                && existing.alias_target.is_none();
+            let new_richer = !ty.variants.is_empty()
+                || !ty.fields.is_empty()
+                || (ty.alias_target.is_some() && existing.alias_target.is_none());
             // ARRAY-ITER-CONCRETIZE-1 — protocol attachments are made
             // IN-PLACE on whatever descriptor occupies the id slot at
             // impl-collection time (`type_desc.protocols.push` in
@@ -12417,6 +12433,11 @@ impl VbcCodegen {
                                                     ty,
                                                     &sum_generic_param_map,
                                                 ),
+                                                // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry
+                                                // the variant payload's declared type name.
+                                                type_name: StringId(self.ctx.intern_string_raw(
+                                                    &Self::extract_type_name_from_ast(ty),
+                                                )),
                                                 ..Default::default()
                                             }
                                         })
@@ -12447,6 +12468,11 @@ impl VbcCodegen {
                                             &f.ty,
                                             &sum_generic_param_map,
                                         ),
+                                        // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: carry the
+                                        // record-variant field's declared type name.
+                                        type_name: StringId(self.ctx.intern_string_raw(
+                                            &Self::extract_type_name_from_ast(&f.ty),
+                                        )),
                                         ..Default::default()
                                     })
                                     .collect();
@@ -12647,6 +12673,16 @@ impl VbcCodegen {
                     }
                     let (refinement_src, refinement_binding) =
                         (StringId::EMPTY, StringId::EMPTY);
+                    // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533/T0109): carry
+                    // the field's declared type NAME so a cross-module type
+                    // that `resolve_field_type_ref` collapsed to Concrete(PTR)
+                    // still renders its nominal name in the archive instead of
+                    // `__opaque_type_14` (which parse_descriptor_type_string
+                    // turns into a fresh Var — the field-identity hole).
+                    let field_type_name = StringId(
+                        self.ctx
+                            .intern_string_raw(&Self::extract_type_name_from_ast(&field.ty)),
+                    );
                     type_desc.fields.push(crate::types::FieldDescriptor {
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
@@ -12654,6 +12690,7 @@ impl VbcCodegen {
                         visibility: crate::types::Visibility::Public,
                         refinement_src,
                         refinement_binding,
+                        type_name: field_type_name,
                     });
                 }
 
@@ -12979,6 +13016,18 @@ impl VbcCodegen {
                     protocols: smallvec::SmallVec::new(),
                     visibility: crate::types::Visibility::Public,
                     alias_target: Some(target_ref),
+                    // T0533 — carry the source-verbatim target NAME.  A
+                    // cross-module alias target (this alias is in
+                    // core/io/mod.vr; `StreamError` is declared in
+                    // core/io/protocols.vr) is not in THIS module's
+                    // `type_name_to_id`, so `resolve_field_type_ref` above
+                    // collapsed `target_ref` to `TypeRef::Concrete(TypeId::PTR)`
+                    // and dropped the identity.  The verbatim AST spelling
+                    // ("StreamError") survives here so archive_metadata can
+                    // render the real name.
+                    alias_target_name: Some(crate::types::StringId(
+                        self.intern_string(&Self::extract_type_name_from_ast(target_type)),
+                    )),
                     // Aliases are name-only redirects; representation
                     // is decided by the alias *target* type's
                     // descriptor, not by the alias itself.
@@ -13049,6 +13098,11 @@ impl VbcCodegen {
                     visibility: crate::types::Visibility::Public,
                     refinement_src: StringId::EMPTY,
                         refinement_binding: StringId::EMPTY,
+                    // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: newtype inner type name.
+                    type_name: StringId(
+                        self.ctx
+                            .intern_string_raw(&Self::extract_type_name_from_ast(_inner_type)),
+                    ),
                     });
                 type_desc.size = 8; // single inner value (one Value-slot)
                 self.push_type_dedupe(type_desc);
@@ -13140,6 +13194,11 @@ impl VbcCodegen {
                         visibility: crate::types::Visibility::Public,
                         refinement_src: StringId::EMPTY,
                         refinement_binding: StringId::EMPTY,
+                        // UNIFIED-CROSS-MODULE-TYPE-IDENTITY: tuple element type name.
+                        type_name: StringId(
+                            self.ctx
+                                .intern_string_raw(&Self::extract_type_name_from_ast(inner_ty)),
+                        ),
                     });
                 }
                 type_desc.size = (types.len() as u32) * 8;
@@ -19836,10 +19895,35 @@ impl VbcCodegen {
             if let Some(mapped) = string_id_map.get(remapped_ty.name.0 as usize) {
                 remapped_ty.name = *mapped;
             }
+            // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533) — THE ROOT of every
+            // inert T0533 attempt. The cross-module alias-target NAME
+            // (`alias_target_name`, a StringId) must go through the SAME
+            // codegen-index → canonical-StringId remap as the type name and
+            // refinement_src (the "hint.type_name lesson" the field-remap note
+            // below describes). Un-remapped, the carried "StreamError" kept a
+            // codegen index that reads as garbage/None in the canonical string
+            // table, so the alias rendered `__opaque_type_N` and the checker
+            // fresh-var'd an `IoError` parameter (accepting an Int — the m1
+            // soundness hole). The name WAS carried at codegen and survived
+            // push_type_dedupe; it was silently dropped HERE.
+            if let Some(atn) = remapped_ty.alias_target_name {
+                if let Some(mapped) = string_id_map.get(atn.0 as usize) {
+                    remapped_ty.alias_target_name = Some(*mapped);
+                }
+            }
             // Remap field names from codegen string index to module StringId
             for field in &mut remapped_ty.fields {
                 if let Some(mapped) = string_id_map.get(field.name.0 as usize) {
                     field.name = *mapped;
+                }
+                // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): the carried field
+                // type NAME is a StringId too — remap it identically, else a
+                // cross-module field type reads as garbage in the canonical
+                // table (the T0109 field-identity hole).
+                if field.type_name != StringId::EMPTY {
+                    if let Some(mapped) = string_id_map.get(field.type_name.0 as usize) {
+                        field.type_name = *mapped;
+                    }
                 }
                 // Refinement predicate carriage: same codegen-index →
                 // module-StringId remap as the field name (the exact
@@ -19880,6 +19964,13 @@ impl VbcCodegen {
                 for f in &mut variant.fields {
                     if let Some(mapped) = string_id_map.get(f.name.0 as usize) {
                         f.name = *mapped;
+                    }
+                    // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): variant field
+                    // type name — same canonical remap as the field name.
+                    if f.type_name != StringId::EMPTY {
+                        if let Some(mapped) = string_id_map.get(f.type_name.0 as usize) {
+                            f.type_name = *mapped;
+                        }
                     }
                 }
             }
@@ -20973,6 +21064,10 @@ impl VbcCodegen {
         for fd in ty.fields.iter() {
             new_fields.push(crate::types::FieldDescriptor {
                 name: intern(self, fd.name),
+                // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern the
+                // field's carried type NAME (archive→local); a raw ..clone()
+                // misindexes it against this module's strings.
+                type_name: intern(self, fd.type_name),
                 ..fd.clone()
             });
         }
@@ -20998,6 +21093,9 @@ impl VbcCodegen {
                 for fd in v.fields.iter() {
                     v_fields.push(crate::types::FieldDescriptor {
                         name: intern(self, fd.name),
+                        // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): re-intern
+                        // the variant field's carried type NAME (archive→local).
+                        type_name: intern(self, fd.type_name),
                         ..fd.clone()
                     });
                 }
@@ -21065,6 +21163,17 @@ impl VbcCodegen {
             protocols: new_protocols,
             visibility: ty.visibility,
             alias_target: ty.alias_target.clone(),
+            // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533): re-intern the SOURCE
+            // module's alias-target name into THIS module's string table (the
+            // "follow-up" the old comment deferred). `intern` maps the source
+            // archive StringId into self.ctx.strings (EMPTY on miss → None).
+            // Without this the import copy carries None and, when it wins the
+            // metadata slot over the defining module's Some, the alias renders
+            // __opaque_type_N and the checker fresh-vars it — the m1 hole.
+            alias_target_name: ty.alias_target_name.and_then(|sid| {
+                let local = intern(self, sid);
+                (local != crate::types::StringId::EMPTY).then_some(local)
+            }),
             is_transparent_wrapper: ty.is_transparent_wrapper,
         };
 
@@ -21153,7 +21262,24 @@ impl VbcCodegen {
             // end of that walk, every type in the module IS loaded, so
             // a second-pass repopulation can fill any deferred entries.
             for (fname, fdesc) in names.iter().zip(imported.fields.iter()) {
-                let resolved = self.type_ref_to_field_name(&fdesc.type_ref);
+                // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0109): prefer the source
+                // NAME codegen carried. A cross-module field type collapsed to
+                // Concrete(PTR) at bake, so type_ref_to_field_name returns None
+                // and the entry was skipped — leaving `match e.status` to
+                // hash-fall-back to a wrong tag. The carried type_name recovers
+                // it (and subsumes module.types resolution for same-archive
+                // fields — one source of truth, retiring the T0109 Leg B pass).
+                let carried = if fdesc.type_name != crate::types::StringId::EMPTY {
+                    self.ctx
+                        .strings
+                        .get(fdesc.type_name.0 as usize)
+                        .filter(|s| !s.is_empty())
+                        .cloned()
+                } else {
+                    None
+                };
+                let resolved =
+                    carried.or_else(|| self.type_ref_to_field_name(&fdesc.type_ref));
                 if owns_simple_key
                     && !self
                         .type_field_type_names
@@ -21370,6 +21496,8 @@ impl VbcCodegen {
                     protocols: smallvec::SmallVec::new(),
                     visibility: ty.visibility,
                     alias_target: None,
+                    // T0533 — protocol stub has no alias target to name.
+                    alias_target_name: None,
                     is_transparent_wrapper: false,
                 });
             }

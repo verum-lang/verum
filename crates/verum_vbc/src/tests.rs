@@ -136,6 +136,7 @@ fn test_roundtrip_type_descriptor() {
             FieldDescriptor {
                 refinement_src: crate::types::StringId::EMPTY,
                 refinement_binding: crate::types::StringId::EMPTY,
+                type_name: crate::types::StringId::EMPTY,
                 name: x_name,
                 type_ref: TypeRef::Concrete(TypeId::FLOAT),
                 offset: 0,
@@ -144,6 +145,7 @@ fn test_roundtrip_type_descriptor() {
             FieldDescriptor {
                 refinement_src: crate::types::StringId::EMPTY,
                 refinement_binding: crate::types::StringId::EMPTY,
+                type_name: crate::types::StringId::EMPTY,
                 name: y_name,
                 type_ref: TypeRef::Concrete(TypeId::FLOAT),
                 offset: 8,
@@ -158,6 +160,7 @@ fn test_roundtrip_type_descriptor() {
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
         alias_target: None,
+        alias_target_name: None,
         is_transparent_wrapper: false,
     };
 
@@ -220,6 +223,7 @@ fn test_roundtrip_sum_type() {
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
         alias_target: None,
+        alias_target_name: None,
         is_transparent_wrapper: false,
     };
 
@@ -717,6 +721,7 @@ fn test_roundtrip_all_type_kinds() {
             protocols: smallvec::smallvec![],
             visibility: Visibility::Public,
             alias_target: None,
+            alias_target_name: None,
             is_transparent_wrapper: false,
         });
     }
@@ -753,6 +758,7 @@ fn test_roundtrip_all_visibility_levels() {
             protocols: smallvec::smallvec![],
             visibility: *vis,
             alias_target: None,
+            alias_target_name: None,
             is_transparent_wrapper: false,
         });
     }
@@ -911,6 +917,7 @@ fn test_roundtrip_empty_and_full_variants() {
                 fields: smallvec::smallvec![FieldDescriptor {
                     refinement_src: crate::types::StringId::EMPTY,
                     refinement_binding: crate::types::StringId::EMPTY,
+                    type_name: crate::types::StringId::EMPTY,
                     name: val_name,
                     type_ref: TypeRef::Concrete(TypeId::TEXT),
                     offset: 0,
@@ -925,6 +932,7 @@ fn test_roundtrip_empty_and_full_variants() {
         protocols: smallvec::smallvec![],
         visibility: Visibility::Public,
         alias_target: None,
+        alias_target_name: None,
         is_transparent_wrapper: false,
     });
     module.header.type_table_count = 1;

@@ -829,6 +829,19 @@ pub struct TypeDescriptor {
     /// concrete args at the use site.
     #[serde(default)]
     pub alias_target: Option<TypeRef>,
+    /// T0533 — ALIAS-TARGET-NAME-CARRY: the source-verbatim spelling of
+    /// the alias target (`"StreamError"`, `"Result<T, StreamError>"`),
+    /// interned into THIS module's string table.  A CROSS-MODULE target
+    /// name codegen cannot resolve to a local `TypeId` collapses `alias_
+    /// target` above to `TypeRef::Concrete(TypeId::PTR)` — the identity
+    /// is gone.  This preserves the name so `archive_metadata` renders it
+    /// instead of the fresh-var `__opaque_type_<PTR>` placeholder that
+    /// `parse_descriptor_type_string` turns into a `Type::Var` (the
+    /// soundness hole: an `IoError` parameter accepted an `Int`).  Mirrors
+    /// `FunctionDescriptor.return_type_name` (VBC format v2.6).  Additive
+    /// VBC format v2.9; pre-2.9 archives decode `None`.
+    #[serde(default)]
+    pub alias_target_name: Option<StringId>,
     /// Single canonical flag: is this type a transparent wrapper
     /// whose values are represented at runtime as the inner value
     /// (no heap allocation, no field offsets, no type-tag preserved)?
@@ -873,6 +886,7 @@ impl Default for TypeDescriptor {
             protocols: SmallVec::new(),
             visibility: Visibility::Public,
             alias_target: None,
+            alias_target_name: None,
             // Default: NOT a transparent wrapper. Record types and sum
             // types preserve runtime identity; only `Newtype` / single-
             // element `Tuple` lowering paths flip this true.
@@ -947,6 +961,24 @@ pub struct FieldDescriptor {
     /// Binding name for the predicate ("it" unless named).
     #[serde(default)]
     pub refinement_binding: StringId,
+    /// UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533/T0109): the
+    /// source-verbatim spelling of the field's declared type
+    /// (`"MigrationStatus"`, `"List<Observation>"`), interned into
+    /// THIS module's string table.  A CROSS-MODULE field type codegen
+    /// cannot resolve to a local `TypeId` collapses `type_ref` above to
+    /// `TypeRef::Concrete(TypeId::PTR)` (the "generic carrier") — the
+    /// nominal identity is gone, and `archive_metadata` renders the
+    /// field as `__opaque_type_14`, which `parse_descriptor_type_string`
+    /// turns into a fresh `Type::Var` (records swallow every field; a
+    /// stored-variant `match e.status` hash-falls-back to a wrong tag).
+    /// This preserves the name so `archive_metadata` renders it instead.
+    /// `StringId::EMPTY` when the field type is a bare generic param or a
+    /// builtin whose `type_ref` already round-trips.  Mirrors
+    /// `TypeDescriptor.alias_target_name` (the alias twin) and the
+    /// sibling `refinement_src`.  Additive VBC format v2.9; pre-2.9
+    /// archives decode `EMPTY`.
+    #[serde(default)]
+    pub type_name: StringId,
 }
 
 impl Default for FieldDescriptor {
@@ -958,6 +990,7 @@ impl Default for FieldDescriptor {
             visibility: Visibility::Public,
                     refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
         }
     }
 }
@@ -1991,6 +2024,7 @@ mod tests {
         td.fields.push(FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: StringId(1),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -1999,6 +2033,7 @@ mod tests {
         td.fields.push(FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: StringId(2),
             type_ref: TypeRef::Concrete(TypeId::FLOAT),
             offset: 8,
@@ -2111,6 +2146,7 @@ mod tests {
         let fd = FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: StringId(42),
             type_ref: TypeRef::Concrete(TypeId::TEXT),
             offset: 16,
@@ -2173,6 +2209,7 @@ mod tests {
         fields.push(FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: StringId(10),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -2434,6 +2471,7 @@ mod tests {
         td.fields.push(FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: StringId(1),
             type_ref: TypeRef::Concrete(TypeId::INT),
             offset: 0,
@@ -2463,6 +2501,7 @@ mod tests {
         let fd = FieldDescriptor {
             refinement_src: StringId::EMPTY,
             refinement_binding: StringId::EMPTY,
+            type_name: StringId::EMPTY,
             name: StringId(42),
             type_ref: TypeRef::Concrete(TypeId::TEXT),
             offset: 8,

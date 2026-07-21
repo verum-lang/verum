@@ -410,6 +410,11 @@ impl Serializer {
         // `TypeDescriptor::is_transparent_wrapper`.
         self.output.push(desc.is_transparent_wrapper as u8);
 
+        // v2.9 — ALIAS-TARGET-NAME-CARRY (T0533): source-verbatim alias
+        // target name (Option<StringId>), trailing + version-gated on the
+        // read side.  Mirrors `return_type_name`'s optional-u32 encoding.
+        self.serialize_optional_u32(desc.alias_target_name.map(|s| s.0));
+
         Ok(())
     }
 
@@ -449,6 +454,10 @@ impl Serializer {
         // mis-parsing mid-stream.
         encode_u32(field.refinement_src.0, &mut self.output);
         encode_u32(field.refinement_binding.0, &mut self.output);
+        // v2.9 — UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533/T0109): the
+        // field's source-verbatim type NAME. Fixed-width trailing append;
+        // reader gates on version_minor >= 9. Sibling of refinement_src.
+        encode_u32(field.type_name.0, &mut self.output);
         Ok(())
     }
 
