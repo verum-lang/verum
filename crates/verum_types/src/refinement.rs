@@ -682,6 +682,64 @@ impl RefinementErrorGenerator {
         builder.build()
     }
 
+    /// Render a pattern to source-like text for diagnostics (T0479), instead
+    /// of dumping the raw `{:?}` AST. Mirrors `format_expr`; covers the binding
+    /// forms that appear in refinement diagnostics (let-binding patterns,
+    /// closure params). Uncommon composite forms render structurally rather
+    /// than as a debug dump.
+    fn format_pattern(&self, pattern: &verum_ast::pattern::Pattern) -> Text {
+        use verum_ast::literal::LiteralKind;
+        use verum_ast::pattern::PatternKind;
+        match &pattern.kind {
+            PatternKind::Wildcard => "_".into(),
+            PatternKind::Rest => "..".into(),
+            PatternKind::Ident {
+                by_ref,
+                mutable,
+                name,
+                ..
+            } => {
+                let mut s = String::new();
+                if *by_ref {
+                    s.push_str("ref ");
+                }
+                if *mutable {
+                    s.push_str("mut ");
+                }
+                s.push_str(name.name.as_str());
+                s.into()
+            }
+            PatternKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Int(i) => i.value.to_string().into(),
+                LiteralKind::Float(f) => f.value.to_string().into(),
+                LiteralKind::Bool(b) => if *b { "true" } else { "false" }.into(),
+                LiteralKind::Char(c) => format!("'{}'", c).into(),
+                _ => "<lit>".into(),
+            },
+            PatternKind::Tuple(pats) => {
+                let inner: Vec<String> = pats
+                    .iter()
+                    .map(|p| self.format_pattern(p).to_string())
+                    .collect();
+                format!("({})", inner.join(", ")).into()
+            }
+            PatternKind::Array(pats) => {
+                let inner: Vec<String> = pats
+                    .iter()
+                    .map(|p| self.format_pattern(p).to_string())
+                    .collect();
+                format!("[{}]", inner.join(", ")).into()
+            }
+            PatternKind::Record { .. } => "{ .. }".into(),
+            PatternKind::Variant { .. } => "<variant>".into(),
+            PatternKind::Slice { .. } => "[..]".into(),
+            // Composite/uncommon binding forms (Or, Reference, Range, …) are
+            // rare in refinement let-bindings — render generically rather than
+            // as a raw {:?} AST dump (the T0479 defect).
+            _ => "<pattern>".into(),
+        }
+    }
+
     /// Format an expression as human-readable text for error messages.
     ///
 
@@ -842,7 +900,12 @@ impl RefinementErrorGenerator {
                     .map(|c| match c {
                         verum_ast::expr::ConditionKind::Expr(e) => self.format_expr(e),
                         verum_ast::expr::ConditionKind::Let { pattern, value, .. } => {
-                            format!("let {:?} = {}", pattern, self.format_expr(value)).into()
+                            format!(
+                                "let {} = {}",
+                                self.format_pattern(pattern),
+                                self.format_expr(value)
+                            )
+                            .into()
                         }
                     })
                     .collect();
@@ -891,7 +954,7 @@ impl RefinementErrorGenerator {
 
             ExprKind::Closure { params, body, .. } => {
                 let params_str: List<String> =
-                    params.iter().map(|p| format!("{:?}", p.pattern)).collect();
+                    params.iter().map(|p| self.format_pattern(&p.pattern).to_string()).collect();
                 let body_str = self.format_expr(body);
                 format!("|{}| {}", params_str.join(", "), body_str).into()
             }
@@ -3241,3 +3304,31 @@ impl Default for RefinementChecker {
 }
 
 // Tests moved to tests/refinement_tests.rs
+
+#[cfg(test)]
+mod format_pattern_tests {
+    use super::*;
+
+    #[test]
+    fn format_pattern_renders_source_not_debug_ast_t0479() {
+        let checker = RefinementChecker::new(RefinementConfig::default());
+        // Ident binding `x` (the dominant let-binding form) renders as `x`,
+        // not the raw `Pattern { kind: Ident { .. } }` debug dump.
+        let ident = verum_ast::pattern::Pattern::new(
+            verum_ast::pattern::PatternKind::Ident {
+                by_ref: false,
+                mutable: false,
+                name: verum_ast::ty::Ident::new("x", Span::dummy()),
+                subpattern: verum_common::Maybe::None,
+            },
+            Span::dummy(),
+        );
+        assert_eq!(checker.error_gen.format_pattern(&ident).as_str(), "x");
+        // Wildcard renders as `_`.
+        let wc = verum_ast::pattern::Pattern::new(
+            verum_ast::pattern::PatternKind::Wildcard,
+            Span::dummy(),
+        );
+        assert_eq!(checker.error_gen.format_pattern(&wc).as_str(), "_");
+    }
+}
