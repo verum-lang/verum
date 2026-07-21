@@ -1548,6 +1548,59 @@ impl TypeChecker {
     /// Bidirectional type-check a record literal expression against an expected type.
     /// Checks each field against its declared type, handles optional base spread,
     /// and propagates narrowed type information for refinement fields.
+    /// Type-check a record-literal field VALUE against its declared field type,
+    /// accumulating a field-scoped diagnostic on a plain type mismatch instead
+    /// of aborting the whole literal.
+    ///
+    /// A bare `check_expr(value, expected)?` short-circuits at the FIRST bad
+    /// field, so `R { n: <wrong>, s: <wrong> }` reported only one of two type
+    /// errors. This preserves bidirectional checking (generic / literal fields
+    /// still receive the expected type inward) but, on a `Mismatch`, records an
+    /// `E400` that names the field plus its expected/found types and CONTINUES,
+    /// so every bad field is reported — the construction-site half of diagnostic
+    /// totality (see docs/architecture/diagnostic-totality.md).
+    ///
+    /// Non-mismatch failures (unbound variable in the value, malformed
+    /// sub-expression, …) still propagate: swallowing them would drop a real
+    /// error and produce a false green. A failure for which `check_expr` already
+    /// emitted its own richer diagnostic is kept and not duplicated.
+    fn check_record_field_value(
+        &mut self,
+        field_init: &verum_ast::expr::FieldInit,
+        value_expr: &Expr,
+        expected_field_ty: &Type,
+        type_name: &str,
+    ) -> Result<()> {
+        let diag_len_before = self.diagnostics.len();
+        match self.check_expr(value_expr, expected_field_ty) {
+            Ok(_) => Ok(()),
+            // Plain type mismatch → field-scoped diagnostic, then keep going so
+            // sibling fields are still checked (report ALL bad fields, not just
+            // the first).
+            Err(TypeError::Mismatch {
+                expected, actual, ..
+            }) if self.diagnostics.len() == diag_len_before => {
+                let msg = format!(
+                    "Type mismatch in field '{}' of '{}': expected '{}', found '{}'",
+                    field_init.name.name.as_str(),
+                    type_name,
+                    expected,
+                    actual
+                );
+                let diag =
+                    Diagnostic::new_error(msg, span_to_line_col(value_expr.span), "E400");
+                self.diagnostics.push(diag);
+                Ok(())
+            }
+            // `check_expr` already emitted its own (richer) diagnostic — keep it,
+            // don't duplicate, and continue.
+            Err(_) if self.diagnostics.len() > diag_len_before => Ok(()),
+            // Genuine abort (unbound variable, etc.) — propagate so it is not
+            // lost.
+            Err(e) => Err(e),
+        }
+    }
+
     fn check_record_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Record { path, fields, base } = &expr.kind
@@ -1693,7 +1746,12 @@ impl TypeChecker {
                     };
 
                     if let Some(ref value_expr) = field_init.value {
-                        self.check_expr(value_expr, expected_field_ty)?;
+                        self.check_record_field_value(
+                            field_init,
+                            value_expr,
+                            expected_field_ty,
+                            type_name.as_str(),
+                        )?;
                     } else {
                         // Shorthand syntax
                         if let Some(scheme) = self.ctx.env.lookup(field_name.as_str()) {
@@ -8875,7 +8933,12 @@ impl TypeChecker {
                             // Handle shorthand syntax
                             let field_ty =
                                 if let Some(ref value_expr) = field_init.value {
-                                    self.check_expr(value_expr, expected_field_ty)?;
+                                    self.check_record_field_value(
+                                        field_init,
+                                        value_expr,
+                                        expected_field_ty,
+                                        &format!("{}.{}", type_name, variant_name),
+                                    )?;
                                     expected_field_ty.clone()
                                 } else {
                                     match self.ctx.env.lookup(field_name) {
@@ -9142,7 +9205,12 @@ impl TypeChecker {
                                     let field_ty = if let Some(ref value_expr) =
                                         field_init.value
                                     {
-                                        self.check_expr(value_expr, expected_field_ty)?;
+                                        self.check_record_field_value(
+                                            field_init,
+                                            value_expr,
+                                            expected_field_ty,
+                                            variant_name,
+                                        )?;
                                         expected_field_ty.clone()
                                     } else {
                                         match self.ctx.env.lookup(field_name) {
@@ -9400,7 +9468,12 @@ impl TypeChecker {
             // Handle shorthand syntax: { x } means { x: x }
             let field_ty = if let Some(ref value_expr) = field_init.value {
                 // Explicit value provided: check against expected type
-                self.check_expr(value_expr, expected_field_ty)?;
+                self.check_record_field_value(
+                    field_init,
+                    value_expr,
+                    expected_field_ty,
+                    type_name.as_str(),
+                )?;
                 expected_field_ty.clone()
             } else {
                 // Shorthand: lookup variable in environment
