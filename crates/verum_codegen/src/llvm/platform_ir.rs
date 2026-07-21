@@ -657,9 +657,14 @@ impl<'ctx> PlatformIR<'ctx> {
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_io_declarations"); }
         self.emit_io_declarations(module)?;
 
-        // Time functions
-        if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_time_functions"); }
-        self.emit_time_functions(module)?;
+        // Time helpers (verum_time_monotonic_nanos / verum_time_realtime_nanos /
+        // verum_time_sleep_nanos / verum_time_now_ms / verum_sleep_ms) are emitted
+        // libc-free by the runtime pass (RuntimeLowering::emit_misc_ir_functions),
+        // which runs before this platform pass and is the single definer. The
+        // former platform_ir::emit_time_functions shadowed them with a libc-only
+        // body (clock_gettime/nanosleep by name, no Linux syscall path) and added a
+        // libc-only verum_time_now_ms; removed per
+        // docs/architecture/no-libc-architecture.md (T0436).
 
         // Platform-specific declarations. TARGET-triple dispatch.
         if target_is_darwin(module) {
@@ -4224,8 +4229,9 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_file_io(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         self.emit_file_open(module)?;
         self.emit_file_close(module)?;
-        self.emit_file_exists(module)?;
-        self.emit_file_delete(module)?;
+        // verum_file_exists / verum_file_delete are defined libc-free by the
+        // runtime pass (verum_internal_access / verum_internal_unlink direct
+        // syscalls); the former libc-only platform copies were removed (T0436).
         self.emit_file_read_text(module)?;
         self.emit_file_write_text(module)?;
         self.emit_file_read_all(module)?;
@@ -4283,11 +4289,6 @@ impl<'ctx> PlatformIR<'ctx> {
                 "write",
                 i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
             ),
-            (
-                "access",
-                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
-            ),
-            ("unlink", i64_type.fn_type(&[ptr_type.into()], false)),
         ];
         for (name, fn_type) in decls {
             if module.get_function(name).is_none() {
@@ -4498,82 +4499,6 @@ impl<'ctx> PlatformIR<'ctx> {
         let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         let result = builder
             .build_call(close_fn, &[fd32.into()], "r")
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
-        builder.build_return(Some(&result)).or_llvm_err()?; // i64 Verum ABI — no extension needed
-        Ok(())
-    }
-
-    /// verum_file_exists(path: ptr) -> i64 (0 or 1)
-    fn emit_file_exists(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        self.ensure_io_syscalls_declared(module)?;
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-
-        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = self.get_or_declare_fn(module, "verum_file_exists", fn_type);
-        if func.count_basic_blocks() > 0 {
-            return Ok(());
-        }
-
-        let builder = ctx.create_builder();
-        let entry = ctx.append_basic_block(func, "entry");
-        builder.position_at_end(entry);
-
-        let path = func
-            .get_first_param()
-            .or_internal("missing first param")?
-            .into_pointer_value();
-        let access_fn = module.get_function("access").or_missing_fn("access")?;
-        // F_OK = 0
-        let result = builder
-            .build_call(access_fn, &[path.into(), i32_type.const_zero().into()], "r")
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
-        // return (access(path, F_OK) == 0) ? 1 : 0
-        let is_zero = builder
-            .build_int_compare(IntPredicate::EQ, result, i32_type.const_zero(), "ok")
-            .or_llvm_err()?;
-        let out = builder
-            .build_select(
-                is_zero,
-                i64_type.const_int(1, false),
-                i64_type.const_zero(),
-                "exists",
-            )
-            .or_llvm_err()?;
-        builder.build_return(Some(&out)).or_llvm_err()?;
-        Ok(())
-    }
-
-    /// verum_file_delete(path: ptr) -> i64
-    fn emit_file_delete(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        self.ensure_io_syscalls_declared(module)?;
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-
-        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        let func = self.get_or_declare_fn(module, "verum_file_delete", fn_type);
-        if func.count_basic_blocks() > 0 {
-            return Ok(());
-        }
-
-        let builder = ctx.create_builder();
-        let entry = ctx.append_basic_block(func, "entry");
-        builder.position_at_end(entry);
-
-        let path = func
-            .get_first_param()
-            .or_internal("missing first param")?
-            .into_pointer_value();
-        let unlink_fn = module.get_function("unlink").or_missing_fn("unlink")?;
-        let result = builder
-            .build_call(unlink_fn, &[path.into()], "r")
             .or_llvm_err()?
             .basic_value_or("expected basic value")?
             .into_int_value();
@@ -16200,195 +16125,6 @@ impl<'ctx> PlatformIR<'ctx> {
     // ========================================================================
     // Time functions
     // ========================================================================
-
-    fn emit_time_functions(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let i32_type = ctx.i32_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let void_type = ctx.void_type();
-
-        // Ensure clock_gettime and nanosleep are declared with i64 Verum ABI
-        let ft = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-        let clock_fn = super::error::get_or_declare_function(module, "clock_gettime", ft);
-        let ft = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-        let nanosleep_fn = super::error::get_or_declare_function(module, "nanosleep", ft);
-
-        // verum_time_monotonic_nanos() → i64
-        // Calls clock_gettime(CLOCK_MONOTONIC=6 on macOS, 1 on Linux)
-        let mono_fn = module
-            .get_function("verum_time_monotonic_nanos")
-            .unwrap_or_else(|| {
-                module.add_function(
-                    "verum_time_monotonic_nanos",
-                    i64_type.fn_type(&[], false),
-                    None,
-                )
-            });
-        if mono_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(mono_fn, "entry");
-            builder.position_at_end(entry);
-
-            // Allocate timespec {tv_sec: i64, tv_nsec: i64} on stack
-            let ts_type = ctx.struct_type(&[i64_type.into(), i64_type.into()], false);
-            let ts = builder.build_alloca(ts_type, "ts").or_llvm_err()?;
-            builder
-                .build_store(ts, ts_type.const_zero())
-                .or_llvm_err()?;
-
-            // CLOCK_MONOTONIC = 6 on macOS, 1 on Linux. Target-aware per #70.
-            let clock_id = if super::target_triple::target_is_darwin(module) {
-                i64_type.const_int(6, false)
-            } else {
-                i64_type.const_int(1, false)
-            };
-
-            builder
-                .build_call(clock_fn, &[clock_id.into(), ts.into()], "")
-                .or_llvm_err()?;
-
-            // result = tv_sec * 1_000_000_000 + tv_nsec
-            let sec_ptr = builder
-                .build_struct_gep(ts_type, ts, 0, "sec_ptr")
-                .or_llvm_err()?;
-            let nsec_ptr = builder
-                .build_struct_gep(ts_type, ts, 1, "nsec_ptr")
-                .or_llvm_err()?;
-            let sec = builder
-                .build_load(i64_type, sec_ptr, "sec")
-                .or_llvm_err()?
-                .into_int_value();
-            let nsec = builder
-                .build_load(i64_type, nsec_ptr, "nsec")
-                .or_llvm_err()?
-                .into_int_value();
-            let billion = i64_type.const_int(1_000_000_000, false);
-            let sec_ns = builder
-                .build_int_mul(sec, billion, "sec_ns")
-                .or_llvm_err()?;
-            let total = builder.build_int_add(sec_ns, nsec, "total").or_llvm_err()?;
-            builder.build_return(Some(&total)).or_llvm_err()?;
-        }
-
-        // verum_time_sleep_nanos(nanos: i64) → void
-        let sleep_fn = module
-            .get_function("verum_time_sleep_nanos")
-            .unwrap_or_else(|| {
-                module.add_function(
-                    "verum_time_sleep_nanos",
-                    void_type.fn_type(&[i64_type.into()], false),
-                    None,
-                )
-            });
-        if sleep_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(sleep_fn, "entry");
-            builder.position_at_end(entry);
-
-            let nanos = sleep_fn
-                .get_first_param()
-                .or_internal("missing first param")?
-                .into_int_value();
-            let ts_type = ctx.struct_type(&[i64_type.into(), i64_type.into()], false);
-            let ts = builder.build_alloca(ts_type, "ts").or_llvm_err()?;
-
-            let billion = i64_type.const_int(1_000_000_000, false);
-            let sec = builder
-                .build_int_unsigned_div(nanos, billion, "sec")
-                .or_llvm_err()?;
-            let nsec = builder
-                .build_int_unsigned_rem(nanos, billion, "nsec")
-                .or_llvm_err()?;
-            let sec_ptr = builder
-                .build_struct_gep(ts_type, ts, 0, "sec_p")
-                .or_llvm_err()?;
-            let nsec_ptr = builder
-                .build_struct_gep(ts_type, ts, 1, "nsec_p")
-                .or_llvm_err()?;
-            builder.build_store(sec_ptr, sec).or_llvm_err()?;
-            builder.build_store(nsec_ptr, nsec).or_llvm_err()?;
-
-            builder
-                .build_call(nanosleep_fn, &[ts.into(), ptr_type.const_null().into()], "")
-                .or_llvm_err()?;
-            builder.build_return(None).or_llvm_err()?;
-        }
-
-        // verum_sleep_ms(millis: i64) → void
-        let sleep_ms_fn = module.get_function("verum_sleep_ms").unwrap_or_else(|| {
-            module.add_function(
-                "verum_sleep_ms",
-                void_type.fn_type(&[i64_type.into()], false),
-                None,
-            )
-        });
-        if sleep_ms_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(sleep_ms_fn, "entry");
-            builder.position_at_end(entry);
-            let ms = sleep_ms_fn
-                .get_first_param()
-                .or_internal("missing first param")?
-                .into_int_value();
-            let million = i64_type.const_int(1_000_000, false);
-            let ns = builder.build_int_mul(ms, million, "ns").or_llvm_err()?;
-            builder
-                .build_call(sleep_fn, &[ns.into()], "")
-                .or_llvm_err()?;
-            builder.build_return(None).or_llvm_err()?;
-        }
-
-        // verum_time_now_ms() → i64 (wall clock ms since epoch)
-        let now_fn = module.get_function("verum_time_now_ms").unwrap_or_else(|| {
-            module.add_function("verum_time_now_ms", i64_type.fn_type(&[], false), None)
-        });
-        if now_fn.count_basic_blocks() == 0 {
-            let builder = ctx.create_builder();
-            let entry = ctx.append_basic_block(now_fn, "entry");
-            builder.position_at_end(entry);
-
-            let ts_type = ctx.struct_type(&[i64_type.into(), i64_type.into()], false);
-            let ts = builder.build_alloca(ts_type, "ts").or_llvm_err()?;
-            builder
-                .build_store(ts, ts_type.const_zero())
-                .or_llvm_err()?;
-
-            // CLOCK_REALTIME = 0
-            builder
-                .build_call(clock_fn, &[i64_type.const_zero().into(), ts.into()], "")
-                .or_llvm_err()?;
-
-            let sec_ptr = builder
-                .build_struct_gep(ts_type, ts, 0, "sec_p")
-                .or_llvm_err()?;
-            let nsec_ptr = builder
-                .build_struct_gep(ts_type, ts, 1, "nsec_p")
-                .or_llvm_err()?;
-            let sec = builder
-                .build_load(i64_type, sec_ptr, "sec")
-                .or_llvm_err()?
-                .into_int_value();
-            let nsec = builder
-                .build_load(i64_type, nsec_ptr, "nsec")
-                .or_llvm_err()?
-                .into_int_value();
-
-            let thousand = i64_type.const_int(1000, false);
-            let million = i64_type.const_int(1_000_000, false);
-            let sec_ms = builder
-                .build_int_mul(sec, thousand, "sec_ms")
-                .or_llvm_err()?;
-            let nsec_ms = builder
-                .build_int_unsigned_div(nsec, million, "nsec_ms")
-                .or_llvm_err()?;
-            let total = builder
-                .build_int_add(sec_ms, nsec_ms, "total_ms")
-                .or_llvm_err()?;
-            builder.build_return(Some(&total)).or_llvm_err()?;
-        }
-        Ok(())
-    }
 
     // ========================================================================
     // macOS — libSystem FFI declarations

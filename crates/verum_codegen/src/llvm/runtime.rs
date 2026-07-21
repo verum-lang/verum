@@ -5317,6 +5317,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
             "emit_verum_time_sleep_nanos",
             self.emit_verum_time_sleep_nanos(module)
         );
+        // `verum_time_now_ms` / `verum_sleep_ms` were previously the only
+        // members of the time family defined in `platform_ir::emit_time_functions`
+        // — a libc-only shadow emitter (`clock_gettime`/`nanosleep` by name, no
+        // Linux syscall path). They now live here, libc-free by delegation to the
+        // syscall-backed `verum_time_realtime_nanos` / `verum_time_sleep_nanos`
+        // above, so the runtime pass is the single definer of every time helper
+        // (docs/architecture/no-libc-architecture.md, T0436).
+        step!("emit_verum_time_now_ms", self.emit_verum_time_now_ms(module));
+        step!("emit_verum_sleep_ms", self.emit_verum_sleep_ms(module));
         step!("emit_verum_random_u64", self.emit_verum_random_u64(module));
         step!(
             "emit_verum_random_float",
@@ -5635,6 +5644,89 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.build_unconditional_branch(done).or_llvm_err()?;
 
         builder.position_at_end(done);
+        builder.build_return(None).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_time_now_ms() -> i64  (wall-clock milliseconds since epoch)
+    ///
+    /// **Libc-free.** Delegates to the canonical `verum_time_realtime_nanos`
+    /// (direct `SYS_clock_gettime` on Linux, libSystem on macOS — see
+    /// `emit_verum_time_realtime_nanos`) and scales nanoseconds to
+    /// milliseconds. This is the single definer of `verum_time_now_ms`; the
+    /// previous `platform_ir::emit_time_functions` copy called `clock_gettime`
+    /// by name with no Linux syscall path, breaching the no-libc invariant
+    /// (docs/architecture/no-libc-architecture.md, T0436).
+    fn emit_verum_time_now_ms(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_time_now_ms") {
+            if f.count_basic_blocks() > 0 {
+                return Ok(());
+            }
+        }
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[], false);
+        let func = super::error::get_or_declare_function(module, "verum_time_now_ms", fn_type);
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        // now_ms = verum_time_realtime_nanos() / 1_000_000
+        let realtime_fn = super::error::get_or_declare_function(
+            module,
+            "verum_time_realtime_nanos",
+            i64_type.fn_type(&[], false),
+        );
+        let nanos = builder
+            .build_call(realtime_fn, &[], "ns")
+            .or_llvm_err()?
+            .basic_value_or("verum_time_realtime_nanos returned void")?
+            .into_int_value();
+        let million = i64_type.const_int(1_000_000, false);
+        let ms = builder
+            .build_int_unsigned_div(nanos, million, "ms")
+            .or_llvm_err()?;
+        builder.build_return(Some(&ms)).or_llvm_err()?;
+        Ok(())
+    }
+
+    /// verum_sleep_ms(millis: i64)
+    ///
+    /// **Libc-free.** Converts milliseconds to nanoseconds and delegates to
+    /// the canonical `verum_time_sleep_nanos` (direct `SYS_nanosleep` on
+    /// Linux, libSystem on macOS). Single definer; the previous
+    /// `platform_ir` copy shared the libc-only time emitter — see the no-libc
+    /// rule (T0436).
+    fn emit_verum_sleep_ms(&self, module: &Module<'ctx>) -> Result<()> {
+        if let Some(f) = module.get_function("verum_sleep_ms") {
+            if f.count_basic_blocks() > 0 {
+                return Ok(());
+            }
+        }
+        let i64_type = self.context.i64_type();
+        let void_type = self.context.void_type();
+        let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let func = super::error::get_or_declare_function(module, "verum_sleep_ms", fn_type);
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        // nanos = millis * 1_000_000; verum_time_sleep_nanos(nanos)
+        let millis = func
+            .get_nth_param(0)
+            .or_internal("verum_sleep_ms: missing param 0")?
+            .into_int_value();
+        let million = i64_type.const_int(1_000_000, false);
+        let nanos = builder
+            .build_int_mul(millis, million, "nanos")
+            .or_llvm_err()?;
+        let sleep_fn = super::error::get_or_declare_function(
+            module,
+            "verum_time_sleep_nanos",
+            void_type.fn_type(&[i64_type.into()], false),
+        );
+        builder
+            .build_call(sleep_fn, &[nanos.into()], "")
+            .or_llvm_err()?;
         builder.build_return(None).or_llvm_err()?;
         Ok(())
     }
