@@ -29,6 +29,28 @@ public mount .database.{
     db_error_from_conn,
 };
 
+// -----------------------------------------------------------------------------
+// L7 facade re-exports of lower-layer types (T0555).
+// `SqliteApiDbError` is additionally surfaced under the short name `DbError`.
+// StepOutcome / LifecycleError come from l6_session.statement_lifecycle (whose
+// variants are SoRowReady / SoDone / SoErrored), matching the l6_session facade.
+// -----------------------------------------------------------------------------
+public mount .database.{ SqliteApiDbError as DbError };
+
+public mount core.database.sqlite.connection.{ SqliteConnection };
+
+public mount core.database.sqlite.native.l6_session.statement.{
+    PreparedStatement, StmtError,
+};
+
+public mount core.database.sqlite.native.l6_session.connection.{
+    ConnectionMode, CmRead, CmWrite, CmAdmin,
+};
+
+public mount core.database.sqlite.native.l6_session.statement_lifecycle.{
+    LifecycleError, StepOutcome, SoRowReady, SoDone, SoErrored,
+};
+
 public mount .transaction.{
     SqliteTransaction, TxKind,
     TkDeferred, TkImmediate, TkExclusive,
