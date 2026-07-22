@@ -192,6 +192,38 @@ fn main() {}
 }
 
 // ============================================================================
+// occurs-check #115: the REAL scenario the removed band-aid claimed to protect —
+// an HKT closure-pattern destructuring (`Maybe`-boxed function, matched and
+// applied). This must type-check cleanly WITHOUT the unsound Function-cycle-break
+// in bind_var; a genuine infinite type (`v = v -> Int`) still fails the
+// occurs-check (pinned by unify_tests::test_occurs_check).
+// ============================================================================
+#[test]
+fn occurs115_boxed_function_pattern_destructure_typechecks() {
+    let src = r#"
+mount core.base.maybe.{Maybe, Some, None};
+fn dbl(n: Int) -> Int { n * 2 }
+fn call_boxed<A, B>(m: Maybe<fn(A) -> B>, x: A) -> Maybe<B> {
+    match m {
+        Some(f) => Some(f(x)),
+        None => None,
+    }
+}
+fn main() {
+    let m: Maybe<fn(Int) -> Int> = Some(dbl);
+    let _r = call_boxed(m, 21);
+}
+"#;
+    let r = check_source(src);
+    assert!(
+        r.is_ok(),
+        "boxed-function pattern destructuring must type-check without the occurs-check \
+         band-aid (#115); got: {:?}",
+        r
+    );
+}
+
+// ============================================================================
 // Basic Type Inference Tests
 // ============================================================================
 

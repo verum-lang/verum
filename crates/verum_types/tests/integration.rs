@@ -486,25 +486,13 @@ fn test_occurs_check() {
     );
 }
 
-#[test]
-fn test_function_cycle_breaks_instead_of_infinite_type() {
-    // #115 contract (bind_var cycle-breaking): binding v against a FUNCTION
-    // type containing v replaces the recursive occurrence with a fresh hole
-    // instead of erroring — real conflicts surface later as Mismatch at the
-    // call site. This test pinned Err(InfiniteType) before #115 and was the
-    // third masked-red target in the B9 fail-fast chain (T0171).
-    let mut unifier = Unifier::new();
-    let span = Span::dummy();
-
-    let v = TypeVar::fresh();
-    let ty = Type::function(List::from(vec![Type::Var(v)]), Type::int());
-
-    let result = unifier.unify(&Type::Var(v), &ty, span);
-    assert!(
-        result.is_ok(),
-        "function-shaped cycle must break with fresh holes, got {result:?}"
-    );
-}
+// `test_function_cycle_breaks_instead_of_infinite_type` was removed: it codified
+// the unsound #115 band-aid (bind_var cycle-breaking for Function types).
+// `v = v -> Int` is a GENUINE infinite type and MUST fail the occurs-check — see
+// `unify_tests::test_occurs_check`, which this test directly contradicted (same
+// input, opposite assertion). The real closure-pattern scenario the band-aid
+// claimed to protect type-checks cleanly without it, pinned by
+// `type_checking::occurs115_boxed_function_pattern_destructure_typechecks`.
 
 // ============================================================================
 // Subtyping Tests
