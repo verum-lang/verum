@@ -482,6 +482,32 @@ pub(in super::super) fn handle_get_variant_data_ref(
         deref_depth += 1;
     }
 
+    // **T0557 (2026-07-21)** — auto-deref through a heap-interior
+    // pointer tracked in `cbgr_mutable_ptrs`, EXACTLY as the by-value
+    // sibling `handle_get_variant_data` (Task #7 fix, 2026-05-24) and
+    // `handle_match_tag` already do.  Without it, a `ref` payload
+    // binding whose scrutinee is ITSELF an interior `ref` (the nested
+    // `match &Maybe<FromItem> { Some(ref fi) => match fi { FiT(ref t)
+    // => &t.field } }` shape in l5_sql/planner.plan_from_for_select)
+    // computes `field_ptr = interior_ptr + OBJECT_HEADER_SIZE + 8` on
+    // the OUTER variant's payload slot instead of the inner variant
+    // object.  The resulting binding is garbage; the first field access
+    // on it (`&t.field` → RefField, or `t.field` → GetF) then panics
+    // "RefField: field 0 (offset 0+8=8) exceeds object data size 0/1"
+    // or null-derefs.  The `Some(fi)` by-value form was unaffected
+    // because it copies the inner pointer out of the slot.  Blocks the
+    // sqlite l7_api end-to-end suite (T0469 stage 0.5).
+    if variant.is_ptr() && !variant.is_nil() {
+        let ptr_addr = variant.as_ptr::<u8>() as usize;
+        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
+            // SAFETY: a pointer tracked in `cbgr_mutable_ptrs` points
+            // into a live heap object's data area; reading 8 bytes
+            // yields the stored Value (the actual inner variant ptr).
+            let inner = unsafe { *(variant.as_ptr::<Value>()) };
+            variant = inner;
+        }
+    }
+
     if variant.is_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
         if !base_ptr.is_null() {
