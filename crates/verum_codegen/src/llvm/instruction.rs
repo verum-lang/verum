@@ -21522,62 +21522,10 @@ fn lower_arith_extended<'ctx>(
         }
 
         // ==== Binary Float Operations ====
-        Some(ArithSubOpcode::Atan2) => {
-            // atan2(a, b) — `@llvm.atan2.f64` intrinsic.  LLVM
-            // lowers this to the platform's math runtime
-            // (libSystem.B.dylib on macOS, libm via the syscall-
-            // free runtime on Linux); using the intrinsic
-            // directly (vs declaring an external `atan2` symbol)
-            // keeps the no-libc invariant intact.
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "atan2_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "atan2_b")?;
-            let result = build_binary_intrinsic_f64(ctx, "llvm.atan2.f64", "atan2", a, b)?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::Hypot) => {
-            // hypot(a, b) — `@llvm.hypot.f64` intrinsic
-            // (numerically stable sqrt(x²+y²) without
-            // intermediate overflow).  Same no-libc rationale as
-            // Atan2 above.
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "hypot_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "hypot_b")?;
-            let result = build_binary_intrinsic_f64(ctx, "llvm.hypot.f64", "hypot", a, b)?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::Copysign) => {
-            // copysign(a, b) via llvm.copysign.f64 intrinsic
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "copysign_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "copysign_b")?;
-            let result = build_binary_intrinsic_f64(ctx, "llvm.copysign.f64", "copysign", a, b)?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
-        Some(ArithSubOpcode::Pow) => {
-            // pow(a, b) via llvm.pow.f64 intrinsic
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "pow_a")?;
-            let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "pow_b")?;
-            let result = build_binary_intrinsic_f64(ctx, "llvm.pow.f64", "pow", a, b)?;
-            ctx.set_register(dst, result.into());
-            Ok(())
-        }
+        // atan2 / hypot / copysign / pow are emitted as MathExtendedOpcode
+        // (MathSubOpcode::{Atan2,Hypot,Copysign,Pow}F64 — registry.rs), handled
+        // by the MathExtended lowering below; the old ArithExtended arms were
+        // dead here (nothing constructs ArithSubOpcode::{these} for AOT).
         Some(ArithSubOpcode::LogBase) => {
             // log_base(a, b) = log(a) / log(b)
             if operands.len() < 3 {
