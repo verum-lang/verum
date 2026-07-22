@@ -531,6 +531,26 @@ pub(in super::super) fn handle_set_field(
         obj_val
     };
 
+    // T0562: mirror the read side (0x8B GetVariantDataRef / T0557) — a
+    // `ref mut` variant-payload bind hands SetField a heap-INTERIOR pointer
+    // tracked in `cbgr_mutable_ptrs`, which is NOT a register-ref, so the
+    // deref above skips it. Without this, the payload SLOT address is read as
+    // an ObjectHeader (size 0) and the field bounds check panics
+    // "field write out of bounds ... size 0" — the write-side twin of T0557.
+    let obj_val = if obj_val.is_ptr()
+        && !obj_val.is_nil()
+        && state
+            .cbgr_mutable_ptrs
+            .contains(&(obj_val.as_ptr::<u8>() as usize))
+    {
+        // SAFETY: a pointer tracked in `cbgr_mutable_ptrs` points into a live
+        // heap object's data area; reading 8 bytes yields the stored Value
+        // (the actual inner variant ptr).
+        unsafe { *(obj_val.as_ptr::<Value>()) }
+    } else {
+        obj_val
+    };
+
     if !obj_val.is_ptr() || obj_val.is_nil() {
         return Err(InterpreterError::NullPointer);
     }
