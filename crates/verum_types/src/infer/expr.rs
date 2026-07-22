@@ -7462,6 +7462,24 @@ impl TypeChecker {
         Ok(InferResult::new(Type::tuple(types)))
     }
 
+    /// T0216-c — the single authority for built-in type-property RESULT TYPES.
+    /// These compile-time-metadata properties are valid on ALL receiver types;
+    /// every arm of `infer_expr_field`'s field-access match consults this one
+    /// function (after its own field / method lookups) so the property set can
+    /// never drift between arms — the drift that regressed `rec.is_signed` when
+    /// T0563 removed the record-field swallow. Returns `None` for a member that
+    /// is not a built-in property (the caller then continues its normal
+    /// resolution). Mirrors the codegen surface (compile_type_property).
+    fn builtin_type_property_result_type(prop: &str, self_ty: &Type) -> Option<Type> {
+        match prop {
+            "size" | "alignment" | "stride" | "bits" | "id" => Some(Type::int()),
+            "is_signed" => Some(Type::bool()),
+            "min" | "max" => Some(self_ty.clone()),
+            "name" => Some(Type::text()),
+            _ => None,
+        }
+    }
+
     fn infer_expr_field(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Field { expr: obj, field } = &expr.kind else { unreachable!() };
@@ -8086,33 +8104,15 @@ impl TypeChecker {
                             let ty = scheme.instantiate();
                             return Ok(InferResult::new(ty));
                         }
-                        // Built-in type properties — valid for ALL types as
-                        // compile-time metadata. The Named arm MUST list the full
-                        // set (is_signed / min / max / id too), mirroring the
-                        // Float|Int and `_` arms: this arm previously omitted them
-                        // (the T0216-c hand-synced-property drift), which was
-                        // harmless while the swallow below returned a fresh var,
-                        // but after the T0563 swallow removal an omitted property
-                        // on a KNOWN record would fall through to the loud
-                        // UnknownField error and regress. Completing the set keeps
-                        // `rec.is_signed` / `rec.min` / `rec.id` resolving.
-                        match field.name.as_str() {
-                            "size" | "alignment" | "stride" | "bits" => {
-                                return Ok(InferResult::new(Type::int()));
-                            }
-                            "is_signed" => {
-                                return Ok(InferResult::new(Type::bool()));
-                            }
-                            "min" | "max" => {
-                                return Ok(InferResult::new(normalized_ty.clone()));
-                            }
-                            "id" => {
-                                return Ok(InferResult::new(Type::int()));
-                            }
-                            "name" => {
-                                return Ok(InferResult::new(Type::text()));
-                            }
-                            _ => {}
+                        // Built-in type properties (T0216-c): the single authority
+                        // resolves them for every receiver type, so the arms
+                        // cannot drift (the omission here regressed rec.is_signed
+                        // when T0563 removed the swallow below).
+                        if let Some(t) = Self::builtin_type_property_result_type(
+                            field.name.as_str(),
+                            &normalized_ty,
+                        ) {
+                            return Ok(InferResult::new(t));
                         }
                         // T0563 / G1 (docs/architecture/diagnostic-totality.md §3):
                         // loud undefined field/member access. If the receiver's
@@ -8200,30 +8200,14 @@ impl TypeChecker {
             // Handle associated constants on primitive types
             // e.g., Float.INFINITY, Int.MAX, f64.MIN
             Type::Float | Type::Int => {
-                // Check type properties first (size, align, alignment, stride, bits, name)
-                match field.name.as_str() {
-                    "size" | "alignment" | "stride" | "bits" => {
-                        return Ok(InferResult::new(Type::int()));
-                    }
-                    // PROP-LAYER-DRIFT-1 (task #2): the codegen resolves
-                    // `is_signed`/`min`/`max`/`id` for primitives, but this
-                    // checker branch omitted them → `Int.is_signed` was a
-                    // hard "associated constant not found" error.  Typed here
-                    // to match the codegen surface (is_signed → Bool, min/max
-                    // → the numeric type itself, id → UInt64).
-                    "is_signed" => {
-                        return Ok(InferResult::new(Type::bool()));
-                    }
-                    "min" | "max" => {
-                        return Ok(InferResult::new(normalized_ty.clone()));
-                    }
-                    "id" => {
-                        return Ok(InferResult::new(Type::int()));
-                    }
-                    "name" => {
-                        return Ok(InferResult::new(Type::text()));
-                    }
-                    _ => {}
+                // Built-in type properties first (T0216-c: one authority; this
+                // arm and the codegen once drifted — PROP-LAYER-DRIFT-1 — over
+                // is_signed/min/max/id on primitives).
+                if let Some(t) = Self::builtin_type_property_result_type(
+                    field.name.as_str(),
+                    &normalized_ty,
+                ) {
+                    return Ok(InferResult::new(t));
                 }
                 // Look up as "Type.field" in the environment
                 let const_name = format!("{}.{}", normalized_ty, field.name);
@@ -8268,22 +8252,20 @@ impl TypeChecker {
                         available.join(", ")
                     ))));
                 }
-                // Fall through to default handling
-                match field.name.as_str() {
-                    "size" | "alignment" | "stride" | "bits" => {
-                        Ok(InferResult::new(Type::int()))
-                    }
-                    "is_signed" => Ok(InferResult::new(Type::bool())),
-                    "min" | "max" => Ok(InferResult::new(normalized_ty.clone())),
-                    "id" => Ok(InferResult::new(Type::int())),
-                    "name" => Ok(InferResult::new(Type::text())),
-                    _ => Err(TypeError::OtherWithCode {
+                // Built-in type properties (T0216-c: one authority), else E103.
+                if let Some(t) = Self::builtin_type_property_result_type(
+                    field.name.as_str(),
+                    &normalized_ty,
+                ) {
+                    Ok(InferResult::new(t))
+                } else {
+                    Err(TypeError::OtherWithCode {
                         code: verum_common::Text::from("E103"),
                         msg: verum_common::Text::from(format!(
                             "Cannot access field '{}' on non-record type: {}",
                             field.name, normalized_ty
                         )),
-                    }),
+                    })
                 }
             }
             // Handle type properties for ALL types: T.size, T.align, T.alignment, T.stride, T.bits
