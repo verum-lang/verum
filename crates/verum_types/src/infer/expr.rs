@@ -8477,25 +8477,35 @@ impl TypeChecker {
         if let Some(array_size) = Self::get_array_size(&arr_ty) {
             // Get the constant index value if statically known
             if let Some(index_value) = self.try_extract_const_index(index) {
+                // T0584: accumulate the diagnostic and CONTINUE (error
+                // recovery) instead of `return Err`, so every OOB access in a
+                // function is reported, not only the first — the bounds check
+                // previously aborted the statement, leaving subsequent
+                // accesses unchecked. Falls through to the normal index-type
+                // resolution below (yielding the element type); the pushed
+                // error-severity diagnostic still fails the typecheck. The
+                // `else if` prevents a negative index from also tripping the
+                // exceeds-length branch (duplicate diagnostic).
                 if index_value < 0 {
-                    return Err(TypeError::InvalidIndex {
+                    let e = TypeError::InvalidIndex {
                         message: verum_common::Text::from(format!(
                             "Array index out of bounds: negative index {}",
                             index_value
                         )),
                         span: index.span,
-                    });
-                }
-                // Only check upper bound for non-variable paths (literals, etc.)
-                // Variable paths may have been resized via push/pop
-                if !arr_is_mutable_variable && index_value as u64 >= array_size {
-                    return Err(TypeError::InvalidIndex {
+                    };
+                    self.diagnostics.push(e.to_diagnostic());
+                } else if !arr_is_mutable_variable && index_value as u64 >= array_size {
+                    // Only check upper bound for non-variable paths (literals,
+                    // etc.). Variable paths may have been resized via push/pop.
+                    let e = TypeError::InvalidIndex {
                         message: verum_common::Text::from(format!(
                             "Array index out of bounds: index {} exceeds array length {}",
                             index_value, array_size
                         )),
                         span: index.span,
-                    });
+                    };
+                    self.diagnostics.push(e.to_diagnostic());
                 }
             }
         }
