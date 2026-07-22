@@ -8086,10 +8086,27 @@ impl TypeChecker {
                             let ty = scheme.instantiate();
                             return Ok(InferResult::new(ty));
                         }
-                        // Check for built-in type properties (size, alignment, stride, etc.)
-                        // These are valid for ALL types as compile-time metadata
+                        // Built-in type properties — valid for ALL types as
+                        // compile-time metadata. The Named arm MUST list the full
+                        // set (is_signed / min / max / id too), mirroring the
+                        // Float|Int and `_` arms: this arm previously omitted them
+                        // (the T0216-c hand-synced-property drift), which was
+                        // harmless while the swallow below returned a fresh var,
+                        // but after the T0563 swallow removal an omitted property
+                        // on a KNOWN record would fall through to the loud
+                        // UnknownField error and regress. Completing the set keeps
+                        // `rec.is_signed` / `rec.min` / `rec.id` resolving.
                         match field.name.as_str() {
                             "size" | "alignment" | "stride" | "bits" => {
+                                return Ok(InferResult::new(Type::int()));
+                            }
+                            "is_signed" => {
+                                return Ok(InferResult::new(Type::bool()));
+                            }
+                            "min" | "max" => {
+                                return Ok(InferResult::new(normalized_ty.clone()));
+                            }
+                            "id" => {
                                 return Ok(InferResult::new(Type::int()));
                             }
                             "name" => {
@@ -8097,10 +8114,75 @@ impl TypeChecker {
                             }
                             _ => {}
                         }
-                        // Field not found - for Named types, the field may exist
-                        // in the actual type definition but not be visible due to
-                        // module resolution. Return a fresh type variable to allow
-                        // type inference to continue.
+                        // T0563 / G1 (docs/architecture/diagnostic-totality.md §3):
+                        // loud undefined field/member access. If the receiver's
+                        // full field set is KNOWN (its struct definition resolved)
+                        // and `field` is neither a declared field (missed at the
+                        // __struct_fields_ / direct-type lookups above) nor an
+                        // associated / protocol / inherent method (all three live
+                        // in the shared `inherent_methods` bucket — see
+                        // infer/decls.rs:7470; env-registered `Type.method` forms
+                        // already returned at the associated-constant lookup
+                        // above), it is a genuine undefined member: a typed E404
+                        // error with a did-you-mean over the real members.
+                        //
+                        // An UNKNOWN field set (opaque type, or a cross-module
+                        // type whose definition is not loaded — the T0533 family)
+                        // stays lenient (fresh var), so this cannot regress opaque
+                        // or partially-resolved receivers.
+                        let known_fields = match self.ctx.lookup_type(struct_key.as_str())
+                        {
+                            Option::Some(Type::Record(f)) => Some(f),
+                            _ => match self.ctx.lookup_type(type_name.as_str()) {
+                                Option::Some(Type::Record(f)) => Some(f),
+                                _ => None,
+                            },
+                        };
+                        if let Some(fields) = known_fields {
+                            // One read-lock: decide method-membership AND collect
+                            // the type's real members for the did-you-mean list.
+                            let (is_member_fn, mut members) = {
+                                let static_key: Text =
+                                    format!("$static${}", field.name).into();
+                                let bare_key: Text = field.name.as_str().into();
+                                let guard = self.inherent_methods.read();
+                                let bucket =
+                                    guard.get(&Text::from(type_name.as_str()));
+                                let is_fn = bucket.is_some_and(|b| {
+                                    b.contains_key(&bare_key)
+                                        || b.contains_key(&static_key)
+                                });
+                                let mut ms: Vec<String> = fields
+                                    .keys()
+                                    .map(|k| k.as_str().to_string())
+                                    .collect();
+                                if let Some(b) = bucket {
+                                    for k in b.keys() {
+                                        let name = k
+                                            .as_str()
+                                            .strip_prefix("$static$")
+                                            .unwrap_or(k.as_str());
+                                        ms.push(name.to_string());
+                                    }
+                                }
+                                (is_fn, ms)
+                            };
+                            if !is_member_fn {
+                                members.sort();
+                                members.dedup();
+                                return Err(TypeError::UnknownField {
+                                    ty: Text::from(type_name.as_str()),
+                                    field: Text::from(field.name.as_str()),
+                                    available: Text::from(
+                                        members.join(", ").as_str(),
+                                    ),
+                                    span: expr.span,
+                                });
+                            }
+                        }
+                        // Field set UNKNOWN, or the member is a valid method-as-
+                        // value (UFCS): stay lenient (fresh var) to continue
+                        // inference — unchanged from the pre-T0563 behavior.
                         if matches!(
                             &normalized_ty,
                             Type::Named { .. } | Type::Generic { .. }

@@ -678,6 +678,17 @@ impl From<TypeError> for VerumError {
                     ).into(),
                 }
             }
+
+            // T0563 / G1 (diagnostic-totality.md §3): loud undefined field/
+            // member access. Mirrors the UnknownVariantConstructor mapping.
+            TypeError::UnknownField { ty, field, available, .. } => {
+                VerumError::Other {
+                    message: format!(
+                        "field '{}' not found on type '{}' (available: {})",
+                        field, ty, available
+                    ).into(),
+                }
+            }
         }
     }
 }

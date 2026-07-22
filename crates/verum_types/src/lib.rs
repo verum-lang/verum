@@ -1970,6 +1970,24 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
+    /// G1 (T0563, docs/architecture/diagnostic-totality.md §3): a
+    /// `receiver.member` access where `member` is neither a declared field of
+    /// the (KNOWN) receiver type, an associated fn, nor a protocol method in
+    /// scope. The field twin of `UnknownVariantConstructor`. Only raised when
+    /// the receiver's full field set is known — opaque / cross-module-unloaded
+    /// receivers stay lenient (fresh var), so no regression. Message prefix is
+    /// pinned ("field '…' not found on type") for the audit classifier and
+    /// vtest @expected-error substring matching.
+    #[error(
+        "field '{field}' not found on type '{ty}'. Available members: [{available}]"
+    )]
+    UnknownField {
+        ty: Text,
+        field: Text,
+        available: Text,
+        span: verum_ast::span::Span,
+    },
+
     #[error("{msg}")]
     OtherWithCode { code: Text, msg: Text },
 
@@ -2099,6 +2117,7 @@ impl TypeError {
             OtherWithCodeSpanned { span, .. } => *span,
             PositivityViolation { span, .. } => *span,
             UnknownVariantConstructor { span, .. } => *span,
+            UnknownField { span, .. } => *span,
         }
     }
 
@@ -2708,6 +2727,52 @@ impl TypeError {
                      help: check the variant name against the type declaration",
                     variant, ty, available, ty, variant, ty
                 ));
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder.build()
+            }
+
+            UnknownField {
+                ty,
+                field,
+                available,
+                span,
+            } => {
+                // G1 (T0563, diagnostic-totality.md §3): loud undefined field/
+                // member access, E404. The did-you-mean picks the closest real
+                // member by edit distance; the full member list is always shown.
+                let members: Vec<&str> = available
+                    .as_str()
+                    .split(", ")
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let suggestion = members
+                    .iter()
+                    .map(|m| {
+                        (
+                            *m,
+                            verum_diagnostics::context_error::levenshtein_distance(
+                                field.as_str(),
+                                m,
+                            ),
+                        )
+                    })
+                    .filter(|(_, d)| *d <= (field.as_str().len() / 2).max(2))
+                    .min_by_key(|(_, d)| *d)
+                    .map(|(m, _)| m);
+                let mut msg = format!(
+                    "field '{}' not found on type '{}'. Available members: [{}]",
+                    field, ty, available
+                );
+                if let Some(s) = suggestion {
+                    msg.push_str(&format!("\n  help: did you mean `{}`?", s));
+                }
+                msg.push_str(&format!(
+                    "\n  help: `{}.{}` does not name a declared field or method of `{}`",
+                    ty, field, ty
+                ));
+                let mut builder = DiagnosticBuilder::error().code("E404").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }

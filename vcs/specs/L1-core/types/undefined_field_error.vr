@@ -1,0 +1,17 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: types, diagnostics, totality, T0563
+// @expect: error(E404)
+// @expected-error: E404 "not found on type 'Point'"
+//
+// T0563 / G1 (docs/architecture/diagnostic-totality.md §3): undefined
+// field/member access on a KNOWN record type is a loud typed error (E404)
+// with a did-you-mean, NOT a silently-swallowed fresh type variable.
+
+type Point is { x: Int, y: Int };
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    print(p.nonexistent);
+}
