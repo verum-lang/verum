@@ -965,8 +965,15 @@ impl TypeChecker {
                     // Store parameter names in order (like we do for record types)
                     let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
                         indexmap::IndexMap::new();
-                    for (name, _) in &type_param_vars {
-                        param_record.insert(name.clone(), Type::Int);
+                    for (name, var) in &type_param_vars {
+                        // T0258: store the param's REAL template var instead of
+                        // the former hardcoded `Type::Int` sentinel, so a reader
+                        // of `__type_params_<Name>`'s VALUE gets correct data
+                        // rather than garbage. This is the variant write-site
+                        // where the sentinel bit (T0246's `Maybe.Some(T)` payload
+                        // var); the type-alias write-site is arity/name-only with
+                        // no template var to store.
+                        param_record.insert(name.clone(), Type::Var(*var));
                     }
                     let type_params_key: Text = format!("__type_params_{}", type_name).into();
                     self.ctx
