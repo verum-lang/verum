@@ -159,7 +159,10 @@ jobs:
       - name: Install Coq / Rocq
         run: |
           sudo apt-get update
-          sudo apt-get install -y coq rocq-prover
+          # `coqc` (the binary the replay invokes — verum_smt cross_format_runner)
+          # ships in `coq`; the `rocq-prover` apt package does not exist on
+          # Ubuntu 24.04, so installing it hard-failed the step with E100.
+          sudo apt-get install -y coq
 
       - name: Cache Isabelle distribution + HOL heap
         id: cache-isabelle
