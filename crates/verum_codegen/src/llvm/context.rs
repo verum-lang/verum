@@ -434,6 +434,21 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Used by Ref/RefMut to pass through variant pointers instead of taking alloca addresses.
     variant_registers: std::collections::HashSet<u16>,
 
+    /// T0241 — per-arm payload types of a `Result<T,E>` register (Ok = args[0],
+    /// Err = args[1]), recorded when the register is classified as a `Result`
+    /// value.  The `Result` twin of `maybe_inner_types`: the Tier-1 register
+    /// model is side-table–typed (not NaN-boxed), so the value extracted from an
+    /// Ok/Err arm by `GetVariantData` must be re-classified from these types or
+    /// it comes out UNMARKED — a Text error message built by `ok_or_else(|| f"…")`
+    /// then prints as its raw pointer under AOT while Tier-0 is correct.
+    result_arm_types: HashMap<u16, Vec<verum_vbc::types::TypeRef>>,
+
+    /// T0241 — the variant tag last tested by an `IsVar` against a given variant
+    /// register.  `GetVariantData` carries no tag of its own, so the dominating
+    /// `IsVar` (which does) is what tells the extraction whether it is reading
+    /// the Ok (tag 0) or Err (tag 1) arm of a `Result`.
+    variant_match_tags: HashMap<u16, u32>,
+
     /// Registers where Ref passed through the value instead of creating a pointer.
     /// In VBC semantics, `&x` for primitives (Int, Float, Bool) is just `x` (value copy).
     /// When Deref encounters a register in this set, it passes through instead of loading.
@@ -807,6 +822,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             scalar_register_types: HashMap::new(),
             maybe_inner_types: HashMap::new(),
             variant_registers: std::collections::HashSet::new(),
+            result_arm_types: HashMap::new(),
+            variant_match_tags: HashMap::new(),
 
             closure_return_types: HashMap::new(),
             reg_types: RegisterTypeMap::new(),
@@ -913,6 +930,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             scalar_register_types: HashMap::new(),
             maybe_inner_types: HashMap::new(),
             variant_registers: std::collections::HashSet::new(),
+            result_arm_types: HashMap::new(),
+            variant_match_tags: HashMap::new(),
 
             closure_return_types: HashMap::new(),
             reg_types: RegisterTypeMap::new(),
@@ -1285,6 +1304,29 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Get the inner struct type name for a Maybe<Heap<T>> register.
     pub fn get_maybe_inner_type(&self, reg: u16) -> Option<&str> {
         self.maybe_inner_types.get(&reg).map(|s| s.as_str())
+    }
+
+    /// T0241 — record the per-arm payload types of a `Result<T,E>` register so a
+    /// later `GetVariantData` can re-classify the extracted Ok/Err payload.
+    pub fn set_result_arm_types(&mut self, reg: u16, args: Vec<verum_vbc::types::TypeRef>) {
+        self.result_arm_types.insert(reg, args);
+    }
+
+    /// T0241 — per-arm payload types for a `Result` register, if known.
+    pub fn get_result_arm_types(&self, reg: u16) -> Option<&Vec<verum_vbc::types::TypeRef>> {
+        self.result_arm_types.get(&reg)
+    }
+
+    /// T0241 — record the variant tag an `IsVar` tested against `reg`, so a
+    /// following `GetVariantData` on the same register (which carries no tag)
+    /// selects the matching `Result` arm.
+    pub fn set_variant_match_tag(&mut self, reg: u16, tag: u32) {
+        self.variant_match_tags.insert(reg, tag);
+    }
+
+    /// T0241 — the tag last tested against `reg` by `IsVar`, if any.
+    pub fn get_variant_match_tag(&self, reg: u16) -> Option<u32> {
+        self.variant_match_tags.get(&reg).copied()
     }
 
     /// Mark a register as holding a variant value (heap-allocated variant or null).
@@ -2230,6 +2272,11 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         // boxed-value formatter — misreading it as a heap pointer → SIGSEGV
         // (e.g. `f"{f(Variant(x))}"`). Reset them too so the contract holds.
         self.variant_registers.remove(&reg);
+        // T0241: a redefined register is no longer the Result / matched variant
+        // it may have been — drop its per-arm-type and match-tag facts so a
+        // reused slot never re-classifies a fresh value from a stale arm.
+        self.result_arm_types.remove(&reg);
+        self.variant_match_tags.remove(&reg);
         self.heap_alloc_registers.remove(&reg);
         self.gen_registers.remove(&reg);
         self.map_list_value_registers.remove(&reg);

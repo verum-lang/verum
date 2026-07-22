@@ -4908,6 +4908,28 @@ pub fn lower_instruction<'ctx>(
                 if let Some(type_args) = ctx.get_generic_type_args(variant.0).cloned() {
                     ctx.set_generic_type_args(dst.0, type_args);
                 }
+                // T0241 RESULT-PAYLOAD-CLASSIFY: Maybe<Text> payloads are
+                // classified above, but Result<T,E> had no equivalent — the
+                // extracted Ok/Err payload came out UNMARKED, so a Text error
+                // message built by `ok_or_else(|| f"…")` printed as its raw
+                // pointer under AOT (Tier-0 self-describes via NaN-boxing).
+                // Re-classify from the source Result's per-arm types, choosing
+                // the arm by the tag of the dominating IsVar (Ok = 0 / Err = 1).
+                // The arm MUST be exact: marking an Int Err payload as Text would
+                // treat a scalar as a heap pointer and crash, so a heterogeneous
+                // Result with no recorded tag is deliberately left unclassified.
+                if let Some(arm_types) = ctx.get_result_arm_types(variant.0).cloned() {
+                    if !arm_types.is_empty() {
+                        let arm_idx = match ctx.get_variant_match_tag(variant.0) {
+                            Some(tag) => Some((tag as usize).min(arm_types.len() - 1)),
+                            None if arm_types.iter().all(|t| *t == arm_types[0]) => Some(0),
+                            None => None,
+                        };
+                        if let Some(idx) = arm_idx {
+                            mark_register_from_return_type(ctx, dst.0, &arm_types[idx]);
+                        }
+                    }
+                }
             }
             // Mark variant data as pass-through for Deref: extracted variant fields
             // ARE the values themselves, not references to them. When a variant field
@@ -4932,6 +4954,10 @@ pub fn lower_instruction<'ctx>(
         // ====================================================================
         Instruction::IsVar { dst, value, tag } => {
             let val = ctx.get_register(value.0)?;
+            // T0241: remember which arm this IsVar tested on the variant register
+            // so a following GetVariantData (it carries no tag) can classify the
+            // extracted Result payload from the matching arm (Ok = 0 / Err = 1).
+            ctx.set_variant_match_tag(value.0, *tag);
             // Convert value to pointer, handling int-as-pointer in alloca mode
             let variant_ptr = match val {
                 BasicValueEnum::PointerValue(p) => p,
@@ -35230,6 +35256,15 @@ fn mark_register_from_return_type<'ctx>(
             // Store generic type args so GetF can resolve TypeRef::Generic(n) fields
             if !args.is_empty() {
                 ctx.set_generic_type_args(reg, args.clone());
+            }
+            // T0241: a `Result<T,E>` value — record the per-arm payload types
+            // (Ok = args[0], Err = args[1]) so the Ok/Err payload later extracted
+            // by GetVariantData is re-classified (the `Result` twin of the
+            // Maybe<T> arm above).  Without this the Tier-1 side-table register
+            // model leaves the payload UNMARKED and a Text error message built by
+            // `ok_or_else(|| f"…")` prints as its raw pointer under AOT.
+            if *base == TypeId::RESULT && !args.is_empty() {
+                ctx.set_result_arm_types(reg, args.clone());
             }
         }
         _ => {}
