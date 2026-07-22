@@ -17,8 +17,15 @@ name: Dev release (rolling)
 # Versioned releases are separate: push a `v*` tag → `release.yml`.
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    # Once-a-day rolling dev release at 06:00 UTC. A scheduled run is never
+    # cancelled by a push — unlike the retired per-push trigger, whose runs
+    # were killed by the next commit (cancel-in-progress) before the ~3-6h
+    # six-triple matrix (LLVM + verum) finished, leaving the single `dev` tag
+    # with only the fastest leg's asset. A full day is ample for all six
+    # triples to build, so every asset on `dev` is refreshed together.
+    - cron: '0 6 * * *'
+  # Manual re-cut on demand (e.g. right after a scope/infra fix).
   workflow_dispatch:
 
 # Only the newest commit matters for a rolling release — cancel stale runs.
