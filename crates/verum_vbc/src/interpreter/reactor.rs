@@ -400,6 +400,21 @@ fn pack_key(fd: i64, kind: InterestKind) -> u64 {
     ((fd as u64) << 1) | bit
 }
 
+/// Inverse of [`pack_key`]: recover `(fd, InterestKind)` from the `u64`
+/// user-data word an epoll event carries. Linux-only — the kqueue reactor
+/// reads the fd from the event's `ident` directly and never round-trips the
+/// packed key through the kernel, so this would be dead code elsewhere.
+#[cfg(target_os = "linux")]
+#[inline]
+fn unpack_key(key: u64) -> (i64, InterestKind) {
+    let kind = if key & 1 == 0 {
+        InterestKind::Readable
+    } else {
+        InterestKind::Writable
+    };
+    ((key >> 1) as i64, kind)
+}
+
 /// Public entry: wait for `fd` to become readable, up to `timeout`.
 pub fn wait_readable(fd: i64, timeout: Duration) -> WaitOutcome {
     wait(fd, InterestKind::Readable, timeout)
