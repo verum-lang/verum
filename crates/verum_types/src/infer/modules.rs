@@ -14251,6 +14251,27 @@ impl TypeChecker {
             h
         } else if let Some(m) = mount_scoped {
             m
+        } else if let Some(local) = parents
+            .iter()
+            .find(|p| {
+                self.module_publishes_type(
+                    self.current_module_path.as_str(),
+                    p.as_str(),
+                )
+            })
+            .cloned()
+        {
+            // T0586: a variant parent declared in the CURRENT module beats
+            // an ambient stdlib one when no explicit hint / mount
+            // disambiguates. Fixes nested variant constructors
+            // (`Heap.new(Leaf(x))`) that lose their expected type and would
+            // otherwise resolve first-registered-wins to a colliding stdlib
+            // type — e.g. a file's own `Tree.Leaf` shadowed by the baked
+            // `RTreeNode.Leaf`. Only fires when a current-module parent
+            // exists, so stdlib-only resolutions (`None`, …) are untouched,
+            // and it sits AFTER mount-scoped selection so explicit mounts
+            // (T0525) keep priority.
+            local
         } else if let (Some(arity), true) =
             (expected_arity, parents.len() > 1)
         {
