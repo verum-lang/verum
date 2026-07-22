@@ -6366,12 +6366,19 @@ impl TypeChecker {
         module_path: &str,
         item_name: &str,
     ) -> Option<TypeScheme> {
+        // Stage C (T0566): resolve the TRANSITIVE re-export redirect via the
+        // single authority BEFORE borrowing `metadata`, so Step 2 uses the
+        // definer-level `(true_name, source)` without a second overlapping
+        // self-borrow. Computed unconditionally (cheap — a 2-3 hop walk,
+        // `None` for a direct-declaring mount); Step 2 only consults it on a
+        // Step-1 miss. Replaces the former inline one-hop `.find()` so there
+        // is exactly ONE re-export walk (name-resolution.md §3.6 + §3.7).
+        let reexport_redirect = self.reexport_source_module_for(module_path, item_name);
+
         let metadata = match &self.core_metadata {
             Maybe::Some(m) => m,
             Maybe::None => return None,
         };
-
-        let item_text = Text::from(item_name);
 
         // Step 1 — direct-declaring lookup.  Build the canonical key
         // `<module_path>.<item_name>` and probe `metadata.functions`.
@@ -6416,12 +6423,13 @@ impl TypeChecker {
             // keyed by what the source module itself calls the item,
             // which differs from `item_name` exactly when this leaf
             // came from a `mount X as Y` rename.
-            let src_opt = leaves_opt.and_then(|leaves| {
-                leaves
-                    .iter()
-                    .find(|(local, _, _)| local == &item_text)
-                    .map(|(_, true_name, src)| (true_name.clone(), src.clone()))
-            });
+            // Stage C (T0566): use the transitive redirect resolved by the
+            // single authority at the top of this fn (no inline one-hop
+            // `.find()`). For a multi-level umbrella this is the DEFINER's
+            // `(true_name, source)` directly, so the `<source>.<true_name>`
+            // probe below lands on the definer's descriptor in one shot.
+            // `leaves_opt` stays bound only for the trace line below.
+            let src_opt = reexport_redirect;
             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                 eprintln!(
                     "[task20] metadata_reexport: mod='{}' item='{}' reexport_key_present={} leaf_count={} true_name_src={:?}",
@@ -6650,16 +6658,86 @@ impl TypeChecker {
             Maybe::Some(m) => m,
             Maybe::None => return None,
         };
-        let item_text = Text::from(item_name);
-        metadata
-            .module_reexports
-            .get(&Text::from(module_path))
-            .and_then(|leaves| {
-                leaves
-                    .iter()
-                    .find(|(local, _, _)| local == &item_text)
-                    .map(|(_, true_name, src)| (true_name.clone(), src.clone()))
-            })
+        // One hop: does `module` re-export `item` under that local spelling?
+        // Yields the item's true name at, and the path of, the next module up
+        // the chain (`None` = `module` declares `item` itself).
+        let one_hop = |module: &str, item: &str| -> Option<(Text, Text)> {
+            let item_text = Text::from(item);
+            metadata
+                .module_reexports
+                .get(&Text::from(module))
+                .and_then(|leaves| {
+                    leaves
+                        .iter()
+                        .find(|(local, _, _)| local == &item_text)
+                        .map(|(_, true_name, src)| (true_name.clone(), src.clone()))
+                })
+        };
+
+        // The first hop must exist, otherwise this is a direct-declaring
+        // mount and there is nothing to redirect — preserve the old one-hop
+        // `None` contract exactly (a direct mount is unaffected).
+        let (mut cur_name, mut cur_mod) = one_hop(module_path, item_name)?;
+
+        // Stage C (T0566): follow the `public mount` chain to a FIXPOINT so a
+        // definition replaced by a re-export (the stdlib-dedup move) still
+        // resolves through every parent umbrella, not just one hop. `seen`
+        // holds the DISTINCT `(module, name)` nodes already on the resolution
+        // path; a back-edge to one of them is a genuine multi-node re-export
+        // cycle (a malformed module graph) — scream once and fail safe to
+        // `None` so the caller falls through to a normal unresolved-name
+        // error instead of looping.
+        //
+        // A SELF-reexport — a module re-exporting an item from itself under
+        // the same name — is a FIXPOINT TERMINAL, not a cycle. This is the
+        // umbrella-surface shape the precompile records for a relative
+        // `public mount .protocols.{Add}`: `module_reexports["core.base"]`
+        // carries `(Add, Add, core.base)`. It terminates at `(item, module)`,
+        // identical to the former one-hop result. (Mis-classifying that
+        // self-reexport as a cycle was the T0566-v1 regression that
+        // false-failed core.base's operator protocols and flooded every
+        // program at load.)
+        let mut seen: std::collections::HashSet<(Text, Text)> =
+            std::collections::HashSet::new();
+        seen.insert((Text::from(module_path), Text::from(item_name)));
+        seen.insert((cur_mod.clone(), cur_name.clone()));
+        let mut hops: usize = 0;
+        loop {
+            match one_hop(cur_mod.as_str(), cur_name.as_str()) {
+                Some((next_name, next_mod)) => {
+                    // Self-reexport terminal: `cur_mod` surfaces `cur_name`
+                    // from itself under the same name — it is the definer as
+                    // the consumer sees it. Stop here; NOT a cycle.
+                    if next_mod == cur_mod && next_name == cur_name {
+                        break;
+                    }
+                    // Advance to a genuinely different node up the chain; a
+                    // repeat is a real back-edge (multi-node cycle).
+                    if !seen.insert((next_mod.clone(), next_name.clone())) {
+                        eprintln!(
+                            "[name-res] re-export CYCLE resolving '{}' from module '{}' \
+                             (re-enters '{}' at '{}') — malformed module graph; failing safe.",
+                            item_name, module_path, next_name.as_str(), next_mod.as_str(),
+                        );
+                        return None;
+                    }
+                    cur_name = next_name;
+                    cur_mod = next_mod;
+                }
+                // Declarer terminal: `cur_mod` declares `cur_name` itself.
+                None => break,
+            }
+            hops += 1;
+            if hops > 256 {
+                eprintln!(
+                    "[name-res] re-export chain for '{}' from '{}' exceeded 256 hops \
+                     — failing safe.",
+                    item_name, module_path,
+                );
+                return None;
+            }
+        }
+        Some((cur_name, cur_mod))
     }
 
     /// - Type: the function type

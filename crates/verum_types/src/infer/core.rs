@@ -1084,10 +1084,13 @@ impl TypeChecker {
     /// mounted file the OTHER module's type.  Resolving through the
     /// qualified key is collision-immune.
     ///
-    /// Follows one `module_reexports` hop so umbrella mounts
-    /// (`mount core.x.{Name}` where `core/x/mod.vr` re-exports
-    /// `Name` from `core.x.leaf`) resolve to the defining module's
-    /// key — same discipline as `reexport_source_module_for`.
+    /// Follows the `module_reexports` chain to a fixpoint (Stage C,
+    /// T0566) via `reexport_source_module_for`, so a multi-level
+    /// umbrella (`mount core.x.{Name}` where `core/x/mod.vr` re-exports
+    /// `Name` from `core.x.mid` which re-exports it from `core.x.leaf`)
+    /// resolves to the TRUE defining module's key — not just the first
+    /// hop. `reexport_source_module_for` is the single transitive
+    /// re-export authority (name-resolution.md §3.6 + §3.7).
     ///
     /// Registers ONLY qualified ctx slots — the flat simple-name
     /// table is left untouched, so unmounted files (and every other

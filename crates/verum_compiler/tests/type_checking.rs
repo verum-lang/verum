@@ -70,6 +70,38 @@ fn rand_string() -> String {
 }
 
 // ============================================================================
+// T0566 — transitive re-export walk (Stage C) must NOT false-cycle on the
+// self-reexport shape `core/base/mod.vr` records for its operator protocols.
+// `public mount .protocols.{Add, Sub, ...}` bakes `module_reexports["core.base"]`
+// leaves of the form `(Add, Add, core.base)` (same-name self-reexport). The
+// v1 fixpoint pre-seeded the start key into a global visited-set and read that
+// first-hop self-reexport as a cycle, returning None and flooding EVERY program
+// at load with "re-export CYCLE resolving 'Add' ...". Runs against the real
+// embedded stdlib metadata (no rebake — the fix is a pure walk over unchanged
+// `module_reexports`). A program exercising the operator protocols must
+// type-check cleanly.
+// ============================================================================
+#[test]
+fn t0566_core_base_operator_reexports_resolve_without_false_cycle() {
+    let src = r#"
+fn main() {
+    let a = 10 + 5;
+    let b = a - 3;
+    let c = b * 2;
+    let d = c / 4;
+    let e = d % 3;
+}
+"#;
+    let r = check_source(src);
+    assert!(
+        r.is_ok(),
+        "core.base operator-protocol re-exports must resolve (T0566 self-reexport \
+         terminal, not a false cycle); got: {:?}",
+        r
+    );
+}
+
+// ============================================================================
 // Basic Type Inference Tests
 // ============================================================================
 
