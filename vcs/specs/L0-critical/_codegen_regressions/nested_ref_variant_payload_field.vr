@@ -1,0 +1,78 @@
+// @test: run
+// @level: L0
+// @tier: 0
+// @tags: codegen, interpreter, pattern-match, ref-binding, variant-payload, T0557
+// @timeout: 60000
+// @description: Nested `ref` variant-payload binding must resolve the inner
+//   field on the inner variant object, not on the outer variant's payload slot.
+//
+// T0557 (2026-07-21): `GetVariantDataRef` (0x8B, the `ref` payload binding)
+// lacked the heap-interior-pointer auto-deref that its by-value sibling
+// `GetVariantData` (0x8A) and `handle_match_tag` already had (Task #7 fix,
+// 2026-05-24). When the scrutinee of a `ref` payload binding was ITSELF an
+// interior pointer produced by an outer `ref` binding, 0x8B computed the
+// field pointer against the OUTER variant's payload slot instead of the
+// inner variant object. The garbage binding then panicked at the first field
+// access: "RefField: field 0 (offset 0+8=8) exceeds object data size 0/1".
+//
+// This is the exact shape of `l5_sql/planner.plan_from_for_select`:
+//   match &Maybe<FromItem> { Some(ref fi) => match fi { FiTable(ref t) =>
+//   ...&t.schema... } }
+// which panicked all three of the sqlite l7_api scalar/aggregate/string
+// end-to-end specs before any SQL ran (T0469 stage 0.5 blocker).
+//
+// The `Some(fi)` by-value form (h2 in the T0557 bisection) was always fine
+// because it copies the inner pointer out of the slot — so this regression
+// pins specifically the doubly-nested `ref` path.
+
+type TRef is { schema: Text, name: Text, alias: Text };
+type FItem is FiT(TRef) | FiOther(Int);
+
+fn takes_ref(s: &Text) -> Int { s.len() as Int }
+
+fn inner_ref(fi: &FItem) -> Int {
+    match fi {
+        FiT(ref t) => takes_ref(&t.schema),
+        _ => -1,
+    }
+}
+
+fn mk() -> TRef {
+    TRef { schema: "AB".clone(), name: "t".clone(), alias: "".clone() }
+}
+
+fn main() {
+    // Outer `ref fi` makes `fi` an interior pointer into the Maybe payload;
+    // the inner `FiT(ref t)` then binds through it. Pre-fix this panicked.
+    let m: Maybe<FItem> = Maybe.Some(FiT(mk()));
+    let via_fn = match m {
+        Maybe.Some(ref fi) => inner_ref(fi),
+        Maybe.None => -2,
+    };
+    assert_eq(via_fn, 2);
+
+    // Same shape fully inline (no fn boundary) — also panicked pre-fix.
+    let m2: Maybe<FItem> = Maybe.Some(FiT(mk()));
+    let inline = match m2 {
+        Maybe.Some(ref fi) => match fi {
+            FiT(ref t) => takes_ref(&t.schema),
+            _ => -1,
+        },
+        Maybe.None => -2,
+    };
+    assert_eq(inline, 2);
+
+    // Control: by-value outer bind was never broken — keep it green so a
+    // future change that regresses only the ref path is still caught above.
+    let m3: Maybe<FItem> = Maybe.Some(FiT(mk()));
+    let byval = match m3 {
+        Maybe.Some(fi) => match fi {
+            FiT(ref t) => takes_ref(&t.schema),
+            _ => -1,
+        },
+        Maybe.None => -2,
+    };
+    assert_eq(byval, 2);
+
+    print("nested_ref_variant_payload_field ok");
+}
