@@ -55,6 +55,9 @@ jobs:
           key: cargo-audit-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-audit-${{ runner.os }}-
 
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
       - name: Build verum CLI
         run: cargo build --release --bin verum
 
@@ -114,6 +117,9 @@ jobs:
             verification/external/lean/.lake
           key: cargo-lean-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'verification/external/lean/lakefile.toml') }}
           restore-keys: cargo-lean-${{ runner.os }}-
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
 
       - name: Build verum CLI
         run: cargo build --release --bin verum
@@ -186,6 +192,9 @@ jobs:
             verification/external/lean/.lake
           key: cargo-lean-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'verification/external/lean/lakefile.toml') }}
           restore-keys: cargo-lean-${{ runner.os }}-
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
 
       - name: Build verum CLI
         run: cargo build --release --bin verum
