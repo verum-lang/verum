@@ -8089,7 +8089,7 @@ impl TypeChecker {
                         // Check for built-in type properties (size, alignment, stride, etc.)
                         // These are valid for ALL types as compile-time metadata
                         match field.name.as_str() {
-                            "size" | "align" | "alignment" | "stride" | "bits" => {
+                            "size" | "alignment" | "stride" | "bits" => {
                                 return Ok(InferResult::new(Type::int()));
                             }
                             "name" => {
@@ -8120,7 +8120,7 @@ impl TypeChecker {
             Type::Float | Type::Int => {
                 // Check type properties first (size, align, alignment, stride, bits, name)
                 match field.name.as_str() {
-                    "size" | "align" | "alignment" | "stride" | "bits" => {
+                    "size" | "alignment" | "stride" | "bits" => {
                         return Ok(InferResult::new(Type::int()));
                     }
                     // PROP-LAYER-DRIFT-1 (task #2): the codegen resolves
@@ -8188,7 +8188,7 @@ impl TypeChecker {
                 }
                 // Fall through to default handling
                 match field.name.as_str() {
-                    "size" | "align" | "alignment" | "stride" | "bits" => {
+                    "size" | "alignment" | "stride" | "bits" => {
                         Ok(InferResult::new(Type::int()))
                     }
                     "is_signed" => Ok(InferResult::new(Type::bool())),
@@ -8208,7 +8208,7 @@ impl TypeChecker {
             // These are valid for any type as compile-time type metadata
             _ => {
                 match field.name.as_str() {
-                    "size" | "align" | "alignment" | "stride" | "bits" => {
+                    "size" | "alignment" | "stride" | "bits" => {
                         // Type properties return Int (the size/alignment value)
                         Ok(InferResult::new(Type::int()))
                     }
