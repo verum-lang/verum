@@ -8531,6 +8531,16 @@ impl<'a> RecursiveParser<'a> {
             // Parenthesized expression: (T), (&T)
             ExprKind::Paren(inner) => self.expr_to_type_for_property(inner),
 
+            // Empty tuple: `().size` / `().alignment` — route to the Unit type
+            // property (T0216). Without this, `()` stays an ExprKind::Tuple and
+            // `.size` becomes a field access on the unit VALUE, which the
+            // checker still types Int but the runtime deref-panics
+            // ("receiver is not a heap object") — an unsoundness. Non-empty
+            // tuples have no type-property surface, so only the empty case maps.
+            ExprKind::Tuple(elements) if elements.is_empty() => {
+                Some(Type::new(verum_ast::ty::TypeKind::Unit, expr.span))
+            }
+
             // Reference expression: &T, &mut T
             ExprKind::Unary { op, expr: inner } => {
                 match op {

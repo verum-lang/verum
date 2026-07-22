@@ -38247,6 +38247,28 @@ impl VbcCodegen {
             }
         }
 
+        // T0216: the size family reads the canonical layout authority first
+        // (Unit -> 0, Int -> 8, Text -> 24). The inline bits table below only
+        // serves .bits/.min/.max and the non-primitive fallback; its `_ => 64`
+        // default made Unit.size == 8 (layout says 0), and with the parser now
+        // routing `().size` here it would otherwise answer 8 for the unit.
+        if matches!(
+            property,
+            TypeProperty::Size | TypeProperty::Stride | TypeProperty::Alignment
+        ) && let Some(size) = verum_common::layout::primitive_size_by_name(&type_name)
+        {
+            let value = match property {
+                TypeProperty::Alignment => {
+                    verum_common::layout::primitive_alignment_by_name(&type_name)
+                        .unwrap_or_else(|| size.min(16)) as i64
+                }
+                // Size and Stride: primitives carry no tail padding (stride == size).
+                _ => size as i64,
+            };
+            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+            return Ok(Some(dest));
+        }
+
         // Get bits for the type
         let bits = match type_name.as_str() {
             "Int" | "Int64" | "i64" => 64i64,
