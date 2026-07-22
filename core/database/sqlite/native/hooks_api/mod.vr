@@ -61,6 +61,13 @@ public mount .dispatcher.{
     fire_authorizer, fire_busy_handler, fire_progress_handler, fire_trace_hook,
 };
 
+// T0583: the busy-handler flow uses busy_timeout's BusyDecision (BdRetry/
+// BdGiveUp) — distinct from the dispatcher's BusyHookDecision above. Re-export
+// it so eight_hooks_dispatcher can mount it from the hooks_api facade.
+public mount core.database.sqlite.native.busy_timeout.handler.{
+    BusyDecision, BdRetry, BdGiveUp,
+};
+
 public mount .callback_registry.{
     HookCallbacks, hook_callbacks_new,
     set_commit_callback, set_rollback_callback,
