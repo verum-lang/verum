@@ -102,6 +102,96 @@ fn main() {
 }
 
 // ============================================================================
+// T0564 — G2 "class-killer": a `;`-terminated statement whose expression is a
+// PURE value read (path / field / tuple-index / literal, side-effect-free) is a
+// discarded no-effect statement — the exact signature of a call that lost its
+// parens (`x.method;`) or an assignment that lost its `=`. Emit W_NOEFFECT.
+// Explicit `let _ = …` discards and tail expressions must stay silent. Runs the
+// real file-based check pipeline and inspects emitted diagnostics.
+// ============================================================================
+/// Compile a snippet through the file-based check pipeline and return the
+/// joined diagnostics text (errors + warnings) so a test can assert on a code.
+fn check_source_diagnostics(source: &str) -> String {
+    use verum_compiler::{OutputFormat, VerifyMode};
+    let dir = std::env::temp_dir().join(format!("vr_t0564_{}", rand_string()));
+    std::fs::create_dir_all(&dir).expect("mkdir tmp");
+    let path = dir.join("probe.vr");
+    std::fs::write(&path, source).expect("write probe");
+    let options = CompilerOptions {
+        input: path,
+        verify_mode: VerifyMode::Runtime,
+        output_format: OutputFormat::Human,
+        check_only: true,
+        ..Default::default()
+    };
+    let mut session = Session::new(options);
+    {
+        let mut pipeline = CompilationPipeline::new(&mut session);
+        let _ = pipeline.run_check_only();
+    }
+    let mut text = session.format_diagnostics();
+    for diag in session.diagnostics().iter() {
+        text.push_str(&format!("{:?}\n", diag));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    text
+}
+
+#[test]
+fn t0564_no_effect_field_chain_flagged() {
+    let src = r#"
+type Inner is { v: Int };
+type Outer is { inner: Inner };
+fn probe(o: Outer) {
+    o.inner;
+}
+fn main() {}
+"#;
+    let diags = check_source_diagnostics(src);
+    assert!(
+        diags.contains("W_NOEFFECT"),
+        "a discarded pure field-chain statement must emit W_NOEFFECT; got:\n{}",
+        diags
+    );
+}
+
+#[test]
+fn t0564_explicit_discard_stays_clean() {
+    let src = r#"
+type Inner is { v: Int };
+type Outer is { inner: Inner };
+fn probe(o: Outer) {
+    let _ = o.inner;
+}
+fn main() {}
+"#;
+    let diags = check_source_diagnostics(src);
+    assert!(
+        !diags.contains("W_NOEFFECT"),
+        "an explicit `let _ = …` discard must stay silent; got:\n{}",
+        diags
+    );
+}
+
+#[test]
+fn t0564_tail_expression_stays_clean() {
+    let src = r#"
+type Inner is { v: Int };
+type Outer is { inner: Inner };
+fn get_inner(o: Outer) -> Inner {
+    o.inner
+}
+fn main() {}
+"#;
+    let diags = check_source_diagnostics(src);
+    assert!(
+        !diags.contains("W_NOEFFECT"),
+        "a tail expression is used by definition and must stay silent; got:\n{}",
+        diags
+    );
+}
+
+// ============================================================================
 // Basic Type Inference Tests
 // ============================================================================
 

@@ -9420,8 +9420,76 @@ impl TypeChecker {
                 Ok(false)
             }
 
-            StmtKind::Expr { expr, .. } => {
+            StmtKind::Expr { expr, has_semi } => {
                 let result = self.synth_expr(expr)?;
+
+                // G2 — no-effect expression statement.
+                // Spec: diagnostic-totality §3 (G2), the "class-killer".
+                //
+                // A `;`-terminated statement whose expression is a *pure*
+                // value read — a path, a field / optional-chain / tuple-index
+                // projection, or a literal — computes a value and immediately
+                // discards it.  That is the exact signature of the T0553
+                // corruption (a call that lost its parentheses:
+                // `self.fullscan_step.add1_i64;` was `…add(1_i64);`) and of
+                // any mechanical edit that turns a call or an assignment into
+                // a discarded expression.  Emit `W_NOEFFECT`.
+                //
+                // Severity policy: a warning by default so it never breaks an
+                // existing build; the compiler's warnings-as-errors path
+                // (`--strict` / `deny_warnings`, and the stdlib gate G3/T0124)
+                // promotes it to a hard error.  Fatality is therefore decided
+                // by the invocation, not hardcoded here.
+                //
+                // Reachability: only a genuinely-discarded statement gets here.
+                // A block's tail expression lives in `block.expr`, never in
+                // `block.stmts`, so tail expressions are structurally
+                // unaffected; an explicit `let _ = expr;` is a `StmtKind::Let`
+                // and stays silent.  The `has_semi` guard additionally excludes
+                // the attribute-carrying trailing expression the parser keeps
+                // as a statement (a tail in disguise, `has_semi == false`).
+                //
+                // The predicate is deliberately restricted to reads that run
+                // NO user code and cannot trap: paths, record/tuple field
+                // projections and literals.  It excludes every call, method
+                // call, assignment, index (bounds trap), operator (may dispatch
+                // to a protocol method / may panic on div-by-zero), await/try,
+                // block, control-flow, closure and value-constructor form — so
+                // an effectful statement such as `list.push(x);` is never
+                // flagged.  (The syntactic property inferrer is unsuitable
+                // here: with an unpopulated function-property context it
+                // classifies an unresolved call as `Pure`, which would falsely
+                // flag effectful calls; purity is decided structurally.)
+                fn is_pure_value_read(expr: &verum_ast::expr::Expr) -> bool {
+                    use verum_ast::expr::ExprKind;
+                    match &expr.kind {
+                        ExprKind::Literal(_) | ExprKind::Path(_) => true,
+                        ExprKind::Field { expr: base, .. }
+                        | ExprKind::OptionalChain { expr: base, .. }
+                        | ExprKind::TupleIndex { expr: base, .. } => {
+                            is_pure_value_read(base)
+                        }
+                        ExprKind::Paren(inner) => is_pure_value_read(inner),
+                        _ => false,
+                    }
+                }
+
+                if *has_semi && is_pure_value_read(expr) {
+                    let diag = DiagnosticBuilder::warning()
+                        .code("W_NOEFFECT")
+                        .message("statement has no effect: its value is computed and then discarded")
+                        .span_label(
+                            span_to_line_col(expr.span),
+                            "this expression has no side effect, so evaluating it as a statement does nothing",
+                        )
+                        .help(
+                            "if a call is missing its parentheses (e.g. `x.method` should be `x.method()`) \
+                             or an assignment its `=`, add them; to discard a value on purpose, write `let _ = …;`",
+                        )
+                        .build();
+                    self.diagnostics.push(diag);
+                }
+
                 // Check if the expression diverges (has type Never)
                 Ok(matches!(result.ty, Type::Never))
             }
