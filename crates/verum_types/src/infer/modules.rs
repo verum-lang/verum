@@ -345,6 +345,27 @@ impl TypeChecker {
             }
             self.alias_scope = prev_alias_scope;
 
+            // Phase 1b (T0441): process nested-module mount/import statements
+            // so aliases (`mount X as Y`) and imported items register before
+            // function signatures reference them. check_module handled
+            // Type/Function/ExternBlock/Pattern but NOT Mount, so a nested
+            // `mount ... as LocalMaybe` was silently dropped and surfaced as
+            // `E101 type not found: LocalMaybe` at first use.
+            for item in items.iter() {
+                if let verum_ast::ItemKind::Mount(mount_decl) = &item.kind {
+                    if let Err(e) = self.check_import(mount_decl) {
+                        if e.is_soundness_critical() {
+                            return Err(e);
+                        }
+                        tracing::debug!(
+                            "Mount in module '{}' failed: {}",
+                            module_name,
+                            e
+                        );
+                    }
+                }
+            }
+
             // Phase 2: Register function signatures for forward references
             // IMPORTANT: Functions declared inside `module X { ... }` are module-scoped
             // (accessed as `X.fn()`), so they must NOT overwrite an existing top-level
@@ -524,6 +545,14 @@ impl TypeChecker {
                     self.find_inline_module_for_import(path_str.as_str(), has_crate)
                 {
                     self.import_item_from_inline_module(&module_key, &item_name)?;
+                    // T0441: a single-item Path mount carrying an alias
+                    // (`mount cog.mod.Maybe as LocalMaybe`) imported the item
+                    // but never bound the alias, so `LocalMaybe` surfaced as
+                    // E101 type-not-found at use. Mirror the Nested branch's
+                    // Task#13 alias binding (below) for the Path case.
+                    if let Maybe::Some(alias) = &import.tree.alias {
+                        self.register_mount_item_alias(item_name.as_str(), alias);
+                    }
                     return Ok(());
                 }
             }
