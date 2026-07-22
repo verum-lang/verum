@@ -166,9 +166,13 @@ jobs:
           # .a with GNU/clang toolchains and .lib with MSVC.
           test -f install/bin/llvm-config || test -f install/bin/llvm-config.exe
           test -d install/include
-          ls install/lib/LLVM*.a  >/dev/null 2>&1 || ls install/lib/LLVM*.lib >/dev/null
-          ls install/lib/LLD*.a   >/dev/null 2>&1 || ls install/lib/LLD*.lib  >/dev/null
-          ls install/lib/MLIR*.a  >/dev/null 2>&1 || ls install/lib/MLIR*.lib >/dev/null
+          # Match lib-prefixed Unix names (libLLVMCore.a, liblldCommon.a) AND
+          # bare MSVC names (LLVMCore.lib, lldCommon.lib). LLD's libraries are
+          # lowercase `lld*`, NOT `LLD*` — the old uppercase glob never matched,
+          # so this sanity check aborted every prebuild despite a good install.
+          ls install/lib/*LLVM*.a >/dev/null 2>&1 || ls install/lib/*LLVM*.lib >/dev/null
+          ls install/lib/*lld*.a  >/dev/null 2>&1 || ls install/lib/*lld*.lib  >/dev/null
+          ls install/lib/*MLIR*.a >/dev/null 2>&1 || ls install/lib/*MLIR*.lib >/dev/null
 
       - name: Strip sources + tests (shrink archive)
         working-directory: llvm/install
