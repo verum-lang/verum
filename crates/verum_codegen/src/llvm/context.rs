@@ -131,6 +131,21 @@ impl FuncNameIndex {
     }
 }
 
+/// Kind of a closure capture, recorded at `NewClosure` from the enclosing
+/// function's live register marks so the closure body prologue can re-apply
+/// the mark. Without it a captured `Text` loses its type mark across the env
+/// boundary and prints as a raw pointer under AOT (T0241 facet-2).
+#[derive(Clone, Copy, Debug)]
+pub enum CaptureKind {
+    Text,
+    List,
+    Map,
+    Float,
+    Bool,
+    Chan,
+    Plain,
+}
+
 /// Per-function lowering context.
 ///
 
@@ -470,6 +485,12 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Used by CallClosure to mark the dst register with the correct type (List, Text, etc.)
     /// so downstream operations dispatch correctly.
     closure_return_types: HashMap<u16, verum_vbc::types::TypeRef>,
+
+    /// Capture kinds recorded per closure func-id at `NewClosure`, from the
+    /// enclosing fn's live register marks. Drained by the lowerer into its
+    /// cross-function map so the closure body prologue can re-mark the capture
+    /// registers (T0241 facet-2).
+    pending_closure_captures: Vec<(u32, Vec<CaptureKind>)>,
 
     /// Unified register type map (Phase 1: coexists with legacy HashSets).
     ///
@@ -826,6 +847,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             variant_match_tags: HashMap::new(),
 
             closure_return_types: HashMap::new(),
+            pending_closure_captures: Vec::new(),
             reg_types: RegisterTypeMap::new(),
             obj_alloc_sizes: std::collections::HashMap::new(),
             dispatch_table: MethodDispatchTable::new(),
@@ -934,6 +956,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             variant_match_tags: HashMap::new(),
 
             closure_return_types: HashMap::new(),
+            pending_closure_captures: Vec::new(),
             reg_types: RegisterTypeMap::new(),
             obj_alloc_sizes: std::collections::HashMap::new(),
             dispatch_table: MethodDispatchTable::new(),
@@ -1419,6 +1442,18 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// Get the return type for a closure register, if tracked.
     pub fn get_closure_return_type(&self, reg: u16) -> Option<&verum_vbc::types::TypeRef> {
         self.closure_return_types.get(&reg)
+    }
+
+    /// Record capture kinds for a closure body (keyed by its function id),
+    /// computed at `NewClosure` from the enclosing fn's live register marks.
+    pub fn push_closure_captures(&mut self, closure_fid: u32, kinds: Vec<CaptureKind>) {
+        self.pending_closure_captures.push((closure_fid, kinds));
+    }
+
+    /// Drain the closure-capture records accumulated while lowering this
+    /// function, for the lowerer to fold into its cross-function map.
+    pub fn take_closure_captures(&mut self) -> Vec<(u32, Vec<CaptureKind>)> {
+        std::mem::take(&mut self.pending_closure_captures)
     }
 
     /// Store the element types for a tuple register (from function return or Pack).

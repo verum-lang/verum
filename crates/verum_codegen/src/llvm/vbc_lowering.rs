@@ -63,7 +63,7 @@ use verum_vbc::module::{
 };
 use verum_vbc::types::{TypeId, TypeRef};
 
-use super::context::FunctionContext;
+use super::context::{CaptureKind, FunctionContext};
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::instruction::lower_instruction;
 use super::types::{RefTier, TypeLowering};
@@ -572,6 +572,11 @@ pub struct VbcToLlvmLowering<'ctx> {
     config: LoweringConfig,
     /// Function map (VBC function ID → LLVM function).
     functions: HashMap<u32, FunctionValue<'ctx>>,
+    /// Capture kinds per closure func-id (T0241 facet-2), harvested from each
+    /// function's `NewClosure` records as it is lowered and read by the
+    /// closure body prologue to re-mark its capture registers. `RefCell` so it
+    /// can be read/written while `ctx` holds a shared borrow of `&self.module`.
+    closure_capture_kinds: std::cell::RefCell<HashMap<u32, Vec<CaptureKind>>>,
     /// Statistics.
     stats: LoweringStats,
     /// Pre-built function name index for O(1) lookups in instruction lowering.
@@ -841,6 +846,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             types,
             config,
             functions: HashMap::new(),
+            closure_capture_kinds: std::cell::RefCell::new(HashMap::new()),
             stats: LoweringStats::default(),
             func_name_index: None,
             has_arity_collisions: false,
@@ -2732,6 +2738,27 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 }
             }
 
+            // T0241 facet-2: re-mark the capture registers from the kinds
+            // recorded at the enclosing fn's NewClosure. The captures were
+            // loaded above as raw i64; without re-marking, a captured Text
+            // takes the int branch in TO_STR and prints as a raw pointer under
+            // AOT (the Int-default captures already round-trip correctly). The
+            // enclosing fn lowered before this body, so the record is present.
+            if let Some(kinds) = self.closure_capture_kinds.borrow().get(&func_id) {
+                for (i, kind) in kinds.iter().enumerate().take(capture_count) {
+                    let reg = i as u16;
+                    match kind {
+                        CaptureKind::Text => ctx.mark_text_register(reg),
+                        CaptureKind::List => ctx.mark_list_register(reg),
+                        CaptureKind::Map => ctx.mark_map_register(reg),
+                        CaptureKind::Float => ctx.mark_float_register(reg),
+                        CaptureKind::Bool => ctx.mark_bool_register(reg),
+                        CaptureKind::Chan => ctx.mark_chan_register(reg),
+                        CaptureKind::Plain => {}
+                    }
+                }
+            }
+
             // Map user args (LLVM params 1..N) to registers after captures
             for (j, param) in llvm_fn.get_param_iter().skip(1).enumerate() {
                 ctx.set_register((capture_count + j) as u16, param);
@@ -4216,6 +4243,18 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             tracing::warn!("{}", diag.display());
         }
         self.stats.warnings += diagnostics.len();
+
+        // T0241 facet-2: fold this function's NewClosure capture records into
+        // the cross-function map so each closure body prologue can re-mark its
+        // capture registers (the enclosing fn lowers before its `$closure$`
+        // body, so the record is present when the body prologue reads it).
+        let harvested = ctx.take_closure_captures();
+        if !harvested.is_empty() {
+            let mut map = self.closure_capture_kinds.borrow_mut();
+            for (fid, kinds) in harvested {
+                map.insert(fid, kinds);
+            }
+        }
 
         Ok(())
     }

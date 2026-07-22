@@ -16,7 +16,7 @@ use verum_vbc::instruction::{
 use verum_vbc::module::{CType, ConstId, Constant, FfiSymbolId, FunctionId};
 use verum_vbc::types::{StringId, TypeId, TypeParamId, TypeRef};
 
-use super::context::{FunctionContext, ReferenceInfo, ReferenceSource};
+use super::context::{CaptureKind, FunctionContext, ReferenceInfo, ReferenceSource};
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::ffi::{FfiLowering, ffi_subop_to_calling_convention};
 use super::runtime::RuntimeLowering;
@@ -3852,6 +3852,37 @@ pub fn lower_instruction<'ctx>(
             ctx.set_register(dst.0, closure_ptr.into());
             // Track the closure's return type so CallClosure can mark dst correctly.
             ctx.set_closure_return_type(dst.0, func_desc.return_type.clone());
+            // T0241 facet-2: record each capture's kind from the enclosing fn's
+            // live register marks, keyed by the closure's func-id, so the
+            // closure body prologue can re-mark the capture registers. Without
+            // it a captured Text loses its mark across the env boundary and
+            // prints as a raw pointer under AOT (TO_STR takes the int branch).
+            // The enclosing fn lowers before its `$closure$` body (function-list
+            // order), so the record is present when the prologue reads it.
+            if !captures.is_empty() {
+                let capture_kinds: Vec<CaptureKind> = captures
+                    .iter()
+                    .map(|r| {
+                        let reg = r.0;
+                        if ctx.is_text_register(reg) {
+                            CaptureKind::Text
+                        } else if ctx.is_list_register(reg) {
+                            CaptureKind::List
+                        } else if ctx.is_map_register(reg) {
+                            CaptureKind::Map
+                        } else if ctx.is_float_register(reg) {
+                            CaptureKind::Float
+                        } else if ctx.is_bool_register(reg) {
+                            CaptureKind::Bool
+                        } else if ctx.is_chan_register(reg) {
+                            CaptureKind::Chan
+                        } else {
+                            CaptureKind::Plain
+                        }
+                    })
+                    .collect();
+                ctx.push_closure_captures(effective_fn_id, capture_kinds);
+            }
             Ok(())
         }
 
