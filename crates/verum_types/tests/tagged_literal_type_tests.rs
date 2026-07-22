@@ -349,4 +349,6 @@ fn t0252_numeric_builtins_resolve_to_arg_numeric_type() {
         "Float",
         "clamp(Float,Float,Float) → Float"
     );
+    assert_eq!(infer_num("pow(2, 3)"), "Int", "pow(Int,Int) → Int");
+    assert_eq!(infer_num("pow(2.0, 3.0)"), "Float", "pow(Float,Float) → Float");
 }

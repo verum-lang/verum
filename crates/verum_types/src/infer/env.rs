@@ -7948,7 +7948,11 @@ impl TypeChecker {
         reg_num_poly!("min", 2);
         reg_num_poly!("max", 2);
         reg_num_poly!("clamp", 3);
-        reg!("pow", List::from_iter([Type::Int, Type::Int]), Type::Int);
+        // pow(base, exp) uniform over the numeric type: pow(2, 3)->Int,
+        // pow(2.0, 3.0)->Float (was Int-only). Mixed base/exp (pow(2.0, 3))
+        // stays out of scope — matches the stdlib pow(Float,Float)->Float and
+        // integer pow(Int,Int)->Int shapes (T0252).
+        reg_num_poly!("pow", 2);
 
         // ---- Type properties (generic + optional regular arg) ----
         reg_generic!("stride_of", List::from_iter([Type::Unknown]), Type::Int);
