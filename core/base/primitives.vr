@@ -1351,6 +1351,18 @@ implement Display for Float {
     }
 }
 
+implement Float {
+    /// Format to exactly `n` fractional digits, returning `Text`. This is
+    /// the target of the f-string `:.N` precision desugar (T0604): the
+    /// parser rewrites `f"{x:.2}"` to `x.to_precision(2)`. Backed by the
+    /// canonical `float_to_string` formatter.
+    public fn to_precision(self, n: Int) -> Text {
+        let mut buf = [0_u8; 64];
+        let len = float_to_string(self, &mut buf, n);
+        unsafe { Text.from_utf8_unchecked(&buf[..len]) }
+    }
+}
+
 implement Zero for Float {
     @inline(always)
     public fn zero() -> Float { 0.0 }
@@ -4527,6 +4539,13 @@ implement Display for Float64 {
     }
 }
 
+implement Float64 {
+    /// `:.N` precision target (T0604); see `Float.to_precision`.
+    public fn to_precision(self, n: Int) -> Text {
+        self.to_float().to_precision(n)
+    }
+}
+
 implement Zero for Float64 {
     public fn zero() -> Float64 { 0.0 as Float64 }
     public fn is_zero(&self) -> Bool { *self == (0.0 as Float64) }
@@ -6288,6 +6307,13 @@ implement Debug for USize {
 implement Display for Float32 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.to_float().to_text())
+    }
+}
+
+implement Float32 {
+    /// `:.N` precision target (T0604); see `Float.to_precision`.
+    public fn to_precision(self, n: Int) -> Text {
+        self.to_float().to_precision(n)
     }
 }
 

@@ -323,10 +323,20 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
         // there is no width/align spec either, so the common
         // `f"{x}"` path remains a single ToString op.
         _ => {
-            if parsed.width == 0 && !parsed.upper {
+            if let Some(prec) = parsed.precision {
+                // `.N` fractional precision — render via `to_precision(n)`,
+                // which returns the value formatted to N decimal places
+                // (a `Float`/`Float32`/`Float64` inherent method). Width /
+                // alignment below still applies to the resulting Text. All
+                // in-tree `:.N` sites format floats; precision on a
+                // non-float receiver surfaces a normal missing-method error
+                // at that call site (T0604).
+                method_call_one_int_arg(expr, "to_precision", prec as i64, span)
+            } else if parsed.width == 0 && !parsed.upper {
                 return Ok(expr);
+            } else {
+                method_call_no_args(expr, "to_string", span)
             }
-            method_call_no_args(expr, "to_string", span)
         }
     };
 
@@ -373,6 +383,9 @@ struct ParsedSpec {
     left_align: bool,
     /// Minimum field width (0 = no padding).
     width: u32,
+    /// Fractional precision from `.N` (`None` = unspecified). Applied to
+    /// floats via `to_precision(n)`; see `wrap_with_format_spec`.
+    precision: Option<u32>,
     /// Conversion-type character (`x`/`o`/`b`/`?`/`s`/`X`/None).
     type_char: Option<char>,
     /// True when type was `X` (uppercase hex); drives the
@@ -430,13 +443,25 @@ fn parse_format_spec(spec: &str) -> ParsedSpec {
         }
     }
 
-    // Skip optional '.precision' for now (not yet wired through;
-    // it would compose via a stdlib `format_float_precision(n)`
-    // helper which doesn't exist yet — punted).
+    // [.precision] — optional fractional precision. Captured and applied
+    // to floats via `to_precision(n)` in `wrap_with_format_spec`. A bare
+    // '.' with no digits is treated as unspecified (no precision).
+    let mut precision: Option<u32> = None;
     if chars.peek() == Some(&'.') {
         chars.next();
-        while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-            chars.next();
+        let mut p: u32 = 0;
+        let mut has_digit = false;
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                p = p.saturating_mul(10).saturating_add(c as u32 - '0' as u32);
+                has_digit = true;
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if has_digit {
+            precision = Some(p);
         }
     }
 
@@ -448,6 +473,7 @@ fn parse_format_spec(spec: &str) -> ParsedSpec {
         fill,
         left_align,
         width,
+        precision,
         type_char,
         upper,
     }
@@ -460,6 +486,25 @@ fn method_call_no_args(receiver: Expr, name: &str, span: verum_ast::Span) -> Exp
             method: verum_ast::Ident::new(name, span),
             type_args: List::new(),
             args: List::new(),
+        },
+        span,
+    )
+}
+
+/// Emit `receiver.<name>(<int_arg>)` — a method call carrying a single
+/// integer-literal argument (used for `to_precision(n)` from `.N` specs).
+fn method_call_one_int_arg(
+    receiver: Expr,
+    name: &str,
+    int_arg: i64,
+    span: verum_ast::Span,
+) -> Expr {
+    Expr::new(
+        ExprKind::MethodCall {
+            receiver: verum_common::Heap::new(receiver),
+            method: verum_ast::Ident::new(name, span),
+            type_args: List::new(),
+            args: List::from(vec![int_literal(int_arg, span)]),
         },
         span,
     )
