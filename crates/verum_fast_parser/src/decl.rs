@@ -3373,7 +3373,17 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // Try to parse as a variant if it looks like one (identifier without generic args or function syntax)
-        if self.looks_like_variant() {
+        //
+        // Exception: a bare type name immediately followed by `/` is the CARRIER
+        // of a quotient type (`type Q is T / relation;`), not a single-variant
+        // marker sum. The variant probe would otherwise consume `T` as a marker
+        // variant and leave `/` orphaned (E018 "unexpected `/`, expected `;`"),
+        // because the quotient-lift in the caller (parse_type_decl) fires only
+        // for an `Alias` body. Divert to the alias path below so `T` parses as
+        // `Alias(T)` and the caller lifts it to `Quotient { base: T, relation }`.
+        let is_quotient_carrier = matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
+            && self.stream.peek_nth(1).map(|t| &t.kind) == Some(&TokenKind::Slash);
+        if self.looks_like_variant() && !is_quotient_carrier {
             let first_variant = self.parse_variant()?;
 
             if self.stream.check(&TokenKind::Pipe) || self.stream.check(&TokenKind::Comma) {
