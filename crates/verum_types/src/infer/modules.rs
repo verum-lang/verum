@@ -1284,8 +1284,24 @@ impl TypeChecker {
                         // Record the full path of the imported constant for dependency tracking
                         // When we later reference this constant, we can look up its full path
                         let module_name = module.name.name.as_str();
-                        let const_full_path =
-                            verum_common::Text::from(format!("cog.{}.{}", module_name, item_name));
+                        // T0587: the constant_dependencies map is KEYED by each
+                        // const's own full path, which uses the current
+                        // crate/file root (current_module_path's first segment)
+                        // -- e.g. `myfile.const_b.VALUE_B`. Hardcoding `cog.`
+                        // here produced `cog.const_b.VALUE_B`, which the
+                        // cycle-detection DFS then could not match against the
+                        // real key, so cross-module const cycles went
+                        // undetected (E600 never fired). Use the same root.
+                        let crate_root = self
+                            .current_module_path
+                            .as_str()
+                            .split('.')
+                            .next()
+                            .unwrap_or("cog");
+                        let const_full_path = verum_common::Text::from(format!(
+                            "{}.{}.{}",
+                            crate_root, module_name, item_name
+                        ));
                         self.imported_constant_paths
                             .insert(verum_common::Text::from(item_name), const_full_path);
 
