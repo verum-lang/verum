@@ -48,38 +48,24 @@ fn text_extended_body(
 
     match sub_op {
         Some(TextSubOpcode::FromStatic) => {
-            // Create Text from static string data
-            // Args: ptr:reg, len:reg
-            let ptr_reg = read_reg(state)?;
-            let len_reg = read_reg(state)?;
-            let ptr = state.get_reg(ptr_reg).as_i64() as *const u8;
-            let len = state.get_reg(len_reg).as_i64() as usize;
-
-            // Create Text from the static data
-            // For small strings (up to 6 chars), use small string optimization
-            if len <= 6 {
-                // SAFETY: We trust the static string data to be valid UTF-8
-                let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-                if let Ok(s) = std::str::from_utf8(slice) {
-                    if let Some(small) = Value::from_small_string(s) {
-                        state.set_reg(dst, small);
-                    } else {
-                        // Fallback to empty string
-                        state.set_reg(dst, Value::from_small_string("").unwrap_or(Value::nil()));
-                    }
-                } else {
-                    state.set_reg(dst, Value::from_small_string("").unwrap_or(Value::nil()));
-                }
-            } else {
-                // For longer strings, we'd need heap allocation
-                // For now, truncate to small string
-                let slice = unsafe { std::slice::from_raw_parts(ptr, len.min(6)) };
-                if let Ok(s) = std::str::from_utf8(slice) {
-                    state.set_reg(dst, Value::from_small_string(s).unwrap_or(Value::nil()));
-                } else {
-                    state.set_reg(dst, Value::nil());
-                }
-            }
+            // FROMSTATIC-ARITY-1 (T0426): the emitter packs `[dst][s]` — ONE
+            // source register holding the string argument (uniform intrinsic
+            // arg packing; the confirmed-correct sibling `AsBytes`, also a
+            // single `&Text` arg, packs the same 2 registers). The old
+            // handler read TWO here (`ptr_reg` + `len_reg`, an obsolete
+            // ptr/len shape matching only the now-stale instruction.rs doc
+            // comment), so `len_reg` consumed a register belonging to the
+            // NEXT instruction → wrong Text AND a pc desync for the rest of
+            // the function on EVERY `text_from_static` call, and it truncated
+            // any result to a 6-char small string. Read the single arg and
+            // materialise through the canonical helpers (all three Text
+            // representations + CBGR-deref, small-OR-heap, no truncation) —
+            // exactly as the ParseInt / IntToText siblings fixed 2026-07-03.
+            let s_reg = read_reg(state)?;
+            let s_val = state.get_reg(s_reg);
+            let s = super::string_helpers::extract_string(&s_val, state);
+            let text_val = super::string_helpers::alloc_string_value(state, &s)?;
+            state.set_reg(dst, text_val);
         }
         // The parse / render / byte-len handlers below were small-string-only
         // STUBS until 2026-07-03: any heap/builder Text — and any `&Text`

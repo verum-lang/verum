@@ -10485,8 +10485,11 @@ pub enum TextSubOpcode {
     /// Create Text from static string data.
     ///
 
-    /// Format: `dst:reg, ptr:reg, len:reg`
-    /// Creates a Text value from a static UTF-8 string slice.
+    /// Format: `dst:reg, s:reg`
+    /// Creates a Text value from the single string argument register the
+    /// emitter packs (`[dst][s]`). The earlier `dst, ptr:reg, len:reg` shape
+    /// was stale relative to both the intrinsic registry and the emitter —
+    /// it made the handler over-read one register and desync `pc` (T0426).
     FromStatic = 0x00,
 
     /// Parse integer from Text.
