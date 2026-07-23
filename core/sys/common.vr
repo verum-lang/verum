@@ -396,11 +396,11 @@ implement SysMemoryOrdering {
     /// Convert to VBC opcode encoding.
     fn to_opcode(&self) -> Int {
         match self {
-            MemoryMemoryOrdering.Relaxed => 0,
-            MemoryMemoryOrdering.Acquire => 1,
-            MemoryMemoryOrdering.Release => 2,
-            MemoryMemoryOrdering.AcqRel => 3,
-            MemoryMemoryOrdering.SeqCst => 4,
+            SysMemoryOrdering.Relaxed => 0,
+            SysMemoryOrdering.Acquire => 1,
+            SysMemoryOrdering.Release => 2,
+            SysMemoryOrdering.AcqRel => 3,
+            SysMemoryOrdering.SeqCst => 4,
         }
     }
 }
