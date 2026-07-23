@@ -2788,7 +2788,20 @@ pub fn lower_instruction<'ctx>(
         // Unary Operations
         // ====================================================================
         Instruction::UnaryI { op, dst, src } => {
-            let src_val = as_i64(ctx, ctx.get_register(src.0)?, "src_val")?;
+            let value = ctx.get_register(src.0)?;
+            // T0375: a generic unary `-x` on a `Float` type-param erases to
+            // `UnaryI{Neg}` (an integer opcode). On a runtime-float register
+            // `as_i64` BITCASTS the IEEE double to garbage (the bitcast-passthrough
+            // class, sibling of T0104). Mirror Tier-0 `handle_negi`'s float arm
+            // (T0497): float-negate and re-mark the dst float, so both tiers agree.
+            if matches!(op, UnaryIntOp::Neg) && scalar_reg_is_float(ctx, src.0, value) {
+                let f = as_f64(ctx, value, "unaryi_neg_float")?;
+                let result = ctx.builder().build_float_neg(f, "fneg").or_llvm_err()?;
+                ctx.set_register(dst.0, result.into());
+                ctx.mark_float_register(dst.0);
+                return Ok(());
+            }
+            let src_val = as_i64(ctx, value, "src_val")?;
 
             let result = match op {
                 UnaryIntOp::Neg => ctx
