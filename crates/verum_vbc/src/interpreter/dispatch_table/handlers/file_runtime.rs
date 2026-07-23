@@ -779,6 +779,20 @@ pub(super) fn extract_byte_list_from_value(state: &InterpreterState, v: Value) -
     } else {
         v
     };
+    // A BYTE_SLICE (528) is the representation-tagged borrowed byte view
+    // that `Text.as_bytes()` (TextExtended::AsBytes) and slice ops produce
+    // — NOT a heap List<Byte>. `core/base/env.vr`'s `var()` passes
+    // `key.as_bytes()` into the `get_env_impl` intrinsic through here, and
+    // the LIST-only decode below returned empty for it, so the env key was
+    // always "" -> `std::env::var("")` -> MISSING for every variable
+    // (T0477; and likewise every other `.as_bytes()`-fed `*_impl` path).
+    // Read the (ptr, len) byte range directly via the canonical classifier.
+    if let Some((ptr, len)) = heap::value_as_byte_slice(&unwrapped) {
+        if ptr.is_null() || len == 0 {
+            return Vec::new();
+        }
+        return unsafe { std::slice::from_raw_parts(ptr, len as usize).to_vec() };
+    }
     if !unwrapped.is_ptr() || unwrapped.is_nil() {
         return Vec::new();
     }
