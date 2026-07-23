@@ -9,7 +9,7 @@
 
 module tests.types.dynamic.data_type;
 
-mount core.data.{Data, DataBuilder};
+mount core.base.data.{Data, DataBuilder};
 
 // =============================================================================
 // Test 1: Basic constructors
