@@ -8431,6 +8431,29 @@ impl TypeChecker {
                 let _ = self.ctx.env.remove(short_name_str);
             }
         }
+
+        // T0591: the env-only eviction above misses stdlib variant
+        // constructors, which live in `variant_constructor_parents`, NOT env
+        // (e.g. `CacheTtl.Seconds(Int)`). So a local `type Seconds is (Float)`
+        // still resolved `Seconds(1.5)` to the stdlib variant (E400 expected
+        // Int, found Float). Evict the ambient same-name shadow here too,
+        // retaining only current-module parents: a type's OWN same-named
+        // variant survives while a foreign stdlib one is dropped, and
+        // qualified spellings (`CacheTtl.Seconds`) resolve via the parent
+        // regardless.
+        let cur_mod = self.current_module_path.clone();
+        if let Some(parents) = self.variant_constructor_parents.get(&name).cloned() {
+            let kept: Vec<Text> = parents
+                .iter()
+                .filter(|p| self.module_publishes_type(cur_mod.as_str(), p.as_str()))
+                .cloned()
+                .collect();
+            if kept.is_empty() {
+                let _ = self.variant_constructor_parents.remove(&name);
+            } else if kept.len() != parents.len() {
+                self.variant_constructor_parents.insert(name.clone(), kept.into());
+            }
+        }
     }
 
     /// Get the current module path

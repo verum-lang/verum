@@ -402,7 +402,11 @@ impl TypeChecker {
                         path: Path::single(type_decl.name.clone()),
                         args: List::new(),
                     };
-                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+                    // T0591: route through the module-aware path so the
+                    // same-name ambient variant-ctor shadow is evicted (a
+                    // stdlib variant like `CacheTtl.Seconds` otherwise
+                    // captured `Seconds(1.5)` and forced its Int payload).
+                    self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                     // Store inner type as Unit for coercion checks
                     let inner_key = format!("__newtype_inner_{}", type_name);
@@ -422,7 +426,11 @@ impl TypeChecker {
                         path: Path::single(type_decl.name.clone()),
                         args: List::new(),
                     };
-                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+                    // T0591: route through the module-aware path so the
+                    // same-name ambient variant-ctor shadow is evicted (a
+                    // stdlib variant like `CacheTtl.Seconds` otherwise
+                    // captured `Seconds(1.5)` and forced its Int payload).
+                    self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                     // Store inner type for field access (.0)
                     let inner_key = format!("__newtype_inner_{}", type_name);
@@ -2471,7 +2479,11 @@ impl TypeChecker {
                         path: Path::single(type_decl.name.clone()),
                         args: List::new(),
                     };
-                    self.ctx.define_type(type_name.clone(), newtype_ty.clone());
+                    // T0591: route through the module-aware path so the
+                    // same-name ambient variant-ctor shadow is evicted (a
+                    // stdlib variant like `CacheTtl.Seconds` otherwise
+                    // captured `Seconds(1.5)` and forced its Int payload).
+                    self.define_type_in_current_module(type_name.clone(), newtype_ty.clone());
 
                     // Store inner type for field access (.0)
                     let inner_key = format!("__newtype_inner_{}", type_name);
