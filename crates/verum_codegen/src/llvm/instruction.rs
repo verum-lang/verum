@@ -2713,8 +2713,39 @@ pub fn lower_instruction<'ctx>(
         // Integer Arithmetic
         // ====================================================================
         Instruction::BinaryI { op, dst, a, b } => {
-            let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
-            let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
+            let va = ctx.get_register(a.0)?;
+            let vb = ctx.get_register(b.0)?;
+            // T0598: opaque/generic float operands can erase to `BinaryI`. Classify
+            // via PER-USE signals only — the loaded value's LLVM kind (FloatValue)
+            // or `is_float_register` (which `set_register` CLEARS) — NEVER the
+            // prescan mark, which is STICKY per register number (register_types.rs
+            // :598, never cleared). A reused slot that was float in an earlier use
+            // otherwise carries a stale prescan-float mark into a later INT use
+            // (e.g. a slice-length add); dispatching float there yields a float that
+            // crashes a downstream int consumer (RefSlice len, :23621). Promote both
+            // to f64, do the float op, re-mark dst float. UDiv/UMod fall through.
+            let a_float = matches!(va, BasicValueEnum::FloatValue(_)) || ctx.is_float_register(a.0);
+            let b_float = matches!(vb, BasicValueEnum::FloatValue(_)) || ctx.is_float_register(b.0);
+            if a_float || b_float {
+                let fl = as_f64(ctx, va, "binaryi_flhs")?;
+                let fr = as_f64(ctx, vb, "binaryi_frhs")?;
+                let fresult = match op {
+                    BinaryIntOp::Add => Some(ctx.builder().build_float_add(fl, fr, "fadd").or_llvm_err()?),
+                    BinaryIntOp::Sub => Some(ctx.builder().build_float_sub(fl, fr, "fsub").or_llvm_err()?),
+                    BinaryIntOp::Mul => Some(ctx.builder().build_float_mul(fl, fr, "fmul").or_llvm_err()?),
+                    BinaryIntOp::Div => Some(ctx.builder().build_float_div(fl, fr, "fdiv").or_llvm_err()?),
+                    BinaryIntOp::Mod => Some(ctx.builder().build_float_rem(fl, fr, "frem").or_llvm_err()?),
+                    BinaryIntOp::Pow => Some(lower_float_pow(ctx, fl, fr)?),
+                    BinaryIntOp::UDiv | BinaryIntOp::UMod => None,
+                };
+                if let Some(r) = fresult {
+                    ctx.set_register(dst.0, r.into());
+                    ctx.mark_float_register(dst.0);
+                    return Ok(());
+                }
+            }
+            let lhs = as_i64(ctx, va, "lhs")?;
+            let rhs = as_i64(ctx, vb, "rhs")?;
 
             let result = match op {
                 BinaryIntOp::Add => ctx
