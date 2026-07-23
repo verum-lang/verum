@@ -715,7 +715,22 @@ public fn float_to_string(value: Float, buf: &mut [Byte], precision: Int) -> Int
 
     // Handle negative numbers
     let negative = value < 0.0;
-    let val = if negative { -value } else { value };
+    let val_abs = if negative { -value } else { value };
+
+    // T0609: round-half-up at the precision cutoff. The per-digit loop
+    // below truncates (floor of each scaled digit), so without this
+    // `3.9:.0` -> "3" and `3.14159:.4` -> "3.1415". Add half a
+    // unit-in-the-last-place before extraction; the add-then-truncate
+    // also propagates the carry (e.g. `9.96:.1` -> "10.0") for free.
+    // `precision` is always >= 0 here (explicit `.N` or the unwrap_or(6)
+    // default), so the loop always terminates with a positive half-ULP.
+    let mut half_ulp = 0.5;
+    let mut round_i = 0;
+    while round_i < precision {
+        half_ulp = half_ulp / 10.0;
+        round_i = round_i + 1;
+    }
+    let val = val_abs + half_ulp;
 
     if negative {
         buf[pos] = '-' as Byte;
