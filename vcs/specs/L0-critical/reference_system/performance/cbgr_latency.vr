@@ -230,14 +230,14 @@ type BenchResult is {
 };
 
 implement Benchmark {
-    fn new(name: Text) -> Benchmark { /* ... */ }
+    fn new(name: Text) -> Benchmark { panic("stub") }
     fn run(&mut self, name: &Text, f: fn(&mut Bencher)) { /* ... */ }
     fn report(&self) { /* ... */ }
 }
 
 implement Bencher {
     fn iter<F: Fn() -> T, T>(&mut self, f: F) { /* ... */ }
-    fn measure<F: Fn()>(&mut self, f: F) -> Duration { /* ... */ }
+    fn measure<F: Fn()>(&mut self, f: F) -> Duration { panic("stub") }
     fn assert_time_less_than(&self, d: Duration) { /* ... */ }
 }
 
