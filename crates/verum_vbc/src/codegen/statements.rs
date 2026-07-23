@@ -617,8 +617,14 @@ impl VbcCodegen {
         }
 
         // Check if this is a byte array type - if so, use specialized byte array allocation
-        // This ensures memory intrinsics like memset/memcpy work correctly
-        if let Some(byte_array_size) = self.detect_byte_array_type(ty)
+        // This ensures memory intrinsics like memset/memcpy work correctly.
+        // Size comes from the `: [Byte; N]` annotation when present, else from
+        // a byte-suffixed repeat literal (`[0_u8; N]`) — the suffix alone is
+        // enough to pack, so an unannotated byte scratch buffer no longer
+        // falls through to a List backing (T0308 / T0608).
+        if let Some(byte_array_size) = self
+            .detect_byte_array_type(ty)
+            .or_else(|| value.and_then(|v| self.detect_byte_array_from_repeat_value(v)))
             && let Some(expr) = value
         {
             // Determine the initialization value
@@ -1136,6 +1142,33 @@ impl VbcCodegen {
     }
 
     /// Detects if type annotation is a byte array [Byte; N] and returns the size.
+    /// Detect a byte-array from a repeat whose element is an explicit
+    /// byte-suffixed integer literal (`[0_u8; N]` / `[0_i8; N]`). The
+    /// `_u8`/`_i8` suffix is sufficient proof of byte-ness, so such a
+    /// literal packs into a `NewByteArray` even WITHOUT a `: [Byte; N]`
+    /// annotation. Without this, an unannotated `[0_u8; N]` fell through to
+    /// a NaN-boxed `List<Byte>` backing whose re-sliced `&mut` parameter
+    /// (`&mut buf[pos..]`) computed a null data pointer, so an element write
+    /// (`SetE`) null-dereferenced — latently breaking `float_to_string` /
+    /// any `[byte; N]` scratch buffer that is re-sliced across a call
+    /// (T0308 / T0608, which blocked f-string float precision T0604).
+    fn detect_byte_array_from_repeat_value(&self, expr: &verum_ast::Expr) -> Option<usize> {
+        use verum_ast::ExprKind;
+        use verum_ast::literal::{IntSuffix, LiteralKind};
+
+        if let ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) = &expr.kind
+            && let ExprKind::Literal(vlit) = &value.kind
+            && let LiteralKind::Int(vint) = &vlit.kind
+            && matches!(vint.suffix, Some(IntSuffix::U8) | Some(IntSuffix::I8))
+            && let ExprKind::Literal(clit) = &count.kind
+            && let LiteralKind::Int(cint) = &clit.kind
+            && cint.value >= 0
+        {
+            return Some(cint.value as usize);
+        }
+        None
+    }
+
     fn detect_byte_array_type(&self, ty: Option<&verum_ast::Type>) -> Option<usize> {
         use verum_ast::literal::LiteralKind;
         use verum_ast::ty::{PathSegment, TypeKind};
