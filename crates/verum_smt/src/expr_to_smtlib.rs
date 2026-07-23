@@ -88,16 +88,7 @@ pub fn expr_to_smtlib(expr: &Expr) -> SmtResult {
     match &expr.kind {
         ExprKind::Literal(lit) => literal_to_smtlib(lit),
 
-        ExprKind::Path(path) => {
-            if path.segments.len() == 1 {
-                if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                    return Ok(ident.name.as_str().to_string());
-                }
-            }
-            Err(SmtTranslateError::UnsupportedExpr {
-                description: "multi-segment path".to_string(),
-            })
-        }
+        ExprKind::Path(path) => path_to_smtlib(path),
 
         ExprKind::Binary { op, left, right } => {
             let l = expr_to_smtlib(left)?;
@@ -199,6 +190,64 @@ pub fn expr_to_smtlib(expr: &Expr) -> SmtResult {
 
         ExprKind::Tuple(elements) if elements.len() == 1 => expr_to_smtlib(&elements[0]),
 
+        // Enum-dispatch reflection: `match k { K.A => e1, K.B => e2 }` over a
+        // variant scrutinee becomes a right-to-left `ite` chain, each arm
+        // guarded by `(= k path_K.A)` — byte-identical to the trusted Z3-AST
+        // translator (`translate.rs`) and the variant-disjointness axioms, so
+        // the reflected body and the goal name the same solver constant.
+        //
+        // SOUNDNESS: this body is emitted as an axiom asserted TRUE, so —
+        // unlike the goal-side `translate_match`, which may safely
+        // over-approximate a match it is trying to prove — every arm must be
+        // represented EXACTLY or the whole match is refused. A guard, a
+        // payload-binding variant pattern, or any non-nullary-variant pattern
+        // makes this `Err` (conservative-refuse is always sound).
+        ExprKind::Match { expr: scrut, arms } => {
+            use verum_ast::pattern::PatternKind;
+            let scrut_smt = expr_to_smtlib(scrut)?;
+            let mut chain: Option<String> = None;
+            for arm in arms.iter().rev() {
+                if let verum_common::Maybe::Some(_) = &arm.guard {
+                    return Err(SmtTranslateError::UnsupportedExpr {
+                        description: "guarded match arm".to_string(),
+                    });
+                }
+                let body_smt = expr_to_smtlib(&arm.body)?;
+                match &arm.pattern.kind {
+                    // Binds anything → the fallthrough (else) branch.
+                    PatternKind::Wildcard | PatternKind::Ident { .. } => {
+                        chain = Some(body_smt);
+                    }
+                    // A nullary variant `K.A`. A payload (`Some(x)`) has no SMT
+                    // form for `x`, so refuse rather than emit a wrong body.
+                    PatternKind::Variant { path, data } => {
+                        if let verum_common::Maybe::Some(_) = data {
+                            return Err(SmtTranslateError::UnsupportedExpr {
+                                description: "variant pattern with payload".to_string(),
+                            });
+                        }
+                        let cond = format!("(= {} {})", scrut_smt, path_to_smtlib(path)?);
+                        let existing = chain.clone().unwrap_or_else(|| body_smt.clone());
+                        chain = Some(format!("(ite {} {} {})", cond, body_smt, existing));
+                    }
+                    // A nullary variant sometimes parses as an empty record.
+                    PatternKind::Record { path, fields, .. } if fields.is_empty() => {
+                        let cond = format!("(= {} {})", scrut_smt, path_to_smtlib(path)?);
+                        let existing = chain.clone().unwrap_or_else(|| body_smt.clone());
+                        chain = Some(format!("(ite {} {} {})", cond, body_smt, existing));
+                    }
+                    _ => {
+                        return Err(SmtTranslateError::UnsupportedExpr {
+                            description: "non-nullary-variant match pattern".to_string(),
+                        });
+                    }
+                }
+            }
+            chain.ok_or_else(|| SmtTranslateError::UnsupportedExpr {
+                description: "match with no arms".to_string(),
+            })
+        }
+
         _ => Err(SmtTranslateError::UnsupportedExpr {
             description: format!("{:?}", std::mem::discriminant(&expr.kind)),
         }),
@@ -247,6 +296,33 @@ pub fn type_to_sort(ty: &verum_ast::ty::Type) -> String {
         verum_ast::ty::TypeKind::Bool => "Bool".to_string(),
         verum_ast::ty::TypeKind::Float => "Real".to_string(),
         _ => "Int".to_string(), // conservative fallback
+    }
+}
+
+/// Translate a path to its SMT-LIB symbol. A single `Name` segment is the
+/// bare identifier (`xs`); a 2+-segment variant path `K.A` becomes the
+/// canonical `path_K.A` constant — byte-identical to the Z3-AST translator
+/// (`translate.rs::translate_expr`, `format!("path_{}", segs.join("."))`) and
+/// to `variant_disjointness_axioms`, so a reflected body and the goal it feeds
+/// name the *same* Int solver constant. (Dots are legal SMT-LIB symbol chars.)
+fn path_to_smtlib(path: &verum_ast::ty::Path) -> SmtResult {
+    let mut names: Vec<&str> = Vec::new();
+    for seg in path.segments.iter() {
+        match seg {
+            verum_ast::ty::PathSegment::Name(ident) => names.push(ident.name.as_str()),
+            _ => {
+                return Err(SmtTranslateError::UnsupportedExpr {
+                    description: "non-name path segment".to_string(),
+                })
+            }
+        }
+    }
+    match names.len() {
+        0 => Err(SmtTranslateError::UnsupportedExpr {
+            description: "empty path".to_string(),
+        }),
+        1 => Ok(names[0].to_string()),
+        _ => Ok(format!("path_{}", names.join("."))),
     }
 }
 

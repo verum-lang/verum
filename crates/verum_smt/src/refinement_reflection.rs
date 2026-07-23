@@ -161,6 +161,14 @@ fn is_smtlib_builtin_symbol(tok: &str) -> bool {
     if tok.chars().next().map_or(false, |c| c.is_ascii_digit()) {
         return true;
     }
+    // Variant-path constants `path_K.A` are declared at the top of the
+    // reflection block (see `to_smtlib_block`) and by the goal-side Z3-AST
+    // translator, so they are always in scope. Treat them as declared so the
+    // closure gate does not drop a body that dispatches on a variant — the
+    // `.` in the token means the paren/whitespace split keeps it whole.
+    if tok.starts_with("path_") {
+        return true;
+    }
     matches!(
         tok,
         "+" | "-" | "*" | "div" | "mod"
@@ -242,6 +250,31 @@ impl RefinementReflectionRegistry {
             .filter(|n| !dropped.contains(n.as_str()))
             .collect();
         names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+
+        // Declare the variant-path constants (`path_K.A`, sort Int) referenced
+        // by the reflected bodies BEFORE the function declarations, so Z3's
+        // `from_string` can resolve them. The block is injected before the
+        // goal/axiom side does `Int::new_const("path_K.A")` (verify_cmd.rs
+        // :1211-1220), so declaring here first means the later `new_const`
+        // reuses the same Int symbol — no double-declaration. A BTreeSet keeps
+        // the emission order deterministic for proof_stability.
+        let mut path_consts: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        for n in &names {
+            for tok in self.by_name[*n]
+                .body_smtlib
+                .as_str()
+                .split(|c: char| c == '(' || c == ')' || c.is_whitespace())
+                .filter(|t| t.starts_with("path_"))
+            {
+                path_consts.insert(tok.to_string());
+            }
+        }
+        for pc in &path_consts {
+            out.push_str("(declare-const ");
+            out.push_str(pc);
+            out.push_str(" Int)\n");
+        }
 
         for n in &names {
             out.push_str(self.by_name[*n].to_smtlib_decl().as_str());

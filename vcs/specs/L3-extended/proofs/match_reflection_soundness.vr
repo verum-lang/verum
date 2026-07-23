@@ -1,0 +1,27 @@
+// @test: verify-fail
+// @tier: 3
+// @level: L3
+// @tags: proofs, refinement, reflection, match, negative-test, soundness
+// @timeout: 15000
+// @expected-error: proof-failed
+
+/// SOUNDNESS regression for the T0597 match-reflection axiom. Both claims are
+/// FALSE, so they MUST fail to verify. The reflected axiom `is_red(c) ==
+/// ite(c = path_Color.Red, true, ...)` is exactly `is_red`'s semantics, not
+/// stronger — so `is_red(Color.Green)` and `is_red(Color.Red) == false` are
+/// unprovable. If a future change made the axiom too strong, these would
+/// prove and this verify-fail spec would flip, catching the unsoundness.
+
+type Color is Red | Green;
+
+fn is_red(c: Color) -> Bool {
+    match c { Color.Red => true, Color.Green => false }
+}
+
+// FALSE: Green is not red.
+theorem green_is_red_MUST_FAIL(): is_red(Color.Green) { proof by auto }
+
+// FALSE: Red IS red, so `== false` is false.
+theorem red_is_not_red_MUST_FAIL(): is_red(Color.Red) == false { proof by auto }
+
+mount core.prelude.*;

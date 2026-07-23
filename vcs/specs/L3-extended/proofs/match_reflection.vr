@@ -1,0 +1,23 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, refinement, reflection, match
+// @timeout: 15000
+
+/// Enum-dispatch Bool predicate via `match`, reflected into SMT (T0597).
+/// Both theorems SHOULD prove: `is_red` unfolds to its reflected match body,
+/// so `is_red(Color.Red)` is true and `is_red(Color.Green)` is false.
+/// Before T0597 the match body was not reflected (`is_red` stayed an
+/// uninterpreted UF) and both theorems failed.
+
+type Color is Red | Green;
+
+fn is_red(c: Color) -> Bool {
+    match c { Color.Red => true, Color.Green => false }
+}
+
+theorem red_is_red(): is_red(Color.Red) { proof by auto }
+
+theorem green_is_not_red(): is_red(Color.Green) == false { proof by auto }
+
+mount core.prelude.*;
