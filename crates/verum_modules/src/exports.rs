@@ -1289,7 +1289,109 @@ fn resolve_glob_reexports_one_pass(
         newly_added_total += module_registry.add_exports_to_module(target_id, &source_exports);
     }
 
+    // T0281 — surface each public INLINE submodule's now-resolved
+    // glob-derived re-exports onto its parent module (the "prelude
+    // pattern").  Runs inside the fixpoint, AFTER the glob updates
+    // above, so the transitive chain (base → prelude → core) converges:
+    // once `super.base.*` has filled `core.prelude`'s table this pass
+    // lifts those names onto `core`.  Counted into the same
+    // fixed-point signal.
+    newly_added_total += propagate_inline_submodule_reexports(module_registry);
+
     Ok(newly_added_total)
+}
+
+/// Surface an inline **public** submodule's re-exports onto its parent
+/// module's [`ExportTable`] — the table-based twin of
+/// [`propagate_submodule_reexports`].
+///
+/// **Why both exist.**  `propagate_submodule_reexports` runs once at
+/// export-extraction time over the AST and surfaces a submodule's
+/// EXPLICIT (`Path` / `Nested`) re-exports onto the parent, but it
+/// deliberately skips the `super.X.*` GLOB (unexpanded at that stage —
+/// "resolved later via `resolve_glob_reexports`").  That promise was
+/// never kept for the PARENT: `resolve_glob_reexports` resolved the glob
+/// onto the glob's OWNING module (`core.prelude`) and stopped.  This
+/// completes the design by lifting the now-resolved glob-derived
+/// re-exports onto the parent (`core`) as well.  Running inside the
+/// `resolve_glob_reexports` fixpoint gives the transitive closure
+/// (`base → prelude → core`) for free.
+///
+/// **Flattening guard** (`core.base.data.Data` must NOT become
+/// `core.Data`).  Only genuine RE-EXPORTS propagate:
+///   * an entry whose `source_module` equals the submodule's own id is
+///     the submodule's OWN declaration — it stays put; and
+///   * an entry of kind [`ExportKind::Module`] is a bare submodule name
+///     — it never flattens into the parent.
+/// A glob-copied re-export keeps its ORIGINAL source module
+/// (`add_exports_to_module`), so `Maybe` (source `core.base`) qualifies
+/// while `core.prelude`'s own declarations — it has none — would not.
+/// `core.base` only DECLARES `data` (`public module data;`) and never
+/// re-exports the `Data` TYPE, so `Data` is absent from `core.prelude`'s
+/// table and never reaches the root.
+///
+/// Returns the count of genuinely-new exports added (zero at the fixed
+/// point) so the closure driver's termination signal stays correct.
+fn propagate_inline_submodule_reexports(
+    module_registry: &mut crate::ModuleRegistry,
+) -> usize {
+    use verum_ast::ItemKind;
+    use verum_ast::decl::Visibility as AstVisibility;
+
+    // Collect (parent_id, items-to-surface) first, without holding a
+    // registry borrow across the mutation — mirrors the collect-then-
+    // apply discipline in `resolve_glob_reexports_one_pass`.
+    let mut plans: List<(crate::path::ModuleId, ExportTable)> = List::new();
+
+    for (parent_id, parent_info_shared) in module_registry.all_modules() {
+        let parent_info: &crate::ModuleInfo = parent_info_shared;
+        for item in &parent_info.ast.items {
+            let ItemKind::Module(mod_decl) = &item.kind else {
+                continue;
+            };
+            if mod_decl.visibility != AstVisibility::Public {
+                continue;
+            }
+            // Only INLINE submodules (a body of items) participate — a
+            // file-backed `public module X;` declaration re-exports
+            // nothing of its own into the parent.
+            if !matches!(mod_decl.items, Maybe::Some(_)) {
+                continue;
+            }
+            let child_path = parent_info.path.join(mod_decl.name.name.as_str());
+            let child_info = match module_registry.get_by_path(&child_path.to_string()) {
+                Maybe::Some(info) => info,
+                Maybe::None => continue,
+            };
+            let child_id = child_info.id;
+            let mut to_add = ExportTable::new();
+            for (name, exported) in child_info.exports.all_exports() {
+                // Genuine-re-export test (the flattening guard).
+                if exported.kind == ExportKind::Module {
+                    continue;
+                }
+                if exported.source_module == child_id {
+                    continue;
+                }
+                let _ = to_add.add_export(ExportedItem::new(
+                    name.as_str(),
+                    exported.kind,
+                    Visibility::Public,
+                    exported.source_module,
+                    exported.span,
+                ));
+            }
+            if !to_add.is_empty() {
+                plans.push((*parent_id, to_add));
+            }
+        }
+    }
+
+    let mut newly_added = 0usize;
+    for (parent_id, to_add) in plans {
+        newly_added += module_registry.add_exports_to_module(parent_id, &to_add);
+    }
+    newly_added
 }
 
 /// Resolve the ExportKind for specific item re-exports after all modules are loaded.

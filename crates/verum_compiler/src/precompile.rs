@@ -669,6 +669,8 @@ fn scan_module_reexports(
         dir: &Path,
         accum: &mut BTreeMap<String, BTreeMap<String, (String, String)>>,
         glob_pairs: &mut Vec<(String, String)>,
+        explicit_leaves: &mut Vec<(String, String, String, String)>,
+        inline_edges: &mut Vec<(String, String)>,
         files_visited: &mut usize,
         files_parsed: &mut usize,
         files_with_reexports: &mut usize,
@@ -685,7 +687,7 @@ fn scan_module_reexports(
                 continue;
             }
             if path.is_dir() {
-                visit_dir(root, &path, accum, glob_pairs, files_visited, files_parsed, files_with_reexports);
+                visit_dir(root, &path, accum, glob_pairs, explicit_leaves, inline_edges, files_visited, files_parsed, files_with_reexports);
                 continue;
             }
             if path.extension().and_then(|s| s.to_str()) != Some("vr") {
@@ -730,6 +732,7 @@ fn scan_module_reexports(
                 reexporting_module: &str,
                 leaves: &mut Vec<ReexportLeaf>,
                 glob_pairs: &mut Vec<(String, String)>,
+                inline_edges: &mut Vec<(String, String)>,
             ) {
                 for item in items.iter() {
                     if let ItemKind::Mount(mount_decl) = &item.kind
@@ -751,11 +754,28 @@ fn scan_module_reexports(
                             reexporting_module,
                             mod_decl.name.name.as_str()
                         );
-                        collect_from_items(sub_items, &nested_path, leaves, glob_pairs);
+                        // Record the inline parent → child edge so the
+                        // post-pass can surface the child's re-exports
+                        // onto this parent (the "prelude pattern").
+                        inline_edges
+                            .push((reexporting_module.to_string(), nested_path.clone()));
+                        collect_from_items(
+                            sub_items,
+                            &nested_path,
+                            leaves,
+                            glob_pairs,
+                            inline_edges,
+                        );
                     }
                 }
             }
-            collect_from_items(&module.items, &reexporting_module, &mut leaves, glob_pairs);
+            collect_from_items(
+                &module.items,
+                &reexporting_module,
+                &mut leaves,
+                glob_pairs,
+                inline_edges,
+            );
 
             if leaves.is_empty() {
                 continue;
@@ -767,6 +787,17 @@ fn scan_module_reexports(
             // all of them. Pre-fix the flat file-keying dropped every
             // concrete prelude mount into the `core` bucket.
             for leaf in leaves {
+                // Record every EXPLICIT (Path/Nested) leaf under its
+                // re-exporting module so the inline-submodule → parent
+                // post-pass can replay a child's explicit re-exports onto
+                // its parent without also dragging up the child's greedy
+                // glob over-captures (the flattening guard).
+                explicit_leaves.push((
+                    leaf.reexporting_module.clone(),
+                    leaf.local_name.clone(),
+                    leaf.true_name.clone(),
+                    leaf.source_module.clone(),
+                ));
                 let bucket = accum.entry(leaf.reexporting_module).or_default();
                 // First-wins under name collision so the BTreeMap
                 // iteration order is reproducible across runs.
@@ -779,6 +810,12 @@ fn scan_module_reexports(
 
     let mut accum: BTreeMap<String, BTreeMap<String, (String, String)>> = BTreeMap::new();
     let mut glob_pairs: Vec<(String, String)> = Vec::new();
+    // (reexporting_module, local_name, true_name, source_module) for every
+    // EXPLICIT Path/Nested leaf — the flattening-safe input to the
+    // inline-submodule → parent propagation post-pass below.
+    let mut explicit_leaves: Vec<(String, String, String, String)> = Vec::new();
+    // (parent_module, child_module) for every inline `public module X { … }`.
+    let mut inline_edges: Vec<(String, String)> = Vec::new();
     let mut files_visited = 0usize;
     let mut files_parsed = 0usize;
     let mut files_with_reexports = 0usize;
@@ -787,6 +824,8 @@ fn scan_module_reexports(
         root,
         &mut accum,
         &mut glob_pairs,
+        &mut explicit_leaves,
+        &mut inline_edges,
         &mut files_visited,
         &mut files_parsed,
         &mut files_with_reexports,
@@ -946,6 +985,88 @@ fn scan_module_reexports(
             bucket.entry(name.as_str().to_string()).or_insert_with(|| {
                 (name.as_str().to_string(), pd.module_path.as_str().to_string())
             });
+        }
+    }
+
+    // T0281 — inline-submodule → parent re-export propagation.
+    //
+    // The "prelude pattern" at `core/mod.vr` re-exports every
+    // fundamental name ONLY through an inline
+    // `public module prelude { public mount super.base.*;
+    // public mount super.collections.List; … }`.  `core/mod.vr` itself
+    // has NO top-level `public mount`, so the scan above keys every
+    // prelude re-export under `accum["core.prelude"]` and leaves
+    // `accum["core"]` empty of them.  A user's `mount core.{Maybe}`
+    // then reads `core`'s (empty) export surface and fails E401 — the
+    // group-mount cascade (base/data/unit_test.vr = 160 fails) — while
+    // `mount core.prelude.Maybe` resolves.
+    //
+    // Mirror `verum_modules::exports::propagate_submodule_reexports`
+    // (the source-path AST propagator) over the metadata buckets:
+    // surface an inline public submodule's re-exports onto its parent.
+    // Fully general — every inline `public module X { … }` edge
+    // captured during the source walk propagates; no `prelude` name is
+    // hardcoded.
+    //
+    // Flattening guard (the negative invariant: `core.base.data.Data`
+    // must NOT become resolvable as `core.Data`).  A child contributes
+    // to its parent ONLY:
+    //   (1) its EXPLICIT Path/Nested leaves (`explicit_leaves`), and
+    //   (2) for each `X.*` glob it holds, the glob TARGET's OWN
+    //       re-export surface (`accum[target]`) — NOT the greedy
+    //       path-prefix expansion that fills the child's own bucket.
+    // `core.base`'s surface is exactly what `core/base/mod.vr`
+    // re-exports (`public mount .maybe.{Maybe}`, `.memory.{Heap,
+    // Shared}`, `collections.{List, Map, Set}`, …) — Maybe / Result /
+    // List / Map / Heap / Shared, but NEVER `Data`, which `core.base`
+    // only declares as a `public module data;` submodule and never
+    // re-exports.  So the fundamental names surface at the root while
+    // deep-submodule types stay unreachable there.
+    //
+    // Runs before canonicalisation so propagated leaves get the same
+    // `source_module` truth-fixing as directly-scanned leaves.  Driven
+    // to a fixed point (bounded) so a multi-level inline chain
+    // converges; `added` counts only genuinely-new entries.
+    {
+        const MAX_PROP_DEPTH: usize = 16;
+        for _ in 0..MAX_PROP_DEPTH {
+            let mut added = 0usize;
+            for (parent, child) in inline_edges.iter() {
+                // (1) The child's explicit Path/Nested re-exports.
+                for (rx, local, true_name, source) in explicit_leaves.iter() {
+                    if rx != child {
+                        continue;
+                    }
+                    let bucket = accum.entry(parent.clone()).or_default();
+                    if !bucket.contains_key(local) {
+                        bucket.insert(local.clone(), (true_name.clone(), source.clone()));
+                        added += 1;
+                    }
+                }
+                // (2) For every `X.*` glob the child holds, the glob
+                //     target's OWN re-export surface — the flattening
+                //     guard (deep-submodule members are excluded because
+                //     the target module never re-exports them).
+                for (rx, source_prefix) in glob_pairs.iter() {
+                    if rx != child {
+                        continue;
+                    }
+                    let surface: Vec<(String, (String, String))> = accum
+                        .get(source_prefix)
+                        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                        .unwrap_or_default();
+                    let bucket = accum.entry(parent.clone()).or_default();
+                    for (local, pair) in surface {
+                        if !bucket.contains_key(&local) {
+                            bucket.insert(local, pair);
+                            added += 1;
+                        }
+                    }
+                }
+            }
+            if added == 0 {
+                break;
+            }
         }
     }
 
