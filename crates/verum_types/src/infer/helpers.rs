@@ -2155,6 +2155,26 @@ pub(crate) fn register_variant_signature_for_lazy(
         }
     }
 
+    // T0594: the lazy loader must ALSO feed the unifier's
+    // original-variant-type + type-var-order registries — exactly as the
+    // eager decl path does (decls.rs:1018-1023) — so Named/Generic<->Variant
+    // unification takes the SOUND extract_type_var_mapping path rather than
+    // `unify_generic_variant_fallback`. That fallback uses "payload != Unit"
+    // as a proxy for "this arm carries a generic parameter", which mishandles
+    // an all-Unit instantiation such as `Maybe<Unit>`: both `None` and
+    // `Some(Unit)` are filtered out, so its arity reads 0 != 1 (args = [Unit])
+    // and it raises a spurious E400 ("expected 'Maybe<Unit>', found
+    // 'None(Unit) | Some(Unit)'"). `variant_type` already carries `Type::Var`
+    // payloads and `param_to_var` is the declaration-order param→var map, so
+    // the extractor recovers `T := Unit` from the template. No hardcoded type
+    // names (satisfies src/CLAUDE.md).
+    checker
+        .unifier
+        .register_original_variant_type(name.clone(), variant_type.clone());
+    checker
+        .unifier
+        .register_type_var_order(name.clone(), param_to_var.values().copied().collect());
+
     // Variant constructor parent mappings.
     for (vname, _payload_ty) in &variant_map {
         let parents = checker
