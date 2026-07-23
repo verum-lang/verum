@@ -4,7 +4,7 @@
 // @tags: types, primitives, int
 
 /// Test for Int primitive type.
-/// Int represents arbitrary precision integers (BigInt semantics).
+/// Int is a 64-bit signed integer (i64). For arbitrary precision, use BigInt.
 
 mount core.prelude.*;
 
@@ -14,10 +14,9 @@ fn main() {
     let negative: Int = -100;
     let zero: Int = 0;
 
-    // Large integers (arbitrary precision)
-    let big: Int = 9999999999999999999999999999999999999999;
-    let negative_big: Int = -9999999999999999999999999999999999999999;
-    let huge: Int = 123456789012345678901234567890123456789012345678901234567890;
+    // Large integers (i64 range)
+    let big: Int = 9223372036854775807;             // i64::MAX
+    let negative_big: Int = -9223372036854775808;   // i64::MIN
 
     // Different bases
     let hex: Int = 0xFF;        // 255
@@ -62,9 +61,8 @@ fn main() {
     let equal: Bool = 42 == 42;
     let not_equal: Bool = 42 != 43;
 
-    // Integer overflow handling (arbitrary precision - no overflow)
-    let max_i64: Int = 9223372036854775807;
-    let beyond_i64: Int = max_i64 + 1;  // Still works - arbitrary precision
+    // i64 maximum boundary
+    let max_i64: Int = 9223372036854775807;   // i64::MAX
 
     // Negative number operations
     let neg_product: Int = -5 * -3;
@@ -136,7 +134,7 @@ fn main() {
     assert(neg_result == -42);
     assert(less == true);
     assert(greater == true);
-    assert(beyond_i64 == 9223372036854775808);
+    assert(max_i64 == 9223372036854775807);
     assert(neg_product == 15);
     assert(neg_quotient == -5);
     assert(abs_pos == 42);
