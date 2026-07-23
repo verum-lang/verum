@@ -1768,9 +1768,21 @@ implement Char {
         char_encode_utf8(self, buf)
     }
 
-    /// Check if escape sequence is required.
+    /// Escape a character for debug display (T0217: was the unimplemented
+    /// `char_escape_debug` intrinsic → runtime panic; now a real body using
+    /// the available is_control()/to_text() methods, mirroring
+    /// core/text/char.vr's CharExtended.escape_debug).
     public fn escape_debug(self) -> Text {
-        char_escape_debug(self)
+        match self {
+            '\t' => "\\t",
+            '\r' => "\\r",
+            '\n' => "\\n",
+            '\\' => "\\\\",
+            '\'' => "\\'",
+            '"' => "\\\"",
+            c if c.is_control() => f"\\u{{{c as Int:04x}}}",
+            c => c.to_text(),
+        }
     }
 
     /// Convert this character to a single-character Text value.

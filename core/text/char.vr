@@ -339,23 +339,16 @@ implement Char {
     // Escaping
     // =========================================================================
 
-    /// Get escape sequence for debug output.
-    public fn escape_debug(self) -> Text {
-        match self {
-            '\t' => "\\t",
-            '\r' => "\\r",
-            '\n' => "\\n",
-            '\\' => "\\\\",
-            '\'' => "\\'",
-            '"' => "\\\"",
-            c if c.is_control() => f"\\u{{{c as Int:04x}}}",
-            c => {
-                let mut buf = [0_u8; 4];
-                let len = c.encode_utf8(&mut buf);
-                unsafe { Text.from_utf8_unchecked(slice_from_raw_parts(&buf[0], len)) }
-            }
-        }
-    }
+    // NOTE (T0217): `escape_debug` DUPLICATED `core/base/primitives.vr`'s
+    // `Char.escape_debug`. Two same-name+arity `implement Char` definitions
+    // made the name+arity dedup keep one occurrence; the surviving body here
+    // (raw `slice_from_raw_parts(&buf[0], len)`) failed to resolve, so
+    // `escape_debug` became "no method named escape_debug found for type Char"
+    // — exactly the `encode_utf8` failure documented above. The single
+    // canonical definition is now the primitives.vr one (a pure-Verum `match`
+    // built on `is_control()` / `to_text()`); this duplicate is removed.
+    // `escape_default` below calls `self.escape_debug()`, which now resolves
+    // to that canonical definition.
 
     /// Get escape sequence for Unicode escape.
     public fn escape_unicode(self) -> Text {
