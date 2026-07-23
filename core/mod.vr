@@ -512,6 +512,12 @@ public module prelude {
     public mount super.sync.AtomicInt;
     public mount super.sync.AtomicBool;
 
+    // From intrinsics.runtime.tier — execution-tier introspection so
+    // `if is_interpreted() { ... }` / `get_tier()` work without an explicit
+    // mount (TIER-DETECT-PRELUDE-1, T0206).
+    public mount super.intrinsics.runtime.tier.is_interpreted;
+    public mount super.intrinsics.runtime.tier.get_tier;
+
     // From time (common types)
     public mount super.time.Duration;
     public mount super.time.Instant;
