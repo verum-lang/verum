@@ -1,5 +1,5 @@
 // @test: run-interpreter-panic
-// @expected-panic: CBGR use-after-free detected
+// @expected-panic: CBGR use-after-free
 // @tier: 0
 // @level: L0
 
