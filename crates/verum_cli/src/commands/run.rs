@@ -253,6 +253,26 @@ fn run_native(manifest_dir: &PathBuf, mode: &str, bin_name: &Text, args: &[Text]
     let elapsed = start.elapsed();
 
     if !status.success() {
+        // A child that died on a SIGNAL has `status.code() == None`. Collapsing
+        // that to exit 1 hid the crash CLASS from harnesses — a SIGSEGV(139)
+        // looked identical to a clean `exit 1`, so AOT crash triage had to
+        // bypass this wrapper with the raw binary + lldb just to SEE the signal
+        // (T0204). Honour the shell convention: report 128+signum loudly, and
+        // name the signal so the crash class is visible in the run output.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(signum) = status.signal() {
+                let name = signal_name(signum);
+                ui::error(&format!(
+                    "process died on signal {} ({}) — exiting {}",
+                    signum,
+                    name,
+                    128 + signum
+                ));
+                std::process::exit(128 + signum);
+            }
+        }
         let code = status.code().unwrap_or(1);
         ui::error(&format!("process exited with code: {}", code));
         std::process::exit(code);
@@ -267,3 +287,26 @@ fn run_native(manifest_dir: &PathBuf, mode: &str, bin_name: &Text, args: &[Text]
 // discovery via `Session.discover_project_files()` +
 // `phase_load_source` / `phase_parse`, so the duplicated
 // walkdir+VerumParser scaffolding here was redundant.
+
+/// Map a POSIX signal number to its conventional name (T0204). A bare
+/// number tells a human almost nothing; the NAME is the crash class —
+/// SIGSEGV (bad memory access) vs SIGABRT (assert/`abort`) vs SIGBUS
+/// (misaligned/unmapped) vs SIGILL (bad instruction) route triage down
+/// entirely different paths. Unknown signals fall back to `SIG<n>`.
+#[cfg(unix)]
+fn signal_name(signum: i32) -> &'static str {
+    match signum {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        7 => "SIGBUS",
+        8 => "SIGFPE",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        15 => "SIGTERM",
+        _ => "SIG?",
+    }
+}
