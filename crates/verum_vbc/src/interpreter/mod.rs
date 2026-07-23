@@ -588,17 +588,32 @@ impl Interpreter {
                             if message.starts_with("[xmod-unresolved]")
                     );
                     if is_lenient_stub_panic {
-                        let ctor_name = self
-                            .state
-                            .module
-                            .get_function(ctor)
-                            .and_then(|d| self.state.module.get_string(d.name))
-                            .unwrap_or("<unknown>")
-                            .to_string();
-                        eprintln!(
-                            "[run_global_ctors] WARN: TLS init '{}' (fid={}) crashed via lenient-stub panic: {:?}. Continuing — tests not touching its static will still run.",
-                            ctor_name, ctor.0, e
-                        );
+                        // This is a KNOWN, HANDLED, EXPECTED case: a global
+                        // static whose initializer calls into a module that was
+                        // pruned from the merge set (e.g. `NEVER_FLAG` in
+                        // core/async/cancellation.vr eagerly inits via
+                        // `AtomicInt.new`, absent for a non-async program). The
+                        // static simply stays uninitialised; any code that later
+                        // touches it gets a clear message at THAT site. Printing
+                        // this diagnostic to stderr on EVERY program run alarmed
+                        // external devs with a scary "crashed via lenient-stub
+                        // panic" for a benign, self-healing condition (T0599).
+                        // Gate it behind a trace flag — silent by default,
+                        // available when actually debugging a ctor skip (matches
+                        // the VERUM_TRACE_* convention the panic text references).
+                        if std::env::var_os("VERUM_TRACE_CTOR_SKIP").is_some() {
+                            let ctor_name = self
+                                .state
+                                .module
+                                .get_function(ctor)
+                                .and_then(|d| self.state.module.get_string(d.name))
+                                .unwrap_or("<unknown>")
+                                .to_string();
+                            eprintln!(
+                                "[run_global_ctors] TLS init '{}' (fid={}) skipped via lenient-stub ({:?}). Continuing — code not touching its static is unaffected.",
+                                ctor_name, ctor.0, e
+                            );
+                        }
                         continue;
                     }
                     return Err(e);
