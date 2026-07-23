@@ -589,10 +589,15 @@ impl TypeChecker {
                                     Self::scrut_has_unresolved_payload(&resolved_scrut)
                                 );
                             }
-                            if has_complex_patterns
-                                || Self::scrut_has_unresolved_payload(&resolved_scrut)
-                            {
-                                // Complex patterns may cause false positives - use warning
+                            if has_complex_patterns {
+                                // T0595: downgrade to a warning ONLY for complex (nested)
+                                // patterns, where an unresolved payload type can make the
+                                // exhaustiveness result a false positive. A missing TOP-LEVEL
+                                // variant (simple patterns) is definitive regardless of any
+                                // OTHER variant's payload being generic — emit E0601. The old
+                                // `|| scrut_has_unresolved_payload` disjunct wrongly downgraded
+                                // non-exhaustive matches on generic scrutinees to a warning, so
+                                // they compiled and then panicked at runtime.
                                 let diag = Diagnostic::new_warning(
                                     msg,
                                     span_to_line_col(expr.span),
@@ -4934,9 +4939,10 @@ impl TypeChecker {
                                             Self::scrut_has_unresolved_payload(&resolved_scrut)
                                         );
                                     }
-                                    if has_complex_patterns
-                                        || Self::scrut_has_unresolved_payload(&resolved_scrut)
-                                    {
+                                    if has_complex_patterns {
+                                        // T0595: see the check-path note — warn only for complex
+                                        // nested patterns; a missing top-level variant is
+                                        // definitive even when another variant's payload is generic.
                                         let diag = Diagnostic::new_warning(
                                             msg,
                                             span_to_line_col(expr.span),
