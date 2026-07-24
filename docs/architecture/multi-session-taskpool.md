@@ -40,6 +40,12 @@ daemon, no lock files, and no git churn.
   an ID by hand.**
 * **Owner identity**: `$TP_OWNER`, else the Claude session-id prefix
   (`$CLAUDE_CODE_SESSION_ID`), else `user-pid`.
+* **Completed-record archive**: a periodic consolidation compacts old
+  `done/` records into `_archive/completed-records-backup.tar.gz` to keep the
+  live pool small. Those IDs are still filed + DONE — `tp show T0123`
+  transparently falls through to the tarball (prints `[archived] …`), and
+  `tp list archived` enumerates them. An ID that is neither live nor archived
+  is genuinely unknown (T0471).
 
 ## CLI
 
@@ -51,8 +57,8 @@ tp note  T0123 -m "progress"           # journal heartbeat (also refreshes mtime
 tp done  T0123 [-m RESOLUTION] [-c COMMIT]
 tp release T0123 [-m REASON]           # blocked / giving up → back to open
 tp dead  T0123 -m REASON               # cancelled; ID stays burned
-tp list  [open|claimed|done|dead|all]
-tp show  T0123
+tp list  [open|claimed|done|dead|archived|all]
+tp show  T0123                          # falls through to the archive tarball
 tp status
 tp reap  [-H HOURS]                    # stale claims (default >24h idle) → open
 ```

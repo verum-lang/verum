@@ -35,6 +35,10 @@ pool_root() {
 
 POOL="$(pool_root)"
 STATES='open claimed done dead'
+# Completed records compacted out of the live pool during consolidation are
+# tar-archived here; show/list fall through so an archived ID reads as DONE,
+# not "unknown task" (T0471).
+ARCHIVE="$POOL/_archive/completed-records-backup.tar.gz"
 
 owner_id() {
   if [ -n "${TP_OWNER:-}" ]; then
@@ -61,6 +65,25 @@ find_task() {
     fi
   done
   return 1
+}
+
+# find_task_archived ID -> tar member path on stdout, rc 1 if not in the archive
+find_task_archived() {
+  [ -f "$ARCHIVE" ] || return 1
+  m="$(tar -tzf "$ARCHIVE" 2>/dev/null | grep -E "(^|/)$1\.md$" | head -1)"
+  [ -n "$m" ] || return 1
+  printf '%s\n' "$m"
+}
+
+# list_archived -> one line per archived task ID (records live only in the
+# tarball; `tp show` reads their full text)
+list_archived() {
+  [ -f "$ARCHIVE" ] || return 0
+  tar -tzf "$ARCHIVE" 2>/dev/null \
+    | grep -Eo 'T[0-9][0-9]*\.md$' | sed 's/\.md$//' | sort -u \
+    | while IFS= read -r aid; do
+        printf '%-7s archived  (in %s — tp show %s to read)\n' "$aid" "${ARCHIVE##*/}" "$aid"
+      done
 }
 
 # Highest ID across every state, +1. done/dead files are never deleted, so
@@ -280,20 +303,37 @@ list_state() { # $1 state
 cmd_list() {
   ensure_pool
   sel="${1:-open}"
-  if [ "$sel" = all ]; then
-    for s in $STATES; do list_state "$s"; done
-  else
-    case " $STATES " in *" $sel "*) ;; *) die "list: unknown state '$sel'" ;; esac
-    list_state "$sel"
-  fi
+  case "$sel" in
+    all)
+      for s in $STATES; do list_state "$s"; done
+      list_archived
+      ;;
+    archived)
+      list_archived
+      ;;
+    *)
+      case " $STATES " in *" $sel "*) ;; *) die "list: unknown state '$sel' (want: $STATES archived all)" ;; esac
+      list_state "$sel"
+      ;;
+  esac
 }
 
 cmd_show() {
   ensure_pool
   id="${1:-}"; [ -n "$id" ] || die 'show: task ID required'
-  res="$(find_task "$id")" || die "show: unknown task $id"
-  printf '[%s] %s\n\n' "${res%% *}" "${res#* }"
-  cat "${res#* }"
+  if res="$(find_task "$id")"; then
+    printf '[%s] %s\n\n' "${res%% *}" "${res#* }"
+    cat "${res#* }"
+    return 0
+  fi
+  # Fall through to the completed-records archive: a task compacted out of the
+  # live pool is still filed + DONE, not "unknown" (T0471).
+  if m="$(find_task_archived "$id")"; then
+    printf '[archived] %s — from %s\n\n' "$id" "$ARCHIVE"
+    tar -xzOf "$ARCHIVE" "$m" 2>/dev/null
+    return 0
+  fi
+  die "show: unknown task $id"
 }
 
 cmd_status() {
