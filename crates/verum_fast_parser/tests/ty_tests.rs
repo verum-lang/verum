@@ -997,3 +997,122 @@ fn test_inline_refinement_with_named_predicates() {
     assert_parses("Int { min: self >= 0, max: self <= 100 }");
     assert_parses("Int { value: self, min: self >= 0, max: self <= 100 }");
 }
+
+// ============================================================================
+// SECTION: T0269 — dotted module paths in type position must NOT nest inside-out
+// ============================================================================
+
+/// Collect the segment names of a `TypeKind::Path`, panicking (with the actual
+/// shape) if `ty` is anything else. Proves a module-qualified name stayed a
+/// single flat `Path` instead of the inside-out `Qualified` mangle.
+fn t0269_path_segment_names(ty: &Type) -> Vec<String> {
+    match &ty.kind {
+        TypeKind::Path(path) => path
+            .segments
+            .iter()
+            .map(|seg| match seg {
+                verum_ast::PathSegment::Name(id) => id.name.as_str().to_string(),
+                verum_ast::PathSegment::SelfValue => "Self".to_string(),
+                verum_ast::PathSegment::Super => "super".to_string(),
+                verum_ast::PathSegment::Cog => "crate".to_string(),
+                verum_ast::PathSegment::Relative => ".".to_string(),
+            })
+            .collect(),
+        other => panic!("expected TypeKind::Path, got {:?}", other),
+    }
+}
+
+#[test]
+fn t0269_module_qualified_type_stays_one_path() {
+    // A multi-segment dotted name whose only type-like segment is the LAST one
+    // is a module-qualified NAME: the leading lowercase modules must stay path
+    // segments, not be mis-nested inside-out as
+    // `HpackError<hpack<http2<net<core>>>>` (T0269).
+    let ty = parse_type("core.net.http2.hpack.HpackError").unwrap();
+    assert_eq!(
+        t0269_path_segment_names(&ty),
+        vec!["core", "net", "http2", "hpack", "HpackError"],
+    );
+}
+
+#[test]
+fn t0269_module_qualified_in_generic_arg_position() {
+    // The real-world trigger: a qualified error type in generic-arg position,
+    // e.g. `Wrapper<core.net.http2.hpack.HpackError>`. The argument must parse
+    // as one flat Path, not the inside-out mangle.
+    let ty = parse_type("Wrapper<core.net.http2.hpack.HpackError>").unwrap();
+    let args = match &ty.kind {
+        TypeKind::Generic { args, .. } => args,
+        other => panic!("expected TypeKind::Generic, got {:?}", other),
+    };
+    assert_eq!(args.len(), 1, "Wrapper takes one type argument");
+    match &args[0] {
+        verum_ast::GenericArg::Type(arg_ty) => {
+            assert_eq!(
+                t0269_path_segment_names(arg_ty),
+                vec!["core", "net", "http2", "hpack", "HpackError"],
+            );
+        }
+        other => panic!("expected GenericArg::Type, got {:?}", other),
+    }
+}
+
+#[test]
+fn t0269_module_prefix_then_type_then_assoc() {
+    // `a.b.C.D`: lowercase modules a, b + type C + associated type D. The split
+    // happens at the FIRST type-like segment (C): the base path a.b.C keeps the
+    // module prefix, and D is a genuine associated-type projection.
+    let ty = parse_type("a.b.C.D").unwrap();
+    match &ty.kind {
+        TypeKind::Qualified {
+            self_ty,
+            assoc_name,
+            ..
+        } => {
+            assert_eq!(t0269_path_segment_names(self_ty), vec!["a", "b", "C"]);
+            assert_eq!(assoc_name.name.as_str(), "D");
+        }
+        other => panic!("expected TypeKind::Qualified for a.b.C.D, got {:?}", other),
+    }
+}
+
+#[test]
+fn t0269_associated_type_projection_unchanged() {
+    // Regression guard: when the first type-like segment is already index 0,
+    // the parse is byte-for-byte the historical one, so `T.Item` and the
+    // chained `C.Iter.Item` associated-type projections are untouched.
+    match &parse_type("T.Item").unwrap().kind {
+        TypeKind::Qualified {
+            self_ty,
+            assoc_name,
+            ..
+        } => {
+            assert_eq!(t0269_path_segment_names(self_ty), vec!["T"]);
+            assert_eq!(assoc_name.name.as_str(), "Item");
+        }
+        other => panic!("expected TypeKind::Qualified for T.Item, got {:?}", other),
+    }
+
+    // `C.Iter.Item` nests: Qualified{ Qualified{ Path(C), Iter }, Item }.
+    match &parse_type("C.Iter.Item").unwrap().kind {
+        TypeKind::Qualified {
+            self_ty,
+            assoc_name,
+            ..
+        } => {
+            assert_eq!(assoc_name.name.as_str(), "Item");
+            match &self_ty.kind {
+                TypeKind::Qualified {
+                    self_ty: inner,
+                    assoc_name: mid,
+                    ..
+                } => {
+                    assert_eq!(t0269_path_segment_names(inner), vec!["C"]);
+                    assert_eq!(mid.name.as_str(), "Iter");
+                }
+                other => panic!("expected nested Qualified for C.Iter, got {:?}", other),
+            }
+        }
+        other => panic!("expected TypeKind::Qualified for C.Iter.Item, got {:?}", other),
+    }
+}

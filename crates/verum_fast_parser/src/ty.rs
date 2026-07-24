@@ -1890,51 +1890,95 @@ impl<'a> RecursiveParser<'a> {
         // Associated type projection with dot notation: `Self.Item<T>`, `T.Assoc<U>`
         // GATs allow associated types to have their own type parameters (future release feature)
 
-        // NOTE: Currently, ALL multi-segment paths are treated as qualified/associated types.
-        // This works for `T.Item` (associated type) but incorrectly treats `module.Type`
-        // (module path) as qualified. This is a known limitation that will be addressed
-        // when we have better context (e.g., distinguish type parameters from module names).
+        // A multi-segment dotted path in type position is grammar rule
+        // `path_type = path` (grammar/verum.ebnf:1274 -> :515): a qualified
+        // *name*. Whether an interior segment denotes a module or an
+        // associated-type projection is a NAME-RESOLUTION question, not a
+        // parse-tree-shape one -- the resolver's `resolve_qualified_type`
+        // already resolves module-qualified `Path`s, `Self.Item`
+        // projections, and `super`/`crate` prefixes. The only signal
+        // available at parse time is the Verum case convention that both
+        // this parser (dependent value-arg detection, below) and the type
+        // resolver (path_resolution.rs uppercase-last-segment fallbacks)
+        // already rely on: module segments and the navigation heads
+        // `super`/`crate`/`.` are module-like; type names and
+        // associated-type names are uppercase (or `Self`).
         //
-
-        // For chained associated types like C.Iter.Item, we need to create nested Qualified types:
-        // C.Iter.Item becomes Qualified { self_ty: Qualified { self_ty: Path(C), assoc: Iter }, assoc: Item }
+        // Split `mod0.mod1. ... Type.Assoc0. ...` at the FIRST type-like
+        // segment: everything up to and including the type name is ONE
+        // module-qualified `Path`; each following segment is a genuine
+        // associated-type projection wrapped in `Qualified`.
+        //
+        //   * `T.Item`, `Self.Item`, `C.Iter.Item` -- the first type-like
+        //     segment is index 0, so this reproduces the historical parse
+        //     byte-for-byte (base `Path([head])`, remainder projected).
+        //   * `core.net.http2.hpack.HpackError` -- the leading lowercase
+        //     modules stay path segments instead of being mis-nested
+        //     inside-out as `HpackError<hpack<http2<net<core>>>>` (T0269).
         let mut base_type = if path.segments.len() > 1 {
-            // Path like T.Item or C.Iter.Item - recursively create nested Qualified types
             let segments_vec: Vec<_> = path.segments.iter().cloned().collect();
 
-            // Start with the first segment as a Path type
-            let first_segment = &segments_vec[0];
-            let first_path = Path::new(List::from(vec![first_segment.clone()]), path.span);
-            let mut current_type = Type::new(TypeKind::Path(first_path), path.span);
+            // First "type-like" segment: `Self`, or an uppercase-initial
+            // name. Navigation heads (`super`/`crate`/relative `.`) and
+            // lowercase names are module prefixes.
+            let type_idx = segments_vec.iter().position(|seg| match seg {
+                PathSegment::SelfValue => true,
+                PathSegment::Name(ident) => ident
+                    .name
+                    .as_str()
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase()),
+                _ => false,
+            });
 
-            // Iterate through remaining segments, creating nested Qualified types
-            for segment in segments_vec.iter().skip(1) {
-                // Convert segment to an Ident for the associated type name
-                let assoc_ident = match segment {
-                    PathSegment::Name(ident) => ident.clone(),
-                    PathSegment::SelfValue => Ident::new("Self", path.span),
-                    PathSegment::Super => Ident::new("super", path.span),
-                    PathSegment::Cog => Ident::new("crate", path.span),
-                    _ => {
-                        return Err(ParseError::invalid_syntax(
-                            "expected identifier for associated type name",
+            match type_idx {
+                // No type-like segment (all-lowercase / navigation-only):
+                // the whole path is a single module-qualified name. Keep it
+                // as one `Path`; resolution uses its final segment.
+                None => Type::new(
+                    TypeKind::Path(path.clone()),
+                    self.stream.make_span(start_pos),
+                ),
+                Some(idx) => {
+                    // Base path = module prefix + the type name itself.
+                    let base_path = Path::new(
+                        segments_vec[..=idx].iter().cloned().collect::<List<_>>(),
+                        path.span,
+                    );
+                    let mut current_type = Type::new(TypeKind::Path(base_path), path.span);
+
+                    // Segments after the type name are associated-type
+                    // projections: `Type.Assoc0.Assoc1 ...`.
+                    for segment in segments_vec.iter().skip(idx + 1) {
+                        // Convert segment to an Ident for the associated type name
+                        let assoc_ident = match segment {
+                            PathSegment::Name(ident) => ident.clone(),
+                            PathSegment::SelfValue => Ident::new("Self", path.span),
+                            PathSegment::Super => Ident::new("super", path.span),
+                            PathSegment::Cog => Ident::new("crate", path.span),
+                            _ => {
+                                return Err(ParseError::invalid_syntax(
+                                    "expected identifier for associated type name",
+                                    path.span,
+                                ));
+                            }
+                        };
+
+                        // Wrap current type in a Qualified type
+                        current_type = Type::new(
+                            TypeKind::Qualified {
+                                self_ty: Box::new(current_type),
+                                trait_ref: Path::new(List::new(), path.span),
+                                assoc_name: assoc_ident,
+                            },
                             path.span,
-                        ));
+                        );
                     }
-                };
 
-                // Wrap current type in a Qualified type
-                current_type = Type::new(
-                    TypeKind::Qualified {
-                        self_ty: Box::new(current_type),
-                        trait_ref: Path::new(List::new(), path.span),
-                        assoc_name: assoc_ident,
-                    },
-                    path.span,
-                );
+                    current_type
+                }
             }
-
-            current_type
         } else {
             // Single segment path - just a regular path type
             Type::new(
