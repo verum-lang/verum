@@ -202,6 +202,24 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
     if value.is_ptr() && !value.is_nil() && !value.is_boxed_int() {
         let base_ptr = value.as_ptr::<u8>();
         if !base_ptr.is_null() {
+            // T0602 — interior field reference (`&self.field`).  A bare
+            // pointer tracked in `cbgr_mutable_ptrs` does NOT address a heap
+            // object header; it addresses a `Value` slot INSIDE one (the
+            // field cell, from RefField / RefFieldNamed).  Deref it to the
+            // pointee and format THAT — the same resolution method dispatch
+            // (`dispatch_receiver` interior-ptr branch) and Deref (:281)
+            // already apply to this exact tracked pointer.  Without it, a
+            // getter returning `&self.x` formats as `<object type_id=N>`
+            // (the field bits misread as an ObjectHeader) instead of the
+            // value.  Terminates: the pointee is a real value/object not in
+            // `cbgr_mutable_ptrs` (a further-nested interior ref resolves in
+            // one more hop), and the `depth` guard below bounds structures.
+            if state.cbgr_mutable_ptrs.contains(&(base_ptr as usize)) {
+                // SAFETY: a tracked interior pointer addresses a live,
+                // aligned `Value` slot (established at ref-creation time).
+                let pointee = unsafe { *(base_ptr as *const Value) };
+                return format_value_for_print_depth(state, pointee, depth);
+            }
             // Read the ObjectHeader to determine the type
             let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
             let data_offset = heap::OBJECT_HEADER_SIZE;
