@@ -28,7 +28,7 @@ mount core.collections.list.List;
 // hits this panic-stub.
 // =============================================================================
 
-@ignore("Text.from_utf8_unchecked was private; Formatter.write_int lenient-stub. Fix staged, awaits stdlib refresh.")
+@ignore("write_int/from_utf8_unchecked defect RESOLVED (from_utf8_unchecked now public, text.vr:497; write_int + Location.fmt_debug GREEN at --interp, verified 2026-07-24). Still @ignore'd for --aot ONLY: Location format via Formatter fails the AOT tier (empty buffer; AOT codegen gap — NewClosure by-name unresolved + Extended sub_op 0x42 unimplemented). Both-tier CI blocks un-ignore until AOT format lands.")
 @test
 fn regression_pin_location_debug_format_via_formatter() {
     let loc = Location.new("test.vr".to_text(), 42, 10);
@@ -43,7 +43,7 @@ fn regression_pin_location_debug_format_via_formatter() {
     assert(buffer.contains("10"));
 }
 
-@ignore("Same Text.from_utf8_unchecked defect — Location.fmt() Display path.")
+@ignore("Same as the debug pin above: interp GREEN, blocked at --aot only by the Location-format codegen gap (the write_int/from_utf8_unchecked defect it originally cited is RESOLVED).")
 @test
 fn regression_pin_location_display_format_via_formatter() {
     let loc = Location.new("main.vr".to_text(), 1, 1);

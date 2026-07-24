@@ -75,7 +75,7 @@ fn test_location_fields_accessible() {
 // Section 2: Location Debug Implementation
 // =============================================================================
 
-@ignore("Formatter.write_int is lenient-stubbed (Text.from_utf8_unchecked private at text.vr:455). Fix staged, awaits stdlib refresh.")
+@ignore("write_int/from_utf8_unchecked defect RESOLVED (from_utf8_unchecked now public, text.vr:497; write_int + Location.fmt_debug GREEN at --interp, verified 2026-07-24). Still @ignore'd for --aot ONLY: Location format via Formatter fails the AOT tier (empty buffer; AOT codegen gap — NewClosure by-name unresolved + Extended sub_op 0x42 unimplemented). Both-tier CI blocks un-ignore until AOT format lands.")
 @test
 fn test_location_debug_format() {
     let loc = Location.new("test.vr", 42, 10);
@@ -93,7 +93,7 @@ fn test_location_debug_format() {
     assert(buffer.contains("10"));
 }
 
-@ignore("Same Formatter.write_int defect — Location.fmt Display path.")
+@ignore("Same as the debug pin above: interp GREEN, blocked at --aot only by the Location-format codegen gap (the write_int/from_utf8_unchecked defect it originally cited is RESOLVED).")
 @test
 fn test_location_display_format() {
     let loc = Location.new("main.vr", 1, 1);
