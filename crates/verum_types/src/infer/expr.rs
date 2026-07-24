@@ -204,10 +204,33 @@ impl TypeChecker {
         if matches!(resolved_ty, Type::Function { .. }) {
             return None;
         }
-        if !self
-            .variant_constructor_parents
-            .contains_key(&Text::from(name))
-        {
+        let Some(parents) = self.variant_constructor_parents.get(&Text::from(name)) else {
+            return None;
+        };
+        // GENUINE-VALUE-BINDING GUARD (T0617): the ctor-as-fn synth is only
+        // correct when `env.lookup` returned the ctor's OWN nominal binding — a
+        // `Named`/`Generic` whose head is the ctor name or one of its parent
+        // types (the `Named("Some")` the doc comment above describes). When
+        // `env.lookup` instead returned an UNRELATED value whose head is neither
+        // — e.g. an explicitly `mount`-ed `const E: Float` colliding with an
+        // ambient `ParsedResource.E` variant ctor from another, unmounted module
+        // — that explicit binding WINS (name-resolution.md: an explicit mount
+        // always beats an ambient variant ctor). Overriding it here fabricated
+        // `fn(ClusterLoadAssignment) -> ParsedResource` for `E` and broke every
+        // `E: Float` use (T0617, 4x E400 in math/constants/unit_test.vr). Every
+        // genuine synth site resolves `env.lookup` to a `Function` (returned
+        // above) or to the ctor's own nominal (allowed here), so this guard
+        // changes ONLY the unrelated-binding case — no stdlib names hardcoded.
+        let head = match resolved_ty {
+            Type::Named { path, .. } => path.as_ident().map(|i| i.name.as_str().to_string()),
+            Type::Generic { name: n, .. } => Some(n.as_str().to_string()),
+            _ => None,
+        };
+        let is_ctor_nominal = match head.as_deref() {
+            Some(h) => h == name || parents.iter().any(|p| p.as_str() == h),
+            None => false,
+        };
+        if !is_ctor_nominal {
             return None;
         }
         let ctor_ty = self.try_resolve_variant_constructor_with_arity(name, None)?;
