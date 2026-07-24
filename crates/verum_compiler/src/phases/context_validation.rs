@@ -1206,6 +1206,7 @@ impl ContextUsageValidator {
     fn find_used_contexts(&self, body: &FunctionBody) -> HashSet<String> {
         let mut finder = ContextUsageFinder {
             used_contexts: HashSet::new(),
+            function_contexts: self.function_contexts.as_ref(),
         };
 
         match body {
@@ -1420,12 +1421,19 @@ impl Visitor for ContextUsageValidator {
     }
 }
 
-/// Visitor that finds all contexts used in a function body
-struct ContextUsageFinder {
+/// Visitor that finds all contexts used in a function body.
+///
+/// A context counts as "used" when it is named directly (`Ctx.method()`,
+/// `Ctx.field`, bare `Ctx`, or `provide Ctx`) OR when the body calls a function
+/// that requires it — context *forwarding*, where a `using [Ctx]` function
+/// passes `Ctx` on to a callee without ever spelling `Ctx` itself (T0239).
+struct ContextUsageFinder<'a> {
     used_contexts: HashSet<String>,
+    /// Function name → the contexts it requires, for forwarding detection.
+    function_contexts: &'a HashMap<String, HashSet<String>>,
 }
 
-impl Visitor for ContextUsageFinder {
+impl Visitor for ContextUsageFinder<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Field { expr: object, .. } => {
@@ -1472,6 +1480,25 @@ impl Visitor for ContextUsageFinder {
                         self.used_contexts.insert(name.to_string());
                     }
                 }
+            }
+            ExprKind::Call { func, .. } => {
+                // Context forwarding (T0239): calling a function that requires a
+                // context means this body USES that context — it must hold the
+                // context in order to forward it — even when the context name is
+                // never spelled here. Mirrors the validator's own callee-context
+                // lookup used for transitive-negative checks.
+                if let ExprKind::Path(path) = &func.kind {
+                    if let Some(ident) = path.as_ident() {
+                        if let Some(callee_contexts) =
+                            self.function_contexts.get(ident.name.as_str())
+                        {
+                            for ctx in callee_contexts {
+                                self.used_contexts.insert(ctx.clone());
+                            }
+                        }
+                    }
+                }
+                walk_expr(self, expr);
             }
             _ => walk_expr(self, expr),
         }
@@ -1939,6 +1966,57 @@ mod tests {
         assert!(validator.declared_contexts.contains("Database"));
         assert_eq!(validator.provided_contexts.len(), 1); // One initial scope
         assert!(validator.errors.is_empty());
+    }
+
+    #[test]
+    fn t0239_context_forwarding_suppresses_false_unused_warning() {
+        // A `using [Logger]` function that only FORWARDS Logger to a helper
+        // (never spelling `Logger.` itself) must not draw the false
+        // "declared in 'using' clause but never used" warning (T0239).
+        use verum_ast::FileId;
+        use verum_fast_parser::VerumParser;
+
+        let source = r#"
+type Logger is { prefix: Text };
+implement Logger {
+    fn info(&self, msg: Text) { }
+}
+fn log_message(msg: Text) using [Logger] {
+    Logger.info(msg);
+}
+fn do_work() using [Logger] {
+    log_message("hi");
+}
+fn main() {
+    let logger = Logger { prefix: "APP" };
+    provide Logger = logger in {
+        do_work();
+    }
+}
+"#;
+        let parser = VerumParser::new();
+        let module = parser
+            .parse_module_str(source, FileId::new(0))
+            .expect("test source should parse");
+
+        let warnings = ContextValidationPhase::new()
+            .validate_module_public(&module)
+            .expect("context validation should not error on this module");
+
+        // `do_work` uses Logger only by forwarding to `log_message`; before the
+        // fix the syntactic finder missed that and warned it was unused.
+        let do_work_unused = warnings.iter().any(|w| {
+            let m = w.message();
+            m.contains("never used") && m.contains("do_work")
+        });
+        assert!(
+            !do_work_unused,
+            "T0239: forwarding Logger via log_message() must count as using it; warnings = {:?}",
+            warnings
+                .iter()
+                .map(|w| w.message().to_string())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
