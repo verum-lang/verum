@@ -85,7 +85,7 @@ fn test_tau_is_two_pi_within_ulp() {
     assert(diff < 1.0e-15);
 }
 
-@ignore("Chained Float `<` comparisons across multiple `assert(X < Y)` lines fail at PC=21 — likely Float-Ord dispatch within `assert(...)` argument-position drift. Single-pair comparisons work in isolation. Multi-assert pattern gated.")
+@ignore("BLOCKED by T0617 (NOT float-ord): `E` (Euler const) is shadowed by the xds variant-ctor `E(ClusterLoadAssignment)`, so this whole file fails typecheck (4x E400) and no test here runs. The chained Float `<` itself is FIXED (T0271, verified 2026-07-24). Un-ignore once T0617 lands.")
 @test
 fn test_constants_strictly_ordered() {
     assert(FRAC_1_SQRT_PI < FRAC_1_SQRT2);
@@ -109,13 +109,13 @@ fn test_e_lt_pi_single_pair() {
     assert(E < PI);
 }
 
-@ignore("Float `<` between two const-loaded values mis-dispatches when the gap is small (<1.0). SQRT2(1.414) < SQRT3(1.732) returns false at runtime although both load correctly via `==`. Sister of Bool/Float Ord dispatch defect family.")
+@ignore("BLOCKED by T0617 (NOT float-ord): the `E`-collision breaks this file's typecheck, so this test can't run. SQRT2<SQRT3 float-ord itself is FIXED (T0271, verified 2026-07-24: isolated `let a = SQRT2 < SQRT3` = true). Un-ignore once T0617 lands.")
 @test
 fn test_sqrt2_lt_sqrt3_single_pair() {
     assert(SQRT2 < SQRT3);
 }
 
-@ignore("Same Float `<` small-gap defect — FRAC_1_SQRT_PI(0.564) < FRAC_1_SQRT2(0.707) returns false.")
+@ignore("BLOCKED by T0617 (NOT float-ord): the `E`-collision breaks this file's typecheck. FRAC_1_SQRT_PI<FRAC_1_SQRT2 float-ord itself is FIXED (T0271, verified 2026-07-24). Un-ignore once T0617 lands.")
 @test
 fn test_frac_1_sqrt_pi_lt_frac_1_sqrt2_single_pair() {
     assert(FRAC_1_SQRT_PI < FRAC_1_SQRT2);

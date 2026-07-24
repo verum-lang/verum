@@ -40,7 +40,6 @@ fn test_load_avg_15_canonical_value() {
 //   average decays slowest, 1-minute fastest.
 // =============================================================================
 
-@ignore("Float `<` between two small-gap close-to-1.0 const-loaded values mis-dispatches — sister of Float-Ord small-gap defect family.")
 @test
 fn test_load_avg_ordering_1_lt_5_lt_15() {
     // The 1-minute decay constant is smallest (most-aggressive decay).
