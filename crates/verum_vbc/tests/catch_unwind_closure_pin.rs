@@ -253,10 +253,13 @@ fn catch_unwind_catches_builtin_unreachable() {
 }
 
 #[test]
-#[ignore = "T0619: catch_unwind of a NORMAL-returning closure runs away \
-    (InstructionLimitExceeded) — pre-existing runtime bug revealed once T0618 \
-    made this file compilable; NOT the T0163 peel (no MatchTag/Is executes here)"]
 fn catch_unwind_passes_through_normal_return() {
+    // T0619 regression: a NORMAL-returning closure must yield Result.Ok and
+    // NOT run away. Pre-fix, `catch_unwind` ran the closure via
+    // `execute_table_with_args` (the top-level entry primitive, entry frame
+    // `return_pc = 0`); a nested normal `Ret` clobbered `main`'s pc to 0 and
+    // spun to InstructionLimitExceeded. The fix routes through
+    // `call_function_sync` (the nested primitive that preserves caller pc/r0).
     // The happy path must stay Ok — and must not be confused for a panic.
     let mut interp = Interpreter::new(build_module(Callable::HeapClosure, Body::ReturnInt(42)));
     let v = interp

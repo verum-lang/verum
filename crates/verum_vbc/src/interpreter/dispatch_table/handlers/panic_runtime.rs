@@ -17,8 +17,26 @@
 //! `state.exception_handlers` when a HANDLER returns an error, so
 //! `InterpreterError::Panic` (a Rust-level error propagating through Rust
 //! call frames) sails past the `TryBegin` the CatchUnwind inline sequence
-//! emits. An intercept that calls `execute_table_with_args` from Rust can
-//! catch it with a normal Rust `match`. Tier-1 keeps the compiled body.
+//! emits. An intercept that runs the closure via `call_function_sync` from
+//! Rust can catch it with a normal Rust `match`. Tier-1 keeps the compiled
+//! body.
+//!
+//! ## Why `call_function_sync`, NOT `execute_table_with_args` (T0619)
+//!
+//! `execute_table_with_args` is the TOP-LEVEL entry primitive: it pushes the
+//! entry frame with `return_pc = 0` and does not preserve the caller's r0.
+//! That is correct only when the callee's final `Ret` empties the stack
+//! (`do_return` hits its `is_empty()` → `FinalReturn` arm before touching a
+//! caller). `catch_unwind` runs the closure NESTED inside the live `main`
+//! frame, so a NORMAL-returning closure's `Ret` reaches `do_return`'s
+//! caller-return tail instead: it writes the result into `main`'s r0 and
+//! restores `main`'s pc to the entry frame's bogus `return_pc = 0` — `main`
+//! restarts from the top and spins until `InstructionLimitExceeded`. (The
+//! panic path dodged it: an `Err` unwinds without running `do_return`.)
+//! `call_function_sync` is the CANONICAL nested-execution primitive — it
+//! captures the real `return_pc = state.pc()` and saves/restores the
+//! caller's r0 (`CALLSYNC-R0-CLOBBER-1`), so the closure returns to `main`'s
+//! true resume point with r0 intact.
 //!
 //! ## Closure shapes (CATCH-UNWIND-CLOSURE-1, T0148)
 //!
@@ -57,7 +75,7 @@
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
-use crate::interpreter::execute_table_with_args;
+use super::super::call_function_sync;
 use super::heap_helpers::{alloc_record_n_fields, extract_text_arg, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
 use crate::instruction::Reg;
@@ -141,10 +159,13 @@ pub(in super::super) fn try_intercept_catch_unwind(
     let saved_depth = state.call_stack.depth();
     let saved_reg_top = state.registers.top();
 
-    // Execute the closure, seeding captures into registers 0..N —
-    // the same convention `handle_call_closure` uses (captures first;
-    // `f` takes no parameters).
-    let inner_result = execute_table_with_args(state, func_id, &captures);
+    // Execute the closure, seeding captures into registers 0..N — the same
+    // convention `handle_call_closure` uses (captures first; `f` takes no
+    // parameters). `call_function_sync` (NOT `execute_table_with_args`) is
+    // the correct NESTED-execution primitive here: it preserves the caller's
+    // pc/r0 so a normally-returning closure returns to `main`'s real resume
+    // point instead of restarting it (T0619 — see module docs).
+    let inner_result = call_function_sync(state, func_id, &captures);
 
     match inner_result {
         Ok(val) => {
