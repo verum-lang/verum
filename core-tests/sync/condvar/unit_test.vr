@@ -61,7 +61,6 @@ fn test_condvar_quiescent_waiter_count_zero() {
 // Gated until the Tier-0 futex FFI stub lands.  See audit §3.6.
 
 @test
-@ignore
 fn test_condvar_notify_one_no_waiters_safe() {
     let cv = Condvar.new();
     cv.notify_one();   // must not panic / abort
@@ -69,7 +68,6 @@ fn test_condvar_notify_one_no_waiters_safe() {
 }
 
 @test
-@ignore
 fn test_condvar_notify_all_no_waiters_safe() {
     let cv = Condvar.new();
     cv.notify_all();   // must not panic / abort
@@ -77,7 +75,6 @@ fn test_condvar_notify_all_no_waiters_safe() {
 }
 
 @test
-@ignore
 fn test_condvar_repeated_notifications_safe() {
     let cv = Condvar.new();
     cv.notify_one();
@@ -153,7 +150,6 @@ fn test_two_condvars_independent_waiter_count() {
 }
 
 @test
-@ignore
 fn test_two_condvars_independent() {
     // GATED: notify_one/notify_all → futex_wake FFI gap (audit § 3.6).
     let a = Condvar.new();

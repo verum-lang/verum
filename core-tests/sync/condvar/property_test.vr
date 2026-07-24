@@ -41,7 +41,6 @@ fn law_condvar_default_no_waiters() {
 // gap at Tier-0 (audit §3.6).
 
 @test
-@ignore
 fn law_condvar_notify_one_preserves_no_waiter_state() {
     let cv = Condvar.new();
     for _ in 0..10 {
@@ -51,7 +50,6 @@ fn law_condvar_notify_one_preserves_no_waiter_state() {
 }
 
 @test
-@ignore
 fn law_condvar_notify_all_preserves_no_waiter_state() {
     let cv = Condvar.new();
     for _ in 0..10 {
@@ -61,7 +59,6 @@ fn law_condvar_notify_all_preserves_no_waiter_state() {
 }
 
 @test
-@ignore
 fn law_condvar_mixed_notify_one_and_all_preserves_no_waiter_state() {
     let cv = Condvar.new();
     for i in 0..6 {
