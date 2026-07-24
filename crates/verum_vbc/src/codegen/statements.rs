@@ -1093,11 +1093,18 @@ impl VbcCodegen {
         if let (Some(ann), Some(v)) = (ty, value) {
             let ann_signed = match &ann.kind {
                 verum_ast::ty::TypeKind::Path(p) => {
-                    p.as_ident().and_then(|i| match i.name.as_str() {
+                    // Match the LAST path segment, not a single-segment bare ident
+                    // (`as_ident()`). The full `verum_compiler` pipeline QUALIFIES
+                    // the annotation (e.g. `core.base.primitives.Int128`), so the
+                    // old bare-only match fired in the raw-AST e2e path but NEVER
+                    // via `verum run` — the T0272 pipeline width-loss that made a
+                    // `let a: Int128 = 4000000000; a*a` truncate through the CLI
+                    // while passing the identical e2e test.
+                    match p.last_segment_name() {
                         "Int128" | "i128" => Some(true),
                         "UInt128" | "u128" => Some(false),
                         _ => None,
-                    })
+                    }
                 }
                 _ => None,
             };
