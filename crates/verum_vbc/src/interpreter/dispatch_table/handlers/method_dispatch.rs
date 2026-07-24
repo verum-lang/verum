@@ -11892,10 +11892,29 @@ pub(super) fn deref_cbgr_for_string(
 ) -> Value {
     if is_cbgr_ref(&v) {
         let (abs_index, _) = decode_cbgr_ref(v);
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
+        return state.registers.get_absolute(abs_index);
     }
+    // RefField / RefListElement heap-anchored interior pointer (from
+    // `&record.field` on a heap-typed field, or `&list[i]`): the addressed
+    // slot holds the field's `Value` (e.g. a Text pointer). This helper
+    // previously handled ONLY CBGR register-refs (`&var`), so a `&field`
+    // argument reached `extract_string` as the RAW slot pointer and compared
+    // garbage — e.g. `a.name.cmp(&b.name)` returned a wrong Ordering (T0403).
+    // Mirror the interior-pointer deref that RefField (cbgr.rs) and SetField
+    // already run.
+    if v.is_ptr() && !v.is_nil() {
+        let p = v.as_ptr::<u8>() as usize;
+        if p != 0
+            && p.is_multiple_of(std::mem::align_of::<Value>())
+            && state.cbgr_mutable_ptrs.contains(&p)
+        {
+            // SAFETY: `p` is a tracked live interior pointer into a heap
+            // object's data area (the same contract RefField/SetField rely
+            // on), Value-aligned and non-null.
+            return unsafe { *(v.as_ptr::<Value>()) };
+        }
+    }
+    v
 }
 
 /// Decode the result of a Verum comparator into a `std::cmp::Ordering`.
