@@ -96,6 +96,28 @@ fn test_load_small_int_zero() {
 }
 
 #[test]
+fn t0381_call_seeds_args_into_single_frame() {
+    // `Interpreter::call` is the public host API the pipeline uses to run
+    // `main(args)`. It must push exactly ONE frame and seed the arguments
+    // into it. The old body double-pushed (a manual `push_frame` plus
+    // `execute_table`'s own) and copied the args into the wrong frame, so the
+    // callee never saw them and debug builds tripped the registers
+    // `pop_frame` base>top assertion (T0381).
+    let bc = encode(&[Instruction::Ret { value: Reg(0) }]);
+    let module = create_module(bc);
+    let mut interp = Interpreter::new(module);
+    let result = interp
+        .call(FunctionId(0), &[Value::from_i64(42)])
+        .expect("call must execute without a frame-accounting panic");
+    assert!(result.is_int());
+    assert_eq!(
+        result.as_i64(),
+        42,
+        "the first argument must reach register 0"
+    );
+}
+
+#[test]
 fn test_load_true() {
     let result = run(&[
         Instruction::LoadTrue { dst: Reg(0) },

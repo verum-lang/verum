@@ -629,23 +629,14 @@ impl Interpreter {
 
     /// Calls a function with the given arguments.
     pub fn call(&mut self, func_id: FunctionId, args: &[Value]) -> InterpreterResult<Value> {
-        // Push arguments to registers
-        let frame = self.state.call_stack.push_frame(
-            func_id,
-            args.len() as u16 + 16, // args + locals
-            0,
-            crate::instruction::Reg(0),
-        )?;
-
-        // Copy arguments
-        for (i, arg) in args.iter().enumerate() {
-            self.state
-                .registers
-                .set(frame, crate::instruction::Reg(i as u16), *arg);
-        }
-
-        // Execute using table dispatch
-        execute_table(&mut self.state, func_id)
+        // Single frame-setup authority: delegate to the canonical host-call
+        // prologue, which pushes exactly ONE frame (call-stack + register
+        // file, kept in sync) and seeds `args` into the callee's parameter
+        // registers.  The old body double-pushed — a manual `push_frame` here
+        // PLUS `execute_table`'s own — and copied the args into the wrong
+        // frame, so the callee never saw them and debug builds tripped the
+        // registers `pop_frame` base>top assertion (T0381).
+        self.execute_function_with_args(func_id, args)
     }
 
     /// Returns a reference to the current module.
