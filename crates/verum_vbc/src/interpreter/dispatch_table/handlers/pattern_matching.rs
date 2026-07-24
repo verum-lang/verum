@@ -601,6 +601,27 @@ pub(in super::super) fn handle_match_tag(
         }
     }
 
+    // **T0163/T0147/T0109 — Heap<T> CBGR-cell peel.** `&*Heap<T>` reaches here
+    // as the cell's DATA pointer (a `cbgr_allocations` allocation whose header
+    // sits 32 bytes before it), which addresses the inner boxed `Value` — NOT a
+    // variant object. Reading the tag at `data_ptr + OBJECT_HEADER_SIZE` lands
+    // inside the inner Value / padding and yields ~0, so every `&*Heap<P>` read
+    // as the first variant (`Zero`); `alpha_eq`'s recursion into `Heap<Process>`
+    // bodies then matched `(Zero,Zero)` and short-circuited all comparisons.
+    // Peel to the inner value (mirrors `handle_deref`'s cbgr_allocations arm,
+    // cbgr.rs) so the tag is read from the boxed variant. One level: the inner
+    // value is the variant object (or nil), never another Heap cell here.
+    if value.is_ptr() && !value.is_nil() {
+        let base_ptr = value.as_ptr::<u8>();
+        let header_addr = (base_ptr as usize)
+            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+        if state.cbgr_allocations.contains(&header_addr) {
+            // SAFETY: a live CBGR data pointer addresses the cell's inner Value.
+            let inner = unsafe { *(base_ptr as *const Value) };
+            value = inner;
+        }
+    }
+
     // Check if value is a pointer to a variant object
     let matches = if value.is_ptr() && !value.is_nil() {
         let base_ptr = value.as_ptr::<u8>();
@@ -676,6 +697,21 @@ pub(in super::super) fn handle_get_tag(
         if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
             // SAFETY: see `handle_match_tag`'s mirror site.
             let inner = unsafe { *(value.as_ptr::<Value>()) };
+            value = inner;
+        }
+    }
+
+    // **T0163/T0147/T0109 — Heap<T> CBGR-cell peel** (mirror of the sibling
+    // handle_match_tag site above): `&*Heap<T>` is the cell's data pointer;
+    // peel to the inner boxed value so the tag is read from the boxed variant,
+    // not the Heap wrapper. Mirrors handle_deref's cbgr_allocations arm.
+    if value.is_ptr() && !value.is_nil() {
+        let base_ptr = value.as_ptr::<u8>();
+        let header_addr = (base_ptr as usize)
+            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+        if state.cbgr_allocations.contains(&header_addr) {
+            // SAFETY: a live CBGR data pointer addresses the cell's inner Value.
+            let inner = unsafe { *(base_ptr as *const Value) };
             value = inner;
         }
     }
