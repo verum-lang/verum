@@ -870,7 +870,6 @@ public mount .autodiff.{
     checkpointed_sequential,
     optimal_checkpoint,
     // Contexts
-    AutodiffContext,
     GradientAccumulation,
 };
 
@@ -953,7 +952,6 @@ public mount .ssm.{
     BalanceLoss,
     Activation,
     Expert,
-    Router,
     MoELayer,
     MoETransformerBlock,
 };
@@ -1219,7 +1217,7 @@ public mount .day_convolution.{
 // =============================================================================
 
 public mount .sdg.{
-    InfinitesimalDisk, D, TangentBundle, TangentVector,
+    D, TangentBundle, TangentVector,
     JetBundle, DifferentialForm,
     wedge_product, exterior_derivative,
     Connection, curvature,
