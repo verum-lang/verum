@@ -363,7 +363,7 @@ public type GpuInfo is {
     max_threads_per_block: U32,
     warp_size: U32,                 // 32 for NVIDIA, 64 for AMD
     shared_memory_per_block: USize,
-    memory_bandwidth_gbps: F64,
+    memory_bandwidth_gbps: Float,
 };
 
 implement GpuInfo {
