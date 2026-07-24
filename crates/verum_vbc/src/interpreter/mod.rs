@@ -64,6 +64,10 @@ mod dispatch_table;
 mod error;
 pub mod gpu_simulator;
 mod heap;
+/// Re-exported for integration tests (`crates/verum_vbc/tests/`) that assert a
+/// heap variant's discriminant: there is no public `Value` API for the sum-type
+/// tag (`Value::tag()` is the NaN-box tag, not the variant tag).
+pub use heap::variant_tag;
 pub mod io_engine;
 pub mod kernel;
 pub mod permission;
