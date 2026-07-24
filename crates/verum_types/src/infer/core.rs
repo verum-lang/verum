@@ -1873,6 +1873,17 @@ impl TypeChecker {
 
     pub(super) fn push_referenced_type_names(ty: &Type, out: &mut Vec<Text>) {
         match ty {
+            // Primitive receivers (Char/Int/Float/Bool) carry inherent methods
+            // in the archive under their bare type name, but were absent here —
+            // so `lazy_load_receiver_methods` never populated their inherent
+            // buckets, and any method NOT in the hardcoded
+            // `resolve_primitive_method` fast-path (e.g. `Char.encode_utf8`)
+            // fell through to an EMPTY inherent lookup -> MethodNotFound (T0610).
+            // `ensure_stdlib_type_loaded` no-ops on a name absent from metadata.
+            Type::Char => out.push(Text::from("Char")),
+            Type::Int => out.push(Text::from("Int")),
+            Type::Float => out.push(Text::from("Float")),
+            Type::Bool => out.push(Text::from("Bool")),
             Type::Named { path, args } => {
                 if let Some(seg) = path.segments.last() {
                     if let verum_ast::ty::PathSegment::Name(id) = seg {
