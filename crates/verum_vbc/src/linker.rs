@@ -798,6 +798,10 @@ impl VbcLinker {
     fn remap_constant(&self, src: &Constant, remap: &RemapTable) -> Result<Constant, LinkError> {
         Ok(match src {
             Constant::Int(v) => Constant::Int(*v),
+            Constant::Int128 { raw, signed } => Constant::Int128 {
+                raw: *raw,
+                signed: *signed,
+            },
             Constant::Float(v) => Constant::Float(*v),
             Constant::String(sid) => Constant::String(remap.map_string_lenient(*sid)),
             Constant::Type(tref) => Constant::Type(self.remap_type_ref(tref, remap)?),

@@ -305,11 +305,19 @@ static BOXED_INTS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
 
 /// Thread-safe global storage for boxed 128-bit integers (T0272).
 ///
-/// Stores the RAW 128-bit bit pattern as `u128`, not a signed `i128`: a signed
-/// payload could not hold `UInt128::MAX` (2^128−1). Callers decide signed vs
-/// unsigned interpretation, exactly as the boxed-i64 path leaves that to the
-/// `signed: bool` idiom in `arith_helpers.rs`.
-static BOXED_I128S: Mutex<Vec<u128>> = Mutex::new(Vec::new());
+/// Stores the RAW 128-bit bit pattern as `u128` (never a signed `i128`: a
+/// signed payload could not hold `UInt128::MAX` = 2^128−1) paired with a
+/// `signed` flag recording whether the value was produced as an `Int128`
+/// (`true`) or a `UInt128` (`false`).
+///
+/// Arithmetic dispatch reads signedness from the *opcode* (`DivI`/`UDivI`,
+/// `Shr`/`Ushr`, `CmpI`/`CmpU`), exactly as the boxed-i64 path does, so the
+/// flag is not consulted there. It exists so a *value-only* consumer — chiefly
+/// `format_value_for_print`, which has no opcode and no static type — can
+/// render a wide `UInt128` (high bit set) as its true magnitude instead of a
+/// spurious negative i128. The one extra byte per entry is negligible and it
+/// leaves the NaN-box bit layout (and its encoding tests) untouched.
+static BOXED_I128S: Mutex<Vec<(u128, bool)>> = Mutex::new(Vec::new());
 
 // Thread-safe global storage for CBGR references
 static THIN_REFS: Mutex<Vec<ThinRef>> = Mutex::new(Vec::new());
@@ -752,14 +760,15 @@ impl Value {
         Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | BOXED_INT_MARKER | index)
     }
 
-    /// Creates a boxed 128-bit integer value from its raw bit pattern (T0272).
+    /// Creates a boxed 128-bit integer value from its raw bit pattern plus a
+    /// signedness flag (T0272).
     ///
     /// A 128-bit value cannot inline into a 64-bit NaN box, so it ALWAYS boxes
     /// into `BOXED_I128S` and tags with the boxed-int-family marker plus the
-    /// width bit. `raw` is the raw 128 bits; the signed/unsigned reading is the
-    /// caller's (`Int128` vs `UInt128`) decision, mirroring the boxed-i64 path.
+    /// width bit. `raw` is the raw 128 bits; `signed` records `Int128` (`true`)
+    /// vs `UInt128` (`false`) so a value-only consumer can render it correctly.
     #[inline]
-    pub fn from_i128_raw(raw: u128) -> Self {
+    pub fn from_i128_raw_signed(raw: u128, signed: bool) -> Self {
         let mut table = BOXED_I128S.lock().unwrap();
         let index = table.len() as u64;
         if index > BOXED_INT_INDEX_MASK {
@@ -774,20 +783,30 @@ impl Value {
                     | wrapped,
             );
         }
-        table.push(raw);
+        table.push((raw, signed));
         Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | BOXED_INT_MARKER | BOXED_I128_WIDTH_BIT | index)
     }
 
-    /// Creates a signed 128-bit integer value.
+    /// Creates a boxed 128-bit integer from its raw bits, tagged as signed.
+    ///
+    /// Retained as the raw-bits entry point (callers that already hold two's-
+    /// complement bits — arithmetic results, deserialization). Signedness only
+    /// steers display; arithmetic takes it from the opcode.
     #[inline]
-    pub fn from_i128(i: i128) -> Self {
-        Self::from_i128_raw(i as u128)
+    pub fn from_i128_raw(raw: u128) -> Self {
+        Self::from_i128_raw_signed(raw, true)
     }
 
-    /// Creates an unsigned 128-bit integer value.
+    /// Creates a signed 128-bit integer value (`Int128`).
+    #[inline]
+    pub fn from_i128(i: i128) -> Self {
+        Self::from_i128_raw_signed(i as u128, true)
+    }
+
+    /// Creates an unsigned 128-bit integer value (`UInt128`).
     #[inline]
     pub fn from_u128(u: u128) -> Self {
-        Self::from_i128_raw(u)
+        Self::from_i128_raw_signed(u, false)
     }
 
     /// Creates a boolean value.
@@ -1126,9 +1145,18 @@ impl Value {
     /// integers, not pointers. This returns `false` for boxed integers so that
     /// `is_ptr()` callers never attempt to dereference a boxed integer's
     /// encoded index as a raw memory address.
+    ///
+    /// T0272: the boxed-int family has TWO widths — boxed-i64 (`is_boxed_int`,
+    /// bit 44 clear) and boxed-i128 (`is_boxed_i128`, bit 44 set). BOTH must be
+    /// excluded. The i128 half was added by the T0272 foundation but this
+    /// predicate was not updated, so a boxed-i128 (its low bits an index like
+    /// 0/1/2…) reported `is_ptr() == true`; every `is_ptr()`-guarded deref then
+    /// read that small index as a raw address and SIGSEGV'd. Excluding it here
+    /// fixes the whole class in one place — the many `is_ptr() && !is_boxed_int()`
+    /// deref guards downstream inherit the correct answer automatically.
     #[inline]
     pub fn is_ptr(&self) -> bool {
-        self.tag() == Some(TAG_POINTER as u8) && !self.is_boxed_int()
+        self.tag() == Some(TAG_POINTER as u8) && !self.is_boxed_int() && !self.is_boxed_i128()
     }
 
     /// Returns true if this is a small string.
@@ -1295,12 +1323,30 @@ impl Value {
         if self.is_boxed_i128() {
             let index = (self.0 & BOXED_INT_INDEX_MASK) as usize;
             let table = BOXED_I128S.lock().unwrap();
-            table.get(index).copied().unwrap_or(0)
+            table.get(index).map(|(raw, _)| *raw).unwrap_or(0)
         } else if self.is_int() {
             // Sign-extend the narrower integer into 128 bits.
             (self.as_i64() as i128) as u128
         } else {
             0
+        }
+    }
+
+    /// True iff this boxed-i128 was produced as a signed `Int128` (T0272).
+    ///
+    /// Only meaningful when [`is_boxed_i128`](Self::is_boxed_i128) is true; a
+    /// non-boxed-i128 (or an out-of-range OOM-wrapped index, whose entry was
+    /// never pushed) reports `true` (the signed default), matching
+    /// `from_i128_raw`. Consulted only where signedness cannot come from an
+    /// opcode — namely display.
+    #[inline]
+    pub fn boxed_i128_is_signed(&self) -> bool {
+        if self.is_boxed_i128() {
+            let index = (self.0 & BOXED_INT_INDEX_MASK) as usize;
+            let table = BOXED_I128S.lock().unwrap();
+            table.get(index).map(|(_, signed)| *signed).unwrap_or(true)
+        } else {
+            true
         }
     }
 
@@ -2703,5 +2749,36 @@ mod tests {
             Value::from_i128(-1).as_i128_raw(),
             Value::from_u128(u128::MAX).as_i128_raw()
         );
+    }
+
+    #[test]
+    fn test_boxed_i128_is_never_a_ptr_regression_t0272() {
+        // SIGSEGV root cause: `is_ptr()` excluded only the boxed-i64 half of the
+        // boxed-int family, so a boxed-i128 (TAG_POINTER + width bit) reported as
+        // a pointer, and every `is_ptr()`-guarded deref read its small table
+        // index as a raw address. A boxed-i128 must NEVER be a pointer.
+        for raw in [0u128, 1u128, u128::MAX, (i128::MAX as u128), (i128::MIN as u128)] {
+            let v = Value::from_i128_raw(raw);
+            assert!(v.is_boxed_i128());
+            assert!(!v.is_ptr(), "boxed i128 raw {raw:#x} must not read as a pointer");
+        }
+    }
+
+    #[test]
+    fn test_boxed_i128_signedness_flag_round_trips_t0272() {
+        // The sign flag drives value-only display (UInt128 high-bit vs Int128).
+        let signed = Value::from_i128(-1);
+        assert!(signed.is_boxed_i128());
+        assert!(signed.boxed_i128_is_signed(), "from_i128 marks signed");
+
+        let unsigned = Value::from_u128(u128::MAX);
+        assert!(unsigned.is_boxed_i128());
+        assert!(!unsigned.boxed_i128_is_signed(), "from_u128 marks unsigned");
+
+        // Same raw bits, opposite signedness — the flag is the only difference.
+        assert_eq!(signed.as_i128_raw(), unsigned.as_i128_raw());
+
+        // The raw-bits entry point defaults to signed.
+        assert!(Value::from_i128_raw(7).boxed_i128_is_signed());
     }
 }

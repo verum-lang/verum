@@ -2485,6 +2485,10 @@ impl VbcFunction {
 pub enum Constant {
     /// Integer constant.
     Int(i64),
+    /// 128-bit integer constant (T0272): the raw two's-complement bits plus a
+    /// signedness flag (`Int128` vs `UInt128`). A value outside the i64 range
+    /// cannot survive the `Int(i64)` collapse, so it is carried at full width.
+    Int128 { raw: u128, signed: bool },
     /// Float constant.
     Float(f64),
     /// String constant (index into string table).
@@ -2513,6 +2517,7 @@ impl Constant {
             Constant::Protocol(_) => 0x06,
             Constant::Array(_) => 0x07,
             Constant::Bytes(_) => 0x08,
+            Constant::Int128 { .. } => 0x09,
         }
     }
 }

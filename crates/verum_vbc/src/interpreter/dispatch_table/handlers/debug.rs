@@ -164,6 +164,20 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
         return "<null fat ref>".to_string();
     }
 
+    // Boxed 128-bit integers (T0272): format at full width. The generic int
+    // arm below narrows through `as_i64()` (low 64 bits), so a wide `Int128`
+    // would otherwise print its truncated tail (e.g. `Int128::MAX` → `-1`). The
+    // boxed value carries its own signedness, so a `UInt128` with the high bit
+    // set renders as its true magnitude rather than a spurious negative.
+    if value.is_boxed_i128() {
+        let raw = value.as_i128_raw();
+        return if value.boxed_i128_is_signed() {
+            format!("{}", raw as i128)
+        } else {
+            format!("{}", raw)
+        };
+    }
+
     // Integer values - format as numbers.
     if value.is_int() && !value.is_bool() {
         return format!("{}", value.as_i64());

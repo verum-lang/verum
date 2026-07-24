@@ -1467,6 +1467,16 @@ impl<'a> Deserializer<'a> {
  let bytes = decode_bytes(self.data, &mut self.offset)?;
  Ok(Constant::Bytes(bytes))
  }
+ // T0272: 128-bit integer constant — hi u64, lo u64, sign byte.
+ 0x09 => {
+ let hi = decode_u64(self.data, &mut self.offset)?;
+ let lo = decode_u64(self.data, &mut self.offset)?;
+ let signed = decode_u8(self.data, &mut self.offset)? != 0;
+ Ok(Constant::Int128 {
+ raw: ((hi as u128) << 64) | (lo as u128),
+ signed,
+ })
+ }
  _ => Err(VbcError::InvalidConstantTag(tag)),
  }
  }

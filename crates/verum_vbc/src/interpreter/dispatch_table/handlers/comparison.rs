@@ -59,14 +59,49 @@ fn ord_operand(state: &InterpreterState, reg: crate::instruction::Reg) -> Value 
     super::cbgr_helpers::resolve_arg_value(state, state.get_reg(reg))
 }
 
+/// T0272: true when either operand is a boxed Int128/UInt128, so the ordering
+/// must be decided at full 128-bit width rather than through the truncating
+/// `as_integer_compatible` (i64) window.
+#[inline]
+fn is_i128_cmp(a: Value, b: Value) -> bool {
+    a.is_boxed_i128() || b.is_boxed_i128()
+}
+
+/// Full-width ordering of two operands, at least one a boxed 128-bit integer.
+/// Signedness comes from the boxed operand's flag: a signed `Int128` compares
+/// as `i128`, an unsigned `UInt128` as `u128`. A narrower operand widens with
+/// sign extension via `as_i128_raw`.
+#[inline]
+fn i128_ordering(a: Value, b: Value) -> std::cmp::Ordering {
+    let ra = a.as_i128_raw();
+    let rb = b.as_i128_raw();
+    let signed = if a.is_boxed_i128() {
+        a.boxed_i128_is_signed()
+    } else if b.is_boxed_i128() {
+        b.boxed_i128_is_signed()
+    } else {
+        true
+    };
+    if signed {
+        (ra as i128).cmp(&(rb as i128))
+    } else {
+        ra.cmp(&rb)
+    }
+}
+
 pub(in super::super) fn handle_lti(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = ord_operand(state, a).as_integer_compatible()
-        < ord_operand(state, b).as_integer_compatible();
+    let va = ord_operand(state, a);
+    let vb = ord_operand(state, b);
+    let result = if is_i128_cmp(va, vb) {
+        i128_ordering(va, vb) == std::cmp::Ordering::Less
+    } else {
+        va.as_integer_compatible() < vb.as_integer_compatible()
+    };
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -77,8 +112,13 @@ pub(in super::super) fn handle_lei(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = ord_operand(state, a).as_integer_compatible()
-        <= ord_operand(state, b).as_integer_compatible();
+    let va = ord_operand(state, a);
+    let vb = ord_operand(state, b);
+    let result = if is_i128_cmp(va, vb) {
+        i128_ordering(va, vb) != std::cmp::Ordering::Greater
+    } else {
+        va.as_integer_compatible() <= vb.as_integer_compatible()
+    };
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -89,8 +129,13 @@ pub(in super::super) fn handle_gti(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result = ord_operand(state, a).as_integer_compatible()
-        > ord_operand(state, b).as_integer_compatible();
+    let va = ord_operand(state, a);
+    let vb = ord_operand(state, b);
+    let result = if is_i128_cmp(va, vb) {
+        i128_ordering(va, vb) == std::cmp::Ordering::Greater
+    } else {
+        va.as_integer_compatible() > vb.as_integer_compatible()
+    };
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -101,8 +146,13 @@ pub(in super::super) fn handle_gei(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let result =
-        state.get_reg(a).as_integer_compatible() >= state.get_reg(b).as_integer_compatible();
+    let va = ord_operand(state, a);
+    let vb = ord_operand(state, b);
+    let result = if is_i128_cmp(va, vb) {
+        i128_ordering(va, vb) != std::cmp::Ordering::Less
+    } else {
+        va.as_integer_compatible() >= vb.as_integer_compatible()
+    };
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
@@ -509,8 +559,32 @@ pub(in super::super) fn handle_cmp_extended(
     let a = read_reg(state)?;
     let b = read_reg(state)?;
 
-    let va = state.get_reg(a).as_i64() as u64;
-    let vb = state.get_reg(b).as_i64() as u64;
+    // 128-bit arm (T0272): a UInt128 comparison decodes both operands at full
+    // width and compares as u128 (this IS the unsigned opcode). Pre-fix the
+    // `as_i64 as u64` narrowing made `UInt128::MAX < 1` read as `0xFFFF… < 1`.
+    let vao = state.get_reg(a);
+    let vbo = state.get_reg(b);
+    if vao.is_boxed_i128() || vbo.is_boxed_i128() {
+        let ua = vao.as_i128_raw();
+        let ub = vbo.as_i128_raw();
+        let result = match sub_op_byte {
+            0x00 => ua < ub,
+            0x01 => ua <= ub,
+            0x02 => ua > ub,
+            0x03 => ua >= ub,
+            _ => {
+                return Err(InterpreterError::NotImplemented {
+                    feature: "CmpExtended unknown sub-opcode",
+                    opcode: Some(crate::instruction::Opcode::CmpExtended),
+                });
+            }
+        };
+        state.set_reg(dst, Value::from_bool(result));
+        return Ok(DispatchResult::Continue);
+    }
+
+    let va = vao.as_i64() as u64;
+    let vb = vbo.as_i64() as u64;
 
     let result = match sub_op_byte {
         0x00 => va < vb,  // LtU

@@ -20591,6 +20591,12 @@ impl VbcCodegen {
                 context::ConstantEntry::Int(v) => {
                     module.add_constant(crate::module::Constant::Int(*v));
                 }
+                context::ConstantEntry::Int128 { raw, signed } => {
+                    module.add_constant(crate::module::Constant::Int128 {
+                        raw: *raw,
+                        signed: *signed,
+                    });
+                }
                 context::ConstantEntry::Float(v) => {
                     module.add_constant(crate::module::Constant::Float(*v));
                 }
@@ -21969,6 +21975,9 @@ impl VbcCodegen {
             let archive_cid = idx as u32;
             let codegen_cid = match src_const {
                 crate::module::Constant::Int(v) => self.ctx.add_const_int(*v),
+                crate::module::Constant::Int128 { raw, signed } => {
+                    self.ctx.add_const_i128(*raw, *signed)
+                }
                 crate::module::Constant::Float(v) => self.ctx.add_const_float(*v),
                 crate::module::Constant::String(sid) => {
                     let text = archive_module.strings.get(*sid).unwrap_or("");

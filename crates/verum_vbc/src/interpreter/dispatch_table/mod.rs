@@ -705,6 +705,10 @@ pub(crate) fn load_constant(
 
     match constant {
         Constant::Int(i) => Ok(Value::from_i64(i)),
+        // T0272: a wide integer constant materializes as a boxed-i128 Value,
+        // preserving its full 128 bits (the `Constant::Int(i64)` path would
+        // collapse it). Signedness is carried so display renders correctly.
+        Constant::Int128 { raw, signed } => Ok(Value::from_i128_raw_signed(raw, signed)),
         Constant::Float(f) => Ok(Value::from_f64(f)),
         Constant::String(string_id) => {
             // **String-constant singleton cache** (#93, mirrors AOT

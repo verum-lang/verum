@@ -89,6 +89,13 @@ fn write_module(out: &mut String, module: &VbcModule) -> std::fmt::Result {
 fn write_constant(out: &mut String, module: &VbcModule, c: &Constant) -> std::fmt::Result {
     match c {
         Constant::Int(v) => write!(out, "Int({})", v),
+        Constant::Int128 { raw, signed } => {
+            if *signed {
+                write!(out, "Int128({})", *raw as i128)
+            } else {
+                write!(out, "UInt128({})", raw)
+            }
+        }
         Constant::Float(v) => write!(out, "Float({:?})", v),
         Constant::String(sid) => {
             let s = module.get_string(*sid).unwrap_or("?");

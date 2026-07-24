@@ -469,6 +469,17 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         return true;
     }
 
+    // 128-bit integers (T0272): two boxed Int128/UInt128 are equal iff their
+    // 128-bit VALUES match — they can live at different side-table indices (so
+    // `to_bits` differs above) yet represent the same number. Also covers a
+    // boxed-i128 vs a narrower integer (the narrower side sign-extends).
+    // Requires BOTH sides be direct integers: a *reference* to an Int128 (only
+    // one side an int) falls through to the reference-unwrap logic below, which
+    // derefs and re-enters this function on the pointee.
+    if (va.is_boxed_i128() || vb.is_boxed_i128()) && va.is_int() && vb.is_int() {
+        return va.as_i128_raw() == vb.as_i128_raw();
+    }
+
     // Single-side reference unwrap.  The mixed (ThinRef vs CBGR-ref)
     // and double-ref branches below handle ref-vs-ref comparisons,
     // but `&text == raw_text` (one side a ref to a register, other

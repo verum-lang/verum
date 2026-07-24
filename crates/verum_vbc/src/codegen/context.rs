@@ -421,6 +421,17 @@ pub struct CodegenContext {
     /// `match (self, other) { … }` element typing.
     pub pending_let_tuple_types: Option<Vec<Option<String>>>,
 
+    /// T0272: signedness of an `Int128`/`UInt128`-annotated let binding whose
+    /// initializer is *directly* an integer literal, stashed by `compile_let`
+    /// so `compile_literal` boxes even a small literal (e.g. `let acc: Int128 =
+    /// 1`) as a 128-bit value. Without this, `acc` would load as an inline i64
+    /// and the first `acc = acc * i` that exceeds i64 would silently truncate —
+    /// the accumulator pattern that is Int128's whole reason for existing.
+    /// Scoped to a direct literal initializer (set only when `value` is a bare
+    /// `Int` literal or a negated one), so it cannot leak into a nested
+    /// sub-expression's literal.
+    pub pending_i128_literal_signed: Option<bool>,
+
     /// T0178 (TRANSMUTE-NANBOX-FLOAT-1): the annotated target type name of
     /// a `let x: T = transmute(arg)` binding, stashed by `compile_let` for
     /// the duration of the initializer compile ONLY when the initializer is
@@ -813,6 +824,9 @@ pub struct ClosureCompilationContext {
 pub enum ConstantEntry {
     /// Integer constant.
     Int(i64),
+    /// 128-bit integer constant (T0272): raw two's-complement bits + a
+    /// signedness flag. Carries a literal that cannot fit `Int(i64)`.
+    Int128 { raw: u128, signed: bool },
     /// Float constant.
     Float(f64),
     /// String constant (index into string table).
@@ -1486,6 +1500,7 @@ impl CodegenContext {
             match_scrutinee_type: None,
             match_tuple_element_types: None,
             pending_let_tuple_types: None,
+            pending_i128_literal_signed: None,
             pending_transmute_target: None,
             raw_pointer_regs: HashSet::new(),
             generic_type_params: HashSet::new(),
@@ -2157,6 +2172,29 @@ impl CodegenContext {
 
         let id = ConstId(self.constants.len() as u32);
         self.constants.push(ConstantEntry::Int(value));
+        self.stats.constants_created += 1;
+        id
+    }
+
+    /// Adds a 128-bit integer constant and returns its ID (T0272).
+    ///
+    /// `raw` is the two's-complement bit pattern, `signed` records `Int128` vs
+    /// `UInt128`. De-duplicates on both, exactly like `add_const_int`.
+    pub fn add_const_i128(&mut self, raw: u128, signed: bool) -> ConstId {
+        for (i, c) in self.constants.iter().enumerate() {
+            if let ConstantEntry::Int128 {
+                raw: r,
+                signed: s,
+            } = c
+                && *r == raw
+                && *s == signed
+            {
+                return ConstId(i as u32);
+            }
+        }
+
+        let id = ConstId(self.constants.len() as u32);
+        self.constants.push(ConstantEntry::Int128 { raw, signed });
         self.stats.constants_created += 1;
         id
     }

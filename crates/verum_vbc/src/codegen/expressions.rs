@@ -1554,8 +1554,40 @@ impl VbcCodegen {
         match &lit.kind {
             LiteralKind::Int(int_lit) => {
                 let value = int_lit.value;
-                // Use immediate if small enough, otherwise constant pool
-                if value >= i16::MIN as i128 && value <= i16::MAX as i128 {
+                // T0272: a literal that cannot fit i64, OR one explicitly typed
+                // Int128/UInt128 by suffix, is carried at full 128-bit width via
+                // a dedicated constant. The former is unambiguous — nothing but a
+                // 128-bit type can hold it; the latter keeps a small `5i128`
+                // boxed so its Int128-ness survives into arithmetic (the
+                // interpreter dispatches wide math off the boxed-i128 tag).
+                // Pre-fix, `add_const_int(value as i64)` silently truncated:
+                // `Int128::MAX` became `-1`, `i128::MAX / 2` became `0`.
+                use verum_ast::literal::IntSuffix;
+                // T0272: an `Int128`/`UInt128`-annotated let binding stashes its
+                // signedness here so even a small literal boxes (accumulator).
+                let forced_i128 = self.ctx.pending_i128_literal_signed.take();
+                let is_i128_typed = forced_i128.is_some()
+                    || matches!(int_lit.suffix, Some(IntSuffix::I128) | Some(IntSuffix::U128));
+                let out_of_i64 =
+                    value < i64::MIN as i128 || value > i64::MAX as i128;
+                if is_i128_typed || out_of_i64 {
+                    // Signedness precedence: an explicit suffix wins; else the
+                    // annotation hint; else signed (a bare out-of-range literal
+                    // is Int128). The stored bits are identical either way —
+                    // signedness only steers display and divide/shift/compare
+                    // opcode selection.
+                    let signed = match int_lit.suffix {
+                        Some(IntSuffix::U128) => false,
+                        Some(IntSuffix::I128) => true,
+                        _ => forced_i128.unwrap_or(true),
+                    };
+                    let const_id = self.ctx.add_const_i128(value as u128, signed);
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: dest,
+                        const_id: const_id.0,
+                    });
+                } else if value >= i16::MIN as i128 && value <= i16::MAX as i128 {
+                    // Use immediate if small enough, otherwise constant pool
                     self.ctx.emit(Instruction::LoadI {
                         dst: dest,
                         value: value as i64,

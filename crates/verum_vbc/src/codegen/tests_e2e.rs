@@ -2964,6 +2964,94 @@ mod const_generic_value_carry_tests {
         );
     }
 
+    /// T0272: assert `main` returns a boxed 128-bit integer with the given raw
+    /// bits — the value survived at full width instead of collapsing to i64.
+    fn assert_main_returns_i128(source: &str, expected: u128) {
+        let result = compile_and_run(source);
+        assert!(
+            result.is_boxed_i128(),
+            "expected a boxed Int128, got {:?}",
+            result
+        );
+        assert_eq!(
+            result.as_i128_raw(),
+            expected,
+            "expected Int128 raw {expected:#x}, got {:#x}",
+            result.as_i128_raw()
+        );
+    }
+
+    /// A wide literal (Int128::MAX) must not truncate to i64 (pre-fix: `-1`).
+    #[test]
+    fn t0272_wide_int128_literal_round_trips() {
+        assert_main_returns_i128(
+            "fn main() -> Int128 { 170141183460469231731687303715884105727 }",
+            i128::MAX as u128,
+        );
+    }
+
+    /// i64::MAX + i64::MAX overflows i64 (pre-fix: `-2`); at 128-bit it is
+    /// 18446744073709551614.
+    #[test]
+    fn t0272_int128_add_beyond_i64() {
+        assert_main_returns_i128(
+            r#"
+            fn main() -> Int128 {
+                let a: Int128 = 9223372036854775807;
+                let b: Int128 = 9223372036854775807;
+                a + b
+            }
+            "#,
+            18_446_744_073_709_551_614u128,
+        );
+    }
+
+    /// 10^12 * 10^12 = 10^24 overflows i64 (pre-fix: 2003764205206896640).
+    #[test]
+    fn t0272_int128_mul_beyond_i64() {
+        assert_main_returns_i128(
+            r#"
+            fn main() -> Int128 {
+                let x: Int128 = 1000000000000;
+                let y: Int128 = 1000000000000;
+                x * y
+            }
+            "#,
+            1_000_000_000_000_000_000_000_000u128,
+        );
+    }
+
+    /// The accumulator pattern: both operands start small (inline-i64-fitting)
+    /// yet the product exceeds i64. Pre-fix this truncated silently; the
+    /// let-annotation boxing keeps `a` at 128-bit width.
+    #[test]
+    fn t0272_int128_small_operands_overflow_i64() {
+        assert_main_returns_i128(
+            r#"
+            fn main() -> Int128 {
+                let a: Int128 = 4000000000;
+                a * a
+            }
+            "#,
+            16_000_000_000_000_000_000u128,
+        );
+    }
+
+    /// Int128::MAX / 2 (pre-fix: `0`, because MAX truncated to -1 then /2 = 0).
+    #[test]
+    fn t0272_int128_div_full_width() {
+        assert_main_returns_i128(
+            r#"
+            fn main() -> Int128 {
+                let a: Int128 = 170141183460469231731687303715884105727;
+                let b: Int128 = 2;
+                a / b
+            }
+            "#,
+            (i128::MAX / 2) as u128,
+        );
+    }
+
     /// Receiver-driven const witness: `let b = B<7>.new(); b.cap()` — the
     /// let-binding carries "B<7>" (constructor full-instantiation carry),
     /// the method callsite parses it back into [ConstValue(7)], and the

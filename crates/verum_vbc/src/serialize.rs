@@ -684,6 +684,14 @@ impl Serializer {
         self.output.push(constant.tag());
         match constant {
             Constant::Int(v) => encode_i64(*v, &mut self.output),
+            // T0272: 16 raw bytes (hi u64, lo u64) + a sign byte. Fixed-size,
+            // additive tag 0x09 — old readers reject it via InvalidConstantTag,
+            // never mis-slice a following constant.
+            Constant::Int128 { raw, signed } => {
+                encode_u64((*raw >> 64) as u64, &mut self.output);
+                encode_u64(*raw as u64, &mut self.output);
+                self.output.push(*signed as u8);
+            }
             Constant::Float(v) => encode_f64(*v, &mut self.output),
             Constant::String(id) => encode_u32(id.0, &mut self.output),
             Constant::Type(type_ref) => self.serialize_type_ref(type_ref)?,
@@ -984,6 +992,49 @@ mod tests {
 
         let bytes = serialize_module(&module).unwrap();
         assert!(bytes.len() > HEADER_SIZE);
+    }
+
+    #[test]
+    fn test_int128_constant_round_trips_t0272() {
+        use crate::deserialize::deserialize_module;
+        let mut module = VbcModule::new("i128_test".to_string());
+        // Values that cannot survive an i64 collapse, both signednesses.
+        module.add_constant(Constant::Int128 {
+            raw: i128::MAX as u128,
+            signed: true,
+        });
+        module.add_constant(Constant::Int128 {
+            raw: i128::MIN as u128,
+            signed: true,
+        });
+        module.add_constant(Constant::Int128 {
+            raw: u128::MAX,
+            signed: false,
+        });
+
+        let bytes = serialize_module(&module).unwrap();
+        let loaded = deserialize_module(&bytes).unwrap();
+        assert_eq!(
+            loaded.constants[0],
+            Constant::Int128 {
+                raw: i128::MAX as u128,
+                signed: true
+            }
+        );
+        assert_eq!(
+            loaded.constants[1],
+            Constant::Int128 {
+                raw: i128::MIN as u128,
+                signed: true
+            }
+        );
+        assert_eq!(
+            loaded.constants[2],
+            Constant::Int128 {
+                raw: u128::MAX,
+                signed: false
+            }
+        );
     }
 
     #[test]

@@ -1084,6 +1084,44 @@ impl VbcCodegen {
             self.ctx.pending_transmute_target = self.extract_base_type_name(ann);
         }
 
+        // T0272: an `Int128`/`UInt128`-annotated binding whose initializer is a
+        // *direct* integer literal (bare or negated) is boxed at full width, so
+        // `let acc: Int128 = 1; … acc = acc * i …` keeps 128-bit precision.
+        // Scoped to a direct literal initializer so it cannot leak into a
+        // nested sub-expression's literal (mirrors the transmute save/restore).
+        let saved_i128_lit = self.ctx.pending_i128_literal_signed.take();
+        if let (Some(ann), Some(v)) = (ty, value) {
+            let ann_signed = match &ann.kind {
+                verum_ast::ty::TypeKind::Path(p) => {
+                    p.as_ident().and_then(|i| match i.name.as_str() {
+                        "Int128" | "i128" => Some(true),
+                        "UInt128" | "u128" => Some(false),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            };
+            let is_direct_int_literal = {
+                use verum_ast::ExprKind;
+                let is_int_lit = |e: &verum_ast::Expr| {
+                    matches!(&e.kind, ExprKind::Literal(l)
+                        if matches!(l.kind, verum_ast::LiteralKind::Int(_)))
+                };
+                match &v.kind {
+                    ExprKind::Unary {
+                        op: verum_ast::UnOp::Neg,
+                        expr: inner,
+                    } => is_int_lit(inner),
+                    _ => is_int_lit(v),
+                }
+            };
+            if let Some(signed) = ann_signed
+                && is_direct_int_literal
+            {
+                self.ctx.pending_i128_literal_signed = Some(signed);
+            }
+        }
+
         let mut init_reg = if let Some(expr) = value {
             self.compile_expr(expr)?
         } else {
@@ -1094,6 +1132,9 @@ impl VbcCodegen {
         };
         // Restore regardless of whether the transmute arm consumed the hint.
         self.ctx.pending_transmute_target = saved_transmute_target;
+        // Restore the i128-literal hint (compile_literal `.take()`s it when it
+        // fires; this bounds it to the initializer either way).
+        self.ctx.pending_i128_literal_signed = saved_i128_lit;
         if let Some(saved) = saved_return_type {
             self.ctx.current_return_type_name = saved;
         }

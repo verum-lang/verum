@@ -32,6 +32,30 @@ fn operand_as_f64(v: Value) -> f64 {
     }
 }
 
+/// T0272: true when either operand is a boxed 128-bit integer, so the op MUST
+/// be evaluated at full 128-bit width instead of narrowing through `as_i64`
+/// (which keeps only the low 64 bits, silently corrupting wide values). Shared
+/// with the bitwise handlers (`super::bitwise`).
+#[inline]
+pub(super) fn is_i128_op(a: Value, b: Value) -> bool {
+    a.is_boxed_i128() || b.is_boxed_i128()
+}
+
+/// Signedness to stamp on a 128-bit arithmetic *result*: the primary boxed
+/// operand's flag (the typechecker guarantees both operands share a type, so
+/// they agree), signed by default. Steers display only — the arithmetic bits
+/// are two's-complement and identical for a given signed/unsigned opcode.
+#[inline]
+pub(super) fn i128_result_signed(a: Value, b: Value) -> bool {
+    if a.is_boxed_i128() {
+        a.boxed_i128_is_signed()
+    } else if b.is_boxed_i128() {
+        b.boxed_i128_is_signed()
+    } else {
+        true
+    }
+}
+
 pub(in super::super) fn handle_addi(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -72,6 +96,19 @@ pub(in super::super) fn handle_addi(
     if val_a.is_float() || val_b.is_float() {
         let result = operand_as_f64(val_a) + operand_as_f64(val_b);
         state.set_reg(dst, Value::from_f64(result));
+        return Ok(DispatchResult::Continue);
+    }
+
+    // 128-bit arm (T0272): when either operand is a boxed Int128/UInt128,
+    // compute the sum at full width and re-box, so the result never collapses
+    // through the i64 window. `wrapping_add` on the raw u128 bits is correct
+    // for both signednesses (two's complement).
+    if is_i128_op(val_a, val_b) {
+        let result = val_a.as_i128_raw().wrapping_add(val_b.as_i128_raw());
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result, i128_result_signed(val_a, val_b)),
+        );
         return Ok(DispatchResult::Continue);
     }
 
@@ -121,6 +158,15 @@ pub(in super::super) fn handle_subi(
         state.set_reg(dst, Value::from_f64(result));
         return Ok(DispatchResult::Continue);
     }
+    // 128-bit arm (T0272): full-width subtraction, see `handle_addi`.
+    if is_i128_op(va, vb) {
+        let result = va.as_i128_raw().wrapping_sub(vb.as_i128_raw());
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result, i128_result_signed(va, vb)),
+        );
+        return Ok(DispatchResult::Continue);
+    }
     // Use `as_integer_compatible` (matches `handle_addi`) so operands that
     // are not tagged Int — pointer-tagged values from compiled stdlib,
     // Unit/Nil holes, small-string residuals — do not panic. The CBGR
@@ -149,6 +195,17 @@ pub(in super::super) fn handle_muli(
         state.set_reg(dst, Value::from_f64(result));
         return Ok(DispatchResult::Continue);
     }
+    // 128-bit arm (T0272): full-width multiply, see `handle_addi`. This is the
+    // case that catches two moderate Int128 operands whose product overflows
+    // i64 (e.g. 10^12 * 10^12) — the pre-fix i64 path silently wrapped it.
+    if is_i128_op(va, vb) {
+        let result = va.as_i128_raw().wrapping_mul(vb.as_i128_raw());
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result, i128_result_signed(va, vb)),
+        );
+        return Ok(DispatchResult::Continue);
+    }
     // Same tag-robustness as handle_addi / handle_subi.
     let result = va
         .as_integer_compatible()
@@ -174,6 +231,20 @@ pub(in super::super) fn handle_divi(
             return Err(InterpreterError::DivisionByZero);
         }
         state.set_reg(dst, Value::from_f64(operand_as_f64(va) / divisor));
+        return Ok(DispatchResult::Continue);
+    }
+    // 128-bit arm (T0272): signed full-width division (DivI is the signed
+    // opcode; codegen emits UDivI for unsigned operands, handled separately).
+    if is_i128_op(va, vb) {
+        let b = vb.as_i128_raw() as i128;
+        if b == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        let result = (va.as_i128_raw() as i128).wrapping_div(b);
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result as u128, i128_result_signed(va, vb)),
+        );
         return Ok(DispatchResult::Continue);
     }
     let divisor = vb.as_integer_compatible();
@@ -204,6 +275,19 @@ pub(in super::super) fn handle_modi(
         state.set_reg(dst, Value::from_f64(operand_as_f64(va) % divisor));
         return Ok(DispatchResult::Continue);
     }
+    // 128-bit arm (T0272): signed full-width remainder, see `handle_divi`.
+    if is_i128_op(va, vb) {
+        let b = vb.as_i128_raw() as i128;
+        if b == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        let result = (va.as_i128_raw() as i128).wrapping_rem(b);
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result as u128, i128_result_signed(va, vb)),
+        );
+        return Ok(DispatchResult::Continue);
+    }
     let divisor = vb.as_integer_compatible();
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
@@ -228,11 +312,23 @@ pub(in super::super) fn handle_udivi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let divisor = state.get_reg(b).as_integer_compatible() as u64;
+    // 128-bit arm (T0272): unsigned full-width division for UInt128 operands.
+    let va = state.get_reg(a);
+    let vb = state.get_reg(b);
+    if is_i128_op(va, vb) {
+        let divisor = vb.as_i128_raw();
+        if divisor == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        let result = va.as_i128_raw().wrapping_div(divisor);
+        state.set_reg(dst, Value::from_i128_raw_signed(result, false));
+        return Ok(DispatchResult::Continue);
+    }
+    let divisor = vb.as_integer_compatible() as u64;
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let dividend = state.get_reg(a).as_integer_compatible() as u64;
+    let dividend = va.as_integer_compatible() as u64;
     let result = dividend.wrapping_div(divisor) as i64;
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
@@ -246,11 +342,23 @@ pub(in super::super) fn handle_umodi(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
-    let divisor = state.get_reg(b).as_integer_compatible() as u64;
+    // 128-bit arm (T0272): unsigned full-width remainder for UInt128 operands.
+    let va = state.get_reg(a);
+    let vb = state.get_reg(b);
+    if is_i128_op(va, vb) {
+        let divisor = vb.as_i128_raw();
+        if divisor == 0 {
+            return Err(InterpreterError::DivisionByZero);
+        }
+        let result = va.as_i128_raw().wrapping_rem(divisor);
+        state.set_reg(dst, Value::from_i128_raw_signed(result, false));
+        return Ok(DispatchResult::Continue);
+    }
+    let divisor = vb.as_integer_compatible() as u64;
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let dividend = state.get_reg(a).as_integer_compatible() as u64;
+    let dividend = va.as_integer_compatible() as u64;
     let result = dividend.wrapping_rem(divisor) as i64;
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
@@ -270,6 +378,16 @@ pub(in super::super) fn handle_negi(
     // to NegI; see `handle_addi`.
     if sv.is_float() {
         state.set_reg(dst, Value::from_f64(-sv.as_f64()));
+        return Ok(DispatchResult::Continue);
+    }
+    // 128-bit arm (T0272): full-width negation (two's complement), preserving
+    // the operand's signedness for display.
+    if sv.is_boxed_i128() {
+        let result = 0u128.wrapping_sub(sv.as_i128_raw());
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result, sv.boxed_i128_is_signed()),
+        );
         return Ok(DispatchResult::Continue);
     }
     let result = sv.as_integer_compatible().wrapping_neg();
@@ -297,6 +415,22 @@ pub(in super::super) fn handle_powi(
         state.set_reg(dst, Value::from_f64(result));
         return Ok(DispatchResult::Continue);
     }
+    // 128-bit arm (T0272): full-width integer power when the base is a boxed
+    // Int128. Exponents are small non-negative counts (a negative exponent
+    // truncates to 0, matching the i64 path).
+    if base_v.is_boxed_i128() {
+        let exp_i128 = exp_v.as_i128_raw() as i128;
+        let result = if (0..=u32::MAX as i128).contains(&exp_i128) {
+            base_v.as_i128_raw().wrapping_pow(exp_i128 as u32)
+        } else {
+            0
+        };
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result, base_v.boxed_i128_is_signed()),
+        );
+        return Ok(DispatchResult::Continue);
+    }
     let base_val = base_v.as_integer_compatible();
     let exp_val = exp_v.as_integer_compatible();
     // Use checked power to handle overflow
@@ -322,6 +456,19 @@ pub(in super::super) fn handle_absi(
         state.set_reg(dst, Value::from_f64(src_val.as_f64().abs()));
         return Ok(DispatchResult::Continue);
     }
+    // 128-bit arm (T0272): full-width absolute value. An unsigned value is
+    // already non-negative (identity).
+    if src_val.is_boxed_i128() {
+        let raw = src_val.as_i128_raw();
+        let signed = src_val.boxed_i128_is_signed();
+        let result = if signed {
+            (raw as i128).wrapping_abs() as u128
+        } else {
+            raw
+        };
+        state.set_reg(dst, Value::from_i128_raw_signed(result, signed));
+        return Ok(DispatchResult::Continue);
+    }
     let result = src_val.as_integer_compatible().wrapping_abs();
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
@@ -333,7 +480,17 @@ pub(in super::super) fn handle_inc(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let result = state.get_reg(src).as_integer_compatible().wrapping_add(1);
+    let sv = state.get_reg(src);
+    // 128-bit arm (T0272): keep a boxed Int128 at full width across `+ 1`.
+    if sv.is_boxed_i128() {
+        let result = sv.as_i128_raw().wrapping_add(1);
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result, sv.boxed_i128_is_signed()),
+        );
+        return Ok(DispatchResult::Continue);
+    }
+    let result = sv.as_integer_compatible().wrapping_add(1);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -344,7 +501,17 @@ pub(in super::super) fn handle_dec(
 ) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let result = state.get_reg(src).as_integer_compatible().wrapping_sub(1);
+    let sv = state.get_reg(src);
+    // 128-bit arm (T0272): keep a boxed Int128 at full width across `- 1`.
+    if sv.is_boxed_i128() {
+        let result = sv.as_i128_raw().wrapping_sub(1);
+        state.set_reg(
+            dst,
+            Value::from_i128_raw_signed(result, sv.boxed_i128_is_signed()),
+        );
+        return Ok(DispatchResult::Continue);
+    }
+    let result = sv.as_integer_compatible().wrapping_sub(1);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }

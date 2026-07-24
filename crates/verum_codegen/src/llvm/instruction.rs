@@ -37811,6 +37811,20 @@ fn lower_load_const<'ctx>(
     };
     let llvm_val = match constant {
         Constant::Int(v) => ctx.types().i64_type().const_int(*v as u64, true).into(),
+        // T0272 — AOT Int128 is NOT yet full-width. The AOT tier models every
+        // Value as one i64 register (NaN-box), with no shared boxed-i128 side
+        // table (that lives in the interpreter process). A correct AOT Int128
+        // needs a distinct 128-bit runtime carrier (heap-boxed 16-byte cell or
+        // an i128 register pair) threaded through every integer arith / compare
+        // / print lowering — a separate, sizeable change (see the T0272 dossier
+        // §AOT). Until then this arm emits the LOW 64 bits, which is EXACTLY the
+        // value AOT produced before (the shared literal lowering used to
+        // `value as i64` before ever reaching the const pool), so it is a
+        // parity placeholder, not a regression. The interpreter tier IS
+        // full-width.
+        Constant::Int128 { raw, .. } => {
+            ctx.types().i64_type().const_int(*raw as u64, true).into()
+        }
         Constant::Float(v) => ctx.types().f64_type().const_float(*v).into(),
         Constant::String(str_id) => {
             let s = vbc_mod.get_string(*str_id).unwrap_or("");

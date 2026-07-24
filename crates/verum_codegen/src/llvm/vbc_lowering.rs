@@ -3700,7 +3700,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                         },
                                     );
                                 }
-                                verum_vbc::module::Constant::Int(_) => {
+                                verum_vbc::module::Constant::Int(_)
+                                | verum_vbc::module::Constant::Int128 { .. } => {
+                                    // T0272: AOT models Int128 as an i64 register
+                                    // (low-64 placeholder — see instruction.rs
+                                    // LoadK arm), so it types as Int here too.
                                     ctx.reg_types_mut()
                                         .set(dst.0, super::register_types::RegisterType::Int);
                                 }
