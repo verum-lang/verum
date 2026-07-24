@@ -664,12 +664,22 @@ pub(crate) fn do_return(
     // Store return value in caller's register
     let caller_base = frame.caller_base;
     state.registers.set(caller_base, frame.return_reg, value);
-    super::autodiff_record::restore_return(
-        state,
-        caller_base,
-        frame.return_reg,
-        value.as_f64().to_bits(),
-    );
+    // Autodiff tape: only FLOAT returns carry a gradient, and `as_f64()`
+    // debug_asserts on a non-float value. Record the return only when
+    // gradient recording is active AND the value is a float. Previously
+    // `value.as_f64().to_bits()` was computed EAGERLY on every return —
+    // `restore_return` internally no-ops when `!grad_recording`, but the
+    // argument was still evaluated, so any non-float return crashed debug
+    // builds (`Expected float, got …`) and fed garbage bits to the tape
+    // for non-float returns under recording in release.
+    if state.grad_recording && value.is_float() {
+        super::autodiff_record::restore_return(
+            state,
+            caller_base,
+            frame.return_reg,
+            value.as_f64().to_bits(),
+        );
+    }
 
     // Restore caller's PC
     state.set_pc(frame.return_pc);
