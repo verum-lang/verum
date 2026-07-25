@@ -181,7 +181,7 @@ fn collect_module_surfaces(core_root: &Path) -> Vec<ModuleSurface> {
         };
 
         let qualified_path = match extract_module_path(&module) {
-            Some(p) => p,
+            Some(p) => qualify_module_path(p, file, core_root),
             None => return,
         };
         let mut exports: HashSet<String> = HashSet::new();
@@ -222,6 +222,47 @@ fn walk_vr_files(dir: &Path, visit: &mut dyn FnMut(&Path)) {
 /// so this just hands that name back as the canonical lookup key.
 /// Returns `None` for files with no module declaration (legacy stdlib
 /// files predating the explicit module discipline).
+/// Qualify a module declaration against the file's location.
+///
+/// Stdlib files declare their module path in THREE forms, all accepted by the
+/// compiler:
+///   * fully qualified — `module core.base.ordering;` (1942 files)
+///   * bare leaf       — `module env;` in `core/base/env.vr` (~160 files)
+///   * core-relative   — `module sys.common;` in `core/sys/common.vr`
+///
+/// The audit indexes modules by qualified path, so anything but the first form
+/// used to register under the wrong key: `env` instead of `core.base.env`,
+/// `sys.common` instead of `core.sys.common`. Every `mount core.base.env` then
+/// looked like a missing item in `core.base`, because the real module was filed
+/// elsewhere in the index.
+///
+/// A declaration already rooted at `core` is taken as-is; anything else is
+/// derived from the file's own location, which is also how the bake discovers
+/// modules (directory walk).
+fn qualify_module_path(declared: String, file: &Path, core_root: &Path) -> String {
+    if declared == "core" || declared.starts_with("core.") {
+        return declared;
+    }
+    let Ok(rel) = file.parent().unwrap_or(file).strip_prefix(core_root) else {
+        return declared;
+    };
+    let mut segs: Vec<String> = vec!["core".to_string()];
+    segs.extend(
+        rel.components()
+            .filter_map(|c| c.as_os_str().to_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+    );
+    // The declaration's LEAF names this module within its directory, except in
+    // a `mod.vr`, which names the directory itself — `module base;` in
+    // `core/base/mod.vr` must not become `core.base.base`.
+    let leaf = declared.rsplit('.').next().unwrap_or(&declared).to_string();
+    if segs.last().map(String::as_str) != Some(leaf.as_str()) {
+        segs.push(leaf);
+    }
+    segs.join(".")
+}
+
 fn extract_module_path(module: &verum_ast::Module) -> Option<String> {
     for item in module.items.iter() {
         if let ItemKind::Module(mod_decl) = &item.kind {
