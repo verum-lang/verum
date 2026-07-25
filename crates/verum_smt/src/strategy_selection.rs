@@ -41,6 +41,30 @@ pub struct StrategySelector {
     pub enable_portfolio: bool,
 }
 
+/// Every z3 probe name [`StrategySelector::analyze_problem`] requests.
+///
+/// This exists because an unknown probe name is unrecoverable: `Probe::new`
+/// unwraps the raw `Z3_mk_probe` result, so a name the linked z3 does not
+/// provide aborts the caller — and the caller can be the compiler, mid-solve.
+/// Which probes exist is a property of the z3 build, not of the goal, so the
+/// only place to catch a bad name is a test that constructs each one.
+///
+/// Note the absence of a QF_UF entry. z3 ships no plain `is-qfuf` probe (only
+/// the combined `is-qfufnra` / `is-qfaufbv` / `is-qfauflia`), and requesting
+/// it is precisely what made every non-empty `select_tactic` call abort, so
+/// `is_qfuf` is derived from the fragments that do exist.
+pub const PROBE_NAMES: &[&str] = &[
+    "size",
+    "depth",
+    "num-consts",
+    "num-exprs",
+    "is-qfbv",
+    "is-qflia",
+    "is-qfnra",
+    "has-quantifiers",
+    "is-propositional",
+];
+
 impl StrategySelector {
     /// Create new strategy selector with default configuration
     pub fn new() -> Self {
@@ -156,6 +180,14 @@ impl StrategySelector {
     }
 
     /// Analyze problem using Z3 probes
+    ///
+    /// Every name passed to [`Probe::new`] below must appear in
+    /// [`PROBE_NAMES`], which the test suite checks against the linked z3
+    /// build. `Probe::new` unwraps the raw `Z3_mk_probe` result, so an
+    /// unknown name is not a recoverable error — it aborts whoever called
+    /// the strategy selector, including the compiler. Probe availability is
+    /// a property of the z3 build rather than of our input, so it has to be
+    /// pinned by a test rather than discovered in production.
     fn analyze_problem(&self, goal: &Goal) -> ProblemCharacteristics {
         // Basic complexity probes
         let size = Probe::new("size").apply(goal);
@@ -171,7 +203,16 @@ impl StrategySelector {
 
         // Advanced probes
         let is_propositional = Probe::new("is-propositional").apply(goal) > 0.0;
-        let is_qfuf = Probe::new("is-qfuf").apply(goal) > 0.0; // Quantifier-free uninterpreted functions
+
+        // Quantifier-free uninterpreted functions. There is NO plain QF_UF
+        // probe in z3 — it ships only combined fragments (is-qfufnra,
+        // is-qfaufbv, is-qfauflia). Asking for "is-qfuf" made
+        // `Z3_mk_probe` return null, which `Probe::new` unwraps, so every
+        // select_tactic call with a non-empty goal aborted the process.
+        // Derive it instead from the fragments that do exist: quantifier-free
+        // and none of the arithmetic/bit-vector theories is, for the purpose
+        // of picking a tactic, the uninterpreted-function case.
+        let is_qfuf = !has_quantifiers && !is_qfbv && !is_qflia && !is_qfnra;
 
         ProblemCharacteristics {
             size,

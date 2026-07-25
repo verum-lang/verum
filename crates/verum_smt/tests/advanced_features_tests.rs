@@ -19,24 +19,28 @@
 // proof extraction, SMT-LIB2 export, and enhanced counterexamples.
 //
 
-// DISABLED — does not compile: needs API migration (ComplexityThresholds,
-// TacticKind variants changed). 26 tests. Tracked by T0632.
-// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
-// named a feature declared in no Cargo.toml, so the file silently never
-// compiled while reading as an opt-in flag someone could turn on.
-#![cfg(any())]
+// Revived under T0641. The previous banner claimed ComplexityThresholds and
+// TacticKind had been redesigned; they had not. verum_smt defines TWO of each
+// — one pair in goal_analysis, one in strategy_selection — and lib.rs
+// re-exports them under disambiguated names, so the bare `ComplexityThresholds`
+// resolves to the goal_analysis type and bare `TacticKind` is not exported at
+// all. These tests want the strategy_selection pair; naming it explicitly was
+// the whole fix. See T0637 on the duplicate-type-name class.
 
 use verum_ast::{
     Expr, ExprKind,
     literal::{IntLit, Literal, LiteralKind},
     span::Span,
 };
-use verum_common::{List, Map, Maybe};
+use verum_common::{List, Map, Maybe, Text};
+use verum_smt::proof_extraction::ProofTerm as ExtractionProofTerm;
 use verum_smt::proof_term_unified::ProofTerm;
+use z3::ast::Bool;
 use verum_smt::{
-    ComplexityThresholds, CounterExample, CounterExampleCategorizer, CounterExampleValue,
-    FailureCategory, ProofExporter, ProofExtractor, ProofMinimizer, SmtCheckMode, SmtLibExporter,
-    StrategySelector, TacticKind,
+    CounterExample, CounterExampleCategorizer, CounterExampleValue, FailureCategory,
+    ProofExporter, ProofExtractor, ProofMinimizer, SmtCheckMode, SmtLibExporter,
+    StrategyComplexityThresholds as ComplexityThresholds, StrategySelector,
+    StrategyTacticKind as TacticKind,
 };
 
 // ==================== Test Helpers ====================
@@ -73,7 +77,7 @@ fn test_strategy_selector_creation() {
 #[test]
 fn test_strategy_selector_empty_constraints() {
     let selector = StrategySelector::new();
-    let empty_constraints: Vec<Expr> = vec![];
+    let empty_constraints: Vec<Bool> = vec![];
 
     let tactic = selector.select_tactic(&empty_constraints);
     // Should use fallback tactic (SMT)
@@ -83,7 +87,7 @@ fn test_strategy_selector_empty_constraints() {
 #[test]
 fn test_timeout_estimation_empty() {
     let selector = StrategySelector::new();
-    let empty: Vec<Expr> = vec![];
+    let empty: Vec<Bool> = vec![];
 
     let timeout = selector.estimate_timeout(&empty);
     assert_eq!(timeout, std::time::Duration::from_secs(1));
@@ -92,7 +96,7 @@ fn test_timeout_estimation_empty() {
 #[test]
 fn test_parallel_strategies_generation() {
     let selector = StrategySelector::new();
-    let constraints: Vec<Expr> = vec![];
+    let constraints: Vec<Bool> = vec![];
 
     let strategies = selector.get_parallel_strategies(&constraints);
     assert!(!strategies.is_empty());
@@ -189,19 +193,36 @@ fn test_proof_term_modus_ponens() {
 
 #[test]
 fn test_proof_minimization() {
-    let refl = ProofTerm::reflexivity(int_expr(42));
-    let axiom = ProofTerm::axiom("ax", dummy_expr());
-
-    let trans = ProofTerm::transitivity(refl, axiom.clone());
+    // ProofMinimizer / ProofExporter / ProofExtractor all operate on
+    // `proof_extraction::ProofTerm`, while the ergonomic constructors
+    // (axiom / reflexivity / transitivity) live on the DIFFERENT
+    // `proof_term_unified::ProofTerm`, and the `From` impls only convert
+    // INTO the unified type. So a caller using the documented builders
+    // cannot produce an argument for these APIs at all — see T0637 on the
+    // five competing ProofTerm types. These tests therefore construct the
+    // extraction enum directly, which is what the code under test consumes.
+    let refl = ExtractionProofTerm::Reflexivity {
+        term: Text::from("42"),
+    };
+    let axiom = ExtractionProofTerm::Axiom {
+        name: Text::from("ax"),
+        formula: Text::from("true"),
+    };
+    let trans = ExtractionProofTerm::Transitivity {
+        left: Box::new(refl),
+        right: Box::new(axiom),
+    };
 
     let minimized = ProofMinimizer::minimize(&trans);
-    // Minimization should simplify the proof
     assert!(minimized.node_count() <= trans.node_count());
 }
 
 #[test]
 fn test_proof_export_smtlib2() {
-    let axiom = ProofTerm::axiom("ax1", dummy_expr());
+    let axiom = ExtractionProofTerm::Axiom {
+        name: Text::from("ax1"),
+        formula: Text::from("true"),
+    };
 
     let smtlib = ProofExporter::to_smtlib2(&axiom);
     assert!(smtlib.contains("assert"));
@@ -210,7 +231,10 @@ fn test_proof_export_smtlib2() {
 
 #[test]
 fn test_proof_export_readable() {
-    let axiom = ProofTerm::axiom("test_axiom", dummy_expr());
+    let axiom = ExtractionProofTerm::Axiom {
+        name: Text::from("test_axiom"),
+        formula: Text::from("true"),
+    };
 
     let readable = ProofExporter::to_readable(&axiom);
     assert!(readable.contains("Axiom"));
@@ -341,9 +365,10 @@ fn test_full_verification_workflow() {
     // 1. Create strategy selector
     let selector = StrategySelector::new();
 
-    // 2. Create simple problem (using Expr instead of Z3 AST)
-    let constraint = dummy_expr();
-    let constraints = vec![constraint];
+    // 2. Create a simple problem. select_tactic works on solver-level
+    // formulas (z3 Bool), not on surface AST Expr — the original spelling
+    // here said "using Expr instead of Z3 AST" and could never compile.
+    let constraints = vec![Bool::new_const("c0")];
 
     // 3. Select strategy
     let _tactic = selector.select_tactic(&constraints);
@@ -359,8 +384,12 @@ fn test_full_verification_workflow() {
 
 #[test]
 fn test_proof_analysis_workflow() {
-    // Create a simple proof
-    let axiom = ProofTerm::axiom("test", dummy_expr());
+    // Create a simple proof (extraction enum — see the note on
+    // test_proof_minimization for why the unified builders cannot be used).
+    let axiom = ExtractionProofTerm::Axiom {
+        name: Text::from("test"),
+        formula: Text::from("true"),
+    };
 
     // Analyze it
     let extractor = ProofExtractor::new();
@@ -385,7 +414,7 @@ fn test_strategy_selection_performance() {
     let selector = StrategySelector::new();
 
     // Create a moderately sized problem
-    let constraints: Vec<Expr> = (0..10).map(|i| int_expr(i)).collect();
+    let constraints: Vec<Bool> = (0..10).map(|i| Bool::new_const(format!("c{i}"))).collect();
 
     let start = Instant::now();
     let _tactic = selector.select_tactic(&constraints);
