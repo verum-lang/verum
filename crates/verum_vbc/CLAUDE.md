@@ -198,13 +198,21 @@ The crate ships two unit-test surfaces, gated by the `codegen` feature:
 
 Test counts are deliberately not pinned here — they move with every added test
 and a stale number reads as a target to hit.  Run the suite for the current
-figure; what is pinned is the gate and the known-red set below.
+figure; what is pinned is the gate.
 
-**Known red (`--features codegen`), tracked by T0627:**
-`codegen::test_params::test_receiver_shadow_safety_free_fn_not_called_in_main`
-and `codegen::tests_e2e::debug_assert_cfg_tests::debug_assert_emits_assert_in_debug_mode`.
-Both assert on the body of a free fn that no caller reaches; do not treat
-either as a baseline to preserve.
+**Both surfaces are GREEN.**  The two tests previously listed here as known-red
+were fixed under T0627 (493927b7d) and were never compiler defects: each
+located the function under test by a name predicate that matched the wrong
+descriptor.  One used `name.contains("check")`, which matches the stdlib
+forward declaration `Text.from_utf8_unchecked` (empty body) before the intended
+`e2e_test.check`; the other used an exact `== "main"` against names that are
+module-qualified (`test_receiver_shadow.main`).
+
+If you add a test that asserts on "the function named X", match the QUALIFIED
+form (`== "x" || ends_with(".x")`) and print which descriptor you actually
+selected before concluding anything about codegen — the function table also
+carries stdlib forward declarations with zero-length bodies, and reading one of
+those looks exactly like "the compiler emitted nothing".
 
 External fixtures: 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
 and 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`.
@@ -220,9 +228,9 @@ the test harness to `compile_module_with_mounts` for files that bring
 cross-module symbols in via `mount`).
 
 The CI gate is: any unit-test failure in either default-feature or
-`--features codegen` surface blocks the PR, except the two red tests
-listed under Test Coverage above.  No new "known failure" may be
-documented here without an explicit tracking task.
+`--features codegen` surface blocks the PR.  There are no exceptions — the
+two that used to be carved out here were fixed under T0627.  No "known
+failure" may be documented here without an explicit tracking task.
 
 ## Performance Targets
 
