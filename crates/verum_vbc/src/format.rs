@@ -70,6 +70,19 @@ pub const VERSION_MAJOR: u16 = 2;
 /// real name instead of the fresh-var `__opaque_type_<PTR>` placeholder.
 pub const VERSION_MINOR: u16 = 9;
 
+/// Minor-version floors for sections whose presence readers gate on.  The
+/// register-type-hints section has been written unconditionally since minor 2,
+/// and `deserialize` skips it for any archive claiming minor <= 1 — so a writer
+/// that ever declared a minor below the floor would emit the section while
+/// every reader skipped it, silently dropping the hints.  Enforced at COMPILE
+/// time rather than by a test, which could only catch it after the fact.
+const _: () = {
+    assert!(
+        VERSION_MINOR >= 2,
+        "writer emits the register-type-hints section; readers gate it on minor >= 2"
+    );
+};
+
 /// Size of VBC header in bytes.
 /// 4 (magic) + 2 + 2 (version) + 4 (flags) + 4 (name) +
 /// 4*2 (type) + 4*2 (func) + 4*2 (const) + 4*2 (string) +

@@ -349,6 +349,17 @@ pub fn structural_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
 /// positives.
 pub const NORMALIZE_STEP_LIMIT: u32 = 10_000;
 
+/// The limit is part of the public surface so callers can size their proof
+/// obligations against it; a floor keeps that contract meaningful.  Enforced
+/// at COMPILE time rather than by a test, so lowering the budget below the
+/// documented floor fails the build for every consumer of the kernel.
+const _: () = {
+    assert!(
+        NORMALIZE_STEP_LIMIT >= 1_000,
+        "callers size proof obligations against this floor"
+    );
+};
+
 /// Context threaded through the unified normaliser
 /// [`normalize_core`].  Carries the step budget plus optional
 /// axiom and inductive registries that gate δ-reduction (axiom

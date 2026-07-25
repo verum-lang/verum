@@ -13,8 +13,8 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, NORMALIZE_STEP_LIMIT,
-    UniverseLevel, definitional_eq, infer, normalize,
+    AxiomRegistry, Context, CoreTerm, FrameworkId, KernelError, UniverseLevel, definitional_eq,
+    infer, normalize,
 };
 
 fn empty() -> (Context, AxiomRegistry) {
@@ -163,13 +163,6 @@ fn normalize_descends_into_path_endpoints() {
         rhs: Heap::new(CoreTerm::Var(Text::from("b"))),
     };
     assert_eq!(normalized, expected);
-}
-
-#[test]
-fn normalize_step_limit_constant_documented() {
-    // The constant is exposed as part of the public surface so
-    // callers can size their proof obligations against it.
-    assert!(NORMALIZE_STEP_LIMIT >= 1_000);
 }
 
 // =============================================================================
