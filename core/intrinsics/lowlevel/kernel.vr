@@ -44,7 +44,6 @@ module core.intrinsics.lowlevel.kernel;
 /// Only valid in @naked @cfg(target_os = "linux", target_arch = "x86_64") functions.
 @intrinsic("linux_x86_64_start")
 @llvm_only(reason = "inline assembly entry point")
-@vbc_direct_lowering
 public fn linux_x86_64_start();
 
 // =============================================================================
@@ -64,7 +63,6 @@ public fn linux_x86_64_start();
 /// Only valid in @naked @cfg(target_os = "linux", target_arch = "aarch64") functions.
 @intrinsic("linux_aarch64_start")
 @llvm_only(reason = "inline assembly entry point")
-@vbc_direct_lowering
 public fn linux_aarch64_start();
 
 // =============================================================================
@@ -83,7 +81,6 @@ public fn linux_aarch64_start();
 /// Only valid in @naked functions with linker script support.
 @intrinsic("baremetal_x86_64_start")
 @llvm_only(reason = "inline assembly entry point")
-@vbc_direct_lowering
 public fn baremetal_x86_64_start();
 
 /// aarch64 bare metal entry point (no OS).
@@ -99,7 +96,6 @@ public fn baremetal_x86_64_start();
 /// Only valid in @naked functions with linker script support.
 @intrinsic("baremetal_aarch64_start")
 @llvm_only(reason = "inline assembly entry point")
-@vbc_direct_lowering
 public fn baremetal_aarch64_start();
 
 // =============================================================================
@@ -113,7 +109,6 @@ public fn baremetal_aarch64_start();
 /// Must be paired with interrupt_epilogue.
 @intrinsic("x86_64_interrupt_prologue")
 @llvm_only(reason = "inline assembly")
-@vbc_direct_lowering
 public fn x86_64_interrupt_prologue();
 
 /// x86_64 interrupt handler epilogue.
@@ -123,7 +118,6 @@ public fn x86_64_interrupt_prologue();
 /// Must be paired with interrupt_prologue.
 @intrinsic("x86_64_interrupt_epilogue")
 @llvm_only(reason = "inline assembly")
-@vbc_direct_lowering
 public fn x86_64_interrupt_epilogue();
 
 /// x86_64 interrupt handler with error code prologue.
@@ -132,7 +126,6 @@ public fn x86_64_interrupt_epilogue();
 /// Like interrupt_prologue but handles the error code pushed by CPU.
 @intrinsic("x86_64_interrupt_error_prologue")
 @llvm_only(reason = "inline assembly")
-@vbc_direct_lowering
 public fn x86_64_interrupt_error_prologue();
 
 // =============================================================================
@@ -146,7 +139,6 @@ public fn x86_64_interrupt_error_prologue();
 /// Must be paired with exception_epilogue.
 @intrinsic("aarch64_exception_prologue")
 @llvm_only(reason = "inline assembly")
-@vbc_direct_lowering
 public fn aarch64_exception_prologue();
 
 /// aarch64 exception handler epilogue.
@@ -156,7 +148,6 @@ public fn aarch64_exception_prologue();
 /// Must be paired with exception_prologue.
 @intrinsic("aarch64_exception_epilogue")
 @llvm_only(reason = "inline assembly")
-@vbc_direct_lowering
 public fn aarch64_exception_epilogue();
 
 // =============================================================================

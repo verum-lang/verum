@@ -40,7 +40,6 @@ module core.intrinsics.runtime.sync;
 /// Returns: 0 on success, -1 on timeout
 /// Requires: Operating system
 @intrinsic("futex_wait")
-@vbc_direct_lowering
 public fn futex_wait(addr: *const UInt32, expected: UInt32, timeout_ns: UInt64) -> Int32;
 
 /// Wake threads waiting on a memory address.
@@ -50,18 +49,15 @@ public fn futex_wait(addr: *const UInt32, expected: UInt32, timeout_ns: UInt64) 
 /// Returns: Number of threads woken
 /// Requires: Operating system
 @intrinsic("futex_wake")
-@vbc_direct_lowering
 public fn futex_wake(addr: *const UInt32, count: UInt32) -> Int32;
 
 /// Wake exactly one thread waiting on address.
 @intrinsic("futex_wake_one")
 @inline(always)
-@vbc_direct_lowering
 public fn futex_wake_one(addr: *const UInt32) -> Int32;
 
 /// Wake all threads waiting on address.
 @intrinsic("futex_wake_all")
-@vbc_direct_lowering
 public fn futex_wake_all(addr: *const UInt32) -> Int32;
 
 // =============================================================================
@@ -74,7 +70,6 @@ public fn futex_wake_all(addr: *const UInt32) -> Int32;
 /// Returns: true if lock acquired, false if already held
 @intrinsic("spinlock_try_lock")
 @inline(always)
-@vbc_direct_lowering
 public fn spinlock_try_lock(lock: *mut UInt32) -> Bool;
 
 /// Acquire spinlock, spinning until available.
@@ -82,19 +77,16 @@ public fn spinlock_try_lock(lock: *mut UInt32) -> Bool;
 
 /// Uses spin_hint() for power efficiency.
 @intrinsic("spinlock_lock")
-@vbc_direct_lowering
 public fn spinlock_lock(lock: *mut UInt32);
 
 /// Release spinlock.
 @intrinsic("spinlock_unlock")
 @inline(always)
-@vbc_direct_lowering
 public fn spinlock_unlock(lock: *mut UInt32);
 
 /// Check if spinlock is held (non-blocking).
 @intrinsic("spinlock_is_locked")
 @inline(always)
-@vbc_direct_lowering
 public fn spinlock_is_locked(lock: *const UInt32) -> Bool;
 
 // =============================================================================

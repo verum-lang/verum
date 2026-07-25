@@ -181,67 +181,54 @@ public const ORDERING_SEQ_CST: UInt8 = 4;
 
 /// Atomic load of UInt8 (VBC opcode: AtomicLoad 0xE3 with size=1).
 @intrinsic("atomic_load_u8")
-@vbc_direct_lowering
 public fn atomic_load_u8(ptr: *const UInt8, ordering: UInt8) -> UInt8;
 
 /// Atomic load of UInt16 (VBC opcode: AtomicLoad 0xE3 with size=2).
 @intrinsic("atomic_load_u16")
-@vbc_direct_lowering
 public fn atomic_load_u16(ptr: *const UInt16, ordering: UInt8) -> UInt16;
 
 /// Atomic load of UInt32 (VBC opcode: AtomicLoad 0xE3 with size=4).
 @intrinsic("atomic_load_u32")
-@vbc_direct_lowering
 public fn atomic_load_u32(ptr: *const UInt32, ordering: UInt8) -> UInt32;
 
 /// Atomic load of UInt64 (VBC opcode: AtomicLoad 0xE3 with size=8).
 @intrinsic("atomic_load_u64")
-@vbc_direct_lowering
 public fn atomic_load_u64(ptr: *const UInt64, ordering: UInt8) -> UInt64;
 
 /// Atomic load of Int32.
 @intrinsic("atomic_load_i32")
-@vbc_direct_lowering
 public fn atomic_load_i32(ptr: *const Int32, ordering: UInt8) -> Int32;
 
 /// Atomic load of pointer.
 @intrinsic("atomic_load_ptr")
-@vbc_direct_lowering
 public fn atomic_load_ptr<T>(ptr: *const *const T, ordering: UInt8) -> *const T;
 
 /// Atomic store of UInt8 (VBC opcode: AtomicStore 0xE4 with size=1).
 @intrinsic("atomic_store_u8")
-@vbc_direct_lowering
 public fn atomic_store_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8);
 
 /// Atomic store of UInt16.
 @intrinsic("atomic_store_u16")
-@vbc_direct_lowering
 public fn atomic_store_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8);
 
 /// Atomic store of UInt32.
 @intrinsic("atomic_store_u32")
-@vbc_direct_lowering
 public fn atomic_store_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8);
 
 /// Atomic store of UInt64.
 @intrinsic("atomic_store_u64")
-@vbc_direct_lowering
 public fn atomic_store_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8);
 
 /// Atomic store of Int32.
 @intrinsic("atomic_store_i32")
-@vbc_direct_lowering
 public fn atomic_store_i32(ptr: *mut Int32, value: Int32, ordering: UInt8);
 
 /// Atomic store of pointer.
 @intrinsic("atomic_store_ptr")
-@vbc_direct_lowering
 public fn atomic_store_ptr<T>(ptr: *mut *const T, value: *const T, ordering: UInt8);
 
 /// Atomic compare-and-swap for UInt32 (VBC opcode: AtomicCas 0xE5).
 @intrinsic("atomic_cas_u32")
-@vbc_direct_lowering
 public fn atomic_cas_u32(
     ptr: *mut UInt32,
     expected: UInt32,
@@ -252,7 +239,6 @@ public fn atomic_cas_u32(
 
 /// Atomic compare-and-swap for UInt64.
 @intrinsic("atomic_cas_u64")
-@vbc_direct_lowering
 public fn atomic_cas_u64(
     ptr: *mut UInt64,
     expected: UInt64,
@@ -263,7 +249,6 @@ public fn atomic_cas_u64(
 
 /// Atomic compare-and-swap for Int32.
 @intrinsic("atomic_cas_i32")
-@vbc_direct_lowering
 public fn atomic_cas_i32(
     ptr: *mut Int32,
     expected: Int32,
@@ -274,7 +259,6 @@ public fn atomic_cas_i32(
 
 /// Atomic compare-and-swap for pointer.
 @intrinsic("atomic_cas_ptr")
-@vbc_direct_lowering
 public fn atomic_cas_ptr<T>(
     ptr: *mut *const T,
     expected: *const T,
@@ -285,67 +269,54 @@ public fn atomic_cas_ptr<T>(
 
 /// Atomic fetch-and-add for UInt32.
 @intrinsic("atomic_fetch_add_u32")
-@vbc_direct_lowering
 public fn atomic_fetch_add_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
 
 /// Atomic fetch-and-add for UInt64.
 @intrinsic("atomic_fetch_add_u64")
-@vbc_direct_lowering
 public fn atomic_fetch_add_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
 
 /// Atomic fetch-and-add for UInt16.
 @intrinsic("atomic_fetch_add_u16")
-@vbc_direct_lowering
 public fn atomic_fetch_add_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8) -> UInt16;
 
 /// Atomic fetch-and-sub for UInt32.
 @intrinsic("atomic_fetch_sub_u32")
-@vbc_direct_lowering
 public fn atomic_fetch_sub_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
 
 /// Atomic fetch-and-sub for UInt64.
 @intrinsic("atomic_fetch_sub_u64")
-@vbc_direct_lowering
 public fn atomic_fetch_sub_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
 
 /// Atomic fetch-and-and for UInt32.
 @intrinsic("atomic_fetch_and_u32")
-@vbc_direct_lowering
 public fn atomic_fetch_and_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
 
 /// Atomic fetch-and-and for UInt64.
 @intrinsic("atomic_fetch_and_u64")
-@vbc_direct_lowering
 public fn atomic_fetch_and_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
 
 /// Atomic fetch-and-and for UInt16.
 @intrinsic("atomic_fetch_and_u16")
-@vbc_direct_lowering
 public fn atomic_fetch_and_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8) -> UInt16;
 
 /// Atomic fetch-and-or for UInt64.
 @intrinsic("atomic_fetch_or_u64")
-@vbc_direct_lowering
 public fn atomic_fetch_or_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
 
 /// Atomic fetch-and-xor for UInt64.
 @intrinsic("atomic_fetch_xor_u64")
-@vbc_direct_lowering
 public fn atomic_fetch_xor_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
 
 /// Atomic exchange for UInt32.
 @intrinsic("atomic_exchange_u32")
-@vbc_direct_lowering
 public fn atomic_exchange_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
 
 /// Atomic exchange for UInt64.
 @intrinsic("atomic_exchange_u64")
-@vbc_direct_lowering
 public fn atomic_exchange_u64(ptr: *mut UInt64, value: UInt64, ordering: UInt8) -> UInt64;
 
 /// Atomic exchange for Int32.
 @intrinsic("atomic_exchange_i32")
-@vbc_direct_lowering
 public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) -> Int32;
 
 // -----------------------------------------------------------------------------
@@ -362,17 +333,14 @@ public fn atomic_exchange_i32(ptr: *mut Int32, value: Int32, ordering: UInt8) ->
 
 /// Atomic load of Int64 (VBC opcode: AtomicLoad 0xE3 with size=8).
 @intrinsic("atomic_load_i64")
-@vbc_direct_lowering
 public fn atomic_load_i64(ptr: *const Int64, ordering: UInt8) -> Int64;
 
 /// Atomic store of Int64.
 @intrinsic("atomic_store_i64")
-@vbc_direct_lowering
 public fn atomic_store_i64(ptr: *mut Int64, value: Int64, ordering: UInt8);
 
 /// Atomic compare-and-swap for Int64.
 @intrinsic("atomic_cas_i64")
-@vbc_direct_lowering
 public fn atomic_cas_i64(
     ptr: *mut Int64,
     expected: Int64,
@@ -383,17 +351,14 @@ public fn atomic_cas_i64(
 
 /// Atomic fetch-and-add for Int64.
 @intrinsic("atomic_fetch_add_i64")
-@vbc_direct_lowering
 public fn atomic_fetch_add_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) -> Int64;
 
 /// Atomic fetch-and-sub for Int64.
 @intrinsic("atomic_fetch_sub_i64")
-@vbc_direct_lowering
 public fn atomic_fetch_sub_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) -> Int64;
 
 /// Atomic exchange for Int64.
 @intrinsic("atomic_exchange_i64")
-@vbc_direct_lowering
 public fn atomic_exchange_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) -> Int64;
 
 // -----------------------------------------------------------------------------
@@ -408,12 +373,10 @@ public fn atomic_exchange_i64(ptr: *mut Int64, value: Int64, ordering: UInt8) ->
 
 /// Atomic fetch-and-add for UInt8.
 @intrinsic("atomic_fetch_add_u8")
-@vbc_direct_lowering
 public fn atomic_fetch_add_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
 
 /// Atomic fetch-and-sub for UInt8.
 @intrinsic("atomic_fetch_sub_u8")
-@vbc_direct_lowering
 public fn atomic_fetch_sub_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
 
 // -----------------------------------------------------------------------------
@@ -429,27 +392,22 @@ public fn atomic_fetch_sub_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) ->
 
 /// Atomic fetch-and-and for UInt8.
 @intrinsic("atomic_fetch_and_u8")
-@vbc_direct_lowering
 public fn atomic_fetch_and_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
 
 /// Atomic fetch-and-or for UInt8.
 @intrinsic("atomic_fetch_or_u8")
-@vbc_direct_lowering
 public fn atomic_fetch_or_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
 
 /// Atomic fetch-and-xor for UInt8.
 @intrinsic("atomic_fetch_xor_u8")
-@vbc_direct_lowering
 public fn atomic_fetch_xor_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
 
 /// Atomic exchange for UInt8.
 @intrinsic("atomic_exchange_u8")
-@vbc_direct_lowering
 public fn atomic_exchange_u8(ptr: *mut UInt8, value: UInt8, ordering: UInt8) -> UInt8;
 
 /// Atomic compare-and-swap for UInt8.
 @intrinsic("atomic_cas_u8")
-@vbc_direct_lowering
 public fn atomic_cas_u8(
     ptr: *mut UInt8,
     expected: UInt8,
@@ -464,17 +422,14 @@ public fn atomic_cas_u8(
 
 /// Atomic fetch-and-sub for UInt16.
 @intrinsic("atomic_fetch_sub_u16")
-@vbc_direct_lowering
 public fn atomic_fetch_sub_u16(ptr: *mut UInt16, value: UInt16, ordering: UInt8) -> UInt16;
 
 /// Atomic fetch-and-or for UInt32.
 @intrinsic("atomic_fetch_or_u32")
-@vbc_direct_lowering
 public fn atomic_fetch_or_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
 
 /// Atomic fetch-and-xor for UInt32.
 @intrinsic("atomic_fetch_xor_u32")
-@vbc_direct_lowering
 public fn atomic_fetch_xor_u32(ptr: *mut UInt32, value: UInt32, ordering: UInt8) -> UInt32;
 
 // =============================================================================

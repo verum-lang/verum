@@ -33,7 +33,6 @@ module core.intrinsics.runtime.tls;
 /// On ARM64: reads from TPIDR_EL0
 /// Requires: TLS runtime
 @intrinsic("tls_get_base")
-@vbc_direct_lowering
 public fn tls_get_base() -> *mut Byte;
 
 // =============================================================================
@@ -48,7 +47,6 @@ public fn tls_get_base() -> *mut Byte;
 /// Requires: TLS runtime
 @intrinsic("tls_slot_get")
 @inline(always)
-@vbc_direct_lowering
 public fn tls_slot_get(slot: UInt8) -> *const Byte;
 
 /// Set a value in a TLS slot by index.
@@ -57,7 +55,6 @@ public fn tls_slot_get(slot: UInt8) -> *const Byte;
 /// Requires: TLS runtime
 @intrinsic("tls_slot_set")
 @inline(always)
-@vbc_direct_lowering
 public fn tls_slot_set(slot: UInt8, value: *const Byte);
 
 /// Clear a TLS slot (set to null).
@@ -65,7 +62,6 @@ public fn tls_slot_set(slot: UInt8, value: *const Byte);
 
 /// Requires: TLS runtime
 @intrinsic("tls_slot_clear")
-@vbc_direct_lowering
 public fn tls_slot_clear(slot: UInt8);
 
 /// Check if a TLS slot is set (non-null).
@@ -75,7 +71,6 @@ public fn tls_slot_clear(slot: UInt8);
 /// Requires: TLS runtime
 @intrinsic("tls_slot_has")
 @inline(always)
-@vbc_direct_lowering
 public fn tls_slot_has(slot: UInt8) -> Bool;
 
 // =============================================================================
@@ -89,7 +84,6 @@ public fn tls_slot_has(slot: UInt8) -> Bool;
 /// Used by `provide` blocks for context inheritance.
 /// Requires: TLS runtime
 @intrinsic("tls_frame_push")
-@vbc_direct_lowering
 public fn tls_frame_push() -> *const Byte;
 
 /// Pop a TLS context frame.
@@ -98,7 +92,6 @@ public fn tls_frame_push() -> *const Byte;
 /// VBC Opcode: PopContext (0xB4)
 /// Requires: TLS runtime
 @intrinsic("tls_frame_pop")
-@vbc_direct_lowering
 public fn tls_frame_pop();
 
 // =============================================================================

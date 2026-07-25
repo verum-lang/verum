@@ -1234,7 +1234,6 @@ public fn safe_close(fd: FileDesc) -> Result<(), OSError> {
 
 /// Memory map (safe wrapper) - returns typed pointer consistent with Linux
 @intrinsic("sys_mmap")
-@vbc_direct_lowering
 public fn safe_mmap(
     addr: Int,
     len: Int,
@@ -1274,7 +1273,6 @@ public fn safe_mmap_raw(
 
 /// Memory unmap (safe wrapper)
 @intrinsic("sys_munmap")
-@vbc_direct_lowering
 public fn safe_munmap(addr: Int, len: Int) -> Result<(), OSError> {
     let result = unsafe { munmap(addr, len) };
     if result < 0 {
@@ -1333,14 +1331,12 @@ public fn madvise_free_reuse(addr: &unsafe Byte, len: Int) -> Result<(), OSError
 
 /// Get process ID (always succeeds)
 @intrinsic("sys_getpid")
-@vbc_direct_lowering
 public fn safe_getpid() -> Int {
     unsafe { getpid() }
 }
 
 /// Get thread ID
 @intrinsic("sys_gettid")
-@vbc_direct_lowering
 public fn safe_gettid() -> UInt64 {
     let mut tid: UInt64 = 0;
     unsafe { pthread_threadid_np(PthreadT(0), &mut tid) };
@@ -1349,7 +1345,6 @@ public fn safe_gettid() -> UInt64 {
 
 /// Get entropy (cryptographic random bytes)
 @intrinsic("sys_getentropy")
-@vbc_direct_lowering
 public fn safe_getentropy(buf: &unsafe Byte, len: Int) -> Result<(), OSError> {
     if len > 256 {
         return Result.Err(OSError.new(5, "getentropy: max 256 bytes"));
