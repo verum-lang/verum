@@ -13,7 +13,7 @@
 
 # --- stub-range architecture (stages 1-5) ---
 crates/verum_vbc/src/stub_ranges.rs :: pub const STAGE5_BASE
-crates/verum_vbc/src/stub_ranges.rs :: pub fn is_name_resolved_stub_id
+crates/verum_vbc/src/stub_ranges.rs :: pub const fn is_name_resolved_stub_id
 crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs :: fn pre_register_unique_public_consts
 crates/verum_vbc/src/codegen/context.rs :: pub pending_mount_aliases
 crates/verum_vbc/src/codegen/expressions.rs :: Stage-5 mount-miss synthesis
