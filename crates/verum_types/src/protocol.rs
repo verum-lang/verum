@@ -11069,6 +11069,25 @@ impl ProtocolChecker {
             }
         }
 
+        // Universal-blanket specialization (implicit): an impl whose `for_type`
+        // is a BARE unconstrained type variable (`implement<T> P for T`, e.g. the
+        // reflexive `From<T> for T`) is the least-specific impl possible — it
+        // coexists with every more-specific concrete/partial impl of the same
+        // protocol, and `select_most_specific_impl` (find_impl_with_substitution)
+        // picks the specialization at each call site. Treating this as a hard
+        // overlap silently DROPS the universal blanket at registration (the
+        // second-registered impl is rejected under Strict coherence), so e.g.
+        // `find_impl(Int, From)` finds nothing and static `Int.from(n)` /
+        // reflexive `.into()` cannot resolve. Only a bare Var is universal; a
+        // partial blanket like `for List<T>` still goes through the real overlap
+        // check below. Two bare-Var blankets DO still conflict (both branches
+        // equal → falls through to the unify check).
+        let impl1_bare_var = matches!(&impl1.for_type, Type::Var(_));
+        let impl2_bare_var = matches!(&impl2.for_type, Type::Var(_));
+        if impl1_bare_var != impl2_bare_var {
+            return Ok(());
+        }
+
         // Check if types could unify
         if self.types_could_unify(&impl1.for_type, &impl2.for_type) {
             let protocol_name = impl1

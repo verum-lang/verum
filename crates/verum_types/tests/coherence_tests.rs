@@ -66,6 +66,44 @@ fn generic_type(name: &str, args: Vec<Type>) -> Type {
     }
 }
 
+// ============== Universal-Blanket Coexistence (T0402) ==============
+
+#[test]
+fn test_universal_blanket_does_not_overlap_concrete() {
+    // Regression (T0402): a bare-`Var` universal blanket
+    // (`implement<T> From<T> for T`, the reflexive identity) must NOT be
+    // flagged as overlapping a concrete `From<..> for Text`. It is the
+    // least-specific impl and coexists with every more-specific impl;
+    // `find_impl_with_substitution`'s `select_most_specific_impl` picks the
+    // specialization at each call site. Before the fix, Strict `check_overlap`
+    // returned `Err` here (`types_could_unify(Var, Text)` = overlap), silently
+    // dropping the reflexive `From` blanket at registration so
+    // `find_impl(_, From)` found nothing and static `Int.from(n)` could not
+    // resolve.
+    use verum_types::ty::TypeVar;
+    let checker = ProtocolChecker::new();
+    let blanket = make_impl("From", Type::Var(TypeVar::with_id(0)), Some("stdlib"));
+    let concrete = make_impl("From", named_type("Text"), Some("stdlib"));
+
+    // The universal blanket coexists with the concrete impl — both orderings.
+    assert!(
+        checker.check_overlap(&blanket, &concrete).is_ok(),
+        "universal blanket From<T> for T must coexist with concrete From (T0402)"
+    );
+    assert!(
+        checker.check_overlap(&concrete, &blanket).is_ok(),
+        "coexistence must hold regardless of registration order (T0402)"
+    );
+
+    // Guard against over-relaxation: two CONCRETE impls of the same
+    // protocol+type still conflict (the fix is scoped to bare-`Var` blankets).
+    let concrete2 = make_impl("From", named_type("Text"), Some("stdlib"));
+    assert!(
+        checker.check_overlap(&concrete, &concrete2).is_err(),
+        "two concrete From<..> for Text must still be flagged as overlapping"
+    );
+}
+
 // ==================== Orphan Rule Tests ====================
 
 #[test]
