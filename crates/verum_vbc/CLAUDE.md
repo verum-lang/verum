@@ -188,15 +188,23 @@ fallible variants; new callers should prefer the fallible surface.
 
 The crate ships two unit-test surfaces, gated by the `codegen` feature:
 
-| Command | Tests | Status |
-|---------|-------|--------|
-| `cargo test -p verum_vbc --lib` (default features) | 908 | all passing |
-| `cargo test -p verum_vbc --lib --features codegen` | 1546 | all passing |
+| Command | Surface |
+|---------|---------|
+| `cargo test -p verum_vbc --lib` (default features) | bytecode IR, interpreter, value model, intrinsic dispatch, monomorphization, serialization |
+| `cargo test -p verum_vbc --lib --features codegen` | the above plus the AST-to-VBC code-generation pipeline |
 
-The default surface covers bytecode IR, interpreter, value model, intrinsic
-dispatch, monomorphization, and serialization.  The `--features codegen` surface
-adds the AST-to-VBC code-generation pipeline (gated because it pulls in
-`verum_ast` / `verum_lexer` / `verum_parser` as optional deps).
+`codegen` is feature-gated because it pulls in `verum_ast` / `verum_lexer` /
+`verum_parser` as optional deps.
+
+Test counts are deliberately not pinned here — they move with every added test
+and a stale number reads as a target to hit.  Run the suite for the current
+figure; what is pinned is the gate and the known-red set below.
+
+**Known red (`--features codegen`), tracked by T0627:**
+`codegen::test_params::test_receiver_shadow_safety_free_fn_not_called_in_main`
+and `codegen::tests_e2e::debug_assert_cfg_tests::debug_assert_emits_assert_in_debug_mode`.
+Both assert on the body of a free fn that no caller reaches; do not treat
+either as a baseline to preserve.
 
 External fixtures: 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
 and 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`.
@@ -212,16 +220,9 @@ the test harness to `compile_module_with_mounts` for files that bring
 cross-module symbols in via `mount`).
 
 The CI gate is: any unit-test failure in either default-feature or
-`--features codegen` surface blocks the PR.  No new "known failure"
-should be documented here without an explicit tracking task.
-
-The earlier "Known Test Failures (Pre-existing)" section that listed
-five `cbgr_heap` / `shape` / `value` failures has been removed; all
-five were fixed before #177 close-out.
-
-The CI gate is: any unit-test failure in either default-feature or
-`--features codegen` surface blocks the PR.  No new "known failure"
-should be documented here without an explicit tracking task.
+`--features codegen` surface blocks the PR, except the two red tests
+listed under Test Coverage above.  No new "known failure" may be
+documented here without an explicit tracking task.
 
 ## Performance Targets
 
