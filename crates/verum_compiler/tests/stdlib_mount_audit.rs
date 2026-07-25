@@ -670,6 +670,20 @@ fn check_mount(
     if target.exports.contains(symbol) {
         return;
     }
+    // SUBMODULE mount, not an item mount.  `mount core.math.tensor;` names a
+    // MODULE, and the walker above cannot tell that apart from an item mount
+    // — it splits any simple path into "everything but the last segment" +
+    // "last segment as the symbol".  So a perfectly valid module mount was
+    // reported as a missing item, which is what produced most of the audit's
+    // historical noise (its `#[ignore]` reason claimed ~250 drifts; the real
+    // count once module mounts are recognised is far smaller).
+    //
+    // A submodule is valid iff the FULL path is itself a module the audit
+    // collected — `resolved` + `symbol` present in `by_path`.
+    let as_submodule = format!("{resolved}.{symbol}");
+    if by_path.contains_key(as_submodule.as_str()) {
+        return;
+    }
     // Probe transitive glob re-exports (e.g.
     // `core.intrinsics.mod.vr` exposes `atomic_*` via
     // `public mount atomic.*`).  Up to 3 levels of indirection — any
