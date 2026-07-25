@@ -1913,10 +1913,15 @@ pub fn info(features: bool, llvm: bool, all: bool) -> Result<(), CliError> {
 
     if llvm || all {
         println!("{}", "LLVM Backend:".bold());
-        #[cfg(feature = "llvm")]
-        println!("  Version: {}", "21.1 (via inkwell)");
-        #[cfg(not(feature = "llvm"))]
-        println!("  Status: {}", "Not built with LLVM support".yellow());
+        // `verum_cli` depends on verum_llvm / verum_llvm_sys unconditionally,
+        // so LLVM is ALWAYS linked.  This used to be gated on a `llvm` feature
+        // that no Cargo.toml declares, which made the gate permanently false —
+        // so `verum info --llvm` reported "Not built with LLVM support" on
+        // every build, including ones that do AOT.  The version is queried
+        // from LLVM itself rather than hardcoded, so it cannot drift.
+        let (major, minor, patch) = verum_llvm::support::get_llvm_version();
+        println!("  Version: {}.{}.{}", major, minor, patch);
+        println!("  Bindings: {}", "verum_llvm (in-tree fork)");
         println!();
     }
 
