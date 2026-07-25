@@ -211,19 +211,22 @@ pub fn stub_class(id: u32) -> Option<&'static str> {
     }
 }
 
+/// Band tops descend stage-1 → stage-5 and each band's bottom sits strictly
+/// above the next band's top, so the stub ranges never overlap.
+///
+/// Enforced at COMPILE time rather than by a test: the bases and the width are
+/// `const`, so a base edit that collapses two bands fails the build — an
+/// overlap would otherwise misclassify stub ids at runtime.
+const _: () = {
+    assert!(STAGE1_BASE - STUB_RANGE_WIDTH > STAGE2_BASE);
+    assert!(STAGE2_BASE - STUB_RANGE_WIDTH > STAGE3_BASE);
+    assert!(STAGE3_BASE - STUB_RANGE_WIDTH > STAGE4_BASE);
+    assert!(STAGE4_BASE - STUB_RANGE_WIDTH > STAGE5_BASE);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bands_are_disjoint_and_ordered() {
-        // Band tops descend stage-1 → stage-4; each band's bottom sits
-        // strictly above the next band's top.
-        assert!(STAGE1_BASE - STUB_RANGE_WIDTH > STAGE2_BASE);
-        assert!(STAGE2_BASE - STUB_RANGE_WIDTH > STAGE3_BASE);
-        assert!(STAGE3_BASE - STUB_RANGE_WIDTH > STAGE4_BASE);
-        assert!(STAGE4_BASE - STUB_RANGE_WIDTH > STAGE5_BASE);
-    }
 
     #[test]
     fn stage_of_classifies_bases_and_bottoms() {

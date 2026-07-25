@@ -50,6 +50,20 @@ pub fn ordering_value(name: &str) -> Option<i64> {
     }
 }
 
+/// Ordering values are strictly increasing — the "stronger ordering = larger
+/// value" invariant that codegen relies on for integer-comparison-based
+/// ordering analysis.
+///
+/// Enforced at COMPILE time rather than by a test: these are `const`s, so the
+/// property is decidable statically and any edit that breaks the progression
+/// fails the build instead of waiting for someone to run the suite.
+const _: () = {
+    assert!(ORDERING_RELAXED < ORDERING_ACQUIRE);
+    assert!(ORDERING_ACQUIRE < ORDERING_RELEASE);
+    assert!(ORDERING_RELEASE < ORDERING_ACQ_REL);
+    assert!(ORDERING_ACQ_REL < ORDERING_SEQ_CST);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,17 +79,6 @@ mod tests {
         assert_eq!(ORDERING_RELEASE, 2);
         assert_eq!(ORDERING_ACQ_REL, 3);
         assert_eq!(ORDERING_SEQ_CST, 4);
-    }
-
-    /// Ordering values are strictly increasing — captures the
-    /// "stronger ordering = larger value" invariant codegen relies
-    /// on for integer-comparison-based ordering analysis.
-    #[test]
-    fn ordering_values_monotonic() {
-        assert!(ORDERING_RELAXED < ORDERING_ACQUIRE);
-        assert!(ORDERING_ACQUIRE < ORDERING_RELEASE);
-        assert!(ORDERING_RELEASE < ORDERING_ACQ_REL);
-        assert!(ORDERING_ACQ_REL < ORDERING_SEQ_CST);
     }
 
     /// Lookup helper resolves all canonical names + rejects unknowns.
