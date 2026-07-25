@@ -1737,8 +1737,25 @@ mod syntactic_tests {
         }
 
         #[test]
-        fn test_const_missing_type() {
-            assert_module_fails("const PI = 3.14;");
+        fn test_const_inferred_type() {
+            // A const may omit its type annotation; the type checker infers it
+            // from the initialiser. The parser implements this deliberately
+            // (verum_fast_parser/src/decl.rs, const branch) and the canonical
+            // copy of this suite pins it as
+            // `assert_module_parses("const PI = 3.14;")`.
+            //
+            // This test previously asserted the OPPOSITE under the name
+            // test_const_missing_type — one of only two tests unique to this
+            // near-duplicate of verum_fast_parser/tests/grammar_tests.rs (427
+            // of ~440 names are shared). Since verum_parser::RecursiveParser
+            // is a re-export of the fast-parser type, both files exercise the
+            // same parser, so the two assertions could not both hold.
+            //
+            // NOTE grammar/verum.ebnf:2055 still spells const_def with a
+            // mandatory `':' type_expr`, which matches neither the parser nor
+            // the canonical test — grammar drift, tracked with the extern-fn
+            // drift in T0643.
+            assert_module_parses("const PI = 3.14;");
         }
     }
 
