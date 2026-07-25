@@ -987,10 +987,10 @@ pub fn lookup_builtin_variant_constructor(
 ) -> Option<(&'static str, &'static VariantLayoutEntry)> {
     if let Some((parent, simple)) = func_name.split_once('.') {
         for (carrier_name, layout) in BUILTIN_VARIANT_CARRIERS.iter() {
-            if *carrier_name == parent {
-                if let Some(entry) = layout.iter().find(|e| e.name == simple) {
-                    return Some((carrier_name, entry));
-                }
+            if *carrier_name == parent
+                && let Some(entry) = layout.iter().find(|e| e.name == simple)
+            {
+                return Some((carrier_name, entry));
             }
         }
         return None;
@@ -2197,7 +2197,7 @@ pub fn primitive_implements_protocol(type_name: &str, protocol_name: &str) -> Op
         },
     };
 
-    Some(protocols.iter().any(|p| *p == proto))
+    Some(protocols.contains(&proto))
 }
 
 #[cfg(test)]

@@ -97,13 +97,11 @@ pub fn safe_prefix(text: &str, byte_offset: usize) -> &str {
 #[inline]
 pub fn truncate_chars(text: &str, max_chars: usize) -> &str {
     let mut take_bytes = 0;
-    let mut count = 0;
-    for (byte_idx, ch) in text.char_indices() {
+    for (count, (byte_idx, ch)) in text.char_indices().enumerate() {
         if count >= max_chars {
             return &text[..take_bytes];
         }
         take_bytes = byte_idx + ch.len_utf8();
-        count += 1;
     }
     text
 }
