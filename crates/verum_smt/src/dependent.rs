@@ -188,10 +188,15 @@ impl PiType {
             TypeKind::Record { fields, .. } => fields
                 .iter()
                 .any(|f| self.type_references_name(&f.ty, name)),
-            // Path equality type: check the carrier type for name references
-            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
-                self.type_references_name(carrier, name)
-            }
+            // Path equality type: check the carrier type for name references.
+            //
+            // DependentApp deliberately does NOT share this arm. It used to,
+            // and because that arm came first it shadowed the dedicated one
+            // below — so the value indices were never examined and this
+            // function answered "does not reference" for any name occurring
+            // only in an index. rustc flags it as an unreachable pattern; the
+            // warning was simply never read.
+            TypeKind::PathType { carrier, .. } => self.type_references_name(carrier, name),
             // Dependent type application `T<A>(v..)`: check the carrier
             // and each value index for references to the bound name.
             TypeKind::DependentApp {

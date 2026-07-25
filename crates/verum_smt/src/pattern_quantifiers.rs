@@ -153,11 +153,16 @@ pub fn type_to_sort(ty: &Type) -> Sort {
             Sort::uninterpreted(Symbol::String("TypeLambda".to_string()))
         }
         // Path equality type: use carrier type's sort
-        TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
-            type_to_sort(carrier)
-        }
+        TypeKind::PathType { carrier, .. } => type_to_sort(carrier),
         // Dependent type application `T<A>(v..)`: use carrier sort,
         // value indices do not affect Z3 sort translation.
+        //
+        // Kept as its own arm rather than folded into PathType above: it was
+        // folded in AND repeated here, so this arm was unreachable and the
+        // reasoning in the comment applied to code that never ran. Both
+        // spellings compute the same sort, so nothing changes at runtime —
+        // unlike the same shadowing in dependent.rs::type_references_name,
+        // where the dead arm was the one that inspected value_args.
         TypeKind::DependentApp { carrier, .. } => type_to_sort(carrier),
     }
 }
