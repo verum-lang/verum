@@ -559,7 +559,7 @@ mod tests {
             HeapPredicate::Emp,
             HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
             HeapPredicate::sep(HeapPredicate::Emp, HeapPredicate::Emp),
-            HeapPredicate::HeapPredicate_and_for_test(),
+            HeapPredicate::heap_predicate_and_for_test(),
             HeapPredicate::pure(Term::universe(0)),
             HeapPredicate::named("list", vec![]),
         ];
@@ -629,12 +629,12 @@ mod tests {
 // only used by the architectural-pin test above.
 #[cfg(test)]
 trait HeapPredicateAndForTest {
-    fn HeapPredicate_and_for_test() -> Self;
+    fn heap_predicate_and_for_test() -> Self;
 }
 
 #[cfg(test)]
 impl HeapPredicateAndForTest for HeapPredicate {
-    fn HeapPredicate_and_for_test() -> Self {
+    fn heap_predicate_and_for_test() -> Self {
         HeapPredicate::And {
             lhs: Box::new(HeapPredicate::Emp),
             rhs: Box::new(HeapPredicate::Emp),

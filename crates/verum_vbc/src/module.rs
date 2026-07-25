@@ -89,6 +89,9 @@ fn push_ctx_type_id(instr: &Instruction, ids: &mut Vec<u32>) {
     }
 }
 
+/// A complete VBC module: header, pools (strings/constants/types), function
+/// descriptors and their bytecode — the unit produced by codegen, serialized
+/// into a `.vbc`/`.vbca` archive and executed by the interpreter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VbcModule {
     /// Module header.
@@ -1456,6 +1459,8 @@ impl VbcModule {
         best.map(|(_, _, _, _, fid)| fid)
     }
 
+    /// Resolve a function id by name, with a deterministic tie-break among
+    /// same-named entries (see the ARCH-P2 note below).
     pub fn find_function_by_name(&self, name: &str) -> Option<FunctionId> {
         // ARCH-P2 step 0b (dispatch tie-break determinism): among
         // SAME-NAMED entries the winner used to be "lowest id" — an
@@ -2488,7 +2493,12 @@ pub enum Constant {
     /// 128-bit integer constant (T0272): the raw two's-complement bits plus a
     /// signedness flag (`Int128` vs `UInt128`). A value outside the i64 range
     /// cannot survive the `Int(i64)` collapse, so it is carried at full width.
-    Int128 { raw: u128, signed: bool },
+    Int128 {
+        /// Raw 128-bit payload; reinterpreted per `signed`.
+        raw: u128,
+        /// `true` for `Int128`, `false` for `UInt128`.
+        signed: bool,
+    },
     /// Float constant.
     Float(f64),
     /// String constant (index into string table).

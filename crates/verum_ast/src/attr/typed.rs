@@ -9423,7 +9423,7 @@ impl std::fmt::Display for DocAttr {
 mod doc_attr_tests {
     use super::*;
     use crate::expr::{Expr, ExprKind};
-    use crate::literal::{Literal, LiteralKind, StringLit};
+    use crate::literal::Literal;
     use crate::ty::{Ident, Path, PathSegment};
 
     fn span() -> Span {

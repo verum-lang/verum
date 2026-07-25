@@ -53,14 +53,20 @@ pub enum UniverseTier {
 /// `rank + 1` otherwise.
 #[derive(Debug, Clone, Copy)]
 pub struct UniverseTierMeta {
+    /// Stable lowercase identifier of the tier ("truncated", "kappa1", ...).
     pub name: &'static str,
+    /// Ordinal rank of the tier: 0 for the truncated base, ascending upward.
     pub rank: u8,
+    /// Rank of this tier's successor. Equals `rank` for the saturated top
+    /// tier (`Kappa2`, where `succ(K2) == K2`) and `rank + 1` otherwise.
     pub successor_rank: u8,
 }
 
 impl UniverseTier {
+    /// Every universe tier, in ascending rank order.
     pub const ALL: &'static [Self] = &[Self::Truncated, Self::Kappa1, Self::Kappa2];
 
+    /// Static metadata (name / rank / successor rank) for this tier.
     pub const fn meta(self) -> UniverseTierMeta {
         match self {
             Self::Truncated => UniverseTierMeta {

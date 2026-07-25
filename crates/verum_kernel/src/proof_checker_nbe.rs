@@ -906,7 +906,7 @@ pub fn verify_certificate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_checker::{self, Certificate};
+    use crate::proof_checker::Certificate;
 
     /// Build the polymorphic-identity certificate (same as
     /// proof_checker::tests). Term: λ(A:Universe(0)). λ(x:Var(0)). Var(0).

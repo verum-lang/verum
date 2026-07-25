@@ -5475,7 +5475,6 @@ fn register_module_filtered(
         // whose source-module-qualified descriptor.name ends in `.name`,
         // register the function under the user's wanted form too.
         let simple_leaf = simple_name.rsplit('.').next().unwrap_or(simple_name.as_str());
-        let simple_prefix = simple_name.split('.').next().unwrap_or(simple_name.as_str());
         for w in wanted.iter() {
             if w == &qualified {
                 continue;

@@ -1049,6 +1049,7 @@ pub enum CubicalCategory {
 }
 
 impl CubicalCategory {
+    /// Stable human-readable label for this cubical-category axis.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::PathConstruction     => "Path Construction",
@@ -5338,10 +5339,15 @@ pub enum SystemSubOpcode {
     /// cluster in the 2026-07-03 sweep).  Formats: load `dst:reg, addr:reg`,
     /// store `dst:reg, addr:reg, value:reg` (dst receives 0).
     RawLoadU8 = 0x53,
+    /// Store one byte at a raw address: `dst, addr, value` (dst receives 0).
     RawStoreU8 = 0x54,
+    /// Load a 32-bit integer from a raw address: `dst, addr`.
     RawLoadI32 = 0x55,
+    /// Store a 32-bit integer at a raw address: `dst, addr, value`.
     RawStoreI32 = 0x56,
+    /// Load a 64-bit integer from a raw address: `dst, addr`.
     RawLoadI64 = 0x57,
+    /// Store a 64-bit integer at a raw address: `dst, addr, value`.
     RawStoreI64 = 0x58,
 
     /// Flat TLS slot quartet — `tls_slot_get/set/has/clear` (runtime/tls.vr).
@@ -5351,8 +5357,11 @@ pub enum SystemSubOpcode {
     /// and the whole set/get/has round-trip broke.  Formats:
     /// get `dst,slot` / set `slot,value` / has `dst,slot` / clear `slot`.
     TlsSlotGetF = 0x59,
+    /// Set a flat TLS slot: `slot, value`.
     TlsSlotSetF = 0x5A,
+    /// Test whether a flat TLS slot is occupied: `dst, slot`.
     TlsSlotHasF = 0x5B,
+    /// Clear a flat TLS slot: `slot`.
     TlsSlotClearF = 0x5C,
     /// `tls_get_base` — an opaque non-null TLS base pointer.  The old route
     /// (OpcodeWithMode(TlsGet, 0)) returned the CONTENT of context slot 0.
@@ -5824,7 +5833,9 @@ pub enum SystemSubOpcode {
     /// raw u32 where the signature promises Bool.  Formats:
     /// try_lock `dst,lock` (Bool) / unlock `lock` / is_locked `dst,lock` (Bool).
     SpinlockTryLock = 0xB3,
+    /// Release a spinlock: `lock`.
     SpinlockUnlock = 0xB4,
+    /// Test whether a spinlock is currently held: `dst, lock` (Bool).
     SpinlockIsLocked = 0xB5,
     /// WaitGroup family (`__waitgroup_*_raw`, sync.vr #65).  Interp: the
     /// handle-table impl in `interpreter::waitgroup`; AOT: an 8-byte

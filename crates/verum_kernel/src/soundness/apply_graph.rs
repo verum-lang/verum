@@ -1526,7 +1526,7 @@ mod tests {
         use verum_ast::expr::{Expr, ExprKind};
         use verum_ast::span::FileId;
         use verum_ast::ty::Ident;
-        use verum_common::{Heap, List};
+        use verum_common::List;
 
         let prop = Expr::new(
             ExprKind::Literal(verum_ast::Literal::bool(true, Span::dummy())),

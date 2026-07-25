@@ -479,7 +479,7 @@ pub(in super::super) fn handle_extended(
 /// FIELD-ACCESS-BYNAME-1 shared resolver: the object's header pointer and
 /// TypeId, with a loud typed error for every non-object shape.
 pub(in super::super) fn field_named_object(
-    state: &InterpreterState,
+    _state: &InterpreterState,
     obj_val: crate::value::Value,
     op: &str,
 ) -> InterpreterResult<(crate::types::TypeId, *const u8)> {

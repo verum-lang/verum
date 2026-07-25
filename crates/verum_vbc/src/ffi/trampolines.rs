@@ -356,6 +356,7 @@ impl TrampolineRegistry {
             .map(|cb| cb.context.function_id)
     }
 
+    /// Raw code pointer of a registered callback trampoline, if `id` is live.
     pub fn get_code_ptr(&self, id: TrampolineId) -> Option<*const ()> {
         self.callbacks.get(&id).map(|cb| cb.code_ptr)
     }

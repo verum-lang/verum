@@ -99,13 +99,21 @@ pub mod nanbox {
 
     // Tag values (0-7, fits in 3 bits). `pub` so external crates can
     // construct typed values without re-deriving the bit layout.
+    /// Heap pointer — payload is the 48-bit heap address.
     pub const TAG_POINTER: u64 = 0x0;
+    /// Integer — payload is a 48-bit signed value.
     pub const TAG_INTEGER: u64 = 0x1;
+    /// Boolean — payload is 0 (false) or 1 (true).
     pub const TAG_BOOLEAN: u64 = 0x2;
+    /// Unit `()` — payload is 0.
     pub const TAG_UNIT: u64 = 0x3;
+    /// Small string stored inline in the payload (up to 6 bytes).
     pub const TAG_SMALL_STRING: u64 = 0x4;
+    /// Type reference — payload is a 48-bit type id.
     pub const TAG_TYPE_REF: u64 = 0x5;
+    /// Function reference — payload is a 48-bit function id.
     pub const TAG_FUNC_REF: u64 = 0x6;
+    /// Sentinel quiet NaN (a genuine float NaN, not a boxed value).
     pub const TAG_NAN: u64 = 0x7;
 
     /// Compose a tagged-header u64 from `NAN_BITS` and a 3-bit tag.

@@ -85,7 +85,6 @@ use verum_vbc::module::{FunctionId, VbcModule};
 use verum_vbc::mono::{
     InstantiationGraph, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase, SourceLocation,
 };
-use verum_vbc::types::TypeRef;
 
 // ============================================================================
 // Monomorphization Phase

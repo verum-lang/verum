@@ -1921,7 +1921,6 @@ mod tests {
     use super::*;
     use verum_ast::Literal;
     use verum_ast::Span;
-    use verum_ast::literal::IntLit;
     use verum_ast::pattern::{Pattern, PatternKind};
     use verum_ast::ty::{Ident, Path};
     use verum_common::Heap;

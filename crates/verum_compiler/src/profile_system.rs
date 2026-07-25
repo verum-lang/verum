@@ -475,7 +475,10 @@ mod profile_meta_drift_pins {
                     "{:?}: default tier is Interpreter but is_vbc_interpretable=false", p),
                 ExecutionTier::Aot => assert!(p.requires_aot(),
                     "{:?}: default tier is Aot but requires_aot=false", p),
-                _ => {}  // Check / other tiers — no specific invariant
+                // No `_` arm: `Interpreter` and `Aot` already cover every
+                // `ExecutionTier`, so a catch-all was unreachable. Leaving the
+                // match exhaustive means ADDING a tier fails to compile here
+                // until its interpretability/AOT invariant is stated.
             }
         }
     }

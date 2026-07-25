@@ -116,7 +116,9 @@ pub enum WaitOutcome {
 /// What kind of readiness the caller wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InterestKind {
+    /// Wait until the source has data available to read.
     Readable,
+    /// Wait until the sink can accept more data without blocking.
     Writable,
 }
 

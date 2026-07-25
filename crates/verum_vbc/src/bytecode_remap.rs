@@ -33,18 +33,23 @@ use crate::types::{ProtocolId, StringId, TypeId};
 /// stdlib types declared in a sibling cog) resolve at runtime instead
 /// of failing at link time.
 pub trait IdRemap {
+    /// Map a string-pool id into the destination module (identity by default).
     fn map_string(&self, src: StringId) -> StringId {
         src
     }
+    /// Map a function id into the destination module (identity by default).
     fn map_function(&self, src: FunctionId) -> FunctionId {
         src
     }
+    /// Map a type id into the destination module (identity by default).
     fn map_type_id(&self, src: TypeId) -> TypeId {
         src
     }
+    /// Map a constant-pool id into the destination module (identity by default).
     fn map_const(&self, src: ConstId) -> ConstId {
         src
     }
+    /// Map a protocol id into the destination module (identity by default).
     fn map_protocol(&self, src: ProtocolId) -> ProtocolId {
         src
     }

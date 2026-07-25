@@ -210,7 +210,7 @@ fn bench_depth_lookup(c: &mut Criterion) {
     group.bench_function("hot_lookup", |b| {
         // Warm up cache
         for _ in 0..100 {
-            policy.depth_for_function(FunctionId(42));
+            let _ = policy.depth_for_function(FunctionId(42));
         }
 
         b.iter(|| {

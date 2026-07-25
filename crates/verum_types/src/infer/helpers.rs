@@ -1491,35 +1491,6 @@ pub(crate) fn collect_named_types_from_function_body(
     // fallback at typecheck time.
 }
 
-/// Per-variant signature registration extracted from
-/// `load_stdlib_from_metadata` so the lazy loader can register one
-/// type's variants without walking the entire stdlib.  Mirrors the
-/// eager loader's behaviour for that single type.
-/// Parse a `archive_metadata::type_ref_to_text` output string
-/// back into a structured `Type`.
-///
-/// **Stdlib-agnostic**: no hardcoded type names.  Built-in
-/// primitive type names (`Int`, `Float`, `Bool`, `Char`, `Text`,
-/// `Unit`, …) are registered as `Type::*` variants in
-/// `ctx.type_defs` by `register_primitives`; user-side resolution
-/// via `Type::Named` lookup recovers them at unify time.  This
-/// parser is a pure structural decoder for compound type strings:
-///
-/// * empty / `"()"` → `Type::Unit` (the single language-level
-///   special case — `()` is a sigil, not a type name);
-/// * `"&T"` / `"&mut T"` → `Type::Reference` over the parsed
-///   inner type;
-/// * `"Base<arg1, arg2, …>"` → `Type::Generic` with parsed args
-///   (top-level commas only, nested generics handled via
-///   depth counter);
-/// * bare identifiers → `Type::Named` — the unifier's
-///   `try_expand_alias` and `ctx.lookup_type` resolve these
-///   against the user's type registry.
-///
-/// Without this parser, signatures stored as compound strings
-/// degrade to opaque `Type::Named { path: "IoResult<Metadata>" }`
-/// blobs that never unify with `Type::Generic { name: "IoResult",
-/// args: [Type::Named { Metadata }] }` at call sites.
 thread_local! {
     /// Per-function-scheme interning map for `__generic_N` placeholders.
     /// `Some` while inside [`with_generic_var_scope`]; `None` otherwise.
@@ -1758,6 +1729,31 @@ mod build_metadata_function_scheme_tests {
     }
 }
 
+/// Parse a `archive_metadata::type_ref_to_text` output string
+/// back into a structured `Type`.
+///
+/// **Stdlib-agnostic**: no hardcoded type names.  Built-in
+/// primitive type names (`Int`, `Float`, `Bool`, `Char`, `Text`,
+/// `Unit`, …) are registered as `Type::*` variants in
+/// `ctx.type_defs` by `register_primitives`; user-side resolution
+/// via `Type::Named` lookup recovers them at unify time.  This
+/// parser is a pure structural decoder for compound type strings:
+///
+/// * empty / `"()"` → `Type::Unit` (the single language-level
+///   special case — `()` is a sigil, not a type name);
+/// * `"&T"` / `"&mut T"` → `Type::Reference` over the parsed
+///   inner type;
+/// * `"Base<arg1, arg2, …>"` → `Type::Generic` with parsed args
+///   (top-level commas only, nested generics handled via
+///   depth counter);
+/// * bare identifiers → `Type::Named` — the unifier's
+///   `try_expand_alias` and `ctx.lookup_type` resolve these
+///   against the user's type registry.
+///
+/// Without this parser, signatures stored as compound strings
+/// degrade to opaque `Type::Named { path: "IoResult<Metadata>" }`
+/// blobs that never unify with `Type::Generic { name: "IoResult",
+/// args: [Type::Named { Metadata }] }` at call sites.
 pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "()" {
@@ -2041,6 +2037,10 @@ pub(crate) fn split_top_level_commas(s: &str) -> Vec<&str> {
     out
 }
 
+/// Per-variant signature registration extracted from
+/// `load_stdlib_from_metadata` so the lazy loader can register one
+/// type's variants without walking the entire stdlib.  Mirrors the
+/// eager loader's behaviour for that single type.
 pub(crate) fn register_variant_signature_for_lazy(
     checker: &mut TypeChecker,
     name: &Text,

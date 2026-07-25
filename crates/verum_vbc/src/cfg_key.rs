@@ -38,14 +38,22 @@ use crate::types::StringId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetOs {
+    /// Apple platforms (macOS / iOS) — `target_os = "macos"`.
     Darwin,
+    /// Linux — `target_os = "linux"`.
     Linux,
+    /// Windows — `target_os = "windows"`.
     Windows,
+    /// FreeBSD — `target_os = "freebsd"`.
     FreeBsd,
+    /// OpenBSD — `target_os = "openbsd"`.
     OpenBsd,
+    /// NetBSD — `target_os = "netbsd"`.
     NetBsd,
+    /// WASI — `target_os = "wasi"`.
     Wasi,
-    None, // bare-metal / embedded
+    /// No OS: bare-metal / embedded targets.
+    None,
     /// Anything else — token text stored in the module string-pool so
     /// older readers can still print the value.
     Other(StringId),
@@ -55,16 +63,28 @@ pub enum TargetOs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetArch {
+    /// 64-bit x86 — `target_arch = "x86_64"`.
     X86_64,
+    /// 64-bit ARM — `target_arch = "aarch64"`.
     Aarch64,
+    /// 32-bit ARM — `target_arch = "arm"`.
     Arm,
+    /// 64-bit RISC-V — `target_arch = "riscv64"`.
     Riscv64,
+    /// 64-bit PowerPC — `target_arch = "powerpc64"`.
     PowerPc64,
+    /// IBM z/Architecture — `target_arch = "s390x"`.
     S390x,
+    /// 32-bit WebAssembly — `target_arch = "wasm32"`.
     Wasm32,
+    /// 64-bit WebAssembly — `target_arch = "wasm64"`.
     Wasm64,
+    /// eBPF, little-endian — `target_arch = "bpfel"`.
     Bpfel,
+    /// eBPF, big-endian — `target_arch = "bpfeb"`.
     Bpfeb,
+    /// Anything else — token text stored in the module string-pool so
+    /// older readers can still print the value.
     Other(StringId),
 }
 
@@ -74,8 +94,11 @@ pub enum TargetArch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PtrWidth {
+    /// 32-bit pointers — `target_pointer_width = "32"`.
     Bits32,
+    /// 64-bit pointers — `target_pointer_width = "64"`.
     Bits64,
+    /// Any other width in bits (e.g. 16 on small embedded targets).
     Custom(u8),
 }
 
@@ -83,7 +106,9 @@ pub enum PtrWidth {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Endian {
+    /// Little-endian — `target_endian = "little"`.
     Little,
+    /// Big-endian — `target_endian = "big"`.
     Big,
 }
 
@@ -109,9 +134,13 @@ pub enum Endian {
 /// triple — that is the "universal" function variant equivalent.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct CfgKey {
+    /// Required `target_os`, or `None` to match any OS.
     pub os: Option<TargetOs>,
+    /// Required `target_arch`, or `None` to match any architecture.
     pub arch: Option<TargetArch>,
+    /// Required `target_pointer_width`, or `None` to match any width.
     pub ptr_width: Option<PtrWidth>,
+    /// Required `target_endian`, or `None` to match either endianness.
     pub endian: Option<Endian>,
     /// Required cfg features (e.g. `target_feature = "neon"`).
     /// Variants without features list have an empty SmallVec.

@@ -76,17 +76,29 @@ pub enum LinkError {
     /// rewrite. The variant-list inside [`crate::instruction::Instruction`]
     /// has grown faster than this rewriter; add the new variant to
     /// `rewrite_instruction_ids` and re-run.
-    UnhandledInstruction { opcode: u8, offset: usize },
+    UnhandledInstruction {
+        /// Opcode byte the rewriter does not handle.
+        opcode: u8,
+        /// Byte offset of the instruction in the source stream.
+        offset: usize,
+    },
     /// A `func_id` / `type_id` / `string_id` operand referenced an ID
     /// outside the source module's table. Either the source archive is
     /// corrupt or the rewriter has a bug.
     DanglingReference {
+        /// Which table the id belongs to ("func", "type", "string", ...).
         kind: &'static str,
+        /// The out-of-range id as it appeared in the source module.
         source_id: u32,
     },
     /// The bytecode instruction stream couldn't be decoded — a length
     /// prefix said `N` bytes but only `M < N` were available.
-    TruncatedBytecode { offset: usize, want: usize },
+    TruncatedBytecode {
+        /// Byte offset where decoding stopped.
+        offset: usize,
+        /// Number of bytes the length prefix promised.
+        want: usize,
+    },
 }
 
 impl std::fmt::Display for LinkError {
