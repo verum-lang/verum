@@ -8994,7 +8994,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 1,
         return_count: 1,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsNan),
+        // Width 4 selects the F32 sub-op — see `is_infinite_f32` for why the
+        // width has to be carried here. NaN-ness alone survives narrowing
+        // either way, but routing it through the same mechanism keeps the
+        // three float-classification intrinsics honest about their operand.
+        strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::IsNan, 4),
         mlir_op: Some("arith.cmpf uno"),
         doc: "Check if f32 is NaN",
     },
@@ -9008,9 +9012,32 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         ],
         param_count: 1,
         return_count: 1,
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsInf),
+        // Width-carrying, unlike the f64 twin: `InlineSequence` hands the
+        // emitter `ptr_elem_stride`, which is 8 for every non-pointer
+        // intrinsic, so an f32 entry registered that way is indistinguishable
+        // from its f64 twin and silently lowers to the F64 sub-op. Width 4 is
+        // the marker (a stride is only ever 8, or 1 for byte buffers).
+        strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::IsInf, 4),
         mlir_op: Some("arith.cmpf ord"),
         doc: "Check if f32 is infinite",
+    },
+    Intrinsic {
+        // The f32 twin of `is_finite_f64`. Absent until T0422: the
+        // IsFiniteF32 sub-op and its interpreter arm existed with no registry
+        // entry able to reach them, so the arm was unreachable by
+        // construction.
+        name: "is_finite_f32",
+        category: IntrinsicCategory::Float32,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 1,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::IsFinite, 4),
+        mlir_op: None,
+        doc: "Check if f32 is finite (not NaN or infinity)",
     },
     Intrinsic {
         name: "eq_f32",

@@ -32078,10 +32078,29 @@ impl VbcCodegen {
 
             // Float special checks
             InlineSequenceId::IsNan | InlineSequenceId::IsInf | InlineSequenceId::IsFinite => {
-                let func_name = match seq_id {
-                    InlineSequenceId::IsNan => "verum_is_nan",
-                    InlineSequenceId::IsInf => "verum_is_inf",
-                    InlineSequenceId::IsFinite => "verum_is_finite",
+                // The f32 and f64 intrinsics share a seq_id, so the operand
+                // width is the ONLY thing distinguishing them here. It arrives
+                // as 4 exactly for the f32 registry entries, which carry it
+                // via `InlineSequenceWithWidth`; every other caller of this
+                // arm gets `ptr_elem_stride`, which is 8 (or 1 for byte
+                // buffers) and never 4.
+                //
+                // Before T0422 this arm always emitted the bare name, so the
+                // string match downstream always chose the F64 sub-op and the
+                // F32 arms were unreachable. That is not a harmless alias for
+                // two of the three: narrowing a finite f64 whose magnitude
+                // exceeds f32 range (1e300, say) yields infinity, so
+                // `is_infinite`/`is_finite` genuinely disagree between the
+                // widths. Only `is_nan` is width-invariant, since narrowing
+                // never manufactures a NaN.
+                let is_f32 = byte_width == 4;
+                let func_name = match (seq_id, is_f32) {
+                    (InlineSequenceId::IsNan, false) => "verum_is_nan",
+                    (InlineSequenceId::IsNan, true) => "verum_is_nan_f32",
+                    (InlineSequenceId::IsInf, false) => "verum_is_inf",
+                    (InlineSequenceId::IsInf, true) => "verum_is_inf_f32",
+                    (InlineSequenceId::IsFinite, false) => "verum_is_finite",
+                    (InlineSequenceId::IsFinite, true) => "verum_is_finite_f32",
                     _ => "verum_is_nan",
                 };
                 self.emit_intrinsic_library_call(func_name, args, dest)?;
