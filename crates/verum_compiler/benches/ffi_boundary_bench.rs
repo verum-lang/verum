@@ -215,8 +215,7 @@ fn bench_scaling_with_parameters(c: &mut Criterion) {
 // ============================================================================
 
 fn bench_marshalling_overhead_target(c: &mut Criterion) {
-    // Target: <10ns marshalling overhead
-    const TARGET_NS: u64 = 10;
+    // Target: <10ns marshalling overhead (measured by the group below).
 
     let function = create_simple_ffi_function();
 

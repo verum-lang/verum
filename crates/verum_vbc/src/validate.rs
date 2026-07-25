@@ -1336,15 +1336,21 @@ mod tests {
 pub enum VariantLayoutError {
     /// type_id has no descriptor in the module's type table.
     UnknownTypeId {
+        /// Type id that has no descriptor in the module's type table.
         type_id: TypeId,
+        /// Variant tag the instruction referenced.
         tag: u32,
+        /// Field count the instruction tried to emit.
         got_field_count: u32,
     },
     /// type_id is registered but its descriptor has no variant
     /// matching `tag`.
     UnknownTag {
+        /// Type id whose descriptor was found.
         type_id: TypeId,
+        /// Variant tag that the descriptor does not define.
         tag: u32,
+        /// Field count the instruction tried to emit.
         got_field_count: u32,
     },
     /// `(type_id, tag)` resolves to a variant descriptor whose
@@ -1352,6 +1358,7 @@ pub enum VariantLayoutError {
     /// `expected` is the variant's declared arity; `got` is what
     /// the instruction tried to emit.
     FieldCountMismatch {
+        /// Type id whose variant arity disagrees with the bytecode.
         type_id: TypeId,
         /// Resolved type name (for diagnostics) — identifies which type's
         /// descriptor disagrees with codegen, so the MakeVariantTyped drift
@@ -1359,8 +1366,11 @@ pub enum VariantLayoutError {
         type_name: String,
         /// Resolved variant name at `tag`.
         variant_name: String,
+        /// Variant tag being constructed.
         tag: u32,
+        /// Arity declared by the variant descriptor.
         expected: u32,
+        /// Field count the instruction tried to emit.
         got: u32,
     },
 }

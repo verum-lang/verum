@@ -395,6 +395,7 @@ pub struct HostCallContext {
     pub host_fns: HashMap<String, crate::module::FunctionId>,
 }
 
+/// Mutable execution state of one interpreter instance: registers, frames, heap, contexts and the CBGR bookkeeping shared by every dispatch handler.
 pub struct InterpreterState {
     /// Current module being executed.
     pub module: Arc<VbcModule>,
@@ -2923,6 +2924,7 @@ impl InterpreterState {
         val
     }
 
+    /// Elements of `val` when it is a list value, else `None`.
     pub fn list_elements(&self, val: Value) -> Option<Vec<Value>> {
         use crate::interpreter::heap::OBJECT_HEADER_SIZE;
         let val = self.normalize_collection_value(val);

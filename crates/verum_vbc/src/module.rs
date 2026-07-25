@@ -3278,10 +3278,15 @@ pub struct TheoremId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TheoremKind {
+    /// A full theorem.
     Theorem,
+    /// A lemma — an auxiliary result supporting a theorem.
     Lemma,
+    /// A corollary — an immediate consequence of a preceding result.
     Corollary,
+    /// An axiom — asserted without proof.
     Axiom,
+    /// A tactic — a reusable proof step rather than a proposition.
     Tactic,
 }
 
@@ -3312,6 +3317,7 @@ pub enum TheoremLifecycle {
 /// `T` translations stored as already-rendered text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TheoremParamEntry {
+    /// Parameter name, interned in the module string pool.
     pub name: StringId,
     /// Per-backend type-text. `(backend_id, rendered_type_text)`.
     /// Backend IDs match `per_backend_propositions` keys.
@@ -3323,6 +3329,7 @@ pub struct TheoremParamEntry {
 /// generic carries no protocol constraint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TheoremGenericEntry {
+    /// Generic parameter name, interned in the module string pool.
     pub name: StringId,
     /// Per-backend bound text. Empty when `<S>` has no `: Bound`.
     pub per_backend_bound: SmallVec<[(StringId, StringId); 2]>,
@@ -3376,7 +3383,9 @@ pub struct FrameworkProvenance {
 /// One `@framework(name, citation)` attribute occurrence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrameworkCitation {
+    /// Framework name as written in `@framework(name, citation)`.
     pub framework_name: StringId,
+    /// Citation text for the framework reference.
     pub citation: StringId,
     /// Theorem / function this citation decorates.
     pub item_kind: ProvenanceItemKind,
@@ -3387,10 +3396,15 @@ pub struct FrameworkCitation {
 /// One `@framework_translate(src, tgt, citation)` bridge edge.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrameworkTranslation {
+    /// Source framework of the translation edge.
     pub source_framework: StringId,
+    /// Target framework of the translation edge.
     pub target_framework: StringId,
+    /// Citation backing the translation.
     pub citation: StringId,
+    /// Theorem / function this translation decorates.
     pub item_kind: ProvenanceItemKind,
+    /// Local item ID — interpretation depends on `item_kind`.
     pub item_id: u32,
 }
 
@@ -3541,7 +3555,7 @@ mod precompile_extension_tests {
         let _ = &mut desc;
         m.functions.push(desc);
 
-        let mut intern = |s: &str| m.strings.intern(s);
+        let intern = |s: &str| m.strings.intern(s);
         // Mutable borrow conflict — re-do via a counter so the test
         // doesn't entangle borrows of `m` and `intern`.
         let cfg = CfgKey {

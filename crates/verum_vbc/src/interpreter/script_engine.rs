@@ -240,6 +240,7 @@ impl HandleMagic for ScriptWorld {
 }
 
 #[repr(C)]
+/// Embeddable script engine: owns a VBC module plus the interpreter state used by the host-facing script API.
 pub struct ScriptEngine {
     /// Type-unique magic word at offset 0 (see [`HandleMagic`]) — a handle deref
     /// reads it to reject a wrong-type or freed handle before trusting the
@@ -685,6 +686,7 @@ impl ScriptOutcome {
             .map(|(k, _)| k.clone())
             .unwrap_or(ScriptValueOwned::Nil)
     }
+    /// Owned copy of the map value at iteration index `i`.
     pub fn map_value_owned(&self, i: i64) -> ScriptValueOwned {
         self.map_pair(i)
             .map(|(_, v)| v.clone())
@@ -791,6 +793,7 @@ impl ScriptOutcome {
     pub fn map_key_kind(&self, i: i64) -> i64 {
         self.map_pair(i).map(|(k, _)| k.kind()).unwrap_or(0)
     }
+    /// Discriminator of the map value at index `i` (see `ScriptValueKind`).
     pub fn map_value_kind(&self, i: i64) -> i64 {
         self.map_pair(i).map(|(_, v)| v.kind()).unwrap_or(0)
     }
@@ -802,36 +805,43 @@ impl ScriptOutcome {
             _ => 0,
         }
     }
+    /// Map value at index `i` as an integer.
     pub fn map_value_int(&self, i: i64) -> i64 {
         match self.map_pair(i) {
             Some((_, ScriptValueOwned::Int(n))) => *n,
             _ => 0,
         }
     }
+    /// Map key at index `i` as a float.
     pub fn map_key_float(&self, i: i64) -> f64 {
         match self.map_pair(i) {
             Some((ScriptValueOwned::Float(f), _)) => *f,
             _ => 0.0,
         }
     }
+    /// Map value at index `i` as a float.
     pub fn map_value_float(&self, i: i64) -> f64 {
         match self.map_pair(i) {
             Some((_, ScriptValueOwned::Float(f))) => *f,
             _ => 0.0,
         }
     }
+    /// Map key at index `i` as a boolean.
     pub fn map_key_bool(&self, i: i64) -> bool {
         matches!(self.map_pair(i), Some((ScriptValueOwned::Bool(true), _)))
     }
+    /// Map value at index `i` as a boolean.
     pub fn map_value_bool(&self, i: i64) -> bool {
         matches!(self.map_pair(i), Some((_, ScriptValueOwned::Bool(true))))
     }
+    /// Map key at index `i` as text.
     pub fn map_key_text(&self, i: i64) -> &str {
         match self.map_pair(i) {
             Some((ScriptValueOwned::Text(s), _)) => s,
             _ => "",
         }
     }
+    /// Map value at index `i` as text.
     pub fn map_value_text(&self, i: i64) -> &str {
         match self.map_pair(i) {
             Some((_, ScriptValueOwned::Text(s))) => s,
@@ -1400,7 +1410,7 @@ mod tests {
     #[test]
     fn linked_scripts_share_one_heap_across_calls() {
         install_compiler_hook(lite_hook());
-        let mut engine = ScriptEngine::new();
+        let engine = ScriptEngine::new();
         let a = engine
             .compile("fn store() -> Int { @intrinsic(\"script_set_int\", \"x\", 99); 0 }")
             .expect("compile a");
@@ -1438,7 +1448,7 @@ mod tests {
     #[test]
     fn cross_script_call_needs_extern_decl() {
         install_compiler_hook(lite_hook());
-        let mut engine = ScriptEngine::new();
+        let engine = ScriptEngine::new();
         let err = engine
             .compile("fn entry() -> Int { helper() + 1 }")
             .expect_err("undefined cross-script fn must not compile standalone");

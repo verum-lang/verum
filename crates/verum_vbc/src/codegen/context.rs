@@ -826,7 +826,12 @@ pub enum ConstantEntry {
     Int(i64),
     /// 128-bit integer constant (T0272): raw two's-complement bits + a
     /// signedness flag. Carries a literal that cannot fit `Int(i64)`.
-    Int128 { raw: u128, signed: bool },
+    Int128 {
+        /// Raw 128-bit payload; reinterpreted per `signed`.
+        raw: u128,
+        /// `true` for `Int128`, `false` for `UInt128`.
+        signed: bool,
+    },
     /// Float constant.
     Float(f64),
     /// String constant (index into string table).
@@ -3973,6 +3978,7 @@ impl CodegenContext {
             .and_then(|params| params.iter().position(|p| p == param))
     }
 
+    /// Find a variant descriptor by its parent type name and variant name.
     pub fn find_variant_by_type_and_name(
         &self,
         type_name: &str,

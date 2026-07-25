@@ -315,7 +315,7 @@ fn bench_type_environment_lookup(c: &mut Criterion) {
             // Simulate environment lookups
             for i in (0..10000).step_by(100) {
                 let expr = make_int_literal(i as i128);
-                black_box(checker.infer(&expr, InferMode::Synth));
+                let _ = black_box(checker.infer(&expr, InferMode::Synth));
             }
         })
     });

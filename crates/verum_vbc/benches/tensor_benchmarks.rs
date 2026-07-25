@@ -37,13 +37,11 @@ use verum_vbc::interpreter::tensor::{
 // ============================================================================
 
 const TINY_SIZES: &[usize] = &[4, 8, 16];
-const SMALL_SIZES: &[usize] = &[32, 64, 128, 256];
 const MEDIUM_SIZES: &[usize] = &[512, 1024, 2048, 4096, 8192];
 const LARGE_SIZES: &[usize] = &[16384, 32768, 65536, 131072, 262144];
 const HUGE_SIZES: &[usize] = &[524288, 1048576, 2097152, 4194304];
 
 const MATMUL_SIZES: &[usize] = &[16, 32, 64, 128, 256, 512];
-const LARGE_MATMUL_SIZES: &[usize] = &[1024, 2048];
 
 // ============================================================================
 // Tensor Creation Benchmarks

@@ -91,7 +91,7 @@ fn bench_type_inference_scaling(c: &mut Criterion) {
                 b.iter(|| {
                     let mut checker = TypeChecker::new();
                     for expr in &exprs {
-                        black_box(checker.infer(expr, InferMode::Synth));
+                        let _ = black_box(checker.infer(expr, InferMode::Synth));
                     }
                 });
             },

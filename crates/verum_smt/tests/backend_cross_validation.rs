@@ -146,7 +146,8 @@ impl CrossValidationStats {
     }
 }
 
-/// Global statistics collector (thread-safe)
+// Global statistics collector (thread-safe). A `///` doc cannot attach to a
+// macro invocation, so this is a plain comment.
 lazy_static::lazy_static! {
     static ref GLOBAL_STATS: Arc<Mutex<CrossValidationStats>> =
         Arc::new(Mutex::new(CrossValidationStats::default()));

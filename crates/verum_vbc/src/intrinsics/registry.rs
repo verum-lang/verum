@@ -1003,7 +1003,9 @@ pub enum InlineSequenceId {
     /// System sub-ops 0x88/0x89/0x8A; each tier answers itself
     /// (interp → std::env, AOT → libSystem setenv/getenv/unsetenv).
     EnvGetSeq,
+    /// `set_env_impl` — set an environment variable (System sub-op 0x89).
     EnvSetSeq,
+    /// `unset_env_impl` — remove an environment variable (System sub-op 0x8A).
     EnvUnsetSeq,
     /// get_tier: execution-tier query — MUST stay a per-tier runtime
     /// answer (TIER-DETECT-AOT-1), never a compile-time constant.
@@ -1059,24 +1061,36 @@ pub enum InlineSequenceId {
     /// load_byte / store_byte / load_i32 / store_i32 / load_i64 / store_i64
     /// — raw Int-address leaves (FfiExtended 0x53-0x58, both tiers)
     RawLoadU8,
+    /// `store_byte` — store one byte at a raw Int address.
     RawStoreU8,
+    /// `load_i32` — load a 32-bit integer from a raw Int address.
     RawLoadI32,
+    /// `store_i32` — store a 32-bit integer at a raw Int address.
     RawStoreI32,
+    /// `load_i64` — load a 64-bit integer from a raw Int address.
     RawLoadI64,
+    /// `store_i64` — store a 64-bit integer at a raw Int address.
     RawStoreI64,
     /// sleep_ns (TimeSleepNanos 0x73) / sleep_ms (TimeSleepMillis 0x76) /
     /// realtime_nanos (TimeRealtimeNanos 0x71)
     SleepNanosSeq,
+    /// `sleep_ms` — sleep for whole milliseconds (TimeSleepMillis 0x76).
     SleepMillisSeq,
+    /// `realtime_nanos` — wall-clock time in nanoseconds (TimeRealtimeNanos 0x71).
     RealtimeNanosSeq,
     /// spinlock trio (FfiExtended 0xB3-0xB5)
     SpinTryLockSeq,
+    /// `spin_unlock` — release a spinlock.
     SpinUnlockSeq,
+    /// `spin_is_locked` — test whether a spinlock is currently held.
     SpinIsLockedSeq,
     /// flat TLS slot quartet (FfiExtended 0x59-0x5C)
     TlsGetSeq,
+    /// `tls_set` — write a thread-local slot.
     TlsSetSeq,
+    /// `tls_has` — test whether a thread-local slot is occupied.
     TlsHasSeq,
+    /// `tls_clear` — clear a thread-local slot.
     TlsClearSeq,
     /// memory_fence → AtomicFence with the SeqCst immediate; the
     /// DirectOpcode route emitted the opcode WITHOUT its ordering byte
@@ -1088,10 +1102,15 @@ pub enum InlineSequenceId {
     SpinHintSeq,
     /// waitgroup family (FfiExtended 0xB6-0xBB)
     WgNewSeq,
+    /// `waitgroup_add` — increment a wait-group counter.
     WgAddSeq,
+    /// `waitgroup_done` — decrement a wait-group counter.
     WgDoneSeq,
+    /// `waitgroup_wait` — block until a wait-group reaches zero.
     WgWaitSeq,
+    /// `waitgroup_try_wait` — non-blocking wait-group poll.
     WgTryWaitSeq,
+    /// `waitgroup_destroy` — release wait-group resources.
     WgDestroySeq,
     /// tls_get_base (FfiExtended 0x5D)
     TlsGetBaseSeq,
@@ -1100,6 +1119,7 @@ pub enum InlineSequenceId {
     /// FfiExtended FutexWake decoder reads a third operand that the emitter
     /// never wrote → bytecode desync → SIGILL/SIGSEGV at runtime.
     FutexWakeOneSeq,
+    /// `futex_wake_all` — wake every waiter (injects count = i32::MAX).
     FutexWakeAllSeq,
 }
 

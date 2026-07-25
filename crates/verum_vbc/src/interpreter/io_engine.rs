@@ -482,6 +482,7 @@ static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
 // Public surface (called from the intrinsic dispatcher)
 // ============================================================================
 
+/// Create an I/O engine session; returns its handle (or a negative errno).
 pub fn engine_new(_capacity: i64) -> i64 {
     match Session::create() {
         Some(session) => {
@@ -493,11 +494,13 @@ pub fn engine_new(_capacity: i64) -> i64 {
     }
 }
 
+/// Destroy an I/O engine session by handle. Returns 0.
 pub fn engine_destroy(handle: i64) -> i64 {
     SESSIONS.lock().unwrap().remove(&handle);
     0
 }
 
+/// Register `fd` with the session under the given interest `flags`.
 pub fn submit(handle: i64, fd: i64, flags: i64) -> i64 {
     let mut sessions = SESSIONS.lock().unwrap();
     match sessions.get_mut(&handle) {
@@ -506,6 +509,7 @@ pub fn submit(handle: i64, fd: i64, flags: i64) -> i64 {
     }
 }
 
+/// Stop tracking `fd` in the session.
 pub fn remove(handle: i64, fd: i64) -> i64 {
     let mut sessions = SESSIONS.lock().unwrap();
     match sessions.get_mut(&handle) {
@@ -514,6 +518,7 @@ pub fn remove(handle: i64, fd: i64) -> i64 {
     }
 }
 
+/// Change the interest `flags` registered for `fd`.
 pub fn modify(handle: i64, fd: i64, flags: i64) -> i64 {
     let mut sessions = SESSIONS.lock().unwrap();
     match sessions.get_mut(&handle) {
@@ -540,6 +545,7 @@ pub fn poll(handle: i64, max_events: i64, timeout_ns: i64) -> i64 {
     result
 }
 
+/// Non-destructive readiness test for `fd` against `flags`.
 pub fn is_ready(handle: i64, fd: i64, flags: i64) -> i64 {
     let sessions = SESSIONS.lock().unwrap();
     match sessions.get(&handle) {
@@ -554,6 +560,7 @@ pub fn is_ready(handle: i64, fd: i64, flags: i64) -> i64 {
     }
 }
 
+/// Consume and return the readiness bits pending for `fd`.
 pub fn take_ready(handle: i64, fd: i64, flags: i64) -> i64 {
     let mut sessions = SESSIONS.lock().unwrap();
     match sessions.get_mut(&handle) {
@@ -611,6 +618,7 @@ fn set_int_sockopt(_fd: i64, _level: i32, _name: i32, _value: i32) -> i64 {
 }
 
 #[cfg(unix)]
+/// Enable `SO_REUSEADDR` on `fd`.
 pub fn socket_set_reuseaddr(fd: i64) -> i64 {
     set_int_sockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, 1)
 }
@@ -620,6 +628,7 @@ pub fn socket_set_reuseaddr(_fd: i64) -> i64 {
 }
 
 #[cfg(unix)]
+/// Enable or disable Nagle's algorithm (`TCP_NODELAY`) on `fd`.
 pub fn socket_set_nodelay(fd: i64, on: bool) -> i64 {
     set_int_sockopt(
         fd,
@@ -634,6 +643,7 @@ pub fn socket_set_nodelay(_fd: i64, _on: bool) -> i64 {
 }
 
 #[cfg(unix)]
+/// Enable or disable `SO_KEEPALIVE` on `fd`.
 pub fn socket_set_keepalive(fd: i64, on: bool) -> i64 {
     set_int_sockopt(
         fd,
@@ -774,6 +784,7 @@ pub fn async_accept(_engine: i64, _listen_fd: i64, _timeout_ns: i64) -> i64 {
 // non-unix stub returns -1 to match the existing `async_accept`
 // pattern.
 #[cfg(unix)]
+/// Queue an asynchronous read of `len` bytes from `fd` into `buf_addr`.
 pub fn async_read(engine: i64, fd: i64, buf_addr: i64, len: i64, timeout_ns: i64) -> i64 {
     use super::dispatch_table::handlers::net_runtime;
     if fd < 0 || buf_addr == 0 || len < 0 {
@@ -806,6 +817,7 @@ pub fn async_read(_engine: i64, _fd: i64, _buf_addr: i64, _len: i64, _timeout_ns
 }
 
 #[cfg(unix)]
+/// Queue an asynchronous write of `len` bytes from `buf_addr` to `fd`.
 pub fn async_write(engine: i64, fd: i64, buf_addr: i64, len: i64, timeout_ns: i64) -> i64 {
     use super::dispatch_table::handlers::net_runtime;
     if fd < 0 || buf_addr == 0 || len < 0 {

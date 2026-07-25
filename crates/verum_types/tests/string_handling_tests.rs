@@ -437,7 +437,7 @@ fn test_string_implements_display() {
         span: Span::dummy(),
     };
 
-    checker.register_protocol(display_protocol);
+    let _ = checker.register_protocol(display_protocol);
 
     // Verify Display protocol was registered successfully
     let protocol = checker.get_protocol(&display_name);
@@ -521,7 +521,7 @@ fn test_string_implements_eq() {
         span: Span::dummy(),
     };
 
-    checker.register_protocol(eq_protocol);
+    let _ = checker.register_protocol(eq_protocol);
 
     // Verify Eq protocol was registered successfully
     let protocol = checker.get_protocol(&eq_name);
@@ -607,7 +607,7 @@ fn test_string_implements_add() {
         span: Span::dummy(),
     };
 
-    checker.register_protocol(add_protocol);
+    let _ = checker.register_protocol(add_protocol);
 
     // Verify Add protocol was registered successfully
     let protocol = checker.get_protocol(&add_name);
@@ -695,7 +695,7 @@ fn test_string_implements_clone() {
         span: Span::dummy(),
     };
 
-    checker.register_protocol(clone_protocol);
+    let _ = checker.register_protocol(clone_protocol);
 
     // Verify Clone protocol was registered successfully
     let protocol = checker.get_protocol(&clone_name);

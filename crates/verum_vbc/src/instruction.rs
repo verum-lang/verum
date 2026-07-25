@@ -5843,10 +5843,15 @@ pub enum SystemSubOpcode {
     /// Formats: new `dst` / add `dst,wg,delta` / done `dst,wg` /
     /// wait `dst,wg` / try_wait `dst,wg` / destroy `dst,wg`.
     WaitgroupNew = 0xB6,
+    /// Increment a wait-group counter: `wg, delta`.
     WaitgroupAdd = 0xB7,
+    /// Decrement a wait-group counter: `wg`.
     WaitgroupDone = 0xB8,
+    /// Block until a wait-group reaches zero: `wg`.
     WaitgroupWait = 0xB9,
+    /// Non-blocking wait-group poll: `dst, wg` (Bool).
     WaitgroupTryWait = 0xBA,
+    /// Release wait-group resources: `wg`.
     WaitgroupDestroy = 0xBB,
     /// Atomic read-modify-write — the ONE authority for every
     /// `atomic_fetch_*` / `atomic_exchange` intrinsic at both tiers.

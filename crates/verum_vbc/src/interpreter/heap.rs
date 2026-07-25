@@ -404,6 +404,7 @@ pub unsafe fn typed_array_store_element(
     Some(())
 }
 
+/// Byte-buffer view `(ptr, len)` of `v` when it is a byte-backed value.
 pub fn value_as_byte_slice(v: &Value) -> Option<(*mut u8, u64)> {
     if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
         return None;

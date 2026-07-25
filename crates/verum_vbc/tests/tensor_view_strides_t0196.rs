@@ -87,7 +87,7 @@ fn negative_stride_flip_view_reverses() {
 fn set_through_transpose_view_lands_at_strided_position() {
     // Zeroed 2x3 base; write column-major via a 3x2 transpose view,
     // then read the base back to confirm the physical cell is correct.
-    let mut base = tensor_from(&[0.0; 6], &[2, 3]);
+    let base = tensor_from(&[0.0; 6], &[2, 3]);
     {
         let mut t = view_over(&base, &[3, 2], &[1, 3], 0, false);
         // Set logical (2,1) of the transpose -> flat logical index 5 ->

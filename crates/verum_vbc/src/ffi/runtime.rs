@@ -992,6 +992,7 @@ impl FfiRuntime {
         self.trampolines.fn_id_for_code_ptr(code_ptr)
     }
 
+    /// Create an FFI callback trampoline for a Verum function.
     pub fn create_callback(
         &mut self,
         return_type: CTypeRuntime,

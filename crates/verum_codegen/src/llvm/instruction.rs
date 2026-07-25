@@ -23757,7 +23757,7 @@ fn lower_cbgr_extended<'ctx>(
                 )
                 .or_llvm_err()?;
             let hdr_c = i64_ty.const_int(hdr, false);
-            let mut scalar_arm = |bb, tag: &str| -> Result<(IntValue, _)> {
+            let scalar_arm = |bb, tag: &str| -> Result<(IntValue, _)> {
                 ctx.builder().position_at_end(bb);
                 let data = ctx
                     .builder()
@@ -23775,7 +23775,7 @@ fn lower_cbgr_extended<'ctx>(
             let (sc8_data, sc8_end) = scalar_arm(scalar8_bb, "rs_sc8")?;
 
             // LIST / BYTE_LIST: follow backing_ptr (payload slot 2).
-            let mut backing_of = |bb, tag: &str| -> Result<IntValue> {
+            let backing_of = |bb, tag: &str| -> Result<IntValue> {
                 ctx.builder().position_at_end(bb);
                 // These arms now receive STAMPED Pack shapes
                 // (TUPLE/BYTE_SLICE): their data pointer sits in
@@ -27064,7 +27064,7 @@ fn lower_extended<'ctx>(
             let is_get =
                 ExtendedSubOpcode::from_byte(sub_op) == Some(ExtendedSubOpcode::GetFieldNamed);
             let mut idx = 0usize;
-            let mut read_reg = |idx: &mut usize| -> Option<u16> {
+            let read_reg = |idx: &mut usize| -> Option<u16> {
                 if *idx >= operands.len() {
                     return None;
                 }
