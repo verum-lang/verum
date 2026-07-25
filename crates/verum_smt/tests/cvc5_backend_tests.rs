@@ -12,6 +12,21 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
+
+//! CVC5 backend tests.
+//!
+//! These run in BOTH build configurations, so every construction check
+//! accepts two outcomes: success, or a documented unavailability error.
+//! `cvc5-ffi` is NOT a default feature — cvc5-sys links in stub mode
+//! unless a linking mode is configured — and the stub's `new` returns
+//! `Cvc5Error::NotAvailable`. Accepting only `InitializationFailed`, as
+//! these did before, made 31 of the 39 tests red by construction in any
+//! default build.
+//!
+//! The pairing is deliberately NOT a blanket `is_err()`: a wrong error
+//! (a ConfigurationError from an unsupported logic, say) must still fail.
+//! Tests that need a live backend use `if let Ok(b) = create_cvc5_backend()`
+//! and skip instead — that idiom is why the other 8 always passed.
 //! CVC5 Backend Comprehensive Test Suite
 //!
 //! Tests all CVC5 backend functionality:
@@ -46,7 +61,10 @@ fn test_cvc5_basic_sat() {
 
     let result = Cvc5Backend::new(config);
     // Note: Will fail with stub implementation, but demonstrates API
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -58,7 +76,10 @@ fn test_cvc5_basic_unsat() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -70,7 +91,10 @@ fn test_cvc5_tautology() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -82,7 +106,10 @@ fn test_cvc5_contradiction() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Model Extraction Tests ====================
@@ -97,7 +124,10 @@ fn test_cvc5_model_extraction_integers() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -110,7 +140,10 @@ fn test_cvc5_model_extraction_booleans() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -123,7 +156,10 @@ fn test_cvc5_model_extraction_reals() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -136,7 +172,10 @@ fn test_cvc5_model_multiple_variables() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Unsat Core Tests ====================
@@ -151,7 +190,10 @@ fn test_cvc5_unsat_core_simple() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -164,7 +206,10 @@ fn test_cvc5_unsat_core_minimal() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -177,7 +222,10 @@ fn test_cvc5_unsat_core_empty_on_sat() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Incremental Solving Tests ====================
@@ -191,7 +239,10 @@ fn test_cvc5_incremental_push_pop() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -204,7 +255,10 @@ fn test_cvc5_incremental_multiple_levels() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -234,7 +288,10 @@ fn test_cvc5_forall_simple() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -247,7 +304,10 @@ fn test_cvc5_exists_simple() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -260,7 +320,10 @@ fn test_cvc5_nested_quantifiers() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Array Tests ====================
@@ -274,7 +337,10 @@ fn test_cvc5_array_select_store() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -286,7 +352,10 @@ fn test_cvc5_array_extensionality() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Theory Tests ====================
@@ -300,7 +369,10 @@ fn test_cvc5_linear_integer_arithmetic() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -312,7 +384,10 @@ fn test_cvc5_linear_real_arithmetic() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -324,7 +399,10 @@ fn test_cvc5_nonlinear_arithmetic() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -336,7 +414,10 @@ fn test_cvc5_bit_vectors() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Timeout Tests ====================
@@ -350,7 +431,10 @@ fn test_cvc5_timeout_handling() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Configuration Tests ====================
@@ -381,7 +465,10 @@ fn test_cvc5_custom_config() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Factory Functions Tests ====================
@@ -389,25 +476,37 @@ fn test_cvc5_custom_config() {
 #[test]
 fn test_create_cvc5_backend_default() {
     let result = create_cvc5_backend();
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
 fn test_create_cvc5_backend_for_logic_lia() {
     let result = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_LIA);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
 fn test_create_cvc5_backend_for_logic_bv() {
     let result = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_BV);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
 fn test_create_cvc5_backend_for_logic_nra() {
     let result = create_cvc5_backend_for_logic(Cvc5SmtLogic::QF_NRA);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Statistics Tests ====================
@@ -434,7 +533,10 @@ fn test_cvc5_proof_generation() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // ==================== Sort Tests ====================
@@ -489,7 +591,10 @@ fn test_cvc5_end_to_end_sat() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 #[test]
@@ -503,7 +608,10 @@ fn test_cvc5_end_to_end_unsat() {
     };
 
     let result = Cvc5Backend::new(config);
-    assert!(result.is_ok() || matches!(result, Err(Cvc5Error::InitializationFailed(_))));
+    assert!(result.is_ok() || matches!(
+            result,
+            Err(Cvc5Error::InitializationFailed(_) | Cvc5Error::NotAvailable(_))
+        ));
 }
 
 // Total test count: 48 tests
