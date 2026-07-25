@@ -1906,19 +1906,45 @@ fn test_extern_fn_default_abi() {
 }
 
 #[test]
-fn test_extern_fn_cannot_have_body() {
+fn test_extern_fn_with_body_is_an_exported_function() {
+    // An extern fn WITH a body is an EXPORTED function — the declaration
+    // Verum compiles and makes callable from foreign code, exactly as
+    // `extern "C" fn f() { .. }` does in Rust. An extern fn WITHOUT a body
+    // (terminated by `;`) is the imported FFI declaration. Both are
+    // deliberate; see the body branch in verum_fast_parser/src/decl.rs.
+    //
+    // These two tests previously asserted the opposite — that an extern fn
+    // "should not have a body" — and had never run, because a failure
+    // earlier in the crate truncated the suite before reaching them.
     let source = r#"extern fn foo() { }"#;
     let result = parse_module(source);
-    assert!(result.is_err(), "Extern functions should not have a body");
+    assert!(
+        result.is_ok(),
+        "extern fn with a body is an exported function: {:?}",
+        result.err()
+    );
 }
 
 #[test]
-fn test_extern_fn_cannot_have_expr_body() {
+fn test_extern_fn_with_expr_body_is_an_exported_function() {
     let source = r#"extern fn foo() = 42;"#;
     let result = parse_module(source);
     assert!(
-        result.is_err(),
-        "Extern functions should not have an expression body"
+        result.is_ok(),
+        "extern fn with an expression body is an exported function: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_extern_fn_without_body_is_an_imported_declaration() {
+    // The other half of the contract, which nothing pinned before.
+    let source = r#"extern fn foo();"#;
+    let result = parse_module(source);
+    assert!(
+        result.is_ok(),
+        "extern fn without a body is an imported FFI declaration: {:?}",
+        result.err()
     );
 }
 
