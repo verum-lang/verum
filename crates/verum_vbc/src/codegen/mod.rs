@@ -8593,7 +8593,7 @@ impl VbcCodegen {
                     return false;
                 }
                 if let verum_common::Maybe::Some(ref cond) = c.condition {
-                    return Self::evaluate_context_condition(cond);
+                    return Self::evaluate_context_condition(cond, self.cfg_evaluator.config());
                 }
                 true
             })
@@ -10518,7 +10518,7 @@ impl VbcCodegen {
                     return false;
                 }
                 if let verum_common::Maybe::Some(ref cond) = c.condition {
-                    return Self::evaluate_context_condition(cond);
+                    return Self::evaluate_context_condition(cond, self.cfg_evaluator.config());
                 }
                 true
             })
@@ -11850,7 +11850,7 @@ impl VbcCodegen {
             }
             // Skip conditional contexts whose condition is false
             if let verum_common::Maybe::Some(ref cond) = ctx.condition
-                && !Self::evaluate_context_condition(cond)
+                && !Self::evaluate_context_condition(cond, self.cfg_evaluator.config())
             {
                 continue;
             }
@@ -11949,7 +11949,22 @@ impl VbcCodegen {
 
     /// Evaluate a compile-time condition for conditional contexts.
     /// Returns true if the condition is met, false if not (context will be skipped).
-    fn evaluate_context_condition(expr: &verum_ast::expr::Expr) -> bool {
+    /// Evaluate a conditional-context guard (`context X if <cond>`).
+    ///
+    /// Reads the **TARGET** configuration (`cfg`), never the host: these
+    /// predicates describe the program being compiled, not how this compiler
+    /// binary was built. The previous implementation hardcoded
+    /// `cfg!(debug_assertions)` / `cfg!(unix)` / `cfg!(target_os = ...)`, which
+    /// (a) violated the CLAUDE.md rule that every per-platform decision reads
+    /// the target — host gates miscompile cross builds — and (b) duplicated
+    /// semantics the target-aware [`verum_ast::cfg::TargetConfig`] already
+    /// implements, so the two could drift. `TargetConfig` is the single
+    /// authority: `is_set` covers unix/windows/debug_assertions/os/arch and
+    /// `matches` covers key-value predicates.
+    fn evaluate_context_condition(
+        expr: &verum_ast::expr::Expr,
+        cfg: &verum_ast::cfg::TargetConfig,
+    ) -> bool {
         use verum_ast::expr::ExprKind;
 
         match &expr.kind {
@@ -11961,17 +11976,13 @@ impl VbcCodegen {
                     if let Some(ident) = path.as_ident() {
                         match ident.name.as_str() {
                             "cfg" => match field.as_str() {
-                                "debug" | "debug_assertions" => cfg!(debug_assertions),
-                                "release" => !cfg!(debug_assertions),
-                                "unix" => cfg!(unix),
-                                "windows" => cfg!(windows),
-                                _ => false,
+                                "debug" | "debug_assertions" => cfg.is_set("debug_assertions"),
+                                "release" => !cfg.is_set("debug_assertions"),
+                                other => cfg.is_set(other),
                             },
                             "platform" => match field.as_str() {
-                                "macos" | "darwin" => cfg!(target_os = "macos"),
-                                "linux" => cfg!(target_os = "linux"),
-                                "windows" => cfg!(target_os = "windows"),
-                                _ => false,
+                                "macos" | "darwin" => cfg.matches("target_os", "macos"),
+                                other => cfg.matches("target_os", other),
                             },
                             _ => false,
                         }
@@ -11987,7 +11998,12 @@ impl VbcCodegen {
             }
             ExprKind::Path(path) => {
                 if let Some(ident) = path.as_ident() {
-                    matches!(ident.name.as_str(), "true" | "debug")
+                    match ident.name.as_str() {
+                        "true" => true,
+                        // A bare `debug` guard used to be unconditionally true.
+                        "debug" => cfg.is_set("debug_assertions"),
+                        _ => false,
+                    }
                 } else {
                     false
                 }
