@@ -3497,807 +3497,6 @@ fn collect_cross_module_callee_names(module: &VbcModule, out: &mut HashSet<Strin
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// **Drift-pin**: every canonical-name shape produced by the
-    /// precompiler must round-trip through `merge_module_and_simple_name`
-    /// to the form the user-side codegen looks up.  Drift between
-    /// registration (this fn) and lookup (`lookup_qualified_function`
-    /// in codegen) is invisible — the function is "registered" but
-    /// nobody can find it — and surfaces as runtime mis-dispatch when
-    /// a same-named sibling in another module claims the bare-name
-    /// fallback (e.g. `core.sys.bitfield.test_bit` silently dispatching
-    /// to `core.net.tls13.handshake.zero_rtt_antireplay.test_bit`).
-    #[test]
-    fn merge_canonical_name_synthesis() {
-        // (1) Bare leaf — no submodule directive in source. Prepend
-        // module_name verbatim.
-        assert_eq!(
-            merge_module_and_simple_name("core.text", "new"),
-            "core.text.new",
-        );
-        assert_eq!(
-            merge_module_and_simple_name("core.io", "write"),
-            "core.io.write",
-        );
-        // (2) Relative submodule — descriptor's leading segment is
-        // also module_name's trailing segment. Skip the overlap.
-        assert_eq!(
-            merge_module_and_simple_name("core.sys", "sys.bitfield.test_bit"),
-            "core.sys.bitfield.test_bit",
-        );
-        assert_eq!(
-            merge_module_and_simple_name("core.collections", "collections.map.Map.new"),
-            "core.collections.map.Map.new",
-        );
-        // (3) Fully-rooted submodule — descriptor already starts with
-        // the cog + entry prefix. Drop module_name entirely.
-        assert_eq!(
-            merge_module_and_simple_name("core.async", "core.async.future.ready"),
-            "core.async.future.ready",
-        );
-        // (4) No overlap — descriptor's leading segments are unrelated
-        // to module_name's tail (e.g. `tls13.handshake....` under
-        // archive entry `core.net`). Prepend module_name verbatim.
-        assert_eq!(
-            merge_module_and_simple_name(
-                "core.net",
-                "tls13.handshake.zero_rtt_antireplay.test_bit"
-            ),
-            "core.net.tls13.handshake.zero_rtt_antireplay.test_bit",
-        );
-        // (5) Longest-overlap discipline: when the descriptor and
-        // module_name share both `sys` AND `sys.bitfield` as possible
-        // prefixes, the algorithm picks the LONGER match. (Synthetic
-        // case to pin the longest-wins rule.)
-        assert_eq!(
-            merge_module_and_simple_name("a.b.sys.bitfield", "sys.bitfield.test_bit"),
-            "a.b.sys.bitfield.test_bit",
-        );
-        // (6) Full overlap of module_name with the descriptor's
-        // prefix — module_name drops entirely.
-        assert_eq!(
-            merge_module_and_simple_name("core.sys.bitfield", "core.sys.bitfield.test_bit"),
-            "core.sys.bitfield.test_bit",
-        );
-        // (7) Type-qualified bare descriptor — `Type.method` where
-        // module_name doesn't overlap. (Static methods land here.)
-        assert_eq!(
-            merge_module_and_simple_name("core.time.duration", "Duration.zero"),
-            "core.time.duration.Duration.zero",
-        );
-    }
-
-    /// Smoke test: when the compiler binary embeds the precompiled
-    /// stdlib archive, `populate_ctx_from_archive` registers a
-    /// non-trivial number of functions and recovers variant-ctor
-    /// metadata for every stdlib type that lands in the archive.
-    ///
-    /// Note on what's in scope: built-in core variants (Maybe.Some /
-    /// Maybe.None / Result.Ok / Result.Err / Ordering.Lt etc.) are
-    /// registered by VbcCodegen::register_builtin_variants, not by
-    /// the archive — they're compiler intrinsics with hardcoded tags.
-    /// This loader handles the user-stdlib-type variants only;
-    /// built-ins flow through a parallel path called from
-    /// `compile_ast_to_vbc` before T1 runs.
-    #[test]
-    fn loads_embedded_archive_into_ctx() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return, // bootstrap build without archive — skip
-        };
-        let mut ctx = CodegenContext::new();
-        let mut next_id: u32 = 0;
-        let stats = populate_ctx_from_archive(archive, &mut ctx, &mut next_id).expect("load");
-
-        assert!(
-            stats.modules_loaded > 100,
-            "must load >100 stdlib modules (got {})",
-            stats.modules_loaded
-        );
-        assert!(
-            stats.functions_registered > 1000,
-            "must register >1000 functions (got {})",
-            stats.functions_registered
-        );
-
-        // At least some stdlib types surface variant constructors
-        // through the archive (DbError variants, ConnectionError,
-        // ShellError, etc.).  We don't pin a specific list because
-        // stdlib evolves; assert "more than zero" to catch the case
-        // where the variant_tag-recovery loop is silently broken.
-        assert!(
-            stats.variant_ctors_resolved > 0,
-            "expected variant-ctor recovery to find at least one stdlib variant ctor"
-        );
-
-        // Sample qualified lookup — the archive's modules carry
-        // canonical `core.X.Y.fn` qualified names.  Pick a stable
-        // entrypoint that's been in stdlib for many revisions.
-        let exported = ctx.export_functions();
-        let canonical_qualified = exported
-            .keys()
-            .filter(|k| k.starts_with("core.") && k.contains('.'))
-            .count();
-        assert!(
-            canonical_qualified > 100,
-            "expected >100 canonical `core.*` qualified entries"
-        );
-    }
-
-    /// **Drift-pin**: every public type in `core/base/protocols.vr`
-    /// MUST be carried into the precompiled archive.  The whole file
-    /// is at structural risk because a single stray top-level token
-    /// (e.g. `implement Foo for Bar { ... };` with an erroneous
-    /// trailing `;`) makes `stdlib_bootstrap` parse-fail the entire
-    /// file under the lenient-skip discipline, silently dropping
-    /// every type declared after the bad token.  When that happens,
-    /// downstream user code's `DefaultHasher.new()` evaluates to
-    /// `Unit` (its impl wasn't compiled), `hasher.write_int(n)`
-    /// panics with `method 'DefaultHasher.write_int' not found on
-    /// receiver of runtime kind '()'`, and every `Formatter { ... }`
-    /// record literal allocates with `type_id=0` then SetF
-    /// out-of-bounds.  Test surface covers the most-load-bearing
-    /// names in the file:
-    ///
-    ///   * `Hasher` — protocol consulted by Hash impls; missing →
-    ///     `Int.hash(hasher)` dispatches `Hasher.write_int` to a
-    ///     non-existent receiver.
-    ///   * `DefaultHasher` — concrete Hasher used by the protocol's
-    ///     default `hash_value` body; missing → `DefaultHasher.new()`
-    ///     returns Unit.
-    ///   * `Formatter` — buffer-writing record used by every Display
-    ///     impl; missing → `Formatter { buffer: &mut buf }` writes
-    ///     SetF at the wrong field index because
-    ///     `type_field_layouts` has no entry.
-    ///   * `FormatError`, `FmtResult` — referenced by every fallible
-    ///     formatter method's return type.
-    ///
-    /// Each entry also asserts the field count surviving the
-    /// precompile round-trip — empty `fields` on the descriptor
-    /// makes `import_archive_type_with_protocol_remap` skip the
-    /// `type_field_layouts` registration which is structurally
-    /// equivalent to dropping the type.
-    #[test]
-    fn archive_default_hasher_carries_state_field() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return, // bootstrap build without archive — skip
-        };
-        // DefaultHasher is declared in core/base/protocols.vr (module
-        // core.base.protocols).  Walk archive modules to find the
-        // descriptor.
-        let mut found: Option<(String, Vec<String>)> = None;
-        let mut function_hits: Vec<(String, String)> = Vec::new();
-        let mut type_names_in_protocols_module: Vec<String> = Vec::new();
-        for entry in &archive.index {
-            let module = match archive.load_module(&entry.name) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            for ty in &module.types {
-                let name = match module.strings.get(ty.name) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                if entry.name == "core.base"
-                    || entry.name.contains("protocols")
-                    || entry.name == "core.base.protocols"
-                {
-                    type_names_in_protocols_module.push(format!(
-                        "{}:{}({}f)",
-                        entry.name,
-                        name,
-                        ty.fields.len()
-                    ));
-                }
-                if name == "DefaultHasher" {
-                    let field_names: Vec<String> = ty
-                        .fields
-                        .iter()
-                        .map(|f| {
-                            module
-                                .strings
-                                .get(f.name)
-                                .map(|s| s.to_string())
-                                .unwrap_or_default()
-                        })
-                        .collect();
-                    found = Some((entry.name.clone(), field_names));
-                    break;
-                }
-            }
-            for fn_desc in &module.functions {
-                let fname = match module.strings.get(fn_desc.name) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                if fname.contains("DefaultHasher") || fname == "new" && entry.name.contains("protocols") {
-                    function_hits.push((entry.name.clone(), fname.to_string()));
-                }
-            }
-            if found.is_some() {
-                break;
-            }
-        }
-        let (entry_name, fields) = found.unwrap_or_else(|| {
-            panic!(
-                "DefaultHasher descriptor MUST be in the precompiled archive — \
-                 missing entry means stdlib precompiler dropped the type.\n\
-                 function_hits (DefaultHasher.* or new in protocols entries):\n  {}\n\
-                 type_names in protocols-containing entries (first 30):\n  {}",
-                function_hits.iter().take(30).map(|(e, f)| format!("{}::{}", e, f)).collect::<Vec<_>>().join("\n  "),
-                type_names_in_protocols_module.iter().take(30).cloned().collect::<Vec<_>>().join("\n  "),
-            )
-        });
-        assert_eq!(
-            fields,
-            vec!["state".to_string()],
-            "DefaultHasher (archive entry `{}`) must carry exactly one \
-             field `state`; precompiler dropped it (fields={:?})",
-            entry_name,
-            fields,
-        );
-
-        // Probe the broader public surface of core/base/protocols.vr.
-        // Any of these missing means the whole file got
-        // lenient-SKIPped at parse time and downstream stdlib code is
-        // architecturally broken.  Test names use the canonical
-        // simple-type-name form because the archive is searched
-        // module-by-module (descriptor name only).
-        let probe = |type_name: &str, expected_field_count: Option<usize>| {
-            let mut found_arity: Option<usize> = None;
-            for entry in &archive.index {
-                let module = match archive.load_module(&entry.name) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                for ty in &module.types {
-                    let name = match module.strings.get(ty.name) {
-                        Some(s) => s,
-                        None => continue,
-                    };
-                    if name == type_name {
-                        found_arity = Some(ty.fields.len());
-                        break;
-                    }
-                }
-                if found_arity.is_some() {
-                    break;
-                }
-            }
-            let arity = found_arity.unwrap_or_else(|| {
-                panic!(
-                    "type `{}` (declared in core/base/protocols.vr) MUST be in \
-                     the precompiled archive.  Missing entry means the whole \
-                     file was lenient-SKIPped at parse time — check for a \
-                     stray `;` after an `implement` block, an unmatched brace, \
-                     or any other top-level syntax defect.",
-                    type_name
-                )
-            });
-            if let Some(expected) = expected_field_count {
-                assert_eq!(
-                    arity, expected,
-                    "type `{}` must have {} field(s) in the archive (got {}) — \
-                     the precompiler may have stripped fields during the \
-                     stripped-bytecode optimisation, OR the type was rebuilt \
-                     without its declared body.",
-                    type_name, expected, arity,
-                );
-            }
-        };
-        // Records — must carry their declared field counts.
-        probe("Formatter", Some(1));
-        probe("FormatError", Some(0));
-        // Protocol types — no `fields` (their methods live on the
-        // monomorphised impl side); just assert presence.
-        probe("Hasher", None);
-        probe("Hash", None);
-        probe("PartialEq", None);
-        probe("Eq", None);
-        probe("Ord", None);
-        probe("PartialOrd", None);
-        probe("Clone", None);
-        probe("Default", None);
-        probe("Debug", None);
-        probe("Display", None);
-    }
-
-    /// **Drift-pin**: every protocol-default-method monomorphisation
-    /// MUST ship in the precompiled archive with a real
-    /// (non-zero-length) bytecode body.  When `stdlib_bootstrap`
-    /// processes `implement Hasher for DefaultHasher`,
-    /// `generate_default_protocol_methods` queues `DefaultHasher.write_int`
-    /// and `DefaultHasher.write_byte` (default bodies on the Hasher
-    /// protocol that DefaultHasher does NOT override) into
-    /// `pending_default_methods`.  `compile_pending_default_methods`
-    /// MUST then run before module finalisation so each queued
-    /// `<Type>.<method>` gets a real archive body.
-    ///
-    /// Without this pin, `hasher.write_int(42)` (where `hasher` is a
-    /// concrete DefaultHasher) panics at runtime with
-    /// `method 'DefaultHasher.write_int' not found on receiver of
-    /// runtime kind 'Object'`, because the runtime's method-table
-    /// lookup misses the unmonomorphised default body.  Affected
-    /// classes include every protocol with default methods: Hasher
-    /// (write_int / write_byte), Hash (hash_value), PartialEq (ne via
-    /// blanket impl<T: Ord>), Display / Debug forwarders, and every
-    /// Iterator combinator default (map, filter, fold, …).
-    #[test]
-    fn archive_carries_protocol_default_method_monomorphisations() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return,
-        };
-        // Each tuple: (qualified_function_name, "rationale").
-        // Pick representative samples whose default body lives on a
-        // protocol but whose receiver-type implements only a subset
-        // of the protocol's API.
-        let required = [
-            (
-                "DefaultHasher.write_int",
-                "Hasher.write_int default — DefaultHasher overrides only `write`",
-            ),
-            (
-                "DefaultHasher.write_byte",
-                "Hasher.write_byte default — DefaultHasher overrides only `write`",
-            ),
-        ];
-        let mut missing: Vec<&'static str> = Vec::new();
-        let mut empty_body: Vec<&'static str> = Vec::new();
-        let mut all_default_hasher_fns: Vec<(String, String, u32)> = Vec::new();
-        for entry in &archive.index {
-            let module = match archive.load_module(&entry.name) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            for fn_desc in &module.functions {
-                let name = match module.strings.get(fn_desc.name) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                if name.contains("DefaultHasher") || name.contains("Hasher.write") {
-                    all_default_hasher_fns.push((
-                        entry.name.clone(),
-                        name.to_string(),
-                        fn_desc.bytecode_length,
-                    ));
-                }
-            }
-        }
-        for (qualified, _why) in &required {
-            let mut found_with_body = false;
-            let mut found_at_all = false;
-            'outer: for entry in &archive.index {
-                let module = match archive.load_module(&entry.name) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                for fn_desc in &module.functions {
-                    let name = match module.strings.get(fn_desc.name) {
-                        Some(s) => s,
-                        None => continue,
-                    };
-                    // Match either bare `DefaultHasher.write_int` or
-                    // any qualified form ending with `.<qualified>`.
-                    if name == *qualified
-                        || name.ends_with(&format!(".{}", qualified))
-                    {
-                        found_at_all = true;
-                        if fn_desc.bytecode_length > 0 {
-                            found_with_body = true;
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-            if !found_at_all {
-                missing.push(qualified);
-            } else if !found_with_body {
-                empty_body.push(qualified);
-            }
-        }
-        assert!(
-            missing.is_empty(),
-            "protocol-default-method monomorphisation(s) MISSING from \
-             archive: {:?}. This indicates stdlib_bootstrap's \
-             `compile_core_module_from_ast` skipped \
-             `compile_pending_default_methods()` between \
-             `resolve_pending_imports` and the body-compilation pass.\n\
-             All DefaultHasher/Hasher.write functions in archive (first 40):\n  {}",
-            missing,
-            all_default_hasher_fns.iter().take(40)
-                .map(|(e, n, l)| format!("{}::{} (body={}B)", e, n, l))
-                .collect::<Vec<_>>().join("\n  "),
-        );
-        assert!(
-            empty_body.is_empty(),
-            "protocol-default-method monomorphisation(s) present but with \
-             zero-length body: {:?}. The queue ran but the body emit was \
-             skipped — likely a `[lenient] SKIP` of the default body's \
-             AST.",
-            empty_body,
-        );
-    }
-
-    /// **Diagnostic**: decode Formatter.write_str's bytecode to see
-    /// whether the body actually calls push_str or just returns Ok.
-    /// A 33-byte body for a 2-instruction logical body (call +
-    /// wrap-result + ret) might mean the call was lenient-SKIPped.
-    #[test]
-    #[ignore = "diagnostic only — Formatter.write_str bytecode disassembly"]
-    fn diag_decode_formatter_write_str() {
-        use verum_vbc::bytecode::decode_instructions;
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return,
-        };
-        for entry in &archive.index {
-            let module = match archive.load_module(&entry.name) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            for fn_desc in &module.functions {
-                let name = match module.strings.get(fn_desc.name) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                if name == "Formatter.write_str" {
-                    let off = fn_desc.bytecode_offset as usize;
-                    let len = fn_desc.bytecode_length as usize;
-                    if off + len > module.bytecode.len() {
-                        eprintln!("{}::{} body out-of-range", entry.name, name);
-                        continue;
-                    }
-                    let region = &module.bytecode[off..off + len];
-                    eprintln!("Found {}::{} (params={}, body={}B):",
-                        entry.name, name, fn_desc.params.len(), len);
-                    eprintln!("  raw bytes: {:02x?}", region);
-                    match decode_instructions(region) {
-                        Ok(instrs) => {
-                            for (i, instr) in instrs.iter().enumerate() {
-                                eprintln!("  [{}] {:?}", i, instr);
-                            }
-                        }
-                        Err(e) => eprintln!("  decode error: {:?}", e),
-                    }
-                    return;
-                }
-            }
-        }
-        eprintln!("Formatter.write_str NOT FOUND");
-    }
-
-    /// **Diagnostic**: dump every archive function whose simple
-    /// name is `write_str` to reveal name collisions across stdlib
-    /// modules.  Each collision is a potential method-dispatch
-    /// hazard — when user code calls `receiver.write_str(...)` on a
-    /// type whose impl has its own `write_str`, codegen's
-    /// `lookup_function_with_arity` must pick the receiver-type-
-    /// qualified entry; if name-collision dispatch picks a free
-    /// function with the same simple name, the call lands on the
-    /// wrong body and the user's `&mut self` mutation never happens.
-    #[test]
-    #[ignore = "diagnostic only — surfaces write_str name collisions"]
-    fn diag_dump_write_str_entries() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return,
-        };
-        let mut all: Vec<(String, String, usize, u32)> = Vec::new();
-        for entry in &archive.index {
-            let module = match archive.load_module(&entry.name) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            for fn_desc in &module.functions {
-                let name = match module.strings.get(fn_desc.name) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                if name.ends_with(".write_str") || name == "write_str" {
-                    all.push((
-                        entry.name.clone(),
-                        name.to_string(),
-                        fn_desc.params.len(),
-                        fn_desc.bytecode_length,
-                    ));
-                }
-            }
-        }
-        eprintln!("write_str entries in archive: {}", all.len());
-        for (entry, name, params, body) in &all {
-            eprintln!("  {}::{} (params={}, body={}B)", entry, name, params, body);
-        }
-    }
-
-    /// Diagnostic: dump current_dir-related entries to verify
-    /// archive has the function under expected qualified name.
-    #[test]
-    #[ignore = "diagnostic only"]
-    fn diag_current_dir_lookup() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return,
-        };
-        for entry in &archive.index {
-            if entry.name.ends_with("io.fs") || entry.name == "core.io.fs" {
-                println!("Archive module: {}", entry.name);
-                let m = archive.load_module(&entry.name).unwrap();
-                for f in &m.functions {
-                    let n = m
-                        .strings
-                        .get(f.name)
-                        .map(|s| s.to_string())
-                        .unwrap_or_default();
-                    if n == "current_dir" || n.contains("current_dir") {
-                        println!(
-                            "  fn `{}` params={} id={:?}",
-                            n,
-                            f.params.len(),
-                            f.id
-                        );
-                    }
-                }
-            }
-        }
-        let mut ctx = CodegenContext::new();
-        let mut next_id: u32 = 0;
-        let _ = populate_ctx_from_archive(archive, &mut ctx, &mut next_id).unwrap();
-        let exported = ctx.export_functions();
-        for k in exported.keys() {
-            if k.contains("current_dir") {
-                println!("ctx key: {}", k);
-            }
-        }
-    }
-
-    /// End-to-end: simulate the `verum run /tmp/text_no_prelude.vr`
-    /// path. Build SymbolGraph, BFS from a `Text` seed, verify the
-    /// defining module gets loaded and `Text.new` lands in the
-    /// codegen ctx under the bare `Text.new` key (NOT just the
-    /// module-qualified form).
-    #[test]
-    fn end_to_end_text_new_registered_under_bare_key() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return,
-        };
-        // Mirror the seed set the harvester would produce for
-        // `let buffer = Text.new()` (MethodCall shape).
-        let mut wanted: HashSet<String> = HashSet::new();
-        wanted.insert("Text".to_string());
-        wanted.insert("Text.new".to_string());
-        wanted.insert("print".to_string());
-
-        let cache = ArchiveCtxCache::new();
-        let graph = cache.graph(archive);
-
-        // Step 1: graph must have Text.new in qualified_to_module.
-        let text_new_module_idx = *graph
-            .qualified_to_module
-            .get("Text.new")
-            .expect("graph must index Text.new in qualified_to_module");
-        let text_new_entry = &archive.index[text_new_module_idx as usize];
-        eprintln!(
-            "Text.new is defined in archive entry: {} (idx {})",
-            text_new_entry.name, text_new_module_idx
-        );
-
-        // Step 2: reachability from `wanted` must include Text.new.
-        let (reached, reached_modules) = graph.reachable(&wanted);
-        assert!(
-            reached.contains("Text.new"),
-            "BFS from Text/Text.new MUST reach Text.new"
-        );
-        assert!(
-            reached_modules.contains(&text_new_module_idx),
-            "BFS modules MUST include the Text.new defining entry ({})",
-            text_new_entry.name
-        );
-
-        // Step 3: simulate register_module_filtered — load the entry,
-        // then verify Text.new gets registered.
-        let module = archive
-            .load_module_by_index(text_new_module_idx as usize)
-            .expect("entry must decode");
-        let mut ctx = CodegenContext::new();
-        let mut next_id: u32 = 0;
-        let _remap = register_module_filtered(
-            &module,
-            &text_new_entry.name,
-            &mut ctx,
-            &wanted,
-            &mut next_id,
-        );
-
-        // Step 4: bare `Text.new` MUST be in ctx.functions for
-        // user-side static-method dispatch.
-        let registered_keys: Vec<String> = ctx
-            .functions
-            .keys()
-            .filter(|k| k.contains("Text.new") || k.ends_with(".new"))
-            .cloned()
-            .collect();
-        assert!(
-            ctx.lookup_function("Text.new").is_some(),
-            "ctx must register `Text.new` under bare key for user-side \
-             static dispatch. Registered Text.new-related keys: {:?}",
-            registered_keys
-        );
-    }
-
-    /// Drift-pin: the archive-wide symbol graph must surface every
-    /// archive-defined `Text.new` / `Maybe.is_some` / `Map.contains_key`
-    /// callee from a seed walk that names just the bare type. This is
-    /// the contract that lets `register_module_filtered` accept the
-    /// function via the literal-simple-name match without falling back
-    /// to the heuristic filter arms.
-    #[test]
-    fn graph_reaches_canonical_stdlib_methods_from_type_seeds() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return, // bootstrap-phase build, no archive
-        };
-        let cache = ArchiveCtxCache::new();
-        let graph = cache.graph(archive);
-        // Quick sanity: graph indexes some functions.
-        assert!(
-            !graph.qualified_to_module.is_empty(),
-            "graph qualified-to-module index empty — graph build broken"
-        );
-        // Seed `Text` should reach `Text.new` (and other Text methods)
-        // via the prefix index.
-        let mut seeds = HashSet::new();
-        seeds.insert("Text".to_string());
-        let (reached, _modules) = graph.reachable(&seeds);
-        assert!(
-            reached.contains("Text.new"),
-            "graph reachability from seed `Text` MUST reach `Text.new`; \
-             qualified_to_module has Text.new = {}, prefix_to_qualified[Text].len() = {}",
-            graph.qualified_to_module.contains_key("Text.new"),
-            graph.prefix_to_qualified.get("Text").map(|v| v.len()).unwrap_or(0),
-        );
-        assert!(
-            reached.contains("Maybe.is_some") || reached.contains("Map.contains_key"),
-            "transitive reachability MUST reach at least one of \
-             Maybe.is_some / Map.contains_key (transitively called from \
-             Text impl methods); reached={} entries",
-            reached.len(),
-        );
-    }
-
-    /// Cache layer round-trip: first call builds, second clones.
-    /// Both must produce identical ctx state.
-    #[test]
-    fn archive_ctx_cache_round_trip() {
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return,
-        };
-        let cache = ArchiveCtxCache::new();
-        let mut ctx_first = CodegenContext::new();
-        cache.apply(archive, &mut ctx_first);
-        let first_count = ctx_first.export_functions().len();
-        assert!(first_count > 0);
-
-        let mut ctx_second = CodegenContext::new();
-        cache.apply(archive, &mut ctx_second);
-        let second_count = ctx_second.export_functions().len();
-        assert_eq!(
-            first_count, second_count,
-            "cached apply must produce identical entry count across runs"
-        );
-    }
-
-    /// Source-of-truth pin test for
-    /// `WellKnownType::canonical_archive_modules`.  Every module path
-    /// returned by the table MUST exist as an archive entry name —
-    /// otherwise the loader's `wanted_module_prefixes` extension is a
-    /// no-op and `Text.new()` / `List.with_capacity(8)` / etc. fall
-    /// through to UndefinedFunction at runtime.
-    ///
-    /// This test catches three drift modes structurally:
-    /// (1) renaming a `core/` module without updating the table;
-    /// (2) adding a new well-known type whose carrier module path is
-    ///     wrong;
-    /// (3) the precompiler bundling a module under a different parent
-    ///     than the table assumes.
-    #[test]
-    fn canonical_archive_modules_match_source() {
-        use verum_common::well_known_types::WellKnownType;
-
-        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
-            Some(a) => a,
-            None => return, // bootstrap build without archive — skip
-        };
-        let archive_names: std::collections::HashSet<&str> = archive
-            .index
-            .iter()
-            .map(|e| e.name.as_str())
-            .collect();
-
-        let well_known_types = [
-            WellKnownType::Text,
-            WellKnownType::Char,
-            WellKnownType::List,
-            WellKnownType::Map,
-            WellKnownType::Set,
-            WellKnownType::Deque,
-            WellKnownType::BTreeMap,
-            WellKnownType::BTreeSet,
-            WellKnownType::BinaryHeap,
-            WellKnownType::Maybe,
-            WellKnownType::Result,
-            WellKnownType::Heap,
-            WellKnownType::Shared,
-            WellKnownType::Channel,
-            WellKnownType::Mutex,
-            WellKnownType::RwLock,
-            WellKnownType::Barrier,
-            WellKnownType::WaitGroup,
-            WellKnownType::Once,
-            WellKnownType::Semaphore,
-            WellKnownType::Task,
-            WellKnownType::Nursery,
-            WellKnownType::AtomicInt,
-            WellKnownType::AtomicBool,
-            WellKnownType::Duration,
-            WellKnownType::Instant,
-            WellKnownType::Never,
-            WellKnownType::Ordering,
-            WellKnownType::Range,
-            WellKnownType::Int,
-            WellKnownType::Float,
-            WellKnownType::Bool,
-        ];
-
-        let mut missing: Vec<(WellKnownType, &'static str)> = Vec::new();
-        for wkt in well_known_types {
-            // Each well-known type's canonical archive modules — at
-            // least ONE of them must resolve.  The list mixes the
-            // canonical-source-declared path (`core.text.text`) and
-            // grandparent-bundled fallback (`core.text`); the
-            // precompiler picks one or the other depending on
-            // bundling shape, and the loader is happy with either.
-            let mods = wkt.canonical_archive_modules();
-            if mods.is_empty() {
-                continue;
-            }
-            let any_present =
-                mods.iter().any(|m| archive_names.contains(m));
-            if !any_present {
-                missing.push((wkt, mods[0]));
-            }
-        }
-        if !missing.is_empty() {
-            // Diagnostic: print the closest archive entries by prefix
-            // so the maintainer can see the bundling shape.
-            for (wkt, expected) in &missing {
-                let prefix = expected.split('.').next().unwrap_or("");
-                let near: Vec<&str> = archive_names
-                    .iter()
-                    .filter(|n| n.starts_with(prefix))
-                    .copied()
-                    .collect();
-                eprintln!(
-                    "  drift: {:?} expected '{}' or fallback; \
-                     archive has under '{}.': {:?}",
-                    wkt, expected, prefix, near
-                );
-            }
-            panic!(
-                "WellKnownType::canonical_archive_modules drift — \
-                 {} types have no archive-resolvable module path",
-                missing.len()
-            );
-        }
-    }
-}
-
 // ============================================================================
 // T2-extended-perf: lazy mount-driven FunctionInfo registration
 // ============================================================================
@@ -5900,4 +5099,805 @@ fn register_module_filtered(
         }
     }
     (func_id_remap, registered_ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Drift-pin**: every canonical-name shape produced by the
+    /// precompiler must round-trip through `merge_module_and_simple_name`
+    /// to the form the user-side codegen looks up.  Drift between
+    /// registration (this fn) and lookup (`lookup_qualified_function`
+    /// in codegen) is invisible — the function is "registered" but
+    /// nobody can find it — and surfaces as runtime mis-dispatch when
+    /// a same-named sibling in another module claims the bare-name
+    /// fallback (e.g. `core.sys.bitfield.test_bit` silently dispatching
+    /// to `core.net.tls13.handshake.zero_rtt_antireplay.test_bit`).
+    #[test]
+    fn merge_canonical_name_synthesis() {
+        // (1) Bare leaf — no submodule directive in source. Prepend
+        // module_name verbatim.
+        assert_eq!(
+            merge_module_and_simple_name("core.text", "new"),
+            "core.text.new",
+        );
+        assert_eq!(
+            merge_module_and_simple_name("core.io", "write"),
+            "core.io.write",
+        );
+        // (2) Relative submodule — descriptor's leading segment is
+        // also module_name's trailing segment. Skip the overlap.
+        assert_eq!(
+            merge_module_and_simple_name("core.sys", "sys.bitfield.test_bit"),
+            "core.sys.bitfield.test_bit",
+        );
+        assert_eq!(
+            merge_module_and_simple_name("core.collections", "collections.map.Map.new"),
+            "core.collections.map.Map.new",
+        );
+        // (3) Fully-rooted submodule — descriptor already starts with
+        // the cog + entry prefix. Drop module_name entirely.
+        assert_eq!(
+            merge_module_and_simple_name("core.async", "core.async.future.ready"),
+            "core.async.future.ready",
+        );
+        // (4) No overlap — descriptor's leading segments are unrelated
+        // to module_name's tail (e.g. `tls13.handshake....` under
+        // archive entry `core.net`). Prepend module_name verbatim.
+        assert_eq!(
+            merge_module_and_simple_name(
+                "core.net",
+                "tls13.handshake.zero_rtt_antireplay.test_bit"
+            ),
+            "core.net.tls13.handshake.zero_rtt_antireplay.test_bit",
+        );
+        // (5) Longest-overlap discipline: when the descriptor and
+        // module_name share both `sys` AND `sys.bitfield` as possible
+        // prefixes, the algorithm picks the LONGER match. (Synthetic
+        // case to pin the longest-wins rule.)
+        assert_eq!(
+            merge_module_and_simple_name("a.b.sys.bitfield", "sys.bitfield.test_bit"),
+            "a.b.sys.bitfield.test_bit",
+        );
+        // (6) Full overlap of module_name with the descriptor's
+        // prefix — module_name drops entirely.
+        assert_eq!(
+            merge_module_and_simple_name("core.sys.bitfield", "core.sys.bitfield.test_bit"),
+            "core.sys.bitfield.test_bit",
+        );
+        // (7) Type-qualified bare descriptor — `Type.method` where
+        // module_name doesn't overlap. (Static methods land here.)
+        assert_eq!(
+            merge_module_and_simple_name("core.time.duration", "Duration.zero"),
+            "core.time.duration.Duration.zero",
+        );
+    }
+
+    /// Smoke test: when the compiler binary embeds the precompiled
+    /// stdlib archive, `populate_ctx_from_archive` registers a
+    /// non-trivial number of functions and recovers variant-ctor
+    /// metadata for every stdlib type that lands in the archive.
+    ///
+    /// Note on what's in scope: built-in core variants (Maybe.Some /
+    /// Maybe.None / Result.Ok / Result.Err / Ordering.Lt etc.) are
+    /// registered by VbcCodegen::register_builtin_variants, not by
+    /// the archive — they're compiler intrinsics with hardcoded tags.
+    /// This loader handles the user-stdlib-type variants only;
+    /// built-ins flow through a parallel path called from
+    /// `compile_ast_to_vbc` before T1 runs.
+    #[test]
+    fn loads_embedded_archive_into_ctx() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return, // bootstrap build without archive — skip
+        };
+        let mut ctx = CodegenContext::new();
+        let mut next_id: u32 = 0;
+        let stats = populate_ctx_from_archive(archive, &mut ctx, &mut next_id).expect("load");
+
+        assert!(
+            stats.modules_loaded > 100,
+            "must load >100 stdlib modules (got {})",
+            stats.modules_loaded
+        );
+        assert!(
+            stats.functions_registered > 1000,
+            "must register >1000 functions (got {})",
+            stats.functions_registered
+        );
+
+        // At least some stdlib types surface variant constructors
+        // through the archive (DbError variants, ConnectionError,
+        // ShellError, etc.).  We don't pin a specific list because
+        // stdlib evolves; assert "more than zero" to catch the case
+        // where the variant_tag-recovery loop is silently broken.
+        assert!(
+            stats.variant_ctors_resolved > 0,
+            "expected variant-ctor recovery to find at least one stdlib variant ctor"
+        );
+
+        // Sample qualified lookup — the archive's modules carry
+        // canonical `core.X.Y.fn` qualified names.  Pick a stable
+        // entrypoint that's been in stdlib for many revisions.
+        let exported = ctx.export_functions();
+        let canonical_qualified = exported
+            .keys()
+            .filter(|k| k.starts_with("core.") && k.contains('.'))
+            .count();
+        assert!(
+            canonical_qualified > 100,
+            "expected >100 canonical `core.*` qualified entries"
+        );
+    }
+
+    /// **Drift-pin**: every public type in `core/base/protocols.vr`
+    /// MUST be carried into the precompiled archive.  The whole file
+    /// is at structural risk because a single stray top-level token
+    /// (e.g. `implement Foo for Bar { ... };` with an erroneous
+    /// trailing `;`) makes `stdlib_bootstrap` parse-fail the entire
+    /// file under the lenient-skip discipline, silently dropping
+    /// every type declared after the bad token.  When that happens,
+    /// downstream user code's `DefaultHasher.new()` evaluates to
+    /// `Unit` (its impl wasn't compiled), `hasher.write_int(n)`
+    /// panics with `method 'DefaultHasher.write_int' not found on
+    /// receiver of runtime kind '()'`, and every `Formatter { ... }`
+    /// record literal allocates with `type_id=0` then SetF
+    /// out-of-bounds.  Test surface covers the most-load-bearing
+    /// names in the file:
+    ///
+    ///   * `Hasher` — protocol consulted by Hash impls; missing →
+    ///     `Int.hash(hasher)` dispatches `Hasher.write_int` to a
+    ///     non-existent receiver.
+    ///   * `DefaultHasher` — concrete Hasher used by the protocol's
+    ///     default `hash_value` body; missing → `DefaultHasher.new()`
+    ///     returns Unit.
+    ///   * `Formatter` — buffer-writing record used by every Display
+    ///     impl; missing → `Formatter { buffer: &mut buf }` writes
+    ///     SetF at the wrong field index because
+    ///     `type_field_layouts` has no entry.
+    ///   * `FormatError`, `FmtResult` — referenced by every fallible
+    ///     formatter method's return type.
+    ///
+    /// Each entry also asserts the field count surviving the
+    /// precompile round-trip — empty `fields` on the descriptor
+    /// makes `import_archive_type_with_protocol_remap` skip the
+    /// `type_field_layouts` registration which is structurally
+    /// equivalent to dropping the type.
+    #[test]
+    fn archive_default_hasher_carries_state_field() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return, // bootstrap build without archive — skip
+        };
+        // DefaultHasher is declared in core/base/protocols.vr (module
+        // core.base.protocols).  Walk archive modules to find the
+        // descriptor.
+        let mut found: Option<(String, Vec<String>)> = None;
+        let mut function_hits: Vec<(String, String)> = Vec::new();
+        let mut type_names_in_protocols_module: Vec<String> = Vec::new();
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for ty in &module.types {
+                let name = match module.strings.get(ty.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if entry.name == "core.base"
+                    || entry.name.contains("protocols")
+                    || entry.name == "core.base.protocols"
+                {
+                    type_names_in_protocols_module.push(format!(
+                        "{}:{}({}f)",
+                        entry.name,
+                        name,
+                        ty.fields.len()
+                    ));
+                }
+                if name == "DefaultHasher" {
+                    let field_names: Vec<String> = ty
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            module
+                                .strings
+                                .get(f.name)
+                                .map(|s| s.to_string())
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    found = Some((entry.name.clone(), field_names));
+                    break;
+                }
+            }
+            for fn_desc in &module.functions {
+                let fname = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if fname.contains("DefaultHasher") || fname == "new" && entry.name.contains("protocols") {
+                    function_hits.push((entry.name.clone(), fname.to_string()));
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let (entry_name, fields) = found.unwrap_or_else(|| {
+            panic!(
+                "DefaultHasher descriptor MUST be in the precompiled archive — \
+                 missing entry means stdlib precompiler dropped the type.\n\
+                 function_hits (DefaultHasher.* or new in protocols entries):\n  {}\n\
+                 type_names in protocols-containing entries (first 30):\n  {}",
+                function_hits.iter().take(30).map(|(e, f)| format!("{}::{}", e, f)).collect::<Vec<_>>().join("\n  "),
+                type_names_in_protocols_module.iter().take(30).cloned().collect::<Vec<_>>().join("\n  "),
+            )
+        });
+        assert_eq!(
+            fields,
+            vec!["state".to_string()],
+            "DefaultHasher (archive entry `{}`) must carry exactly one \
+             field `state`; precompiler dropped it (fields={:?})",
+            entry_name,
+            fields,
+        );
+
+        // Probe the broader public surface of core/base/protocols.vr.
+        // Any of these missing means the whole file got
+        // lenient-SKIPped at parse time and downstream stdlib code is
+        // architecturally broken.  Test names use the canonical
+        // simple-type-name form because the archive is searched
+        // module-by-module (descriptor name only).
+        let probe = |type_name: &str, expected_field_count: Option<usize>| {
+            let mut found_arity: Option<usize> = None;
+            for entry in &archive.index {
+                let module = match archive.load_module(&entry.name) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                for ty in &module.types {
+                    let name = match module.strings.get(ty.name) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    if name == type_name {
+                        found_arity = Some(ty.fields.len());
+                        break;
+                    }
+                }
+                if found_arity.is_some() {
+                    break;
+                }
+            }
+            let arity = found_arity.unwrap_or_else(|| {
+                panic!(
+                    "type `{}` (declared in core/base/protocols.vr) MUST be in \
+                     the precompiled archive.  Missing entry means the whole \
+                     file was lenient-SKIPped at parse time — check for a \
+                     stray `;` after an `implement` block, an unmatched brace, \
+                     or any other top-level syntax defect.",
+                    type_name
+                )
+            });
+            if let Some(expected) = expected_field_count {
+                assert_eq!(
+                    arity, expected,
+                    "type `{}` must have {} field(s) in the archive (got {}) — \
+                     the precompiler may have stripped fields during the \
+                     stripped-bytecode optimisation, OR the type was rebuilt \
+                     without its declared body.",
+                    type_name, expected, arity,
+                );
+            }
+        };
+        // Records — must carry their declared field counts.
+        probe("Formatter", Some(1));
+        probe("FormatError", Some(0));
+        // Protocol types — no `fields` (their methods live on the
+        // monomorphised impl side); just assert presence.
+        probe("Hasher", None);
+        probe("Hash", None);
+        probe("PartialEq", None);
+        probe("Eq", None);
+        probe("Ord", None);
+        probe("PartialOrd", None);
+        probe("Clone", None);
+        probe("Default", None);
+        probe("Debug", None);
+        probe("Display", None);
+    }
+
+    /// **Drift-pin**: every protocol-default-method monomorphisation
+    /// MUST ship in the precompiled archive with a real
+    /// (non-zero-length) bytecode body.  When `stdlib_bootstrap`
+    /// processes `implement Hasher for DefaultHasher`,
+    /// `generate_default_protocol_methods` queues `DefaultHasher.write_int`
+    /// and `DefaultHasher.write_byte` (default bodies on the Hasher
+    /// protocol that DefaultHasher does NOT override) into
+    /// `pending_default_methods`.  `compile_pending_default_methods`
+    /// MUST then run before module finalisation so each queued
+    /// `<Type>.<method>` gets a real archive body.
+    ///
+    /// Without this pin, `hasher.write_int(42)` (where `hasher` is a
+    /// concrete DefaultHasher) panics at runtime with
+    /// `method 'DefaultHasher.write_int' not found on receiver of
+    /// runtime kind 'Object'`, because the runtime's method-table
+    /// lookup misses the unmonomorphised default body.  Affected
+    /// classes include every protocol with default methods: Hasher
+    /// (write_int / write_byte), Hash (hash_value), PartialEq (ne via
+    /// blanket impl<T: Ord>), Display / Debug forwarders, and every
+    /// Iterator combinator default (map, filter, fold, …).
+    #[test]
+    fn archive_carries_protocol_default_method_monomorphisations() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        // Each tuple: (qualified_function_name, "rationale").
+        // Pick representative samples whose default body lives on a
+        // protocol but whose receiver-type implements only a subset
+        // of the protocol's API.
+        let required = [
+            (
+                "DefaultHasher.write_int",
+                "Hasher.write_int default — DefaultHasher overrides only `write`",
+            ),
+            (
+                "DefaultHasher.write_byte",
+                "Hasher.write_byte default — DefaultHasher overrides only `write`",
+            ),
+        ];
+        let mut missing: Vec<&'static str> = Vec::new();
+        let mut empty_body: Vec<&'static str> = Vec::new();
+        let mut all_default_hasher_fns: Vec<(String, String, u32)> = Vec::new();
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for fn_desc in &module.functions {
+                let name = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if name.contains("DefaultHasher") || name.contains("Hasher.write") {
+                    all_default_hasher_fns.push((
+                        entry.name.clone(),
+                        name.to_string(),
+                        fn_desc.bytecode_length,
+                    ));
+                }
+            }
+        }
+        for (qualified, _why) in &required {
+            let mut found_with_body = false;
+            let mut found_at_all = false;
+            'outer: for entry in &archive.index {
+                let module = match archive.load_module(&entry.name) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                for fn_desc in &module.functions {
+                    let name = match module.strings.get(fn_desc.name) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    // Match either bare `DefaultHasher.write_int` or
+                    // any qualified form ending with `.<qualified>`.
+                    if name == *qualified
+                        || name.ends_with(&format!(".{}", qualified))
+                    {
+                        found_at_all = true;
+                        if fn_desc.bytecode_length > 0 {
+                            found_with_body = true;
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            if !found_at_all {
+                missing.push(qualified);
+            } else if !found_with_body {
+                empty_body.push(qualified);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "protocol-default-method monomorphisation(s) MISSING from \
+             archive: {:?}. This indicates stdlib_bootstrap's \
+             `compile_core_module_from_ast` skipped \
+             `compile_pending_default_methods()` between \
+             `resolve_pending_imports` and the body-compilation pass.\n\
+             All DefaultHasher/Hasher.write functions in archive (first 40):\n  {}",
+            missing,
+            all_default_hasher_fns.iter().take(40)
+                .map(|(e, n, l)| format!("{}::{} (body={}B)", e, n, l))
+                .collect::<Vec<_>>().join("\n  "),
+        );
+        assert!(
+            empty_body.is_empty(),
+            "protocol-default-method monomorphisation(s) present but with \
+             zero-length body: {:?}. The queue ran but the body emit was \
+             skipped — likely a `[lenient] SKIP` of the default body's \
+             AST.",
+            empty_body,
+        );
+    }
+
+    /// **Diagnostic**: decode Formatter.write_str's bytecode to see
+    /// whether the body actually calls push_str or just returns Ok.
+    /// A 33-byte body for a 2-instruction logical body (call +
+    /// wrap-result + ret) might mean the call was lenient-SKIPped.
+    #[test]
+    #[ignore = "diagnostic only — Formatter.write_str bytecode disassembly"]
+    fn diag_decode_formatter_write_str() {
+        use verum_vbc::bytecode::decode_instructions;
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for fn_desc in &module.functions {
+                let name = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if name == "Formatter.write_str" {
+                    let off = fn_desc.bytecode_offset as usize;
+                    let len = fn_desc.bytecode_length as usize;
+                    if off + len > module.bytecode.len() {
+                        eprintln!("{}::{} body out-of-range", entry.name, name);
+                        continue;
+                    }
+                    let region = &module.bytecode[off..off + len];
+                    eprintln!("Found {}::{} (params={}, body={}B):",
+                        entry.name, name, fn_desc.params.len(), len);
+                    eprintln!("  raw bytes: {:02x?}", region);
+                    match decode_instructions(region) {
+                        Ok(instrs) => {
+                            for (i, instr) in instrs.iter().enumerate() {
+                                eprintln!("  [{}] {:?}", i, instr);
+                            }
+                        }
+                        Err(e) => eprintln!("  decode error: {:?}", e),
+                    }
+                    return;
+                }
+            }
+        }
+        eprintln!("Formatter.write_str NOT FOUND");
+    }
+
+    /// **Diagnostic**: dump every archive function whose simple
+    /// name is `write_str` to reveal name collisions across stdlib
+    /// modules.  Each collision is a potential method-dispatch
+    /// hazard — when user code calls `receiver.write_str(...)` on a
+    /// type whose impl has its own `write_str`, codegen's
+    /// `lookup_function_with_arity` must pick the receiver-type-
+    /// qualified entry; if name-collision dispatch picks a free
+    /// function with the same simple name, the call lands on the
+    /// wrong body and the user's `&mut self` mutation never happens.
+    #[test]
+    #[ignore = "diagnostic only — surfaces write_str name collisions"]
+    fn diag_dump_write_str_entries() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        let mut all: Vec<(String, String, usize, u32)> = Vec::new();
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for fn_desc in &module.functions {
+                let name = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if name.ends_with(".write_str") || name == "write_str" {
+                    all.push((
+                        entry.name.clone(),
+                        name.to_string(),
+                        fn_desc.params.len(),
+                        fn_desc.bytecode_length,
+                    ));
+                }
+            }
+        }
+        eprintln!("write_str entries in archive: {}", all.len());
+        for (entry, name, params, body) in &all {
+            eprintln!("  {}::{} (params={}, body={}B)", entry, name, params, body);
+        }
+    }
+
+    /// Diagnostic: dump current_dir-related entries to verify
+    /// archive has the function under expected qualified name.
+    #[test]
+    #[ignore = "diagnostic only"]
+    fn diag_current_dir_lookup() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        for entry in &archive.index {
+            if entry.name.ends_with("io.fs") || entry.name == "core.io.fs" {
+                println!("Archive module: {}", entry.name);
+                let m = archive.load_module(&entry.name).unwrap();
+                for f in &m.functions {
+                    let n = m
+                        .strings
+                        .get(f.name)
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    if n == "current_dir" || n.contains("current_dir") {
+                        println!(
+                            "  fn `{}` params={} id={:?}",
+                            n,
+                            f.params.len(),
+                            f.id
+                        );
+                    }
+                }
+            }
+        }
+        let mut ctx = CodegenContext::new();
+        let mut next_id: u32 = 0;
+        let _ = populate_ctx_from_archive(archive, &mut ctx, &mut next_id).unwrap();
+        let exported = ctx.export_functions();
+        for k in exported.keys() {
+            if k.contains("current_dir") {
+                println!("ctx key: {}", k);
+            }
+        }
+    }
+
+    /// End-to-end: simulate the `verum run /tmp/text_no_prelude.vr`
+    /// path. Build SymbolGraph, BFS from a `Text` seed, verify the
+    /// defining module gets loaded and `Text.new` lands in the
+    /// codegen ctx under the bare `Text.new` key (NOT just the
+    /// module-qualified form).
+    #[test]
+    fn end_to_end_text_new_registered_under_bare_key() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        // Mirror the seed set the harvester would produce for
+        // `let buffer = Text.new()` (MethodCall shape).
+        let mut wanted: HashSet<String> = HashSet::new();
+        wanted.insert("Text".to_string());
+        wanted.insert("Text.new".to_string());
+        wanted.insert("print".to_string());
+
+        let cache = ArchiveCtxCache::new();
+        let graph = cache.graph(archive);
+
+        // Step 1: graph must have Text.new in qualified_to_module.
+        let text_new_module_idx = *graph
+            .qualified_to_module
+            .get("Text.new")
+            .expect("graph must index Text.new in qualified_to_module");
+        let text_new_entry = &archive.index[text_new_module_idx as usize];
+        eprintln!(
+            "Text.new is defined in archive entry: {} (idx {})",
+            text_new_entry.name, text_new_module_idx
+        );
+
+        // Step 2: reachability from `wanted` must include Text.new.
+        let (reached, reached_modules) = graph.reachable(&wanted);
+        assert!(
+            reached.contains("Text.new"),
+            "BFS from Text/Text.new MUST reach Text.new"
+        );
+        assert!(
+            reached_modules.contains(&text_new_module_idx),
+            "BFS modules MUST include the Text.new defining entry ({})",
+            text_new_entry.name
+        );
+
+        // Step 3: simulate register_module_filtered — load the entry,
+        // then verify Text.new gets registered.
+        let module = archive
+            .load_module_by_index(text_new_module_idx as usize)
+            .expect("entry must decode");
+        let mut ctx = CodegenContext::new();
+        let mut next_id: u32 = 0;
+        let _remap = register_module_filtered(
+            &module,
+            &text_new_entry.name,
+            &mut ctx,
+            &wanted,
+            &mut next_id,
+        );
+
+        // Step 4: bare `Text.new` MUST be in ctx.functions for
+        // user-side static-method dispatch.
+        let registered_keys: Vec<String> = ctx
+            .functions
+            .keys()
+            .filter(|k| k.contains("Text.new") || k.ends_with(".new"))
+            .cloned()
+            .collect();
+        assert!(
+            ctx.lookup_function("Text.new").is_some(),
+            "ctx must register `Text.new` under bare key for user-side \
+             static dispatch. Registered Text.new-related keys: {:?}",
+            registered_keys
+        );
+    }
+
+    /// Drift-pin: the archive-wide symbol graph must surface every
+    /// archive-defined `Text.new` / `Maybe.is_some` / `Map.contains_key`
+    /// callee from a seed walk that names just the bare type. This is
+    /// the contract that lets `register_module_filtered` accept the
+    /// function via the literal-simple-name match without falling back
+    /// to the heuristic filter arms.
+    #[test]
+    fn graph_reaches_canonical_stdlib_methods_from_type_seeds() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return, // bootstrap-phase build, no archive
+        };
+        let cache = ArchiveCtxCache::new();
+        let graph = cache.graph(archive);
+        // Quick sanity: graph indexes some functions.
+        assert!(
+            !graph.qualified_to_module.is_empty(),
+            "graph qualified-to-module index empty — graph build broken"
+        );
+        // Seed `Text` should reach `Text.new` (and other Text methods)
+        // via the prefix index.
+        let mut seeds = HashSet::new();
+        seeds.insert("Text".to_string());
+        let (reached, _modules) = graph.reachable(&seeds);
+        assert!(
+            reached.contains("Text.new"),
+            "graph reachability from seed `Text` MUST reach `Text.new`; \
+             qualified_to_module has Text.new = {}, prefix_to_qualified[Text].len() = {}",
+            graph.qualified_to_module.contains_key("Text.new"),
+            graph.prefix_to_qualified.get("Text").map(|v| v.len()).unwrap_or(0),
+        );
+        assert!(
+            reached.contains("Maybe.is_some") || reached.contains("Map.contains_key"),
+            "transitive reachability MUST reach at least one of \
+             Maybe.is_some / Map.contains_key (transitively called from \
+             Text impl methods); reached={} entries",
+            reached.len(),
+        );
+    }
+
+    /// Cache layer round-trip: first call builds, second clones.
+    /// Both must produce identical ctx state.
+    #[test]
+    fn archive_ctx_cache_round_trip() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        let cache = ArchiveCtxCache::new();
+        let mut ctx_first = CodegenContext::new();
+        cache.apply(archive, &mut ctx_first);
+        let first_count = ctx_first.export_functions().len();
+        assert!(first_count > 0);
+
+        let mut ctx_second = CodegenContext::new();
+        cache.apply(archive, &mut ctx_second);
+        let second_count = ctx_second.export_functions().len();
+        assert_eq!(
+            first_count, second_count,
+            "cached apply must produce identical entry count across runs"
+        );
+    }
+
+    /// Source-of-truth pin test for
+    /// `WellKnownType::canonical_archive_modules`.  Every module path
+    /// returned by the table MUST exist as an archive entry name —
+    /// otherwise the loader's `wanted_module_prefixes` extension is a
+    /// no-op and `Text.new()` / `List.with_capacity(8)` / etc. fall
+    /// through to UndefinedFunction at runtime.
+    ///
+    /// This test catches three drift modes structurally:
+    /// (1) renaming a `core/` module without updating the table;
+    /// (2) adding a new well-known type whose carrier module path is
+    ///     wrong;
+    /// (3) the precompiler bundling a module under a different parent
+    ///     than the table assumes.
+    #[test]
+    fn canonical_archive_modules_match_source() {
+        use verum_common::well_known_types::WellKnownType;
+
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return, // bootstrap build without archive — skip
+        };
+        let archive_names: std::collections::HashSet<&str> = archive
+            .index
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+
+        let well_known_types = [
+            WellKnownType::Text,
+            WellKnownType::Char,
+            WellKnownType::List,
+            WellKnownType::Map,
+            WellKnownType::Set,
+            WellKnownType::Deque,
+            WellKnownType::BTreeMap,
+            WellKnownType::BTreeSet,
+            WellKnownType::BinaryHeap,
+            WellKnownType::Maybe,
+            WellKnownType::Result,
+            WellKnownType::Heap,
+            WellKnownType::Shared,
+            WellKnownType::Channel,
+            WellKnownType::Mutex,
+            WellKnownType::RwLock,
+            WellKnownType::Barrier,
+            WellKnownType::WaitGroup,
+            WellKnownType::Once,
+            WellKnownType::Semaphore,
+            WellKnownType::Task,
+            WellKnownType::Nursery,
+            WellKnownType::AtomicInt,
+            WellKnownType::AtomicBool,
+            WellKnownType::Duration,
+            WellKnownType::Instant,
+            WellKnownType::Never,
+            WellKnownType::Ordering,
+            WellKnownType::Range,
+            WellKnownType::Int,
+            WellKnownType::Float,
+            WellKnownType::Bool,
+        ];
+
+        let mut missing: Vec<(WellKnownType, &'static str)> = Vec::new();
+        for wkt in well_known_types {
+            // Each well-known type's canonical archive modules — at
+            // least ONE of them must resolve.  The list mixes the
+            // canonical-source-declared path (`core.text.text`) and
+            // grandparent-bundled fallback (`core.text`); the
+            // precompiler picks one or the other depending on
+            // bundling shape, and the loader is happy with either.
+            let mods = wkt.canonical_archive_modules();
+            if mods.is_empty() {
+                continue;
+            }
+            let any_present =
+                mods.iter().any(|m| archive_names.contains(m));
+            if !any_present {
+                missing.push((wkt, mods[0]));
+            }
+        }
+        if !missing.is_empty() {
+            // Diagnostic: print the closest archive entries by prefix
+            // so the maintainer can see the bundling shape.
+            for (wkt, expected) in &missing {
+                let prefix = expected.split('.').next().unwrap_or("");
+                let near: Vec<&str> = archive_names
+                    .iter()
+                    .filter(|n| n.starts_with(prefix))
+                    .copied()
+                    .collect();
+                eprintln!(
+                    "  drift: {:?} expected '{}' or fallback; \
+                     archive has under '{}.': {:?}",
+                    wkt, expected, prefix, near
+                );
+            }
+            panic!(
+                "WellKnownType::canonical_archive_modules drift — \
+                 {} types have no archive-resolvable module path",
+                missing.len()
+            );
+        }
+    }
 }

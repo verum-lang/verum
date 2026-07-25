@@ -349,6 +349,23 @@ fn named_to_expr_placeholder(name: &str, arity: usize) -> Expr {
     )
 }
 
+// Helper for the kernel-side test probe — kept private since it's
+// only used by the architectural-pin test above.
+#[cfg(test)]
+trait HeapPredicateAndForTest {
+    fn heap_predicate_and_for_test() -> Self;
+}
+
+#[cfg(test)]
+impl HeapPredicateAndForTest for HeapPredicate {
+    fn heap_predicate_and_for_test() -> Self {
+        HeapPredicate::And {
+            lhs: Box::new(HeapPredicate::Emp),
+            rhs: Box::new(HeapPredicate::Emp),
+        }
+    }
+}
+
 // IntLit was imported for potential numeric-literal placeholders; not
 // used in V1 (all placeholders are Path / Text literal shapes), so
 // drop the import.
@@ -622,22 +639,5 @@ mod tests {
             let _ = KernelSepBridge::lower(p);
         }
         assert_eq!(probes.len(), 13);
-    }
-}
-
-// Helper for the kernel-side test probe — kept private since it's
-// only used by the architectural-pin test above.
-#[cfg(test)]
-trait HeapPredicateAndForTest {
-    fn heap_predicate_and_for_test() -> Self;
-}
-
-#[cfg(test)]
-impl HeapPredicateAndForTest for HeapPredicate {
-    fn heap_predicate_and_for_test() -> Self {
-        HeapPredicate::And {
-            lhs: Box::new(HeapPredicate::Emp),
-            rhs: Box::new(HeapPredicate::Emp),
-        }
     }
 }

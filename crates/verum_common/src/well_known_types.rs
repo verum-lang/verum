@@ -2462,7 +2462,7 @@ mod tests {
             };
             for proto_name in &protos {
                 let proto = WellKnownProtocol::from_name(proto_name).unwrap();
-                let table_says = table.iter().any(|p| *p == proto);
+                let table_says = table.contains(&proto);
                 let consumer_says =
                     primitive_implements_protocol(type_name, proto_name).unwrap();
                 assert_eq!(

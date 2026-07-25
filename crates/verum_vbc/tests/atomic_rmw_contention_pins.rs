@@ -242,7 +242,7 @@ fn fetch_xor_toggles_an_even_number_of_times() {
         let olds = contend(module);
         assert_eq!(olds.len(), THREADS * ITERS);
 
-        let expected = if (THREADS * ITERS) % 2 == 0 { 0 } else { 1 };
+        let expected = if (THREADS * ITERS).is_multiple_of(2) { 0 } else { 1 };
         assert_eq!(
             unbox(cell.load(Ordering::SeqCst)),
             expected,

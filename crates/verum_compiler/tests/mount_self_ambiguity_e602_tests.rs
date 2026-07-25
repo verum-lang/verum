@@ -60,7 +60,7 @@ fn write_project(files: &[(&str, &str)]) -> (TempDir, PathBuf) {
             leaf = p;
         }
     }
-    assert!(leaf.as_os_str().len() > 0, "fixture must include leaf.vr");
+    assert!(!leaf.as_os_str().is_empty(), "fixture must include leaf.vr");
     (tmp, leaf)
 }
 

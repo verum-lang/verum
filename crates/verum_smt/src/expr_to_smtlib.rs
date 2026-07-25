@@ -201,7 +201,7 @@ pub fn expr_to_smtlib(expr: &Expr) -> SmtResult {
             let scrut_smt = expr_to_smtlib(scrut)?;
             let mut chain: Option<String> = None;
             for arm in arms.iter().rev() {
-                if let verum_common::Maybe::Some(_) = &arm.guard {
+                if arm.guard.is_some() {
                     return Err(SmtTranslateError::UnsupportedExpr {
                         description: "guarded match arm".to_string(),
                     });
@@ -215,7 +215,7 @@ pub fn expr_to_smtlib(expr: &Expr) -> SmtResult {
                     // A nullary variant `K.A`. A payload (`Some(x)`) has no SMT
                     // form for `x`, so refuse rather than emit a wrong body.
                     PatternKind::Variant { path, data } => {
-                        if let verum_common::Maybe::Some(_) = data {
+                        if data.is_some() {
                             return Err(SmtTranslateError::UnsupportedExpr {
                                 description: "variant pattern with payload".to_string(),
                             });

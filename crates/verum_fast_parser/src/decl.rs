@@ -261,7 +261,7 @@ impl<'a> RecursiveParser<'a> {
         // statements once with the AST Visitor and lifting `is_async`
         // when any await-site appears keeps the synthesis purely
         // structural — no user-facing annotation required.
-        let needs_async = stmts.iter().any(|s| stmt_contains_await(s));
+        let needs_async = stmts.iter().any(stmt_contains_await);
 
         // Tail-expression lift: if the final collected statement is an
         // unsemicoloned expression-stmt, move its expression into the

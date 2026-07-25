@@ -36,7 +36,7 @@ fn typecheck_ok(code: &str, label: &str) {
     let mut checker = TypeChecker::new();
     for item in &module.items {
         if let verum_ast::ItemKind::Type(td) = &item.kind {
-            let _ = checker.register_type_declaration(&td);
+            let _ = checker.register_type_declaration(td);
         }
     }
     for item in &module.items {
@@ -46,7 +46,7 @@ fn typecheck_ok(code: &str, label: &str) {
     }
     for item in &module.items {
         if let verum_ast::ItemKind::Function(f) = &item.kind {
-            let _ = checker.register_function_signature(&f);
+            let _ = checker.register_function_signature(f);
         }
     }
     let errs: Vec<String> = module

@@ -394,8 +394,8 @@ fn main() {
                 ])
                 .arg(&nested_target)
                 .arg("--")
-                .arg(&project_root)
-                .current_dir(&project_root)
+                .arg(project_root)
+                .current_dir(project_root)
                 .env("VERUM_NO_AUTO_PRECOMPILE", "1") // prevent recursion
                 .env("CARGO_TARGET_DIR", &nested_target) // belt-and-braces
                 // Bake into THIS build's private staging dir; the publish
@@ -1132,8 +1132,8 @@ fn collect_runtime_gates(core_root: &Path, dir: &Path, out: &mut RuntimeGatedFil
                 continue;
             }
             collect_runtime_gates(core_root, &path, out);
-        } else if name == "mod.vr" {
-            if let Ok(content) = fs::read_to_string(&path) {
+        } else if name == "mod.vr"
+            && let Ok(content) = fs::read_to_string(&path) {
                 let rel_dir = dir
                     .strip_prefix(core_root)
                     .ok()
@@ -1141,7 +1141,6 @@ fn collect_runtime_gates(core_root: &Path, dir: &Path, out: &mut RuntimeGatedFil
                     .unwrap_or_default();
                 scan_mod_vr_runtime_gates(&content, &rel_dir, out);
             }
-        }
     }
 }
 
@@ -1156,8 +1155,8 @@ fn scan_mod_vr_runtime_gates(content: &str, rel_dir: &str, out: &mut RuntimeGate
             pending_gate = DEFAULT_EXCLUDED_RUNTIMES.contains(&value.as_str());
             continue;
         }
-        if pending_gate {
-            if let Some(name) = parse_module_decl_name(trimmed) {
+        if pending_gate
+            && let Some(name) = parse_module_decl_name(trimmed) {
                 let base = if rel_dir.is_empty() {
                     name
                 } else {
@@ -1166,7 +1165,6 @@ fn scan_mod_vr_runtime_gates(content: &str, rel_dir: &str, out: &mut RuntimeGate
                 out.files.insert(format!("{}.vr", base));
                 out.dirs.push(format!("{}/", base));
             }
-        }
         pending_gate = false;
     }
 }

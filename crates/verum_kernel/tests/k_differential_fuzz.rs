@@ -199,13 +199,10 @@ proptest! {
             metadata: std::collections::BTreeMap::new(),
         };
         // The result may be Ok or Err(TypeMismatch), but NOT UniverseOverflow.
-        match cert.verify() {
-            Err(CheckError::UniverseOverflow { .. }) => {
-                panic!(
-                    "Universe(MAX-1) triggered UniverseOverflow — DEFECT-2 boundary is wrong"
-                );
-            }
-            _ => {}
+        if let Err(CheckError::UniverseOverflow { .. }) = cert.verify() {
+            panic!(
+                "Universe(MAX-1) triggered UniverseOverflow — DEFECT-2 boundary is wrong"
+            );
         }
     }
 }
@@ -252,7 +249,7 @@ proptest! {
         let registry = KernelRegistry::default();
         let verdict = registry.verify_all(&cert);
         match &verdict.agreement {
-            AgreementVerdict::Unanimous { .. } | AgreementVerdict::UnanimousReject => {}
+            AgreementVerdict::Unanimous | AgreementVerdict::UnanimousReject => {}
             AgreementVerdict::Disagreement { accepting, rejecting } => {
                 panic!(
                     "Multi-kernel DISAGREEMENT on cert {:?}: \
@@ -290,7 +287,7 @@ proptest! {
         let registry = KernelRegistry::default();
         let verdict = registry.verify_all(&mutant);
         match &verdict.agreement {
-            AgreementVerdict::Unanimous { .. } | AgreementVerdict::UnanimousReject => {}
+            AgreementVerdict::Unanimous | AgreementVerdict::UnanimousReject => {}
             AgreementVerdict::Disagreement { accepting, rejecting } => {
                 panic!(
                     "Multi-kernel DISAGREEMENT on mutated canonical cert \
@@ -366,7 +363,7 @@ fn canonical_battery_expected_verdicts_match_trusted_base_and_registry() {
                     cert.id, accepting, rejecting
                 ));
             }
-            AgreementVerdict::Unanimous { .. } | AgreementVerdict::UnanimousReject => {}
+            AgreementVerdict::Unanimous | AgreementVerdict::UnanimousReject => {}
         }
     }
 

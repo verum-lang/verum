@@ -3123,7 +3123,7 @@ mod capability_meta_drift_pins {
         for cap in Capability::ALL_STANDARD {
             let s = cap.as_str();
             assert!(
-                s.chars().next().map_or(false, |c| c.is_ascii_uppercase()),
+                s.chars().next().is_some_and(|c| c.is_ascii_uppercase()),
                 "{:?}: name is not PascalCase: {}",
                 cap,
                 s

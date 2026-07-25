@@ -288,9 +288,7 @@ fn is_low_classification_sink(ctx: &verum_ast::context::ContextRequirement) -> b
         return false;
     }
     let last = ctx.path.last_segment_name();
-    DEFAULT_LOW_CLASSIFICATION_SINKS
-        .iter()
-        .any(|sink| *sink == last)
+    DEFAULT_LOW_CLASSIFICATION_SINKS.contains(&last)
 }
 
 /// Check if a function carries the `@declassify` attribute, which

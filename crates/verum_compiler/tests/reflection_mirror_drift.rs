@@ -512,8 +512,8 @@ fn extract_vr_fields(src: &str, type_name: &str) -> Vec<String> {
     let mut fields = Vec::new();
     for line in src[start..].lines() {
         let code = strip_line_comment(line).trim();
-        if depth == 1 {
-            if let Some(colon) = code.find(':') {
+        if depth == 1
+            && let Some(colon) = code.find(':') {
                 let name = code[..colon].trim();
                 if !name.is_empty()
                     && name
@@ -524,7 +524,6 @@ fn extract_vr_fields(src: &str, type_name: &str) -> Vec<String> {
                     fields.push(name.to_string());
                 }
             }
-        }
         for ch in code.chars() {
             match ch {
                 '{' => depth += 1,

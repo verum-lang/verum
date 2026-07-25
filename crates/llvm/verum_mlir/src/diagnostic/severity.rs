@@ -31,7 +31,7 @@ impl TryFrom<MlirDiagnosticSeverity> for DiagnosticSeverity {
             MlirDiagnosticSeverity_MlirDiagnosticNote => Self::Note,
             MlirDiagnosticSeverity_MlirDiagnosticRemark => Self::Remark,
             MlirDiagnosticSeverity_MlirDiagnosticWarning => Self::Warning,
-            _ => return Err(Error::UnknownDiagnosticSeverity(severity as u32)),
+            _ => return Err(Error::UnknownDiagnosticSeverity(severity)),
         })
     }
 }

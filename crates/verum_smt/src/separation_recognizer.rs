@@ -582,7 +582,7 @@ impl<'a> ClausePartition<'a> {
         }
         let mut iter = self.separation.iter().cloned();
         let first = iter.next().expect("non-empty");
-        iter.fold(first, |acc, next| SepAssertion::sep(acc, next))
+        iter.fold(first, SepAssertion::sep)
     }
 
     /// True iff the partition has at least one separation clause —
@@ -679,7 +679,7 @@ pub fn partition_clauses<'a>(clauses: &[&'a Expr]) -> ClausePartition<'a> {
 ///
 /// Returns references into the input expression — no allocation
 /// of new `Expr` nodes; cheap.
-pub fn flatten_and_chain<'a>(expr: &'a Expr) -> Vec<&'a Expr> {
+pub fn flatten_and_chain(expr: &Expr) -> Vec<&Expr> {
     let mut out = Vec::new();
     flatten_and_chain_into(expr, &mut out);
     out
@@ -790,7 +790,7 @@ pub fn recognize_clause_with_descent<'a>(clause: &'a Expr) -> ClauseDescentOutco
 fn fold_heap_and(atoms: Vec<SepAssertion>) -> SepAssertion {
     let mut iter = atoms.into_iter();
     let first = iter.next().expect("fold_heap_and requires non-empty input");
-    iter.fold(first, |acc, next| SepAssertion::and(acc, next))
+    iter.fold(first, SepAssertion::and)
 }
 
 /// Partition clauses with conjunction descent.

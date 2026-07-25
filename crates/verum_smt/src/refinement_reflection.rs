@@ -147,7 +147,7 @@ fn is_smtlib_builtin_symbol(tok: &str) -> bool {
     // Numeric literal (int or float): the translator renders these via
     // `format!("{}", value)`, which always starts with an ASCII digit;
     // no SMT operator or Verum identifier does.
-    if tok.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+    if tok.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return true;
     }
     // Variant-path constants `path_K.A` are declared at the top of the

@@ -35,9 +35,9 @@ use super::{
 #[repr(u32)]
 pub enum WalkOrder {
     /// Visit the operation before its nested regions.
-    PreOrder = MlirWalkOrder_MlirWalkPreOrder as u32,
+    PreOrder = MlirWalkOrder_MlirWalkPreOrder,
     /// Visit the operation after its nested regions.
-    PostOrder = MlirWalkOrder_MlirWalkPostOrder as u32,
+    PostOrder = MlirWalkOrder_MlirWalkPostOrder,
 }
 
 /// Control flow action returned by the walk callback.
@@ -45,11 +45,11 @@ pub enum WalkOrder {
 #[repr(u32)]
 pub enum WalkResult {
     /// Continue into this operation’s children.
-    Advance = MlirWalkResult_MlirWalkResultAdvance as u32,
+    Advance = MlirWalkResult_MlirWalkResultAdvance,
     /// Terminate the entire walk immediately.
-    Interrupt = MlirWalkResult_MlirWalkResultInterrupt as u32,
+    Interrupt = MlirWalkResult_MlirWalkResultInterrupt,
     /// Don’t visit this operation’s children, but keep walking siblings.
-    Skip = MlirWalkResult_MlirWalkResultSkip as u32,
+    Skip = MlirWalkResult_MlirWalkResultSkip,
 }
 
 pub trait OperationLike<'c: 'a, 'a>: Display + 'a {

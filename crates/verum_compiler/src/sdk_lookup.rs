@@ -148,8 +148,7 @@ impl SdkRoot {
             } else if path.extension().is_some_and(|e| e == "vr") {
                 let rel = path.strip_prefix(root).map_err(|_| SdkError::Io {
                     path: path.clone(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    source: std::io::Error::other(
                         "child path not under SDK root",
                     ),
                 })?;

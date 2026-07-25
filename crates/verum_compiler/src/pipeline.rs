@@ -1063,7 +1063,7 @@ pub(super) fn should_parse_as_script(
     if bytes.len() >= 2 && &bytes[..2] == b"#!" {
         return true;
     }
-    if bytes.len() >= 5 && &bytes[..3] == [0xEF, 0xBB, 0xBF] && &bytes[3..5] == b"#!" {
+    if bytes.len() >= 5 && bytes[..3] == [0xEF, 0xBB, 0xBF] && &bytes[3..5] == b"#!" {
         return true;
     }
 
@@ -1088,79 +1088,6 @@ pub(super) fn should_parse_as_script(
     match (path.canonicalize(), entry.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,
-    }
-}
-
-#[cfg(test)]
-mod script_parse_routing_tests {
-    use super::should_parse_as_script;
-    use crate::options::CompilerOptions;
-    use std::path::PathBuf;
-
-    fn opts(input: &str, flag: bool) -> CompilerOptions {
-        CompilerOptions {
-            input: PathBuf::from(input),
-            script_mode: flag,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn shebang_triggers_script_mode_regardless_of_flag() {
-        let o = opts("", false);
-        assert!(should_parse_as_script(
-            "#!/usr/bin/env verum\nprint(1)",
-            &o,
-            None
-        ));
-        assert!(should_parse_as_script(
-            "#!/usr/bin/env verum\nprint(1)",
-            &o,
-            Some(std::path::Path::new("/tmp/x.vr"))
-        ));
-    }
-
-    #[test]
-    fn bom_then_shebang_is_a_script() {
-        let bom_shebang = "\u{FEFF}#!/usr/bin/env verum\nprint(1)";
-        let o = opts("", false);
-        assert!(should_parse_as_script(bom_shebang, &o, None));
-    }
-
-    #[test]
-    fn no_shebang_no_flag_is_library() {
-        let o = opts("/tmp/foo.vr", false);
-        assert!(!should_parse_as_script(
-            "fn main(){}",
-            &o,
-            Some(std::path::Path::new("/tmp/foo.vr"))
-        ));
-    }
-
-    #[test]
-    fn flag_alone_requires_path_match() {
-        let o = opts("/tmp/entry.vr", true);
-        assert!(!should_parse_as_script("fn main(){}", &o, None));
-        assert!(!should_parse_as_script(
-            "fn main(){}",
-            &o,
-            Some(std::path::Path::new("/tmp/other.vr"))
-        ));
-        assert!(should_parse_as_script(
-            "fn main(){}",
-            &o,
-            Some(std::path::Path::new("/tmp/entry.vr"))
-        ));
-    }
-
-    #[test]
-    fn flag_with_empty_input_matches_nothing() {
-        let o = opts("", true);
-        assert!(!should_parse_as_script(
-            "fn main(){}",
-            &o,
-            Some(std::path::Path::new("/tmp/x.vr"))
-        ));
     }
 }
 
@@ -2276,6 +2203,79 @@ impl<'s> CompilationPipeline<'s> {
         // (continue_on_error=false), this is a no-op since any phase
         // Err already short-circuited above.
         self.session.abort_if_errors()
+    }
+}
+
+#[cfg(test)]
+mod script_parse_routing_tests {
+    use super::should_parse_as_script;
+    use crate::options::CompilerOptions;
+    use std::path::PathBuf;
+
+    fn opts(input: &str, flag: bool) -> CompilerOptions {
+        CompilerOptions {
+            input: PathBuf::from(input),
+            script_mode: flag,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shebang_triggers_script_mode_regardless_of_flag() {
+        let o = opts("", false);
+        assert!(should_parse_as_script(
+            "#!/usr/bin/env verum\nprint(1)",
+            &o,
+            None
+        ));
+        assert!(should_parse_as_script(
+            "#!/usr/bin/env verum\nprint(1)",
+            &o,
+            Some(std::path::Path::new("/tmp/x.vr"))
+        ));
+    }
+
+    #[test]
+    fn bom_then_shebang_is_a_script() {
+        let bom_shebang = "\u{FEFF}#!/usr/bin/env verum\nprint(1)";
+        let o = opts("", false);
+        assert!(should_parse_as_script(bom_shebang, &o, None));
+    }
+
+    #[test]
+    fn no_shebang_no_flag_is_library() {
+        let o = opts("/tmp/foo.vr", false);
+        assert!(!should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/foo.vr"))
+        ));
+    }
+
+    #[test]
+    fn flag_alone_requires_path_match() {
+        let o = opts("/tmp/entry.vr", true);
+        assert!(!should_parse_as_script("fn main(){}", &o, None));
+        assert!(!should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/other.vr"))
+        ));
+        assert!(should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/entry.vr"))
+        ));
+    }
+
+    #[test]
+    fn flag_with_empty_input_matches_nothing() {
+        let o = opts("", true);
+        assert!(!should_parse_as_script(
+            "fn main(){}",
+            &o,
+            Some(std::path::Path::new("/tmp/x.vr"))
+        ));
     }
 }
 
