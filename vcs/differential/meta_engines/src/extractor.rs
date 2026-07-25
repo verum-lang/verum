@@ -165,7 +165,7 @@ impl std::fmt::Display for Comparable {
 /// Sort map entries by the key's display form — the shared canonical
 /// order for both engines (see module docs).
 fn sort_map_entries(entries: &mut [(Comparable, Comparable)]) {
-    entries.sort_by(|(a, _), (b, _)| a.to_string().cmp(&b.to_string()));
+    entries.sort_by_key(|(a, _)| a.to_string());
 }
 
 /// Decode a VBC result [`Value`] against the interpreter state that produced
