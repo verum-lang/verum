@@ -282,20 +282,36 @@ fn test_portfolio_mode_consensus() {
     let assertions = List::from(vec![mk_bool_lit(true)]);
     let result = switcher.solve(&assertions);
 
-    // In consensus mode, either both agree (SAT) or there's an error
+    // Consensus needs TWO results to compare. Which outcome is correct here
+    // therefore depends on how many backends the build actually has:
+    //
+    //   * both Z3 and CVC5 linked -> they agree on `true` -> Sat;
+    //   * only Z3 (the default build: cvc5-sys links in stub mode unless a
+    //     linking mode is configured) -> consensus is unreachable and the
+    //     switcher must say so rather than wait for a second result that no
+    //     one will ever send.
+    //
+    // The second case is what this assertion previously got wrong. It
+    // accepted only "Portfolio" or "Failed to initialize" — note it inspects
+    // `error`, while "Portfolio" is the value of the sibling `backend` field —
+    // so the genuine single-backend outcome was not in the accepted set. It
+    // never surfaced because solve_portfolio deadlocked before returning it
+    // (T0642); with the channel fixed, the error arrives and must be allowed.
     match result {
         SolveResult::Sat { .. } => {
-            // Good - solvers agreed
+            // Both backends ran and agreed.
         }
         SolveResult::Error { error, .. } => {
-            // Could be initialization error or disagreement
             assert!(
-                error.contains("Portfolio") || error.contains("Failed to initialize"),
+                error.contains("Failed to get both results")
+                    || error.contains("Solvers disagree")
+                    || error.contains("Portfolio")
+                    || error.contains("Failed to initialize"),
                 "Unexpected error: {}",
                 error
             );
         }
-        _ => {}
+        other => panic!("consensus must yield Sat or a stated Error, got {other:?}"),
     }
 }
 

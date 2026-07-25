@@ -1526,6 +1526,22 @@ impl SmtBackendSwitcher {
             None
         };
 
+        // Drop the parent's sender now that every worker holds its own clone.
+        //
+        // Without this the channel keeps a live sender for the whole function,
+        // so `rx.recv()` can never observe a closed channel and never returns
+        // Err. That is only invisible while both backends actually run: the
+        // Consensus and VoteOnDisagree arms below issue TWO unconditional
+        // `recv()` calls, so whenever fewer than two workers were spawned —
+        // CVC5 unavailable, which is the default build, since cvc5-sys links
+        // in stub mode unless a linking mode is configured — the second call
+        // blocks forever and the solve never returns.
+        //
+        // Both arms already handle a missing result through their `_` arm
+        // ("Failed to get both results"), so closing the channel turns an
+        // unbounded hang into the error those arms were written to produce.
+        drop(tx);
+
         // Wait for first result (or both if Consensus mode)
         match self.config.portfolio.mode {
             PortfolioMode::FirstResult => {
