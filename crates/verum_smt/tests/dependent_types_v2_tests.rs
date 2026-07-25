@@ -23,15 +23,6 @@
 //! - Proof Irrelevance: all proofs of a Prop are equal; Squash<A> truncates to proposition
 //!
 
-// REQUIRES API MIGRATION:
-// - Use verum_std::core::Text instead of verum_common::Text (which is just String alias)
-// - Text::from() returns verum_std::core::Text, but dependent module expects this type
-
-// DISABLED — does not compile. 23 tests. Tracked by T0632.
-// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
-// named a feature declared in no Cargo.toml, so the file silently never
-// compiled while reading as an opt-in flag someone could turn on.
-#![cfg(any())]
 
 use verum_ast::{
     Type, TypeKind,
@@ -63,7 +54,10 @@ fn make_int_lit(value: i64) -> Expr {
 }
 
 fn make_var(name: &str) -> Expr {
-    let ident = Ident::new(name.into(), Span::dummy());
+    // `name.into()` is ambiguous here — several crates in the dependency
+    // graph provide `From<&str>`.  Name the target type, as the rest of
+    // the verum_smt test suite does.
+    let ident = Ident::new(Text::from(name), Span::dummy());
     let segment = PathSegment::Name(ident);
     let path = Path {
         segments: vec![segment].into(),
