@@ -7421,6 +7421,28 @@ impl VbcCodegen {
                 }
             }
         }
+        // T0622: a generic whose type param appears ONLY in the RETURN type
+        // (`fn f<T>() -> T`, e.g. `T.default()` / `T::new()`) has no parameter
+        // to derive T from, so the loop above binds nothing — without this the
+        // call emits a plain `Call` with no witness and the callee's
+        // `LoadT(Generic)` resolves to a wrong default (fixed last-variant tag).
+        // Bind any still-unbound return-type param from the EXPECTED type at the
+        // call site: `compile_let` stashes the let-annotation / return-context
+        // type in `current_return_type_name`. Additive — `bind_generic` only
+        // fills UNBOUND params (`or_insert`) and `type_name_to_type_ref_mono`
+        // returns None for unknown/param names, so a stale hint changes nothing.
+        if let (Some(ret_tr), Some(expected_name)) = (
+            self.functions
+                .iter()
+                .find(|f| f.descriptor.id.0 == func_id)
+                .map(|f| f.descriptor.return_type.clone()),
+            self.ctx.current_return_type_name.clone(),
+        ) && ret_tr.is_generic()
+            && let Some(expected_tr) =
+                self.type_name_to_type_ref_mono(&strip_ref(&expected_name))
+        {
+            bind_generic(&ret_tr, &expected_tr, &mut bindings);
+        }
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let nm = self
                 .functions
