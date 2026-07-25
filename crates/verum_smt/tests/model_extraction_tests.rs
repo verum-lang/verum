@@ -16,19 +16,12 @@
 //!
 //! Per CLAUDE.md standards: Tests in tests/ directory
 //!
-//! IMPORTANT: Uses deprecated Z3 API (z3-rs < 0.19). See comprehensive_tests.rs
-//! for detailed explanation of required changes.
-//!
-//! **ESTIMATED EFFORT**: 8-10 hours to rewrite
-//! Requires Z3 API migration: z3_context() method, Context params (~8-10 hours to rewrite).
-
-// REQUIRES Z3 API MIGRATION (~8-10 hours): z3_context() method, Context params
-// DISABLED — does not compile: written against the old Z3 API. 13 tests.
-// Tracked by T0632.
-// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
-// named a feature declared in no Cargo.toml, so the file silently never
-// compiled while reading as an opt-in flag someone could turn on.
-#![cfg(any())]
+//! Migrated to the z3 0.20 API under T0632: that release made the solver
+//! context implicit, so `Context` no longer threads through construction —
+//! `Solver::new()`, `Int::new_const(name)`, `Int::from_i64(n)`. The previous
+//! header estimated 8-10 hours for this and gated the file off; the actual
+//! change was mechanical (drop the leading context argument at 78 call sites)
+//! and every assertion in the file survived it unaltered.
 
 #[allow(unused_imports)]
 use verum_common::{List, Map, Maybe, Text};
@@ -43,14 +36,13 @@ fn create_context() -> Context {
 #[test]
 fn test_model_extraction_simple_integer() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
 
     // x > 5 && x < 10
-    solver.assert(&x.gt(&Int::from_i64(z3_ctx, 5)));
-    solver.assert(&x.lt(&Int::from_i64(z3_ctx, 10)));
+    solver.assert(&x.gt(&Int::from_i64(5)));
+    solver.assert(&x.lt(&Int::from_i64(10)));
 
     let result = solver.check();
     assert_eq!(result, SatResult::Sat);
@@ -68,15 +60,14 @@ fn test_model_extraction_simple_integer() {
 #[test]
 fn test_model_soundness() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
-    let y = Int::new_const(z3_ctx, "y");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
+    let y = Int::new_const("y");
 
     // x + y == 10 && x > y
-    let ten = Int::from_i64(z3_ctx, 10);
-    let sum = Int::add(z3_ctx, &[&x, &y]);
+    let ten = Int::from_i64(10);
+    let sum = Int::add(&[&x, &y]);
     let sum_constraint = sum._eq(&ten);
     let order_constraint = x.gt(&y);
 
@@ -99,16 +90,15 @@ fn test_model_soundness() {
 #[test]
 fn test_model_completeness() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
-    let y = Int::new_const(z3_ctx, "y");
-    let z = Int::new_const(z3_ctx, "z");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
+    let y = Int::new_const("y");
+    let z = Int::new_const("z");
 
     // x + y + z == 15
-    let fifteen = Int::from_i64(z3_ctx, 15);
-    let sum = Int::add(z3_ctx, &[&x, &y, &z]);
+    let fifteen = Int::from_i64(15);
+    let sum = Int::add(&[&x, &y, &z]);
     solver.assert(&sum._eq(&fifteen));
 
     let result = solver.check();
@@ -137,12 +127,11 @@ fn test_model_completeness() {
 #[test]
 fn test_model_multiple_solutions() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
     // x > 0 has infinitely many solutions
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
-    solver.assert(&x.gt(&Int::from_i64(z3_ctx, 0)));
+    let solver = Solver::new();
+    let x = Int::new_const("x");
+    solver.assert(&x.gt(&Int::from_i64(0)));
 
     let result = solver.check();
     assert_eq!(result, SatResult::Sat);
@@ -161,15 +150,14 @@ fn test_model_multiple_solutions() {
 #[test]
 fn test_model_with_equality() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
-    let y = Int::new_const(z3_ctx, "y");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
+    let y = Int::new_const("y");
 
     // x == y && x > 5
     solver.assert(&x._eq(&y));
-    solver.assert(&x.gt(&Int::from_i64(z3_ctx, 5)));
+    solver.assert(&x.gt(&Int::from_i64(5)));
 
     let result = solver.check();
     assert_eq!(result, SatResult::Sat);
@@ -186,13 +174,12 @@ fn test_model_with_equality() {
 #[test]
 fn test_model_with_negation() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
 
     // !(x < 10) is equivalent to x >= 10
-    let constraint = x.lt(&Int::from_i64(z3_ctx, 10)).not();
+    let constraint = x.lt(&Int::from_i64(10)).not();
     solver.assert(&constraint);
 
     let result = solver.check();
@@ -208,15 +195,14 @@ fn test_model_with_negation() {
 #[test]
 fn test_model_with_disjunction() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
 
     // x < 0 OR x > 10
-    let negative = x.lt(&Int::from_i64(z3_ctx, 0));
-    let large = x.gt(&Int::from_i64(z3_ctx, 10));
-    let constraint = Bool::or(z3_ctx, &[&negative, &large]);
+    let negative = x.lt(&Int::from_i64(0));
+    let large = x.gt(&Int::from_i64(10));
+    let constraint = Bool::or(&[&negative, &large]);
 
     solver.assert(&constraint);
 
@@ -233,16 +219,15 @@ fn test_model_with_disjunction() {
 #[test]
 fn test_model_extraction_performance() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
     let start = std::time::Instant::now();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
 
     // Add multiple constraints
     for i in 0..10 {
-        solver.assert(&x.gt(&Int::from_i64(z3_ctx, i)));
+        solver.assert(&x.gt(&Int::from_i64(i)));
     }
 
     let result = solver.check();
@@ -259,13 +244,12 @@ fn test_model_extraction_performance() {
 #[test]
 fn test_model_uniqueness_when_constrained() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
 
     // Fully constrain x
-    solver.assert(&x._eq(&Int::from_i64(z3_ctx, 42)));
+    solver.assert(&x._eq(&Int::from_i64(42)));
 
     let result = solver.check();
     assert_eq!(result, SatResult::Sat);
@@ -280,18 +264,17 @@ fn test_model_uniqueness_when_constrained() {
 #[test]
 fn test_model_with_arithmetic() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
-    let y = Int::new_const(z3_ctx, "y");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
+    let y = Int::new_const("y");
 
     // x * 2 + y == 20 && y > 5
-    let two = Int::from_i64(z3_ctx, 2);
-    let twenty = Int::from_i64(z3_ctx, 20);
-    let five = Int::from_i64(z3_ctx, 5);
-    let x_times_2 = Int::mul(z3_ctx, &[&x, &two]);
-    let expr = Int::add(z3_ctx, &[&x_times_2, &y]);
+    let two = Int::from_i64(2);
+    let twenty = Int::from_i64(20);
+    let five = Int::from_i64(5);
+    let x_times_2 = Int::mul(&[&x, &two]);
+    let expr = Int::add(&[&x_times_2, &y]);
     solver.assert(&expr._eq(&twenty));
     solver.assert(&y.gt(&five));
 
@@ -310,28 +293,25 @@ fn test_model_with_arithmetic() {
 #[test]
 fn test_model_with_boolean_combination() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
-    let y = Int::new_const(z3_ctx, "y");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
+    let y = Int::new_const("y");
 
     // (x > 10 AND y < 5) OR (x < 0 AND y > 20)
     let case1 = Bool::and(
-        z3_ctx,
         &[
-            &x.gt(&Int::from_i64(z3_ctx, 10)),
-            &y.lt(&Int::from_i64(z3_ctx, 5)),
+            &x.gt(&Int::from_i64(10)),
+            &y.lt(&Int::from_i64(5)),
         ],
     );
     let case2 = Bool::and(
-        z3_ctx,
         &[
-            &x.lt(&Int::from_i64(z3_ctx, 0)),
-            &y.gt(&Int::from_i64(z3_ctx, 20)),
+            &x.lt(&Int::from_i64(0)),
+            &y.gt(&Int::from_i64(20)),
         ],
     );
-    let constraint = Bool::or(z3_ctx, &[&case1, &case2]);
+    let constraint = Bool::or(&[&case1, &case2]);
 
     solver.assert(&constraint);
 
@@ -352,13 +332,12 @@ fn test_model_with_boolean_combination() {
 #[test]
 fn test_model_minimality_for_optimization() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
 
     // x > 10 (any value > 10 is valid)
-    solver.assert(&x.gt(&Int::from_i64(z3_ctx, 10)));
+    solver.assert(&x.gt(&Int::from_i64(10)));
 
     let result = solver.check();
     assert_eq!(result, SatResult::Sat);
@@ -376,15 +355,14 @@ fn test_model_minimality_for_optimization() {
 #[test]
 fn test_model_evaluation_of_expressions() {
     let ctx = create_context();
-    let z3_ctx = ctx.z3_context();
 
-    let solver = Solver::new(z3_ctx);
-    let x = Int::new_const(z3_ctx, "x");
-    let y = Int::new_const(z3_ctx, "y");
+    let solver = Solver::new();
+    let x = Int::new_const("x");
+    let y = Int::new_const("y");
 
     // x == 5 && y == 3
-    solver.assert(&x._eq(&Int::from_i64(z3_ctx, 5)));
-    solver.assert(&y._eq(&Int::from_i64(z3_ctx, 3)));
+    solver.assert(&x._eq(&Int::from_i64(5)));
+    solver.assert(&y._eq(&Int::from_i64(3)));
 
     let result = solver.check();
     assert_eq!(result, SatResult::Sat);
@@ -392,9 +370,9 @@ fn test_model_evaluation_of_expressions() {
     let model = solver.get_model().unwrap();
 
     // Evaluate compound expression: x + y * 2
-    let two = Int::from_i64(z3_ctx, 2);
-    let y_times_2 = Int::mul(z3_ctx, &[&y, &two]);
-    let expr = Int::add(z3_ctx, &[&x, &y_times_2]);
+    let two = Int::from_i64(2);
+    let y_times_2 = Int::mul(&[&y, &two]);
+    let expr = Int::add(&[&x, &y_times_2]);
     let expr_value: i64 = model.eval(&expr, true).unwrap().as_i64().unwrap();
 
     // Should be 5 + 3 * 2 = 11
