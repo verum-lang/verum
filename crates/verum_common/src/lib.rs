@@ -194,7 +194,6 @@ pub use to_text::ToText;
 pub mod error;
 pub mod execution_env;
 pub mod traits;
-pub mod types;
 
 // Re-export span types for convenience
 pub use span::{
@@ -218,7 +217,6 @@ pub use conversions::{
 pub use error::*;
 pub use execution_env::ExecutionEnv;
 pub use traits::*;
-pub use types::*;
 
 // Re-export CBGR violation types (single source of truth)
 // CBGR violation types — single source of truth for memory safety error reporting

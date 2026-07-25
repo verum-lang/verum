@@ -236,7 +236,7 @@ use std::collections::*;  // Use Map/Set
 │  (main parser)           │ (logos)              │                       │
 │       │                  │                      │                       │
 │  verum_parser            │                      │                       │
-│  (legacy, partial)       │                      │                       │
+│  (IDE: lossless/incr)    │                      │                       │
 └───────┼─────────────────────┼──────────────────────┼────────────────────┘
         │                     │                      │
 ┌───────▼─────────────────────▼──────────────────────▼────────────────────┐
@@ -257,7 +257,7 @@ use std::collections::*;  // Use Map/Set
 | **verum_ast** | AST definitions | `expr.rs`, `ty.rs`, `pattern.rs`, `decl.rs` |
 | **verum_lexer** | Tokenization (logos) | `token.rs`, `lexer.rs` |
 | **verum_fast_parser** | Fast recursive-descent parser | `lib.rs`, main parser used |
-| **verum_parser** | Legacy parser (partial) | Kept for compatibility |
+| **verum_parser** | IDE parser: lossless + incremental | `syntax_bridge` (LosslessParser), `IncrementalDocument`; used by verum_lsp, NOT the compile path |
 | **verum_types** | Type checking | `infer/` (dir), `unify.rs`, `refinement.rs` |
 | **verum_smt** | SMT verification (z3) | `z3_backend.rs`, `verify.rs`, `tactics.rs` |
 | **verum_vbc** | **VBC bytecode** (core execution) | `codegen/`, `interpreter/`, `intrinsics/` |
