@@ -24,7 +24,6 @@ use verum_mlir::{
 
 /// Builder for constructing Verum MLIR operations.
 ///
-
 /// Provides a fluent API for building MLIR operations with proper
 /// error handling and type safety.
 pub struct VerumOpBuilder<'c> {

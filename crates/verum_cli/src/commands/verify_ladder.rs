@@ -74,12 +74,10 @@ fn requires_kernel_recheck(strategy: LadderStrategy) -> bool {
 /// item and project the result list to a single dispatcher-facing
 /// `KernelRecheckOutcome`.
 ///
-
 /// Recognises:
 ///  * Theorem / Lemma / Corollary → `recheck_theorem` (#118)
 ///  * Axiom → `recheck_axiom` (#119)
 ///
-
 /// Returns `None` for kinds that don't carry refinement-type
 /// leakage at this layer (definitions / functions / types are
 /// covered by other verification phases).

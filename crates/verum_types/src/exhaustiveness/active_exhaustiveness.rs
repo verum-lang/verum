@@ -119,7 +119,6 @@ impl ActivePatternRegistry {
 
 /// Analyze whether a type is suitable as a variant-returning pattern result
 ///
-
 /// Returns `Some(constructors)` if the type is a finite sum type with
 /// enumerable constructors. Returns `None` for Bool, Maybe, or non-sum types.
 pub fn analyze_return_type(ty: &Type, env: &TypeEnv) -> Option<TypeConstructors> {
@@ -170,22 +169,17 @@ pub fn analyze_return_type(ty: &Type, env: &TypeEnv) -> Option<TypeConstructors>
 
 /// Check exhaustiveness for a match on a variant-returning active pattern
 ///
-
 /// This is called when we detect that a match expression matches on the result
 /// of an active pattern application where the pattern returns a sum type.
 ///
-
 /// # Arguments
 ///
-
 /// * `pattern_info` - Information about the variant-returning pattern
 /// * `covered_constructors` - The constructors covered by match arms
 /// * `env` - Type environment
 ///
-
 /// # Returns
 ///
-
 /// `ExhaustivenessResult` indicating whether all variants are covered
 pub fn check_variant_pattern_exhaustiveness(
     pattern_info: &VariantReturningPattern,
@@ -221,14 +215,11 @@ pub fn check_variant_pattern_exhaustiveness(
 
 /// Detect and extract variant-returning pattern from a match scrutinee
 ///
-
 /// Analyzes a match expression to determine if it's matching on the result
 /// of a variant-returning active pattern application.
 ///
-
 /// # Example
 ///
-
 /// For `match Parity(x) { Even => ..., Odd => ... }`:
 /// - Detects that `Parity` is a variant-returning pattern
 /// - Returns the pattern info for exhaustiveness checking
@@ -276,7 +267,6 @@ pub fn detect_variant_returning_match(
 
 /// Extract constructor names from active pattern bindings in a match arm
 ///
-
 /// When matching on `Parity(x)`, the arm `Even => ...` has `Even` as the constructor.
 /// This extracts those constructor names for exhaustiveness checking.
 pub fn extract_covered_constructors(rows: &[PatternRow]) -> List<Text> {
@@ -340,7 +330,6 @@ pub fn has_wildcard_coverage(rows: &[PatternRow]) -> bool {
 
 /// Integration point: Check active pattern exhaustiveness within the main checker
 ///
-
 /// This function is called by the main exhaustiveness checker when it detects
 /// that the scrutinee involves a variant-returning active pattern.
 pub fn check_active_pattern_in_matrix(
@@ -431,7 +420,6 @@ impl ActivePatternCallTracker {
 
     /// Register an active pattern call from a match arm
     ///
-
     /// Returns `true` if this is a duplicate call (optimization opportunity)
     pub fn register_call(&mut self, call_id: ActivePatternCallId, arm_index: usize) -> bool {
         self.total_calls += 1;

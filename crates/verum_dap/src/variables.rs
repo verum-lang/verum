@@ -11,7 +11,6 @@ use crate::types::Variable;
 
 /// A variables reference handle.
 ///
-
 /// The DAP protocol uses `variablesReference` integers to identify variable containers.
 /// We encode frame index and scope type into a single i64:
 ///  - Bits 0..31: frame index
@@ -29,7 +28,6 @@ pub fn decode_variables_reference(reference: i64) -> (i64, i64) {
 
 /// Reads variables for a given stack frame from the interpreter state.
 ///
-
 /// Uses `FunctionDescriptor.debug_variables` to map register indices to names.
 pub fn read_frame_variables(
     state: &InterpreterState,

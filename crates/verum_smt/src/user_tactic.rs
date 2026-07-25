@@ -89,7 +89,6 @@ pub enum TacticExpr {
     /// LLM-oracle tactic: propose proof candidates via language model,
     /// sample above confidence threshold, verify via SMT.
     ///
-
     /// Surface syntax: `oracle` or `oracle(0.85)`.
     /// The `goal_text` field is empty when constructed at parse time and is
     /// filled in by the execution engine just before the tactic is run.
@@ -102,7 +101,6 @@ pub enum TacticExpr {
 
     /// Quote a tactic expression as a first-class value.
     ///
-
     /// Surface syntax: `` `tactic_expr `` or `quote { tactic_expr }`.
     /// At evaluation, a `Quote` node does NOT execute its inner
     /// tactic — it returns a handle that callers can manipulate
@@ -111,7 +109,6 @@ pub enum TacticExpr {
     /// entry point the Ltac2-style DSL in
     /// `docs/verification/tactic-dsl.md §7` describes.
     ///
-
     /// Semantic contract: `Quote(t)` is `t`-inert — the solver does
     /// not observe `t`'s side-effects until an `Unquote` node
     /// corresponding to this Quote runs. Quotes are values; Unquotes
@@ -121,11 +118,9 @@ pub enum TacticExpr {
     /// Invoke a quoted tactic — splice the inner TacticExpr into
     /// the current proof context and execute it.
     ///
-
     /// Surface syntax: `$(expr)` inside a quoted block, or
     /// `unquote(handle)` at statement position.
     ///
-
     /// Invariant: `Unquote(Quote(t))` is operationally equivalent to
     /// `t`. The roundtrip is the identity on semantics; the
     /// intermediate Quote just defers evaluation across a
@@ -135,11 +130,9 @@ pub enum TacticExpr {
     /// Introduce the current proof goal as a fresh metavariable the
     /// user's meta-tactic body can reference.
     ///
-
     /// Surface syntax: `let goal = goal_intro()` inside a
     /// `@tactic meta fn`.
     ///
-
     /// Populates a binding whose value is the current goal's
     /// expression (quoted). Meta-tactics can then destructure it,
     /// match on head symbols, or pass it to other meta-tactics.
@@ -162,12 +155,10 @@ pub enum CompileResult {
 
 /// Compile a surface tactic expression into an internal Z3 tactic combinator.
 ///
-
 /// This is the main entry point: takes a `TacticExpr` from the parser
 /// and produces a `TacticCombinator` that can be executed by
 /// `tactics.rs::apply_combinator()`.
 ///
-
 /// Post-processing: every successful compile result runs through
 /// `tactic_laws::normalize` so Quote/Unquote/GoalIntro artefacts
 /// from the parser (which compile to skip no-ops) collapse out of
@@ -444,7 +435,6 @@ fn compile_named_tactic_with_args(name: &str, args: &[Text]) -> CompileResult {
 /// compile target for `Quote` and `GoalIntro` (meta-programming
 /// markers that have no Z3-level side effect).
 ///
-
 /// Why not an explicit `NoOp` combinator variant: the executor
 /// already handles `Repeat(_, 0)` as a zero-step run, so reusing
 /// that path keeps the combinator enum small. The semantic is
@@ -465,7 +455,6 @@ fn auto_strategy() -> TacticCombinator {
 
 /// The `oracle(confidence)` strategy: stochastic LLM-guided proof search.
 ///
-
 /// Encodes the confidence threshold in the custom tactic tag so that
 /// `proof_search.rs::try_named_tactic` can recover it and dispatch to
 /// `try_oracle_tactic`. Falls back to `auto` via `OrElse` if the oracle
@@ -490,7 +479,6 @@ fn norm_num_strategy() -> TacticCombinator {
 
 /// The `cubical` strategy: path normalization + transport reduction.
 ///
-
 /// Applies cubical-specific simplifications:
 /// 1. Transport on refl ↦ identity
 /// 2. hcomp on constant ↦ base
@@ -513,7 +501,6 @@ fn cubical_strategy() -> TacticCombinator {
 
 /// The `category_simp` strategy: categorical equation solving.
 ///
-
 /// Normalizes expressions using:
 /// 1. Associativity: (f ∘ g) ∘ h = f ∘ (g ∘ h)
 /// 2. Left identity: id ∘ f = f
@@ -557,7 +544,6 @@ fn topos_strategy() -> TacticCombinator {
 
 /// Entry point for `proof by <tactic>;` statements.
 ///
-
 /// Called by the proof checker when it encounters a `proof by` block.
 /// Compiles the surface tactic expression, executes it against the Z3
 /// backend, and returns success/failure with an optional proof term.

@@ -65,7 +65,6 @@ struct ExtensionsData {
 
 /// Deserializes a VBC module from binary data.
 ///
-
 /// **Trust model**: this entry point assumes the input was produced
 /// by a trusted compiler / source. It performs structural decoding
 /// only — no per-instruction cross-reference validation. Use
@@ -88,11 +87,9 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
 /// per-instruction bytecode validator + content-hash verification
 /// before returning.
 ///
-
 /// This is the architectural defense for loading bytecode that may
 /// not have come from a trusted source — it does, in order:
 ///
-
 /// 1. **Structural decode** via `deserialize_module`.
 /// 2. **Content-hash verification**: recompute `blake3(data[HEADER_SIZE..])`
 /// and compare its first 8 bytes to the header's
@@ -106,14 +103,12 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
 /// offsets landing mid-instruction, call-arity mismatches,
 /// and decoder failures mid-stream.
 ///
-
 /// Catches at LOAD time what the interpreter would otherwise catch
 /// on execution-reach (best case) or silent state corruption (worst
 /// case). Cost is O(N) in total bytes (hash) + O(M) in total
 /// instruction count (validator). Use whenever the bytecode source
 /// is not the in-process compiler.
 ///
-
 /// Closes round-1 §3.1 + round-2 §3.1 of the red-team review and
 /// activates the previously-INERT `ContentHashMismatch` defense.
 pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
@@ -124,7 +119,6 @@ pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
 /// [`ValidationOptions::skip_hash_check`] and
 /// [`ValidationOptions::skip_bytecode_validation`].
 ///
-
 /// Pre-fix the only validated entry point invoked
 /// `verify_content_hash` unconditionally — `ValidationOptions::fast()`
 /// (which sets both skip flags) had no way to actually skip hash
@@ -133,7 +127,6 @@ pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
 /// pass `ValidationOptions::fast()` and the loader honors both flags
 /// in lockstep.
 ///
-
 /// Caveat: skipping hash verification is a security trade-off, not a
 /// validity trade-off — the hash is the only on-disk artefact that
 /// flags tampering. Reserve `fast()` for in-process loads from a
@@ -158,7 +151,6 @@ pub fn deserialize_module_validated_with_options(
 /// Verifies the content hash carried by the VBC header against a
 /// freshly-computed `blake3(data[HEADER_SIZE..])`.
 ///
-
 /// The hash is over the raw on-wire bytes after the header, which
 /// for a compressed module is the COMPRESSED payload — exactly what
 /// the serializer hashes (`crates/verum_vbc/src/serialize.rs:153`).
@@ -166,7 +158,6 @@ pub fn deserialize_module_validated_with_options(
 /// catching tampering on the disk artifact without paying the
 /// decompression cost first.
 ///
-
 /// Returns `VbcError::ContentHashMismatch { expected, computed }`
 /// on mismatch. Bypassed by `ValidationOptions::skip_hash_check =
 /// true`; the lenient `deserialize_module` entry point doesn't
@@ -200,7 +191,6 @@ fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
 /// freshly-computed `blake3` over the concatenation of each dependency's
 /// `hash` field (encoded as little-endian u64).
 ///
-
 /// This is the dependency-tree-fingerprint defense:
 /// `content_hash` covers the bytes-on-disk; `dependency_hash`
 /// independently fingerprints the cog-distribution dependency
@@ -208,7 +198,6 @@ fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
 /// reproducibility checker) can compare two modules' dep trees in
 /// O(8) without walking the full dependency table.
 ///
-
 /// Returns `VbcError::DependencyHashMismatch { expected, computed }`
 /// on mismatch.
 fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
@@ -238,7 +227,6 @@ fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
 
 /// Architectural upper bounds for module-table counts.
 ///
-
 /// Hostile bytecode can claim `u32::MAX` (4 billion) for any
 /// `*_count` field in the header, triggering a multi-GB
 /// `Vec::with_capacity(u32::MAX as usize)` allocation before the
@@ -248,7 +236,6 @@ fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
 /// are 1 M, comfortably above any plausible module while staying
 /// far below the wraparound cliff.
 ///
-
 /// Hit at parse time (before any allocation), each rejection
 /// names the offending field for triage.
 const MAX_TYPE_TABLE_ENTRIES: u32 = 1 << 20; // 1 048 576
@@ -258,7 +245,6 @@ const MAX_SPECIALIZATION_TABLE_ENTRIES: u32 = 1 << 20;
 
 /// Descriptor-level architectural upper bounds.
 ///
-
 /// Within a type / function descriptor, varint-encoded counts
 /// (type params, fields, variants, protocols, methods, params,
 /// contexts, bounds) drive `SmallVec::with_capacity` /
@@ -301,7 +287,6 @@ const MAX_SOURCE_MAP_ENTRIES: usize = 1 << 22; // 4 194 304
 
 /// Maximum decompressed bytecode size for a single module.
 ///
-
 /// Adversarial bytecode can claim a near-`u32::MAX` decompressed
 /// size in the bytecode-section header; the decompressor would
 /// `Vec::with_capacity` that amount before reading a byte from
@@ -686,10 +671,8 @@ impl<'a> Deserializer<'a> {
 
  /// Parses bytecode with optional decompression.
  ///
-
  /// # Format
  ///
-
  /// The bytecode section has a compression header followed by the data:
  /// - `u8`: Compression algorithm (0=None, 1=Zstd, 2=Lz4)
  /// - `u32`: Uncompressed size (only present if algorithm != None)
@@ -1554,7 +1537,6 @@ impl<'a> Deserializer<'a> {
 
  /// Parses the extensions section (tensor metadata, FFI, dependencies).
  ///
-
  /// Extension section format:
  /// - u8 section_mask: bitmask of present sections
  /// - 0x01: shape_metadata (tensor shapes)

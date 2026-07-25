@@ -267,7 +267,6 @@ pub fn check_binding(
 
 /// Validate a full usage map against a declaration map.
 ///
-
 /// `declarations` carries each binding's declared quantity;
 /// `observed` is the usage map produced by walking the function
 /// body. Returns the first violation found (deterministic by

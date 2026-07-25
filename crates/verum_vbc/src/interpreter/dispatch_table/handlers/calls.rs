@@ -56,7 +56,6 @@ fn unresolved_xmod_call(
 
 /// Call function: `dst = fn(args...)`
 ///
-
 /// Format: `[0x5B] [dst:reg] [func_id:varint] [args:reg_range]`
 pub(in super::super) fn handle_call(
     state: &mut InterpreterState,
@@ -543,7 +542,6 @@ pub(in super::super) fn handle_call(
 
 /// CallR (0x5F) - Indirect call via register.
 ///
-
 /// The function address is stored in a register rather than being a constant.
 pub(in super::super) fn handle_call_indirect(
     state: &mut InterpreterState,
@@ -602,7 +600,6 @@ pub(in super::super) fn handle_call_indirect(
 
 /// CallG (0x80) - Generic function call with type parameters.
 ///
-
 /// Encoding: opcode + dst:reg + func_id:varint + type_args:reg_vec + args:reg_range
 /// type_args is encoded as varint(count) + reg * count (must consume all type arg registers).
 pub(in super::super) fn handle_call_generic(
@@ -757,7 +754,6 @@ pub(in super::super) fn handle_call_generic(
 
 /// CallV (0x81) - Virtual dispatch call.
 ///
-
 /// Performs vtable-based method dispatch on the receiver's runtime type.
 /// The vtable_slot encodes protocol index (upper 16 bits) and method index (lower 16 bits).
 pub(in super::super) fn handle_call_virtual(
@@ -909,7 +905,6 @@ fn get_builtin_type_id(val: Value) -> TypeId {
 
 /// CallC (0x82) - Inline cached call.
 ///
-
 /// Uses a cache slot to speed up repeated calls to the same target.
 pub(in super::super) fn handle_call_cached(
     state: &mut InterpreterState,
@@ -1079,7 +1074,6 @@ pub(in super::super) fn handle_call_closure(
 
 /// Tail call: reuses current stack frame
 ///
-
 /// Format: `[0x5C] [func_id:varint] [args:reg_range]`
 pub(in super::super) fn handle_tail_call_op(
     state: &mut InterpreterState,
@@ -1183,11 +1177,9 @@ pub(in super::super) fn handle_new_closure(
 /// declared with @intrinsic("llvm.xxx") that have no bytecode body
 /// (bytecode_length == 0).
 ///
-
 /// Returns `Ok(Some(result))` if the intrinsic was handled, `Ok(None)` if not
 /// recognized (caller should fall through to normal call path).
 ///
-
 /// Covers:
 /// - F64/F32 math functions (sqrt, sin, cos, tan, exp, log, pow, etc.)
 /// - Rounding functions (floor, ceil, round, trunc)

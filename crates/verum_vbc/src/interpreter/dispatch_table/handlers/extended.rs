@@ -20,14 +20,12 @@ use crate::types::{VariantDescriptor, VariantKind};
 
 /// Compute the expected payload-field count for a declared variant.
 ///
-
 /// `MakeVariantTyped` Phase 3b validation cross-checks the bytecode
 /// `field_count` operand against this:
 ///  - `Unit` → 0 (no payload),
 ///  - `Tuple` → `arity` (positional fields),
 ///  - `Record` → `fields.len()` (named fields).
 ///
-
 /// Inlined in the dispatcher's hot path; the match is exhaustive so
 /// the codegen folds it to a single load + cmov on most targets.
 #[inline]
@@ -44,13 +42,11 @@ fn expected_field_count(variant: &VariantDescriptor) -> u32 {
 /// the validator is unit-testable without bytecode-stream
 /// construction.
 ///
-
 /// Returns `Ok(())` on success. On failure the
 /// `InterpreterError::LayoutMismatch` payload distinguishes the
 /// three rejection classes via `reason`: "unknown type_id",
 /// "unknown tag for type", "field_count mismatch".
 ///
-
 /// Builtin-range type ids (`is_builtin()`, < 0x100) bypass this
 /// validation: they're scalar primitives and never carry a
 /// `variants` list — codegen never emits MakeVariantTyped for
@@ -107,7 +103,6 @@ pub(in super::super) fn validate_make_variant_typed(
 
 /// Dispatcher for `Opcode::Extended` (0x1F) — #167 Part A.
 ///
-
 /// Format: `[0x1F] [sub_op:u8] [operands...]`. The sub-op byte
 /// selects the extended-instruction kind from a 256-entry secondary
 /// space. An unknown sub-op surfaces `InterpreterError::NotImplemented`

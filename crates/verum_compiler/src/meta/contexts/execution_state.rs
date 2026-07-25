@@ -46,7 +46,6 @@ impl CallFrame {
 
 /// Execution state for meta functions
 ///
-
 /// Tracks variable bindings, call stack, and execution metadata during
 /// compile-time evaluation.
 #[derive(Debug, Clone)]

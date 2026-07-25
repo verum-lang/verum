@@ -139,7 +139,6 @@ pub trait CompilationPhase: Send + Sync {
 
 /// Input for a compilation phase
 ///
-
 /// Note: Session reference is managed separately by the pipeline
 /// to avoid lifetime issues with Clone. Access to Session for span conversion
 /// should be provided via the compilation phase implementation.
@@ -155,14 +154,12 @@ pub struct PhaseInput {
 /// **Pipeline track** for a [`PhaseData`] payload. Verum has two
 /// parallel paths through the compilation pipeline:
 ///
-
 ///  - **Compilation track** (TypedAST → VBC): the canonical
 ///  execution path. HIR / VBC are this track's IRs.
 ///  - **Verification track** (TypedAST → MIR → SMT / CBGR): the
 ///  sidecar IR path used for verification, optimization, and
 ///  CBGR bounds elimination. MIR / OptimizedMir live here.
 ///
-
 /// `PhaseData::pipeline_track()` classifies any phase data by its
 /// track so consumers (audit gates, diagnostics, dependency
 /// analysis) can route uniformly.
@@ -254,16 +251,13 @@ pub enum PhaseData {
 
     /// Mid-level IR (Phase 6) — verification-track sidecar.
     ///
-
     /// **NOT in the main TypedAST → VBC compilation path.** MIR is
     /// produced and consumed only by:
     ///
-
     ///  - `phases::optimization` — optimization passes.
     ///  - `phases::verification_phase` — SMT-based verification.
     ///  - `passes::cbgr_integration` — CBGR bounds elimination.
     ///
-
     /// The compilation pipeline goes TypedAST → VBC directly. See
     /// [`PipelineTrack`] for the architectural classification.
     Mir(List<mir_lowering::MirModule>),
@@ -274,7 +268,6 @@ pub enum PhaseData {
 
     /// VBC bytecode modules (VBC-first pipeline)
     ///
-
     /// This variant is used when compiling directly to VBC bytecode
     /// instead of going through MIR. All tier analysis happens before
     /// VBC generation, and the bytecode includes tier-aware instructions.
@@ -338,7 +331,6 @@ impl PhaseData {
 
 /// VBC module data with tier analysis results.
 ///
-
 /// Produced by the VBC codegen phase after tier analysis.
 #[derive(Debug, Clone)]
 pub struct VbcModuleData {
@@ -377,11 +369,9 @@ pub struct VerificationResults {
 
 /// High-level intermediate representation (HIR) module.
 ///
-
 /// HIR is the typed AST representation produced by Phase 4 (Semantic Analysis).
 /// It contains all type information, resolved names, and validated contracts.
 ///
-
 /// Phase 4: Semantic analysis with bidirectional type checking, refinement
 /// subsumption (syntactic + SMT), reference validation, context resolution.
 #[derive(Debug, Clone)]
@@ -653,12 +643,10 @@ pub use crate::profile_system::Profile as LanguageProfile;
 
 /// Execution tier for Verum compilation.
 ///
-
 /// Verum uses a two-tier model:
 /// - Interpreter: VBC bytecode execution for development/debugging
 /// - Aot: Native code via LLVM for production
 ///
-
 /// Note: JIT infrastructure (in verum_codegen/src/mlir/jit/) is preserved
 /// as an internal implementation detail of the AOT pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -883,7 +871,6 @@ impl PhaseMetrics {
 
     /// Convert to PhasePerformanceMetrics for compilation profiling
     ///
-
     /// This is used to integrate phase metrics into the overall compilation
     /// profiling report. Percentages will be calculated by the report.
     pub fn to_performance_metrics(&self) -> crate::compilation_metrics::PhasePerformanceMetrics {
@@ -908,41 +895,31 @@ impl PhaseMetrics {
 
 /// Convert a verum_ast::Span to a verum_diagnostics::Span (LineColSpan).
 ///
-
 /// This function provides proper span conversion using the Session's source file
 /// cache. It performs efficient O(log n) lookup via binary search on line starts.
 ///
-
 /// # Performance
 ///
-
 /// - Conversion time: < 1ms (typically ~100ns)
 /// - Binary search on cached line start positions
 /// - Graceful fallback for missing source files or synthetic spans
 ///
-
 /// # Arguments
 ///
-
 /// * `ast_span` - The byte-offset span from AST
 /// * `session_opt` - Optional reference to the compilation session for source lookup
 ///
-
 /// # Returns
 ///
-
 /// A LineColSpan with 1-indexed line/column numbers for diagnostic display.
 /// Returns placeholder if session is None or source file not found.
 ///
-
 /// # Examples
 ///
-
 /// ```ignore
 /// use crate::session::Session;
 /// use verum_ast::Span;
 ///
-
 /// let session = Session::new(options);
 /// let file_id = session.load_file(Path::new("test.vr"))?;
 /// let ast_span = Span::new(0, 10, file_id);
@@ -965,19 +942,15 @@ pub fn ast_span_to_diagnostic_span(
 
 /// Convert a TypeError to a Diagnostic with proper source location information.
 ///
-
 /// This function uses the session to convert AST byte-offset spans to
 /// line/column diagnostic spans, enabling file:line:column error reporting.
 ///
-
 /// # Examples
 ///
-
 /// ```ignore
 /// use crate::session::Session;
 /// use verum_types::TypeError;
 ///
-
 /// let session = Session::new(options);
 /// let type_error: TypeError = /* ... */;
 /// let diagnostic = type_error_to_diagnostic(&type_error, Some(&session));

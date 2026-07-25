@@ -127,7 +127,6 @@ impl KernelRecheck {
     /// `K-Refine-omega` recheck **gated by `@require_extension(vfe_7)`
     /// policy** (M-VVA Sub-2.4 — VVA spec L170, deferred policy wiring).
     ///
-
     /// Routes through [`check_refine_omega`] only when the configured
     /// [`ExtensionPolicy`] declares `vfe_7` active for the consuming
     /// scope. When the extension is opt-out (policy = `OptInOnly` and
@@ -136,7 +135,6 @@ impl KernelRecheck {
     /// the VVA Year-0–2 rollout default of "extensions off unless
     /// explicitly opted in".
     ///
-
     /// **Soundness.** Skipping the rule is sound under the rollout
     /// calendar: K-Refine-omega's transfinite stratification check is
     /// strictly stronger than the always-on K-Refine rule (finite
@@ -146,7 +144,6 @@ impl KernelRecheck {
     /// off — only from gating ON when the program author's intent was
     /// to opt into the weaker rule.
     ///
-
     /// **Backward-compat.** Existing callers continue using
     /// [`KernelRecheck::refine_omega`] (the unconditional form). The
     /// gated form is opt-in for new callers wiring policy-aware passes.
@@ -203,14 +200,12 @@ impl KernelRecheck {
     /// error into [`KernelRecheckError::RoundTrip`] tagged with the
     /// callsite context.
     ///
-
     /// Admit-set ():
     ///  - structural identity (`α == α`),
     ///  - K-Adj-Unit shape `AlphaOf(EpsilonOf(F)) ↔ F`,
     ///  - K-Adj-Counit shape `EpsilonOf(AlphaOf(F)) ↔ F`,
     ///  - β-/ι-/δ-equivalence (definitional_eq).
     ///
-
     /// Preprint-blocked: adds the universal
     /// canonicalize algorithm.
     pub fn round_trip(
@@ -226,7 +221,6 @@ impl KernelRecheck {
 
     /// universal-canonicalize K-Round-Trip recheck.
     ///
-
     /// Strictly stronger than [`Self::round_trip`]: every pair the
     ///  algorithm admits is also admitted by V2 with an EMPTY
     /// audit trail. Pairs that admits but reject (modal-
@@ -234,7 +228,6 @@ impl KernelRecheck {
     /// a non-empty [`BridgeAudit`] surfacing every Diakrisis admit
     /// invoked.
     ///
-
     /// External auditors enumerate the audit trail to see WHICH
     /// preprint-blocked claims (16.10 / 16.7 / 14.3) the proof
     /// relies on. An empty audit means the proof is fully
@@ -253,7 +246,6 @@ impl KernelRecheck {
     /// K-Eps-Mu recheck with explicit Diakrisis A-3
     /// τ-witness audit trail.
     ///
-
     /// Strictly stronger than [`Self::eps_mu_coherence`]: every pair
     /// admits is also admitted by V3-final, with the
     /// audit trail recording the σ_α / π_α witness construction
@@ -303,7 +295,6 @@ impl KernelRecheck {
     /// arbitrary κ-tower domain (KappaN(n) for n ≥ 1) with explicit
     /// Diakrisis Lemma 131.L4 bridge admit for ascents beyond κ_2.
     ///
-
     /// Strictly stronger than [`Self::universe_ascent`] (which
     /// operates on the 3-tier domain {Truncated, Kappa1, Kappa2}):
     /// decidable pairs produce empty audit; κ_n for n ≥ 3 and
@@ -357,7 +348,6 @@ impl KernelRecheck {
     /// (tuples, references, slices, arrays, function-types, bounded-
     /// types) so refinements nested inside generics are not missed.
     ///
-
     /// V3 is what the production verification pipeline calls
     /// (`crates/verum_verification/src/passes.rs::SmtVerificationPass::
     /// verify_function`); /V2 entry points remain available
@@ -475,16 +465,13 @@ impl KernelRecheck {
     /// want to drive the full module re-check uniformly without
     /// dispatching across `ItemKind` variants.
     ///
-
     /// Recognises (matches the per-decl helpers above):
     ///
-
     ///  * `Theorem` / `Lemma` / `Corollary` → [`recheck_theorem`]
     ///  * `Axiom` → [`recheck_axiom`]
     ///  * `Function` → [`recheck_function`]
     ///  * Nested module / impl block → recurse into items
     ///
-
     /// Returns one entry per `(item_name, kind_label, outcome)`
     /// triple. Items that aren't kernel-recheckable (Type, Const,
     /// Use, etc.) are silently skipped — they have their own
@@ -861,7 +848,6 @@ pub(crate) fn walk_ast_expr_for_recheck(
 /// `Var("<kind-tag>")` placeholder so the `m_depth_omega` walker
 /// treats it as rank 0.
 ///
-
 /// The richer translation (Π / Σ / App / Pair / etc.) is future work —
 /// covers the cases that actually trigger
 /// `K-Refine-omega` rejection in user code (modal predicates over
@@ -997,7 +983,6 @@ where
 /// operator support is wired so K-Refine-omega correctly rejects
 /// over-stratified predicates (the canonical V1 use case).
 ///
-
 /// composite-expression coverage. Previously
 /// `Binary` / `Unary` / `Call` / `If` / `Match` / `Block` /
 /// `Literal` collapsed to opaque `Var("<unsupported-expr>")`
@@ -1008,10 +993,8 @@ where
 /// `CoreTerm::App(left, right)` so `m_depth_omega` correctly
 /// computes `max` over the operands.
 ///
-
 /// Coverage:
 ///
-
 ///  • `ExprKind::Path` → `CoreTerm::Var("<last-segment>")`.
 ///  • `ExprKind::Paren(e)` → recurse on `e`.
 ///  • Method-call shape `x.box()` / `x.diamond()` /

@@ -50,7 +50,6 @@ use crate::ty::Type;
 
 /// Automatic Send/Sync derivation engine
 ///
-
 /// This module determines whether a type is Send and/or Sync based on
 /// structural rules defined in the specification.
 pub struct SendSyncDerivation<'a> {
@@ -65,10 +64,8 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Check if a type is Send
     ///
-
     /// Basic protocols with simple associated types (initial release) — 4.1 - Send Protocol
     ///
-
     /// A type is Send if ownership can be safely transferred between threads.
     pub fn is_send(&self, ty: &Type) -> bool {
         match ty {
@@ -302,10 +299,8 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Check if a type is Sync
     ///
-
     /// Basic protocols with simple associated types (initial release) — 4.2 - Sync Protocol
     ///
-
     /// A type is Sync if &T can be safely shared between threads.
     /// Equivalently: T: Sync ⟺ &T: Send
     pub fn is_sync(&self, ty: &Type) -> bool {
@@ -523,7 +518,6 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Derive Send implementation for a type
     ///
-
     /// Returns a ProtocolImpl if the type can be Send, or None if it cannot.
     pub fn derive_send(&self, ty: &Type) -> Maybe<ProtocolImpl> {
         if !self.is_send(ty) {
@@ -547,7 +541,6 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Derive Sync implementation for a type
     ///
-
     /// Returns a ProtocolImpl if the type can be Sync, or None if it cannot.
     pub fn derive_sync(&self, ty: &Type) -> Maybe<ProtocolImpl> {
         if !self.is_sync(ty) {
@@ -571,7 +564,6 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Generate where clauses for Send implementation
     ///
-
     /// For generic types like List<T>, generate: where T: Send
     fn generate_send_where_clauses(&self, ty: &Type) -> List<crate::protocol::WhereClause> {
         let mut clauses = List::new();
@@ -598,7 +590,6 @@ impl<'a> SendSyncDerivation<'a> {
 
     /// Generate where clauses for Sync implementation
     ///
-
     /// For generic types like List<T>, generate: where T: Sync
     fn generate_sync_where_clauses(&self, ty: &Type) -> List<crate::protocol::WhereClause> {
         let mut clauses = List::new();
@@ -628,7 +619,6 @@ impl<'a> SendSyncDerivation<'a> {
 
 /// Register Send and Sync marker protocols
 ///
-
 /// This should be called during protocol checker initialization to register
 /// the standard Send and Sync protocols.
 pub fn register_send_sync_protocols(checker: &mut ProtocolChecker) {
@@ -654,7 +644,6 @@ pub fn register_send_sync_protocols(checker: &mut ProtocolChecker) {
 
 /// Register Send/Sync implementations for standard types
 ///
-
 /// This registers implementations for:
 /// - Primitive types (Int, Bool, Float, etc.)
 /// - Standard library types (List, Map, Set, etc.)

@@ -108,7 +108,6 @@ bitflags! {
 
 /// Object metadata placed after CbgrHeader.
 ///
-
 /// This contains interpreter-specific metadata that supplements
 /// the CBGR header from verum_common.
 #[repr(C)]
@@ -165,7 +164,6 @@ impl ObjectMeta {
 
 /// CBGR-tracked heap object.
 ///
-
 /// Wraps a TrackedAllocation from verum_common and provides
 /// access to both the CBGR header and interpreter metadata.
 pub struct CbgrObject {
@@ -187,10 +185,8 @@ impl std::fmt::Debug for CbgrObject {
 impl CbgrObject {
     /// Creates a new CbgrObject from a TrackedAllocation.
     ///
-
     /// # Safety
     ///
-
     /// The allocation must have been created with sufficient space for ObjectMeta.
     unsafe fn from_allocation(allocation: TrackedAllocation) -> Self {
         Self { allocation }
@@ -271,7 +267,6 @@ impl CbgrObject {
 
     /// Validates a reference against the CBGR header.
     ///
-
     /// Returns Ok(()) if valid, or an error describing the violation.
     #[inline]
     pub fn validate(&self, expected_gen: u32, expected_epoch: u32) -> InterpreterResult<()> {
@@ -332,7 +327,6 @@ pub struct CbgrHeapStats {
 
 /// CBGR-integrated heap allocator.
 ///
-
 /// Uses verum_common's tracked allocation system for full CBGR
 /// memory safety with generation and epoch tracking.
 pub struct CbgrHeap {
@@ -373,7 +367,6 @@ impl CbgrHeap {
 
     /// Allocates an object of the given type and size.
     ///
-
     /// Returns a CbgrObject with:
     /// - CbgrHeader initialized by verum_common (generation=0, current epoch)
     /// - ObjectMeta initialized with the given type_id and size
@@ -462,10 +455,8 @@ impl CbgrHeap {
 
     /// Frees an object.
     ///
-
     /// # Safety
     ///
-
     /// The object must have been allocated by this heap and must not be
     /// accessed after freeing.
     pub unsafe fn free(&mut self, mut obj: CbgrObject) {
@@ -525,14 +516,11 @@ impl CbgrHeap {
 
     /// Clears all objects (for reset).
     ///
-
     /// Deallocates every tracked object via `tracked_dealloc` to avoid
     /// leaking memory and keep the global CBGR allocation counters accurate.
     ///
-
     /// # Safety
     ///
-
     /// All references to heap objects become invalid.
     pub unsafe fn clear(&mut self) {
         // Drain objects and deallocate each one via TrackedAllocation.
@@ -551,7 +539,6 @@ impl CbgrHeap {
 
     /// Returns the next generation number.
     ///
-
     /// This is a convenience method that provides a unique generation number
     /// for manual reference creation. Normally, generations are managed by
     /// the CBGR header during allocation, but this allows creating generations
@@ -567,26 +554,19 @@ impl CbgrHeap {
 
     /// Creates a TokenStream heap object from serialized bytes.
     ///
-
     /// This is used by the MetaQuote instruction handler to create TokenStream
     /// objects directly from pre-serialized bytes stored in the constant pool.
     ///
-
     /// # Arguments
     ///
-
     /// * `serialized_data` - Pre-serialized TokenStream bytes
     ///
-
     /// # Returns
     ///
-
     /// A heap-allocated CbgrObject containing the serialized TokenStream data.
     ///
-
     /// # Performance
     ///
-
     /// O(n) where n = serialized data size. Just a single memcpy.
     pub fn alloc_token_stream(&mut self, serialized_data: &[u8]) -> InterpreterResult<CbgrObject> {
         self.alloc_with_init(TypeId::TOKEN_STREAM, serialized_data.len(), |buf| {
@@ -596,14 +576,11 @@ impl CbgrHeap {
 
     /// Gets a CbgrObject from a data pointer.
     ///
-
     /// Given a pointer to the data portion of an object (after ObjectMeta),
     /// this reconstructs the CbgrObject wrapper for CBGR operations.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must have been returned by `CbgrObject::data_ptr()` for
     /// an object allocated from this heap.
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -633,7 +610,6 @@ impl CbgrHeap {
 
 /// A lightweight reference to a CBGR heap object.
 ///
-
 /// Used for looking up objects by data pointer without full ownership.
 pub struct CbgrObjectRef {
     meta_ptr: *mut u8,

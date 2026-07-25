@@ -95,7 +95,6 @@ use crate::reflection::ReflectedTerm;
 
 /// A named hypothesis: `name : ty`.
 ///
-
 /// current surface treats every hypothesis as opaquely-typed; the reflected
 /// type uses an [`opaque_placeholder`] sentinel because translating
 /// real hypothesis types requires the elaborator and is V1 work.
@@ -137,7 +136,6 @@ impl NamedHypothesis {
 /// One proof obligation: a proposition to prove + the local
 /// hypotheses available when discharging it.
 ///
-
 /// V0 snapshots emit at most one goal — the theorem's stated
 /// proposition. Future work will surface per-subgoal entries once the
 /// elaborator's goal-stack model is wired in.
@@ -180,7 +178,6 @@ impl ProofGoal {
 
 /// One entry in [`ProofState::applied_steps`].
 ///
-
 /// Every snapshot is a *static* observation: `goals_before` and
 /// `goals_after` are heuristic counts derived from the AST shape,
 /// not live kernel state. conservatively assumes each step
@@ -236,7 +233,6 @@ impl ProofStepSnapshot {
 /// Static-snapshot view of the surrounding context — declared
 /// hypotheses + their count.
 ///
-
 /// emits an empty context unless the theorem declares explicit
 /// `requires` clauses; in that case each clause becomes a synthetic
 /// `pre_<n>` named-hypothesis entry with an opaque placeholder type.
@@ -277,7 +273,6 @@ impl ContextSnapshot {
 
 /// Full static snapshot of a theorem's proof body at V0 fidelity.
 ///
-
 /// Produced by [`snapshot_proof_state`]. Serializes cleanly so the
 /// CLI can emit it as JSON (`verum proofview --format json`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -332,25 +327,20 @@ impl ProofState {
 /// snapshot of its V0 proof state. Returns `None` for theorems
 /// with no proof body (e.g. axioms or unproven theorems).
 ///
-
 /// **No kernel invocation.** V0 is a heuristic, not a verdict — it
 /// answers "what tactics did I write?" without claiming "and they
 /// produce a valid proof".
 ///
-
 /// ## Heuristic for [`ProofState::remaining_goals`]
 ///
-
 ///  * **Empty body** (`proof { }` with zero steps) → 1 goal
 ///  (the theorem's proposition) remains open.
 ///  * **Body with at least one step** → 0 goals remaining. V0
 ///  assumes every written step closes a goal; Future work will plug the
 ///  real kernel verdict in.
 ///
-
 /// ## Heuristic for [`ProofState::applied_steps`]
 ///
-
 /// Sequential walk of the body, producing one
 /// [`ProofStepSnapshot`] per tactic-shaped item. Combinators
 /// (`Seq`, `Try`, `Repeat`, `AllGoals`, `Focus`) flatten to their

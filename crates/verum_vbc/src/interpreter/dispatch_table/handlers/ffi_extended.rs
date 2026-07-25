@@ -26,7 +26,6 @@ use crate::value::Value;
 /// runtime enforces against — every name listed here is a known
 /// resource boundary.
 ///
-
 /// Returning `None` lets the FFI call through unconditionally
 /// (math, allocation, formatting, etc.). Returning `Some(scope)`
 /// triggers a `state.check_permission(scope, 0)` call before the
@@ -108,7 +107,6 @@ fn ffi_symbol_permission_scope(
 /// preserving zero-cost dispatch for math / allocation / format
 /// FFIs that aren't security-relevant.
 ///
-
 /// Stdio is flushed before the panic so the user sees any prior
 /// `print(...)` output even when the script terminates abruptly.
 fn check_ffi_permission(state: &mut InterpreterState, symbol_idx: u32) -> InterpreterResult<()> {
@@ -156,7 +154,6 @@ const MAX_FFI_ALLOCATION_SIZE: usize = verum_common::layout::MAX_ALLOCATION_SIZE
 
 /// FfiExtended (0xBC) - FFI and memory operations.
 ///
-
 /// Handles FFI calling conventions, memory operations, and byte array allocation.
 pub(in super::super) fn handle_ffi_extended(
     state: &mut InterpreterState,
@@ -4321,7 +4318,6 @@ fn cbgr_user_realloc(state: &mut InterpreterState, user: i64, new_size: i64) -> 
 /// Extract MemProt flags from a struct object.
 /// MemProt layout: ObjectHeader + [read: Bool, write: Bool, exec: Bool]
 ///
-
 /// On Unix, returns POSIX PROT_* flags. On other platforms, returns a
 /// platform-neutral bitmask (read=1, write=2, exec=4) that callers
 /// translate to platform-specific constants.
@@ -4372,7 +4368,6 @@ pub(in super::super) fn extract_memprot_flags(_state: &InterpreterState, val: Va
 /// Extract MapFlags flags from a struct object.
 /// MapFlags layout: ObjectHeader + [shared: Bool, is_private: Bool, anonymous: Bool, fixed: Bool]
 ///
-
 /// Returns platform-neutral bitmask flags. On Unix, these match POSIX MAP_*
 /// constants. Callers on other platforms translate as needed.
 pub(in super::super) fn extract_mapflags(_state: &InterpreterState, val: Value) -> i32 {
@@ -4456,11 +4451,9 @@ pub(in super::super) fn extract_filedesc(state: &InterpreterState, val: Value) -
 #[cfg(feature = "ffi")]
 /// Apply error protocol checking to an FFI return value.
 ///
-
 /// Mirrors the LLVM lowering's `emit_ffi_error_protocol_check` for differential
 /// correctness between interpreter (Tier 0) and AOT (Tier 1).
 ///
-
 /// Convention: for protocols that detect errors, the return value is negated errno
 /// (negative i64) on error, or the raw return value on success.
 fn apply_error_protocol(

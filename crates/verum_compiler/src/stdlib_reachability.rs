@@ -56,7 +56,6 @@ use crate::stdlib_index::{self, StdlibModuleIndex};
 /// Compute the transitive closure of stdlib modules required to
 /// type-check the given user module.
 ///
-
 /// Returns `None` when the embedded dep graph is unavailable
 /// (e.g. minimal builds without `core/`); callers should fall back to
 /// the full-load path in that case.
@@ -95,7 +94,6 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
 /// auto-imported into every user compilation via `core/mod.vr`'s
 /// `public mount super.X.{…}` re-export chain.
 ///
-
 /// Per #102 the prelude paths are computed at build time by
 /// `build.rs::build_prelude_seeds` and embedded as a static slice
 /// in `embedded_prelude_seeds`.  The runtime no longer parses

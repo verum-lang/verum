@@ -236,7 +236,6 @@ const SIZE_OF_POINTER: u64 = 8;
 /// the small AST walk so neither crate depends on the other's
 /// implementation.
 ///
-
 /// Returns `MlsLevel::Public` (the safe default) when no
 /// `@classification` attribute is present. Multiple attributes on
 /// the same item produce the highest declared level — matching
@@ -268,7 +267,6 @@ pub(crate) fn read_param_classification(
 
 /// Detect `@declassify` attribute on a FunctionDecl (#295).
 ///
-
 /// Returns `true` when the function declares itself a
 /// declassification boundary — the call-classification walker
 /// skips its body entirely. `@declassify` accepts no arguments
@@ -571,7 +569,6 @@ impl InferResult {
 
 /// Work items for iterative type inference.
 ///
-
 /// This enum represents the different stages of type inference work to avoid
 /// stack overflow in deeply nested expressions.
 #[derive(Debug)]
@@ -737,7 +734,6 @@ pub struct TypeChecker {
     generic_associated_types_enabled: bool,
     /// MLS classification sidecar (#289 Phase 2b foundation).
     ///
-
     /// Maps binding identity (variable name in the current scope's
     /// flat namespace) to its `MlsLevel`. When a function
     /// parameter carries `@classification(secret)`, the binding
@@ -747,13 +743,11 @@ pub struct TypeChecker {
     /// the propagation through unify / synth / check sites in
     /// `infer.rs::synth_*`.
     ///
-
     /// The map is keyed by `Text` (variable name, scoped) rather
     /// than a TypeVar id because classification is a property of
     /// BINDINGS (not types) — two different variables can carry
     /// the same `Type::Int` but distinct classifications.
     ///
-
     /// Architecture phases (all CLOSED):
     ///  * Phase 2b-Foundation (#289): this map (storage).
     ///  * Phase 2b-Integration (#291): seeded from
@@ -800,7 +794,6 @@ pub struct TypeChecker {
     /// `A.method(...)` is treated as a module-path lookup
     /// (`<path>.method`) rather than a value-lookup on the identifier.
     ///
-
     /// Needed because stdlib symbols (e.g. `core.sys.linux.syscall.stat`)
     /// can be resolved into the flat name environment via cross-module
     /// imports and shadow a locally-declared mount alias like
@@ -855,7 +848,6 @@ pub struct TypeChecker {
     /// Maps type_name -> (method_name -> method_type)
     /// Used for resolving obj.method() calls where method has self parameter
     ///
-
     /// NOTE: This is wrapped in Shared<RwLock<...>> to enable order-independent
     /// method resolution across modules. Methods registered in implement blocks
     /// become immediately visible to all TypeChecker instances sharing this map.
@@ -901,7 +893,6 @@ pub struct TypeChecker {
     type_var_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>>,
     /// Lookup from a Higher-Kinded parameter name to its fresh TypeVar id.
     ///
-
     /// HKT parameters like `F<_>: Functor` are registered both as a
     /// `Type::Var(fresh_tvar)` in `ctx.env`/`ctx.types` AND as a
     /// `Type::TypeConstructor { name, arity, kind }` in kind-inferred contexts.
@@ -1065,7 +1056,6 @@ pub struct TypeChecker {
     function_contracts: Map<Text, FunctionContract>,
     /// Maps function names to the ordered list of their parameter names.
     ///
-
     /// Populated by `register_function_signature` for every function the
     /// type checker sees. This is separate from `function_contracts` which
     /// only stores entries for functions with explicit `requires`/`ensures`
@@ -1074,13 +1064,11 @@ pub struct TypeChecker {
     /// line 10558) can substitute earlier argument values into subsequent
     /// parameters' refinement predicates.
     ///
-
     /// Example: for `fn safe_get(len: Int, i: Int{< len}) -> Int`, this
     /// stores `safe_get → [len, i]` so that at a call `safe_get(5, 10)`
     /// the refinement checker can substitute `len → 5` into `i < len`
     /// before checking the second argument against the predicate.
     ///
-
     /// Empty entries (functions where names couldn't be extracted —
     /// e.g. destructuring patterns, or closures) are acceptable — the
     /// enforcement path falls back to the pre-existing non-dependent
@@ -1094,7 +1082,6 @@ pub struct TypeChecker {
     /// parameters share the same default as untracked bindings
     /// (lattice JOIN identity element).
     ///
-
     /// Populated by `register_function_signature` from each
     /// parameter's `@classification(<level>)` attribute. Read at
     /// call sites by `synth_call` / `check_app` to enforce the
@@ -1140,7 +1127,6 @@ pub struct TypeChecker {
     /// This is activated by the @prototype attribute on functions or modules.
     /// @prototype mode: relaxed type checking for rapid prototyping, deferred refinement verification — @prototype Mode
     ///
-
     /// Behavior changes in prototype mode:
     /// - Unknown field access → WARNING + infer type
     /// - Missing type annotations → WARNING + infer type
@@ -1279,12 +1265,10 @@ struct GeneratorContext {
 
 /// Deferred constraint for improved constraint solving
 ///
-
 /// These constraints are collected during type inference when they cannot
 /// be solved immediately (e.g., because type variables are not yet resolved).
 /// They are revisited after more type information becomes available.
 ///
-
 /// Constraint-based type inference: collect type constraints from expressions and solve via unification
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeferredConstraint {
@@ -1312,10 +1296,8 @@ pub enum DeferredConstraint {
     /// Associated type projection constraint: T.Item = R
     /// Deferred when the base type T is an unresolved type variable
     ///
-
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     ///
-
     /// This constraint arises when we encounter a projection like `T.Item`
     /// but T is not yet known. Once T is resolved, we can look up the
     /// protocol implementation and resolve the associated type.
@@ -1330,7 +1312,6 @@ pub enum DeferredConstraint {
     /// Associated type bound constraint: T.Item: Protocol
     /// Deferred when the projection cannot be resolved yet
     ///
-
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     ProjectionBound {
         /// The projection (e.g., T.Item)
@@ -1344,16 +1325,12 @@ pub enum DeferredConstraint {
 
 /// A single step in a type conversion path.
 ///
-
 /// E0204 Multiple conversion paths: when try (?) operator finds multiple From implementations for error conversion, requiring explicit disambiguation — E0204 Multiple conversion paths
 ///
-
 /// Represents one From<source> for target implementation in a conversion chain.
 ///
-
 /// # Visibility
 ///
-
 /// This struct is `pub` to enable external testing but is not part of the stable API.
 #[derive(Debug, Clone)]
 pub struct ConversionStep {
@@ -1367,17 +1344,13 @@ pub struct ConversionStep {
 
 /// A complete conversion path from source to target type.
 ///
-
 /// E0204 Multiple conversion paths: when try (?) operator finds multiple From implementations for error conversion, requiring explicit disambiguation — E0204 Multiple conversion paths
 ///
-
 /// Represents a sequence of From implementations that convert from one type to another.
 /// Used for detecting ambiguous conversion paths in the ? operator.
 ///
-
 /// # Visibility
 ///
-
 /// This struct is `pub` to enable external testing but is not part of the stable API.
 #[derive(Debug, Clone)]
 pub struct ConversionPath {

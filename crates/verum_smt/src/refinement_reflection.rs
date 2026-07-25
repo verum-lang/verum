@@ -180,7 +180,6 @@ fn is_smtlib_builtin_symbol(tok: &str) -> bool {
 
 /// The registry of reflected user-function definitions.
 ///
-
 /// Indexed by qualified function name for O(1) lookup. The verifier
 /// applies the registry to its solver context once per proof goal,
 /// so the cost of accumulating axioms is proportional to the number
@@ -433,7 +432,6 @@ impl std::error::Error for ReflectionError {}
 
 /// Soundness gate: returns `Ok` iff the function may be reflected.
 ///
-
 /// Pure callers pass simple booleans for each property; in the full
 /// integration these will be derived from the type checker's
 /// `PropertySet` analysis.

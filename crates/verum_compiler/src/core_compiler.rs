@@ -150,11 +150,9 @@ pub struct StdlibModule {
 
 /// Build an index of all publicly exported items (functions, types) per module path.
 ///
-
 /// This index is used for import validation to check that imported items actually exist.
 /// The key is the module path (e.g., "core.memory") and the value is a set of exported names.
 ///
-
 /// The submodule path is derived from the file name:
 /// - "core/memory.vr" -> "core.memory"
 /// - "core/mod.vr" -> "core" (mod.vr exports to parent module)
@@ -298,7 +296,6 @@ pub fn build_export_index(
 
 /// Recursively collect exported item names from an import tree.
 ///
-
 /// For `public import foo.{Bar, Baz as B}`:
 /// - Bar is exported as "Bar"
 /// - Baz is exported as "B" (using alias)
@@ -345,11 +342,9 @@ fn collect_import_exports(tree: &verum_ast::MountTree, exports: &mut HashSet<Str
 
 /// Resolve a relative import path to an absolute module path.
 ///
-
 /// When `is_prefix` is true, all segments are treated as module path (no item extraction).
 /// When `is_prefix` is false, the last segment is treated as the item name.
 ///
-
 /// Examples:
 /// - `.memory` in module `core` with is_prefix=true -> `core.memory`, None
 /// - `.memory.size_of` in module `core` with is_prefix=false -> `core.memory`, Some("size_of")
@@ -424,7 +419,6 @@ fn resolve_import_path(
 
 /// Validate imports and collect errors for missing items.
 ///
-
 /// Returns a list of (module_path, item_name, similar_names, span) tuples for items that don't exist.
 pub fn validate_imports(
     all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],

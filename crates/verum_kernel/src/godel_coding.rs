@@ -60,7 +60,6 @@ use serde::{Deserialize, Serialize};
 /// Primitive recursive function representation (Kleene's normal
 /// form, restricted to primitive recursion — no `μ` operator).
 ///
-
 /// **Closure operations**:
 ///  * [`PrimitiveRecursive::Zero`] — the constant 0 function.
 ///  * [`PrimitiveRecursive::Succ`] — the unary successor `n ↦ n+1`.
@@ -111,7 +110,6 @@ impl PrimitiveRecursive {
     /// Evaluate this primitive recursive function on the given
     /// argument vector. Returns the function's natural-number value.
     ///
-
     /// Total on every input — primitive recursion is *always*
     /// terminating. Saturates at `u64::MAX` defensively for
     /// pathological recursion depths.
@@ -242,7 +240,6 @@ pub fn representable_in_pa(_pr: &PrimitiveRecursive) -> bool {
 /// Cantor pairing function: bijection `ℕ × ℕ → ℕ`. Defined as
 /// `⟨a, b⟩ = (a + b)(a + b + 1)/2 + b`.
 ///
-
 /// Saturates at `u64::MAX` on overflow.
 pub fn cantor_pair(a: u64, b: u64) -> u64 {
     let sum = a.saturating_add(b);

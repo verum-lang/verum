@@ -53,7 +53,6 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register build assets builtins with context requirements
 ///
-
 /// All file system functions require BuildAssets context since they
 /// access files from the project directory.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
@@ -292,7 +291,6 @@ fn meta_load_toml(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 /// `load_toml`, returning the parsed Map<Text, MetaValue>
 /// for further composition by user code.
 ///
-
 /// `@codegen(path, fn_name)` — two-arg form is the
 /// architectural completion of #20 P7 / @codegen:
 /// after loading the spec, invokes the user-defined meta
@@ -302,7 +300,6 @@ fn meta_load_toml(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 /// a `MetaValue::Items(...)` that the surrounding macro
 /// expansion splices into the module:
 ///
-
 /// ```verum
 /// public meta fn build_users(spec: Map<Text, Any>) -> List<Item>
 ///  using [BuildAssets, AstAccess]
@@ -310,12 +307,10 @@ fn meta_load_toml(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 ///  // Construct AST items from the parsed spec...
 /// }
 ///
-
 /// // Module-level invocation:
 /// @codegen("schemas/users.toml", "build_users");
 /// ```
 ///
-
 /// Sandbox + cycle protection: file load goes through the
 /// same `BuildAssetsInfo::load_toml` path (project-root
 /// canonicalize precheck); the user meta-fn invocation

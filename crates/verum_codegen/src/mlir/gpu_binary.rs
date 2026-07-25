@@ -77,14 +77,12 @@ impl GpuBinaryEmitter {
 
     /// Emit GPU binaries from a fully-lowered MLIR module.
     ///
-
     /// The MLIR module must have been through the complete GPU pass pipeline
     /// (including `GpuModuleToBinaryPass`). After that pass, the module
     /// contains:
     /// - Host code in the LLVM dialect
     /// - GPU kernels compiled to binary blobs attached as attributes
     ///
-
     /// This function:
     /// 1. Translates host MLIR → LLVM IR
     /// 2. Extracts kernel binary data
@@ -185,7 +183,6 @@ impl GpuBinaryEmitter {
 
     /// Extract GPU kernel binaries from the MLIR module.
     ///
-
     /// Walks the module looking for gpu.binary operations or embedded
     /// kernel data in gpu.module attributes. If the MLIR binary pass
     /// didn't produce actual binaries (e.g., target compiler not found),

@@ -746,7 +746,6 @@ impl ConcurrencyAnalyzer {
 
     /// Extract memory accesses from CFG.
     ///
-
     /// Honours `config.max_accesses`: once the analyzer has
     /// recorded that many accesses the rest of the CFG is
     /// skipped and the analysis runs on the truncated set. The

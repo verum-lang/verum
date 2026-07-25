@@ -32,10 +32,8 @@ impl<'c> BlockArgument<'c, '_> {
 
     /// Creates a block argument from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(value: MlirValue) -> Self {
         Self {

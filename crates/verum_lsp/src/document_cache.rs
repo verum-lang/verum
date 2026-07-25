@@ -423,23 +423,18 @@ impl Clone for DocumentCache {
 
 /// Merge a partially-parsed AST region into the main AST
 ///
-
 /// This function performs sophisticated AST surgery to replace items in the main AST
 /// with freshly-parsed items from the partial module, based on their spans.
 ///
-
 /// # Strategy
 ///
-
 /// 1. Identify which items in the main AST overlap with the reparse range
 /// 2. Remove those items
 /// 3. Insert the new items from the partial module
 /// 4. Preserve unchanged items for performance
 ///
-
 /// # Returns
 ///
-
 /// `true` if merging succeeded, `false` if we should fall back to full parse
 fn merge_ast_regions(main_ast: &mut Module, partial_ast: &Module, reparse_range: &Range) -> bool {
     // Convert LSP Range to byte offsets

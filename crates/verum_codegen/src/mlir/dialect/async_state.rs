@@ -186,10 +186,8 @@ impl Default for AsyncAnalysis {
 
 /// Create state machine operation.
 ///
-
 /// Creates a new async state machine.
 ///
-
 /// ```mlir
 /// %sm = verum.async_state_machine_create {
 ///  state_count = 5 : i32,
@@ -236,10 +234,8 @@ impl AsyncStateMachineCreateOp {
 
 /// Get state operation.
 ///
-
 /// Gets the current state of the state machine.
 ///
-
 /// ```mlir
 /// %state = verum.async_get_state %sm : i32
 /// ```
@@ -263,10 +259,8 @@ impl AsyncGetStateOp {
 
 /// Set state operation.
 ///
-
 /// Sets the current state of the state machine.
 ///
-
 /// ```mlir
 /// verum.async_set_state %sm, %new_state
 /// ```
@@ -288,10 +282,8 @@ impl AsyncSetStateOp {
 
 /// Save locals operation.
 ///
-
 /// Saves local variables to the state machine.
 ///
-
 /// ```mlir
 /// verum.async_save_locals %sm, [%var0, %var1] {
 ///  offsets = [0, 8]
@@ -323,10 +315,8 @@ impl AsyncSaveLocalsOp {
 
 /// Restore locals operation.
 ///
-
 /// Restores local variables from the state machine.
 ///
-
 /// ```mlir
 /// %var0, %var1 = verum.async_restore_locals %sm {
 ///  offsets = [0, 8],
@@ -357,10 +347,8 @@ impl AsyncRestoreLocalsOp {
 
 /// Set result operation.
 ///
-
 /// Sets the result of the async computation.
 ///
-
 /// ```mlir
 /// verum.async_set_result %sm, %value
 /// ```
@@ -382,10 +370,8 @@ impl AsyncSetResultOp {
 
 /// Get result operation.
 ///
-
 /// Gets the result from a completed async computation.
 ///
-
 /// ```mlir
 /// %result = verum.async_get_result %sm : i64
 /// ```
@@ -412,10 +398,8 @@ impl AsyncGetResultOp {
 
 /// Poll future operation.
 ///
-
 /// Polls a future for completion.
 ///
-
 /// ```mlir
 /// %poll_result = verum.async_poll %future : !verum.poll_result<i64>
 /// ```
@@ -438,10 +422,8 @@ impl AsyncPollOp {
 
 /// Check poll ready operation.
 ///
-
 /// Checks if a poll result is ready.
 ///
-
 /// ```mlir
 /// %is_ready = verum.async_poll_is_ready %poll_result : i1
 /// ```
@@ -465,10 +447,8 @@ impl AsyncPollIsReadyOp {
 
 /// Extract poll value operation.
 ///
-
 /// Extracts the value from a ready poll result.
 ///
-
 /// ```mlir
 /// %value = verum.async_poll_value %poll_result : i64
 /// ```
@@ -491,10 +471,8 @@ impl AsyncPollValueOp {
 
 /// Return pending operation.
 ///
-
 /// Returns Pending from a poll function.
 ///
-
 /// ```mlir
 /// verum.async_return_pending
 /// ```
@@ -510,10 +488,8 @@ impl AsyncReturnPendingOp {
 
 /// Return ready operation.
 ///
-
 /// Returns Ready with a value from a poll function.
 ///
-
 /// ```mlir
 /// verum.async_return_ready %value
 /// ```
@@ -538,10 +514,8 @@ impl AsyncReturnReadyOp {
 
 /// Spawn task operation.
 ///
-
 /// Spawns an async task.
 ///
-
 /// ```mlir
 /// %handle = verum.async_spawn %future : !verum.task_handle<i64>
 /// ```
@@ -564,10 +538,8 @@ impl AsyncSpawnOp {
 
 /// Join task operation.
 ///
-
 /// Joins (awaits) a spawned task.
 ///
-
 /// ```mlir
 /// %result = verum.async_join %handle : i64
 /// ```
@@ -590,10 +562,8 @@ impl AsyncJoinOp {
 
 /// Select operation.
 ///
-
 /// Waits for any of multiple futures to complete.
 ///
-
 /// ```mlir
 /// %result, %index = verum.async_select [%f0, %f1, %f2] : (i64, index)
 /// ```
@@ -618,10 +588,8 @@ impl AsyncSelectOp {
 
 /// Race operation.
 ///
-
 /// Races multiple futures, returning the first to complete.
 ///
-
 /// ```mlir
 /// %result = verum.async_race [%f0, %f1] : i64
 /// ```
@@ -648,10 +616,8 @@ impl AsyncRaceOp {
 
 /// Get waker operation.
 ///
-
 /// Gets the waker for the current async context.
 ///
-
 /// ```mlir
 /// %waker = verum.async_get_waker : !verum.waker
 /// ```
@@ -672,10 +638,8 @@ impl AsyncGetWakerOp {
 
 /// Wake operation.
 ///
-
 /// Wakes a waker to signal that polling should resume.
 ///
-
 /// ```mlir
 /// verum.async_wake %waker
 /// ```
@@ -696,10 +660,8 @@ impl AsyncWakeOp {
 
 /// Clone waker operation.
 ///
-
 /// Clones a waker.
 ///
-
 /// ```mlir
 /// %waker2 = verum.async_clone_waker %waker : !verum.waker
 /// ```
@@ -743,7 +705,6 @@ impl<'c> AsyncTypeBuilder<'c> {
 
     /// Create a state machine type.
     ///
-
     /// StateMachine = { state: i32, result: T, locals: ptr, waker: ptr }
     pub fn state_machine_type(&self) -> Result<Type<'c>> {
         Type::parse(self.context, "!llvm.struct<(i32, ptr, ptr, ptr)>")
@@ -752,7 +713,6 @@ impl<'c> AsyncTypeBuilder<'c> {
 
     /// Create a poll result type.
     ///
-
     /// PollResult = { tag: i8, value: T }
     pub fn poll_result_type(&self) -> Result<Type<'c>> {
         Type::parse(self.context, "!llvm.struct<(i8, ptr)>")

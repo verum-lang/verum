@@ -363,7 +363,6 @@ impl BorrowSet {
 
     /// Check for conflicting borrows (ignoring liveness).
     ///
-
     /// This is the legacy method that doesn't consider release points.
     /// Prefer `has_conflict_at` for liveness-aware conflict checking.
     #[must_use]
@@ -375,11 +374,9 @@ impl BorrowSet {
 
     /// Check for conflicting borrows at a specific point (liveness-aware).
     ///
-
     /// This is the liveness-based conflict checker. A conflict only exists
     /// if the existing borrow is still live at the given point.
     ///
-
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -421,12 +418,10 @@ pub struct BorrowData {
     pub two_phase: bool,
     /// Point where borrow is released (liveness-based).
     ///
-
     /// This is the key field for liveness-based borrow release.
     /// Instead of releasing at scope end, the borrow is released at
     /// the last use point, enabling earlier access to the borrowed place.
     ///
-
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -451,13 +446,11 @@ impl BorrowData {
 
     /// Check if this borrow has been released at or before the given point.
     ///
-
     /// This is the key method for liveness-based borrow release checking.
     /// A borrow is considered released if:
     /// 1. It has a release_point, AND
     /// 2. The given point is at or after the release_point
     ///
-
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -477,7 +470,6 @@ impl BorrowData {
 
     /// Check if this borrow is live at the given point.
     ///
-
     /// A borrow is live if:
     /// 1. It has been created (reserve_point <= point)
     /// 2. It has not been released yet (!is_released_at(point))
@@ -784,10 +776,8 @@ impl NllAnalyzer {
 
     /// Perform NLL analysis.
     ///
-
     /// Honours every `NllConfig` gate:
     ///
-
     /// * `two_phase_borrows` (default `true`) — when `true`, the
     ///  constraint generator marks borrows as two-phase eligible,
     ///  allowing reservation+activation patterns that the strict
@@ -808,7 +798,6 @@ impl NllAnalyzer {
     ///  `NllAnalysisResult.detailed_diagnostics` field via the
     ///  `detailed_diagnostics()` accessor for diagnostic builders.
     ///
-
     /// Before this wire-up three of the four gates were inert.
     #[must_use]
     pub fn analyze(mut self) -> NllAnalysisResult {
@@ -966,16 +955,13 @@ impl NllAnalyzer {
 
     /// Compute release points for all borrows based on liveness analysis.
     ///
-
     /// This is the core of liveness-based borrow release. For each borrow,
     /// we determine the point at which it can be released (the last use of
     /// the assigned_place, i.e., the variable holding the reference).
     ///
-
     /// After this point, the borrowed place can be accessed again without
     /// conflict, even before the lexical scope ends.
     ///
-
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.
@@ -1084,12 +1070,10 @@ impl NllAnalyzer {
 
     /// Check for borrow checking violations using liveness-based release.
     ///
-
     /// This is the core of NLL borrow checking with liveness-based release.
     /// A conflict only exists if there is a point where BOTH borrows are live.
     /// If borrow1 is released before borrow2 starts, there is no conflict.
     ///
-
     /// Liveness-based borrow release: borrows are released at the point of last
     /// use of the assigned_place (the variable holding the reference), not at
     /// lexical scope end. This enables earlier re-access of the borrowed place.

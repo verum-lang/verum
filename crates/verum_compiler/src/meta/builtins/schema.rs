@@ -127,7 +127,6 @@ const CONSTRAINT_IS_PROTOCOL: &str = "is_protocol";
 
 /// Create a function schema builder
 ///
-
 /// Returns a Map representing a schema with kind = "function".
 /// Additional constraints can be added by inserting keys into the map.
 fn meta_schema_function(
@@ -151,7 +150,6 @@ fn meta_schema_function(
 
 /// Create a type schema builder
 ///
-
 /// Returns a Map representing a schema with kind = "type".
 fn meta_schema_type(
     _ctx: &mut MetaContext,
@@ -178,7 +176,6 @@ fn meta_schema_type(
 
 /// Validate code against a schema
 ///
-
 /// Parses the code text and checks it against the constraints in the schema map.
 /// Returns a list of SchemaError maps, each with "message" and "kind" fields.
 fn meta_schema_validate(

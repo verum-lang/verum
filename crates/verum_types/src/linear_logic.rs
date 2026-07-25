@@ -222,7 +222,6 @@ impl LinForm {
     /// number of times, including zero. The unrestricted-shape set
     /// in classical linear logic:
     ///
-
     /// - `!A` (`OfCourse`) admits weakening + contraction on the
     ///  LHS — the bang's exponential structural rules.
     /// - `?A` (`WhyNot`) admits weakening + contraction on the RHS
@@ -230,7 +229,6 @@ impl LinForm {
     /// - `⊤` (`Top`) is the additive truth: `⊢ Δ, ⊤` absorbs any
     ///  surrounding context, so it admits both rules trivially.
     ///
-
     /// `1` (`One`) is the unit of `⊗` — exactly one proof, no
     /// structural rules. The previous implementation classified
     /// `One` as unrestricted; that was a soundness defect that

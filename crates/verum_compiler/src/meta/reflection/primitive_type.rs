@@ -5,7 +5,6 @@
 
 /// Primitive type information
 ///
-
 /// Matches: core/meta/reflection.vr PrimitiveType
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

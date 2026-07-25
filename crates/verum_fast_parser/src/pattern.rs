@@ -59,7 +59,6 @@ fn reserved_keyword_name(kind: &TokenKind) -> String {
 impl<'a> RecursiveParser<'a> {
     /// Parse a pattern with full support for @ bindings and OR patterns.
     ///
-
     /// Grammar:
     /// ```text
     /// pattern := or_pattern
@@ -72,7 +71,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a pattern without OR pattern support.
     ///
-
     /// This is used in contexts like closure parameters where `|` is a delimiter,
     /// not an OR pattern separator.
     pub fn parse_pattern_no_or(&mut self) -> ParseResult<Pattern> {
@@ -81,7 +79,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a pattern without allowing struct/record literals.
     ///
-
     /// This is used in contexts like `is` expressions in if/while conditions
     /// where `{ }` should not be consumed as part of the pattern.
     /// For example: `if value is None { }` - the `{` is the block start, not a record pattern.
@@ -96,14 +93,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a pattern that allows inline guards (used inside parentheses/brackets).
     ///
-
     /// This is used in nested contexts where `if` should be interpreted as a
     /// pattern-level guard rather than a match arm guard.
     ///
-
     /// Spec: Rust RFC 3637 - Guard Patterns
     ///
-
     /// Example:
     /// ```verum
     /// match user.plan() {
@@ -117,7 +111,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Internal pattern parser with full configuration.
     ///
-
     /// Grammar (Spec: Rust RFC 3637):
     /// ```ebnf
     /// pattern = or_pattern ;
@@ -128,7 +121,6 @@ impl<'a> RecursiveParser<'a> {
     /// guard = 'if' , expression ;
     /// ```
     ///
-
     /// Note: `allow_guard` controls whether inline guards are parsed at the pattern level.
     /// When false (default for top-level patterns), `if` is left for match arm guard parsing.
     /// When true (inside parentheses/brackets), `if` creates a PatternKind::Guard node.
@@ -217,7 +209,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a cons pattern: `pattern :: pattern` (right-associative).
     ///
-
     /// The `::` operator destructures stream/cons-list types.
     /// `a :: b :: rest` is parsed as `Cons(a, Cons(b, rest))`.
     fn parse_cons_pattern_impl(
@@ -250,17 +241,13 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a guarded pattern (pattern with optional inline guard).
     ///
-
     /// Grammar: `and_pattern , [ 'if' , expression ]`
     ///
-
     /// Spec: Rust RFC 3637 - Guard Patterns
     ///
-
     /// Inline guards allow guards to nest within or-patterns, enabling per-alternative conditions.
     /// The guard is evaluated after the pattern matches and must return Bool.
     ///
-
     /// # Example
     /// ```verum
     /// match user.plan() {
@@ -269,14 +256,12 @@ impl<'a> RecursiveParser<'a> {
     ///  _ => error(),
     /// }
     ///
-
     /// match (x, y) {
     ///  ((Some(a) if a > 0) | (Some(a) if a < -10), b) => process(a, b),
     ///  _ => default(),
     /// }
     /// ```
     ///
-
     /// # Semantics
     /// - Pattern is matched first, then guard is evaluated
     /// - If guard returns false, the match continues to next alternative
@@ -329,14 +314,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an AND pattern (pattern combination with &).
     ///
-
     /// Grammar: `primary_pattern , { '&' , primary_pattern }`
     ///
-
     /// AND patterns combine multiple patterns that must all match.
     /// Active patterns (user-defined decompositions) can be combined: `Even() & Positive()`
     ///
-
     /// Example:
     /// ```verum
     /// match n {
@@ -407,7 +389,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a pattern with @ binding support.
     ///
-
     /// Grammar: `base_pattern ('@' base_pattern)?`
     fn parse_at_pattern(&mut self) -> ParseResult<Pattern> {
         self.parse_at_pattern_impl(true)
@@ -1053,7 +1034,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse tuple or parenthesized pattern: (a, b, c) or (pattern)
     ///
-
     /// Inside parentheses, guard patterns are allowed:
     /// ```verum
     /// match value {
@@ -1130,7 +1110,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse array or slice pattern: [a, b, c] or [a, .., b]
     ///
-
     /// Inside brackets, guard patterns are allowed:
     /// ```verum
     /// match list {
@@ -1245,11 +1224,9 @@ impl<'a> RecursiveParser<'a> {
     /// Stream patterns consume elements lazily from an iterator.
     /// Grammar: stream_pattern = 'stream' , '[' , { stream_element } , ']' ;
     ///
-
     /// Unlike slice patterns which work on fixed collections, stream patterns
     /// consume elements lazily from an iterator.
     ///
-
     /// Syntax variants:
     /// - `stream[]` -> empty stream (matches exhausted iterator)
     /// - `stream[first, second, ...rest]` -> consume head, bind rest as remaining iterator
@@ -1596,7 +1573,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse identifier, variant, or record pattern.
     ///
-
     /// This handles:
     /// - Plain identifier: `x`, `mut x`, `ref x`, `ref mut x`
     /// - Tuple variant: `Some(x)`, `Ok(value)`
@@ -1608,7 +1584,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse identifier, variant, or record pattern with configurable struct support.
     ///
-
     /// When `allow_struct` is false, `{ }` is NOT consumed as part of the pattern.
     /// This is used for `is` expressions in if/while conditions where `{ }` starts the block.
     fn parse_ident_or_variant_or_record_pattern_impl(
@@ -2240,7 +2215,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse field patterns in a record pattern: `x`, `x: pattern`, `ref x`, `ref mut x`
     ///
-
     /// Handles the following field pattern forms:
     /// - `x` - shorthand for `x: x` (bind field to variable of same name)
     /// - `x: pattern` - bind field to explicit pattern
@@ -2360,11 +2334,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse comma-separated pattern arguments with E075 error for double commas.
     ///
-
     /// This is used for variant and active pattern arguments where double commas
     /// should produce E075 (invalid active pattern arguments).
     ///
-
     /// Guard patterns are allowed in arguments: `Some(x if x > 0)`
     fn comma_separated_pattern_args(&mut self) -> ParseResult<Vec<Pattern>> {
         let mut items = Vec::new();
@@ -2460,11 +2432,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Convert a pattern to an expression.
     ///
-
     /// This is used for active pattern type arguments which are parsed as patterns
     /// but need to be expressions. Only literal patterns and identifiers are supported.
     ///
-
     /// Converts literal and identifier patterns to expressions (used for active pattern type args).
     fn pattern_to_expr(&self, pattern: Pattern) -> verum_ast::Expr {
         use verum_ast::{Expr, ExprKind};
@@ -2503,7 +2473,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Lookahead to determine if `{` starts a struct pattern or a block.
     ///
-
     /// Returns true if the tokens after `{` look like struct pattern fields:
     /// - `{ identifier, ...` (field shorthand)
     /// - `{ identifier: ...` (field with pattern)
@@ -2513,7 +2482,6 @@ impl<'a> RecursiveParser<'a> {
     /// - `{ .. }` (rest pattern)
     /// - `{ }` followed by `)` (empty struct in parenthesized expression)
     ///
-
     /// Returns false otherwise (likely a block).
     fn looks_like_struct_pattern(&self) -> bool {
         // We must be at `{` token

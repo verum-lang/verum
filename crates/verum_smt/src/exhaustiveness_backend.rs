@@ -24,7 +24,6 @@ use verum_types::ty::Type;
 
 /// SMT-based guard verifier
 ///
-
 /// Manages Z3 context and provides methods for analyzing guard conditions
 /// using SMT solving. Implements the `GuardVerifier` trait so callers can
 /// hold a `&dyn GuardVerifier` without linking Z3.
@@ -189,7 +188,6 @@ impl SmtGuardVerifier {
 
     /// Extract witness values for uncovered cases.
     ///
-
     /// Honours `SmtGuardConfig.max_witnesses`: iteratively asks Z3
     /// for a satisfying model, extracts the bindings, then asserts
     /// a "block-this-model" constraint and re-solves to surface
@@ -361,13 +359,11 @@ impl SmtGuardVerifier {
 
     /// Get a satisfying model for a formula.
     ///
-
     /// Walks the formula collecting every `Var(name)` reference, then
     /// asks the solver to evaluate each name in the satisfying model
     /// (under the right Z3 sort for `scrutinee_ty`) and returns the
     /// resulting bindings as the witness.
     ///
-
     /// Pre-fix this method only ever extracted a binding named `"n"`
     /// (a hardcoded literal) AND hardcoded `Type::Int` for both the
     /// formula translation and the var-extraction sort. Bool guards
@@ -379,7 +375,6 @@ impl SmtGuardVerifier {
     /// diagnostics. The dispatch on `scrutinee_ty` declares vars in
     /// the matching Z3 sort.
     ///
-
     /// Now retained behind `#[cfg(test)]` since the production
     /// path goes through `get_models(...)` (which honours
     /// `SmtGuardConfig.max_witnesses`); this single-shot variant
@@ -472,7 +467,6 @@ impl SmtGuardVerifier {
     /// uncovered region (e.g. `n ≤ 0` over Int has infinitely many
     /// witnesses) doesn't run forever.
     ///
-
     /// Returns an empty Vec when the formula is UNSAT (no uncovered
     /// witnesses to surface).
     fn get_models(
@@ -724,7 +718,6 @@ const _: Duration = Duration::ZERO;
 
 /// Analyze guards in a match and produce warnings if appropriate.
 ///
-
 /// Moved from `verum_types::exhaustiveness::smt::analyze_guarded_match` so
 /// callers that already depend on `verum_smt` can use the SMT-backed
 /// analysis directly.

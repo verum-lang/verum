@@ -59,7 +59,6 @@ profile = "application"
 
 /// Helper to run code in a temp directory context.
 ///
-
 /// Runs the closure on a thread with a 64 MB stack to accommodate deep
 /// recursion during stdlib loading and type inference.
 fn with_temp_project<F>(f: F)

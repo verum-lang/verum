@@ -40,7 +40,6 @@ pub struct TypeAttribute {
 
 /// Type introspection context
 ///
-
 /// Manages type definitions, protocol implementations, and provides
 /// type reflection capabilities for meta functions.
 #[derive(Debug, Clone, Default)]

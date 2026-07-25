@@ -103,7 +103,6 @@ impl DeriveDisplay {
 
     /// Generate fmt body for struct types
     ///
-
     /// Generates: write!(f, "TypeName {{ field: {}, ... }}", self.field, ...)
     fn generate_struct_fmt(
         &self,
@@ -216,7 +215,6 @@ impl DeriveDisplay {
 
     /// Generate fmt body for newtype
     ///
-
     /// Just delegates to the inner type's Display implementation
     fn generate_newtype_fmt(
         &self,
@@ -263,7 +261,6 @@ impl DeriveDisplay {
 
     /// Generate fmt body for enum types
     ///
-
     /// Generates match expression with custom @display formats if present
     fn generate_enum_fmt(&self, ctx: &DeriveContext, span: Span) -> DeriveResult<Block> {
         let type_info = &ctx.type_info;
@@ -468,7 +465,6 @@ impl DeriveDisplay {
 
     /// Generate a format string body for interpolated display messages
     ///
-
     /// For templates like "Error: {reason}", generates code that writes the interpolated string
     fn generate_format_string_body(
         &self,

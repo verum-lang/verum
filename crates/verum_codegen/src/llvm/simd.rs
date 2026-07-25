@@ -449,7 +449,6 @@ pub struct SimdStats {
 
 /// SIMD code generation context.
 ///
-
 /// Provides LLVM IR generation for SIMD vector operations with
 /// platform-specific intrinsic selection.
 pub struct SimdLowering<'ctx> {
@@ -528,7 +527,6 @@ impl<'ctx> SimdLowering<'ctx> {
 
     /// Splat (broadcast) a scalar to all lanes.
     ///
-
     /// ```llvm
     /// %v = insertelement <4 x float> poison, float %scalar, i32 0
     /// %splat = shufflevector <4 x float> %v, <4 x float> poison, <4 x i32> zeroinitializer
@@ -885,7 +883,6 @@ impl<'ctx> SimdLowering<'ctx> {
 
     /// Build a shuffle operation with compile-time mask.
     ///
-
     /// ```llvm
     /// %result = shufflevector <4 x float> %a, <4 x float> %b, <4 x i32> <i32 0, i32 5, i32 2, i32 7>
     /// ```

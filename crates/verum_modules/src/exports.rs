@@ -347,13 +347,11 @@ impl ExportTable {
 
     /// Add an exported item
     ///
-
     /// Re-exports with the same name as an existing export are allowed when:
     /// - They have the same kind and source module (deduplication)
     /// - The new export is a non-module kind and existing is a Module kind
     ///  (allows `panic` module and `panic` function to coexist)
     ///
-
     /// In the case of same-name different-kind exports, the non-module export
     /// takes precedence to maintain Rust-like namespace semantics where
     /// re-exported items shadow module names.
@@ -465,7 +463,6 @@ impl ExportTable {
 
     /// Check if a name is visible from another module (by ModuleId - requires module_path to be set)
     ///
-
     /// Note: For proper visibility checking, prefer `is_visible_from_path` which takes a ModulePath.
     /// This method is maintained for backward compatibility but returns false for non-Public
     /// visibility if module_path is not set.
@@ -489,10 +486,8 @@ impl ExportTable {
 
     /// Check if a name is visible from another module path.
     ///
-
     /// Implements proper five-level visibility checking (Private/Public/PublicCrate/PublicSuper/PublicIn)
     ///
-
     /// - `Public`: visible everywhere
     /// - `PublicCrate`: visible only within the same crate (first path segment)
     /// - `PublicSuper`: visible to parent module
@@ -565,7 +560,6 @@ impl ExportTable {
 
     /// Merge another export table (for re-exports)
     ///
-
     /// Re-exported types preserve their refinements and contracts.
     pub fn merge(&mut self, other: &ExportTable, visibility: Visibility) -> ModuleResult<()> {
         for (_name, item) in other.all_exports() {
@@ -601,7 +595,6 @@ impl ExportTable {
 
     /// Validate that refinement predicates are accessible when re-exporting
     ///
-
     /// Validates that all exported refinement predicates are accessible
     /// from the requesting module using the five-level visibility system.
     pub fn validate_refinement_accessibility(
@@ -654,7 +647,6 @@ impl Default for ExportTable {
 
 /// Extract an ExportTable from a module's AST.
 ///
-
 /// This function analyzes all items in the module and adds public items
 /// to the export table. It handles:
 /// - Functions (including meta functions)
@@ -664,7 +656,6 @@ impl Default for ExportTable {
 /// - Nested modules
 /// - Context declarations
 ///
-
 /// Extracts exports from module AST items based on visibility modifiers.
 /// Re-exports (public import) flatten module hierarchy for public API.
 pub fn extract_exports_from_module(
@@ -1008,11 +999,9 @@ pub fn extract_exports_from_module(
 
 /// Add re-exported items from a public link to the export table.
 ///
-
 /// This handles `pub link .path.{Item1, Item2}` statements, which re-export
 /// linked items as part of the current module's public interface.
 ///
-
 /// Extracts exports from module AST items based on visibility modifiers.
 /// Re-exports (public import) flatten module hierarchy for public API.
 fn add_reexports_from_link(
@@ -1168,18 +1157,14 @@ fn propagate_submodule_reexports(
 
 /// Resolve glob re-exports after all modules are loaded.
 ///
-
 /// This function processes `public import path.*` statements and copies
 /// all exports from the source module to the current module's export table.
 ///
-
 /// This must be called after all modules are initially loaded since it needs
 /// access to the source modules' export tables.
 ///
-
 /// Returns the number of glob re-exports resolved.
 ///
-
 /// **MOD-MED-3 (transitive closure).** When chain A → B → C (each
 /// `public mount`-re-exports the next), a single pass would leave A's
 /// exports table with B's items (filled before B's pass added C's),
@@ -1189,7 +1174,6 @@ fn propagate_submodule_reexports(
 /// `resolve_export_kind_with_reexports_inner` is supposed to catch
 /// upstream) can't block the build forever.
 ///
-
 /// Extracts exports from module AST items based on visibility modifiers.
 /// Re-exports (public import) flatten module hierarchy for public API.
 pub fn resolve_glob_reexports(module_registry: &mut crate::ModuleRegistry) -> ModuleResult<usize> {
@@ -1396,20 +1380,16 @@ fn propagate_inline_submodule_reexports(
 
 /// Resolve the ExportKind for specific item re-exports after all modules are loaded.
 ///
-
 /// This handles `public import path.{Item1, Item2}` statements where the default
 /// ExportKind::Type was assigned during initial extraction. Now that all modules
 /// are loaded, we can look up the actual kind from the source module.
 ///
-
 /// This is critical for variant constructors: when `std.core` does
 /// `public import .maybe.{None, Some}`, we need to look up that `Some` is
 /// actually a Function (variant constructor), not a Type.
 ///
-
 /// Returns the number of re-exports updated.
 ///
-
 /// Extracts exports from module AST items based on visibility modifiers.
 /// Re-exports (public import) flatten module hierarchy for public API.
 pub fn resolve_specific_reexport_kinds(
@@ -1635,7 +1615,6 @@ fn collect_glob_links(
 
 /// Resolve a link path relative to the current module.
 ///
-
 /// Handles:
 /// - `super.core` -> parent module's `core` submodule
 /// - `.package` -> current module's `package` submodule (relative link)
@@ -1756,11 +1735,9 @@ fn convert_visibility(ast_vis: &verum_ast::decl::Visibility) -> Visibility {
 
 /// Information about an exported context type.
 ///
-
 /// Contexts can be explicit `context` declarations or protocols that can be
 /// used in `using [Context]` clauses for dependency injection.
 ///
-
 /// Extracts context declarations from a module's AST. Contexts are the
 /// Level 2 (Dynamic) dependency injection system: `context Logger { fn log(...) }`.
 /// Functions declare required contexts with `using [Context]` after return type.
@@ -1837,17 +1814,14 @@ impl ContextSourceKind {
 
 /// Extract all context-capable types from a module.
 ///
-
 /// This function extracts:
 /// - Explicit `context` declarations
 /// - Protocols (which can serve as context types in `using` clauses)
 /// - Context groups
 ///
-
 /// These are needed for cross-file context resolution when a function uses
 /// `using [Database, Auth]` where these types are defined in other modules.
 ///
-
 /// Extracts context declarations from a module's AST. Contexts are the
 /// Level 2 (Dynamic) dependency injection system: `context Logger { fn log(...) }`.
 /// Functions declare required contexts with `using [Context]` after return type.
@@ -1937,12 +1911,10 @@ pub fn extract_contexts_from_module(
 
 /// Check if a type definition is a context protocol type.
 ///
-
 /// Matches patterns like `context type X is protocol { ... }` where the protocol
 /// has `is_context = true`. Only context protocols can be used in `using [...]`
 /// dependency injection clauses.
 ///
-
 /// Extracts context declarations from a module's AST. Contexts are the
 /// Level 2 (Dynamic) dependency injection system: `context Logger { fn log(...) }`.
 /// Functions declare required contexts with `using [Context]` after return type.

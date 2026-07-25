@@ -8,7 +8,6 @@ use verum_common::{List, Text};
 
 /// Information about ownership and borrowing for a type
 ///
-
 /// Matches: core/meta/reflection.vr OwnershipInfo
 #[derive(Debug, Clone, PartialEq)]
 pub struct OwnershipInfo {

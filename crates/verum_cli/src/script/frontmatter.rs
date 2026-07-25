@@ -241,12 +241,10 @@ impl std::error::Error for FrontmatterError {}
 /// Cog identifier grammar (matches `grammar/verum.ebnf` `identifier` for the
 /// kebab-or-snake-case subset used in registry / mount paths):
 ///
-
 /// ```text
 /// cog_ident = ascii_alpha , { ascii_alpha | ascii_digit | "_" | "-" } ;
 /// ```
 ///
-
 /// First character must be an ASCII letter (so `42json` is rejected); rest
 /// allow letters / digits / `_` / `-`. We deliberately stay ASCII to match
 /// crates.io / cargo / npm cog-name conventions; Unicode identifiers are
@@ -266,13 +264,11 @@ fn is_valid_cog_ident(s: &str) -> bool {
 
 /// Semver requirement validator. Accepts:
 ///
-
 ///  * Bare version — `1.2.3`, `0.1.0-rc.1`
 ///  * Operator + ver — `>=0.6.0`, `^1.2`, `~2.3.4`, `<3`, `>1.0`, `=1.2.3`
 ///  * Wildcard — `1.*`, `1.2.*`, `*`
 ///  * Comma list — `>=1.2, <2`
 ///
-
 /// The grammar is deliberately permissive (matches Cargo's `VersionReq`)
 /// because the PubGrub-side resolver (P4) does the load-bearing matching;
 /// we just refuse obvious typos here so a misspelled spec fails at parse
@@ -357,7 +353,6 @@ fn validate_dep_short_form(spec: &str) -> Result<(), String> {
 /// Permission scope grammar — must match the design's
 /// [run].default-permissions documentation exactly:
 ///
-
 /// ```text
 /// scope = scope_kind , [ "=" , scope_targets ]
 /// scope_kind = "fs:read" | "fs:write" | "net" | "env" | "run" | "ffi"
@@ -366,7 +361,6 @@ fn validate_dep_short_form(spec: &str) -> Result<(), String> {
 /// target = any non-comma, non-whitespace UTF-8 sequence
 /// ```
 ///
-
 /// `time` and `random` are the only scopes that have no `=value` form;
 /// every other scope may stand alone (granting blanket access) or be
 /// narrowed via `=`-separated targets.
@@ -477,7 +471,6 @@ pub fn validate(fm: &Frontmatter) -> Result<(), FrontmatterError> {
 /// as TOML, and return the structured `Frontmatter`. Returns `Ok(None)` if
 /// the source contains no frontmatter block.
 ///
-
 /// Detection rules:
 /// - Opening line, after `trim_end()`, equals `// /// script` (with optional
 ///  inner whitespace, e.g. `// /// script` is also accepted — we strip a
@@ -489,7 +482,6 @@ pub fn validate(fm: &Frontmatter) -> Result<(), FrontmatterError> {
 /// - At most one block per source. The opening match wins; subsequent
 ///  `// /// script` lines are treated as ordinary comments.
 ///
-
 /// Byte ranges in the returned [`Extracted::range`] are in *original-source*
 /// coordinates (i.e. include any BOM byte offset). Callers that strip the
 /// BOM separately can subtract `UTF8_BOM_LEN` themselves.
@@ -621,21 +613,17 @@ pub fn extract_lossy(source: &str) -> Option<Extracted> {
 
 /// One-shot extract + validate.
 ///
-
 /// Production callers (script-mode dispatch in `verum run`) want to fail
 /// fast on either a malformed block (invalid TOML, unterminated marker)
 /// OR a malformed value (bad semver req, unknown permission scope). This
 /// helper composes the two passes so a single `?` covers both.
 ///
-
 /// Returns `Ok(None)` when the source has no frontmatter — that's not an
 /// error, it just means the script doesn't carry inline metadata.
 ///
-
 /// Returns `Ok(Some(extracted))` when both extraction and schema
 /// validation succeeded.
 ///
-
 /// Returns `Err(...)` on the first failure, whether structural or
 /// semantic. The error variants are user-actionable: each variant carries
 /// the offending value so the caller can render a precise diagnostic.

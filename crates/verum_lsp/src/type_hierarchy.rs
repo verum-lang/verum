@@ -59,7 +59,6 @@ pub fn prepare_type_hierarchy(
 
 /// Find supertypes for a type hierarchy item
 ///
-
 /// For a type: returns protocols it implements
 /// For a protocol: returns protocols it extends (bounds)
 pub fn supertypes(
@@ -113,7 +112,6 @@ pub fn supertypes(
 
 /// Find subtypes for a type hierarchy item
 ///
-
 /// For a protocol: returns all types that implement it
 /// For a type: returns types that extend it (if applicable)
 pub fn subtypes(

@@ -52,7 +52,6 @@ use verum_vbc::types::{TypeId, TypeRef};
 
 /// Complete type information for a register, derived from VBC TypeRef.
 ///
-
 /// This replaces all the individual boolean tracking sets (is_list, is_map, etc.)
 /// with a single enum that carries the full type + metadata needed for lowering.
 #[derive(Debug, Clone)]
@@ -573,7 +572,6 @@ impl RegisterType {
 
 /// Unified register type tracker.
 ///
-
 /// Stores a single `RegisterType` per register, replacing 40+ separate
 /// HashSet<u16> tracking fields. All type predicates are derived from the
 /// stored RegisterType via O(1) pattern matching.
@@ -1100,7 +1098,6 @@ impl RegisterTypeMap {
 
 /// How to compile a method call on a given type.
 ///
-
 /// Replaces the Strategy 0/1/2/3/4 cascade in instruction.rs with a
 /// declarative dispatch table.
 #[derive(Debug, Clone)]
@@ -1139,7 +1136,6 @@ pub enum MethodDispatchTarget {
 
 /// Declarative method dispatch table.
 ///
-
 /// Maps (type_category, method_name) → DispatchTarget. Built once per
 /// module compilation, replacing the 3000-line Strategy cascade.
 #[derive(Debug, Default)]
@@ -1174,7 +1170,6 @@ impl MethodDispatchTable {
 
     /// Register all built-in method dispatch overrides.
     ///
-
     /// These are methods that cannot go through the standard compiled
     /// function lookup because they need C runtime, inline LLVM IR,
     /// or special handling.

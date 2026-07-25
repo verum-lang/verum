@@ -74,7 +74,6 @@ use walkdir::WalkDir;
 
 /// CLI-facing options for `verum bench`.
 ///
-
 /// Passed from `main.rs` after tier resolution — the command itself
 /// never looks at the raw `--interp` / `--aot` flags, which keeps the
 /// tier precedence identical across `run` / `test` / `bench`.
@@ -314,12 +313,10 @@ fn discover_benchmarks(filter: Option<&Text>) -> Result<Vec<BenchFunc>> {
 
 /// Extract bench functions from a single file. Accepts:
 ///
-
 /// * `@bench` on its own line, followed by `[visibility] fn NAME(`
 /// * `@bench(group)` likewise; `group` is captured for reporting
 /// * `[visibility] fn bench_NAME(` (legacy naming-convention form)
 ///
-
 /// Valid visibility prefixes: `public`, `pub`, `private`, none.
 fn scan_file_for_benches(
     path: &Path,
@@ -818,7 +815,6 @@ fn median_absolute_deviation(xs: &[f64], med: f64) -> f64 {
 
 /// Percentile bootstrap 95 % CI for the median.
 ///
-
 /// Draws `iters` resamples with replacement, computes the median of
 /// each, returns the 2.5 / 97.5 percentiles of the resulting
 /// distribution. No external deps; uses `rand` which is already in
@@ -1035,7 +1031,6 @@ fn load_baseline(name: &str) -> Option<Baseline> {
 
 /// Side-by-side comparison with significance check.
 ///
-
 /// A change is flagged only when the point estimate (median) moved by
 /// more than `noise_threshold_pct` AND the CI95 ranges don't overlap
 /// (simple but robust "are they distinguishable" test).

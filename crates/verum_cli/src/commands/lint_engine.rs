@@ -55,7 +55,6 @@ use super::lint::{LintCategory, LintConfig, LintIssue, LintLevel};
 
 /// Per-file context passed to every lint pass.
 ///
-
 /// Holds the parsed `Module`, the source text (for span resolution
 /// and snippet extraction), the file path (for diagnostic output),
 /// and the active config (so passes that need thresholds —
@@ -848,12 +847,10 @@ pub fn collect_suppressions(module: &Module, source: &str) -> Vec<SuppressionSco
 /// Apply suppressions to a list of issues. Allow → drop, Deny →
 /// raise to Error, Warn → demote/promote to Warning.
 ///
-
 /// An issue is matched to a suppression iff the issue's `line` is
 /// inside the suppression's [line_start, line_end] inclusive range
 /// AND the suppression's `rule` matches the issue's rule name.
 ///
-
 /// Multiple matching suppressions: most-specific (smallest line span)
 /// wins.
 pub fn apply_suppressions(
@@ -1338,7 +1335,6 @@ struct ContextRule {
 /// strips the `.vr` extension. Robust against absolute paths — finds
 /// the *last* `src/` segment when present.
 ///
-
 /// Examples:
 ///  `core/math/linalg.vr` → `core.math.linalg`
 ///  `src/foo/bar.vr` → `foo.bar`
@@ -1362,13 +1358,11 @@ fn module_path_for_file(file: &Path) -> String {
 
 /// Glob match for module paths. Pattern semantics:
 ///
-
 ///  - `*` at the end of a segment matches that whole segment.
 ///  - `*` as a sole segment matches any one segment.
 ///  - `**` matches zero or more segments (greedy).
 ///  - Exact match otherwise.
 ///
-
 /// Examples:
 ///  pattern "core" ↔ "core" ✓ exact
 ///  pattern "core.*" ↔ "core.foo", "core.foo.bar" ✓

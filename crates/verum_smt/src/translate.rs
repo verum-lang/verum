@@ -98,21 +98,18 @@ use z3::{FuncDecl, Pattern as Z3Pattern, Sort, SortKind, Symbol};
 
 /// Configuration options for SMT translation.
 ///
-
 /// Controls how various Verum types and expressions are translated to Z3,
 /// particularly around floating-point precision and special value handling.
 #[derive(Debug, Clone)]
 pub struct TranslationConfig {
     /// Use IEEE 754 FPA (Floating-Point Arithmetic) theory for float types.
     ///
-
     /// When `true`:
     /// - Float types are translated to Z3's IEEE 754 double-precision sort (11 exponent, 53 significand bits)
     /// - Arithmetic operations use proper FPA semantics with rounding modes
     /// - NaN, infinity, and subnormal values are handled precisely
     /// - Verification is more precise but potentially slower
     ///
-
     /// When `false` (default):
     /// - Float types are approximated as Real numbers
     /// - Faster solving but may miss floating-point edge cases
@@ -121,13 +118,11 @@ pub struct TranslationConfig {
 
     /// Default rounding mode for FPA operations when `precise_floats` is enabled.
     ///
-
     /// Defaults to `RoundNearestTiesToEven` (IEEE 754 default).
     pub default_rounding_mode: FloatRoundingMode,
 
     /// Float precision to use: Float32 (single) or Float64 (double).
     ///
-
     /// Defaults to Float64 for maximum precision.
     pub float_precision: FloatPrecision,
 }
@@ -272,37 +267,28 @@ pub enum FloatCheck {
 
 /// Translator for converting Verum AST to Z3.
 ///
-
 /// The translator maintains a mapping from variable names to Z3 AST nodes,
 /// allowing refinement predicates like `Int{> 0}` to reference variables.
 ///
-
 /// ## Floating-Point Support
 ///
-
 /// The translator supports two modes for floating-point values:
 ///
-
 /// 1. **Approximate mode** (default): Floats are translated to Z3 Real numbers.
 ///  Faster solving but may miss IEEE 754 edge cases.
 ///
-
 /// 2. **Precise mode**: Floats use Z3's FPA (Floating-Point Arithmetic) theory.
 ///  Handles NaN, infinity, subnormal values, and rounding modes accurately.
 ///
-
 /// Configure via `TranslationConfig::with_precise_floats()`.
 ///
-
 /// ## Bounds Checking
 ///
-
 /// Tensor dimension constraints are NOT automatically enforced during translation.
 /// Instead, bounds checking constraints should be generated separately using
 /// `create_dimension_constraints` and `create_bounds_constraint`, then asserted
 /// at the verification level (e.g., in `verum_verification` or `verum_smt::refinement`).
 ///
-
 /// This separation allows:
 /// - Fine-grained control over when bounds are checked
 /// - Different verification strategies (eager vs lazy checking)
@@ -316,7 +302,6 @@ pub struct Translator<'ctx> {
     config: TranslationConfig,
     /// Stdlib uninterpreteds seen so far.
     ///
-
     /// When `translate_call` / `translate_method_call` lowers a call to
     /// a recognised stdlib function (e.g. `len`, `count`) to an
     /// uninterpreted Z3 Int constant, it records the constant's name
@@ -357,7 +342,6 @@ pub struct Translator<'ctx> {
 
 /// Build the canonical length-constant name for an expression.
 ///
-
 /// Uses the pretty-printer to normalise across spans and whitespace
 /// variants, AFTER stripping any redundant parenthesisation. Two
 /// writings of the same logical expression — `xs ++ ys` and
@@ -526,7 +510,6 @@ impl<'ctx> Translator<'ctx> {
     /// `len((xs ++ ys) ++ zs) == len(xs ++ (ys ++ zs))` without
     /// unfolding user-level append.
     ///
-
     /// In addition, when we see a 2-level concat (`(a ++ b) ++ c` or
     /// `a ++ (b ++ c)`), we queue the length-level associativity
     /// identity: `length_((a++b)++c) == length_(a++(b++c))` in the
@@ -823,7 +806,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Bind a variable to a Z3 expression.
     ///
-
     /// This allows refinement predicates to reference variables by name.
     /// The special variable `it` is commonly used in refinement types.
     pub fn bind(&mut self, name: Text, value: Dynamic) {
@@ -852,7 +834,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Get all binding names.
     ///
-
     /// Returns an iterator over all currently bound variable names.
     /// This is useful for cloning translator state in dependent type checking.
     pub fn binding_names(&self) -> impl Iterator<Item = Text> + '_ {
@@ -861,7 +842,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Get all bindings as an iterator.
     ///
-
     /// Returns an iterator over (name, value) pairs for all bindings.
     pub fn bindings_iter(&self) -> impl Iterator<Item = (&Text, &Dynamic)> {
         self.bindings.iter()
@@ -874,7 +854,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Clear all bindings.
     ///
-
     /// Removes all variable bindings, returning the translator to an empty state.
     pub fn clear_bindings(&mut self) {
         self.bindings.clear();
@@ -882,7 +861,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate an Verum expression to Z3.
     ///
-
     /// This is the main entry point for expression translation.
     /// It recursively translates the expression tree into Z3 AST nodes.
     /// Translate an expression but force identifier-heads to the Bool
@@ -1395,12 +1373,10 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate a tuple expression to Z3 datatype.
     ///
-
     /// For tuples, we create a Z3 datatype constructor:
     /// - Unit tuple `()` → true (boolean)
     /// - Tuple `(a, b, c)` → Tuple_3(field_0: T0, field_1: T1, field_2: T2)
     ///
-
     /// Z3 datatypes provide a structured way to represent product types.
     fn translate_tuple(&self, exprs: &[Expr]) -> Result<Dynamic, TranslationError> {
         if exprs.is_empty() {
@@ -1436,13 +1412,11 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate an interpolated string expression to Z3.
     ///
-
     /// Interpolated strings like `f"Hello {name}"` are translated to string concatenation:
     /// - Parts: ["Hello ", ""]
     /// - Exprs: [name]
     /// Result: concat("Hello ", to_str(name))
     ///
-
     /// For safe interpolations (sql, html, etc.), we model them as uninterpreted functions
     /// that take the interpolated parts and return a safe string.
     fn translate_interpolated_string(
@@ -1545,7 +1519,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate an index expression for array/tensor access.
     ///
-
     /// This implements Z3 Array select operations:
     /// - tensor[i] -> Array::select(tensor, i)
     /// - tensor[i][j] -> Array::select(Array::select(tensor, i), j)
@@ -2117,7 +2090,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Try to extract a Float from a Dynamic AST node.
     ///
-
     /// Returns `Some(Float)` if the Dynamic represents an IEEE 754 floating-point value,
     /// `None` otherwise.
     fn try_as_float(&self, dyn_ast: &Dynamic) -> Option<Float> {
@@ -2135,7 +2107,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate a binary operation on IEEE 754 Float values (FPA theory).
     ///
-
     /// Uses the configured rounding mode for arithmetic operations.
     /// Comparison operations are exact per IEEE 754 semantics.
     fn translate_float_binop(
@@ -2263,27 +2234,20 @@ impl<'ctx> Translator<'ctx> {
 
     /// Check if a floating-point expression has a special property (NaN, infinite, etc.).
     ///
-
     /// This method translates an expression and checks it against the specified
     /// floating-point property using Z3's FPA theory predicates.
     ///
-
     /// # Arguments
     ///
-
     /// * `expr` - The expression to check (must be a Float in precise mode)
     /// * `check` - The type of check to perform
     ///
-
     /// # Returns
     ///
-
     /// A Z3 Bool expression that is true iff the expression has the specified property.
     ///
-
     /// # Errors
     ///
-
     /// Returns an error if precise floats are disabled or the expression is not a float.
     pub fn translate_float_special_check(
         &self,
@@ -2380,7 +2344,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Create a symbolic floating-point variable.
     ///
-
     /// Returns a fresh FPA constant with the configured precision.
     pub fn new_float_const(&self, name: &str) -> Result<Float, TranslationError> {
         if !self.config.precise_floats {
@@ -2700,22 +2663,17 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate a universal quantifier (forall) to Z3.
     ///
-
     /// Universal quantifiers express that a predicate holds for ALL values of a type.
     ///
-
     /// ## Supported Forms
     ///
-
     /// - Type-based: `forall x: T. P(x)` → `∀x:T. P(x)`
     /// - Domain-based: `forall x in S. P(x)` → `∀x. x ∈ S → P(x)`
     /// - Guarded: `forall x in S where Q(x). P(x)` → `∀x. x ∈ S → Q(x) → P(x)`
     /// - Multiple bindings: `forall x: Int, y: Int. P(x, y)` → `∀x,y:Int. P(x,y)`
     ///
-
     /// ## Translation Strategy
     ///
-
     /// 1. Extract bound variable names from each binding's pattern
     /// 2. Create fresh Z3 constants for each bound variable
     /// 3. Bind variables in the translator context
@@ -2724,17 +2682,14 @@ impl<'ctx> Translator<'ctx> {
     /// 6. Construct implications for domain membership and guards
     /// 7. Create the Z3 forall quantifier with pattern hints
     ///
-
     /// ## Example
     ///
-
     /// ```verum
     /// forall x: Int. x + 0 == x
     /// forall x in items. x > 0
     /// forall x in items where x != 0. 1 / x > 0
     /// ```
     ///
-
     /// Quantifier expressions: translated to Z3 forall_const/exists_const with domain guards
     fn translate_forall(
         &self,
@@ -2949,22 +2904,17 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate an existential quantifier (exists) to Z3.
     ///
-
     /// Existential quantifiers express that there EXISTS at least one value
     /// satisfying a predicate.
     ///
-
     /// ## Supported Forms
     ///
-
     /// - Type-based: `exists x: T. P(x)` → `∃x:T. P(x)`
     /// - Domain-based: `exists x in S. P(x)` → `∃x. x ∈ S ∧ P(x)`
     /// - Guarded: `exists x in S where Q(x). P(x)` → `∃x. x ∈ S ∧ Q(x) ∧ P(x)`
     ///
-
     /// Note: For exists, domain and guard are conjoined (∧) not implication (→)
     ///
-
     /// Quantifier expressions: translated to Z3 forall_const/exists_const with domain guards
     fn translate_exists(
         &self,
@@ -3166,21 +3116,16 @@ impl<'ctx> Translator<'ctx> {
 
     /// Extract the variable name from a quantifier pattern.
     ///
-
     /// Quantifier patterns in Verum are restricted to simple identifier patterns
     /// for the bound variable.
     ///
-
     /// ## Supported Patterns
     ///
-
     /// - `x` - Simple identifier
     /// - `(x)` - Parenthesized identifier
     ///
-
     /// ## Unsupported Patterns
     ///
-
     /// - `_` - Wildcard (variable must be named for SMT translation)
     /// - `(x, y)` - Tuple patterns (multi-variable quantifiers not yet supported)
     /// - Pattern matching on constructors
@@ -3203,7 +3148,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Create a Z3 constant with the appropriate type.
     ///
-
     /// This is used to create bound variables for quantifiers with the
     /// correct Z3 sort based on the Verum type annotation.
     fn create_typed_const(&self, name: &str, ty: &Type) -> Result<Dynamic, TranslationError> {
@@ -3283,31 +3227,24 @@ impl<'ctx> Translator<'ctx> {
 
     /// Generate instantiation patterns for quantifier MBQI.
     ///
-
     /// Z3's Model-Based Quantifier Instantiation (MBQI) uses patterns to guide
     /// when quantifiers should be instantiated. Good patterns improve both
     /// performance and completeness of verification.
     ///
-
     /// ## Pattern Generation Strategy
     ///
-
     /// 1. **Function applications**: If the body contains f(x), use f(x) as a pattern
     /// 2. **Array accesses**: If the body contains arr[x], use (select arr x) as a pattern
     /// 3. **Method calls**: If the body contains obj.method(x), use method(obj, x) as a pattern
     /// 4. **Field accesses**: If the body contains x.field, use field(x) as a pattern
     ///
-
     /// ## Example
     ///
-
     /// For `forall (x: Int) => f(x) > 0`, the pattern would be `f(x)`.
     /// This tells Z3: "instantiate this forall whenever you see f(something)".
     ///
-
     /// ## Notes
     ///
-
     /// - Empty patterns list lets Z3 auto-generate patterns (may be less efficient)
     /// - Multiple patterns create multi-patterns (all must match for instantiation)
     /// - Patterns are sorted by priority: function apps > method calls > index > field > arithmetic
@@ -3364,23 +3301,18 @@ impl<'ctx> Translator<'ctx> {
 
     /// Generate quantifier patterns with a custom configuration.
     ///
-
     /// This is a more flexible version of `generate_quantifier_patterns` that
     /// allows specifying the variable name and configuration explicitly.
     ///
-
     /// # Arguments
     ///
-
     /// * `var_name` - Name of the bound variable
     /// * `bound_var` - Z3 AST for the bound variable
     /// * `body` - Quantifier body expression
     /// * `config` - Pattern generation configuration
     ///
-
     /// # Returns
     ///
-
     /// List of Z3 patterns for the quantifier
     pub fn generate_quantifier_patterns_with_config(
         &self,
@@ -3411,22 +3343,17 @@ impl<'ctx> Translator<'ctx> {
 
     /// Generate patterns for multiple bound variables.
     ///
-
     /// Used for quantifiers with multiple bound variables like:
     /// `forall (x: Int, y: Int) => f(x, y) > 0`
     ///
-
     /// # Arguments
     ///
-
     /// * `var_names` - Names of the bound variables
     /// * `bound_vars` - Z3 ASTs for the bound variables (parallel with var_names)
     /// * `body` - Quantifier body expression
     ///
-
     /// # Returns
     ///
-
     /// List of Z3 patterns for the quantifier
     pub fn generate_multi_var_patterns(
         &self,
@@ -3459,7 +3386,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Create a Z3 variable for a given type.
     ///
-
     /// This is used to create fresh variables when verifying refinement constraints.
     pub fn create_var(&self, name: &str, ty: &Type) -> Result<Dynamic, TranslationError> {
         match &ty.kind {
@@ -3528,11 +3454,9 @@ impl<'ctx> Translator<'ctx> {
 
     /// Create a Z3 variable for a tensor type using Array theory.
     ///
-
     /// For a tensor with shape [N, M, K], we create nested arrays:
     /// Array[Int -> Array[Int -> Array[Int -> T]]]
     ///
-
     /// The shape constraints are tracked separately and can be verified.
     fn create_tensor_var(
         &self,
@@ -3589,7 +3513,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate a Verum element type to a Z3 Sort.
     ///
-
     /// Maps:
     /// - Int -> Sort::int()
     /// - Float -> Sort::real() or Sort::double() (if precise_floats enabled)
@@ -3638,18 +3561,14 @@ impl<'ctx> Translator<'ctx> {
 
     /// Generate bounds checking constraints for tensor indexing.
     ///
-
     /// For an index `i` accessing dimension with size `N`, generates:
     /// `0 <= i && i < N`
     ///
-
     /// This method should be called at the verification level (not during translation)
     /// to generate bounds checking assertions for tensor operations.
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// // After translating tensor and index expressions:
     /// let index_z3 = translator.translate_expr(&index_expr)?.as_int().unwrap();
@@ -3671,31 +3590,23 @@ impl<'ctx> Translator<'ctx> {
 
     /// Generate all dimension size constraints for a tensor.
     ///
-
     /// For a tensor variable with dimensions [N, M, K], this generates
     /// symbolic constants for each dimension and returns them for verification.
     ///
-
     /// This method extracts dimension information that can be used with
     /// `create_bounds_constraint` to verify safe tensor indexing operations.
     ///
-
     /// # Arguments
     ///
-
     /// * `tensor_name` - Name of the tensor variable (used to generate unique dimension constant names)
     /// * `shape` - Shape expressions (can be concrete integers or symbolic meta parameters)
     ///
-
     /// # Returns
     ///
-
     /// List of (dimension_index, dimension_size_constant) pairs
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// // For tensor: Tensor<f32, [10, N, 20]>
     /// let dims = translator.create_dimension_constraints("my_tensor", &shape)?;
@@ -3747,7 +3658,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate a tensor type to Z3 Array sort.
     ///
-
     /// This method creates the appropriate Z3 sort for tensor types:
     /// - 1D tensor: Array[Int -> Element]
     /// - 2D tensor: Array[Int -> Array[Int -> Element]]
@@ -3946,7 +3856,6 @@ pub enum TranslationError {
 
 /// Represents a pattern trigger extracted from a quantifier body.
 ///
-
 /// Triggers are terms that guide Z3's quantifier instantiation.
 /// When Z3 encounters a ground term matching a trigger, it instantiates
 /// the quantifier with the corresponding substitution.
@@ -4026,7 +3935,6 @@ impl PatternTrigger {
 
     /// Get the priority score for this trigger (higher = better pattern)
     ///
-
     /// Function applications and method calls are preferred over arithmetic.
     pub fn priority(&self) -> u32 {
         match self {
@@ -4043,7 +3951,6 @@ impl PatternTrigger {
     /// defects that would make Z3 either ignore the trigger or
     /// generate a matching loop.
     ///
-
     /// The diagnostic surface is the fundamental fix for the
     /// "quantifier performance cliff": users (and the auto-extractor)
     /// sometimes ship triggers that look right but silently fail to
@@ -4054,10 +3961,8 @@ impl PatternTrigger {
     /// (once the grammar is wired) emit actionable diagnostics
     /// instead of silently degrading into full-quantifier search.
     ///
-
     /// Empty return = trigger is valid.
     ///
-
     /// See `docs/verification/performance.md §4` (trigger
     /// troubleshooting).
     pub fn diagnose_against(&self, bound_vars: &[Text]) -> Vec<TriggerDiagnostic> {
@@ -4101,7 +4006,6 @@ impl PatternTrigger {
 
 /// A single defect found by [`PatternTrigger::diagnose_against`].
 ///
-
 /// Emitted into the W502 / W503 / W504 diagnostic surface when the
 /// `@trigger(…)` attribute is enabled and a trigger fails
 /// validation. Each variant carries enough context for the
@@ -4531,22 +4435,17 @@ impl Default for PatternGenConfig {
 impl<'ctx> Translator<'ctx> {
     /// Extract pattern triggers from a quantifier body.
     ///
-
     /// Analyzes the body expression to find function applications, method calls,
     /// and other operations that involve the bound variables. These are used
     /// to guide Z3's quantifier instantiation.
     ///
-
     /// # Arguments
     ///
-
     /// * `body` - The quantifier body expression
     /// * `bound_vars` - Names of the quantified variables
     ///
-
     /// # Returns
     ///
-
     /// List of pattern triggers ordered by priority
     pub fn extract_pattern_triggers(
         &self,
@@ -4565,22 +4464,17 @@ impl<'ctx> Translator<'ctx> {
 
     /// Convert pattern triggers to Z3 patterns.
     ///
-
     /// Takes extracted triggers and creates Z3 Pattern objects that can be
     /// passed to forall_const or exists_const.
     ///
-
     /// # Arguments
     ///
-
     /// * `triggers` - List of pattern triggers to convert
     /// * `z3_vars` - Mapping from variable names to Z3 AST nodes
     /// * `config` - Pattern generation configuration
     ///
-
     /// # Returns
     ///
-
     /// List of Z3 patterns ready for quantifier construction
     pub fn triggers_to_z3_patterns(
         &self,
@@ -4617,7 +4511,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Translate a single trigger to a Z3 pattern.
     ///
-
     /// Creates a Z3 Pattern from a PatternTrigger by building the corresponding
     /// Z3 AST term and wrapping it in a Pattern.
     fn translate_trigger_to_z3(
@@ -4829,11 +4722,9 @@ impl<'ctx> Translator<'ctx> {
 
     /// Group triggers into multi-patterns.
     ///
-
     /// Multi-patterns require multiple terms to match before instantiation.
     /// This can help avoid unnecessary instantiations.
     ///
-
     /// Triggers that share the same bound variables are grouped together.
     pub fn group_triggers(&self, triggers: &[PatternTrigger]) -> List<List<PatternTrigger>> {
         let mut groups: List<List<PatternTrigger>> = List::new();
@@ -4876,7 +4767,6 @@ impl<'ctx> Translator<'ctx> {
 
     /// Create Z3 multi-patterns from trigger groups.
     ///
-
     /// Each group becomes a single Z3 Pattern containing multiple terms.
     pub fn groups_to_z3_multi_patterns(
         &self,

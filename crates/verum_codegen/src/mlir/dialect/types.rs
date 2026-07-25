@@ -81,7 +81,6 @@ impl std::fmt::Display for RefTier {
 
 /// Verum type representation.
 ///
-
 /// Wraps MLIR types with Verum-specific semantics.
 #[derive(Debug, Clone)]
 pub enum VerumType {
@@ -252,7 +251,6 @@ impl RefType {
 
     /// Get MLIR type string representation.
     ///
-
     /// References are lowered to LLVM struct types per
     /// `core/mem/fat_ref.vr` / `core/mem/thin_ref.vr`:
     /// - ThinRef: { ptr, i32 generation, i32 epoch_and_caps } = 16 bytes
@@ -355,7 +353,6 @@ impl TextType {
 
     /// Get MLIR type string.
     ///
-
     /// Text is represented as { ptr: i8*, len: i64 }
     pub fn to_mlir_type_string(&self) -> Text {
         Text::from("!llvm.struct<(ptr, i64)>")
@@ -385,7 +382,6 @@ impl MaybeType {
 
     /// Get MLIR type string.
     ///
-
     /// Maybe is represented as { tag: i1, value: T }
     pub fn to_mlir_type_string(&self) -> Text {
         let inner_str = self.inner.to_mlir_type_string();
@@ -590,7 +586,6 @@ impl VariantType {
 
     /// Get MLIR type string.
     ///
-
     /// Variants are represented as { tag: i32, payload: max_payload_size }
     pub fn to_mlir_type_string(&self) -> Text {
         // Simplified: tag + pointer to payload

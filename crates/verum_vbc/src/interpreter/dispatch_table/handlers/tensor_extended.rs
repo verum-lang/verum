@@ -19,7 +19,6 @@ use crate::value::Value;
 
 /// Handler for TensorExtended opcode (0xFC).
 ///
-
 /// This dispatches to tensor operations based on the sub-opcode byte.
 /// Uses the tensor.rs module for actual tensor computations.
 pub(in super::super) fn handle_tensor_extended(

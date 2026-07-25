@@ -67,12 +67,10 @@ pub struct ConstructorSig {
 
 /// one **path constructor** of a higher inductive type.
 ///
-
 /// Per a HIT extends an ordinary inductive with cells whose
 /// boundary is a path between two values of the type itself; the path
 /// constructor's body is the kernel-internal record of that cell.
 ///
-
 /// **Cell dimension** is recorded explicitly via [`Self::dim`]
 /// ():
 /// * `dim = 1` — a 1-cell (path) `lhs ↝ rhs` between two point
@@ -88,7 +86,6 @@ pub struct ConstructorSig {
 ///  recursively, and the eliminator's path-branch type
 ///  nests `PathOver` over `PathOver` n times.
 ///
-
 /// The endpoint expressions `lhs` / `rhs` are arbitrary [`CoreTerm`]s
 /// over the surrounding inductive — typically references to point
 /// constructors (e.g. `Var("Base")` for S¹'s `loop : Base ↝ Base`),
@@ -96,7 +93,6 @@ pub struct ConstructorSig {
 /// HIT's `merid : Σ X ↝ Σ X` where the recursor at `lhs` is computed
 /// by recursion over the argument).
 ///
-
 /// ships kernel-level n-cell support: the eliminator
 /// emit unconditionally walks the dim field and nests `PathOver`
 /// branches accordingly. The grammar / parser surface for the
@@ -320,7 +316,6 @@ impl InductiveRegistry {
     /// returned — those carry path-substitution semantics, handled
     /// separately).
     ///
-
     /// Used by `support::normalize_with_inductives` to fire the
     /// HIT eliminator's β-rule:
     /// `Elim(motive, [c0, c1, ..., cn]) (App-chain(C, args))`
@@ -344,7 +339,6 @@ impl InductiveRegistry {
     /// the inductive's `path_constructors` list. `None` when the
     /// name doesn't match any registered path ctor.
     ///
-
     /// Used by `support::normalize_with_inductives` to fire the
     /// HIT path-constructor β-rule. With N point ctors and M path
     /// ctors, `Elim(motive, cases)(Var(P_j))` reduces to
@@ -366,7 +360,6 @@ impl InductiveRegistry {
     /// inductive by qualified path. Returns the registered level
     /// when present, `None` when the name isn't in the registry.
     ///
-
     /// Used by `infer`'s `Inductive` arm to honour the spec's
     /// declared universe instead of the pre-V8 hardcoded
     /// `Concrete(0)` fallback. Path matching is by full string
@@ -454,7 +447,6 @@ fn name_appears_in(target: &str, ty: &CoreTerm) -> bool {
 /// The strict-positivity walker for `K-Pos`. Returns Ok iff
 /// the type name `target` appears only strictly positively in `ty`.
 ///
-
 /// The discipline:
 /// - On `Pi(domain, codomain)`: `target` must NOT appear in `domain`
 ///  (the negative position); `codomain` must itself be strictly
@@ -543,12 +535,10 @@ pub fn check_strict_positivity(
 
 /// Return `true` iff `ty` is the direct UIP shape:
 ///
-
 /// ```text
 /// Π A. Π a. Π b. Π p. Π q. PathTy(PathTy(A, a, b), p, q)
 /// ```
 ///
-
 /// The check is deliberately conservative: it inspects the outer
 /// five Π binders and confirms that the innermost codomain is a
 /// path-of-paths whose inner carrier is `A`. Axioms that imply UIP
@@ -559,7 +549,6 @@ pub fn check_strict_positivity(
 /// where UIP is derivable (not axiomatised) from the proposition
 /// truncation.
 ///
-
 /// `pub(crate)` because the AxiomRegistry's UIP rejection
 /// (`KernelError::UipForbidden`) calls this to detect the shape;
 /// not part of the public kernel API.
@@ -657,12 +646,10 @@ fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
 /// derive the **dependent eliminator type** for an
 /// inductive (with optional path constructors).
 ///
-
 /// Per + Task C3 (`docs/architecture/...verum-verification-architecture.md
 /// #17.2`) the kernel auto-generates the eliminator's type signature
 /// from the registered declaration. The shape is:
 ///
-
 /// ```text
 /// elim_T : Π (motive : T → Type_u) .
 ///  Π (case_C₁ : Π (a₁:A₁)…(aₙ:Aₙ) . motive(C₁(a₁,…,aₙ))) . -- one per point ctor
@@ -673,7 +660,6 @@ fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
 ///  Π (x : T) . motive(x)
 /// ```
 ///
-
 /// where `↻(e)` denotes the **recursor's image** at endpoint `e`.
 /// V1 emits `↻(e) = e` for non-trivial endpoints — the kernel
 /// records the **structural** type signature; recursor coherence
@@ -684,10 +670,8 @@ fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
 /// via axioms or `@verify` proofs without the kernel committing to a
 /// premature reduction strategy.
 ///
-
 /// # Examples
 ///
-
 /// * Ordinary `Bool` → `Π(motive: Bool → Type). Π(case_True: motive(True)).
 ///  Π(case_False: motive(False)). Π(x: Bool). motive(x)`.
 /// * S¹ HIT (point `Base`, path `Loop : Base..Base`) →
@@ -697,10 +681,8 @@ fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
 ///  `Π(motive). Π(case_Zero). Π(case_One).
 ///  Π(case_Seg: PathTy(motive(Zero), Zero, One)). Π(x). motive(x)`.
 ///
-
 /// # V1 limitations (tracked for V2)
 ///
-
 /// * Recursor-image at non-nullary endpoints is emitted as the raw
 ///  endpoint expression — Future work will resolve to the right case-app chain.
 /// * Path-over (the dependent path needed when `motive(lhs) ≠
@@ -806,15 +788,12 @@ pub fn eliminator_type(decl: &RegisteredInductive) -> CoreTerm {
 
 /// derive the case-branch type for a point constructor.
 ///
-
 /// For ctor `C(a₁:A₁, …, aₙ:Aₙ) : T`, the eliminator's case branch is:
 ///
-
 /// ```text
 /// Π (a₁ : A₁) … (aₙ : Aₙ) . motive(C(a₁, …, aₙ))
 /// ```
 ///
-
 /// Nullary ctors collapse to `motive(C)` (no Π binders).
 pub fn point_constructor_case_type(motive_var: &CoreTerm, ctor: &ConstructorSig) -> CoreTerm {
     // Build the constructor application: App_chain(Var(C), a₁, …, aₙ).
@@ -841,17 +820,14 @@ pub fn point_constructor_case_type(motive_var: &CoreTerm, ctor: &ConstructorSig)
 
 /// recursor's image at a path-constructor endpoint.
 ///
-
 /// V1: emit the endpoint expression as-is.
 ///
-
 /// V2 when `endpoint` is `Var(name)` and `name` matches a
 /// registered point ctor, rewrite to `Var("case_<name>")`. This
 /// produces an eliminator type whose path-branch PathTy endpoints
 /// reference the recursor's image (a value of `motive(point)`)
 /// rather than the constructor itself (a value of `T`).
 ///
-
 /// V3 (App-chain endpoint resolution. When an
 /// endpoint is a non-nullary constructor application
 /// `App(...App(Var("Cons"), arg₁), …, argₙ)`, rewrite to
@@ -863,7 +839,6 @@ pub fn point_constructor_case_type(motive_var: &CoreTerm, ctor: &ConstructorSig)
 /// references or values whose recursor image is supplied by the
 /// surrounding elaboration context.
 ///
-
 /// Limitations (deferred to V3.1+):
 /// * The β-rule for the eliminator (`Elim(...case_C...)(C args)` ↦
 ///  `case_C(args, recursor_calls(args))`) is not yet realised at
@@ -904,7 +879,6 @@ fn recursor_image_at_endpoint(endpoint: &CoreTerm, point_ctor_names: &[&str]) ->
 /// build the eliminator's
 /// branch-type for an n-cell path constructor.
 ///
-
 /// For `dim = 1`:
 ///  * If `path_lhs == path_rhs` structurally → homogeneous
 ///  `PathTy(motive(path_lhs), lhs_image, rhs_image)`.
@@ -912,7 +886,6 @@ fn recursor_image_at_endpoint(endpoint: &CoreTerm, point_ctor_names: &[&str]) ->
 ///  rhs_image)` where `parent_path = PathTy(parent_ind, path_lhs,
 ///  path_rhs)` reifies the constructor-path shape.
 ///
-
 /// For `dim ≥ 2`: nest `PathOver` (`dim − 1`) times around the
 /// dim=1 branch, each layer adding one dimensional wrap. The
 /// outermost path slot reifies the n-cell as a nested PathTy

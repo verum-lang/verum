@@ -178,7 +178,6 @@ pub struct OptimizationStats {
 
 /// Z3 optimizer wrapper
 ///
-
 /// Note: In z3 0.19.4, Context is thread-local and doesn't need to be stored.
 pub struct Z3Optimizer {
     /// Z3 optimize instance
@@ -395,7 +394,6 @@ impl Z3Optimizer {
 
     /// Push scope for incremental solving.
     ///
-
     /// Honours `OptimizerConfig.incremental`: when disabled,
     /// scope manipulation is a no-op so callers that build the
     /// optimizer in non-incremental mode can't accidentally rely

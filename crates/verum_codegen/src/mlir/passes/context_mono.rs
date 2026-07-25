@@ -276,7 +276,6 @@ impl CallSiteInfo {
 
 /// The main context analysis engine.
 ///
-
 /// This performs interprocedural context flow analysis to identify
 /// monomorphization opportunities.
 pub struct ContextAnalysisEngine {
@@ -826,7 +825,6 @@ impl Default for ContextAnalysisEngine {
 
 /// Context monomorphization pass - Industrial-Grade Implementation.
 ///
-
 /// This pass specializes functions based on context types to eliminate
 /// dynamic context lookup overhead.
 pub struct ContextMonomorphizationPass {

@@ -68,7 +68,6 @@ use crate::{GreenChild, GreenNode, SyntaxKind, TextRange, TextSize};
 
 /// Represents a text edit (insertion, deletion, or replacement).
 ///
-
 /// Edits are described in terms of the original text coordinates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextEdit {
@@ -343,7 +342,6 @@ impl NodeStabilityAnalyzer {
 
     /// Check if an edit is contained within stable boundaries.
     ///
-
     /// Returns true if the edit doesn't cross delimiter tokens like braces.
     pub fn edit_is_contained(node: &GreenNode, edit: &TextEdit) -> bool {
         // If edit spans the entire node, it's not contained
@@ -447,7 +445,6 @@ impl IncrementalStats {
 
 /// Incremental update engine.
 ///
-
 /// This is the core engine for incremental parsing. It:
 /// 1. Finds the smallest affected subtree for an edit
 /// 2. Determines if incremental parsing is beneficial
@@ -479,12 +476,10 @@ impl IncrementalEngine {
 
     /// Find the smallest subtree affected by an edit.
     ///
-
     /// This traverses the tree to find the smallest containing node that:
     /// 1. Fully contains the edit range
     /// 2. Is stable (can be independently reparsed)
     ///
-
     /// Returns the path to the affected node and the node itself.
     pub fn find_affected_subtree(
         &mut self,
@@ -624,7 +619,6 @@ impl IncrementalEngine {
 
     /// Apply an edit to the green tree incrementally.
     ///
-
     /// Returns the new root node with the edit applied.
     pub fn apply_edit<F>(
         &mut self,
@@ -769,7 +763,6 @@ impl IncrementalEngine {
 
     /// Check if incremental parsing is beneficial.
     ///
-
     /// Returns false if the edit is large enough that full reparse is faster.
     pub fn should_use_incremental(&self, root: &GreenNode, edit: &TextEdit) -> bool {
         let tree_size = root.width() as usize;
@@ -808,7 +801,6 @@ impl IncrementalEngine {
 
 /// Change tracker for batching and merging document edits.
 ///
-
 /// This is designed for LSP integration where multiple edits may come
 /// in rapid succession and need to be processed together.
 #[derive(Debug)]
@@ -880,7 +872,6 @@ impl ChangeTracker {
 
     /// Merge adjacent/overlapping edits for efficiency.
     ///
-
     /// This is called before applying edits to reduce the number of
     /// incremental parse operations needed.
     pub fn merge_edits(&mut self) {
@@ -924,7 +915,6 @@ impl ChangeTracker {
 
     /// Apply all pending edits to source text.
     ///
-
     /// Edits are applied in reverse order (last edit first) to maintain
     /// correct positions.
     pub fn apply_all(&self, mut source: String) -> String {
@@ -937,7 +927,6 @@ impl ChangeTracker {
 
     /// Compose pending edits into a single edit if possible.
     ///
-
     /// Returns None if edits cannot be composed (non-contiguous).
     pub fn compose(&self) -> Option<TextEdit> {
         if self.pending_edits.is_empty() {

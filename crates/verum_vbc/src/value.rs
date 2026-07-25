@@ -155,7 +155,6 @@ pub const MIN_SMALL_INT: i64 = -(1 << 47);
 
 /// High marker bit (bit 47) used for non-pointer special values.
 ///
-
 /// Both generators and boxed integers have this bit set to distinguish them
 /// from real heap pointers. User-space addresses on x86-64/ARM64 have bit 47 = 0
 /// due to canonical addressing, so this bit is always safe to use as a marker.
@@ -163,11 +162,9 @@ const SPECIAL_VALUE_MARKER: u64 = 1u64 << 47;
 
 /// Marker bit for generator values (bit 47 set, bit 46 NOT set).
 ///
-
 /// Generators use TAG_POINTER with SPECIAL_VALUE_MARKER set and bit 46 clear.
 /// The remaining 45 bits (0-44) hold the GeneratorId (bit 45 is THIN_REF_SUB_MARKER).
 ///
-
 /// Generator State Machine: Generators are created from `fn*` functions via GenCreate (0x9E).
 /// The generator maintains a state machine with statuses: Created, Running, Yielded, Completed.
 /// On Yield, the full register state + PC + context stack is saved. On GenNext (0x9F), the
@@ -177,7 +174,6 @@ const GENERATOR_MARKER: u64 = SPECIAL_VALUE_MARKER; // bit 47 = 1, bit 46 = 0
 
 /// Sub-marker bit (bit 46) to distinguish boxed integers from generators.
 ///
-
 /// When SPECIAL_VALUE_MARKER (bit 47) is set:
 /// - bit 46 = 0: generator
 /// - bit 46 = 1: boxed integer
@@ -185,14 +181,11 @@ const BOXED_INT_SUB_MARKER: u64 = 1u64 << 46;
 
 /// Combined marker for boxed integers (bits 47 AND 46 both set).
 ///
-
 /// Boxed integers use TAG_POINTER with both bit 47 and bit 46 set.
 /// The remaining 45 bits (0-44) hold an index into the global boxed integer table.
 ///
-
 /// This is used for integers outside the 48-bit inline range (-2^47 to 2^47-1).
 ///
-
 /// This encoding guarantees no collision with:
 /// - Real heap pointers: bit 47 = 0 (canonical addressing)
 /// - Generators: bit 47 = 1, bit 46 = 0
@@ -224,7 +217,6 @@ const BOXED_I128_WIDTH_BIT: u64 = 1u64 << 44;
 
 /// Sub-marker bit (bit 45) to distinguish ThinRef from generators.
 ///
-
 /// When bit 47 is set and bit 46 is clear:
 /// - bit 45 = 0: generator
 /// - bit 45 = 1: ThinRef
@@ -232,14 +224,12 @@ const THIN_REF_SUB_MARKER: u64 = 1u64 << 45;
 
 /// Combined marker for ThinRef (bit 47 set, bit 46 clear, bit 45 set).
 ///
-
 /// ThinRef values use TAG_POINTER with this marker pattern.
 /// The remaining 45 bits hold an index into the global ThinRef table.
 const THIN_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | THIN_REF_SUB_MARKER; // bits 47 and 45
 
 /// Sub-marker bit (bit 45) to distinguish FatRef from boxed integers.
 ///
-
 /// When both bit 47 and bit 46 are set:
 /// - bit 45 = 0: boxed integer
 /// - bit 45 = 1: FatRef
@@ -247,7 +237,6 @@ const FAT_REF_SUB_MARKER: u64 = 1u64 << 45;
 
 /// Combined marker for FatRef (bits 47, 46, and 45 all set).
 ///
-
 /// FatRef values use TAG_POINTER with this marker pattern.
 /// The remaining 45 bits hold an index into the global FatRef table.
 const FAT_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER | FAT_REF_SUB_MARKER; // bits 47, 46, 45
@@ -333,7 +322,6 @@ static FAT_REFS: Mutex<Vec<FatRef>> = Mutex::new(Vec::new());
 
 /// Clears the global NaN-boxed Value side tables.
 ///
-
 /// The VBC Value representation uses global `Mutex<Vec<_>>` side tables to
 /// hold payloads too large to fit in 48 bits (boxed integers) or that are
 /// structurally larger than 64 bits (CBGR `ThinRef` / `FatRef`). Each
@@ -341,21 +329,17 @@ static FAT_REFS: Mutex<Vec<FatRef>> = Mutex::new(Vec::new());
 /// [`Value::from_fat_ref`] call pushes onto these tables and stores the
 /// resulting index inside the returned `Value`.
 ///
-
 /// Because the tables are process-global, consecutive in-process test runs
 /// share them, and the indices handed out to a prior run remain baked into
 /// any stale `Value`s that linger in globals, caches, or interpreter state
 /// leaked between tests. Under sustained batch execution the tables also
 /// grow unboundedly (one entry per boxed int / CBGR ref created).
 ///
-
 /// This function truncates all three side tables to zero length, freeing
 /// their backing storage and resetting index allocation.
 ///
-
 /// # Safety contract
 ///
-
 /// Any existing `Value` whose payload is a side-table index (boxed int,
 /// ThinRef, FatRef) becomes **dangling** after this call. Callers MUST
 /// guarantee that no such `Value`s remain reachable before invoking this
@@ -387,7 +371,6 @@ pub fn reset_global_value_tables() {
 
 /// CBGR capability flags (16 bits).
 ///
-
 /// These flags control what operations are permitted on a reference.
 /// Capabilities can only be attenuated (removed), never added.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -456,13 +439,11 @@ impl Capabilities {
 
 /// ThinRef - Compact CBGR reference (16 bytes).
 ///
-
 /// Used for references to sized types. Contains:
 /// - Raw pointer to the data
 /// - Generation counter for dangling reference detection
 /// - Epoch and capabilities packed together
 ///
-
 /// Layout: ptr:8 + generation:4 + epoch_caps:4 = 16 bytes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(C)]
@@ -548,13 +529,11 @@ impl Default for ThinRef {
 
 /// FatRef - Extended CBGR reference (32 bytes).
 ///
-
 /// Used for references that need additional metadata:
 /// - Slices (need length)
 /// - Trait objects (need vtable pointer)
 /// - Interior references (need offset)
 ///
-
 /// Layout: ptr:8 + generation:4 + epoch_caps:4 + metadata:8 + offset:4 + reserved:4 = 32 bytes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(C)]
@@ -684,15 +663,12 @@ impl Default for FatRef {
 
 /// NaN-boxed runtime value.
 ///
-
 /// All VBC runtime values are represented as 64-bit NaN-boxed values.
 /// This provides efficient storage (8 bytes per value) and fast type
 /// checking via bit manipulation.
 ///
-
 /// # Safety
 ///
-
 /// The internal representation assumes x86-64 or ARM64 with 48-bit
 /// virtual addresses. On systems with larger address spaces, pointer
 /// encoding may fail.
@@ -707,7 +683,6 @@ impl Value {
 
     /// Creates a float value.
     ///
-
     /// If the float is NaN, it's boxed specially to avoid confusion
     /// with tagged values.
     #[inline]
@@ -728,7 +703,6 @@ impl Value {
 
     /// Creates an integer value.
     ///
-
     /// Small integers (-2^47 to 2^47-1) are stored inline.
     /// Larger integers are automatically boxed (heap-allocated).
     #[inline]
@@ -745,14 +719,11 @@ impl Value {
 
     /// Creates a boxed integer value (stored in global table).
     ///
-
     /// This is used for integers outside the 48-bit inline range.
     /// The integer is stored in a global table and the index is encoded.
     ///
-
     /// # Note
     ///
-
     /// Uses a global table for storage. In production, this should
     /// integrate with the runtime's garbage collector for cleanup.
     #[inline]
@@ -838,10 +809,8 @@ impl Value {
 
     /// Creates a pointer value.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must fit in 48 bits and remain valid for the
     /// lifetime of this value.
     #[inline]
@@ -857,7 +826,6 @@ impl Value {
 
     /// Creates a small string value (up to 6 bytes).
     ///
-
     /// Returns `None` if the string doesn't fit (> 6 bytes).
     /// Layout: bits 47-44 = length (4 bits), bits 0-47 = 6 bytes of string data
     #[inline]
@@ -902,7 +870,6 @@ impl Value {
 
     /// Returns the raw 64-bit NaN-box bit-pattern of this Value.
     ///
-
     /// Used by interpreter handlers that need to round-trip the
     /// FULL Value through raw memory (e.g. `DerefMutRaw` writing
     /// a heap-allocated Variant pointer to a struct field's
@@ -915,11 +882,9 @@ impl Value {
 
     /// Creates a generator reference value.
     ///
-
     /// Generators are encoded using TAG_POINTER with the GENERATOR_MARKER bit set.
     /// Bits 0-44 hold the generator ID (45 bits total).
     ///
-
     /// Generator encoding: TAG_POINTER | GENERATOR_MARKER | (id & GENERATOR_ID_MASK).
     /// The generator ID indexes into the interpreter's generator table (Vec<Generator>).
     #[inline]
@@ -939,13 +904,11 @@ impl Value {
 
     /// Creates a ThinRef value (stored in global table).
     ///
-
     /// ThinRef is a 16-byte CBGR reference containing:
     /// - Pointer to data (8 bytes)
     /// - Generation counter (4 bytes)
     /// - Epoch + capabilities (4 bytes)
     ///
-
     /// Since ThinRef doesn't fit in 64 bits, it's stored in a global table
     /// and the index is encoded in the Value.
     #[inline]
@@ -962,14 +925,12 @@ impl Value {
 
     /// Creates a FatRef value (stored in global table).
     ///
-
     /// FatRef is a 32-byte CBGR reference containing:
     /// - ThinRef (16 bytes)
     /// - Metadata (8 bytes) - length for slices, vtable for traits
     /// - Offset (4 bytes) - for interior references
     /// - Reserved (4 bytes)
     ///
-
     /// Since FatRef doesn't fit in 64 bits, it's stored in a global table
     /// and the index is encoded in the Value.
     #[inline]
@@ -1038,7 +999,6 @@ impl Value {
 
     /// Returns the tag for tagged values.
     ///
-
     /// Returns None for pure float values.
     #[inline]
     pub fn tag(&self) -> Option<u8> {
@@ -1057,13 +1017,11 @@ impl Value {
 
     /// Returns true if this is a boxed integer (heap-allocated for large values).
     ///
-
     /// Boxed integers are stored with both bit 47 and bit 46 set, plus an index
     /// into a global table. This encoding guarantees no collision with:
     /// - Real heap pointers: bit 47 = 0 (canonical addressing)
     /// - Generators: bit 47 = 1, bit 46 = 0
     ///
-
     /// On x86-64/ARM64, user-space addresses have bits 47-63 all-zero.
     #[inline]
     pub fn is_boxed_int(&self) -> bool {
@@ -1148,7 +1106,6 @@ impl Value {
 
     /// Returns true if this is a pointer.
     ///
-
     /// Note: Boxed integers share the TAG_POINTER tag but are semantically
     /// integers, not pointers. This returns `false` for boxed integers so that
     /// `is_ptr()` callers never attempt to dereference a boxed integer's
@@ -1187,13 +1144,11 @@ impl Value {
 
     /// Returns true if this is a generator reference.
     ///
-
     /// Generators use TAG_POINTER with bit 47 set and bit 46 clear.
     /// This distinguishes them from:
     /// - Real heap pointers: bit 47 = 0
     /// - Boxed integers: bit 47 = 1, bit 46 = 1
     ///
-
     /// Checks if this value is a generator reference. Distinguished from other pointer-tagged
     /// values by: bit 47 set (SPECIAL_VALUE_MARKER), bit 46 clear (not boxed int), bit 45 clear (not ThinRef).
     #[inline]
@@ -1206,7 +1161,6 @@ impl Value {
 
     /// Returns true if this is a ThinRef (CBGR managed reference).
     ///
-
     /// ThinRef values use TAG_POINTER with bit 47 set, bit 46 clear, and bit 45 set.
     /// This distinguishes them from:
     /// - Real heap pointers: bit 47 = 0
@@ -1222,7 +1176,6 @@ impl Value {
 
     /// Returns true if this is a FatRef (CBGR managed reference with metadata).
     ///
-
     /// FatRef values use TAG_POINTER with bits 47, 46, and 45 all set.
     /// This distinguishes them from:
     /// - Real heap pointers: bit 47 = 0
@@ -1242,7 +1195,6 @@ impl Value {
 
     /// Returns true if this is a regular pointer (not a generator, boxed int, ThinRef, FatRef, or nil).
     ///
-
     /// Real heap pointers have bit 47 = 0 due to canonical addressing on x86-64/ARM64.
     /// Generators and boxed integers both have bit 47 = 1, so checking SPECIAL_VALUE_MARKER
     /// is sufficient to exclude them.
@@ -1259,10 +1211,8 @@ impl Value {
 
     /// Extracts as f64.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a float value.
     #[inline]
     pub fn as_f64(&self) -> f64 {
@@ -1277,16 +1227,12 @@ impl Value {
 
     /// Extracts as i64.
     ///
-
     /// Handles both inline integers (48-bit) and boxed integers (table-stored).
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not an integer value.
     ///
-
     /// For boxed integers whose index falls outside the current
     /// `BOXED_INTS` table (e.g. because `reset_global_value_tables()` was
     /// called while the `Value` remained reachable through a cached side
@@ -1360,10 +1306,8 @@ impl Value {
 
     /// Extracts as bool.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a boolean value.
     #[inline]
     pub fn as_bool(&self) -> bool {
@@ -1373,7 +1317,6 @@ impl Value {
 
     /// Returns true if this value is "truthy" for conditional branching.
     ///
-
     /// - Bool: true/false
     /// - Int: non-zero is truthy
     /// - Nil/Unit: falsy
@@ -1392,15 +1335,12 @@ impl Value {
 
     /// Extracts as i64, accepting both Int and Bool values.
     ///
-
     /// Bool is coerced to 0 (false) or 1 (true). This is used by integer
     /// comparison handlers which may receive Bool operands from codegen
     /// (Bool is classified as a primitive type).
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is neither an integer nor a boolean value.
     #[inline]
     pub fn as_integer_compatible(&self) -> i64 {
@@ -1426,14 +1366,11 @@ impl Value {
 
     /// Extracts as char.
     ///
-
     /// Characters are stored as integers (Unicode codepoint).
     /// Returns the character corresponding to the stored codepoint.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not an integer value or the value is not a valid char.
     #[inline]
     pub fn as_char(&self) -> char {
@@ -1443,10 +1380,8 @@ impl Value {
 
     /// Extracts as pointer.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a pointer value.
     #[inline]
     pub fn as_ptr<T>(&self) -> *mut T {
@@ -1456,10 +1391,8 @@ impl Value {
 
     /// Extracts as small string.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a small string value.
     #[inline]
     pub fn as_small_string(&self) -> SmallString {
@@ -1484,10 +1417,8 @@ impl Value {
 
     /// Extracts as TypeId.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a type reference.
     #[inline]
     pub fn as_type_id(&self) -> TypeId {
@@ -1501,10 +1432,8 @@ impl Value {
 
     /// Extracts as FunctionId.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a function reference.
     #[inline]
     pub fn as_func_id(&self) -> FunctionId {
@@ -1518,13 +1447,10 @@ impl Value {
 
     /// Extracts the generator ID from a generator value.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a generator reference.
     ///
-
     /// Extracts the 45-bit generator ID from bits 0-44 of the NaN-boxed value.
     /// The ID indexes into the interpreter's generator table for state lookup/resume.
     #[inline]
@@ -1539,10 +1465,8 @@ impl Value {
 
     /// Extracts the ThinRef from a ThinRef value.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a ThinRef value.
     #[inline]
     pub fn as_thin_ref(&self) -> ThinRef {
@@ -1554,10 +1478,8 @@ impl Value {
 
     /// Extracts the FatRef from a FatRef value.
     ///
-
     /// # Panics
     ///
-
     /// Panics if this is not a FatRef value.
     #[inline]
     pub fn as_fat_ref(&self) -> FatRef {
@@ -1603,7 +1525,6 @@ impl Value {
 
     /// Tries to extract as generator ID.
     ///
-
     /// Returns Some(generator_id) if this is a generator value, None otherwise.
     #[inline]
     pub fn try_as_generator_id(&self) -> Option<u64> {

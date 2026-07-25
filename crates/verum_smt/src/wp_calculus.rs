@@ -75,7 +75,6 @@ pub enum WpError {
 
 /// WP calculus engine for computing weakest preconditions
 ///
-
 /// This engine translates Verum statements into Z3 constraints using
 /// Dijkstra's weakest precondition calculus.
 pub struct WpEngine<'ctx> {
@@ -124,7 +123,6 @@ impl<'ctx> WpEngine<'ctx> {
 
     /// Register a function contract for call summarization
     ///
-
     /// When the WP engine encounters a call to this function, it will use
     /// the contract instead of inlining the function body.
     pub fn register_contract(
@@ -139,7 +137,6 @@ impl<'ctx> WpEngine<'ctx> {
 
     /// Store old values for postcondition handling
     ///
-
     /// Call this before computing WP to capture pre-state values
     /// referenced by `old(expr)` in postconditions.
     pub fn capture_old_values(&mut self, var_names: &[Text]) {
@@ -152,7 +149,6 @@ impl<'ctx> WpEngine<'ctx> {
 
     /// Compute the weakest precondition of a function body
     ///
-
     /// Given a function body and postcondition, computes the weakest condition
     /// that must hold before execution for the postcondition to hold after.
     pub fn wp(&mut self, body: &Expr, postcondition: &Bool) -> WpResult<Bool> {
@@ -923,7 +919,6 @@ impl<'a> DataflowAnalyzer<'a> {
 
 /// Extract loop body effects using comprehensive dataflow analysis
 ///
-
 /// This function analyzes a loop body expression and extracts all effects
 /// (assignments) that modify state variables.
 pub fn extract_loop_body_effects_enhanced(

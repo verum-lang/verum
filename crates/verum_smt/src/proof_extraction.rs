@@ -67,7 +67,6 @@ use z3::{Config, Goal, Solver, Tactic};
 
 /// Configuration for Z3 proof generation
 ///
-
 /// This configuration controls how Z3 generates and extracts proofs.
 /// For production use, enable all proof features; for development, use minimal settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +107,6 @@ impl Default for ProofGenerationConfig {
 impl ProofGenerationConfig {
     /// Create configuration optimized for production use
     ///
-
     /// Enables all validation and minimization features.
     pub fn production() -> Self {
         Self {
@@ -125,7 +123,6 @@ impl ProofGenerationConfig {
 
     /// Create configuration optimized for development/debugging
     ///
-
     /// Minimal overhead, no validation.
     pub fn development() -> Self {
         Self {
@@ -142,7 +139,6 @@ impl ProofGenerationConfig {
 
     /// Create configuration for minimal proof extraction
     ///
-
     /// Only basic proof extraction, no extras.
     pub fn minimal() -> Self {
         Self {
@@ -159,7 +155,6 @@ impl ProofGenerationConfig {
 
     /// Apply this configuration to a Z3 Config object
     ///
-
     /// This sets up Z3's internal configuration for proof
     /// generation. Closes the inert-defense pattern around
     /// `enable_unsat_cores`: previously the field was set on
@@ -180,12 +175,10 @@ impl ProofGenerationConfig {
     /// Apply per-solver parameters that aren't available at the
     /// Config level.
     ///
-
     /// Two of the documented `ProofGenerationConfig` fields are
     /// Solver-level Z3 params, not Config-level — they have to
     /// be set per-Solver via `Solver::set_params`:
     ///
-
     ///  * `minimize_unsat_cores` — Z3's `smt.core.minimize`
     ///  parameter. When true, the solver runs additional
     ///  minimization on the unsat core before returning it,
@@ -196,7 +189,6 @@ impl ProofGenerationConfig {
     ///  the extractor has to. Zero leaves the solver unbounded
     ///  (matches the documented "0 = no timeout" semantics).
     ///
-
     /// Call this on every Solver involved in proof extraction so
     /// the per-call resource budget actually reaches the solver.
     pub fn apply_to_z3_solver(&self, solver: &Solver) {
@@ -211,7 +203,6 @@ impl ProofGenerationConfig {
 
     /// Execute code with this proof generation configuration
     ///
-
     /// Sets up Z3 context with proper proof generation settings.
     pub fn with_config<F, R>(&self, f: F) -> R
     where
@@ -228,21 +219,16 @@ impl ProofGenerationConfig {
 
 /// Structured proof term representation
 ///
-
 /// Converts Z3's internal proof objects to a structured format
 /// suitable for analysis, minimization, and export.
 ///
-
 /// This enum represents all Z3 proof rules as structured proof terms,
 /// enabling complete proof tree extraction and analysis.
 ///
-
 /// ## Serialization
 ///
-
 /// ProofTerm supports serde serialization for caching and persistence:
 ///
-
 /// ```ignore
 /// let proof = ProofTerm::Axiom { name: "ax1".into(), formula: "x > 0".into() };
 /// let json = serde_json::to_string(&proof)?;
@@ -258,7 +244,6 @@ pub enum ProofTerm {
 
     /// Modus ponens: from A and A => B, derive B
     ///
-
     /// ```text
     /// T1: A
     /// T2: A => B
@@ -271,7 +256,6 @@ pub enum ProofTerm {
 
     /// Rewrite rule application
     ///
-
     /// A proof for a local rewriting step (= t s).
     /// The head function symbol of t is interpreted.
     Rewrite {
@@ -294,13 +278,11 @@ pub enum ProofTerm {
 
     /// Theory lemma (SMT theory axiom)
     ///
-
     /// Generic proof for theory lemmas from arithmetic, arrays, etc.
     TheoryLemma { theory: Text, lemma: Text },
 
     /// Unit resolution (SAT reasoning)
     ///
-
     /// ```text
     /// T1: (or l_1 ... l_n l_1' ... l_m')
     /// T2: (not l_1)
@@ -312,7 +294,6 @@ pub enum ProofTerm {
 
     /// Quantifier instantiation
     ///
-
     /// A proof of (or (not (forall (x) (P x))) (P a))
     QuantifierInstantiation {
         quantified: Box<ProofTerm>,
@@ -321,7 +302,6 @@ pub enum ProofTerm {
 
     /// Lemma (derived fact with proof)
     ///
-
     /// ```text
     /// T1: false
     /// [lemma T1]: (or (not l_1) ... (not l_n))
@@ -337,7 +317,6 @@ pub enum ProofTerm {
     // ==================== New Proof Rules ====================
     /// And elimination: from (and l_1 ... l_n), derive l_i
     ///
-
     /// ```text
     /// T1: (and l_1 ... l_n)
     /// [and-elim T1]: l_i
@@ -353,7 +332,6 @@ pub enum ProofTerm {
 
     /// Not-or elimination: from (not (or l_1 ... l_n)), derive (not l_i)
     ///
-
     /// ```text
     /// T1: (not (or l_1 ... l_n))
     /// [not-or-elim T1]: (not l_i)
@@ -369,7 +347,6 @@ pub enum ProofTerm {
 
     /// Iff-true: from p, derive (iff p true)
     ///
-
     /// ```text
     /// T1: p
     /// [iff-true T1]: (iff p true)
@@ -383,7 +360,6 @@ pub enum ProofTerm {
 
     /// Iff-false: from (not p), derive (iff p false)
     ///
-
     /// ```text
     /// T1: (not p)
     /// [iff-false T1]: (iff p false)
@@ -397,7 +373,6 @@ pub enum ProofTerm {
 
     /// Commutativity: derive (= (f a b) (f b a)) for commutative f
     ///
-
     /// ```text
     /// [comm]: (= (f a b) (f b a))
     /// ```
@@ -410,7 +385,6 @@ pub enum ProofTerm {
 
     /// Monotonicity: if a R a', b R b', then f(a,b) R f(a',b')
     ///
-
     /// ```text
     /// T1: (R a a')
     /// T2: (R b b')
@@ -425,7 +399,6 @@ pub enum ProofTerm {
 
     /// Distributivity: f distributes over g
     ///
-
     /// ```text
     /// [distributivity]: (= (f a (g c d)) (g (f a c) (f a d)))
     /// ```
@@ -436,7 +409,6 @@ pub enum ProofTerm {
 
     /// Definition axiom: Tseitin-style CNF transformation axiom
     ///
-
     /// Propositional tautologies for CNF conversion:
     /// - (or (not (and p q)) p)
     /// - (or (and p q) (not p) (not q))
@@ -448,7 +420,6 @@ pub enum ProofTerm {
 
     /// Definition introduction: introduces a name for an expression
     ///
-
     /// ```text
     /// [def-intro]: (and (or n (not e)) (or (not n) e))
     /// ```
@@ -461,7 +432,6 @@ pub enum ProofTerm {
 
     /// Apply definition: apply a definition to rewrite
     ///
-
     /// ```text
     /// [apply-def T1]: F ~ n
     /// ```
@@ -476,7 +446,6 @@ pub enum ProofTerm {
 
     /// Iff to oriented equality: from (iff p q), derive (~ p q)
     ///
-
     /// ```text
     /// T1: (iff p q)
     /// [iff~ T1]: (~ p q)
@@ -492,7 +461,6 @@ pub enum ProofTerm {
 
     /// NNF positive: negation normal form transformation (positive context)
     ///
-
     /// Used when creating NNF of positive force quantifiers or
     /// recursively creating NNF over Boolean formulas.
     NNFPos {
@@ -504,7 +472,6 @@ pub enum ProofTerm {
 
     /// NNF negative: negation normal form transformation (negative context)
     ///
-
     /// ```text
     /// T1: (not s_1) ~ r_1
     /// ...
@@ -519,7 +486,6 @@ pub enum ProofTerm {
 
     /// Skolemization: introduce Skolem functions for existentials
     ///
-
     /// ```text
     /// [sk]: (~ (exists x (p x y)) (p (sk y) y))
     /// ```
@@ -530,7 +496,6 @@ pub enum ProofTerm {
 
     /// Quantifier introduction: from (~ p q), derive (~ (forall x p) (forall x q))
     ///
-
     /// ```text
     /// T1: (~ p q)
     /// [quant-intro T1]: (~ (forall (x) p) (forall (x) q))
@@ -544,7 +509,6 @@ pub enum ProofTerm {
 
     /// Proof bind: from f, derive (forall x f) where x are free in f
     ///
-
     /// ```text
     /// T1: f
     /// [proof-bind T1]: forall (x) f
@@ -560,7 +524,6 @@ pub enum ProofTerm {
 
     /// Pull quantifier: pull quantifier out of a formula
     ///
-
     /// ```text
     /// [pull-quant]: (iff (f (forall (x) q(x)) r) (forall (x) (f (q x) r)))
     /// ```
@@ -571,7 +534,6 @@ pub enum ProofTerm {
 
     /// Push quantifier: push quantifier into a formula
     ///
-
     /// ```text
     /// [push-quant]: (iff (forall (x) (and p q)) (and (forall (x) p) (forall (x) q)))
     /// ```
@@ -582,7 +544,6 @@ pub enum ProofTerm {
 
     /// Eliminate unused variables
     ///
-
     /// ```text
     /// [elim-unused]: (iff (forall (x y) p[x]) (forall (x) p[x]))
     /// ```
@@ -593,7 +554,6 @@ pub enum ProofTerm {
 
     /// Destructive equality resolution
     ///
-
     /// ```text
     /// [der]: (iff (forall (x) (or (not (= x t)) P[x])) P[t])
     /// ```
@@ -604,7 +564,6 @@ pub enum ProofTerm {
 
     /// Hyper-resolution: generalized resolution rule
     ///
-
     /// Takes multiple clauses and resolves them together.
     HyperResolve {
         /// The clauses being resolved
@@ -923,7 +882,6 @@ impl ProofTerm {
 
 /// Extracts and analyzes Z3 proof objects
 ///
-
 /// The ProofExtractor is the main entry point for extracting structured proof terms
 /// from Z3 solver proofs. It supports:
 /// - Configurable extraction depth
@@ -931,22 +889,17 @@ impl ProofTerm {
 /// - Optional validation on extraction
 /// - Caching support via serialization
 ///
-
 /// ## Usage
 ///
-
 /// ```ignore
 /// use verum_smt::proof_extraction::{ProofExtractor, ProofGenerationConfig};
 ///
-
 /// // Create with default settings
 /// let extractor = ProofExtractor::new();
 ///
-
 /// // Create with production settings
 /// let extractor = ProofExtractor::with_config(ProofGenerationConfig::production());
 ///
-
 /// // Extract proof from Z3 solver
 /// if let Some(proof) = solver.get_proof() {
 ///  if let Some(term) = extractor.extract_proof(&proof) {
@@ -976,10 +929,8 @@ impl ProofExtractor {
 
     /// Create proof extractor with custom configuration
     ///
-
     /// ## Example
     ///
-
     /// ```ignore
     /// let config = ProofGenerationConfig::production();
     /// let extractor = ProofExtractor::with_config(config);
@@ -1019,11 +970,9 @@ impl ProofExtractor {
 
     /// Extract proof from Z3 solver
     ///
-
     /// Returns structured proof term if available.
     /// Note: Z3 must be configured with proof generation enabled.
     ///
-
     /// # Example
     /// ```ignore
     /// let extractor = ProofExtractor::new();
@@ -1071,7 +1020,6 @@ impl ProofExtractor {
 
     /// Extract proof with full result including validation
     ///
-
     /// Returns both the proof term and validation results.
     pub fn extract_proof_with_validation(
         &self,
@@ -1092,14 +1040,12 @@ impl ProofExtractor {
 
     /// Validate a proof term for structural soundness
     ///
-
     /// Checks:
     /// - All proof steps are valid
     /// - No circular dependencies
     /// - Axioms are properly used
     /// - Conclusions follow from premises
     ///
-
     /// Returns true if proof is valid, false otherwise.
     pub fn validate_proof(&self, proof: &ProofTerm) -> ProofValidation {
         let mut validation = ProofValidation {
@@ -1484,7 +1430,6 @@ impl ProofExtractor {
 
     /// Minimize a proof by removing redundant steps
     ///
-
     /// This is a convenience wrapper around `ProofMinimizer::minimize`.
     pub fn minimize_proof(&self, proof: &ProofTerm) -> ProofTerm {
         ProofMinimizer::minimize(proof)
@@ -2011,7 +1956,6 @@ impl ProofExtractor {
 
     /// Extract left and right sides from an equality formula
     ///
-
     /// Parses formulas of the form "(= left right)" or "left = right"
     fn extract_equality_sides(formula: &Text) -> (Text, Text) {
         let s = formula.as_str();
@@ -2038,7 +1982,6 @@ impl ProofExtractor {
 
     /// Extract left and right sides from an iff formula
     ///
-
     /// Parses formulas of the form "(iff left right)" or "left <=> right"
     fn extract_iff_sides(formula: &Text) -> (Text, Text) {
         let s = formula.as_str();
@@ -2064,7 +2007,6 @@ impl ProofExtractor {
 
     /// Split an S-expression into two balanced parts
     ///
-
     /// Given "a b)" or "(f x) (g y))", returns the first complete term and the rest
     fn split_balanced_sexp(s: &str) -> Option<(&str, &str)> {
         let s = s.trim();
@@ -2107,7 +2049,6 @@ impl ProofExtractor {
 
     /// Extract quantified variables from a formula
     ///
-
     /// Parses formulas of the form "(forall (x y z) body)" and extracts [x, y, z]
     fn extract_quantified_variables(formula: &Text) -> List<Text> {
         let s = formula.as_str();
@@ -2267,13 +2208,11 @@ impl ProofExtractor {
 
     /// Apply tactics in sequence to search for proof
     ///
-
     /// This composes tactics to help find proofs:
     /// - Simplify the problem
     /// - Apply domain-specific tactics
     /// - Extract resulting proof
     ///
-
     /// Returns proof term if tactics succeed in finding a proof.
     pub fn apply_tactic_sequence(&self, goal: &Goal, tactics: &[TacticKind]) -> Maybe<ProofTerm> {
         // Build tactic strategy from sequence
@@ -2289,7 +2228,6 @@ impl ProofExtractor {
 
     /// Apply a tactic strategy to search for proof
     ///
-
     /// Uses the tactic combinators to build sophisticated proof search strategies.
     /// If the strategy succeeds, extracts the resulting proof term.
     pub fn apply_tactic_strategy(
@@ -2469,7 +2407,6 @@ impl ProofExtractor {
 
     /// Build recommended tactic strategy for proof extraction
     ///
-
     /// Analyzes the goal and constructs an appropriate strategy:
     /// - Simplification
     /// - Domain-specific tactics (QF_LIA, QF_BV, etc.)
@@ -2496,7 +2433,6 @@ impl ProofExtractor {
 
     /// Extract proof using automatic tactic selection
     ///
-
     /// This is a high-level convenience method that:
     /// 1. Builds an appropriate tactic strategy for the goal
     /// 2. Applies the strategy
@@ -2519,13 +2455,11 @@ impl ProofExtractor {
     /// Convert a `proof_extraction::ProofTerm` into the lighter-weight
     /// `proof_extraction_bridge::ProofTerm` representation.
     ///
-
     /// This is the glue between the Z3-facing proof tree (which uses
     /// `Box<ProofTerm>` and raw `Text` formulas) and the tactic-centric bridge
     /// type (which mirrors the same structure but is decoupled from Z3 internals
     /// so that `proof_extraction_bridge` can be used without pulling in Z3).
     ///
-
     /// Most structural variants translate one-to-one. Z3-specific or
     /// extended proof rules that have no direct bridge analogue are collapsed
     /// into `SmtVerified` so the certificate pipeline always produces a valid
@@ -2979,7 +2913,6 @@ impl ProofFormatter {
 
 /// Export proof to various formats
 ///
-
 /// The ProofExporter provides conversion from ProofTerm to multiple output formats:
 /// - SMT-LIB2: Standard SMT solver format for proof exchange
 /// - Coq: Proof assistant tactics
@@ -2990,22 +2923,17 @@ pub struct ProofExporter;
 impl ProofExporter {
     /// Export proof to SMT-LIB2 format
     ///
-
     /// Generates a complete SMT-LIB2 proof script that can be verified
     /// by any SMT-LIB2 compliant solver.
     ///
-
     /// ## Format
     ///
-
     /// The output uses standard SMT-LIB2 proof annotations:
     /// - Named assertions: `(assert (! formula :named name))`
     /// - Proof steps: `(@rule premise1 premise2 ... conclusion)`
     ///
-
     /// ## Example
     ///
-
     /// ```ignore
     /// let proof = ProofTerm::Axiom { name: "ax1".into(), formula: "(> x 0)".into() };
     /// let smtlib = ProofExporter::to_smtlib2(&proof);
@@ -3316,7 +3244,6 @@ impl ProofExporter {
 
     /// Export proof to SMT-LIB2 with proof annotations
     ///
-
     /// This variant includes additional annotations for proof checking.
     pub fn to_smtlib2_annotated(proof: &ProofTerm, include_comments: bool) -> Text {
         let base = Self::to_smtlib2(proof);
@@ -3336,7 +3263,6 @@ impl ProofExporter {
 
     /// Export proof to Coq format
     ///
-
     /// Converts a ProofTerm into valid Coq tactic syntax.
     /// The output is wrapped in "Proof. ... Qed." format.
     pub fn to_coq(proof: &ProofTerm) -> Text {
@@ -3500,7 +3426,6 @@ impl ProofExporter {
 
     /// Export proof to Lean format
     ///
-
     /// Converts a ProofTerm into valid Lean 4 tactic syntax.
     /// The output uses "by" tactic mode.
     pub fn to_lean(proof: &ProofTerm) -> Text {
@@ -3910,7 +3835,6 @@ mod tests {
 
     /// Pin the fail-closed contract of `validate_on_extract = true`.
     ///
-
     /// Pre-fix `extract_proof` logged a warning and RETURNED the
     /// (possibly invalid) proof anyway, defeating the safety-critical
     /// semantics of the flag. Now: a hard validation failure
@@ -3918,7 +3842,6 @@ mod tests {
     /// returns `Maybe::None`, so the caller can no longer accidentally
     /// consume an unvalidated proof while believing it was validated.
     ///
-
     /// We test the public surface directly: build a `ProofValidation`
     /// with `is_valid = false` + a non-empty `errors` list, and assert
     /// that `is_ok()` returns false. The integration with

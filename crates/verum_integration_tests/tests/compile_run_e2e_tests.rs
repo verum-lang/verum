@@ -42,7 +42,6 @@ use verum_vbc::value::Value;
 
 /// Compile a Verum source program to VBC and execute it via the interpreter.
 ///
-
 /// Returns (stdout, exit_code) where exit_code is 0 for success, 1 for runtime error.
 fn compile_and_run(source: &str) -> Result<(String, i32), String> {
     // Step 1: Parse + typecheck + VBC codegen via compiler API

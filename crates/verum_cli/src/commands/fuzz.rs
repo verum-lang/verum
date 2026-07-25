@@ -103,12 +103,10 @@ pub fn cargo_fuzz_available() -> bool {
 /// Walk the workspace for `fuzz/Cargo.toml` files and enumerate
 /// their `[[bin]]` targets. Discovery roots:
 ///
-
 ///  * `<workspace_root>/fuzz/Cargo.toml`
 ///  * `<workspace_root>/crates/<name>/fuzz/Cargo.toml`
 ///  * `<workspace_root>/<arbitrary>/fuzz/Cargo.toml` (one level)
 ///
-
 /// Returns an empty list when nothing matches.
 pub fn discover_targets(workspace_root: &Path) -> Vec<FuzzTarget> {
     let mut out = Vec::new();

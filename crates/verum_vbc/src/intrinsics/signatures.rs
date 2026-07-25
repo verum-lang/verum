@@ -34,7 +34,6 @@ use std::sync::LazyLock;
 
 /// Protocol bounds for generic type parameters.
 ///
-
 /// These constrain which types can be used with generic intrinsics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProtocolBound {
@@ -446,7 +445,6 @@ impl IntrinsicSignature {
 
     /// Validate arguments against this signature.
     ///
-
     /// `arg_types` are the actual argument types as strings.
     /// `type_args` are the explicit type arguments provided at the call site.
     pub fn validate_args(

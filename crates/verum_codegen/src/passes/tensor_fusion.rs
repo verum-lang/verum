@@ -272,7 +272,6 @@ impl TensorOpKind {
 /// Fusion plan derived from a `Vec<TensorChain>`. Tells the LLVM
 /// lowering pass:
 ///
-
 ///  * which instruction indices are part of a fused chain (skip
 ///  their per-op lowering — `chain_replaces[idx]` would emit
 ///  duplicate runtime calls)
@@ -280,7 +279,6 @@ impl TensorOpKind {
 ///  index where the fused-kernel runtime call is emitted in
 ///  place of the original op)
 ///
-
 /// Anchors are picked as the LAST instruction of each chain so all
 /// chain inputs are guaranteed to be live at the anchor PC — earlier
 /// anchor positions would let LLVM SSA construction dead-code the
@@ -377,7 +375,6 @@ fn match_op_at(pc_instr: &Instruction, op: &ChainOp) -> Option<bool> {
 /// instruction stream so the lowering can interleave them with the
 /// surrounding (non-tensor) IR.
 ///
-
 /// Takes `&[Instruction]` directly rather than `&VbcFunction` so the
 /// analyzer can be unit-tested without needing to construct a full
 /// `FunctionDescriptor` chain.

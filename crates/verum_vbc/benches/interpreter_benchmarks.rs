@@ -27,7 +27,6 @@ use verum_vbc::types::{PropertySet, TypeId, TypeRef, Visibility};
 
 /// Creates a simple test module with a counting loop function.
 ///
-
 /// The function is equivalent to:
 /// ```
 /// fn count_loop(n: i64) -> i64 {
@@ -155,7 +154,6 @@ fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
 
 /// Creates a simple arithmetic benchmark module.
 ///
-
 /// Performs N iterations of simple arithmetic operations.
 fn create_arith_module(iterations: i64) -> Arc<VbcModule> {
     let mut module = VbcModule::new("bench_arith".to_string());

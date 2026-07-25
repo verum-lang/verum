@@ -57,7 +57,6 @@ use std::collections::HashMap;
 
 /// Coarse-grained namespace for capability checks.
 ///
-
 /// Mirrors the family of [`IntrinsicCategory`](crate::intrinsics::IntrinsicCategory)
 /// values that the compiler can tag with `RequiresPermission`,
 /// plus broader stdlib-level scopes (file-open, socket-bind)
@@ -93,7 +92,6 @@ pub enum PermissionScope {
 impl PermissionScope {
     /// Stable byte encoding for wire-format use.
     ///
-
     /// The bytecode encoder writes `PermissionAssert::scope_tag`
     /// using these values (see `bytecode.rs::encode_instruction`).
     /// The dispatch handler decodes them via the inverse
@@ -132,7 +130,6 @@ impl PermissionScope {
 
 /// Opaque target identifier within a [`PermissionScope`].
 ///
-
 /// The router treats it as an arbitrary `u64` — interpretation is
 /// scope-specific. Codegen passes a stable hash (path, addr,
 /// algorithm) so that repeated calls with the same logical
@@ -184,7 +181,6 @@ pub enum PermissionDecision {
 
 /// Trait alias for the user-supplied policy callback.
 ///
-
 /// The closure must be `Send + Sync` because the router is
 /// shared across threads in the multi-worker scheduler hook
 /// (T1-I). It is invoked **only on cache misses**, so the cost
@@ -194,7 +190,6 @@ pub type PolicyFn = dyn Fn(PermissionScope, PermissionTargetId) -> PermissionDec
 
 /// Statistics recorded by the router.
 ///
-
 /// Used by the diagnostic surface (`verum audit --capabilities`)
 /// and by performance benchmarks to prove the warm-path budget.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -222,7 +217,6 @@ struct LastEntry {
 
 /// Routes intrinsic permission checks (#12 / P3.2).
 ///
-
 /// Construct with [`PermissionRouter::allow_all`] for the default
 /// permissive policy, or [`PermissionRouter::with_policy`] to
 /// install a host-supplied callback. Either form is mutated
@@ -309,7 +303,6 @@ impl PermissionRouter {
 
     /// Route a single check.
     ///
-
     /// Path order:
     ///  1. `last` one-entry cache → ≤2ns warm path
     ///  2. backing `map` lookup → ~10–30ns
@@ -317,7 +310,6 @@ impl PermissionRouter {
     ///  policy itself
     ///  4. allow-all fallback when no policy is wired
     ///
-
     /// The decision is back-filled into both caches so the next
     /// matching request hits the warm path.
     #[inline]

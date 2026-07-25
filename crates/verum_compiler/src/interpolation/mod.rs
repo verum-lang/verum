@@ -62,14 +62,12 @@ pub struct InterpolationDispatcher;
 impl InterpolationDispatcher {
     /// Dispatch interpolation to the appropriate handler
     ///
-
     /// # Arguments
     /// - `tag`: The interpolation tag (sql, html, url, etc.)
     /// - `template`: The template string
     /// - `interpolations`: The expressions to interpolate
     /// - `span`: Source location for error reporting
     ///
-
     /// # Returns
     /// The result of the interpolation as a string representation
     pub fn dispatch(

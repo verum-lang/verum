@@ -127,7 +127,6 @@ pub fn erase_proofs_from_module(module: Module) -> (Module, ProofErasureStats) {
 
 /// Erase all proof-level items from a list of modules.
 ///
-
 /// Returns the filtered modules and aggregate statistics.
 pub fn erase_proofs(modules: List<Module>) -> (List<Module>, ProofErasureStats) {
     let mut aggregate_stats = ProofErasureStats::default();

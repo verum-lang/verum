@@ -154,7 +154,6 @@ impl AotObjectCache {
     /// inputs.  Returns `None` (cache disabled for this compile)
     /// when the input file can't be read — never fatal.
     ///
-
     /// The key hashes, in order: the cache format version, the
     /// caller-built config fingerprint (compiler stamp + every
     /// out-of-module lowering knob), the input source bytes, and
@@ -164,7 +163,6 @@ impl AotObjectCache {
     /// fingerprint (`include_bytes!` — they change only with the
     /// binary).
     ///
-
     /// Deliberately NOT keyed on the VBC module: its serialization
     /// is per-process-HashMap-order nondeterministic (measured:
     /// identical length, different bytes on every run), so a VBC

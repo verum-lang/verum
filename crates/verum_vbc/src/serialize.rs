@@ -59,27 +59,22 @@ pub fn serialize_module(module: &VbcModule) -> VbcResult<Vec<u8>> {
 
 /// Serializes a VBC module to binary format with optional compression.
 ///
-
 /// The bytecode section is compressed using the specified algorithm if it
 /// meets the size threshold. Other sections (string table, extensions) are
 /// not compressed as they're typically smaller and already compact.
 ///
-
 /// # Arguments
 /// * `module` - The VBC module to serialize
 /// * `options` - Compression options (algorithm, level, threshold)
 ///
-
 /// # Example
 /// ```rust,ignore
 /// use verum_vbc::compression::CompressionOptions;
 /// use verum_vbc::serialize::serialize_module_compressed;
 ///
-
 /// // With zstd compression (default settings)
 /// let bytes = serialize_module_compressed(&module, CompressionOptions::zstd())?;
 ///
-
 /// // With lz4 for faster decompression
 /// let bytes = serialize_module_compressed(&module, CompressionOptions::lz4())?;
 /// ```
@@ -291,19 +286,15 @@ impl Serializer {
 
     /// Serializes bytecode with optional compression.
     ///
-
     /// # Format
     ///
-
     /// The bytecode section has a compression header followed by the data:
     /// - `u8`: Compression algorithm (0=None, 1=Zstd, 2=Lz4)
     /// - `u32`: Uncompressed size (only present if algorithm != None)
     /// - `bytes`: Compressed or uncompressed bytecode
     ///
-
     /// # Returns
     ///
-
     /// Returns `(stored_size, uncompressed_size)` where stored_size is what
     /// was actually written (including compression header).
     fn serialize_bytecode(&mut self, bytecode: &[u8]) -> VbcResult<(u32, u32)> {
@@ -751,11 +742,9 @@ impl Serializer {
 
     /// Serializes the extensions section (tensor metadata, FFI, dependencies).
     ///
-
     /// Returns (offset, size, extra_flags) where extra_flags are VbcFlags
     /// indicating which tensor metadata is present.
     ///
-
     /// Extension section format:
     /// - u8 section_mask: bitmask of present sections
     ///  - 0x01: shape_metadata (tensor shapes)

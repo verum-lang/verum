@@ -1640,11 +1640,9 @@ impl TerminationChecker {
 
     /// Extract the context around a call (pattern matching, etc.)
     ///
-
     /// Tracks which parameters are matched against patterns, what constructors
     /// were matched, and which fields/subcomponents are being used.
     ///
-
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Termination Checking
     fn extract_call_context(&self, call: &RecursiveCall) -> CallContext {
         // Start with an empty context

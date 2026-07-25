@@ -158,11 +158,9 @@ impl Drop for SourceLocation {
 
 /// A wrapper around error types which includes a [`SourceLocation`].
 ///
-
 /// This error is used to describe erros in the TableGen source file at a
 /// certain location.
 ///
-
 /// By calling `add_source_info`, information about the TableGen source file at
 /// the [`SourceLocation`] will be included in this error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,7 +190,6 @@ impl<E: std::error::Error> SourceError<E> {
 
     /// Replaces the inner error with the given error.
     ///
-
     /// Any source information that was previously attached with
     /// [`SourceError::add_source_info`] will be removed.
     pub fn set_error<F: std::error::Error>(self, error: F) -> SourceError<F> {
@@ -205,7 +202,6 @@ impl<E: std::error::Error> SourceError<E> {
 
     /// Replaces the location.
     ///
-
     /// Any source information that was previously attached with
     /// [`SourceError::add_source_info`] will be removed.
     pub fn set_location(mut self, location: impl SourceLoc) -> Self {
@@ -216,7 +212,6 @@ impl<E: std::error::Error> SourceError<E> {
     /// Adds information about the TableGen source file at the
     /// given [`SourceLocation`] to this error.
     ///
-
     /// A new error message will be created by `SourceMgr` class of LLVM.
     pub fn add_source_info(mut self, info: SourceInfo) -> Self {
         self.message = Some(Self::create_message(

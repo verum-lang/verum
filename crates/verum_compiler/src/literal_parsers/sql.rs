@@ -72,7 +72,6 @@ impl SqlDialect {
 
 /// Parse a `sql#"..."`-class tagged literal at compile time.
 ///
-
 /// On success the returned `ParsedLiteral::Sql` carries the
 /// normalised SQL text (callers reuse this as the on-wire payload),
 /// the dialect, the bound-parameter count, and a 64-bit fingerprint

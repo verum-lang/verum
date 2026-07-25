@@ -26,7 +26,6 @@ pub struct StructType<'ctx> {
 impl<'ctx> StructType<'ctx> {
     /// Create `StructType` from [`LLVMTypeRef`]
     ///
-
     /// # Safety
     /// Undefined behavior, if referenced type isn't struct type
     pub unsafe fn new(struct_type: LLVMTypeRef) -> Self {
@@ -39,19 +38,15 @@ impl<'ctx> StructType<'ctx> {
 
     /// Gets the type of a field belonging to this `StructType`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into()], false);
     ///
-
     /// assert_eq!(struct_type.get_field_type_at_index(0).unwrap().into_float_type(), f32_type);
     /// ```
     pub fn get_field_type_at_index(self, index: u32) -> Option<BasicTypeEnum<'ctx>> {
@@ -71,10 +66,8 @@ impl<'ctx> StructType<'ctx> {
 
     /// Gets the type of a field belonging to this `StructType`.
     ///
-
     /// # Safety
     ///
-
     /// The index must be less than [StructType::count_fields] and the struct must not be opaque.
     pub unsafe fn get_field_type_at_index_unchecked(self, index: u32) -> BasicTypeEnum<'ctx> {
         unsafe { BasicTypeEnum::new(LLVMStructGetTypeAtIndex(self.as_type_ref(), index)) }
@@ -82,14 +75,11 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates a `StructValue` based on this `StructType`'s definition.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_zero = f32_type.const_float(0.);
@@ -109,14 +99,11 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates a constant zero value of this `StructType`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
@@ -128,14 +115,11 @@ impl<'ctx> StructType<'ctx> {
 
     /// Gets the size of this `StructType`. Value may vary depending on the target architecture.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let f32_struct_type = context.struct_type(&[f32_type.into()], false);
@@ -147,19 +131,15 @@ impl<'ctx> StructType<'ctx> {
 
     /// Gets a reference to the `Context` this `StructType` was created in.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
     ///
-
     /// assert_eq!(struct_type.get_context(), context);
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
@@ -168,19 +148,15 @@ impl<'ctx> StructType<'ctx> {
 
     /// Gets this `StructType`'s name.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.opaque_struct_type("opaque_struct");
     ///
-
     /// assert_eq!(struct_type.get_name().unwrap().to_str().unwrap(), "opaque_struct");
     /// ```
     pub fn get_name(&self) -> Option<&CStr> {
@@ -197,23 +173,19 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates a `PointerType` with this `StructType` for its element type.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// // This example is ignored because LLVM 21 uses opaque pointers
     /// // and get_element_type() no longer exists
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
     /// let struct_ptr_type = struct_type.ptr_type(AddressSpace::default());
     ///
-
     /// assert_eq!(struct_ptr_type.get_element_type().into_struct_type(), struct_type);
     /// ```
     #[deprecated(note = "LLVM 21 uses opaque pointers. Use Context::ptr_type instead.")]
@@ -223,14 +195,11 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates a `FunctionType` with this `StructType` for its return type.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
@@ -246,20 +215,16 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates an `ArrayType` with this `StructType` for its element type.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
     /// let struct_array_type = struct_type.array_type(3);
     ///
-
     /// assert_eq!(struct_array_type.len(), 3);
     /// assert_eq!(struct_array_type.get_element_type().into_struct_type(), struct_type);
     /// ```
@@ -269,19 +234,15 @@ impl<'ctx> StructType<'ctx> {
 
     /// Determines whether or not a `StructType` is packed.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
     ///
-
     /// assert!(struct_type.is_packed());
     /// ```
     pub fn is_packed(self) -> bool {
@@ -290,19 +251,15 @@ impl<'ctx> StructType<'ctx> {
 
     /// Determines whether or not a `StructType` is opaque.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.opaque_struct_type("opaque_struct");
     ///
-
     /// assert!(struct_type.is_opaque());
     /// ```
     pub fn is_opaque(self) -> bool {
@@ -311,20 +268,16 @@ impl<'ctx> StructType<'ctx> {
 
     /// Counts the number of field types.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i8_type = context.i8_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), i8_type.into()], false);
     ///
-
     /// assert_eq!(struct_type.count_fields(), 2);
     /// ```
     pub fn count_fields(self) -> u32 {
@@ -333,20 +286,16 @@ impl<'ctx> StructType<'ctx> {
 
     /// Gets this `StructType`'s field types.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i8_type = context.i8_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), i8_type.into()], false);
     ///
-
     /// assert_eq!(struct_type.get_field_types(), &[f32_type.into(), i8_type.into()]);
     /// ```
     pub fn get_field_types(self) -> Vec<BasicTypeEnum<'ctx>> {
@@ -388,21 +337,17 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates an undefined instance of a `StructType`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i8_type = context.i8_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), i8_type.into()], false);
     /// let struct_type_undef = struct_type.get_undef();
     ///
-
     /// assert!(struct_type_undef.is_undef());
     /// ```
     pub fn get_undef(self) -> StructValue<'ctx> {
@@ -411,22 +356,18 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates a poison instance of a `StructType`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i8_type = context.i8_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), i8_type.into()], false);
     /// let struct_type_poison = struct_type.get_poison();
     ///
-
     /// assert!(struct_type_poison.is_poison());
     /// ```
     pub fn get_poison(self) -> StructValue<'ctx> {
@@ -435,28 +376,21 @@ impl<'ctx> StructType<'ctx> {
 
     /// Defines the body of a `StructType`.
     ///
-
     /// If the struct is an opaque type, it will no longer be after this call.
     ///
-
     /// Resetting the `packed` state of a non-opaque struct type may not work.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let opaque_struct_type = context.opaque_struct_type("opaque_struct");
     ///
-
     /// opaque_struct_type.set_body(&[f32_type.into()], false);
     ///
-
     /// assert!(!opaque_struct_type.is_opaque());
     /// ```
     pub fn set_body(self, field_types: &[BasicTypeEnum<'ctx>], packed: bool) -> bool {
@@ -477,21 +411,17 @@ impl<'ctx> StructType<'ctx> {
 
     /// Creates a constant `ArrayValue`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
     /// let struct_val = struct_type.const_named_struct(&[]);
     /// let struct_array = struct_type.const_array(&[struct_val, struct_val]);
     ///
-
     /// assert!(struct_array.is_const());
     /// ```
     pub fn const_array(self, values: &[StructValue<'ctx>]) -> ArrayValue<'ctx> {

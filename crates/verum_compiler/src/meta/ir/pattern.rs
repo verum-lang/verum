@@ -30,7 +30,6 @@ use verum_common::{Heap, List, Maybe, Text};
 
 /// Patterns for meta matching
 ///
-
 /// Comprehensive pattern support for compile-time evaluation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetaPattern {

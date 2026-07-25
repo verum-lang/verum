@@ -102,7 +102,6 @@ impl TheoryStats {
 
 /// Theory classification for statistics purposes.
 ///
-
 /// This is a coarser categorization than `ExtendedCharacteristics` — we
 /// bucket goals into a small number of categories for reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -157,7 +156,6 @@ impl TheoryClass {
 
     /// Classify an `ExtendedCharacteristics` into a single theory bucket.
     ///
-
     /// Priority order (first match wins):
     ///  sequences > strings > NRA > NIA > arrays > BV > datatypes >
     ///  LRA > LIA > quantifiers > UF > propositional > mixed
@@ -196,7 +194,6 @@ impl TheoryClass {
 
 /// Aggregate routing statistics.
 ///
-
 /// This struct is updated after every `solve()` call in the `BackendSwitcher`.
 /// It uses interior atomic counters for thread-safe updates without locks on
 /// the common path, and a `parking_lot::Mutex` for the per-theory breakdown.
@@ -348,7 +345,6 @@ impl RoutingStats {
 
     /// Record a cross-validation DIVERGENCE.
     ///
-
     /// This is a safety-critical event: it indicates either a solver bug or
     /// an encoding error. The event is logged (up to 100 most recent) for
     /// post-hoc analysis.

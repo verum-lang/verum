@@ -210,7 +210,6 @@ impl Process {
 /// reduced process, or `None` if no reduction is possible at this
 /// level.
 ///
-
 /// Looks at the **immediate** parallel structure: if `P = P₁ | P₂`
 /// where `P₁` starts with `x⟨y⟩.…` and `P₂` starts with `x(z).…`,
 /// fires the rule. More sophisticated search (under restrictions,

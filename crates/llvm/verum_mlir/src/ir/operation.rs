@@ -39,10 +39,8 @@ pub struct Operation<'c> {
 impl Operation<'_> {
     /// Creates an operation from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirOperation) -> Self {
         Self {
@@ -53,10 +51,8 @@ impl Operation<'_> {
 
     /// Creates an optional operation from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_option_raw(raw: MlirOperation) -> Option<Self> {
         if raw.ptr.is_null() {
@@ -142,14 +138,11 @@ impl<'c, 'a> OperationRef<'c, 'a> {
 
     /// Returns an operation.
     ///
-
     /// This function is different from `deref` because the correct lifetime is
     /// kept for the return type.
     ///
-
     /// # Safety
     ///
-
     /// The returned reference is safe to use only in the lifetime scope of the
     /// operation reference.
     pub unsafe fn to_ref(&self) -> &'a Operation<'c> {
@@ -166,10 +159,8 @@ impl<'c, 'a> OperationRef<'c, 'a> {
 
     /// Creates an operation reference from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirOperation) -> Self {
         Self {
@@ -180,10 +171,8 @@ impl<'c, 'a> OperationRef<'c, 'a> {
 
     /// Creates an optional operation reference from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_option_raw(raw: MlirOperation) -> Option<Self> {
         if raw.ptr.is_null() {
@@ -243,10 +232,8 @@ impl OperationRefMut<'_, '_> {
 
     /// Creates an operation reference from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirOperation) -> Self {
         Self {
@@ -257,10 +244,8 @@ impl OperationRefMut<'_, '_> {
 
     /// Creates an optional operation reference from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_option_raw(raw: MlirOperation) -> Option<Self> {
         if raw.ptr.is_null() {

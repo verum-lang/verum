@@ -32,17 +32,13 @@ use crate::ty::Type;
 
 /// Context declaration - defines an interface for dependency injection
 ///
-
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — Basic Context Syntax
 ///
-
 /// A context declaration is similar to a trait/protocol in other languages.
 /// It specifies operations that must be implemented by context providers.
 ///
-
 /// # Properties
 ///
-
 /// - **name**: The context name (e.g., "Logger", "Database")
 /// - **type_params**: Optional type parameters (e.g., State<S>)
 /// - **operations**: List of operations defined by this context
@@ -68,13 +64,10 @@ pub struct ContextDecl {
 
 /// Type parameter for parameterized contexts
 ///
-
 /// Context provision: "provide ContextName = implementation" installs a provider in lexical scope via task-local storage (theta) — Parameterized Contexts
 ///
-
 /// # Examples
 ///
-
 /// - `State<S>` - type parameter S
 /// - `Cache<K, V>` - type parameters K and V
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,10 +81,8 @@ pub struct TypeParam {
 
 /// Operation defined within a context
 ///
-
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — Basic Context Syntax
 ///
-
 /// Each operation defines:
 /// - A name
 /// - Parameters (name and type)
@@ -118,20 +109,15 @@ pub struct ContextOperation {
 impl ContextDecl {
     /// Create a new context declaration
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The context name
     ///
-
     /// # Examples
     ///
-
     /// ```
     /// use verum_types::di::decl::ContextDecl;
     ///
-
     /// let logger_context = ContextDecl::new("Logger".into());
     /// ```
     pub fn new(name: Text) -> Self {
@@ -146,21 +132,16 @@ impl ContextDecl {
 
     /// Create a context declaration with type parameters
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The context name
     /// * `type_params` - Type parameters for this context
     ///
-
     /// # Examples
     ///
-
     /// ```
     /// use verum_types::di::decl::{ContextDecl, TypeParam};
     ///
-
     /// let state_context = ContextDecl::with_type_params(
     ///  "State".into(),
     ///  vec![TypeParam::new("S".into())]
@@ -178,10 +159,8 @@ impl ContextDecl {
 
     /// Add an operation to this context
     ///
-
     /// # Arguments
     ///
-
     /// * `operation` - The operation to add
     pub fn add_operation(&mut self, operation: ContextOperation) {
         if operation.is_async {
@@ -215,16 +194,13 @@ impl ContextDecl {
 
     /// Validate this context declaration
     ///
-
     /// Checks:
     /// - At least one operation defined
     /// - No duplicate operation names
     /// - Type parameters are used in operations
     ///
-
     /// # Returns
     ///
-
     /// `Ok(())` if valid, `Err(ContextError)` otherwise
     pub fn validate(&self) -> Result<(), ContextError> {
         // Must have at least one operation
@@ -248,10 +224,8 @@ impl ContextDecl {
 
     /// Get the full qualified name including type parameters
     ///
-
     /// # Examples
     ///
-
     /// - `Logger` -> "Logger"
     /// - `State<S>` -> "State<S>"
     /// - `Cache<K, V>` -> "Cache<K, V>"
@@ -290,10 +264,8 @@ impl TypeParam {
 impl ContextOperation {
     /// Create a new context operation
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - Operation name
     /// * `params` - Parameters as (name, type) pairs
     /// * `return_type` - Return type

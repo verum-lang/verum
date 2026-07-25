@@ -355,7 +355,6 @@ pub struct PartialResult {
 
 /// Main static verification engine
 ///
-
 /// Integrates Z3 for static safety proofs with CBGR check elimination.
 pub struct StaticVerifier {
     /// Configuration
@@ -556,7 +555,6 @@ impl StaticVerifier {
 
     /// Verify a safety constraint
     ///
-
     /// Returns whether the constraint can be statically verified,
     /// allowing the corresponding runtime check to be eliminated.
     pub fn verify(&self, constraint: &SafetyConstraint) -> VerificationResult {
@@ -596,7 +594,6 @@ impl StaticVerifier {
 
     /// Verify multiple constraints, returning elimination decisions.
     ///
-
     /// `config.timeout_ms` bounds the cumulative wall-clock of the
     /// batch — once the budget is exhausted, every remaining
     /// constraint is short-circuited to a `Timeout` result rather

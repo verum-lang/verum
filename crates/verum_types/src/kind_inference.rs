@@ -82,20 +82,16 @@ use crate::{Result, TypeError};
 
 /// Kind of a type (the "type of a type")
 ///
-
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 lines 410-437
 ///
-
 /// Kinds form a hierarchy:
 /// - `*` (Type): Concrete types like Int, Bool, List<Int>
 /// - `* -> *`: Type constructors like List, Maybe, GenRef
 /// - `* -> * -> *`: Binary type constructors like Map, Result
 /// - `(* -> *) -> *`: Higher-order type constructors (rare)
 ///
-
 /// # Examples
 ///
-
 /// ```ignore
 /// Int : *
 /// List : * -> *
@@ -109,14 +105,12 @@ use crate::{Result, TypeError};
 pub enum Kind {
     /// Base kind: `*`
     ///
-
     /// The kind of concrete types that have values.
     /// Examples: Int, Bool, Text, List<Int>, Map<Text, Int>
     Type,
 
     /// Arrow kind: `k1 -> k2`
     ///
-
     /// The kind of type constructors that take a type of kind k1
     /// and produce a type of kind k2.
     /// Examples:
@@ -126,7 +120,6 @@ pub enum Kind {
 
     /// Kind variable for inference
     ///
-
     /// During kind inference, we introduce fresh kind variables
     /// and solve constraints to determine their concrete kinds.
     KindVar(u32),
@@ -156,7 +149,6 @@ impl Kind {
 
     /// Create a unary constructor kind `* -> *`
     ///
-
     /// Examples: List, Maybe, GenRef
     pub fn unary_constructor() -> Self {
         Kind::Arrow(Box::new(Kind::Type), Box::new(Kind::Type))
@@ -164,7 +156,6 @@ impl Kind {
 
     /// Create a binary constructor kind `* -> * -> *`
     ///
-
     /// Examples: Map, Result
     pub fn binary_constructor() -> Self {
         Kind::Arrow(
@@ -232,7 +223,6 @@ impl Kind {
 
     /// Get the arity of this kind (number of arrows)
     ///
-
     /// - `*` has arity 0
     /// - `* -> *` has arity 1
     /// - `* -> * -> *` has arity 2
@@ -256,7 +246,6 @@ impl Kind {
 
     /// Get the result kind after applying N type arguments
     ///
-
     /// For example:
     /// - `(* -> * -> *).apply_n(1) = * -> *`
     /// - `(* -> * -> *).apply_n(2) = *`
@@ -292,7 +281,6 @@ impl fmt::Display for Kind {
 
 /// Substitution for kind variables
 ///
-
 /// Maps kind variables to their inferred kinds.
 #[derive(Debug, Clone, Default)]
 pub struct KindSubstitution {
@@ -322,7 +310,6 @@ impl KindSubstitution {
 
     /// Compose two substitutions
     ///
-
     /// The result applies s1 first, then s2
     pub fn compose(&self, other: &KindSubstitution) -> KindSubstitution {
         let mut result = KindSubstitution::new();
@@ -527,7 +514,6 @@ impl KindError {
 
 /// Kind inference engine
 ///
-
 /// Implements constraint-based kind inference using unification.
 /// Similar to Hindley-Milner type inference, but for kinds.
 pub struct KindInferer {
@@ -548,7 +534,6 @@ pub struct KindInferer {
 impl KindInferer {
     /// Create a new kind inferer with stdlib type constructors pre-registered.
     ///
-
     /// Production code uses `new_minimal()` — type constructors are registered
     /// dynamically during resolve_type_definition from parsed .vr files.
     /// This method pre-registers stdlib types for tests, benchmarks, and bootstrapping.
@@ -560,12 +545,10 @@ impl KindInferer {
 
     /// Create a minimal kind inferer without stdlib types.
     ///
-
     /// STDLIB-AGNOSTIC: This constructor creates an empty kind inferer.
     /// Types should be registered via `register_type_constructor()` or
     /// `register_stdlib_types()` based on stdlib metadata.
     ///
-
     /// Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
     pub fn new_minimal() -> Self {
         Self {
@@ -578,12 +561,10 @@ impl KindInferer {
 
     /// Register standard library type constructors.
     ///
-
     /// **LEGACY**: Contains hardcoded type names for bootstrapping.
     /// In a fully stdlib-agnostic system, this information would come from
     /// stdlib metadata (e.g., stdlib.vbca or type annotations).
     ///
-
     /// Types are registered based on their arity:
     /// - Unary (* -> *): Single type parameter (List, Maybe, Set, etc.)
     /// - Binary (* -> * -> *): Two type parameters (Map, Result)
@@ -637,7 +618,6 @@ impl KindInferer {
 
     /// Infer the kind of a type
     ///
-
     /// This is the main entry point for kind inference.
     /// It analyzes a type and returns its kind.
     pub fn infer_kind(&mut self, ty: &Type) -> Result<Kind> {
@@ -1046,7 +1026,6 @@ impl KindInferer {
 
     /// Generate kind constraints from a protocol definition
     ///
-
     /// This analyzes a protocol and generates constraints for:
     /// - Associated type kinds
     /// - Method signature kinds
@@ -1087,7 +1066,6 @@ impl KindInferer {
 
     /// Solve the constraint system
     ///
-
     /// Uses Robinson's unification algorithm to solve kind constraints.
     /// Returns the final substitution or an error if constraints are unsatisfiable.
     pub fn solve(&mut self) -> Result<KindSubstitution> {
@@ -1119,7 +1097,6 @@ impl KindInferer {
 
     /// Unify two kinds
     ///
-
     /// Robinson's unification algorithm adapted for kinds.
     /// Returns a substitution that makes the two kinds equal.
     pub fn unify(
@@ -1163,7 +1140,6 @@ impl KindInferer {
 
     /// Bind a kind variable to a kind
     ///
-
     /// Performs occurs check to prevent infinite kinds.
     pub fn bind_kind_var(&mut self, var: u32, kind: Kind, span: Span) -> Result<KindSubstitution> {
         // Occurs check: ensure var doesn't appear in kind
@@ -1178,7 +1154,6 @@ impl KindInferer {
 
     /// Check that a type has the expected kind
     ///
-
     /// This is the main entry point for kind checking.
     /// It infers the kind of a type and checks it matches the expected kind.
     pub fn check_kind(&mut self, ty: &Type, expected_kind: &Kind) -> Result<()> {
@@ -1198,7 +1173,6 @@ impl KindInferer {
 
     /// Check protocol definition has correct kinds
     ///
-
     /// Validates:
     /// - All associated types have valid kinds
     /// - All method signatures respect kinds
@@ -1228,7 +1202,6 @@ impl KindInferer {
 
     /// Check if a type is well-kinded
     ///
-
     /// A type is well-kinded if:
     /// - All type constructors are applied correctly
     /// - All type applications result in kind *
@@ -1265,34 +1238,26 @@ pub struct HKTInstantiationResult {
 impl KindInferer {
     /// Check kind compatibility when applying a type constructor to arguments.
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
     ///
-
     /// When applying `F<Int>` where `F: * -> *`, this verifies:
     /// 1. F has the expected constructor kind (* -> *)
     /// 2. Int has kind * (the expected argument kind)
     /// 3. The resulting application F<Int> has kind *
     ///
-
     /// # Arguments
     ///
-
     /// * `constructor` - The type constructor being applied (e.g., F, List, Map)
     /// * `args` - The type arguments being applied
     /// * `span` - Source location for error reporting
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(Kind)` - The resulting kind after application
     /// * `Err(TypeError)` - If kind mismatch or arity error
     ///
-
     /// # Examples
     ///
-
     /// ```ignore
     /// // F<Int> where F: * -> *
     /// let result_kind = inferer.check_type_application_kind(
@@ -1302,7 +1267,6 @@ impl KindInferer {
     /// )?;
     /// assert_eq!(result_kind, Kind::Type);
     ///
-
     /// // Map<Text, Int> where Map: * -> * -> *
     /// let result_kind = inferer.check_type_application_kind(
     ///  &Type::TypeConstructor { name: "Map".into(), arity: 2, kind: Kind::binary_constructor() },
@@ -1384,7 +1348,6 @@ impl KindInferer {
 
     /// Infer the kind of a type constructor.
     ///
-
     /// For Type::TypeConstructor, returns the declared kind.
     /// For Type::Named/Generic, looks up the kind from known_kinds.
     /// For Type::Var, returns a fresh kind variable.
@@ -1434,36 +1397,28 @@ impl KindInferer {
 
     /// Instantiate an HKT parameter with a concrete type constructor.
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — HKT parameter instantiation
     ///
-
     /// When calling `fn foo<F<_>: Functor>(x: F<Int>)` with `foo::<List>(...)`,
     /// this verifies:
     /// 1. `List` has kind `* -> *` (matches F's expected kind)
     /// 2. `List` implements `Functor` (satisfies protocol bound)
     ///
-
     /// # Arguments
     ///
-
     /// * `hkt_param_name` - Name of the HKT parameter (e.g., "F")
     /// * `expected_kind` - The expected kind for the parameter (e.g., * -> *)
     /// * `concrete_constructor` - The concrete type constructor being substituted (e.g., List)
     /// * `protocol_bounds` - Protocol bounds that must be satisfied (e.g., Functor)
     /// * `span` - Source location for error reporting
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(HKTInstantiationResult)` - Successful instantiation with result info
     /// * `Err(TypeError)` - If kind mismatch or protocol not implemented
     ///
-
     /// # Examples
     ///
-
     /// ```ignore
     /// // Instantiate F<_> with List where F<_>: Functor
     /// let result = inferer.instantiate_hkt_param(
@@ -1527,30 +1482,23 @@ impl KindInferer {
 
     /// Check if a type constructor implements a protocol.
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Protocol checking for type constructors
     ///
-
     /// For HKT bounds like `F<_>: Functor + Monad`, this checks if the type
     /// constructor (e.g., List, Maybe) implements the required protocol.
     ///
-
     /// Note: This method validates the kind compatibility. Actual protocol
     /// implementation checking is delegated to ProtocolChecker.
     ///
-
     /// # Arguments
     ///
-
     /// * `constructor` - The type constructor to check
     /// * `protocol_name` - Name of the protocol
     /// * `expected_hkt_kind` - The expected kind for the protocol's type parameter
     /// * `span` - Source location for error reporting
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(())` - If the constructor has compatible kind
     /// * `Err(TypeError)` - If kind is incompatible
     pub fn check_constructor_protocol_compatibility(
@@ -1608,7 +1556,6 @@ impl KindInferer {
 
     /// Get the kind for a named type constructor.
     ///
-
     /// Returns Some(kind) if the constructor is known, None otherwise.
     pub fn get_constructor_kind(&self, name: &str) -> Maybe<&Kind> {
         match self.known_kinds.get(&Text::from(name)) {
@@ -1627,7 +1574,6 @@ impl KindInferer {
 
     /// Get the arity of a type constructor.
     ///
-
     /// Returns Some(arity) for type constructors, None for concrete types.
     pub fn get_constructor_arity(&mut self, ty: &Type) -> Maybe<usize> {
         match self.infer_constructor_kind(ty) {
@@ -1649,20 +1595,15 @@ impl KindInferer {
 impl Type {
     /// Create a type application from a constructor and arguments.
     ///
-
     /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .3 - Type applications
     ///
-
     /// # Arguments
     ///
-
     /// * `constructor` - The type constructor (must have kind * -> ... -> *)
     /// * `args` - Type arguments to apply
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let list_int = Type::make_type_app(
     ///  Type::type_constructor("List", 1, Kind::unary_constructor()),
@@ -1736,7 +1677,6 @@ impl Type {
 
     /// Apply additional type arguments to a type.
     ///
-
     /// If the type is already a TypeApp, extends the arguments.
     /// If it's a TypeConstructor or other type, creates a new TypeApp.
     pub fn apply_type_args(self, additional_args: List<Type>) -> Self {
@@ -1761,7 +1701,6 @@ impl Type {
 
     /// Check if this type is fully applied (all type arguments provided).
     ///
-
     /// A TypeConstructor with arity N is fully applied when it has N arguments.
     /// A concrete type (kind *) is always considered fully applied.
     pub fn is_fully_applied(&self) -> bool {
@@ -1780,7 +1719,6 @@ impl Type {
 
     /// Get the number of remaining type parameters needed.
     ///
-
     /// Returns 0 for fully applied types or concrete types.
     pub fn remaining_arity(&self) -> usize {
         match self {
@@ -1801,7 +1739,6 @@ impl Type {
 
 /// Extension trait for TypeChecker to add kind inference
 ///
-
 /// This will be integrated into the main TypeChecker in infer.rs
 pub trait KindInference {
     /// Get the kind inferer

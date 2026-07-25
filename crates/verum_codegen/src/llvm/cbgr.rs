@@ -167,7 +167,6 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Create a ThinRef (Tier 0 - full checks).
     ///
-
     /// This generates the full reference with generation tracking.
     pub fn create_ref_tier0(
         &mut self,
@@ -199,7 +198,6 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Create a reference (Tier 1/2 - optimized path).
     ///
-
     /// For compiler-proven safe or manually unsafe references,
     /// we skip generation tracking.
     pub fn create_ref_checked(
@@ -246,12 +244,10 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Create a ThinRef from a raw user pointer.
     ///
-
     /// Reads the allocation header at `ptr - 32`:
     ///  - offset 0: generation (i32)
     ///  - offset 4: epoch (i16)
     ///
-
     /// Packs into `{ ptr, generation, epoch_and_caps }` where epoch_and_caps
     /// stores epoch in the low 16 bits and zero capabilities in the high 16.
     pub fn create_thin_ref(
@@ -322,7 +318,6 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Dereference a ThinRef (Tier 0 - with real validation).
     ///
-
     /// Extracts generation and epoch from the ThinRef, packs them into a
     /// single i64 (generation in low 32 bits, epoch in bits 32..47), then
     /// calls `verum_cbgr_validate_ref(user_ptr, packed_gen_epoch)`.
@@ -477,7 +472,6 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Dereference a reference (Tier 1/2 - no checks).
     ///
-
     /// For compiler-proven or unsafe references, skip validation.
     pub fn deref_checked(
         &mut self,
@@ -524,7 +518,6 @@ impl<'ctx> CbgrLowering<'ctx> {
 
     /// Validate a reference (explicit ChkRef instruction).
     ///
-
     /// This performs a full Tier 0 validation regardless of the reference's tier.
     /// Used for explicit validation checks in the bytecode.
     pub fn validate_ref(

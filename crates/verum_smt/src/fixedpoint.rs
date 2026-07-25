@@ -32,7 +32,6 @@ use verum_common::{List, Map, Maybe, Set, Text};
 
 /// Get raw Z3_context from high-level Context
 ///
-
 /// # Safety
 /// The Context must be valid and its internal layout must match ContextRepr.
 /// This is only guaranteed for z3 =0.19.7.
@@ -54,7 +53,6 @@ unsafe fn get_z3_context(ctx: &Context) -> Z3_context {
 
 /// Get raw Z3_func_decl from FuncDecl
 ///
-
 /// # Safety
 /// The FuncDecl must be valid and its internal layout must match FuncDeclRepr.
 /// This is only guaranteed for z3 =0.19.7.
@@ -74,7 +72,6 @@ unsafe fn get_z3_func_decl(decl: &FuncDecl) -> Z3_func_decl {
 
 /// Get raw Z3_ast from AST types
 ///
-
 /// # Safety
 /// The AST type T must have layout { ctx: Context, z3_ast: Z3_ast }.
 /// This is only guaranteed for z3 =0.19.7 AST wrapper types (Bool, Int, etc.).
@@ -94,7 +91,6 @@ unsafe fn get_z3_ast<T>(ast: &T) -> Z3_ast {
 
 /// Get raw Z3_params from Params
 ///
-
 /// # Safety
 /// The Params must be valid and its internal layout must match ParamsRepr.
 /// This is only guaranteed for z3 =0.19.7.
@@ -269,7 +265,6 @@ struct FixedPointInternal {
 impl FixedPointInternal {
     /// Create new fixedpoint engine
     ///
-
     /// # Safety
     /// - z3_ctx must be a valid Z3_context
     unsafe fn new(z3_ctx: Z3_context) -> Result<Self, Text> {
@@ -309,7 +304,6 @@ impl Drop for FixedPointInternal {
 
 /// Z3 Fixed-point engine wrapper
 ///
-
 /// Provides safe Rust API for Z3's fixedpoint solver (Datalog/CHC solver).
 /// Supports:
 /// - Datalog rules and facts
@@ -332,13 +326,11 @@ pub struct FixedPointEngine {
 impl FixedPointEngine {
     /// Create new fixed-point engine
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::FixedPointEngine;
     /// use z3::Context;
     ///
-
     /// let ctx = Context::thread_local();
     /// let engine = FixedPointEngine::new(ctx).expect("Failed to create engine");
     /// ```
@@ -357,20 +349,16 @@ impl FixedPointEngine {
 
     /// Register a relation (predicate) with the fixedpoint engine
     ///
-
     /// Relations must be registered before they can be used in rules.
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::FixedPointEngine;
     /// use z3::{Context, Sort, Symbol, FuncDecl};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
     ///
-
     /// // Create a predicate edge(Int, Int)
     /// let int_sort = Sort::int();
     /// let edge = FuncDecl::new(
@@ -379,7 +367,6 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-
     /// engine.register_relation(&edge);
     /// ```
     pub fn register_relation(&mut self, decl: &FuncDecl) -> Result<(), Text> {
@@ -423,23 +410,19 @@ impl FixedPointEngine {
 
     /// Add a Horn clause rule
     ///
-
     /// Rules should be of the form:
     /// - `forall vars. body => head` (implication)
     /// - `head` (fact)
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::FixedPointEngine;
     /// use z3::{Context, Sort, FuncDecl};
     /// use z3::ast::{Ast, Bool, Dynamic, Int};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
     ///
-
     /// let int_sort = Sort::int();
     /// let edge = FuncDecl::new(
     ///  "edge",
@@ -447,10 +430,8 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-
     /// engine.register_relation(&edge).unwrap();
     ///
-
     /// // Add fact: edge(1, 2)
     /// let x = Int::from_i64(1);
     /// let y = Int::from_i64(2);
@@ -495,21 +476,17 @@ impl FixedPointEngine {
 
     /// Add a fact (ground atom)
     ///
-
     /// This is a convenience method for adding rules with no premises.
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::FixedPointEngine;
     /// use z3::{Context, Sort, FuncDecl};
     /// use z3::ast::{Ast, Int};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
     ///
-
     /// let int_sort = Sort::int();
     /// let node = FuncDecl::new(
     ///  "node",
@@ -517,10 +494,8 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-
     /// engine.register_relation(&node).unwrap();
     ///
-
     /// // Add facts: node(1), node(2), node(3)
     /// for i in 1..=3 {
     ///  let args = [Int::from_i64(i).into()];
@@ -556,13 +531,11 @@ impl FixedPointEngine {
 
     /// Extract a constant value from a Dynamic AST node
     ///
-
     /// Supports:
     /// - Integer constants (Int)
     /// - Boolean constants (Bool)
     /// - Bitvector constants (BV)
     ///
-
     /// For non-constant expressions, returns an error.
     fn extract_constant_value(&self, ast: &Dynamic) -> Result<u32, Text> {
         // SAFETY: Get raw Z3_ast pointer
@@ -686,7 +659,6 @@ impl FixedPointEngine {
 
     /// Assert a constraint (background axiom)
     ///
-
     /// Constraints are used as background axioms when using PDR mode.
     /// They are ignored in standard Datalog mode.
     pub fn assert(&mut self, axiom: &Bool) -> Result<(), Text> {
@@ -699,24 +671,20 @@ impl FixedPointEngine {
 
     /// Query whether a predicate is derivable
     ///
-
     /// Returns:
     /// - `SatResult::Sat` if the query is satisfiable (derivable)
     /// - `SatResult::Unsat` if the query is unsatisfiable (not derivable)
     /// - `SatResult::Unknown` if timed out or otherwise failed
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::FixedPointEngine;
     /// use z3::{Context, Sort, FuncDecl, SatResult};
     /// use z3::ast::{Ast, Int};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
     ///
-
     /// let int_sort = Sort::int();
     /// let edge = FuncDecl::new(
     ///  "edge",
@@ -724,17 +692,14 @@ impl FixedPointEngine {
     ///  &Sort::bool(),
     /// );
     ///
-
     /// engine.register_relation(&edge).unwrap();
     ///
-
     /// // Add some edges
     /// let x = Int::from_i64(1);
     /// let y = Int::from_i64(2);
     /// let fact = edge.apply(&[&x.into(), &y.into()]).as_bool().unwrap();
     /// engine.add_rule(&fact, Some("edge_1_2")).unwrap();
     ///
-
     /// // Query if edge(1,2) exists
     /// let query = edge.apply(&[&x.into(), &y.into()]).as_bool().unwrap();
     /// let result = engine.query(&query).unwrap();
@@ -757,7 +722,6 @@ impl FixedPointEngine {
 
     /// Query multiple relations simultaneously
     ///
-
     /// More efficient than multiple single queries when you want to check
     /// multiple predicates at once.
     pub fn query_relations(&mut self, relations: &[&FuncDecl]) -> Result<SatResult, Text> {
@@ -792,11 +756,9 @@ impl FixedPointEngine {
 
     /// Get the answer (solution) from the last query
     ///
-
     /// Only valid after a SAT query result. Returns the formula that
     /// encodes the satisfying answers.
     ///
-
     /// In Datalog mode: returns disjunction of all derivations
     /// In PDR mode: returns a single conjunction
     pub fn get_answer(&self) -> Result<Bool, Text> {
@@ -815,7 +777,6 @@ impl FixedPointEngine {
 
     /// Get reason for unknown result
     ///
-
     /// Returns a string describing why the query returned Unknown.
     pub fn get_reason_unknown(&self) -> Text {
         // SAFETY: Pointers are valid
@@ -831,17 +792,14 @@ impl FixedPointEngine {
 
     /// Set parameters for the fixedpoint engine
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::FixedPointEngine;
     /// use z3::{Context, Params};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
     ///
-
     /// let mut params = Params::new();
     /// params.set_symbol("engine", "spacer"); // Use SPACER engine (PDR)
     /// params.set_u32("timeout", 30000); // 30 second timeout
@@ -960,22 +918,18 @@ impl FixedPointEngine {
 
     /// Add a Datalog rule
     ///
-
     /// Converts a DatalogRule to Z3 format and adds it to the fixedpoint engine.
     /// Rules are of the form: head :- body1, body2, ..., bodyN, constraints.
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::{FixedPointEngine, DatalogRule, Atom};
     /// use verum_common::{List, Text};
     /// use z3::Context;
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
     ///
-
     /// // Define rule: path(X,Z) :- edge(X,Y), path(Y,Z)
     /// let rule = DatalogRule {
     ///  head: Atom {
@@ -1021,22 +975,18 @@ impl FixedPointEngine {
 
     /// Add a CHC (Constrained Horn Clause)
     ///
-
     /// CHCs are the most general form of Horn clauses with constraints.
     /// Format: ∀vars. (H₁ ∧ ... ∧ Hₙ ∧ C₁ ∧ ... ∧ Cₘ) ⇒ conclusion
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::{FixedPointEngine, CHC, Atom};
     /// use verum_common::{List, Text};
     /// use z3::{Context, Sort};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut engine = FixedPointEngine::new(ctx.clone()).unwrap();
     ///
-
     /// let chc = CHC {
     ///  vars: List::new(),
     ///  hypothesis: List::new(),
@@ -1179,7 +1129,6 @@ impl FixedPointEngine {
 
     /// Get invariants discovered during solving
     ///
-
     /// Extracts inductive invariants from the fixedpoint engine after a successful query.
     /// These invariants can be used to understand the solution structure.
     pub fn get_invariants(&self) -> List<Bool> {
@@ -1192,7 +1141,6 @@ impl FixedPointEngine {
 
     /// Validate a solution against the original rules
     ///
-
     /// Checks that the proposed solution is indeed inductive and satisfies all rules.
     pub fn validate_solution(&mut self, solution: &FixedPointSolution) -> Result<bool, Text> {
         // For each predicate interpretation, check if it satisfies all rules
@@ -1230,7 +1178,6 @@ pub mod patterns {
     impl ListPredicates {
         /// Create a predicate for list length
         ///
-
         /// Defines: length(nil) = 0, length(cons(h,t)) = 1 + length(t)
         pub fn length(ctx: &Context) -> RecursivePredicate {
             let list_sort = Sort::uninterpreted(Symbol::String("List".to_string()));
@@ -1262,7 +1209,6 @@ pub mod patterns {
 
         /// Create a predicate for list membership
         ///
-
         /// Defines: contains(x, cons(x, t)), contains(x, cons(h, t)) :- contains(x, t)
         pub fn contains(ctx: &Context) -> RecursivePredicate {
             let elem_sort = Sort::int();
@@ -1328,7 +1274,6 @@ pub mod patterns {
     impl TreePredicates {
         /// Create a predicate for tree height
         ///
-
         /// Defines: height(leaf) = 0, height(node(l,r)) = 1 + max(height(l), height(r))
         pub fn height(ctx: &Context) -> RecursivePredicate {
             let tree_sort = Sort::uninterpreted(Symbol::String("Tree".to_string()));
@@ -1366,7 +1311,6 @@ pub mod patterns {
 
         /// Create a predicate for tree search
         ///
-
         /// Defines: search(x, node(x, _, _)), search(x, node(_, l, r)) :- search(x, l) ∨ search(x, r)
         pub fn search(ctx: &Context) -> RecursivePredicate {
             let elem_sort = Sort::int();
@@ -1450,7 +1394,6 @@ pub mod patterns {
     impl GraphPredicates {
         /// Create a predicate for graph reachability
         ///
-
         /// Defines: reach(x,y) :- edge(x,y), reach(x,z) :- edge(x,y) ∧ reach(y,z)
         pub fn reachability(ctx: &Context) -> RecursivePredicate {
             let node_sort = Sort::int();
@@ -1481,7 +1424,6 @@ pub mod patterns {
 
         /// Create a predicate for detecting cycles
         ///
-
         /// Defines: cycle(x) :- edge(x,x), cycle(x) :- edge(x,y) ∧ cycle(y) ∧ reach(y,x)
         pub fn cycle_detection(ctx: &Context) -> RecursivePredicate {
             let node_sort = Sort::int();
@@ -1545,7 +1487,6 @@ pub mod patterns {
 
 /// Create a fixed-point context with default configuration
 ///
-
 /// This is a convenience function that sets up a FixedPointEngine with
 /// commonly used parameters for Verum verification.
 pub fn create_fixedpoint_context(use_spacer: bool) -> Result<FixedPointEngine, Text> {
@@ -1575,7 +1516,6 @@ pub fn create_fixedpoint_context(use_spacer: bool) -> Result<FixedPointEngine, T
 
 /// Solve a recursive predicate and extract solution
 ///
-
 /// High-level function that handles the full workflow:
 /// 1. Register predicate
 /// 2. Query for satisfiability
@@ -1602,7 +1542,6 @@ pub fn solve_recursive_predicate(
 
 /// Extract invariants from a fixedpoint solution
 ///
-
 /// Analyzes the solution to extract meaningful invariants that can be
 /// used in subsequent verification steps.
 pub fn extract_invariants(solution: &FixedPointSolution) -> List<Bool> {
@@ -1620,7 +1559,6 @@ pub fn extract_invariants(solution: &FixedPointSolution) -> List<Bool> {
 
 /// Validate that a solution is correct
 ///
-
 /// Performs extensive validation to ensure the solution:
 /// 1. Satisfies all rules
 /// 2. Is inductive
@@ -1732,31 +1670,25 @@ impl RecursiveProgramVerifier {
 
     /// Verify termination using ranking function
     ///
-
     /// This method verifies that a recursive function terminates by proving that:
     /// 1. The ranking function is always non-negative
     /// 2. The ranking function strictly decreases on every recursive call
     ///
-
     /// Uses Z3's SMT solver to verify these properties.
     ///
-
     /// # Theory
     /// A ranking function maps the function's state to a well-founded order (typically natural numbers).
     /// Termination is proven by showing the ranking decreases on each recursive call.
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::{RecursiveProgramVerifier, RecursiveFunction, RankingFunction};
     /// use z3::{Context, Sort, ast::{Int, Bool}};
     /// use verum_common::{List, Text};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut verifier = RecursiveProgramVerifier::new(ctx.clone()).unwrap();
     ///
-
     /// // Define factorial function: fact(n) = if n <= 0 then 1 else n * fact(n-1)
     /// let n = Int::new_const("n");
     /// let func = RecursiveFunction {
@@ -1768,14 +1700,12 @@ impl RecursiveProgramVerifier {
     ///  verification_conditions: List::new(),
     /// };
     ///
-
     /// // Ranking function: n (decreases from n to n-1)
     /// let ranking = RankingFunction {
     ///  expression: n.clone(),
     ///  well_founded_constraint: n.ge(&Int::from_i64(0)),
     /// };
     ///
-
     /// let terminates = verifier.verify_termination(func, ranking).unwrap();
     /// assert!(terminates);
     /// ```
@@ -1883,26 +1813,21 @@ impl DatalogSolver {
 
     /// Register a relation (predicate) with the Datalog solver
     ///
-
     /// This must be called before adding facts or rules that use the relation.
     /// The relation is defined by its name and parameter sorts.
     ///
-
     /// # Arguments
     /// * `name` - The name of the relation (predicate)
     /// * `param_sorts` - The sorts (types) of the relation's parameters
     ///
-
     /// # Example
     /// ```ignore
     /// use verum_smt::fixedpoint::DatalogSolver;
     /// use z3::{Context, Sort};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut solver = DatalogSolver::new(ctx.clone()).unwrap();
     ///
-
     /// // Register a unary relation "node" over integers
     /// solver.register_relation("node", &[Sort::int()]).unwrap();
     /// ```
@@ -1931,42 +1856,35 @@ impl DatalogSolver {
 
     /// Query whether an atom is derivable in the Datalog program
     ///
-
     /// This method queries the fixed-point engine to determine if the given atom
     /// (predicate application) holds in the least fixed point of the rules.
     ///
-
     /// # Theory
     /// In Datalog:
     /// - Facts are added as base cases
     /// - Rules define how to derive new facts
     /// - The query asks: "Is this atom in the transitive closure?"
     ///
-
     /// # Examples
     /// ```ignore
     /// use verum_smt::{DatalogSolver, Atom, DatalogRule};
     /// use verum_common::{List, Text};
     /// use z3::{Context, Sort, FuncDecl, ast::Int};
     ///
-
     /// let ctx = Context::thread_local();
     /// let mut solver = DatalogSolver::new(ctx.clone()).unwrap();
     ///
-
     /// // Define edge relation
     /// // Add facts: edge(1,2), edge(2,3)
     /// // Add rule: path(x,y) :- edge(x,y)
     /// // Add rule: path(x,z) :- edge(x,y), path(y,z)
     ///
-
     /// // Query: path(1,3)?
     /// let query_atom = Atom {
     ///  predicate: Text::from("path"),
     ///  args: List::from(vec![Int::from_i64(1).into(), Int::from_i64(3).into()]),
     /// };
     ///
-
     /// let result = solver.query(query_atom).unwrap();
     /// assert!(result); // Should be true (transitive closure)
     /// ```

@@ -67,11 +67,9 @@ use crate::analysis::BlockId;
 
 /// Concrete value representation
 ///
-
 /// Represents known constant values that can be tracked through the CFG.
 /// Used for constant propagation and concrete value analysis.
 ///
-
 /// Known constant values tracked through CFG for constant propagation.
 /// Enables pruning of infeasible paths in escape analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -116,7 +114,6 @@ impl ConcreteValue {
 
     /// Merge two concrete values (lattice join)
     ///
-
     /// # Lattice Structure
     /// ```text
     ///  Top (all values)
@@ -235,12 +232,10 @@ pub enum BinaryOp {
 
 /// Range of possible values for integers
 ///
-
 /// Used for proving bounds constraints and refining escape analysis.
 /// For example, if we know size ∈ [0, 99], we can prove small allocations
 /// don't escape.
 ///
-
 /// Integer range [min, max] for proving bounds constraints. Example: if
 /// size is in [0, 99], the allocation is bounded and may qualify for
 /// stack promotion (NoEscape).
@@ -368,11 +363,9 @@ impl fmt::Display for ValueRange {
 
 /// Symbolic value for complex expressions
 ///
-
 /// Represents values that aren't known concretely but can be expressed
 /// symbolically for constraint solving.
 ///
-
 /// Values not known concretely but expressible symbolically for constraint solving.
 /// Used to track relationships like `x = y + 1` through the CFG.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -494,11 +487,9 @@ impl fmt::Display for SymbolicValue {
 
 /// Value state at a program point
 ///
-
 /// Maps SSA versions to their known values (concrete or range).
 /// Maintained via dataflow analysis through the CFG.
 ///
-
 /// Maps SSA versions to concrete values and range constraints at a program point.
 /// Updated via forward dataflow through the CFG, merged at join points.
 #[derive(Debug, Clone)]
@@ -604,7 +595,6 @@ impl ValueState {
 
     /// Refine state with path condition
     ///
-
     /// When we know a predicate is true/false on a path, refine the value state.
     /// For example: if (x < 10) -> refine x to [MIN, 9]
     #[must_use]
@@ -676,11 +666,9 @@ pub struct PropagationStats {
 
 /// Value propagator through CFG
 ///
-
 /// Implements dataflow analysis to propagate values through the control
 /// flow graph. Computes value state at each program point.
 ///
-
 /// # Algorithm
 /// 1. Initialize entry block with parameter values
 /// 2. Iterate CFG in topological order
@@ -690,7 +678,6 @@ pub struct PropagationStats {
 ///  - Propagate to successors
 /// 4. Fixed point reached when no changes occur
 ///
-
 /// Forward dataflow propagation engine: iterates CFG in topological order,
 /// merges incoming states at join points, applies transfer functions (evaluate
 /// operations), and propagates to successors until fixpoint.
@@ -725,11 +712,9 @@ impl ValuePropagator {
 
     /// Create a propagator with a custom configuration.
     ///
-
     /// The active configuration controls which value-tracking
     /// domains run when transfer functions execute:
     ///
-
     ///  * `enable_constant_propagation` — gates the concrete-value
     ///  set in `propagate_constant` and the constant fast-path
     ///  inside `propagate_binop`.
@@ -929,7 +914,6 @@ impl Default for ValuePropagator {
 
 /// Path predicate for conditional branches
 ///
-
 /// Represents a boolean condition that determines which path is taken.
 /// Used to refine value states and prove path feasibility.
 #[derive(Debug, Clone)]

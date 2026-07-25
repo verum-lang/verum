@@ -58,7 +58,6 @@ use crate::document::DocumentState;
 
 /// CBGR hint provider for LSP integration
 ///
-
 /// Analyzes code and provides inline hints about CBGR overhead and
 /// optimization opportunities.
 pub struct CbgrHintProvider {
@@ -114,12 +113,10 @@ impl CbgrHintProvider {
 
     /// Analyze the reference whose sigil sits under `position`, if any.
     ///
-
     /// This is the public entry point used by hover to produce CBGR
     /// information without requiring the user to enable the full inlay-hint
     /// stream. It always runs, regardless of [`is_enabled`].
     ///
-
     /// Returns `None` if `position` is not inside a reference sigil.
     pub fn analyze_at_position(
         &self,
@@ -152,7 +149,6 @@ impl CbgrHintProvider {
 
     /// Render a `RefAnalysis` as Markdown suitable for a hover bubble.
     ///
-
     /// Format is stable and consumed by `hover::hover_at_position`. Kept here
     /// so that the same structured view backs hover, code-lens and code
     /// actions without duplicated string-building logic.
@@ -217,7 +213,6 @@ impl CbgrHintProvider {
 
     /// Provide inlay hints for a document
     ///
-
     /// Returns inline hints showing:
     /// - CBGR overhead for &T references
     /// - Promotion opportunities for NoEscape references
@@ -269,7 +264,6 @@ impl CbgrHintProvider {
 
     /// Provide code actions for CBGR optimization
     ///
-
     /// Returns actions like:
     /// - "Promote to &checked T"
     /// - "View escape analysis"
@@ -319,14 +313,12 @@ impl CbgrHintProvider {
 
     /// Find all references in a given range
     ///
-
     /// Uses text-based scanning to find reference patterns:
     /// - `&` followed by identifier (borrow)
     /// - `&mut` followed by identifier (mutable borrow)
     /// - `&checked` (Tier 1 reference)
     /// - `&unsafe` (Tier 2 reference)
     ///
-
     /// Returns ReferenceInfo for each found reference.
     fn find_references_in_range(
         &self,
@@ -441,7 +433,6 @@ impl CbgrHintProvider {
 
     /// Analyze a reference for escape behavior
     ///
-
     /// Performs lightweight escape analysis to determine if a reference
     /// can be promoted to &checked T (zero-cost).
     fn analyze_reference(&self, document: &DocumentState, _ref_id: RefId) -> EscapeResult {
@@ -491,7 +482,6 @@ impl CbgrHintProvider {
 
     /// Create promotion hint for promotable reference.
     ///
-
     /// The label is intentionally tiny (`0ns` / `→✓`) so it doesn't overlay the
     /// source line. All the detail lives in the tooltip and in the hover.
     fn create_promotion_hint(&self, ref_info: ReferenceInfo, can_promote: bool) -> InlayHint {
@@ -652,7 +642,6 @@ struct ReferenceInfo {
 
 /// Syntactic context of a reference in source.
 ///
-
 /// The CBGR model attaches a runtime cost to *reference creation* — `let r = &x`
 /// or `f(&x)`. A reference *type* in a function signature (`fn f(p: &List<T>)`)
 /// is not a reference creation; the cost belongs to the caller's borrow.
@@ -670,7 +659,6 @@ pub enum RefContext {
 
 /// Public analysis result for a single reference.
 ///
-
 /// Consumed by hover, code-actions and inlay-hint code paths. Keeping this
 /// type public lets other LSP surfaces (hover, code lens, diagnostics) share
 /// one source of truth for reference-level CBGR information.
@@ -689,7 +677,6 @@ pub struct RefAnalysis {
 impl RefAnalysis {
     /// Can this reference be promoted to `&checked T` (0ns)?
     ///
-
     /// Only Tier 0 references that do not escape their scope are promotable.
     pub fn is_promotable(&self) -> bool {
         matches!(self.tier, ReferenceTier::Tier0 { .. })
@@ -721,13 +708,11 @@ impl RefAnalysis {
 
 /// Classify the syntactic context of a `&` sigil at `ref_start` (byte offset).
 ///
-
 /// A `&` is in *type position* when the immediately preceding non-whitespace,
 /// non-comment token is one of `:`, `->` or `<` — i.e. it introduces a type
 /// annotation on a parameter, field, return, or generic argument. In every
 /// other position we treat it as a runtime borrow expression.
 ///
-
 /// This is a pragmatic text-level heuristic; a full AST-based classifier
 /// would be strictly more precise but also strictly more expensive and is
 /// unnecessary for surfacing hover/inlay information.

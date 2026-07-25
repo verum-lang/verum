@@ -90,7 +90,6 @@ impl ScopeResolver {
 
     /// Resolve an identifier using sets-of-scopes algorithm
     ///
-
     /// The algorithm finds all bindings for the name whose scopes are a
     /// subset of the identifier's scopes, then returns the most specific
     /// (largest subset).

@@ -82,7 +82,6 @@ enum IEndpoint {
 
 /// Minimal cubical normal-form representation.
 ///
-
 /// We only need enough structure to decide definitional equality:
 /// we track the *name* of dimension variables and *value* atoms, plus
 /// the constructor forms whose reduction rules can fire.
@@ -201,11 +200,9 @@ impl CubicalNorm {
 
     /// Reduce to Weak Head Normal Form.
     ///
-
     /// Applies the five core cubical reduction rules (identical to
     /// `verum_types::cubical::CubicalTerm::whnf`):
     ///
-
     /// 1. `transport(refl, x) ↦ x`
     /// 2. `transport(ua(e), x) ↦ e.fwd(x)`
     /// 3. `transport(sym(ua(e)), x) ↦ e.bwd(x)`
@@ -314,10 +311,8 @@ impl CubicalNorm {
 
 /// Convert an `Expr` into a `CubicalNorm` for normalisation.
 ///
-
 /// The mapping is:
 ///
-
 /// | Expr pattern | CubicalNorm |
 /// |-----------------------------------------|----------------------|
 /// | literal / path variable | `Atom(name)` |
@@ -447,10 +442,8 @@ fn func_head_name(func: &Expr) -> Option<String> {
 
 /// Execute the `cubical` (or `homotopy`) tactic on a proof goal.
 ///
-
 /// ## Algorithm
 ///
-
 /// 1. Expect the goal to be an equality: `lhs == rhs`.
 /// 2. Convert `lhs` and `rhs` to [`CubicalNorm`] via
 ///  [`expr_to_cubical_norm`].
@@ -461,7 +454,6 @@ fn func_head_name(func: &Expr) -> Option<String> {
 ///  the original goal as a single remaining subgoal so the caller
 ///  can try another tactic).
 ///
-
 /// The `fallback_smt` closure receives the original goal when cubical
 /// normalisation is insufficient. The closure typically calls
 /// `ProofSearchEngine::try_auto`.
@@ -494,17 +486,14 @@ pub fn execute_cubical_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
 
 /// Execute the `category_simp` tactic.
 ///
-
 /// Applies a bounded (≤ `MAX_REWRITES`) sequence of categorical rewrite
 /// rules to the goal, checking after each step whether both sides have
 /// become definitionally equal:
 ///
-
 /// * **Associativity**: `(f ∘ g) ∘ h = f ∘ (g ∘ h)`
 /// * **Left identity**: `id ∘ f = f`
 /// * **Right identity**: `f ∘ id = f`
 ///
-
 /// After exhausting the rewrite budget, any remaining equality is
 /// deferred to the SMT fallback.
 pub fn execute_category_simp_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
@@ -535,15 +524,12 @@ pub fn execute_category_simp_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
 
 /// Execute the `category_law` tactic.
 ///
-
 /// A more aggressive version of `category_simp` that also unfolds
 /// functor-preservation laws:
 ///
-
 /// * `F(id) = id`
 /// * `F(g ∘ f) = F(g) ∘ F(f)`
 ///
-
 /// Uses a larger rewrite budget (100 steps) before falling back to SMT.
 pub fn execute_category_law_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
     const MAX_REWRITES: usize = 100;
@@ -571,14 +557,12 @@ pub fn execute_category_law_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
 
 /// Execute the `descent_check` tactic.
 ///
-
 /// Recognises goals of the form `descent_condition(cover, sections)` or
 /// `compatible_sections(cover, s1, s2)` and delegates them to the SMT
 /// solver. The sheaf-domain encoding in `domains/` handles the actual
 /// verification; this tactic is a thin routing shim that tells the SMT
 /// layer to activate that encoding.
 ///
-
 /// For goals that do not match the descent pattern, the tactic is
 /// `NotApplicable` so the proof engine can try other tactics.
 pub fn execute_descent_check_tactic(goal: &ProofGoal) -> CubicalTacticOutcome {
@@ -637,7 +621,6 @@ pub enum ProofMethod {
 
 /// Called by `ProofSearchEngine::try_named_tactic` for `"cubical"` / `"homotopy"`.
 ///
-
 /// Returns:
 /// - `Ok(List::new())` — goal proved by cubical normalisation.
 /// - `Err(ProofError::TacticFailed)` with a `__smt_fallback` message — tells
@@ -704,7 +687,6 @@ pub fn try_descent_check(goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError
 
 /// Canonical representation of a morphism expression after category rewriting.
 ///
-
 /// We represent a normalised morphism as a left-flat list of atoms joined
 /// by composition — `[f, g, h]` means `f ∘ g ∘ h` with identity elements
 /// removed. This makes equality checking trivial.
@@ -740,12 +722,10 @@ impl CatNorm {
 
 /// Normalise a morphism `Expr` under category associativity + identity laws.
 ///
-
 /// Recognises:
 /// - `id` (identity) — stripped
 /// - `f.compose(g)` / `compose(f, g)` / `f >> g` / `g << f` — flattened
 ///
-
 /// Returns a [`CatNorm`] (flat atom list without identities).
 fn normalise_cat(expr: &Expr, budget: usize) -> CatNorm {
     if budget == 0 {
@@ -896,7 +876,6 @@ fn is_identity_method(name: &str) -> bool {
 
 /// Check whether an expression is shaped like a descent condition.
 ///
-
 /// Matches:
 /// - A call to `descent_condition(…)` or `compatible_sections(…)`
 /// - A method call with descent-related names
@@ -948,7 +927,6 @@ fn is_descent_shaped(expr: &Expr) -> bool {
 
 /// Construct a synthetic `F(arg)` call expression for functor law unfolding.
 ///
-
 /// Uses the real span from `func` so that any diagnostics produced during
 /// normalisation point to the original source location rather than a dummy
 /// span.

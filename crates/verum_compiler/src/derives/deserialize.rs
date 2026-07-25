@@ -74,22 +74,18 @@ impl DeriveMacro for DeriveDeserialize {
 impl DeriveDeserialize {
     /// Generate deserialize body for struct types
     ///
-
     /// Generates code like:
     /// ```verum
     /// const FIELDS: &[&str] = &["field1", "field2"];
     ///
-
     /// struct __Visitor;
     /// impl Visitor for __Visitor {
     ///  type Value = TypeName;
     ///
-
     ///  fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
     ///  let mut field1: Option<Type1> = None;
     ///  let mut field2: Option<Type2> = None;
     ///
-
     ///  while let Some(key) = map.next_key::<&str>()? {
     ///  match key {
     ///  "field1" => field1 = Some(map.next_value()?),
@@ -98,7 +94,6 @@ impl DeriveDeserialize {
     ///  }
     ///  }
     ///
-
     ///  Ok(TypeName {
     ///  field1: field1.ok_or_else(|| Error::missing_field("field1"))?,
     ///  field2: field2.ok_or_else(|| Error::missing_field("field2"))?,
@@ -106,7 +101,6 @@ impl DeriveDeserialize {
     ///  }
     /// }
     ///
-
     /// deserializer.deserialize_struct("TypeName", FIELDS, __Visitor)
     /// ```
     fn generate_struct_deserialize(
@@ -542,7 +536,6 @@ impl DeriveDeserialize {
 
     /// Generate deserialize body for enum types
     ///
-
     /// Generates code like:
     /// ```verum
     /// const VARIANTS: &[&str] = &["Unit", "Tuple", "Struct"];

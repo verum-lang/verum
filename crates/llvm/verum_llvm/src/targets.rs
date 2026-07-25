@@ -630,25 +630,20 @@ impl Target {
 
     /// Create a target machine from given [TargetMachineOptions].
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::targets::{InitializationConfig, Target, TargetMachine, TargetTriple, TargetMachineOptions};
     /// use verum_llvm::OptimizationLevel;
     ///
-
     /// Target::initialize_native(&InitializationConfig::default()).unwrap();
     ///
-
     /// let triple = TargetMachine::get_default_triple();
     /// let target = Target::from_triple(&triple).unwrap();
     /// let options = TargetMachineOptions::default()
     ///  .set_cpu("generic")
     ///  .set_level(OptimizationLevel::Aggressive);
     ///
-
     /// let target_machine = target.create_target_machine_from_options(&triple, options).unwrap();
     /// ```
     pub fn create_target_machine_from_options(
@@ -771,17 +766,13 @@ impl TargetMachine {
 
     /// Gets the default triple for the current system.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::targets::TargetMachine;
     ///
-
     /// let default_triple = TargetMachine::get_default_triple();
     ///
-
     /// assert_eq!(default_triple.as_str().to_str(), Ok("x86_64-pc-linux-gnu"));
     /// ```
     pub fn get_default_triple() -> TargetTriple {
@@ -800,10 +791,8 @@ impl TargetMachine {
 
     /// Gets a string containing the host CPU's name (triple).
     ///
-
     /// # Example Output
     ///
-
     /// `x86_64-pc-linux-gnu`
     pub fn get_host_cpu_name() -> LLVMString {
         use verum_llvm_sys::target_machine::LLVMGetHostCPUName;
@@ -813,10 +802,8 @@ impl TargetMachine {
 
     /// Gets a comma separated list of supported features by the host CPU.
     ///
-
     /// # Example Output
     ///
-
     /// `+sse2,+cx16,+sahf,-tbm`
     pub fn get_host_cpu_features() -> LLVMString {
         use verum_llvm_sys::target_machine::LLVMGetHostCPUFeatures;
@@ -849,19 +836,15 @@ impl TargetMachine {
 
     /// Writes a `TargetMachine` to a `MemoryBuffer`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{CodeModel, RelocMode, FileType, Target, TargetMachine, TargetTriple, InitializationConfig};
     ///
-
     /// Target::initialize_native(&InitializationConfig::default()).unwrap();
     ///
-
     /// let opt = OptimizationLevel::Default;
     /// let reloc = RelocMode::Default;
     /// let model = CodeModel::Default;
@@ -877,16 +860,13 @@ impl TargetMachine {
     /// )
     /// .unwrap();
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     ///
-
     /// module.add_function("my_fn", fn_type, None);
     ///
-
     /// let buffer = target_machine.write_to_memory_buffer(&module, FileType::Assembly).unwrap();
     /// ```
     pub fn write_to_memory_buffer(
@@ -920,22 +900,17 @@ impl TargetMachine {
 
     /// Saves a `TargetMachine` to a file.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{CodeModel, RelocMode, FileType, Target, TargetMachine, TargetTriple, InitializationConfig};
     ///
-
     /// use std::path::Path;
     ///
-
     /// Target::initialize_native(&InitializationConfig::default()).unwrap();
     ///
-
     /// let opt = OptimizationLevel::Default;
     /// let reloc = RelocMode::Default;
     /// let model = CodeModel::Default;
@@ -952,16 +927,13 @@ impl TargetMachine {
     /// )
     /// .unwrap();
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let void_type = context.void_type();
     /// let fn_type = void_type.fn_type(&[], false);
     ///
-
     /// module.add_function("my_fn", fn_type, None);
     ///
-
     /// assert!(target_machine.write_to_file(&module, FileType::Object, &path).is_ok());
     /// ```
     pub fn write_to_file(
@@ -1031,19 +1003,15 @@ impl TargetData {
 
     /// Gets the `IntType` representing a bit width of a pointer. It will be assigned the referenced context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
-
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
@@ -1159,7 +1127,6 @@ impl Drop for TargetData {
 /// LLVM target machine options provide another way to create target machines,
 /// used with [Target::create_target_machine_from_options].
 ///
-
 /// The option structure exposes an additional setting (i.e., the target ABI)
 /// and provides default values for unspecified settings.
 

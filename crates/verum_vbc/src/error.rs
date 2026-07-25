@@ -298,10 +298,8 @@ pub enum VbcError {
 
 /// Renders the body of `VbcError::MultipleErrors` for `Display`.
 ///
-
 /// Produces the form:
 ///
-
 /// ```text
 /// validation failed with 3 errors:
 ///  1. invalid function reference: FunctionId(99)
@@ -309,7 +307,6 @@ pub enum VbcError {
 ///  3. invalid type reference: TypeId(9999)
 /// ```
 ///
-
 /// Indented per-error lines mean any caller that prints the error
 /// gets the full forensic detail without needing to walk the inner
 /// `Vec<VbcError>` manually. Used by the validator and by

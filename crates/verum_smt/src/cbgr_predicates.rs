@@ -62,7 +62,6 @@ use z3::{FuncDecl, SatResult, Solver, Sort, Symbol};
 
 /// Generation tracking predicates for refinement types
 ///
-
 /// CBGR generation tracking predicates for use in ensures/requires clauses.
 /// Instead of lifetime-annotated functions, Verum uses ensures clauses with
 /// generation predicates, e.g.: `fn get_slice(&self) -> &Item ensures generation(result) == generation(self)`.
@@ -91,7 +90,6 @@ pub enum GenerationPredicate {
 
 /// Encodes CBGR predicates to Z3
 ///
-
 /// Z3 0.19+ uses thread-local context resolution. The other Z3 declarations
 /// (generation/epoch/valid/same_alloc and the reference bitvector sort) are
 /// constructed inline by the `encode_*` methods rather than retained as
@@ -117,17 +115,13 @@ impl CBGRPredicateEncoder {
 
     /// Encode generation extraction
     ///
-
     /// generation(ref) extracts bits 64-127 from the reference bitvector.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_smt::cbgr_predicates::CBGRPredicateEncoder;
     ///
-
     /// let encoder = CBGRPredicateEncoder::new();
     /// // Verify: generation(ref) == 42
     /// ```
@@ -138,7 +132,6 @@ impl CBGRPredicateEncoder {
 
     /// Encode epoch extraction
     ///
-
     /// epoch(ref) extracts bits 112-127 from the generation counter.
     pub fn encode_epoch(&self, ref_var: &BV) -> BV {
         // Extract bits 112-127 (epoch counter from generation)
@@ -148,7 +141,6 @@ impl CBGRPredicateEncoder {
 
     /// Encode validity check
     ///
-
     /// A reference is valid if its generation <= global_generation.
     pub fn encode_valid(&self, ref_var: &BV) -> Bool {
         let ref_gen = self.encode_generation(ref_var);
@@ -163,7 +155,6 @@ impl CBGRPredicateEncoder {
 
     /// Encode same allocation check
     ///
-
     /// Two references point to the same allocation if their pointers match.
     pub fn encode_same_allocation(&self, ref_a: &BV, ref_b: &BV) -> Bool {
         // Extract pointers (bits 0-63)
@@ -176,13 +167,10 @@ impl CBGRPredicateEncoder {
 
     /// Verify a CBGR property
     ///
-
     /// Takes a property expressed using generation predicates and verifies it.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// // Verify: valid(ref1) && valid(ref2) => same_allocation(ref1, ref2)
     /// ```
@@ -260,7 +248,6 @@ impl CBGRPredicateEncoder {
 
     /// Extract counterexample from SAT model
     ///
-
     /// Parses the Z3 model to extract concrete values for reference variables,
     /// including pointer, generation, and epoch fields from 128-bit bitvectors.
     fn extract_counterexample(
@@ -308,7 +295,6 @@ impl CBGRPredicateEncoder {
 
     /// Parse a 128-bit reference bitvector from Z3 model evaluation
     ///
-
     /// Layout: [ptr: 64 bits][generation: 48 bits][epoch: 16 bits]
     fn parse_reference_bv(&self, bv: &BV, model: &z3::Model) -> ReferenceValue {
         // Extract pointer (bits 0-63)
@@ -342,7 +328,6 @@ impl CBGRPredicateEncoder {
 
     /// Convert a Z3 bitvector to u64
     ///
-
     /// Evaluates the bitvector in the model and parses the resulting string representation.
     fn bv_to_u64(&self, bv: &BV, model: &z3::Model) -> u64 {
         if let Some(evaluated) = model.eval(bv, true) {
@@ -366,7 +351,6 @@ impl CBGRPredicateEncoder {
 
     /// Encode CBGR invariants
     ///
-
     /// These are global axioms that must always hold:
     /// 1. Generation counters are monotonic
     /// 2. Valid references have generation <= global
@@ -397,7 +381,6 @@ impl CBGRPredicateEncoder {
 
     /// Verify generation monotonicity
     ///
-
     /// Checks that if ref2 is allocated after ref1, then gen(ref2) >= gen(ref1).
     pub fn verify_monotonicity(&self, ref1: &BV, ref2: &BV) -> bool {
         let solver = Solver::new();
@@ -415,7 +398,6 @@ impl CBGRPredicateEncoder {
 
     /// Verify epoch increment on reuse
     ///
-
     /// When an allocation is reused, the epoch must increment.
     pub fn verify_epoch_increment(&self, old_ref: &BV, new_ref: &BV) -> bool {
         let solver = Solver::new();
@@ -472,7 +454,6 @@ pub fn encode_generation_counter(gen_value: u64, epoch: u16) -> u64 {
 
 /// Verify generation-aware refinement type
 ///
-
 /// Parses a refinement string containing generation predicates and verifies
 /// them using Z3. Supports the following predicate syntax:
 /// - `generation(ref) >= N` - generation counter comparison
@@ -481,19 +462,15 @@ pub fn encode_generation_counter(gen_value: u64, epoch: u16) -> u64 {
 /// - `valid(ref)` - reference validity check
 /// - `same_allocation(a, b)` - same allocation check
 ///
-
 /// # Example
 ///
-
 /// ```no_run
 /// use verum_smt::cbgr_predicates::verify_generation_refinement;
 ///
-
 /// // Verify that generation is always non-negative
 /// let result = verify_generation_refinement("generation(ref) >= 0");
 /// assert!(result.is_valid);
 ///
-
 /// // Verify epoch bounds
 /// let result = verify_generation_refinement("epoch(ref) <= 65535");
 /// assert!(result.is_valid);

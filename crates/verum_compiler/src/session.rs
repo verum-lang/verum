@@ -30,7 +30,6 @@ pub struct FunctionId(pub u64);
 
 /// A compilation session that tracks all state during compilation
 ///
-
 /// Type-erased script-permission policy. Wraps a boxed `Fn` whose
 /// signature exactly matches `PermissionRouter::set_policy`. Has a
 /// `Debug` stub so the surrounding `Session` can keep its derived
@@ -73,21 +72,18 @@ pub struct Session {
 
     /// Diagnostics accumulated during compilation.
     ///
-
     /// Audit-2.3 (event-stream): the original `Shared<RwLock<List<Diagnostic>>>`
     /// took the write lock on EVERY emit. On a 10K-function module the
     /// thousands of emissions from parallel type-check / refinement /
     /// codegen passes serialised through that single lock — a documented
     /// scalability hotspot. The fix is a hybrid:
     ///
-
     ///  * **`diagnostics_queue`** — lock-free MPMC queue, all emits
     ///  push here without contention.
     ///  * **`diagnostics_aggregate`** — owned by readers; the list
     ///  read-API drains the queue into this on demand and clones
     ///  the result. Locked, but only on the cold read path.
     ///
-
     /// Hot-path emit cost: one atomic push (~10 ns) vs a parking_lot
     /// write lock acquire-release (~50 ns uncontended, microseconds
     /// under contention).
@@ -101,7 +97,6 @@ pub struct Session {
 
     /// Next available FileId (atomic for lock-free allocation).
     ///
-
     /// Wrapped in `Shared` so that ModuleLoaders created via
     /// `create_module_loader` hand out a single monotonic FileId
     /// sequence consistent with `Session::next_file_id()`. Without
@@ -120,12 +115,10 @@ pub struct Session {
 
     /// Tier analysis cache for reference tier decisions.
     ///
-
     /// Stores the results of tier analysis for each function, indexed by
     /// FunctionId. The codegen phase uses this cache to determine which references
     /// can be promoted from Tier 0 (~15ns) to Tier 1 (0ns).
     ///
-
     /// CBGR analysis results from escape analysis (tier promotion decisions).
     tier_analysis_cache: Shared<RwLock<Map<FunctionId, TierAnalysisResult>>>,
 
@@ -134,11 +127,9 @@ pub struct Session {
 
     /// Configuration evaluator for @cfg conditional compilation.
     ///
-
     /// This evaluator is initialized from CompilerOptions and used to filter
     /// items with @cfg attributes during compilation.
     ///
-
     /// Conditional compilation: platform-specific and feature-gated code paths.
     cfg_evaluator: CfgEvaluator,
 
@@ -148,14 +139,12 @@ pub struct Session {
 
     /// Shared SMT routing statistics.
     ///
-
     /// Populated by verification phases that dispatch through
     /// `verum_smt::SmtBackendSwitcher`. The CLI reads these at the end
     /// of compilation to drive `verum smt-stats` (persisted to
     /// `$VERUM_STATE_DIR/smt-stats.json`). The field is always present —
     /// phases that don't use SMT simply leave it empty.
     ///
-
     /// `Arc` so the switcher inside each phase can hold an owned handle
     /// without moving the session.
     routing_stats: std::sync::Arc<verum_smt::routing_stats::RoutingStats>,
@@ -166,7 +155,6 @@ pub struct Session {
     /// serialise the result into the persistent script cache without
     /// re-running the pipeline.
     ///
-
     /// `None` until the first compile-and-run succeeds; `Some` after.
     /// `Arc` so callers receive a cheap clone of the same module the
     /// interpreter just executed — no double-allocation, no re-encode.
@@ -174,36 +162,30 @@ pub struct Session {
 
     /// Script-mode permission policy installed by the CLI runner.
     ///
-
     /// `Some(closure)` when the entry source is a script and the CLI
     /// has built a policy from the script's resolved `PermissionSet`
     /// (frontmatter ∪ CLI flags). The policy is a function from
     /// `(scope, target_id)` → `Allow | Deny`.
     ///
-
     /// The pipeline transfers this into the `VbcInterpreter`'s
     /// `PermissionRouter` immediately after constructing the
     /// interpreter, so subsequent intrinsic dispatches (raw syscalls,
     /// gated FFI calls, opt-in `check_permission` calls in stdlib)
     /// hit the script's policy on cache miss.
     ///
-
     /// `None` for project-mode runs and any single-file run that
     /// isn't a script — those keep the router's default allow-all
     /// behaviour, matching pre-script-mode semantics.
     ///
-
     /// Boxed-closure type chosen to match `PermissionRouter::set_policy`'s
     /// `F: Fn(...) + Send + Sync + 'static` bound exactly.
     script_permission_policy: Shared<RwLock<Option<ScriptPermissionPolicy>>>,
 
     /// Process exit code requested by the most recent execution.
     ///
-
     /// `None` for `()` / `nil` / non-Int returns (CLI exits 0).
     /// `Some(n)` for `Int` / `Bool` returns (CLI exits with `n`).
     ///
-
     /// Writing this field instead of calling `std::process::exit`
     /// from inside the pipeline lets the CLI run post-execution work
     /// — persisting the script cache, flushing telemetry, printing
@@ -221,7 +203,6 @@ pub struct Session {
     /// then read by the pipeline when it constructs
     /// `LoweringConfig` for the AOT path.
     ///
-
     /// `None` is the trusted-application path — the AOT lowerer
     /// elides every `PermissionAssert` site (matching the
     /// interpreter's allow-all default when no policy is wired).
@@ -252,7 +233,6 @@ pub struct Session {
 impl Session {
     /// Create a new compilation session.
     ///
-
     /// Applies cross-cutting feature reconciliations once at startup
     /// (e.g., disabling SMT verification when refinement types are
     /// turned off) so downstream phases see a consistent view of the
@@ -434,7 +414,6 @@ impl Session {
     /// after the interpreter is constructed; subsequent intrinsic
     /// dispatches consult the script's grants on cache miss.
     ///
-
     /// Replacing an existing policy is supported but rare — the
     /// expected lifecycle is at-most-once per script run.
     pub fn set_script_permission_policy(&self, policy: ScriptPermissionPolicy) {
@@ -456,7 +435,6 @@ impl Session {
     /// when it builds `LoweringConfig`, baking the resolved grants
     /// into the generated binary at compile time.
     ///
-
     /// `None` (the default) is the trusted-application path —
     /// `PermissionAssert` opcodes lower to no-ops, matching the
     /// allow-all interpreter default for plain applications.
@@ -488,7 +466,6 @@ impl Session {
 
     /// Convenience accessor for the unified language-feature set.
     ///
-
     /// Equivalent to `self.options().language_features`, but callers that
     /// only need to query features shouldn't have to drag in the full
     /// `CompilerOptions` import.
@@ -500,7 +477,6 @@ impl Session {
     /// struct. Called from `Session::new*` constructors so that no
     /// caller can bypass them.
     ///
-
     /// Current reconciliations:
     ///  1. If `types.refinement` is disabled, the refinement-type SMT
     ///  path is a no-op — downgrade `verify_mode` to `Runtime` so
@@ -870,7 +846,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Access the shared SMT routing statistics handle.
     ///
-
     /// Phase code clones this `Arc` when constructing an
     /// `SmtBackendSwitcher`, so all verification work in a session
     /// shares a single stats collector. The CLI calls
@@ -891,7 +866,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Register external cog dependencies from lockfile data.
     ///
-
     /// Each entry is (name, version, root_path). This is a convenience method
     /// so CLI code doesn't need to depend on verum_modules directly.
     pub fn register_cog_dependencies(&mut self, deps: Vec<(String, String, std::path::PathBuf)>) {
@@ -907,22 +881,17 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Create a new compilation session with a pre-populated module registry.
     ///
-
     /// This is an optimization for test performance: instead of re-registering
     /// ~166 stdlib modules for every test (~500ms), tests can pass a deep_clone
     /// of a cached registry (~1ms).
     ///
-
     /// # Arguments
     ///
-
     /// * `options` - Compiler options for this session
     /// * `registry` - Pre-populated module registry (typically a deep_clone of the stdlib cache)
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// // Get cached registry (returns None if not yet populated)
     /// if let Some(registry) = get_cached_stdlib_registry() {
@@ -962,7 +931,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Build a TargetConfig from CompilerOptions
     ///
-
     /// Parses target_triple or detects host platform, then applies
     /// custom features and flags from options.
     fn build_target_config(options: &CompilerOptions) -> TargetConfig {
@@ -1012,14 +980,11 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get the cfg evaluator for conditional compilation.
     ///
-
     /// Use this to check if items with @cfg attributes should be included
     /// in compilation based on the current target configuration.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let item = // ... item with @cfg(unix) attribute
     /// if session.cfg_evaluator().should_include(&item) {
@@ -1100,14 +1065,12 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     /// Load a SYNTHETIC source string produced by macro / derive /
     /// monomorphization / @delegate expansion (#274 + #284).
     ///
-
     /// The resulting `SourceFile` carries a `SyntheticOrigin`
     /// back-pointer at the user-source span that triggered the
     /// expansion. Diagnostics emitted against spans inside this
     /// file are resolved to user-visible locations via
     /// `Span::resolve_to_user_source(|fid| self.synthetic_origin(fid))`.
     ///
-
     /// `name`: human-readable label for the synthetic file (e.g.
     ///  `"<derive:Eq for User>"`, `"<macro:assert_eq>"`,
     ///  `"<mono:List<Int>>"`). Surfaces in diagnostic output when
@@ -1154,7 +1117,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Look up the `SyntheticOrigin` for a FileId, if any.
     ///
-
     /// Used by `Span::resolve_to_user_source(|fid| session.
     /// synthetic_origin(fid))` to walk the chain from a synthetic
     /// span back to its user-source ancestor. Returns `None` for
@@ -1195,7 +1157,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Emit a diagnostic.
     ///
-
     /// Audit-2.3: lock-free push onto `diagnostics_queue`. Concurrent
     /// emitters from parallel type-check / refinement / codegen passes
     /// don't block each other. The error flag uses an atomic for the
@@ -1212,7 +1173,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Emit multiple diagnostics (batched for efficiency).
     ///
-
     /// SegQueue has no batch-push API, so the loop is just N atomic
     /// pushes — still lock-free and faster than the prior write-lock
     /// roundtrip per diagnostic.
@@ -1331,14 +1291,12 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Phase-result reducer for the `continue_on_error` semantics.
     ///
-
     /// Pipeline phases historically used `phase.do_thing()?;` —
     /// every phase short-circuits on the first hard error. That
     /// model fails IDE / LSP / CI workflows that want ALL
     /// diagnostics in one pass: a single missing semicolon hides
     /// every subsequent type error.
     ///
-
     /// This helper lets the pipeline opt into accumulation: when
     /// `CompilerOptions.continue_on_error` is true and a phase
     /// returns `Err`, the error is converted into a Severity::Error
@@ -1347,12 +1305,10 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
     /// accumulated diagnostics surface at `abort_if_errors()` at
     /// the end of the pipeline.
     ///
-
     /// When `continue_on_error` is false (the default), this
     /// function is a no-op pass-through — `result` is returned
     /// verbatim, preserving the current short-circuit behaviour.
     ///
-
     /// Closes the inert-defense pattern at session.rs:659 — pre-fix
     /// `continue_on_error` landed on the session but no production
     /// code path consulted it.
@@ -1411,10 +1367,8 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Create a module loader for the session.
     ///
-
     /// Uses the input directory (or file's parent) as the root path for module resolution.
     ///
-
     /// Module loader initialized from session root path for file-to-module mapping.
     pub fn create_module_loader(&self) -> ModuleLoader {
         // When input is a directory, use it directly as the root
@@ -1453,7 +1407,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get access to the module registry.
     ///
-
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn module_registry(&self) -> Shared<RwLock<ModuleRegistry>> {
         self.module_registry.clone()
@@ -1461,7 +1414,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Register a module in the module registry.
     ///
-
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn register_module(&self, module_info: verum_modules::ModuleInfo) -> ModuleId {
         self.module_registry.write().register(module_info)
@@ -1469,7 +1421,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get a module by ID from the registry.
     ///
-
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn get_module_by_id(&self, id: ModuleId) -> Option<Shared<verum_modules::ModuleInfo>> {
         self.module_registry.read().get(id).into()
@@ -1477,7 +1428,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get a module by path from the registry.
     ///
-
     /// Module registry: stores module exports for cross-file name resolution.
     pub fn get_module_by_path(&self, path: &str) -> Option<Shared<verum_modules::ModuleInfo>> {
         self.module_registry.read().get_by_path(path).into()
@@ -1485,10 +1435,8 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Discover all .vr files in a directory tree.
     ///
-
     /// This enables multi-file project compilation.
     ///
-
     /// Module loader initialized from session root path for file-to-module mapping.
     pub fn discover_project_files(&self) -> Result<List<PathBuf>> {
         // When input is a directory (like 'src/'), search inside it directly
@@ -1559,36 +1507,27 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Convert AST Span (byte offsets) to Diagnostic Span (line/column).
     ///
-
     /// This method performs efficient conversion using the cached line start
     /// information in SourceFile. If the source file is not found, it returns
     /// a placeholder span to ensure diagnostics can still be displayed.
     ///
-
     /// # Performance
     ///
-
     /// - O(log n) lookup via binary search on line starts
     /// - < 1ms per conversion (typically ~100ns)
     /// - No allocations for cache hits
     ///
-
     /// # Arguments
     ///
-
     /// * `ast_span` - The byte-offset span from AST
     ///
-
     /// # Returns
     ///
-
     /// A LineColSpan with 1-indexed line/column numbers for diagnostic display.
     /// Returns placeholder "<unknown>:1:1" if source file not found.
     ///
-
     /// # Examples
     ///
-
     /// ```ignore
     /// let file_id = session.load_file(Path::new("test.vr"))?;
     /// let ast_span = Span::new(0, 10, file_id);
@@ -1641,14 +1580,11 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Record a compilation phase execution with timing and memory info
     ///
-
     /// This method is used to track performance of individual compilation phases
     /// for profiling and optimization purposes.
     ///
-
     /// # Arguments
     ///
-
     /// * `phase_name` - Name of the phase (e.g., "Lexing", "Parsing", "Type Checking")
     /// * `duration` - Time taken to execute the phase
     /// * `memory_allocated` - Memory allocated during this phase (in bytes)
@@ -1675,7 +1611,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Record module compilation metrics
     ///
-
     /// Tracks individual module compilation for identifying slow modules.
     pub fn record_module_metrics(
         &self,
@@ -1695,13 +1630,11 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Finalize metrics and get the complete profiling report
     ///
-
     /// This should be called at the end of compilation to:
     /// - Calculate percentages
     /// - Detect bottlenecks
     /// - Generate summary statistics
     ///
-
     /// Returns a cloned copy of the finalized metrics report.
     pub fn finalize_metrics(&self) -> CompilationProfileReport {
         let mut metrics = self.metrics.write();
@@ -1712,7 +1645,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get current (unfinalized) metrics
     ///
-
     /// Returns a snapshot of the current metrics without finalization.
     /// Useful for progress reporting during long compilations.
     pub fn current_metrics(&self) -> CompilationProfileReport {
@@ -1721,7 +1653,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get phase-specific metrics for populating BuildMetrics
     ///
-
     /// Returns durations for common phases (parse, typecheck, codegen, etc.)
     /// for backward compatibility with CLI's BuildMetrics struct.
     pub fn get_build_metrics(&self) -> BuildMetrics {
@@ -1777,18 +1708,14 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Store tier analysis result in the session cache.
     ///
-
     /// Called by the tier analysis phase to cache tier decisions for later
     /// use by the codegen phase.
     ///
-
     /// # Arguments
     ///
-
     /// * `function_id` - Unique identifier for the function
     /// * `result` - The analysis result containing tier decisions for all references
     ///
-
     /// CBGR analysis results from escape analysis (tier promotion decisions).
     pub fn cache_tier_analysis(&self, function_id: FunctionId, result: TierAnalysisResult) {
         self.tier_analysis_cache.write().insert(function_id, result);
@@ -1796,19 +1723,14 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get cached tier analysis result for a function.
     ///
-
     /// Called by the codegen phase to retrieve tier decisions for references.
     ///
-
     /// # Arguments
     ///
-
     /// * `function_id` - Unique identifier for the function
     ///
-
     /// # Returns
     ///
-
     /// The cached analysis result if available, None otherwise.
     pub fn get_tier_analysis(&self, function_id: FunctionId) -> Option<TierAnalysisResult> {
         self.tier_analysis_cache.read().get(&function_id).cloned()
@@ -1821,7 +1743,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Merge tier statistics from another analysis.
     ///
-
     /// Called after analyzing functions to accumulate statistics across
     /// all functions in the compilation unit.
     pub fn merge_tier_statistics(&self, stats: &TierStatistics) {
@@ -1835,7 +1756,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Get all cached tier analysis results.
     ///
-
     /// Returns a cloned map of all function analysis results. Useful for
     /// bulk codegen operations.
     pub fn all_tier_analyses(&self) -> Map<FunctionId, TierAnalysisResult> {
@@ -1844,7 +1764,6 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
 
     /// Clear the tier analysis cache.
     ///
-
     /// Useful for incremental compilation when functions are recompiled.
     pub fn clear_tier_cache(&self) {
         self.tier_analysis_cache.write().clear();

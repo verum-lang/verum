@@ -534,15 +534,12 @@ impl TypeChecker {
 
     /// Set the stdlib module loader for lazy loading.
     ///
-
     /// When set, the TypeChecker will use this loader to load stdlib modules
     /// on-demand when they are first imported, rather than requiring all
     /// modules to be pre-loaded.
     ///
-
     /// # Arguments
     ///
-
     /// * `resolver` - The module resolver implementation
     pub fn set_lazy_resolver(&mut self, resolver: verum_modules::SharedModuleResolver) {
         self.lazy_resolver = Some(resolver);
@@ -586,7 +583,6 @@ impl TypeChecker {
 
     /// Create a new type checker that owns a [`SharedModuleRegistry`].
     ///
-
     /// **Recommended** entry point for new code. The newtype encapsulates the
     /// `Shared<RwLock<...>>` wrapping so callers cannot accidentally pass the
     /// wrong shape (a class of bug that historically produced 30+ `mismatched
@@ -599,7 +595,6 @@ impl TypeChecker {
     /// Create a new type checker with a shared module registry
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Shared module state
     ///
-
     /// Legacy raw-handle API kept for callers that still hold an unwrapped
     /// `Shared<RwLock<ModuleRegistry>>`. New code should prefer
     /// [`Self::with_shared_registry`].
@@ -720,13 +715,11 @@ impl TypeChecker {
 
     /// Create a TypeChecker with a shared inherent_methods map
     ///
-
     /// This enables order-independent method resolution by sharing
     /// the methods map across multiple TypeChecker instances.
     /// Methods registered in one module become immediately visible
     /// to all other modules sharing the same map.
     ///
-
     /// Order-independent declarations: types and functions can be referenced before their definition within a module
     pub fn with_shared_methods(
         inherent_methods: Shared<
@@ -849,13 +842,11 @@ impl TypeChecker {
 
     /// Create a new TypeChecker with shared inherent methods AND a pre-populated ProtocolChecker.
     ///
-
     /// This enables stdlib protocol implementations to be shared across all modules.
     /// The ProtocolChecker should be pre-populated with stdlib impls before user code
     /// is processed, allowing IntoIterator, Future, and other protocol resolutions
     /// to work without hardcoded type knowledge.
     ///
-
     /// Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
     pub fn with_shared_methods_and_protocols(
         inherent_methods: Shared<
@@ -1210,7 +1201,6 @@ impl TypeChecker {
 
     /// Per-instantiation impl gate.
     ///
-
     /// When `method_impl_patterns` has one or more registered patterns
     /// for `(type_name, method_name)`, at least one pattern must match
     /// the receiver's concrete type arguments. Otherwise the method
@@ -1219,13 +1209,11 @@ impl TypeChecker {
     /// `write` is only registered for `Register<T, WriteOnly>` and
     /// `Register<T, ReadWrite>`.
     ///
-
     /// Returns `true` when:
     ///  - no patterns are registered (backward-compat — primitive
     ///  types like Int/Text have no patterns), OR
     ///  - at least one pattern is compatible with `receiver_args`.
     ///
-
     /// A pattern slot of `Type::Var(_)` (impl-level generic, e.g. `T`
     /// in `implement<T: Copy> Register<T, ReadOnly>`) matches any
     /// receiver arg. A concrete pattern slot (`Named`, `Generic`, …)
@@ -1378,7 +1366,6 @@ impl TypeChecker {
 
     /// Register a variable as uninitialized with appropriate tracking based on its type.
     ///
-
     /// For compound types (tuples, arrays, records), creates partial initialization
     /// tracking so we can detect field-by-field or element-by-element initialization.
     fn register_uninitialized_var(&mut self, var_name: &str, ty: &Type) {
@@ -1482,7 +1469,6 @@ impl TypeChecker {
 
     /// Track access to an affine field (partial move tracking).
     ///
-
     /// When accessing a field that has an affine type, this marks the field as moved.
     /// After a field is moved, the parent struct cannot be used as a whole.
     /// Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-partial-move
@@ -1610,11 +1596,9 @@ impl TypeChecker {
 
     /// Track assignment to pattern variables for definite assignment analysis.
     ///
-
     /// Walks a pattern and marks all bound variables as initialized.
     /// This is used for destructuring assignment: `(a, b) = value`.
     ///
-
     /// Spec: L0-critical/memory-safety/uninitialized
     pub(super) fn track_pattern_assignment(
         &mut self,
@@ -1903,7 +1887,6 @@ impl TypeChecker {
 
     /// Synthesize type for an expression that's the object of field/index access.
     ///
-
     /// This is like synth_expr but skips the full initialization check for simple paths,
     /// since field/index access checks the specific field/index instead.
     pub(super) fn synth_expr_for_field_access(&mut self, expr: &Expr) -> Result<InferResult> {
@@ -1953,7 +1936,6 @@ impl TypeChecker {
 
     /// Type-check an expression that is the target of an assignment.
     ///
-
     /// This is like check_expr but skips initialization checking,
     /// since the assignment is what initializes the variable.
     /// Does `ty` have a method `method_name` reachable WITHOUT any
@@ -1962,7 +1944,6 @@ impl TypeChecker {
     /// for `ty` (via `lookup_all_protocol_methods`), plus the
     /// dyn-protocol path when `ty` is a `DynProtocol`.
     ///
-
     /// Used by the auto-deref cascade in method resolution — the
     /// cascade MUST NOT unwrap `Mutex<T>` to `T` when the user
     /// actually called `mutex.lock()`, so we stop the chain as soon
@@ -2438,15 +2419,12 @@ impl TypeChecker {
 
     /// Record a function call for call graph building.
     ///
-
     /// This is called during type inference when a function call is encountered.
     /// The call site information is stored for later use in transitive negative
     /// context verification.
     ///
-
     /// # Arguments
     ///
-
     /// * `callee_name` - Name of the function being called
     /// * `span` - Source location of the call
     pub(super) fn record_call_site(&mut self, callee_name: impl Into<Text>, span: Span) {
@@ -2464,21 +2442,16 @@ impl TypeChecker {
 
     /// Check if calling a function would violate negative context constraints.
     ///
-
     /// This is called during function call type checking to immediately detect
     /// violations of negative context constraints.
     ///
-
     /// # Arguments
     ///
-
     /// * `callee_name` - Name of the function being called
     /// * `span` - Source location of the call
     ///
-
     /// # Returns
     ///
-
     /// `Ok(())` if the call is valid, or an error if it violates negative constraints
     pub(super) fn check_negative_context_violation(&self, callee_name: &str, span: Span) -> Result<()> {
         // Check if caller has any negative context constraints
@@ -2502,15 +2475,12 @@ impl TypeChecker {
 
     /// Perform transitive negative context verification for all registered functions.
     ///
-
     /// This should be called after all functions in a module have been type-checked
     /// to verify that no function with negative context constraints transitively
     /// calls a function that uses those contexts.
     ///
-
     /// # Returns
     ///
-
     /// `Ok(())` if all functions satisfy their negative context constraints,
     /// or an error with details about the first violation found.
     pub fn verify_all_negative_contexts(&self) -> Result<()> {
@@ -2519,29 +2489,22 @@ impl TypeChecker {
 
     /// Type check a list of items and then verify negative context constraints.
     ///
-
     /// This is the recommended entry point for checking a module's items.
     /// It performs:
     /// 1. Type checking of all items (functions, types, impls, etc.)
     /// 2. Transitive negative context verification
     ///
-
     /// # Arguments
     ///
-
     /// * `items` - The top-level items to check
     ///
-
     /// # Returns
     ///
-
     /// `Ok(())` if all items type-check correctly and negative context constraints
     /// are satisfied, or the first error encountered.
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// // This will be caught by transitive verification:
     /// fn uses_db() using [Database] { ... }
@@ -2758,11 +2721,9 @@ impl TypeChecker {
 
     /// Pre-register a module and all nested modules (public interface).
     ///
-
     /// This is called before any content processing to ensure
     /// all modules are available for cross-module imports.
     ///
-
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
     pub fn pre_register_module_public(
         &mut self,
@@ -2774,11 +2735,9 @@ impl TypeChecker {
 
     /// Pre-register a module and all nested modules.
     ///
-
     /// This is called in Phase -1 before any content processing to ensure
     /// all modules are available for cross-module imports.
     ///
-
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
     fn pre_register_module(&mut self, module: &verum_ast::decl::ModuleDecl, parent_path: &str) {
         let module_name = module.name.name.as_str();
@@ -2810,7 +2769,6 @@ impl TypeChecker {
 
     /// Build and return the call graph from registered functions.
     ///
-
     /// This is useful for debugging and visualization of the call relationships.
     pub fn build_call_graph(&self) -> crate::context_check::CallGraph {
         self.context_checker.build_call_graph_from_registry()
@@ -2821,7 +2779,6 @@ impl TypeChecker {
 
     /// Verify a dependent type constraint using SMT solver
     ///
-
     /// This method is the primary integration point for dependent type verification.
     /// It delegates to RefinementChecker which uses SmtDependentTypeChecker.
     pub fn verify_dependent_type(
@@ -2839,7 +2796,6 @@ impl TypeChecker {
 
     /// Enable dependent type checking
     ///
-
     /// Historical name: used to auto-construct `SmtDependentTypeChecker` in
     /// `RefinementChecker`. Post-cycle-break, callers must also call
     /// `set_dependent_checker(...)` with a backend boxed from
@@ -2862,7 +2818,6 @@ impl TypeChecker {
     /// Install a concrete SMT backend (e.g.
     /// `verum_smt::refinement_backend::RefinementZ3Backend`).
     ///
-
     /// Needed post-cycle-break: the default `RefinementChecker::new` no
     /// longer auto-constructs a `Z3Backend`. Call this once during type
     /// checker setup to restore SMT-backed refinement verification.
@@ -2880,15 +2835,12 @@ impl TypeChecker {
 
     /// Get current path evidence as SMT assumptions
     ///
-
     /// Returns all learned predicates that are known to be true on the
     /// current execution path. These can be passed to `check_with_evidence`
     /// for flow-sensitive refinement verification.
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// fn process(data: List<Int>) -> Int {
     ///  if data.is_empty() { return 0; }
@@ -2902,7 +2854,6 @@ impl TypeChecker {
 
     /// Check if we have evidence that a variable is non-empty
     ///
-
     /// Useful for checking List/Array bounds safety without SMT query.
     pub fn has_non_empty_evidence(&mut self, var_name: &verum_common::Text) -> bool {
         self.refinement_evidence.has_non_empty_evidence(var_name)
@@ -2910,7 +2861,6 @@ impl TypeChecker {
 
     /// Check if we have evidence that a variable is Some/Ok
     ///
-
     /// Useful for checking Maybe/Result unwrap safety without SMT query.
     pub fn has_some_or_ok_evidence(&mut self, var_name: &verum_common::Text) -> bool {
         self.refinement_evidence.has_some_or_ok_evidence(var_name)
@@ -2918,21 +2868,16 @@ impl TypeChecker {
 
     /// Check refinement with current path evidence
     ///
-
     /// This is a convenience method that combines getting evidence
     /// and calling the refinement checker with that evidence.
     ///
-
     /// # Arguments
     ///
-
     /// * `value` - The expression being checked
     /// * `refinement` - The refinement type to check against
     ///
-
     /// # Returns
     ///
-
     /// `VerificationResult::Valid` if the value satisfies the refinement
     /// given the current path evidence, or `Invalid`/`Unknown` otherwise.
     pub fn check_refinement_with_evidence(
@@ -2959,7 +2904,6 @@ impl TypeChecker {
     /// indirection bypasses the refinement check entirely — struct-field
     /// types like `PageNo = Int where |n|{n >= 1}` would accept `0`.
     ///
-
     /// Spec: tls-quic.md §4.6 (AckRanges), §9 (V3–V7 invariants).
     pub(crate) fn check_refinement_for_expanded_alias(
         &mut self,
@@ -3006,7 +2950,6 @@ impl TypeChecker {
 
     /// Get evidence statistics for debugging/optimization
     ///
-
     /// Returns (conditions_added, conditions_used, cache_hits)
     pub fn evidence_stats(&self) -> (usize, usize, usize) {
         self.refinement_evidence.stats()
@@ -3014,7 +2957,6 @@ impl TypeChecker {
 
     /// Clear all refinement evidence
     ///
-
     /// Called when entering a new function to reset evidence state.
     pub fn clear_refinement_evidence(&mut self) {
         self.refinement_evidence.clear();
@@ -3022,7 +2964,6 @@ impl TypeChecker {
 
     /// Extract a simple variable name from an expression
     ///
-
     /// Returns Some(name) if the expression is a simple identifier,
     /// or None for complex expressions like method calls or field access.
     pub(super) fn extract_simple_var_name(&self, expr: &Expr) -> Maybe<verum_common::Text> {
@@ -3042,7 +2983,6 @@ impl TypeChecker {
 
     /// Add pattern evidence to the refinement tracker
     ///
-
     /// When matching a pattern, we learn constraints about the scrutinee.
     /// For example, matching `Some(x)` tells us the value is Some variant.
     pub(super) fn add_pattern_evidence(
@@ -3160,7 +3100,6 @@ impl TypeChecker {
 
     /// Narrow variable types in the current scope based on a condition expression.
     ///
-
     /// When entering an if-then branch with condition `x > 0`, this method
     /// narrows the type of `x` from `Int` to `Int{it > 0}` in the current scope.
     pub(super) fn narrow_variable_types_from_condition(&mut self, condition: &Expr, negated: bool) {
@@ -3267,12 +3206,10 @@ impl TypeChecker {
 
     /// Register protocol bounds for a type variable
     ///
-
     /// This method tracks which protocols a type variable is constrained to implement.
     /// Used during generic function type checking to enable method resolution on
     /// bounded type variables (e.g., `fn sort<T: Ord>(list: List<T>)`).
     ///
-
     /// # Parameters
     /// - `var`: The type variable to register bounds for
     /// - `bounds`: List of protocol bounds (e.g., Ord, Clone)
@@ -3305,7 +3242,6 @@ impl TypeChecker {
 
     /// Get the protocol bounds for a type variable
     ///
-
     /// Returns the bounds if the type variable has any registered,
     /// or an empty list if the type variable is unbounded.
     pub fn get_type_var_bounds(&self, var: &TypeVar) -> List<crate::protocol::ProtocolBound> {
@@ -3317,7 +3253,6 @@ impl TypeChecker {
 
     /// Check if a type variable has a specific protocol bound
     ///
-
     /// Returns true if the type variable is constrained to implement the given protocol.
     pub fn type_var_has_bound(&self, var: &TypeVar, protocol_name: &str) -> bool {
         if let Some(bounds) = self.type_var_bounds.get(var) {
@@ -3334,7 +3269,6 @@ impl TypeChecker {
 
     /// Transfer bounds from one type variable to another
     ///
-
     /// Used during unification when a type variable is substituted.
     /// Ensures that bounds are propagated correctly through substitutions.
     pub fn transfer_type_var_bounds(&mut self, from: &TypeVar, to: &TypeVar) {
@@ -3432,7 +3366,6 @@ impl TypeChecker {
 
     /// Register a direct type bound for a type variable.
     ///
-
     /// Used for function type bounds like `F: fn() -> T` where the constraint
     /// is an actual type, not a protocol reference.
     pub fn register_type_var_type_bound(&mut self, var: TypeVar, bound: Type) {
@@ -3451,7 +3384,6 @@ impl TypeChecker {
 
     /// Get direct type bounds for a type variable.
     ///
-
     /// Returns the list of type constraints (like function types) for the variable,
     /// or an empty list if none are registered.
     pub fn get_type_var_type_bounds(&self, var: &TypeVar) -> List<Type> {
@@ -3463,7 +3395,6 @@ impl TypeChecker {
 
     /// Try to extract a function type bound from a type variable.
     ///
-
     /// If the type variable has a function type bound (like `F: fn(A) -> B`),
     /// returns the first such bound. This is essential for closure type inference.
     pub fn get_function_type_bound(&self, var: &TypeVar) -> Maybe<Type> {
@@ -3489,7 +3420,6 @@ impl TypeChecker {
 
     /// Add a deferred constraint to be solved later
     ///
-
     /// Constraints are deferred when they cannot be solved immediately,
     /// typically because type variables are not yet resolved.
     pub fn defer_constraint(&mut self, constraint: DeferredConstraint) {
@@ -3514,11 +3444,9 @@ impl TypeChecker {
 
     /// Process all deferred constraints
     ///
-
     /// Attempts to solve each deferred constraint with the current substitution.
     /// Returns any constraints that still cannot be solved.
     ///
-
     /// This is called after each major inference pass to propagate type information.
     pub fn solve_deferred_constraints(&mut self) -> Result<()> {
         // Keep iterating until no more progress is made
@@ -3557,7 +3485,6 @@ impl TypeChecker {
 
     /// Attempt to solve a single deferred constraint
     ///
-
     /// Returns Ok(true) if solved, Ok(false) if still deferred, Err if failed
     fn try_solve_constraint(&mut self, constraint: &DeferredConstraint) -> Result<bool> {
         match constraint {
@@ -3729,7 +3656,6 @@ impl TypeChecker {
 
     /// Recursively constant-fold a refinement predicate expression.
     ///
-
     /// Used by the dependent-refinement substitution path at call sites
     /// (see the `Type::Function` arm of the Call handler). After
     /// substituting earlier concrete arguments into a later parameter's
@@ -3741,7 +3667,6 @@ impl TypeChecker {
     /// trivially evaluate once `<variable>` is also substituted with a
     /// literal at the check site.
     ///
-
     /// The folding is conservative: only integer arithmetic (+, -, *,
     /// /, %, **) and comparisons (==, !=, <, <=, >, >=) with two
     /// literal operands are reduced. Anything else — variables, calls,
@@ -3749,7 +3674,6 @@ impl TypeChecker {
     /// unchanged. This keeps the transformation sound: a folded
     /// expression is semantically equivalent to the original.
     ///
-
     /// Division by zero produces the original expression (no panic).
     /// Negation of `Int::MIN` is also preserved as-is to avoid overflow.
     pub(super) fn const_fold_expr(expr: &Expr) -> Expr {
@@ -4161,10 +4085,8 @@ impl TypeChecker {
 
     /// Verify a dependent type constraint with proper error propagation
     ///
-
     /// Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Dependent Types Verification
     ///
-
     /// This method verifies the constraint and returns an error if verification fails
     /// and the constraint is proven invalid. Unknown results are treated as tentatively
     /// valid (gradual verification) - they will be checked at runtime.
@@ -4217,14 +4139,11 @@ impl TypeChecker {
 
     /// Convert a generic type argument to an expression
     ///
-
     /// Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Type-level expressions
     ///
-
     /// In dependent types, type arguments may contain expression-level values.
     /// This function extracts the expression from a generic argument.
     ///
-
     /// # Conversion Rules
     /// - GenericArg::Const(expr) - Direct expression, used as-is
     /// - GenericArg::Type(ty) - Try to extract value from type path or compute from type
@@ -4321,19 +4240,16 @@ impl TypeChecker {
 
     /// Create a fresh type variable expression for inference.
     ///
-
     /// This creates a unique identifier that the type checker can use to infer
     /// the actual value during unification. The name follows the pattern `_tv{N}`
     /// Evaluate a `GenericArg::Const` expression to a concrete compile-time value
     /// and wrap it in a `Type::Meta` that carries the value.
     ///
-
     /// Returns `None` when the expression is not a compile-time constant (e.g. it
     /// references another meta parameter whose value is only known after generic
     /// instantiation); the caller should fall back to type-only representation
     /// for such arguments.
     ///
-
     /// This is stdlib-agnostic: the base type is derived from the `ConstValue`
     /// kind through its built-in primitive mapping, never by inspecting type
     /// names or hardcoding stdlib knowledge.
@@ -4376,15 +4292,12 @@ impl TypeChecker {
 
     /// Create a symbolic bounded integer expression for Fin type well-formedness checking.
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .3 - Fin types
     ///
-
     /// This creates a unique symbolic variable that represents an arbitrary value
     /// in the range [0, n) for a Fin<n> type. The SMT solver uses this to verify
     /// that n is a valid bound (n > 0) during type well-formedness checking.
     ///
-
     /// The symbolic value is distinct from concrete values:
     /// - Symbolic: Used for type-level well-formedness verification
     /// - Concrete: Used when actual values are assigned to Fin<n> variables
@@ -4411,16 +4324,13 @@ impl TypeChecker {
     /// In stdlib bootstrap mode, all other types (List, Map, Maybe, etc.)
     /// come from parsing stdlib .vr files, not from hardcoded registration.
     ///
-
     /// Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
     ///
-
     /// Registered types:
     /// - Core: Int, Float, Bool, Text, Char, Unit, Never, Byte
     /// - Sized integers: i8-i128, u8-u128, isize, usize
     /// - Sized floats: f32, f64
     ///
-
     /// NOT registered (come from stdlib):
     /// - Collections: List<T>, Map<K,V>, Set<T>
     /// - Smart pointers: Heap<T>, Shared<T>, Weak<T>
@@ -5909,7 +5819,6 @@ impl TypeChecker {
     /// This is the full registration for normal build mode.
     /// For stdlib bootstrap mode, use `register_primitives()` instead.
     ///
-
     /// This should be called once when starting type checking
     /// Enable lenient context resolution where undefined contexts produce
     /// warnings instead of errors. Used during stdlib body checking where
@@ -5921,7 +5830,6 @@ impl TypeChecker {
 
     /// Toggle cubical-type normalization at the unification layer.
     ///
-
     /// Wired by the compiler's semantic-analysis phase from
     /// `[types] cubical` in `verum.toml`. When off, the unifier uses
     /// strict syntactic equality on Path / Partial / Eq endpoints,
@@ -5948,7 +5856,6 @@ impl TypeChecker {
     /// Functor<F<_>>`) are rejected at registration time with
     /// `TypeError::Other` citing the manifest field.
     ///
-
     /// Manifest validation enforces that this field can be true
     /// only when `[types].higher_kinded` is also true.
     pub fn set_higher_kinded_protocols_enabled(&mut self, enabled: bool) {
@@ -5980,7 +5887,6 @@ impl TypeChecker {
     /// MLS classification sidecar — set the classification level
     /// for a binding (#289 Phase 2b foundation).
     ///
-
     /// Phase 2b-Integration (separate follow-up) calls this from
     /// the parameter-introduction site in `synth_function_decl`
     /// to seed the sidecar with each parameter's
@@ -5997,7 +5903,6 @@ impl TypeChecker {
 
     /// Read the classification level of a binding (#289).
     ///
-
     /// Returns `MlsLevel::Public` (the safe default) for unknown
     /// bindings. Callers that need to distinguish "not classified"
     /// from "explicitly Public" should use `binding_classification_
@@ -6050,14 +5955,12 @@ impl TypeChecker {
     /// level (`param >= arg`), else `Err(TypeError::Other)`
     /// citing the source / sink levels and the parameter index.
     ///
-
     /// **Lattice contract**: classification represents PROTECTION
     /// REQUIREMENTS. A Secret value requires Secret-level
     /// protection; the parameter declaration is the function's
     /// CONTRACT for what protection it provides. The function
     /// must provide AT LEAST the protection the data needs.
     ///
-
     /// Examples:
     ///  - arg=Public, param=Public → OK (no requirement)
     ///  - arg=Public, param=Secret → OK (over-protected)
@@ -6068,7 +5971,6 @@ impl TypeChecker {
     ///  - arg=TopSecret, param=Secret → REJECT
     ///  - arg=TopSecret, param=TopSecret → OK
     ///
-
     /// Phase 2b-FinalIntegration (separate task) calls this at
     /// synth_call / check_app sites for every argument; this
     /// commit lays the helper so the integration is just
@@ -6107,7 +6009,6 @@ impl TypeChecker {
     /// `TypeError::Other` diagnostics for every leak detected;
     /// the empty list means every call respected the contract.
     ///
-
     /// This is a separate gate from synth_call's main check loop —
     /// keeping it module-level + post-checking lets callers opt
     /// into MLS enforcement without invasive changes to the core
@@ -6116,7 +6017,6 @@ impl TypeChecker {
     /// need it (default Public-floor manifest) skip it for zero
     /// overhead.
     ///
-
     /// Coverage in this Phase 2b-Final-Integration:
     ///  - Top-level `Path(fn)(args)` calls in function bodies.
     ///  - Method calls (`x.method(args)`) — the receiver's
@@ -6265,7 +6165,6 @@ impl TypeChecker {
     /// Compute the MLS classification of an expression (#292
     /// propagation foundation).
     ///
-
     /// Walks common expression kinds applying the lattice's join:
     ///  - `Path(name)` → `binding_classification(name)`
     ///  - `Binary { left, right }` → `expr_classification(left).
@@ -6278,7 +6177,6 @@ impl TypeChecker {
     ///  Phase 2b foundation; `@declassify` blocks and explicit
     ///  classification escape hatches are #292-Followup)
     ///
-
     /// This is the load-bearing read site for the let-binding
     /// propagation pin: `let x = secret_param;` flows the param's
     /// classification onto `x`'s sidecar entry.
@@ -8234,15 +8132,12 @@ impl TypeChecker {
 
     /// Set the module registry for cross-file type resolution.
     ///
-
     /// The registry allows the type checker to look up types defined in other modules
     /// when processing imports like `import domain.errors.{RegistryError}`.
     ///
-
     /// This method takes a locked registry and clones its contents into the type checker's
     /// local registry. This is safe because the registry is read-only during type checking.
     ///
-
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Module-qualified type access
     pub fn set_module_registry(&mut self, registry: Shared<parking_lot::RwLock<ModuleRegistry>>) {
         // Share the SAME handle — both module_registry and
@@ -8317,14 +8212,12 @@ impl TypeChecker {
     /// keep the existing entry (the caller MUST then skip the
     /// overwrite to preserve determinism).
     ///
-
     /// Side effects: emits `W_STDLIB_SHADOW` diagnostic when a
     /// project glob successfully evicts a stdlib glob — the user
     /// gets a heads-up that their type-decl shadowed a stdlib
     /// constructor with the same short name, which is a common
     /// foot-gun.
     ///
-
     /// Bookkeeping: on allowed registration the helper updates
     /// `glob_import_provenance[name]` with the incoming provenance.
     pub(crate) fn glob_shadow_arbiter(
@@ -8367,7 +8260,6 @@ impl TypeChecker {
     /// Register a type definition in the current module's scope, ALONGSIDE the
     /// unqualified flat registration that feeds `ctx.lookup_type`.
     ///
-
     /// Motivation (architectural): stdlib module A and stdlib module B can
     /// legitimately both declare `public type RecvError is …`. Prior to this
     /// helper, the flat `ctx.type_defs` map was the only store, and whichever
@@ -8377,14 +8269,12 @@ impl TypeChecker {
     /// cross-module type mismatches at call sites (see
     /// `broadcast_stream.vr` vs `quic.stream_sm.recv`).
     ///
-
     /// This helper additionally registers the type under the fully qualified
     /// key `{module_path}.{name}`. Resolver code (`ast_to_type_inner` for
     /// `TypeKind::Path`) then tries the qualified key first before falling
     /// back to the unqualified one, so types compiled inside a module always
     /// see that module's own definitions first — regardless of load order.
     ///
-
     /// No-op fallback (`current_module_path == "cog"` or empty) means
     /// user-code phase / unknown-module context: register only flat, so
     /// behaviour matches pre-change semantics there.
@@ -8464,14 +8354,12 @@ impl TypeChecker {
 
     /// Set module-level type inference context (COMPLETE implementation)
     ///
-
     /// This enables full module-level type inference with:
     /// - Cross-function type inference and propagation
     /// - Mutual recursion support via fixpoint iteration
     /// - Polymorphic recursion
     /// - Higher-rank types
     ///
-
     /// Once set, function type lookups will use the module context
     /// for cross-function inference.
     pub fn set_module_context(&mut self, module_ctx: crate::module_context::ModuleContext) {
@@ -8490,30 +8378,23 @@ impl TypeChecker {
 
     /// Register a protocol as a valid context type for use in `using` clauses.
     ///
-
     /// This is essential for cross-file context resolution where protocols are
     /// defined in one module and used in `using [ProtocolName]` clauses in another.
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The protocol name to register as a valid context
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// // In module A:
     /// type Database is protocol { ... }
     ///
-
     /// // In module B:
     /// fn handler() using [Database] { ... } // Database must be registered
     /// ```
     ///
-
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Cross-file contexts
     pub fn register_protocol_as_context(&mut self, name: Text) {
         self.context_resolver.register_protocol_as_context(name);
@@ -8605,13 +8486,10 @@ impl TypeChecker {
 
     /// Register multiple protocols as valid context types.
     ///
-
     /// Convenience method for registering protocols from module exports.
     ///
-
     /// # Arguments
     ///
-
     /// * `names` - Iterator of protocol names to register
     pub fn register_protocols_as_contexts<I>(&mut self, names: I)
     where
@@ -8632,16 +8510,13 @@ impl TypeChecker {
 
     /// Look up function type from module context (if available)
     ///
-
     /// This enables cross-function type inference by looking up
     /// inferred types from other functions in the same module.
     ///
-
     /// Resolution strategy:
     /// 1. Check type environment first (where register_function_signature stores signatures)
     /// 2. Fall back to module context for cross-module lookups
     ///
-
     /// This enables order-independent function resolution within a file by consulting
     /// the environment where all function signatures are pre-registered.
     pub(super) fn lookup_function_in_module(&self, name: &str) -> Maybe<TypeScheme> {
@@ -8687,7 +8562,6 @@ impl TypeChecker {
 
     /// Check if a function has already been registered (in both env and function_required_params).
     ///
-
     /// Used by the compilation pipeline's S1 pass to avoid overwriting pre-registered
     /// function signatures from explicitly imported modules with signatures from
     /// unrelated stdlib modules that happen to have the same function name.
@@ -8845,12 +8719,10 @@ impl TypeChecker {
 
     /// Extract the element type from a collection type.
     ///
-
     /// This is used for domain-based type inference in quantifier bindings.
     /// For `forall x in collection. ...`, we need to infer the type of `x`
     /// from the element type of `collection`.
     ///
-
     /// Supported collection types:
     /// - List<T> → T
     /// - Set<T> → T
@@ -8858,10 +8730,8 @@ impl TypeChecker {
     /// - Array<T, N> → T
     /// - Slice<T> → T
     ///
-
     /// Returns None if the type is not a recognized collection type.
     ///
-
     /// Quantifier expressions: "forall x in collection: predicate" and "exists x in collection: predicate" as boolean expressions
     pub(crate) fn element_type_of(&self, ty: &Type) -> Option<Type> {
         match ty {
@@ -8892,7 +8762,6 @@ impl TypeChecker {
 
     /// Infer function type from declaration
     ///
-
     /// This method infers:
     /// - Parameter types from the function signature
     /// - Return type (wrapped in Future<T> for async functions)
@@ -9662,7 +9531,6 @@ impl TypeChecker {
     /// Infer the type of a recovery body (either match arms or closure).
     /// Used for try-recover and try-recover-finally expressions.
     ///
-
     /// `error_type` is the type of the error being recovered from (the `E` in `Result<T, E>`).
     pub(super) fn infer_recover_body(
         &mut self,
@@ -9715,7 +9583,6 @@ impl TypeChecker {
 
     /// Extract the error type from a try block by analyzing ? operators.
     ///
-
     /// Extract the error type from the enclosing function's return type.
     /// If the function returns Result<T, E>, returns Some(E).
     /// Returns None if the function doesn't return a Result type.
@@ -9748,7 +9615,6 @@ impl TypeChecker {
     /// This is stdlib-agnostic: uses the Try protocol's Output and Residual associated types.
     /// Returns (success_type, error_type) where Never indicates unknown.
     ///
-
     /// Design: Uses protocol-based resolution exclusively - no hardcoded type names.
     /// The Try protocol defines: type Output; type Residual;
     pub(super) fn extract_try_output_types(&self, ty: &Type) -> (Type, Type) {
@@ -9795,7 +9661,6 @@ impl TypeChecker {
 
     /// Check if a type name corresponds to a heap-allocated type.
     ///
-
     /// Wrap a value type in a success variant that matches the expected type's structure.
     /// Uses the expected type's variant structure to construct the appropriate wrapper.
     /// This preserves the structural form of the expected type.
@@ -10778,7 +10643,6 @@ impl TypeChecker {
     /// Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — .2 lines 143-162
     /// Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .4.2 lines 8705-8754
     ///
-
     /// Range validation is deferred to refinement checking phase.
     /// This function only performs type narrowing based on the suffix.
     fn infer_int_with_suffix(
@@ -10847,16 +10711,13 @@ impl TypeChecker {
 
     /// Try to resolve an operator through protocol implementation.
     ///
-
     /// This function looks up protocol implementations (Add, Sub, Mul, Div, etc.)
     /// for the given type without any hardcoded type knowledge.
     ///
-
     /// ARCHITECTURAL RULE: The type checker MUST NOT have hardcoded knowledge
     /// of stdlib/core types. All operator behavior is discovered from protocol
     /// implementations defined in the source code.
     ///
-
     /// Returns Some(output_type) if a matching protocol implementation is found,
     /// None if the type doesn't implement the protocol.
     fn try_operator_protocol(
@@ -10940,7 +10801,6 @@ impl TypeChecker {
 
     /// Try to resolve an operator through protocol implementation using types directly.
     ///
-
     /// This is the version for iterative inference where we have types, not expressions.
     /// Returns Some(output_type) if a matching protocol implementation is found.
     pub(super) fn try_operator_protocol_with_types(
@@ -11088,11 +10948,9 @@ impl TypeChecker {
 
     /// Infer type for binary operation.
     ///
-
     /// ARCHITECTURAL RULE: This function MUST NOT contain hardcoded knowledge
     /// of stdlib types like Duration, Time, Text, etc. All operator behavior
     /// is discovered through protocol implementations.
-
     /// VBC-MIXED-ARITH-SILENT-NAN-1: mixed Int/Float arithmetic has NO
     /// coercion in Verum (semantic honesty — no hidden magic); the
     /// runtime produced a silent NaN (release) or panicked (debug), so
@@ -12220,7 +12078,6 @@ with .to_float() or .to_int() (at {:?})",
     /// Extract the base variable name from a field access expression.
     /// Used for field-level borrow tracking.
     ///
-
     /// Examples:
     /// - `container.field` -> Some("container")
     /// - `a.b.c` -> Some("a") (extracts root receiver)
@@ -12322,7 +12179,6 @@ with .to_float() or .to_int() (at {:?})",
     /// Extract the base variable name from any expression, including index access.
     /// Used for aliasing detection when borrowing collection elements.
     ///
-
     /// Examples:
     /// - `data` -> Some("data")
     /// - `data[0]` -> Some("data")
@@ -12360,7 +12216,6 @@ with .to_float() or .to_int() (at {:?})",
     /// Extract the full field path from a field access expression.
     /// Returns (base_name, full_path) for field-level borrow tracking.
     ///
-
     /// Examples:
     /// - `container.field` -> Some(("container", "field"))
     /// - `container.first.value` -> Some(("container", "first.value"))
@@ -12404,7 +12259,6 @@ with .to_float() or .to_int() (at {:?})",
     /// Infer type for type property expressions.
     /// Spec: grammar/verum.ebnf Section 2.17 - Type Properties
     ///
-
     /// Type properties provide compile-time access to type metadata:
     /// - `T.size` -> Int (size in bytes)
     /// - `T.alignment` -> Int (alignment in bytes)
@@ -12528,14 +12382,11 @@ with .to_float() or .to_int() (at {:?})",
 
     /// Find the deref target type for a concrete type implementing Ref<T>.
     ///
-
     /// Spec: L0-critical/reference_system/reference_tiers/tier_conversion.vr
     ///
-
     /// This enables auto-deref for types that implement the Ref<T> protocol.
     /// When `*x` is used on a type implementing `Ref<T>`, it returns `T`.
     ///
-
     /// Built-in dereferenceable types (Heap<T>, Shared<T>) are handled here
     /// as well as user-defined types implementing Ref<T>.
     pub(super) fn find_deref_target_type(&self, ty: &Type) -> Option<Type> {
@@ -12546,7 +12397,6 @@ with .to_float() or .to_int() (at {:?})",
 
     /// Find the target type T if a type implements Ref<T> protocol.
     ///
-
     /// Queries the protocol checker for Ref<T> implementation on the given type.
     fn find_ref_protocol_target(&self, ty: &Type) -> Option<Type> {
         // Look for Ref<T> implementation on this type
@@ -12582,11 +12432,9 @@ with .to_float() or .to_int() (at {:?})",
 
     /// Convert AST type bounds to protocol bounds.
     ///
-
     /// Converts from verum_ast::ty::TypeBound to crate::protocol::ProtocolBound.
     /// This is used when processing where clauses and generic parameter bounds.
     ///
-
     /// Example: `T: Clone + Display` -> [ProtocolBound(Clone), ProtocolBound(Display)]
     pub(super) fn convert_type_bounds_to_protocol_bounds(
         &mut self,
@@ -12665,17 +12513,14 @@ with .to_float() or .to_int() (at {:?})",
 
     /// Extract direct type bounds from AST bounds.
     ///
-
     /// Converts Equality bounds (like `F: fn() -> T`) to Type values.
     /// These are bounds that represent actual types, not protocol references.
     /// Used alongside `convert_type_bounds_to_protocol_bounds` to fully capture
     /// all bound information for type variables.
     ///
-
     /// # Arguments
     /// * `bounds` - The AST type bounds to process
     ///
-
     /// # Returns
     /// A list of Types representing direct type bounds (function types, etc.)
     pub(super) fn extract_type_bounds_from_ast(&mut self, bounds: &[verum_ast::ty::TypeBound]) -> List<Type> {
@@ -12725,11 +12570,9 @@ with .to_float() or .to_int() (at {:?})",
 
     /// Convert AST generic parameters to protocol type parameters.
     ///
-
     /// Transforms verum_ast::ty::GenericParam list into crate::protocol::TypeParam list.
     /// Used when registering generic protocols like `type Iterator<T> is protocol { ... }`.
     ///
-
     /// # Examples
     /// - `<T>` -> TypeParam { name: "T", bounds: [], default: None }
     /// - `<T: Clone>` -> TypeParam { name: "T", bounds: [Clone], default: None }

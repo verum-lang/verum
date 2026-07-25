@@ -43,7 +43,6 @@ pub struct SmtGuardConfig {
     /// Maximum number of distinct uncovered-case witnesses to
     /// extract from the model (default: 1).
     ///
-
     /// When the SMT solver reports the guard set as non-exhaustive,
     /// the verifier asks Z3 for a satisfying model of the
     /// negation, then iteratively asserts a "block-this-model"
@@ -52,7 +51,6 @@ pub struct SmtGuardConfig {
     /// unbounded uncovered region (e.g. `n > 0` over Int — every
     /// `n ≤ 0` is uncovered) doesn't run forever.
     ///
-
     /// `0` is treated the same as `1` (always extract at least one
     /// witness when extract_witnesses is on); set higher (3-5 is
     /// a typical UX choice) to surface a richer view of the
@@ -163,14 +161,12 @@ pub struct GuardedPattern {
 
 /// Trait implemented by any guard verifier (SMT-backed or otherwise).
 ///
-
 /// `verum_types` exposes the interface; concrete SMT-backed implementations
 /// live in `verum_smt` to keep the dependency edge `verum_smt →
 /// verum_types` one-way.
 pub trait GuardVerifier: Send + Sync {
     /// Verify whether guarded patterns are exhaustive for a type.
     ///
-
     /// Returns:
     /// - Whether all guards together cover all possible values
     /// - Which guards are redundant

@@ -57,11 +57,9 @@ use verum_common::Text;
 
 /// Foreign proof system this importer handles.
 ///
-
 /// **Canonical 7-system enum** — single source of truth for foreign
 /// proof systems across the codebase. Used by:
 ///
-
 ///  - `verum_verification::foreign_import` — skeleton import (this module).
 ///  - `verum_smt::cross_format_runner` — re-check via `Checker`.
 ///  - `verum_kernel::soundness::corpus_export` — `CorpusBackend`.
@@ -69,7 +67,6 @@ use verum_common::Text;
 ///  - `verum_kernel::soundness::apply_graph` — foreign-prefix
 ///  classification (mirrors `is_foreign_framework_target`).
 ///
-
 /// **Pre-#166**: each layer had its own foreign-system enumeration
 /// (string-based dispatch in `proof_replay`, `ExportFormat` in
 /// `cross_format_runner`, this 4-variant enum in `foreign_import`).
@@ -374,7 +371,6 @@ pub trait ForeignSystemImporter: std::fmt::Debug + Send + Sync {
 
 /// Look up the canonical importer for a system tag.
 ///
-
 /// **Returns `None`** for systems without an importer
 /// (`Agda`/`Dedukti`/`Metamath` — they're proof-replay targets, not
 /// import sources). Use [`ForeignSystem::with_importer`] to enumerate
@@ -391,7 +387,6 @@ pub fn try_importer_for(system: ForeignSystem) -> Option<Box<dyn ForeignSystemIm
 
 /// Look up the canonical importer for a system tag.
 ///
-
 /// **Panics** for systems without an importer. Prefer
 /// [`try_importer_for`] when handling unknown system tags from user
 /// input; this variant is for callers that have already validated the
@@ -411,14 +406,12 @@ pub fn importer_for(system: ForeignSystem) -> Box<dyn ForeignSystemImporter> {
 
 /// Coq / Rocq statement-level importer. Recognises:
 ///
-
 ///  * `Theorem <name> : <statement>.` (proof body discarded)
 ///  * `Lemma <name> : <statement>.`
 ///  * `Corollary <name> : <statement>.`
 ///  * `Axiom <name> : <statement>.`
 ///  * `Definition <name> ... : <type> := <body>.`
 ///
-
 /// The statement extends from the `:` after the name to the
 /// terminating `.` (Coq's statement terminator). Multi-line
 /// statements are preserved verbatim.
@@ -464,13 +457,11 @@ const COQ_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 
 /// Lean 4 / Mathlib4 importer. Recognises:
 ///
-
 ///  * `theorem <name> : <statement> := <proof>` (proof discarded)
 ///  * `lemma <name> : <statement> := <proof>`
 ///  * `axiom <name> : <statement>`
 ///  * `def <name> : <type> := <body>`
 ///
-
 /// Statement extends from `:` after the name to `:=` (the proof
 /// separator). Stops at end-of-line if there's no `:=` (axioms).
 #[derive(Debug, Default, Clone, Copy)]
@@ -594,7 +585,6 @@ const ISABELLE_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 
 /// Block-structured extractor (#93 hardening). Handles:
 ///
-
 ///  * Coq: `Section S. ... End S.` and `Module M. ... End M.` —
 ///  names are pushed/popped from the scope stack so qualified
 ///  declarations get the right `S.M.thm` rendering.
@@ -605,7 +595,6 @@ const ISABELLE_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 ///  respects `definition ... end;` as a no-scope frame so
 ///  internal declarations aren't double-counted.
 ///
-
 /// Multi-line statements are aggregated up to the per-system
 /// terminator (`.` for Coq/Isabelle/Mizar, `:=` or end-of-block
 /// for Lean) so a `Theorem foo : ...` whose statement spans 5
@@ -742,7 +731,6 @@ fn match_scope_open<'a>(line: &'a str, system: ForeignSystem) -> Option<&'a str>
 
 /// Recognise scope-closing forms:
 ///
-
 ///  * Coq: `End X.` → Named(X)
 ///  * Lean4: `end foo` → Named(foo); `end` alone → Anonymous
 ///  * Isabelle: `end` → Anonymous
@@ -807,7 +795,6 @@ fn is_ident_char(c: char) -> bool {
 /// Returns `(joined_text, lines_consumed)`. The aggregator stops
 /// at the per-system terminator:
 ///
-
 ///  * Coq / Mizar / Isabelle: `.` at end of a line (or top-level
 ///  `proof` / `by` / `apply` for Isabelle).
 ///  * Lean4: `:=` or a blank line.

@@ -108,7 +108,6 @@ pub const CTX_TYPE_USER_START: u32 = 0x1000;
 
 /// IEEE 754 rounding modes for floating-point operations.
 ///
-
 /// These map directly to hardware FPU rounding modes and are consistent
 /// with the verum_smt::FloatRoundingMode enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -149,7 +148,6 @@ impl RoundingMode {
 
 /// Floating-point precision levels.
 ///
-
 /// Controls the precision used for tensor operations when the context
 /// is active. Operations may promote to higher precision internally
 /// and round to the target precision on output.
@@ -198,14 +196,11 @@ impl FloatPrecision {
 
 /// PrecisionMode context for controlling floating-point behavior.
 ///
-
 /// This context can be provided to tensor operations to control
 /// precision, rounding, and denormal handling.
 ///
-
 /// # Example Usage (in Verum)
 ///
-
 /// ```verum
 /// provide PrecisionMode {
 ///  precision: Single,
@@ -277,7 +272,6 @@ impl PrecisionMode {
 
     /// Packs the PrecisionMode into a 64-bit value for NaN-boxing.
     ///
-
     /// Layout:
     /// - Bits 0-7: precision (u8)
     /// - Bits 8-15: rounding_mode (u8)
@@ -308,7 +302,6 @@ impl PrecisionMode {
 
 /// GPU execution context for tracking device and buffer state.
 ///
-
 /// In the interpreter, GPU operations are executed as CPU fallbacks.
 /// This context tracks the simulated GPU state so that device management,
 /// stream creation/destruction, and buffer allocation are consistent.
@@ -352,7 +345,6 @@ impl GpuContext {
 impl GpuContext {
     /// Resets the GPU context, clearing all accumulated state.
     ///
-
     /// Call this between test executions to prevent unbounded growth of
     /// streams, buffers, events, and graph operation logs.
     pub fn reset(&mut self) {
@@ -375,7 +367,6 @@ impl Default for GpuContext {
 
 /// Main interpreter state.
 ///
-
 /// This structure holds all runtime state for executing VBC bytecode.
 /// It is designed for single-threaded execution but can be cloned
 /// for multi-threaded scenarios.
@@ -491,14 +482,12 @@ pub struct InterpreterState {
 
     /// Generator registry for fn* functions.
     ///
-
     /// Generator registry: stores Generator structs indexed by GeneratorId. Each generator
     /// holds saved_pc, saved_registers, saved_contexts, yielded_value, and status.
     pub generators: GeneratorRegistry,
 
     /// Currently executing generator (if in generator context).
     ///
-
     /// When a generator is being executed (resumed), this holds its ID.
     /// Used by Yield instruction to know which generator to suspend.
     pub current_generator: Option<GeneratorId>,
@@ -509,7 +498,6 @@ pub struct InterpreterState {
 
     /// Nursery registry for structured concurrency.
     ///
-
     /// Structured concurrency: nursery blocks spawn tasks and await_all joins them.
     /// Supports timeout, max_tasks, on_error (cancel_all/wait_all/fail_fast) options.
     pub nurseries: NurseryRegistry,
@@ -627,7 +615,6 @@ pub struct InterpreterState {
 
     /// Exception handler stack for try-catch blocks.
     ///
-
     /// Each entry contains the handler PC and the call stack depth
     /// when the try block was entered.
     pub exception_handlers: ExceptionHandlerStack,
@@ -640,7 +627,6 @@ pub struct InterpreterState {
 
     /// Currently awaited task ID (for async task completion tracking).
     ///
-
     /// When Await is called on a Pending task, the task is executed synchronously.
     /// This field tracks which task is being awaited so that when the task function
     /// returns, we can mark the task as Completed with the return value.
@@ -648,12 +634,10 @@ pub struct InterpreterState {
 
     /// Whether the verum_runtime context system has been initialized.
     ///
-
     /// The runtime context system (verum_runtime::context::ffi) provides cross-boundary
     /// context propagation for async tasks and FFI calls. It must be initialized once
     /// per thread before use.
     ///
-
     /// Context system (Level 2 dynamic DI): provide/using keywords with ~5-30ns
     /// lookup via task-local storage. Must be initialized once per thread before
     /// use. The context environment (theta) is stored in task-local storage and
@@ -662,11 +646,9 @@ pub struct InterpreterState {
 
     /// Thread-local storage slots for V-LLSI TLS operations.
     ///
-
     /// Provides per-interpreter TLS storage that can be accessed via
     /// TlsGet/TlsSet opcodes. Slots are indexed by integer keys.
     ///
-
     /// Thread-local storage for VBC interpreter. Provides per-interpreter TLS
     /// accessed via TlsGet/TlsSet opcodes, indexed by integer keys. Used by
     /// the context system and other thread-local state.
@@ -699,11 +681,9 @@ pub struct InterpreterState {
 
     /// Current CBGR epoch for capability-based generational reference tracking.
     ///
-
     /// The epoch is incremented by AdvanceEpoch to invalidate all references
     /// from previous epochs. This provides temporal memory safety.
     ///
-
     /// CBGR epoch for capability-based generational reference tracking.
     /// Incremented by AdvanceEpoch to invalidate all references from previous
     /// epochs. Each managed reference (&T) stores its creation epoch; on
@@ -713,14 +693,12 @@ pub struct InterpreterState {
 
     /// CBGR bypass depth counter for performance-critical sections.
     ///
-
     /// When non-zero, CBGR validation is temporarily disabled.
     /// Incremented by BypassBegin, decremented by BypassEnd.
     pub cbgr_bypass_depth: u32,
 
     /// Tracks base addresses of raw CBGR allocations (AllocationHeader starts).
     ///
-
     /// When `Heap.new(value)` allocates a CBGR object, the raw allocation base
     /// (where the AllocationHeader starts) is stored here. This allows `GetField`
     /// to detect CBGR header pointers and use raw u32 field access instead of
@@ -756,18 +734,15 @@ pub struct InterpreterState {
 
     /// CBGR validation counter for statistics.
     ///
-
     /// Counts the number of reference validations performed.
     pub cbgr_validation_count: u64,
 
     /// FFI runtime for libffi-based external function calls.
     ///
-
     /// This is the new FFI system that uses libffi for dynamic dispatch.
     /// It provides cross-platform support for calling native C functions
     /// from VBC bytecode at Tier 0 (interpreter).
     ///
-
     /// Lazily initialized on first FFI call to avoid overhead when FFI
     /// is not used.
     #[cfg(feature = "ffi")]
@@ -780,14 +755,12 @@ pub struct InterpreterState {
 
     /// Pending drops for struct fields.
     ///
-
     /// When dropping a struct without its own Drop impl, its fields are added here
     /// to be dropped one at a time (since each drop may invoke a user-defined function).
     pub pending_drops: Vec<Value>,
 
     /// Global instruction counter shared across all dispatch loop invocations.
     ///
-
     /// Unlike the previous per-loop `loop_count`, this counter is incremented by
     /// every dispatch loop (including nested ones from closures, iterators, generators,
     /// etc.) and checked against `config.max_instructions`. This prevents infinite
@@ -841,7 +814,6 @@ pub struct InterpreterState {
 
     /// Permission router for intrinsic gating (#12 / P3.2).
     ///
-
     /// Every `Syscall`-category intrinsic — and any other
     /// intrinsic tagged with `IntrinsicHint::RequiresPermission`
     /// — routes through here before dispatching the underlying
@@ -850,7 +822,6 @@ pub struct InterpreterState {
     /// embedders; production hosts wire a policy via
     /// `set_permission_policy` to gate gated operations.
     ///
-
     /// Boxed so the router's per-call allocations (the backing
     /// HashMap) don't bloat the InterpreterState by-value
     /// footprint and so embedders that don't need gating pay no
@@ -1012,7 +983,6 @@ impl ContextStack {
 
     /// Pops the most recently provided context entry.
     ///
-
     /// Used by `CtxEnd` to close a `provide X = v in { body }` block. CtxProvide
     /// and CtxEnd come in matched pairs for scoped provides, so LIFO pop is
     /// correct even when nested provides occur in the same stack frame.
@@ -1050,7 +1020,6 @@ impl ContextStack {
 
     /// Clones all context entries (for generator state saving).
     ///
-
     /// Generator state machine: saves/restores context entries on yield/resume for correct DI scoping
     pub fn clone_entries(&self) -> Vec<ContextEntry> {
         self.entries.clone()
@@ -1058,7 +1027,6 @@ impl ContextStack {
 
     /// Restores context entries from a saved state (for generator resumption).
     ///
-
     /// Generator state machine: saves/restores context entries on yield/resume for correct DI scoping
     pub fn restore_entries(&mut self, entries: Vec<ContextEntry>) {
         self.entries = entries;
@@ -1073,7 +1041,6 @@ impl ContextStack {
 
     /// Provides a PrecisionMode context.
     ///
-
     /// The precision mode will be active until the scope ends.
     pub fn provide_precision_mode(&mut self, mode: PrecisionMode, stack_depth: usize) {
         let packed = mode.pack();
@@ -1086,7 +1053,6 @@ impl ContextStack {
 
     /// Gets the current PrecisionMode context, or returns the default.
     ///
-
     /// If no PrecisionMode has been provided, returns the default mode
     /// (Double precision, NearestTiesToEven, allow denormals).
     pub fn get_precision_mode(&self) -> PrecisionMode {
@@ -1120,16 +1086,13 @@ impl ContextStack {
 
     /// Provides a ComputeDevice context.
     ///
-
     /// The device will be active until the scope ends. Tensor operations
     /// within this scope will use this device for allocation and computation.
     ///
-
     /// # Arguments
     /// * `device_id` - The device ID (0 = CPU, 0x1000+ = GPU devices)
     /// * `stack_depth` - Current call stack depth for scope tracking
     ///
-
     /// # Example
     /// ```ignore
     /// // Corresponds to:
@@ -1146,11 +1109,9 @@ impl ContextStack {
 
     /// Gets the current ComputeDevice context, or returns CPU (0) as default.
     ///
-
     /// Returns the device ID where tensor operations should be performed.
     /// If no ComputeDevice has been provided, returns 0 (CPU).
     ///
-
     /// # Returns
     /// Device ID: 0 = CPU, 0x1000 = GPU0, 0x1001 = GPU1, etc.
     pub fn get_compute_device(&self) -> u16 {
@@ -1172,7 +1133,6 @@ impl ContextStack {
 
     /// Returns true if the current compute device is a GPU.
     ///
-
     /// GPU device IDs have the high nibble set (0x1000+).
     pub fn is_gpu_device(&self) -> bool {
         let device = self.get_compute_device();
@@ -1196,16 +1156,13 @@ impl ContextStack {
 
     /// Provides a RandomSource context with the given seed.
     ///
-
     /// All random tensor operations within this scope will use this seed
     /// for reproducible random number generation.
     ///
-
     /// # Arguments
     /// * `seed` - 64-bit seed value for the PRNG
     /// * `stack_depth` - Current call stack depth for scope tracking
     ///
-
     /// # Example
     /// ```ignore
     /// // Corresponds to:
@@ -1222,11 +1179,9 @@ impl ContextStack {
 
     /// Gets the current RandomSource seed, or returns a default seed.
     ///
-
     /// If no RandomSource has been provided, returns a fixed default seed (0)
     /// for deterministic behavior in tests and development.
     ///
-
     /// # Returns
     /// The 64-bit seed value for PRNG initialization.
     pub fn get_random_seed(&self) -> u64 {
@@ -1248,11 +1203,9 @@ impl ContextStack {
 
     /// Generates a random key for the current context.
     ///
-
     /// Uses SplitMix64 to derive a 128-bit key from the seed.
     /// This matches the RandomKey structure in core/math/random.vr.
     ///
-
     /// # Returns
     /// A tuple (high, low) representing the 128-bit random key.
     pub fn get_random_key(&self) -> (u64, u64) {
@@ -1276,17 +1229,14 @@ impl ContextStack {
 
     /// Provides a TrainingMode context.
     ///
-
     /// The training mode will be active until the scope ends. Operations
     /// like dropout, batch norm, and other training-specific behaviors
     /// check this context to determine their behavior.
     ///
-
     /// # Arguments
     /// * `is_training` - true for training mode, false for inference
     /// * `stack_depth` - Current call stack depth for scope tracking
     ///
-
     /// # Example
     /// ```ignore
     /// // Corresponds to:
@@ -1303,11 +1253,9 @@ impl ContextStack {
 
     /// Gets the current TrainingMode context, or returns false (inference) as default.
     ///
-
     /// Returns true if in training mode, false if in inference mode.
     /// If no TrainingMode has been provided, defaults to false (inference).
     ///
-
     /// # Returns
     /// true = training mode, false = inference mode
     pub fn get_training_mode(&self) -> bool {
@@ -1332,7 +1280,6 @@ impl ContextStack {
 
 /// SplitMix64 hash function for PRNG seeding.
 ///
-
 /// High-quality mixing function used to initialize other PRNGs.
 /// Matches the implementation in core/math/random.vr.
 #[inline]
@@ -1460,11 +1407,9 @@ pub struct TaskId(pub u64);
 
 /// Queue of async tasks with work-stealing-ready semantics.
 ///
-
 /// Ready tasks live in a `VecDeque` with explicit ownership of both
 /// ends so the scheduler can operate in two distinct modes:
 ///
-
 ///  * **Local execution (LIFO, back).** The current worker
 ///  [`next_ready`][Self::next_ready] pops the most recently
 ///  spawned task. This matches the recursive-nested-task access
@@ -1472,7 +1417,6 @@ pub struct TaskId(pub u64);
 ///  line and the most likely to hold references to registers that
 ///  were live at the spawn point.
 ///
-
 ///  * **Stealing (FIFO, front).** A foreign worker
 ///  [`steal_ready`][Self::steal_ready] pops the oldest ready task.
 ///  Taking from the far end minimises contention with the owning
@@ -1480,7 +1424,6 @@ pub struct TaskId(pub u64);
 ///  subcomputations (older tasks tend to be the root of wider
 ///  task trees), amortising the steal cost.
 ///
-
 /// The current VBC interpreter is single-threaded, so only the LIFO
 /// path is exercised in production. The FIFO stealing API is a
 /// forward-compatibility surface: when a multi-threaded scheduler
@@ -1622,7 +1565,6 @@ impl TaskQueue {
 
     /// Returns the next ready task for the owning worker (LIFO).
     ///
-
     /// Pops from the back of the deque — the most recently spawned
     /// task. Cache-hot, recursive-spawn-friendly, matches the
     /// synchronous call pattern that most async programs resemble.
@@ -1641,14 +1583,12 @@ impl TaskQueue {
 
     /// Steals the oldest ready task (FIFO) on behalf of a foreign worker.
     ///
-
     /// Pops from the front of the deque. Targeted by the work-stealing
     /// scheduler when a remote worker's local deque runs dry and it
     /// needs to acquire work from a victim queue without colliding with
     /// the victim's own LIFO accesses. Skips non-Pending tasks for the
     /// same reason as [`next_ready`].
     ///
-
     /// Currently unused in production — the VBC interpreter executes
     /// on a single OS thread — but the contract is stable so a future
     /// multi-threaded scheduler can plug in without reshaping the
@@ -1666,7 +1606,6 @@ impl TaskQueue {
 
     /// Number of ready (enqueued, possibly not yet started) tasks.
     ///
-
     /// Used by the scheduler and by steal-victim selection heuristics
     /// to pick queues that are most likely to yield a steal.
     #[inline]
@@ -1736,7 +1675,6 @@ impl TaskQueue {
 
 /// Status of a generator.
 ///
-
 /// Generators transition through these states:
 /// Created → (resume) → Yielded ↔ (resume/yield) → Completed
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1753,11 +1691,9 @@ pub enum GeneratorStatus {
 
 /// A generator instance.
 ///
-
 /// Generators are created from `fn*` functions and produce values lazily
 /// via the Iterator protocol.
 ///
-
 /// Size: 24 bytes + saved_registers + saved_contexts
 #[derive(Debug, Clone)]
 pub struct Generator {
@@ -1831,7 +1767,6 @@ pub struct GeneratorId(pub u64);
 
 /// Registry of active generators.
 ///
-
 /// Manages generator lifecycle and provides O(1) lookup by ID.
 #[derive(Debug, Clone, Default)]
 pub struct GeneratorRegistry {
@@ -1852,7 +1787,6 @@ impl GeneratorRegistry {
 
     /// Creates a new generator, returning its ID.
     ///
-
     /// The generator starts in Created status and must be resumed to begin execution.
     pub fn create(&mut self, func_id: FunctionId, reg_count: u16) -> GeneratorId {
         self.create_with_args(func_id, reg_count, Vec::new())
@@ -1860,7 +1794,6 @@ impl GeneratorRegistry {
 
     /// Creates a new generator with initial argument values, returning its ID.
     ///
-
     /// The generator starts in Created status and must be resumed to begin execution.
     /// The initial arguments are stored in saved_registers and will be restored to the
     /// generator's frame when first resumed via GenNext.
@@ -2026,7 +1959,6 @@ pub struct NurseryTask {
 
 /// A nursery instance.
 ///
-
 /// Tracks spawned tasks for structured concurrency.
 #[derive(Debug, Clone)]
 pub struct Nursery {
@@ -2112,7 +2044,6 @@ impl Nursery {
 
 /// Registry of active nurseries.
 ///
-
 /// Manages nursery lifecycle and provides O(1) lookup by ID.
 #[derive(Debug, Clone, Default)]
 pub struct NurseryRegistry {
@@ -2155,7 +2086,6 @@ impl NurseryRegistry {
 
     /// Awaits all tasks in a nursery (synchronous simulation).
     ///
-
     /// In the interpreter, this executes all tasks sequentially.
     /// Returns true if all tasks completed successfully.
     pub fn await_all(&mut self, nursery_id: u64) -> bool {
@@ -2193,7 +2123,6 @@ impl NurseryRegistry {
 
     /// Configures a nursery option.
     ///
-
     /// config_type:
     /// - 0: timeout (ms)
     /// - 1: max_tasks
@@ -2227,7 +2156,6 @@ impl NurseryRegistry {
 
     /// Enters a nursery scope (pushes onto scope stack).
     ///
-
     /// This is used for structured concurrency to track the current
     /// active nursery scope for context propagation.
     pub fn enter_scope(&mut self, nursery_id: u64) {
@@ -2241,7 +2169,6 @@ impl NurseryRegistry {
 
     /// Exits a nursery scope (pops from scope stack).
     ///
-
     /// Validates that the exiting nursery matches the top of the stack.
     pub fn exit_scope(&mut self, nursery_id: u64) {
         // Pop from scope stack - validate it matches
@@ -2396,13 +2323,11 @@ pub struct ExecutionStats {
 
 /// CBGR (Capability-Based Generational References) statistics.
 ///
-
 /// Tracks reference usage across the three tiers:
 /// - Tier 0: Full CBGR validation (~15ns overhead)
 /// - Tier 1: Compiler-proven safe (0ns overhead)
 /// - Tier 2: Unsafe/manual safety (0ns overhead)
 ///
-
 /// Also provides adaptive validation capabilities that can adjust
 /// validation frequency based on observed violation rates.
 #[derive(Debug, Clone)]
@@ -2500,15 +2425,12 @@ impl CbgrStats {
 
     /// Enable adaptive validation with custom thresholds.
     ///
-
     /// When enabled, the system will reduce validation frequency after
     /// observing `threshold` consecutive clean validations, skipping
     /// `skip_count` validations for every validation performed.
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// stats.enable_adaptive(1000, 9); // After 1000 clean, skip 9 of 10
     /// ```
@@ -2527,11 +2449,9 @@ impl CbgrStats {
 
     /// Check if validation should be performed based on adaptive state.
     ///
-
     /// Returns `true` if validation should be performed, `false` if it can be skipped.
     /// This method should be called before each CBGR validation.
     ///
-
     /// When adaptive mode is disabled, always returns `true`.
     /// When adaptive mode is enabled and pattern is clean, may return `false`
     /// to skip validation and reduce overhead.
@@ -2558,7 +2478,6 @@ impl CbgrStats {
 
     /// Record a successful (clean) validation.
     ///
-
     /// Call this after each validation that passes without violation.
     #[inline(always)]
     pub fn record_clean_validation(&mut self) {
@@ -2568,7 +2487,6 @@ impl CbgrStats {
 
     /// Record a validation that detected a violation.
     ///
-
     /// This resets the adaptive state to ensure full validation resumes.
     #[inline(always)]
     pub fn record_violation(&mut self) {
@@ -2588,7 +2506,6 @@ impl CbgrStats {
 
     /// Get the estimated overhead reduction from adaptive validation.
     ///
-
     /// Returns a value between 0.0 (no reduction) and 1.0 (maximum reduction).
     pub fn adaptive_overhead_reduction(&self) -> f64 {
         if !self.adaptive_enabled || self.cbgr_checks == 0 {
@@ -2748,7 +2665,6 @@ impl InterpreterState {
 
     /// Initializes the runtime context system if not already initialized.
     ///
-
     /// This sets up thread-local storage for the V-LLSI context system.
     /// The interpreter calls this automatically when needed.
     pub fn ensure_runtime_ctx_initialized(&mut self) {
@@ -2764,7 +2680,6 @@ impl InterpreterState {
     /// allow-all / one-entry-cache-hit case lowers to a couple
     /// of compares + a return.
     ///
-
     /// Codegen for tagged intrinsics emits a call equivalent to
     /// this on entry to the handler; a `Deny` return short-
     /// circuits the syscall into a `PermissionDenied` error
@@ -3141,7 +3056,6 @@ impl InterpreterState {
 
     /// Resets the interpreter state (clears stack, registers, heap).
     ///
-
     /// Also clears accumulated runtime state (GPU context, CBGR allocations,
     /// method cache, output buffers, nurseries, exception handlers, TLS slots)
     /// to prevent unbounded memory growth across repeated executions.
@@ -3239,7 +3153,6 @@ impl InterpreterState {
 
     /// Gets a value from a TLS slot.
     ///
-
     /// Returns `None` if the slot has not been set.
     #[inline]
     pub fn tls_get(&self, slot: usize) -> Option<Value> {
@@ -3285,12 +3198,10 @@ impl InterpreterState {
 
     /// Gets or creates the FFI runtime for libffi-based calls.
     ///
-
     /// The FFI runtime is lazily initialized on first use to avoid overhead
     /// when FFI is not used. Once created, it caches library handles and
     /// resolved symbols for optimal performance.
     ///
-
     /// # Returns
     /// A mutable reference to the FFI runtime, or an error if initialization fails.
     #[cfg(feature = "ffi")]
@@ -3327,7 +3238,6 @@ impl InterpreterState {
 
     /// Returns a reference to the current module.
     ///
-
     /// Used by FFI operations that need to access module metadata.
     #[inline]
     pub fn module(&self) -> &VbcModule {
@@ -3350,7 +3260,6 @@ impl InterpreterState {
 
     /// Enables output capture mode (for test execution).
     ///
-
     /// When enabled, `print` and `debug_print` output is captured to internal
     /// buffers instead of being written to stdout/stderr.
     pub fn enable_output_capture(&mut self) {
@@ -3444,14 +3353,11 @@ impl InterpreterState {
 
     /// Sets up the callback handler for the current thread.
     ///
-
     /// This must be called before making FFI calls that might invoke callbacks.
     /// The handler will be able to invoke Verum functions re-entrantly.
     ///
-
     /// # Safety
     ///
-
     /// The caller must ensure:
     /// 1. `teardown_callback_handler()` is called after the FFI call completes
     /// 2. The interpreter state remains valid for the duration of the FFI call
@@ -3469,7 +3375,6 @@ impl InterpreterState {
 
     /// Tears down the callback handler after an FFI call.
     ///
-
     /// This must be called after every FFI call that used `setup_callback_handler()`.
     #[cfg(feature = "ffi")]
     pub fn teardown_callback_handler(&mut self) {
@@ -3485,22 +3390,17 @@ impl InterpreterState {
 
 /// Callback handler function invoked by FFI trampolines.
 ///
-
 /// This function is called when C code invokes a callback trampoline.
 /// It retrieves the interpreter state from the thread-local and re-enters
 /// the interpreter to execute the specified Verum function.
 ///
-
 /// # Arguments
 ///
-
 /// * `function_id` - The VBC function ID to invoke
 /// * `args` - Arguments marshalled from C types to Verum Values
 ///
-
 /// # Returns
 ///
-
 /// The result value, or `None` if the function returns unit or an error occurred.
 #[cfg(feature = "ffi")]
 fn invoke_callback_function(

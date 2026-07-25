@@ -32,16 +32,13 @@
 
 /// Clamp a byte offset DOWN to the nearest preceding char boundary.
 ///
-
 /// Walks at most 3 bytes since UTF-8 sequences are ≤ 4 bytes long;
 /// returns immediately if the offset is already at a boundary. When
 /// the offset exceeds `text.len()` it is first capped at `text.len()`,
 /// which is always a valid char boundary.
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::text_utf8::clamp_to_char_boundary;
 /// // π is U+03C0 — 2 bytes in UTF-8. Byte offset 1 lands inside it.
@@ -63,16 +60,13 @@ pub fn clamp_to_char_boundary(text: &str, byte_offset: usize) -> usize {
 /// UTF-8-safe prefix slice: `&text[..byte_offset]` with the offset
 /// clamped to the nearest preceding char boundary.
 ///
-
 /// The conservative choice is to round DOWN — returning the
 /// already-typed prefix is always semantically safe, while extending
 /// past a half-typed multi-byte char would lie about the cursor
 /// position.
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::text_utf8::safe_prefix;
 /// let s = "π = 1";
@@ -91,14 +85,11 @@ pub fn safe_prefix(text: &str, byte_offset: usize) -> &str {
 /// NOT bytes — naive `&s[..N]` panics when `N` falls inside a
 /// multi-byte UTF-8 sequence.
 ///
-
 /// Returns the original slice unchanged if it has ≤ `max_chars`
 /// characters.
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::text_utf8::truncate_chars;
 /// assert_eq!(truncate_chars("hello", 3), "hel");
@@ -124,20 +115,16 @@ pub fn truncate_chars(text: &str, max_chars: usize) -> &str {
 /// the given byte offset, using the supplied `is_word_char`
 /// predicate.
 ///
-
 /// `byte_offset` is clamped to the nearest preceding char boundary
 /// before the walk begins. Returns `None` when the cursor is not on
 /// a word character (the standard LSP contract — no word means no
 /// rename / hover / completion target).
 ///
-
 /// The returned bounds are always at char boundaries, so
 /// `&text[start..end]` is always safe to slice.
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::text_utf8::find_word_bounds;
 /// let pred = |c: char| c.is_alphanumeric() || c == '_';
@@ -188,10 +175,8 @@ pub fn find_word_bounds(
 /// when `byte_offset == 0` (no preceding char). Walks UTF-8 backwards
 /// correctly; never panics on multi-byte input.
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::text_utf8::char_before_satisfies;
 /// let s = "foo.bar";
@@ -218,10 +203,8 @@ pub fn char_before_satisfies(
 /// the given predicate. Returns `None` when `byte_offset >= text.len()`.
 /// Walks UTF-8 forwards correctly; never panics on multi-byte input.
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::text_utf8::char_at_satisfies;
 /// let s = "foo.bar";

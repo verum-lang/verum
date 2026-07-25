@@ -75,7 +75,6 @@ const ROOT: &str = "core";
 /// declarations of the same simple name are mutually exclusive at
 /// codegen time and therefore cannot collide.
 ///
-
 /// Modelled as a conjunction of `key = value` constraints (e.g.
 /// `target_os = "linux"`). An empty constraint set means "always
 /// active" (no `@cfg` annotation, or one we cannot model). When the
@@ -92,7 +91,6 @@ struct CfgConstraint {
 /// Keys whose different values prove mutual exclusion at build time.
 /// These are the cfg axes that pick exactly one value per build:
 ///
-
 ///  target_os — linux / macos / windows / …
 ///  target_arch — x86_64 / aarch64 / …
 ///  target_family — unix / windows / wasm / …
@@ -102,7 +100,6 @@ struct CfgConstraint {
 ///  embedded / none — at most one is selected
 ///  per `runtime` build profile
 ///
-
 /// Keys NOT in this list (notably `feature` and `debug_assertions`)
 /// are additive or independent: two cfgs with `feature = "A"` and
 /// `feature = "B"` can both be active when the build enables both
@@ -270,14 +267,12 @@ fn stdlib_public_type_names_are_unique() {
 /// Walk a directory recursively, collecting `public type Name is …`
 /// declarations.
 ///
-
 /// `inherited_cfg` is the @cfg constraint accumulated from ancestor
 /// `mod.vr` files via the `@cfg(...) public module <child>;` pattern.
 /// Every type discovered in this directory (and all descendants)
 /// inherits that constraint, conjoined with any per-declaration
 /// @cfg attribute.
 ///
-
 /// The mod.vr-based child-cfg lookup is what lets the ratchet
 /// recognise that types in `core/sys/linux/*.vr` and
 /// `core/sys/darwin/*.vr` cannot collide — `core/sys/mod.vr`
@@ -352,7 +347,6 @@ fn merge_cfg(a: &CfgConstraint, b: &CfgConstraint) -> CfgConstraint {
 /// the map (caller treats them as inheriting the parent's cfg
 /// unchanged).
 ///
-
 /// Heuristic-only — same lenient-formatting policy as scan_file.
 fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
     let mut out = BTreeMap::new();
@@ -402,13 +396,11 @@ fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
 /// Records each match under its simple name + `@cfg` constraint in
 /// `sink`.
 ///
-
 /// Heuristic-only — the test is intentionally lenient about formatting
 /// (whitespace, generics, body kind). Excludes `protocol` types since
 /// they cannot collide via the variant-constructor mechanism (no
 /// constructors).
 ///
-
 /// `@cfg(...)` attributes immediately preceding a type declaration
 /// (with `@repr(...)` / `@align(...)` / etc. allowed in between) are
 /// captured and attached to the site, so the uniqueness check can
@@ -513,7 +505,6 @@ fn scan_file(
 
 /// Convert a file path under `core/` into its dotted module path:
 ///
-
 ///  core/sys/common.vr -> core.sys.common
 ///  core/sys/locking/mod.vr -> core.sys.locking
 fn file_to_module_path(repo_core_root: &Path, file: &Path) -> String {

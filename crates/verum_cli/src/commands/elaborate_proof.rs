@@ -90,7 +90,6 @@ impl ElaborationStatus {
 
 /// Entry point for `verum elaborate-proof <file>`.
 ///
-
 /// `output_dir` is the destination directory for `.vproof` files.
 /// When `None`, defaults to `<source-dir>/elaborated/`.
 pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {

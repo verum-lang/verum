@@ -160,10 +160,8 @@ impl std::fmt::Display for CodegenPassId {
 /// concrete proof obligation describing what would discharge that
 /// invariant, and the current discharge status.
 ///
-
 /// # Field semantics
 ///
-
 /// * [`Self::pass`] — the canonical pass identifier.
 /// * [`Self::semantic_invariant`] — one-line statement of the
 ///  observable behaviour the pass preserves (e.g. "the operational

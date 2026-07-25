@@ -55,17 +55,14 @@ use std::hash::Hash;
 
 /// Format a list of items with a custom separator
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_list;
 ///
-
 /// let items = vec!["apple", "banana", "cherry"];
 /// assert_eq!(format_list(&items, ", "), "apple, banana, cherry");
 /// assert_eq!(format_list(&items, " | "), "apple | banana | cherry");
 ///
-
 /// let empty: Vec<&str> = vec![];
 /// assert_eq!(format_list(&empty, ", "), "");
 /// ```
@@ -85,13 +82,11 @@ pub fn format_list<T: Display>(items: &[T], separator: &str) -> Text {
 
 /// Format a list of items with a custom formatter function
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_list_with;
 /// use verum_common::Text;
 ///
-
 /// let items = vec![1, 2, 3];
 /// let formatted = format_list_with(&items, ", ", |x| Text::from(format!("#{}", x)));
 /// assert_eq!(formatted, "#1, #2, #3");
@@ -115,12 +110,10 @@ where
 
 /// Format a list with Oxford comma (a, b, and c)
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_list_pretty;
 ///
-
 /// assert_eq!(format_list_pretty(&vec!["a"]), "a");
 /// assert_eq!(format_list_pretty(&vec!["a", "b"]), "a and b");
 /// assert_eq!(format_list_pretty(&vec!["a", "b", "c"]), "a, b, and c");
@@ -148,16 +141,13 @@ pub fn format_list_pretty<T: Display>(items: &[T]) -> Text {
 
 /// Format a list with brackets
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_list_bracketed;
 ///
-
 /// let items = vec!["a", "b", "c"];
 /// assert_eq!(format_list_bracketed(&items, ", "), "[a, b, c]");
 ///
-
 /// let empty: Vec<&str> = vec![];
 /// assert_eq!(format_list_bracketed(&empty, ", "), "[]");
 /// ```
@@ -174,13 +164,11 @@ pub fn format_list_bracketed<T: Display>(items: &[T], separator: &str) -> Text {
 
 /// Format a Map for display
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_map;
 /// use verum_common::Map;
 ///
-
 /// let mut map = Map::new();
 /// map.insert("key1", "value1");
 /// map.insert("key2", "value2");
@@ -206,13 +194,11 @@ where
 
 /// Format an OrderedMap for display
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_ordered_map;
 /// use verum_common::OrderedMap;
 ///
-
 /// let mut map = OrderedMap::new();
 /// map.insert(1, "one");
 /// map.insert(2, "two");
@@ -237,13 +223,11 @@ where
 
 /// Format a Set for display
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_set;
 /// use verum_common::Set;
 ///
-
 /// let mut set = Set::new();
 /// set.insert("a");
 /// set.insert("b");
@@ -268,13 +252,11 @@ where
 
 /// Format an OrderedSet for display
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_ordered_set;
 /// use verum_common::OrderedSet;
 ///
-
 /// let mut set = OrderedSet::new();
 /// set.insert(1);
 /// set.insert(2);
@@ -302,16 +284,13 @@ where
 
 /// Format a dependency cycle with arrows
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_cycle;
 ///
-
 /// let cycle = vec!["mod_a", "mod_b", "mod_c"];
 /// assert_eq!(format_cycle(&cycle), "mod_a -> mod_b -> mod_c -> mod_a");
 ///
-
 /// let empty: Vec<&str> = vec![];
 /// assert_eq!(format_cycle(&empty), "[]");
 /// ```
@@ -331,12 +310,10 @@ pub fn format_cycle<T: Display>(cycle: &[T]) -> Text {
 
 /// Format a dependency chain (no cycle closure)
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_dependency_chain;
 ///
-
 /// let chain = vec!["step1", "step2", "step3"];
 /// assert_eq!(format_dependency_chain(&chain), "step1 -> step2 -> step3");
 /// ```
@@ -350,12 +327,10 @@ pub fn format_dependency_chain<T: Display>(chain: &[T]) -> Text {
 
 /// Format a code block with indentation
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_code_block;
 ///
-
 /// let code = "fn main() {\n println!(\"Hello\");\n}";
 /// let formatted = format_code_block(code, 4);
 /// // Each line will be indented by 4 spaces
@@ -372,12 +347,10 @@ pub fn format_code_block(code: &str, indent_spaces: usize) -> Text {
 
 /// Format inline code with backticks
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_inline_code;
 ///
-
 /// assert_eq!(format_inline_code("x + 1"), "`x + 1`");
 /// ```
 pub fn format_inline_code(code: &str) -> Text {
@@ -386,19 +359,16 @@ pub fn format_inline_code(code: &str) -> Text {
 
 /// Format a function signature
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_function_signature;
 ///
-
 /// let params = vec![verum_common::Text::from("x: Int"), verum_common::Text::from("y: Int")];
 /// assert_eq!(
 ///  format_function_signature("add", &params, Some("Int")),
 ///  "fn add(x: Int, y: Int) -> Int"
 /// );
 ///
-
 /// assert_eq!(
 ///  format_function_signature("print", &[], None),
 ///  "fn print()"
@@ -418,18 +388,15 @@ pub fn format_function_signature(name: &str, params: &[Text], return_type: Maybe
 
 /// Format a type signature with generics
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::format_type_signature;
 ///
-
 /// assert_eq!(
 ///  format_type_signature("List", &["T"]),
 ///  "List<T>"
 /// );
 ///
-
 /// assert_eq!(
 ///  format_type_signature("Map", &["K", "V"]),
 ///  "Map<K, V>"
@@ -449,12 +416,10 @@ pub fn format_type_signature(name: &str, generics: &[&str]) -> Text {
 
 /// Truncate text with ellipsis if it exceeds max length
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::truncate_with_ellipsis;
 ///
-
 /// assert_eq!(truncate_with_ellipsis("hello world", 20), "hello world");
 /// assert_eq!(truncate_with_ellipsis("hello world", 8), "hello...");
 /// assert_eq!(truncate_with_ellipsis("hello", 8), "hello");
@@ -470,12 +435,10 @@ pub fn truncate_with_ellipsis(text: &str, max_len: usize) -> Text {
 
 /// Indent each line of text by a number of spaces
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::indent;
 ///
-
 /// let text = "line1\nline2\nline3";
 /// let indented = indent(text, 4);
 /// assert_eq!(indented, " line1\n line2\n line3");
@@ -492,12 +455,10 @@ pub fn indent(text: &str, spaces: usize) -> Text {
 
 /// Wrap text to a specified width
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::wrap_text;
 ///
-
 /// let text = "The quick brown fox jumps over the lazy dog";
 /// let wrapped = wrap_text(text, 20);
 /// // Lines will be wrapped at ~20 characters
@@ -534,12 +495,10 @@ pub fn wrap_text(text: &str, width: usize) -> Text {
 
 /// Join text lines with a separator
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::formatting::join_lines;
 ///
-
 /// let lines = vec!["line1", "line2", "line3"];
 /// assert_eq!(join_lines(&lines, "\n"), "line1\nline2\nline3");
 /// assert_eq!(join_lines(&lines, "; "), "line1; line2; line3");
@@ -815,7 +774,6 @@ impl TableFormatter {
 
 /// Format a list of items (AsRef<str> version for backward compatibility)
 ///
-
 /// This function maintains compatibility with existing code in error.rs
 pub fn format_list_str<T: AsRef<str>>(items: &[T]) -> Text {
     if items.is_empty() {
@@ -833,7 +791,6 @@ pub fn format_list_str<T: AsRef<str>>(items: &[T]) -> Text {
 
 /// Format a cycle (AsRef<str> version for backward compatibility)
 ///
-
 /// This function maintains compatibility with existing code in error.rs
 pub fn format_cycle_str<T: AsRef<str>>(items: &[T]) -> Text {
     if items.is_empty() {

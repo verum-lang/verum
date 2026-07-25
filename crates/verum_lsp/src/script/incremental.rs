@@ -105,7 +105,6 @@ impl IncrementalStats {
 
 /// Incremental script parser with caching
 ///
-
 /// This parser maintains a cache of parsed lines and intelligently
 /// re-parses only what has changed. It tracks dependencies between lines
 /// to enable smart cache invalidation.
@@ -171,7 +170,6 @@ impl IncrementalScriptParser {
 
     /// Parse a line with incremental caching
     ///
-
     /// If the line at this line number hasn't changed, returns the cached result.
     /// Otherwise, re-parses and updates the cache.
     pub fn parse_line(
@@ -224,7 +222,6 @@ impl IncrementalScriptParser {
 
     /// Parse multiple lines incrementally
     ///
-
     /// This is more efficient than parsing line-by-line as it can
     /// detect unchanged regions and skip them.
     pub fn parse_lines(
@@ -246,7 +243,6 @@ impl IncrementalScriptParser {
 
     /// Update a specific line and re-parse
     ///
-
     /// This invalidates the cache for this line and all dependent lines.
     pub fn update_line(
         &mut self,
@@ -340,7 +336,6 @@ impl IncrementalScriptParser {
 
     /// Pre-warm the cache by parsing all lines
     ///
-
     /// Useful for loading a script file into the REPL
     pub fn prewarm(&mut self, lines: &[&str], file_id: FileId) -> Result<(), List<ParseError>> {
         for (i, line) in lines.iter().enumerate() {
@@ -385,18 +380,15 @@ fn calculate_hash(text: &str) -> u64 {
 
 /// Detect dependencies between script lines.
 ///
-
 /// Returns the line numbers that the given line depends on.
 /// This is used for smart cache invalidation - when a line is modified,
 /// all lines that depend on it must also be re-parsed.
 ///
-
 /// # Algorithm
 /// 1. Scan the line for identifier usage
 /// 2. Look up each identifier in the context's definition tracking
 /// 3. Return the set of line numbers where those definitions were made
 ///
-
 /// # Example
 /// ```text
 /// Line 1: let x = 42 // Defines x on line 1
@@ -439,7 +431,6 @@ pub fn detect_dependencies(line: &str, context: &ScriptContext) -> List<usize> {
 
 /// Check if a line contains an identifier (not as part of another word).
 ///
-
 /// This performs a more accurate check than a simple substring match.
 /// For example, "x" should match "x + 1" but not "tax". Word-boundary
 /// probing uses the UTF-8-safe primitives from `verum_common::text_utf8`
@@ -480,7 +471,6 @@ fn is_ident_char(c: char) -> bool {
 
 /// Dependency graph for script lines.
 ///
-
 /// This structure tracks which lines depend on which other lines,
 /// enabling efficient re-parsing when lines are modified.
 #[derive(Debug, Clone, Default)]

@@ -20,7 +20,6 @@ use crate::diakrisis_bridge::{BridgeAudit, admit_drake_reflection_extended};
 /// `Truncated` marker is reserved for the Cat-baseline that lives
 /// strictly below κ_1.
 ///
-
 /// Mirrors `core.math.stack_model::Universe` (single source of truth
 /// between kernel and stdlib).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -144,23 +143,19 @@ impl UniverseTier {
 
 /// Categorical coherence — `K-Universe-Ascent` kernel rule.
 ///
-
 /// Verifies that a meta-classifier application `M_stack(α)`
 /// correctly ascends the universe level by exactly one step:
 ///
-
 /// ```text
 ///  Γ ⊢ α : Articulation@U_k Γ ⊢ M_stack(α) : Articulation@U_{k+1}
 ///  ──────────────────────────────────────────────────────────────────── (K-Universe-Ascent)
 ///  Γ ⊢ M_stack : Functor[Articulation@U_k → Articulation@U_{k+1}]
 /// ```
 ///
-
 /// Per Lemma 131.L1 (universe-ascent): M_stack(F: U_1) ∈ U_2.
 /// Per Lemma 131.L3 (Drake-reflection closure): M_stack(F: U_2)
 /// stays in U_2; no κ_3 is needed.
 ///
-
 /// The rule rejects:
 ///  - source/target tier inversion (target tier < source tier);
 ///  - source = Truncated with target ≥ Kappa1 — Truncated is the
@@ -315,23 +310,19 @@ impl From<UniverseTier> for KappaTier {
 /// V2 universe-ascent rule with audit-trail-aware Drake reflection
 /// admit. Strictly stronger than [`check_universe_ascent`]:
 ///
-
 ///  * Truncated identity / Truncated → ≥κ_1 mismatch / canonical
 ///  κ_1 → κ_2 ascent / Drake closure at κ_2 / κ_1 → κ_1 are
 ///  decided directly (empty audit).
 ///
-
 ///  * Ascents involving κ_n for n ≥ 3, OR multi-step ascents
 ///  (target tier strictly more than one level above source)
 ///  are admitted via `BridgeId::DrakeReflectionExtended`.
 ///  The structural algorithm beyond κ_2 is preprint-blocked on
 ///  Diakrisis Lemma 131.L4.
 ///
-
 ///  * Tier inversion (target < source) is rejected uniformly,
 ///  regardless of tier index.
 ///
-
 /// **Soundness invariant**: V2 never widens V0's accept set on
 /// the {Truncated, κ_1, κ_2} input domain. New ascent classes
 /// reachable in V2 strictly require the bridge admit.

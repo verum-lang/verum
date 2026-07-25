@@ -282,7 +282,6 @@ impl DeclKind {
 
 /// minimal context the replay backend needs.
 ///
-
 /// Carries the declaration's name, kind, and optional framework
 /// attribution. Intentionally minimal so the export pipeline can
 /// construct it from the AST without dragging additional state.
@@ -306,7 +305,6 @@ pub struct FrameworkRef {
 
 /// the lowered proof in the target language.
 ///
-
 /// `source` is opaque per-target text; the export emitter splices it
 /// into the target file verbatim. `depends_on` lists axiom / lemma
 /// names the proof cites so the emitter can ensure they're imported
@@ -355,7 +353,6 @@ impl TargetTactic {
 
 /// the trait every target backend implements.
 ///
-
 /// Implementors live in a per-target module. The framework wires
 /// them into the [`ProofReplayRegistry`] at startup (or lazily on
 /// first lookup).
@@ -421,7 +418,6 @@ impl ProofReplayRegistry {
 /// target-language Admitted / sorry / `?` placeholder for every
 /// supported target. Always succeeds, always sets `admitted = true`.
 ///
-
 /// This is the contract that lets V4 ship today without breaking
 /// statement-only exports: when no per-target replayer is
 /// registered, [`AdmittedReplay`] is the default and the existing

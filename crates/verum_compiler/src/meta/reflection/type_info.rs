@@ -13,7 +13,6 @@ use super::variant_info::VariantInfo;
 
 /// Complete type information for compile-time reflection
 ///
-
 /// Provides comprehensive type metadata including fields, variants, and protocol implementations.
 #[derive(Debug, Clone)]
 pub struct TypeInfo {

@@ -129,7 +129,6 @@ impl Clause {
 /// of clauses. Empty disjunction = `⊥` (never-true); single empty
 /// clause = `⊤` (always-true).
 ///
-
 /// Invariant: no clause subsumes another (canonical / minimal DNF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaceFormula {
@@ -238,13 +237,11 @@ impl FaceFormula {
 
     /// **Subsumption decision: `self ⇒ other`.**
     ///
-
     /// In DNF, `self ⇒ other` iff every clause of `self` is contained
     /// in (i.e., implies) some clause of `other`. Each clause
     /// containment is itself decidable via literal-set inclusion (a
     /// clause with FEWER literals is more general).
     ///
-
     /// For HComp / Transp / Glue cofibration coherence:
     /// `walls.support ⇒ φ` means the wall family covers exactly the
     /// face φ requires — interval-subsumption verified.

@@ -14,7 +14,6 @@ use verum_common::{List, Maybe, Text};
 
 /// Unique identifier for a module.
 ///
-
 /// Module IDs are allocated sequentially and remain stable throughout
 /// a compilation session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -46,22 +45,18 @@ impl std::fmt::Display for ModuleId {
 
 /// A module path representing the hierarchical location of a module.
 ///
-
 /// Examples:
 /// - `std` → ["std"]
 /// - `std.collections` → ["std", "collections"]
 /// - `cog.parser.ast` → ["cog", "parser", "ast"]
 ///
-
 /// # Specification
 ///
-
 /// Module paths follow these rules:
 /// - Absolute paths start from cog root (`cog.*`) or external cog
 /// - Relative paths use `self`, `super`, or direct names
 /// - Path segments are identifiers
 ///
-
 /// Absolute paths start from cog root (`cog.*`) or external cog.
 /// Relative paths use `self`, `super`, or direct names.
 /// Path segments are identifiers separated by dots.
@@ -78,7 +73,6 @@ impl ModulePath {
 
     /// Create a module path from a string (dot-separated).
     ///
-
     /// Example: `ModulePath::from_str("std.collections.List")`
     pub fn from_str(path: &str) -> Self {
         let segments = path.split('.').map(Text::from).collect::<List<_>>();
@@ -167,12 +161,10 @@ impl ModulePath {
 
     /// Resolve a relative path from a base path.
     ///
-
     /// # Example
     /// ```
     /// use verum_modules::ModulePath;
     ///
-
     /// let base = ModulePath::from_str("cog.parser.ast");
     /// let relative = ModulePath::from_str("super.lexer");
     /// let resolved = base.resolve(&relative).unwrap();
@@ -209,33 +201,27 @@ impl ModulePath {
 
     /// Resolve an import path string relative to a current module path.
     ///
-
     /// This is the centralized import resolution logic. It handles:
     /// - `self.foo` -> sibling module (parent.foo) or child module for mod.vr
     /// - `super.foo` -> parent's sibling module
     /// - Absolute paths -> returned as-is
     ///
-
     /// # Arguments
     /// * `import_path` - The import path string (e.g., "self.foo", "super.bar", "std.io")
     /// * `current` - The current module's path
     ///
-
     /// # Returns
     /// * `Ok(ModulePath)` - The resolved absolute module path
     /// * `Err(ModuleError)` - If the path cannot be resolved (e.g., super from root)
     ///
-
     /// # Example
     /// ```
     /// use verum_modules::ModulePath;
     ///
-
     /// let current = ModulePath::from_str("handlers.search");
     /// let resolved = ModulePath::resolve_import("self.utils", &current).unwrap();
     /// assert_eq!(resolved.to_string(), "handlers.utils");
     ///
-
     /// let resolved = ModulePath::resolve_import("super.contexts", &current).unwrap();
     /// assert_eq!(resolved.to_string(), "contexts");
     /// ```
@@ -422,16 +408,13 @@ use crate::error::ModuleError;
 
 /// Resolve an import path relative to the current module.
 ///
-
 /// # Arguments
 /// * `import_path` - Raw import path (e.g., "super.super.domain.Package")
 /// * `current_module` - Full path of the importing module (e.g., "services.package_service")
 ///
-
 /// # Returns
 /// Fully resolved module path
 ///
-
 /// # Examples
 /// ```
 /// // From services.package_service:

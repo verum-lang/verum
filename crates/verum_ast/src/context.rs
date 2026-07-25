@@ -42,10 +42,8 @@ use verum_common::{Heap, List, Maybe};
 
 /// A context requirement in a function signature or type.
 ///
-
 /// # Variants
 ///
-
 /// Context requirements can be:
 /// - Simple: `Database`
 /// - With type args: `Cache<User>`
@@ -55,7 +53,6 @@ use verum_common::{Heap, List, Maybe};
 /// - Conditional: `Analytics if cfg.enabled`
 /// - Transformed: `Database.transactional()`
 ///
-
 /// Context requirements can be simple (`Database`), parameterized (`Cache<User>`),
 /// negative (`!Database` -- asserts absence), aliased (`Database as db`),
 /// named (`db: Database`), conditional (`Analytics if cfg.enabled`), or
@@ -131,10 +128,8 @@ impl Spanned for ContextRequirement {
 
 /// A transform applied to a context (e.g., `.transactional()`)
 ///
-
 /// # Examples
 ///
-
 /// ```verum
 /// fn query() using [Database.transactional()] -> Data { ... }
 /// fn cached() using [Cache.scoped("user")] -> User { ... }
@@ -154,7 +149,6 @@ impl Spanned for ContextTransform {
 
 /// A list of context requirements, used in function types and declarations.
 ///
-
 /// This is a thin wrapper around `List<ContextRequirement>` that provides
 /// convenient constructors and utility methods.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

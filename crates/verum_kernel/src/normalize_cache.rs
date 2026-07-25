@@ -109,7 +109,6 @@ pub struct NormalizeCacheStats {
 /// Concurrent, sharded cache for plain (axiom-free) normalization
 /// results.
 ///
-
 /// Construct via [`NormalizeCache::new`] (default capacity = 16K) or
 /// [`NormalizeCache::with_capacity`]. `Send + Sync` so it sits on
 /// the verification context and can be shared across rayon workers.
@@ -128,14 +127,12 @@ impl Default for NormalizeCache {
 impl NormalizeCache {
     /// Default capacity hint = 16384 entries.
     ///
-
     /// Each entry is the 32-byte signature + the cached `CoreTerm`
     /// (variable size, typically tens-to-hundreds of bytes for
     /// stdlib refinement predicates) + per-shard overhead. At full
     /// load the working-set is bounded by per-session `clear`
     /// (typically called between top-level decls).
     ///
-
     /// 16K vs `TacticCache`'s 8K — kernel normalization touches more
     /// distinct terms than Z3 probe characterisation because the
     /// kernel walks every refinement predicate body, not just the

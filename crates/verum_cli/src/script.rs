@@ -52,7 +52,6 @@ use std::path::Path;
 /// Subcommand names registered by `verum`. If `argv[1]` matches any of these,
 /// we never rewrite — the user is invoking the subcommand directly.
 ///
-
 /// Maintained in sync with `enum Commands` in `main.rs`. Adding a subcommand
 /// requires adding its CLI name here as well; the rewrite is conservative —
 /// missing entries cause script mode to (incorrectly) fire on a real
@@ -113,13 +112,10 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
 /// rewrite it to `verum run <file> -- <args…>`. Returns the (possibly
 /// unchanged) argv to feed into clap.
 ///
-
 /// `argv` must include `argv[0]` (the binary path), as is conventional.
 ///
-
 /// # Arg-passing semantics
 ///
-
 /// In a shebang invocation (`./hello.vr foo bar`), the OS hands `verum` the
 /// argv `["verum", "hello.vr", "foo", "bar"]`. The user expects `foo` and
 /// `bar` to reach the script, not to act as `verum`-level flags. We therefore
@@ -154,7 +150,6 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 /// True iff `arg` should trigger a script-mode rewrite. The check is
 /// deliberately strict: false positives would shadow legitimate subcommands.
 ///
-
 /// **Verum execution-mode contract.** The no-`run` shorthand
 /// (`verum ./script.vr`) is reserved for **scripts**, not arbitrary
 /// `.vr` files. A script is identified by a `#!` shebang line at byte 0
@@ -163,14 +158,12 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 /// form. This makes the three execution modes unambiguous from argv
 /// alone:
 ///
-
 /// | Mode | Invocation | Required signal |
 /// |-------------|-----------------------------------|---------------------------|
 /// | Interpreter | `verum run file.vr` | `fn main()` in source |
 /// | AOT | `verum run --aot file.vr` | `fn main()` in source |
 /// | Script | `verum file.vr` or `./file.vr` | `#!` shebang at byte 0 |
 ///
-
 /// Conditions, AND-joined:
 /// - Not a flag (does not start with `-`).
 /// - Not a known subcommand name (UTF-8 only — every Verum subcommand
@@ -178,7 +171,6 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 /// - Names an existing file (regular file, accessible).
 /// - **Begins with `#!` shebang** (BOM-tolerant: `EF BB BF #!` accepted).
 ///
-
 /// **Encoding contract:** flag detection and the file-existence /
 /// shebang checks all operate on the raw `OsStr` so non-UTF-8 paths
 /// (Windows legacy paths, macOS broken-encoding test fixtures,
@@ -256,14 +248,12 @@ pub fn is_script_invocation(argv: &[OsString]) -> bool {
 /// precise advisory message when `argv[1]` looks like a *would-be* script
 /// (existing `.vr` file) but lacks the mandatory `#!` shebang.
 ///
-
 /// The Verum execution-mode contract reserves the no-`run` shorthand for
 /// shebang scripts; without one, clap would surface the generic "unknown
 /// subcommand" error which gives the user no actionable next step. By
 /// detecting the misuse pre-clap we can point them at the exact fix
 /// (`verum run file.vr` for non-script files, or add a shebang).
 ///
-
 /// Returns `Some(message)` only for the `.vr`-extension-without-shebang
 /// case; every other shape (subcommands, flags, non-existent files, files
 /// with unrelated extensions) returns `None` to stay out of clap's way.

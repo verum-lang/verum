@@ -65,7 +65,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a theorem declaration.
     /// Syntax: [pub] theorem name<T>(params): proposition { proof }
     ///
-
     /// Theorem syntax: `[pub] theorem name<T>(params): proposition { proof_body }`
     /// Propositions are type expressions. Proof bodies are term/tactic/structured/by-method.
     pub fn parse_theorem(
@@ -100,7 +99,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a lemma declaration.
     /// Syntax: [pub] lemma name<T>(params): proposition { proof }
     ///
-
     /// Lemma syntax: `[pub] lemma name<T>(params): proposition { proof_body }`
     /// Same structure as theorem but indicates a helper result.
     pub fn parse_lemma(
@@ -127,7 +125,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a corollary declaration.
     /// Syntax: [pub] corollary name<T>(params): proposition { proof }
     ///
-
     /// Corollary syntax: `[pub] corollary name<T>(params): proposition { proof_body }`
     /// A consequence derived from a previously proven theorem.
     pub fn parse_corollary(
@@ -145,7 +142,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse theorem-like declarations (theorem, lemma, corollary).
     ///
-
     /// Supports two syntax forms:
     /// 1. Contract-based: `theorem name(params) requires ... ensures ... { proof by tactic }`
     /// 2. Proposition-based: `theorem name(params): proposition { tactic }`
@@ -482,7 +478,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse an axiom declaration.
     /// Syntax: [pub] axiom name<T>(params): proposition;
     ///
-
     /// Axiom syntax: `[pub] axiom name<T>(params): proposition;`
     /// Axioms are unproven assumptions — accepted as true without proof body.
     pub fn parse_axiom(
@@ -677,10 +672,8 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a tactic declaration.
     /// Syntax: tactic name(params) { body }
     ///
-
     /// Grammar: tactic_decl = 'tactic' , identifier , '(' , [ param_list ] , ')' , block_expr ;
     ///
-
     /// Tactic declarations define reusable proof strategies. Built-in tactics include:
     /// simp (simplify), ring (normalize ring exprs), field (normalize field exprs),
     /// omega (linear arithmetic), blast (tableau prover). User tactics compose these.
@@ -906,7 +899,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single tactic parameter.
     ///
-
     /// Tactic parameters are typed bindings — either one of the classical
     /// tactic-DSL kinds (`Expr`, `Type`, `Tactic`, `Hypothesis`, `Int`,
     /// `Prop`) or an arbitrary concrete type (`Float`, `List<T>`,
@@ -1073,7 +1065,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a proof body.
     /// Can be: { term }, proof { ... }, by method { ... }
     ///
-
     /// Proof bodies come in four forms:
     /// 1. Term-mode: direct expression `{ proof_term }`
     /// 2. Tactic-mode: `proof { have h1: ...; suffices ...; ... }`
@@ -2363,7 +2354,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a calculation chain.
     /// Syntax: calc { start = expr by justification; = expr by justification; ... }
     ///
-
     /// Calculation chains enable equational reasoning:
     /// `calc { start = expr by justification; = expr by justification; ... }`
     /// Relations: = (equality), != (inequality), <, <=, >, >=, => (implication), iff.
@@ -2486,7 +2476,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a tactic expression.
     ///
-
     /// Tactic expressions: simp, ring, field, omega, blast, trivial, assumption,
     /// exact(term), apply(term), rewrite[lemma], unfold(def), intro(names),
     /// specialize(term, args), norm_num, decide, ext, funext, congr, and more.

@@ -99,7 +99,6 @@ impl VerifiedContract {
 
 /// Registry of verified contracts for semantic analysis
 ///
-
 /// Optimized with HashMap for O(1) lookup by function/type name.
 #[derive(Debug, Clone, Default)]
 pub struct VerifiedContractRegistry {

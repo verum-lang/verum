@@ -116,7 +116,6 @@ pub const SLICE_FAT_PTR_SIZE: u64 = POINTER_SIZE * 2;
 ///     generation: u32    @ 8
 ///     epoch_and_caps: u32@ 12
 /// ```
-
 /// Offset of the `ptr` field (always 0 — first field).
 pub const THIN_REF_PTR_OFFSET: u64 = 0;
 
@@ -140,7 +139,6 @@ pub const THIN_REF_EPOCH_CAPS_OFFSET: u64 = POINTER_SIZE + 4; // 12
 ///     offset_from_base  @ 24  (subslice view offset)
 ///     reserved          @ 28  (padding for future extensions)
 /// ```
-
 /// Offset of the 64-bit `metadata` field (FatRef-only).
 pub const FAT_REF_METADATA_OFFSET: u64 = THIN_REF_SIZE; // 16
 

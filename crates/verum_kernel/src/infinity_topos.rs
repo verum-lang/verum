@@ -178,7 +178,6 @@ pub fn is_infinity_topos(t: &InfinityTopos) -> bool {
 /// fully-faithful reflective inclusion into a presheaf ∞-category
 /// + left-exact reflector + Giraud axioms.
 ///
-
 /// Returns `None` if any precondition fails.
 pub fn build_infinity_topos(
     name: impl Into<Text>,

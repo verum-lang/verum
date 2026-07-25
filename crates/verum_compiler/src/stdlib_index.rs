@@ -153,10 +153,8 @@ impl StdlibModuleIndex {
 
 /// Convert a stdlib file-relative path to its canonical module path.
 ///
-
 /// Examples:
 ///
-
 /// ```text
 /// "base/maybe.vr" → "core.base.maybe"
 /// "shell/exec.vr" → "core.shell.exec"
@@ -165,7 +163,6 @@ impl StdlibModuleIndex {
 ///  → "core.database.sqlite.native.l7_api.database"
 /// ```
 ///
-
 /// This function is the single source of truth for the file→module
 /// mapping. The same convention is implemented inline in
 /// `pipeline.rs::load_stdlib_modules` (lines 3805-3829); both must stay

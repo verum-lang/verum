@@ -37,10 +37,8 @@ impl VisibilityChecker {
 
     /// Check if an item is visible from another module.
     ///
-
     /// Implements the visibility algorithm from Section 5.2.8 of the spec:
     ///
-
     /// ```text
     /// fn is_visible(item: Item, from_module: Module) -> bool {
     ///  match item.visibility {

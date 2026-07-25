@@ -201,11 +201,9 @@ pub struct BicatOfFractions {
 /// Build the bicategory of fractions `C[W^{-1}]` under Pronk's
 /// BF1–BF5 axioms.
 ///
-
 /// **Preconditions** (kernel-checked): the supplied [`PronkAxioms`]
 /// record asserts all five flags.
 ///
-
 /// Returns `None` if any axiom fails.
 pub fn build_bicat_of_fractions(
     base: &InfinityCategory,
@@ -237,11 +235,9 @@ pub fn build_bicat_of_fractions(
 /// Compose two spans `X ← Y → Z` and `Z ← W → V` to obtain
 /// `X ← P → V` where `P` is the apex of an Ore-pullback (BF4).
 ///
-
 /// **Preconditions** (current surface): both spans share the meeting
 /// object `Z` (i.e. `first.target == second.source`).
 ///
-
 /// Returns `None` when the meeting object doesn't match.
 pub fn compose_spans(first: &Span, second: &Span) -> Option<Span> {
     if first.target != second.source {

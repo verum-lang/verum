@@ -32,7 +32,6 @@ use std::sync::Arc;
 
 /// Pre-built index for O(1) function name lookups in VBC modules.
 ///
-
 /// Replaces O(n) linear scans of `vbc_mod.functions` in instruction.rs
 /// Strategy 2/3 with efficient HashMap lookups.
 #[derive(Debug, Clone, Default)]
@@ -148,7 +147,6 @@ pub enum CaptureKind {
 
 /// Per-function lowering context.
 ///
-
 /// Manages register values, basic blocks, and statistics for a single
 /// function being lowered.
 pub struct FunctionContext<'a, 'ctx> {
@@ -258,12 +256,10 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Pre-scanned float registers: registers that VBC BinaryF/UnaryF/CmpF/LoadK(Float)
     /// will use. Unlike float_registers, these are NOT cleared by set_register().
     /// (Migrated to reg_types — prescan_float flag)
-
     /// Pre-scanned text registers: registers that the pre-pass determined hold Text values
     /// (e.g., AsVar extracting from Result<Text, E>). Unlike text_registers, these are
     /// NOT cleared by set_register(), so instructions like AsVar can restore text marking.
     /// (Migrated to reg_types — prescan_text flag)
-
     /// Variant registers with float fields: (variant_reg, field_idx) → true.
     /// Used by GetVariantData to mark extracted float fields as float_registers.
     variant_float_fields: std::collections::HashSet<(u16, u32)>,
@@ -274,7 +270,6 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Registers that hold lists whose elements are strings (List<Text>).
     /// Used by GetE to propagate string_register tracking through list access.
     /// (Migrated to reg_types — RegisterType::List { element: Text })
-
     /// Registers that hold channel pointers (for channel method dispatch in CallM).
     chan_registers: std::collections::HashSet<u16>,
 
@@ -343,23 +338,18 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Registers holding Maybe<Text> variant objects (from strip_prefix/strip_suffix etc.).
     /// Used by AsVar to propagate string_register marking to extracted payload.
     /// (Migrated to reg_types — RegisterType::Maybe { inner_is_text: true })
-
     /// Registers holding Maybe<&T> variants from compiled modules (e.g., List.get()).
     /// The payload is a raw pointer that needs auto-deref in unwrap/match.
     /// (Migrated to reg_types — RegisterType::Maybe { inner_is_ref: true })
-
     /// Registers that hold "owned" text objects — allocated by Concat/ToString/CharToStr.
     /// These must be freed when overwritten or at function exit. NOT set for string literals
     /// (LoadK Constant::String) or function parameters, which are borrowed.
     /// (Migrated to reg_types — RegisterType::Text { owned: true })
-
     /// Registers holding FFI-allocated pointers (TransferFrom ownership).
     /// (Migrated to reg_types — owned_ffi flag)
-
     /// Registers consumed by TransferTo FFI calls (use-after-transfer detection).
     /// Any subsequent use of these registers is a potential error.
     /// (Migrated to reg_types — consumed_ffi flag)
-
     /// Registers that hold struct pointers (stack-spilled structs in alloca mode).
     /// Used by ListPush to heap-copy structs before storing in list backing array.
     /// (Migrated to reg_types — RegisterType::Struct)
@@ -368,15 +358,12 @@ pub struct FunctionContext<'a, 'ctx> {
 
     /// Registers currently holding f64 values (stored directly, no bitcast).
     /// (Migrated to alloca_register_types — FloatType check)
-
     /// Registers currently holding pointer values (stored directly, no ptrtoint).
     /// (Migrated to alloca_register_types — PointerType check)
-
     /// Registers that hold pointers to inline structs within arrays (no object header).
     /// Set by offset() when the element type is a struct (e.g., Slot<K,V> in Map).
     /// Used by Deref (skip load-through) and GetF (skip header offset).
     /// (Migrated to reg_types — RegisterType::InlineStruct)
-
     /// Element stride override for pointer registers (in bytes).
     /// Set when GetF loads a backing pointer whose elements are larger than 8 bytes.
     /// Used by offset() to compute correct byte offset (stride * index).
@@ -468,19 +455,16 @@ pub struct FunctionContext<'a, 'ctx> {
     /// In VBC semantics, `&x` for primitives (Int, Float, Bool) is just `x` (value copy).
     /// When Deref encounters a register in this set, it passes through instead of loading.
     /// (Migrated to reg_types — pass_through_ref flag)
-
     /// Lists whose elements are pass-through refs (e.g., List<Heap<T>>).
     /// When GetE reads from such a list, the result is marked as pass_through_ref
     /// so that Deref passes through instead of loading through the pointer.
     /// (Migrated to reg_types — pass_through_ref_list flag)
-
     /// Registers holding generic type parameters compiled as `ptr` (value-as-pointer).
     /// In compiled module functions, generic params (K, V, T) are represented as `ptr`
     /// where the pointer IS the value (via inttoptr), not a real memory address.
     /// Deref on these registers should do ptrtoint (extract value) instead of load
     /// (which would crash on fake addresses like 0x1 or 0x2).
     /// (Migrated to reg_types — RegisterType::GenericParam)
-
     /// Tracks the return type of closure registers (from NewClosure or fn-type parameters).
     /// Used by CallClosure to mark the dst register with the correct type (List, Text, etc.)
     /// so downstream operations dispatch correctly.
@@ -494,7 +478,6 @@ pub struct FunctionContext<'a, 'ctx> {
 
     /// Unified register type map (Phase 1: coexists with legacy HashSets).
     ///
-
     /// This is the new architecture that will replace all 40+ HashSet<u16> tracking
     /// fields. During Phase 1, both systems are maintained in parallel. Once all
     /// call sites are migrated, the legacy fields will be removed.
@@ -505,7 +488,6 @@ pub struct FunctionContext<'a, 'ctx> {
 
     /// Method dispatch table for declarative method routing.
     ///
-
     /// Maps (type_name, method_name) → DispatchTarget, replacing the Strategy
     /// 0/1/2/3/4 cascade in instruction.rs.
     dispatch_table: MethodDispatchTable,
@@ -563,7 +545,6 @@ pub struct FunctionContext<'a, 'ctx> {
     /// (or `--allow*` CLI flags); `None` for trusted-application
     /// AOT runs that bypass script-mode enforcement.
     ///
-
     /// `PermissionAssert` lowering reads this to decide whether to
     /// elide, panic unconditionally, or emit a per-target switch.
     /// Shared via `Arc` so every lowered function in the module sees
@@ -869,7 +850,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Create a new function context with VBC module for FFI support.
     ///
-
     /// The VBC module provides access to FFI symbol tables, struct layouts,
     /// and other metadata required for zero-cost FFI lowering.
     pub fn with_vbc_module(
@@ -1008,7 +988,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the VBC module if available.
     ///
-
     /// Returns None if the context was created without a VBC module.
     /// FFI operations that require module-level metadata will fail
     /// with an appropriate error if no VBC module is set.
@@ -1152,7 +1131,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get builder and mutable CBGR helper together.
     ///
-
     /// This method allows simultaneous access to both the builder (for generating
     /// instructions) and the CBGR helper (for reference operations) by splitting
     /// the borrow across the two fields.
@@ -1172,7 +1150,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the LLVM context.
     ///
-
     /// This is needed for FFI lowering and other operations that require
     /// creating new types or values.
     pub fn llvm_context(&self) -> &'ctx Context {
@@ -1181,7 +1158,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the LLVM module that contains this function.
     ///
-
     /// Returns the parent module of the function being lowered.
     /// This is needed for declaring external functions for FFI calls.
     pub fn get_module(&self) -> &'a Module<'ctx> {
@@ -1194,7 +1170,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Set the CBGR tier for a specific register.
     ///
-
     /// This is used for escape-analysis-based optimization where individual
     /// registers can have different tiers based on their escape behavior.
     pub fn set_register_tier(&mut self, reg: u16, tier: RefTier) {
@@ -1203,7 +1178,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the CBGR tier for a specific register.
     ///
-
     /// Returns the per-register tier if set, otherwise falls back to the
     /// function's default tier.
     pub fn get_register_tier(&self, reg: u16) -> RefTier {
@@ -1215,7 +1189,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Set VBC escape analysis tier decisions for this function.
     ///
-
     /// Maps VBC instruction offset to RefTier. Called before instruction lowering
     /// to provide escape analysis results from `VbcEscapeAnalyzer`.
     pub fn set_vbc_escape_tiers(&mut self, tiers: HashMap<usize, RefTier>) {
@@ -1224,7 +1197,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Look up the escape-analysis-decided tier for a VBC instruction offset.
     ///
-
     /// Returns `Some(RefTier)` if the escape analysis produced a decision for
     /// this instruction, `None` otherwise.
     pub fn get_vbc_escape_tier(&self, offset: usize) -> Option<RefTier> {
@@ -2125,7 +2097,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Register a reference in a register for escape tracking.
     ///
-
     /// Call this when creating a reference (Ref/RefMut instructions).
     pub fn register_reference(&mut self, reg: u16, info: ReferenceInfo) {
         // Set initial tier based on escape analysis (before moving info)
@@ -2140,7 +2111,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Mark a register's reference as escaping to heap.
     ///
-
     /// Call this when storing a reference to heap memory.
     pub fn mark_heap_escape(&mut self, reg: u16) {
         if let Some(info) = self.reference_registers.get_mut(&reg) {
@@ -2152,7 +2122,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Mark a register's reference as returned from function.
     ///
-
     /// Call this when a reference is returned.
     pub fn mark_returned(&mut self, reg: u16) {
         if let Some(info) = self.reference_registers.get_mut(&reg) {
@@ -2172,7 +2141,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get the effective tier for a reference operation.
     ///
-
     /// This considers both the per-register tier and the function's default tier,
     /// and records statistics for CBGR elimination.
     pub fn get_effective_ref_tier(&mut self, reg: u16) -> RefTier {
@@ -2782,7 +2750,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Push an exception handler onto the stack.
     ///
-
     /// Called by TryBegin to set up structured exception handling.
     pub fn push_exception_handler(&mut self, handler: ExceptionHandler<'ctx>) {
         self.exception_handlers.push(handler);
@@ -2790,7 +2757,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Pop an exception handler from the stack.
     ///
-
     /// Called by TryEnd when leaving a try block normally.
     pub fn pop_exception_handler(&mut self) -> Option<ExceptionHandler<'ctx>> {
         self.exception_handlers.pop()
@@ -2808,7 +2774,6 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
     /// Get or create the exception value slot.
     ///
-
     /// This allocates a stack slot to store the current exception value.
     /// The slot is reused across all exception handlers in the function.
     pub fn get_or_create_exception_slot(&mut self) -> Result<PointerValue<'ctx>> {

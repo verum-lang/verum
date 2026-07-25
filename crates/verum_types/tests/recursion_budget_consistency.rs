@@ -91,7 +91,6 @@ fn cross_evaluator_defaults_match_documented_constants() {
 /// load-bearing soundness gate that proves the limit is consulted on
 /// EVERY entry, not just after some grace frames.
 ///
-
 /// Each evaluator's zero-rejects behaviour is verified in its own
 /// test file; this is the cross-cutting mirror that catches any
 /// evaluator drifting away from the contract while the other two

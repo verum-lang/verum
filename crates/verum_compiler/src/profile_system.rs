@@ -404,7 +404,6 @@ impl LinkingConfigExt for NoLibcConfig {
 pub trait PlatformExt {
     /// Check if platform supports VBC interpretation.
     ///
-
     /// Embedded platforms cannot support VBC interpretation because:
     /// - No OS to provide syscalls
     /// - Limited memory for interpreter overhead

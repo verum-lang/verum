@@ -47,10 +47,8 @@ use crate::zfc_self_recognition::InaccessibleLevel;
 
 /// Logical foundation a corpus assumes.
 ///
-
 /// **Stable serde tags** (snake_case) for JSON pipelines.
 ///
-
 /// Variants are ordered by historical adoption: ZFC (set-theoretic,
 /// classical) first, then HoTT (type-theoretic with univalence),
 /// then Cubical (constructive HoTT with computational univalence),
@@ -191,7 +189,6 @@ impl FoundationProfile {
     /// can't both be assumed simultaneously. Used by the
     /// `--framework-conflicts` audit gate.
     ///
-
     /// Conflict cases:
     ///  - UIP + univalence are mutually exclusive.
     pub fn conflicts_with(self, other: FoundationProfile) -> bool {
@@ -243,10 +240,8 @@ impl FoundationProfile {
     /// `core/math/`. Maps a citation tag (as written in the
     /// `@framework` attribute argument) to its foundation profile.
     ///
-
     /// Recognised tags from the existing corpus:
     ///
-
     ///  - `"hott"` → `FoundationProfile::Hott`
     ///  - `"cubical"` → `FoundationProfile::Cubical`
     ///  - `"zfc"` → `FoundationProfile::Zfc` (default — no inaccessibles)
@@ -259,7 +254,6 @@ impl FoundationProfile {
     ///  - `"cic"` / `"coq"` → `FoundationProfile::Cic`
     ///  - `"predicative_mltt"` / `"predicative"` → `FoundationProfile::PredicativeMltt`
     ///
-
     /// Tags not in this list (e.g., framework names like
     /// `"lurie_htt"`, `"schreiber_dcct"`, `"baez_dolan"`) are
     /// FRAMEWORKS WITHIN a foundation — they cite specific results
@@ -291,12 +285,10 @@ impl FoundationProfile {
     /// `"schreiber_dcct"`, `"baez_dolan"`, …) and returns the
     /// foundation each framework lives in.
     ///
-
     /// **Recognised frameworks** (drawn from the actual `core/math/`
     /// corpus inventory — `verum audit --framework-axioms` lists every
     /// citation):
     ///
-
     /// ZFC + 2 inaccessibles family:
     ///  - `"msfs"` (107 uses) — Moduli Space of Formal Systems.
     ///  - `"diakrisis"` (53 uses) — Yanofsky-style self-reference
@@ -309,21 +301,17 @@ impl FoundationProfile {
     ///  - `"lair_makkai_pare"` — accessibility theory.
     ///  - `"lambek_scott"` — cartesian-closed categories ↔ STLC.
     ///
-
     /// ZFC + 1 inaccessible:
     ///  - `"lurie_htt"` (11 uses) — Higher Topos Theory.
     ///
-
     /// ZFC (no inaccessibles needed):
     ///  - `"arnold_catastrophe"` (8) — singularity theory.
     ///  - `"bounded_arithmetic_*"` (~10 uses) — proof-complexity
     ///  fragments (I_Δ_0 / S_2^1 / V_0 / V_1 / V_NP / V_PH).
     ///
-
     /// Domain-specific (return `None` — not foundations):
     ///  - `"owl2_fs"` (66 uses) — OWL 2 functional syntax (DL fragment).
     ///
-
     /// Unknown tags return `None`.
     pub fn from_known_framework(framework: &str) -> Option<Self> {
         match framework {
@@ -368,7 +356,6 @@ impl FoundationProfile {
     /// ([`from_known_framework`](Self::from_known_framework)).
     /// Returns `None` only when neither recognises the tag.
     ///
-
     /// This is the canonical entry point for "given a citation
     /// `@framework(<tag>, ...)`, what foundation does it imply?".
     pub fn resolve_citation(tag: &str) -> Option<Self> {
@@ -413,7 +400,6 @@ impl std::fmt::Display for FoundationProfile {
 /// either [`FoundationProfile::from_framework_tag`] or
 /// [`FoundationProfile::from_known_framework`].
 ///
-
 /// Surfaced by the audit gate so the corpus author can either add
 /// the framework to the recognised set or correct the citation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -445,14 +431,12 @@ pub struct FoundationConflict {
 /// Distribution of `@framework(...)` citations across foundation
 /// profiles, with conflict detection.
 ///
-
 /// The data layer underneath
 /// `verum audit --foundation-profiles`: takes the citation manifest
 /// produced by [`crate::framework_citation::collect_framework_citations`]
 /// and partitions it by foundation, surfacing unresolved citations
 /// and cross-foundation conflicts.
 ///
-
 /// **Why a separate analyzer (vs. a method on `FrameworkCitationManifest`)**:
 /// the citation manifest knows nothing about foundations — it's
 /// purely structural. The classification is a separate concern that

@@ -92,7 +92,6 @@ pub mod interpreter;
 
 /// VBC monomorphization for generic function specialization.
 ///
-
 /// Transforms generic VBC bytecode into specialized bytecode by:
 /// - Substituting type parameters with concrete types
 /// - Rewriting CALL_G to CALL with specialized function IDs
@@ -104,7 +103,6 @@ pub mod cbgr;
 
 /// VBC-level CBGR escape analysis for reference tier promotion.
 ///
-
 /// Analyzes Ref/RefMut instructions to determine which can be promoted from
 /// Tier 0 (runtime-checked, ~15ns) to Tier 1 (compiler-proven safe, 0ns).
 /// Runs between VBC codegen and LLVM lowering.
@@ -112,7 +110,6 @@ pub mod cbgr_analysis;
 
 /// Tensor metadata for GPU and distributed computation.
 ///
-
 /// Provides compile-time metadata for tensor operations as defined
 /// in the tensor-GPU architecture specification:
 /// - Shape verification with symbolic dimensions
@@ -124,7 +121,6 @@ pub mod metadata;
 
 /// Industrial-grade FFI runtime for VBC interpreter.
 ///
-
 /// Provides zero-to-minimal overhead FFI support for all tiers:
 /// - Tier 0 (Interpreter): ~150ns using libffi dynamic dispatch
 /// - Tier 1-2 (JIT): ~15ns with symbol caching
@@ -133,7 +129,6 @@ pub mod ffi;
 
 /// Industrial-grade intrinsic system for zero-overhead intrinsic compilation.
 ///
-
 /// Maps intrinsic names to optimal VBC instruction sequences:
 /// - Direct opcodes: Zero overhead (add_i64 → AddI)
 /// - Inline sequences: Near-zero overhead (checked_add → Add + overflow check)
@@ -145,12 +140,10 @@ pub mod codegen;
 
 /// TokenStream serialization for VBC heap storage.
 ///
-
 /// Provides serialization and deserialization of TokenStream for the VBC meta-system.
 /// When a meta function generates code via `quote { ... }`, the resulting TokenStream
 /// is serialized to binary format and stored on the VBC interpreter's heap.
 ///
-
 /// The module is enabled with the `codegen` feature since it requires verum_lexer.
 #[cfg(feature = "codegen")]
 pub mod token_stream;

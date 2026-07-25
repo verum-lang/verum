@@ -235,15 +235,12 @@ pub struct Manifest {
 
 /// Formal-verification configuration (the `[verify]` section).
 ///
-
 /// Lets projects customize default verification behavior without needing
 /// to annotate every function with `@verify(...)`. Strategy names here are
 /// semantic (backend-agnostic) — see grammar/verum.ebnf for the full list.
 ///
-
 /// ## Example `verum.toml`
 ///
-
 /// ```toml
 /// [verify]
 /// default_strategy = "formal"
@@ -251,7 +248,6 @@ pub struct Manifest {
 /// enable_telemetry = true
 /// persist_stats = true
 ///
-
 /// # Per-module overrides
 /// [verify.modules."crypto.signing"]
 /// strategy = "certified"
@@ -261,7 +257,6 @@ pub struct Manifest {
 pub struct VerifyConfig {
     /// Default verification strategy when no `@verify(...)` attribute is present.
     ///
-
     /// Valid values: `runtime`, `static`, `formal`, `fast`, `thorough`,
     /// `certified`, `synthesize`. Defaults to `formal`.
     #[serde(default = "default_verify_strategy")]
@@ -288,7 +283,6 @@ pub struct VerifyConfig {
 
     /// Treat any cross-validation divergence as a hard build error.
     ///
-
     /// When true (default), if a `@verify(certified)` goal produces
     /// divergent results between independent verifiers, the build fails.
     /// When false, divergences are logged but do not stop compilation
@@ -298,7 +292,6 @@ pub struct VerifyConfig {
 
     /// Per-module verification overrides.
     ///
-
     /// Keys are module paths (e.g., `"crypto.signing"`); values are the
     /// same fields as the top-level `[verify]` section but narrowed to
     /// that module and its descendants.
@@ -368,34 +361,28 @@ pub struct VerifyConfig {
 
     /// Named verification profiles — e.g. `release`, `ci`, `dev`.
     ///
-
     /// Each profile inherits every field from the top-level `[verify]`
     /// section and overrides only what it names. Selected via
     /// `verum verify --profile <name>`. Matches the documented
     /// workflow in `docs/verification/cli-workflow.md §9`.
     ///
-
     /// Example:
     ///
-
     /// ```toml
     /// [verify]
     /// default_strategy = "formal"
     /// solver_timeout_ms = 10000
     ///
-
     /// [verify.profiles.release]
     /// default_strategy = "certified"
     /// solver_timeout_ms = 300000
     /// fail_on_divergence = true
     ///
-
     /// [verify.profiles.ci]
     /// default_strategy = "fast"
     /// solver_timeout_ms = 3000
     /// ```
     ///
-
     /// CLI flags STILL override profile values — selection order is:
     /// CLI flag > profile override > base `[verify]` > default.
     #[serde(default)]
@@ -404,7 +391,6 @@ pub struct VerifyConfig {
 
 /// Per-profile override block in the `[verify.profiles.<name>]` section.
 ///
-
 /// Every field is optional — profile inheritance means unset fields
 /// fall through to the base `[verify]` section. This preserves a
 /// "specify only what differs" ergonomics without losing parent
@@ -464,13 +450,11 @@ impl VerifyConfig {
     /// Apply a named profile's overrides on top of the base config,
     /// producing the effective `VerifyConfig` the CLI should use.
     ///
-
     /// Inheritance policy: profile values override base values; unset
     /// profile fields leave base values intact. Per-module overrides
     /// (`modules`) are NOT merged — profiles cannot change per-module
     /// settings in this release (see task #81 follow-up).
     ///
-
     /// Returns `Err` if the named profile does not exist.
     pub fn with_profile(self, name: &str) -> std::result::Result<Self, Text> {
         let profile = self
@@ -577,15 +561,12 @@ fn default_true() -> bool {
 
 /// Advanced type-system features (the `[types]` section).
 ///
-
 /// Controls which advanced type-theoretic features the compiler enables.
 /// Disabling features skips associated checks and may speed up compilation
 /// at the cost of less expressive types.
 ///
-
 /// ## Example
 ///
-
 /// ```toml
 /// [types]
 /// dependent = true # Pi/Sigma types, length-indexed vectors
@@ -663,14 +644,12 @@ fn default_coherence_depth() -> u32 {
 
 /// Runtime system configuration (the `[runtime]` section).
 ///
-
 /// Controls memory management, async execution, and low-level runtime behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
     /// CBGR reference mode: `managed` (~15ns), `checked` (0ns, static proof),
     /// `unsafe` (0ns, no safety), `mixed` (auto-select per reference).
     ///
-
     /// Default: `mixed`.
     #[serde(default = "default_cbgr_mode")]
     pub cbgr_mode: Text,
@@ -739,7 +718,6 @@ fn default_panic_strategy() -> Text {
 
 /// Code-generation configuration (the `[codegen]` section).
 ///
-
 /// Controls the compiler's execution tiers and target-specific code output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodegenConfig {
@@ -870,7 +848,6 @@ fn default_stage_limit() -> u32 {
 pub struct ProtocolsConfig {
     /// Specialization coherence: `strict`, `lenient`, `unchecked`.
     ///
-
     /// - `strict` (default): orphan rules enforced, no overlapping impls
     /// - `lenient`: allow orphan impls in same crate (Rust-like)
     /// - `unchecked`: skip coherence checking (unsafe)
@@ -1236,7 +1213,6 @@ pub struct BuildConfig {
     /// Windows subsystem selection — controls whether the produced
     /// PE binary allocates a console window when launched.
     ///
-
     /// `None` (default) means "unset" — the source-level
     /// `@gui` / `@console` attribute on `fn main` will fill in the
     /// value at codegen time. `Some(Console)` / `Some(Gui)` is an
@@ -1245,11 +1221,9 @@ pub struct BuildConfig {
     /// source code, since manifests are the project-level
     /// configuration).
     ///
-
     /// Maps to `/SUBSYSTEM:CONSOLE` vs `/SUBSYSTEM:WINDOWS` at link
     /// time. Ignored on non-Windows targets.
     ///
-
     /// Resolution order, highest precedence first:
     ///  1. CLI `--windows-subsystem` flag.
     ///  2. Manifest `[build].windows_subsystem` (this field).
@@ -1283,13 +1257,11 @@ pub struct BuildConfig {
 /// Windows PE subsystem selection. Determines whether the loader
 /// allocates a console window on process start.
 ///
-
 /// **Console** is the default and matches the historical Verum
 /// behaviour (every binary is a CLI app). **Gui** suppresses the
 /// console allocation — required for Win32 GUI applications, where
 /// a flashing console window on launch is a UX defect.
 ///
-
 /// The runtime's `print()` / stdout helpers gracefully degrade under
 /// `Gui`: `GetStdHandle(STD_OUTPUT_HANDLE)` returns
 /// `INVALID_HANDLE_VALUE` when there's no console, and the

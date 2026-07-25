@@ -125,24 +125,19 @@ pub fn is_reflective(rs: &ReflectiveSubcategory) -> bool {
 
 /// Build a reflective subcategory under HTT 5.2.7.4 preconditions.
 ///
-
 /// **Preconditions** (kernel-checked):
 ///
-
 ///  1. The inclusion `ι : D → C` is fully faithful (witness flag).
 ///  2. SAFT preconditions hold for `ι` (so its left adjoint
 ///  `r : C → D` exists per HTT 5.5.2.9).
 ///
-
 /// **Algorithm**:
 ///
-
 ///  1. Verify fully-faithfulness flag.
 ///  2. Build the adjunction `r ⊣ ι` via [`build_adjunction`].
 ///  3. Idempotency follows automatically from fully-faithful
 ///  inclusion: `r ∘ ι ≃ id_D` makes `ι ∘ r ∘ ι ∘ r ≃ ι ∘ r`.
 ///
-
 /// Returns `None` if any precondition fails.
 pub fn build_reflective_subcategory(
     name: impl Into<Text>,
@@ -195,7 +190,6 @@ pub fn idempotency_witness(rs: &ReflectiveSubcategory) -> bool {
 /// HTT 5.2.7.4 (iv): the adjunction unit `η : id_C ⇒ ι ∘ r` exhibits
 /// `r` as the *localisation* of `C` at the class of η-equivalences.
 ///
-
 /// current surface: returns `true` when the underlying reflective
 /// subcategory is coherent (the localisation property is automatic
 /// from HTT 5.2.7.4 (iv)).

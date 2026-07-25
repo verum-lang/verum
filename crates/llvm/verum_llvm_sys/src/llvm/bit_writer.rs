@@ -5,12 +5,10 @@ use super::prelude::*;
 unsafe extern "C" {
     /// Write a module to the specified path.
     ///
-
     /// Returns 0 on success.
     pub fn LLVMWriteBitcodeToFile(M: LLVMModuleRef, Path: *const ::libc::c_char) -> ::libc::c_int;
     /// Write a module to an open file descriptor.
     ///
-
     /// Returns 0 on success.
     pub fn LLVMWriteBitcodeToFD(
         M: LLVMModuleRef,

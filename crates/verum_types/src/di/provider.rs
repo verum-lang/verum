@@ -29,15 +29,12 @@ use super::requirement::ContextRef;
 
 /// Provider expression - the AST node or source text for the provider
 ///
-
 /// Context resolution: resolving context names to declarations, expanding groups, checking provision — .2 - The `provide` Keyword
 ///
-
 /// This enum allows storing provider expressions either as:
 /// - An actual AST `Expr` node for full semantic analysis
 /// - Source text for backward compatibility and simple cases
 ///
-
 /// Using the AST node enables:
 /// - Type checking of provider expressions
 /// - Semantic analysis and validation
@@ -47,7 +44,6 @@ use super::requirement::ContextRef;
 pub enum ProviderExpr {
     /// Full AST expression node for semantic analysis
     ///
-
     /// This is the preferred representation, enabling:
     /// - Type inference on the provider expression
     /// - Validation that the expression produces the correct type
@@ -56,7 +52,6 @@ pub enum ProviderExpr {
 
     /// Source text representation for backward compatibility
     ///
-
     /// Used when:
     /// - Parsing hasn't completed yet
     /// - The expression is simple and doesn't need full analysis
@@ -159,18 +154,14 @@ impl Eq for ProviderExpr {}
 
 /// Context provider binding
 ///
-
 /// Context resolution: resolving context names to declarations, expanding groups, checking provision — .2 - The `provide` Keyword
 ///
-
 /// A context provider binds a concrete implementation to a context interface.
 /// The provider expression is evaluated when the `provide` statement executes,
 /// and the result is stored in the context environment.
 ///
-
 /// # Properties
 ///
-
 /// - **context**: The context being provided
 /// - **provider_expr**: Expression that creates the provider (AST node or source)
 /// - **scope**: Where this provider is active (local, module, global)
@@ -182,12 +173,10 @@ pub struct ContextProvider {
 
     /// Provider expression - the AST node or source text
     ///
-
     /// This can be either:
     /// - `ProviderExpr::Ast(expr)` - Full AST for semantic analysis
     /// - `ProviderExpr::Source { text, span }` - Source text for simple cases
     ///
-
     /// Using an AST node enables type checking, semantic analysis,
     /// and proper code generation.
     pub provider_expr: ProviderExpr,
@@ -210,10 +199,8 @@ fn default_type_id() -> TypeId {
 
 /// Scope where a context provider is active
 ///
-
 /// Context resolution: resolving context names to declarations, expanding groups, checking provision — .2 - Scoped Context Providers
 ///
-
 /// Providers can be scoped at different levels:
 /// - **Local**: Function or block scope
 /// - **Module**: Module-wide (@using attribute)
@@ -238,18 +225,14 @@ pub enum ProviderScope {
 impl ContextProvider {
     /// Create a new local-scope context provider from source text
     ///
-
     /// # Arguments
     ///
-
     /// * `context` - The context being provided
     /// * `provider_expr` - Source text expression that creates the provider
     /// * `type_id` - Runtime type ID for the provider value
     ///
-
     /// # Examples
     ///
-
     /// ```no_run
     /// use verum_types::di::provider::ContextProvider;
     /// use verum_types::di::requirement::ContextRef;
@@ -257,7 +240,6 @@ impl ContextProvider {
     /// # struct ConsoleLogger;
     /// # let logger_ctx = ContextRef::new("Logger".into(), TypeId::of::<()>());
     ///
-
     /// let provider = ContextProvider::new(
     ///  logger_ctx,
     ///  "console_logger()".into(),
@@ -276,14 +258,11 @@ impl ContextProvider {
 
     /// Create a new local-scope context provider from an AST expression
     ///
-
     /// This is the preferred constructor when you have a parsed AST expression,
     /// as it enables full semantic analysis, type checking, and code generation.
     ///
-
     /// # Arguments
     ///
-
     /// * `context` - The context being provided
     /// * `expr` - The AST expression that creates the provider
     /// * `type_id` - Runtime type ID for the provider value
@@ -299,10 +278,8 @@ impl ContextProvider {
 
     /// Create a context provider with a specific scope
     ///
-
     /// # Arguments
     ///
-
     /// * `context` - The context being provided
     /// * `provider_expr` - Expression that creates the provider
     /// * `type_id` - Runtime type ID for the provider value
@@ -340,17 +317,14 @@ impl ContextProvider {
 
     /// Mark this provider as async
     ///
-
     /// # Examples
     ///
-
     /// ```no_run
     /// use verum_types::di::provider::ContextProvider;
     /// use verum_types::di::requirement::ContextRef;
     /// use std::any::TypeId;
     /// # let logger_ctx = ContextRef::new("Logger".into(), TypeId::of::<()>());
     ///
-
     /// let provider = ContextProvider::new(logger_ctx, "async_logger()".into(), TypeId::of::<()>())
     ///  .as_async();
     /// ```
@@ -361,7 +335,6 @@ impl ContextProvider {
 
     /// Get the AST expression if available
     ///
-
     /// Returns `Some(&Expr)` if the provider was created with `from_ast()`,
     /// or `None` if it was created with source text.
     pub fn ast_expr(&self) -> Option<&Expr> {
@@ -405,15 +378,12 @@ impl ContextProvider {
 
     /// Validate this provider
     ///
-
     /// Checks:
     /// - Provider expression is not empty
     /// - Async context requires async provider
     ///
-
     /// # Returns
     ///
-
     /// `Ok(())` if valid, `Err(ProviderError)` otherwise
     pub fn validate(&self) -> Result<(), ProviderError> {
         // Provider expression must not be empty

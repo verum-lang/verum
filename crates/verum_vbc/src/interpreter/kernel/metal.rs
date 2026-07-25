@@ -75,7 +75,6 @@ use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 /// Metal Shading Language (MSL) kernels for tensor operations
 /// Optimized for Apple Silicon M3/A17 Pro (Apple GPU Family 9)
 ///
-
 /// Key optimizations applied:
 /// 1. SIMD vectorization with float4 for 4x throughput on element-wise ops
 /// 2. Fused multiply-add (FMA) operations where applicable
@@ -1326,7 +1325,6 @@ impl MetalBackend {
 
     /// Execute a binary operation on GPU
     ///
-
     /// Uses SIMD vectorization with float4 for 4x throughput on Apple Silicon.
     /// Automatically handles alignment and dispatches optimal number of work groups.
     pub fn binop_gpu(
@@ -1399,7 +1397,6 @@ impl MetalBackend {
 
     /// Execute a unary operation on GPU
     ///
-
     /// Uses SIMD vectorization with float4 for 4x throughput on Apple Silicon.
     pub fn unop_gpu(&self, a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
         if a.dtype != DType::F32 {
@@ -1526,11 +1523,9 @@ impl MetalBackend {
 
     /// Execute reduction operation on GPU
     ///
-
     /// Supports Sum, Max, Min operations over all elements of a tensor.
     /// Uses parallel reduction with threadgroup shared memory.
     ///
-
     /// For axis-specific reductions, falls back to CPU.
     pub fn reduce_gpu(
         &self,
@@ -1616,14 +1611,11 @@ impl MetalBackend {
 
     /// Execute softmax on GPU
     ///
-
     /// Implements numerically stable softmax: softmax(x) = exp(x - max(x)) / sum(exp(x - max(x)))
     ///
-
     /// For 1D tensors: computes softmax over all elements
     /// For 2D tensors: computes softmax along the last dimension (each row independently)
     ///
-
     /// Uses multi-pass algorithm for large tensors:
     /// 1. Find max value (for numerical stability)
     /// 2. Compute exp(x - max) and sum
@@ -1869,14 +1861,11 @@ impl MetalBackend {
 
     /// Execute layer normalization on GPU
     ///
-
     /// LayerNorm(x) = (x - mean) / sqrt(var + eps) * gamma + beta
     ///
-
     /// Input shape: [batch_size, hidden_size]
     /// Gamma/Beta shape: [hidden_size] (optional)
     ///
-
     /// Uses efficient parallel reduction for mean/variance computation.
     pub fn layer_norm_gpu(
         &self,

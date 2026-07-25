@@ -23,7 +23,6 @@ use verum_common::cbgr::caps;
 
 /// Check if requested capabilities are compatible with mutability.
 ///
-
 /// Each capability bit has different mutability requirements:
 /// - READ/DELEGATE/NO_ESCAPE: always available
 /// - WRITE/MUTABLE: requires is_mut
@@ -53,7 +52,6 @@ fn check_capabilities_for_mutability(cap_mask: u32, is_mut: bool) -> bool {
 
 /// Ref (0x70) - Create immutable reference (Tier 0 - full validation).
 ///
-
 /// For interpreter mode, an immutable reference stores the absolute register index
 /// and current CBGR generation of the referenced variable. On dereference, the
 /// generation is validated to detect use-after-free.
@@ -97,12 +95,10 @@ pub(in super::super) fn handle_ref_create(
 
 /// RefMut (0x71) - Create mutable reference (Tier 0 - full validation).
 ///
-
 /// Stores the absolute register index and CBGR generation so that DerefMut
 /// can validate the reference before writing back to the original variable.
 /// Encodes the mutability bit so epoch_caps/can_write can detect mutable refs.
 ///
-
 /// IMPORTANT: Always creates a CBGR register reference, even for pointer-valued
 /// variables (structs). This ensures DerefMut can update the register value,
 /// not just write to the heap memory the pointer points to.
@@ -207,7 +203,6 @@ fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut
 
 /// Deref (0x72) - Dereference with CBGR validation (Tier 0).
 ///
-
 /// Reads the value at the absolute register index stored in the reference.
 /// For Tier 0 references, validates the CBGR generation to detect use-after-free.
 pub(in super::super) fn handle_deref(
@@ -330,7 +325,6 @@ pub(in super::super) fn handle_deref(
 
 /// DerefMut (0x73) - Write through mutable reference (Tier 0).
 ///
-
 /// Writes the value to the absolute register index stored in the reference.
 /// This enables mutation through &mut parameters. Validates CBGR generation
 /// before writing to detect use-after-free.
@@ -422,11 +416,9 @@ pub(in super::super) fn handle_deref_mut(
 
 /// ChkRef (0x74) - Check reference validity (Tier 0 CBGR validation).
 ///
-
 /// Validates the CBGR generation and epoch of a reference.
 /// Supports both register-based and heap-based CBGR references.
 ///
-
 /// If the generation has been bumped (variable went out of scope) or
 /// the epoch has advanced (generation wrapped around), this panics
 /// with a use-after-free error.
@@ -539,7 +531,6 @@ pub(in super::super) fn validate_ref_bool(state: &mut InterpreterState, ref_val:
 
 /// RefChecked (0x75) - Create Tier 1 checked reference.
 ///
-
 /// Tier 1 references are compiler-proven safe and skip generation checks.
 /// Uses CBGR_NO_CHECK_GENERATION sentinel so deref skips validation.
 pub(in super::super) fn handle_ref_checked(
@@ -560,7 +551,6 @@ pub(in super::super) fn handle_ref_checked(
 
 /// RefUnsafe (0x76) - Create Tier 2 unsafe reference (no runtime checks).
 ///
-
 /// Tier 2 references require manual safety proof and skip generation checks.
 /// Uses CBGR_NO_CHECK_GENERATION sentinel so deref skips validation.
 pub(in super::super) fn handle_ref_unsafe(
@@ -581,13 +571,11 @@ pub(in super::super) fn handle_ref_unsafe(
 
 /// DropRef (0x77) - Drop a value/reference.
 ///
-
 /// If the value has a user-defined Drop implementation, calls the drop method first.
 /// Then bumps the CBGR generation for the register slot, invalidating any
 /// references that captured the old generation. For CBGR heap allocations,
 /// also bumps the generation in the AllocationHeader.
 ///
-
 /// The drop implementation works as follows:
 /// 1. First call: if value has Drop impl, set up drop call, clear register, return Continue
 /// 2. Drop function executes and returns to this instruction
@@ -1042,10 +1030,8 @@ pub(in super::super) fn handle_drop_ref(
 
 /// CbgrExtended (0x78) - Extended CBGR (Capability-Based Generational References) operations.
 ///
-
 /// Format: `[0x78] [sub_opcode:u8] [operands...]`
 ///
-
 /// Sub-opcode categories:
 /// - 0x00-0x0F: Slice and Interior References
 /// - 0x10-0x1F: Capability Operations
@@ -1053,10 +1039,8 @@ pub(in super::super) fn handle_drop_ref(
 /// - 0x30-0x3F: Reference Conversion
 /// - 0x40-0x4F: Debug and Introspection
 ///
-
 /// Note: The interpreter provides simplified implementations for these operations.
 /// The AOT compiler generates optimized code with full CBGR semantics.
-
 /// SLICE-REP-UNIFY-1 (#51 runtime leg 2): THE canonical constructor of
 /// a slice value over a runtime container. Verum's slice representation
 /// is the FatRef (`{data_ptr, len, reserved=elem_size}`); the historic
@@ -1066,7 +1050,6 @@ pub(in super::super) fn handle_drop_ref(
 /// FatRef-only consumer (slice_subslice, split_at) either crashed or
 /// silently no-op'd on the latter.
 ///
-
 /// Accepts: an existing FatRef / BYTE_SLICE view (identity — already
 /// canonical), a LIST / BYTE_LIST heap object (follows `backing_ptr`
 /// to the element data), or a typed raw array (U8/U16/U32/U64 —

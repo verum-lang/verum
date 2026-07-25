@@ -75,17 +75,14 @@
 
 /// Verum Unified Verification Architecture (VVA) version stamp.
 ///
-
 /// Closes B14 . governance promises *"Каждое verification spec
 /// принятие — minor version bump VVA"*; without a constant in code,
 /// the version policy was unobservable. Tooling (CLI, certificate
 /// emitters, cross-tool replay matrix per task #90) keys behaviour
 /// on this constant.
 ///
-
 /// **Bump policy** (per versioning):
 ///
-
 ///  * Major bump (`X` → `X+1`): backwards-incompatible changes to
 ///  [`CoreTerm`], [`KernelError`], or any `pub` kernel surface.
 ///  * Minor bump (`X.Y` → `X.Y+1`): verification spec kernel-rule acceptance,
@@ -94,7 +91,6 @@
 ///  tightening (e.g., the B4 saturation fix in commit 3b15c185),
 ///  refactoring without API change.
 ///
-
 /// Current version reflects the /V2 K-Eps-Mu rule + V1
 /// K-Universe-Ascent rule + K-Refine-omega rule shipped
 /// B-series soundness
@@ -131,7 +127,6 @@ pub mod arch_transitive; // ATS-V transitive peer-graph DFS for AP-019 / AP-024 
 
 /// Kernel reflection — the meta-theory escape hatch (#158, current slice).
 ///
-
 /// Exposes [`proof_checker::Term`]'s grammar + judgment shape as
 /// serializable data so non-trusted callers (audit gates, future
 /// Verum-side meta-tactics) can pattern-match on kernel terms
@@ -145,7 +140,6 @@ pub use reflection::{
 
 /// Interactive proof-state explorer — current surface (#319 / #189).
 ///
-
 /// Static, heuristic snapshot of a theorem's proof body:
 /// `proof { … }` walked into a structured [`proof_view::ProofState`]
 /// without invoking the kernel. Powers `verum proofview <file>:<thm>`
@@ -293,7 +287,6 @@ pub use ordinal::Ordinal;
 /// proof assistant carries first-class ∞-categorical reasoning in
 /// its kernel; this is Verum's novel contribution. Ships:
 ///
-
 ///  * `InfinityCategory` / `InfinityMorphism` / `InfinityEquivalence`
 ///  — native CoreTerm-adjacent representations.
 ///  * `identity_is_equivalence(x, n)` — the fundamental kernel
@@ -306,7 +299,6 @@ pub use ordinal::Ordinal;
 ///  * `compose(f, g)` + `compose_is_associative(f, g, h)` — native
 ///  composition with strict associativity at level 1.
 ///
-
 /// Future-work promotion paths documented in module-level docs.
 pub mod infinity_category;
 pub use infinity_category::{
@@ -323,7 +315,6 @@ pub use infinity_category::{
 /// `S`-indexed diagram, with explicit accessibility-preservation
 /// witness per AR 1.26.
 ///
-
 /// Future work: full ∞-categorical higher-cell content (associator
 /// 2-cells, pentagonal coherence) — gates Theorem 9.3 Step 1.
 pub mod grothendieck;
@@ -345,12 +336,10 @@ pub use accessibility::{
 /// algorithmic kernel rules. Gates MSFS Definition 3.3 (S_S
 /// closure under Yoneda + Kan-extension along S-definable morphisms).
 ///
-
 /// Pre-this-module the Yoneda closure was admitted via the host
 /// stdlib axiom `msfs_s_s_closed_under_yoneda` and Kan-extension
 /// closure routed through O1 of the same definition. ships:
 ///
-
 ///  * `Presheaf` / `YonedaEmbedding` / `YonedaLemma` — first-class
 ///  ∞-categorical surface representations.
 ///  * `yoneda_embedding(c)` — fully-faithful embedding witness with
@@ -362,7 +351,6 @@ pub use accessibility::{
 ///  preconditions (HTT 4.3.3.7).
 ///  * `kan_extension_unit_witness` — universal-property witness.
 ///
-
 /// Future work: full higher-cell content (associator + pentagonal
 /// coherence cells).
 pub mod yoneda;
@@ -376,7 +364,6 @@ pub use yoneda::{
 /// MSFS Theorem 9.3 Step 1 (currently admits via host-stdlib axiom
 /// `msfs_htt_3_2_straightening`) and §6 β-part Step 2.
 ///
-
 /// Ships:
 ///  * `CartesianFibration` / `CartesianMorphism` — first-class
 ///  ∞-categorical surface representations.
@@ -390,7 +377,6 @@ pub use yoneda::{
 ///  * `fibration_is_unstraightened` — recognise fibrations arising
 ///  via unstraightening.
 ///
-
 /// Future work: full higher-cell coherence content (associator
 /// 2-cells + pentagonal coherence between St and Un).
 pub mod cartesian_fibration;
@@ -404,7 +390,6 @@ pub use cartesian_fibration::{
 /// algorithmic kernel rule. Gates MSFS Lemma 10.3 (the (ι, r)
 /// reflective subcategory construction) and Diakrisis 16.3.
 ///
-
 /// Ships:
 ///  * `Adjunction` — first-class adjoint-pair representation with
 ///  unit/counit/triangle-identities witnesses.
@@ -417,7 +402,6 @@ pub use cartesian_fibration::{
 ///  composition (the 2-categorical monoidal structure).
 ///  * `triangle_identities_witness` — universal-property witness.
 ///
-
 /// Future work: explicit unit/counit natural-transformation cells
 /// with full pentagonal coherence between composition and identity.
 pub mod adjoint_functor;
@@ -433,7 +417,6 @@ pub use adjoint_functor::{
 /// Whitehead-certified equivalences carry empty `BridgeAudit`,
 /// shrinking the surface visible to `verum audit --proof-honesty`.
 ///
-
 /// Ships:
 ///  * `PiLevelIso` — per-level `π_k` iso witness.
 ///  * `WhiteheadCriterion` — full per-level certificate with
@@ -445,7 +428,6 @@ pub use adjoint_functor::{
 ///  * `KanComplexLift` + `weak_equivalence_lifts_in_kan_complex` —
 ///  HTT 1.2.4.3 (weak ⟹ honest equivalence in a Kan complex).
 ///
-
 /// Future work: structural inspection of each iso witness instead
 /// of trust-then-verify on the witness flag.
 pub mod whitehead;
@@ -460,7 +442,6 @@ pub use whitehead::{
 /// Lemma 10.3 + Diakrisis 16.3 fully (host-stdlib `msfs_aft_iota_r`
 /// admit can be promoted to direct invocation).
 ///
-
 /// Ships:
 ///  * `ReflectiveSubcategory` — first-class record `(D, C, ι, r, η)`
 ///  with fully-faithful + adjunction + idempotency witnesses.
@@ -470,7 +451,6 @@ pub use whitehead::{
 ///  * `idempotency_witness` / `reflector_unit_is_localisation` —
 ///  universal-property witnesses (HTT 5.2.7.4 (iii)/(iv)).
 ///
-
 /// Future work: explicit unit / idempotency natural-transformation
 /// cells with full pentagonal coherence.
 pub mod reflective_subcategory;
@@ -484,7 +464,6 @@ pub use reflective_subcategory::{
 /// 3.3 closure under (co)limits (replaces `msfs_s_s_closed_under_colimits`
 /// host-stdlib admit).
 ///
-
 /// Ships:
 ///  * `LimitShape` — coarse shape classification (Terminal / Pullback
 ///  / Equaliser / Filtered / Small).
@@ -501,7 +480,6 @@ pub use reflective_subcategory::{
 ///  * `promote_limit_to_level` — level-monotonicity promotion.
 ///  * `presheaf_is_bicomplete(c)` — HTT 5.5.3.5 witness.
 ///
-
 /// Future work: explicit universal-cone natural transformations
 /// with full pentagonal coherence cells.
 pub mod limits_colimits;
@@ -517,7 +495,6 @@ pub use limits_colimits::{
 /// kernel rule (HTT 5.5.6). The level-descent operator
 /// `τ_{≤n}: C → C_{≤n}` quotienting (n+1)-cells and higher.
 ///
-
 /// Ships:
 ///  * `Truncation` — the apex of `τ_{≤n}(x)` with universal-property
 ///  witness.
@@ -532,7 +509,6 @@ pub use limits_colimits::{
 ///  * `compose_truncations(outer, inner)` — level-descent
 ///  composition collapsing to `min(m, n)`.
 ///
-
 /// Future work: explicit unit / counit cells with structural
 /// level-descent traces.
 pub mod truncation;
@@ -548,7 +524,6 @@ pub use truncation::{
 /// (replaces `msfs_epi_mono_factorisation` admit) and §9 Theorem 9.3
 /// Step 4 (replaces `msfs_n_truncation_factorisation` admit).
 ///
-
 /// Ships:
 ///  * `FactorisationSystem` — the `(L, R)` data with closure +
 ///  orthogonality + factorisation witnesses.
@@ -564,7 +539,6 @@ pub use truncation::{
 ///  - `build_localisation_factorisation` (HTT 5.2.7.5) —
 ///  composes with [`crate::reflective_subcategory`].
 ///
-
 /// Future work: explicit lifting cells with full pentagonal
 /// coherence between orthogonality and factorisation.
 pub mod factorisation;
@@ -580,7 +554,6 @@ pub use factorisation::{
 /// classifier — currently admits via `diakrisis_pronk_bicat_fractions`)
 /// and MSFS Theorem 9.3 Step 3.
 ///
-
 /// Ships:
 ///  * `PronkAxioms` — BF1–BF5 axiom-witness record with
 ///  `fully_satisfied()` constructor.
@@ -592,7 +565,6 @@ pub use factorisation::{
 ///  * `compose_spans(first, second)` — span composition via Ore-pullback.
 ///  * `universal_2_functor(bicat)` — universal-property witness.
 ///
-
 /// Future work: explicit pentagonal coherence cells for span
 /// composition + full bicategorical 2-cell content.
 pub mod pronk_fractions;
@@ -608,7 +580,6 @@ pub use pronk_fractions::{
 /// [`reflective_subcategory`] + [`limits_colimits`] +
 /// left-exactness witness.
 ///
-
 /// Ships:
 ///  * `GiraudAxioms` — the four Giraud-axiom witnesses
 ///  (presentable, universal-colimits, disjoint-coproducts,
@@ -623,10 +594,8 @@ pub use pronk_fractions::{
 ///  * `left_exact_localisation_witness` — HTT 6.1.0.6 (ii)
 ///  witness flag.
 ///
-
 /// Discharges MSFS §3 admit `msfs_s_s_is_infty_topos`.
 ///
-
 /// Future work: structural checking of effective-groupoid +
 /// universal-colimit content (the current surface trusts the witness flags).
 pub mod infinity_topos;
@@ -641,7 +610,6 @@ pub use infinity_topos::{
 /// K-Pos, K-Norm, K-FwAx, K-Adj-Unit, K-Adj-Counit) into the precise
 /// ZFC-axiom + Grothendieck-universe requirements needed to model it.
 ///
-
 /// Ships:
 ///  * `ZfcAxiom` enumeration (all 9 axioms incl. Choice).
 ///  * `InaccessibleLevel` (Kappa1 / Kappa2).
@@ -652,7 +620,6 @@ pub use infinity_topos::{
 ///  * `SelfRecognitionAudit` — accumulator with `cite`/`report` and
 ///  transitive ZFC-axiom + inaccessibles union queries.
 ///
-
 /// **Self-recognition invariant**: every kernel rule is provable in
 /// ZFC + 2 inaccessibles. Discharges VVA §16.5 Phase 5 audit
 /// surface.
@@ -667,7 +634,6 @@ pub use zfc_self_recognition::{
 /// Gödel-style incompleteness arguments and Yanofsky 2003 diagonal
 /// paradox claims.
 ///
-
 /// Ships:
 ///  * `PrimitiveRecursive` — Kleene normal form (Zero / Succ / Proj
 ///  / Comp / PrimRec) with totally-evaluating `eval`.
@@ -679,7 +645,6 @@ pub use zfc_self_recognition::{
 ///  * `is_primitive_recursive` / `is_mu_recursive` /
 ///  `representable_in_pa` — class-membership predicates.
 ///
-
 /// Future work: full kernel-CoreTerm round-trip via `encode_term` /
 /// `decode_term` (ships symbol-level cells).
 pub mod godel_coding;
@@ -692,7 +657,6 @@ pub use godel_coding::{
 /// rule. Production tactics that close subgoals via deterministic
 /// decision procedures (no SMT delegation). Five built-in tactics:
 ///
-
 ///  * `tactic_lia` — Linear Integer Arithmetic (current surface: trivial
 ///  constraints; V1 promotes to Omega-test).
 ///  * `tactic_decide` — boolean tautology decision via truth-table
@@ -702,7 +666,6 @@ pub use godel_coding::{
 ///  * `tactic_congruence` — EUF equality closure via union-find.
 ///  * `tactic_eauto` — bounded back-chaining over hint database.
 ///
-
 /// Each returns a `TacticOutcome::{Closed, Open}` carrying a
 /// re-checkable witness; the kernel re-checks the witness in linear
 /// time relative to its size.

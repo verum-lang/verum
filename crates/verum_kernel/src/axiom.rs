@@ -26,14 +26,12 @@ use crate::{CoreTerm, FrameworkId, KernelError, UniverseLevel};
 
 /// subsingleton-check regime for `K-FwAx` admission.
 ///
-
 /// Per `verification-architecture.md` §4.4 and §4.5, a framework
 /// axiom's body must be a *subsingleton* (proof-irrelevant: at
 /// most one inhabitant up to definitional equality) for subject
 /// reduction to hold. The spec offers two acceptance routes; this
 /// enum encodes the caller's choice.
 ///
-
 /// The kernel does not infer the regime from the term — it's a
 /// caller-level decision tied to the surrounding module's
 /// `@import` set (e.g., `core.math.frameworks.uip` enables the
@@ -64,7 +62,6 @@ pub enum SubsingletonRegime {
 
 /// A thread-local, opt-in registry of trusted axioms.
 ///
-
 /// Every [`register`](Self::register) call extends the TCB; every
 /// [`all`](Self::all) call enumerates the current boundary so the CLI
 /// and certificate exporters can report exactly which external results
@@ -91,27 +88,23 @@ pub struct RegisteredAxiom {
     /// such axioms as always-citable (preserves backwards
     /// compat for axioms registered before ).
     ///
-
     /// `#[serde(default)]` keeps pre-V8 on-disk certificates
     /// without the field deserialisable.
     #[serde(default)]
     pub coord: Option<crate::KernelCoord>,
     /// definitional content (transparent body).
     ///
-
     /// `None` (the V8 default) marks the entry as an **opaque
     /// postulate**: a true axiom whose only kernel-visible
     /// content is its declared type. δ-reduction
     /// ([`crate::support::normalize_with_axioms`]) leaves
     /// references to opaque postulates unchanged.
     ///
-
     /// `Some(body)` marks the entry as a **transparent
     /// definition**: a name bound to an explicit term that
     /// δ-reduction unfolds. Used by elaborator-emitted
     /// `def name : ty := body` declarations.
     ///
-
     /// `#[serde(default)]` keeps pre-V8 on-disk certificates
     /// (without the field) deserialisable as opaque postulates.
     #[serde(default)]
@@ -129,16 +122,13 @@ impl AxiomRegistry {
     /// Register a new axiom. Returns `Err` if an axiom with the same
     /// name already exists — the kernel refuses silent re-registration.
     ///
-
     /// Also rejects axioms whose statement is structurally equivalent
     /// to **Uniqueness of Identity Proofs** (UIP):
     ///
-
     /// ```text
     /// Π A. Π (a b : A). Π (p q : PathTy(A, a, b)). PathTy(PathTy(A, a, b), p, q)
     /// ```
     ///
-
     /// UIP is a statement that any two proofs of the same equality are
     /// themselves equal. It is **incompatible with univalence**: if the
     /// kernel admitted UIP alongside the `ua` axiom and the `Glue` rule,
@@ -146,17 +136,14 @@ impl AxiomRegistry {
     /// any `Equiv(A, B)` — collapsing the higher-path structure that
     /// cubical type theory was designed to preserve.
     ///
-
     /// Detection is syntactic: we look for the exact shape
     /// `Pi A. Pi a. Pi b. Pi p. Pi q. PathTy(PathTy(A, a, b), p, q)`.
     /// More elaborate reductions (axioms that imply UIP transitively)
     /// are out of scope — this check catches the direct case, which
     /// is the common pitfall.
     ///
-
     /// Corresponds to rule 10 in `docs/verification/trusted-kernel.md`.
     ///
-
     /// production default is now
     /// [`SubsingletonRegime::ClosedPropositionOnly`] per
     /// `verification-architecture.md` §A.Z.4
@@ -197,7 +184,6 @@ impl AxiomRegistry {
     /// register an axiom with the strict
     /// closed-proposition subsingleton check enforced.
     ///
-
     /// Equivalent to
     /// `register_with_regime(..., SubsingletonRegime::ClosedPropositionOnly)`.
     /// Rejects with [`KernelError::AxiomNotSubsingleton`] when the
@@ -220,12 +206,10 @@ impl AxiomRegistry {
     /// register an axiom under an explicit
     /// [`SubsingletonRegime`].
     ///
-
     /// Implements the full `K-FwAx` admission gate from
     /// `verification-architecture.md` §4.4 with four layered
     /// checks (in order):
     ///
-
     ///  1. Duplicate-name rejection (`KernelError::DuplicateAxiom`).
     ///  2. UIP-shape syntactic rejection (`KernelError::UipForbidden`)
     ///  — the original pre-V8 gate, preserved.
@@ -239,7 +223,6 @@ impl AxiomRegistry {
     ///  `UipPermitted` (free-vars + needs Γ to type-check) and
     ///  `LegacyUnchecked` regimes.
     ///
-
     /// On any rejection the entries list is unchanged (no half-
     /// committed registration).
     pub fn register_with_regime(
@@ -339,7 +322,6 @@ impl AxiomRegistry {
     /// production gate); after admission the entry's `coord`
     /// field is populated for use by the K-Coord-Cite rule.
     ///
-
     /// Errors propagate from `register_with_regime` (duplicate
     /// name, UIP shape, subsingleton, body-is-Prop). On
     /// successful admission the registry is updated atomically.
@@ -373,7 +355,6 @@ impl AxiomRegistry {
     /// register a transparent **definition**: a name
     /// bound to an explicit body that δ-reduction will unfold.
     ///
-
     /// Equivalent to `register_with_regime(LegacyUnchecked)` but
     /// stores the body for later use by
     /// [`crate::support::normalize_with_axioms`]. Definitions
@@ -383,7 +364,6 @@ impl AxiomRegistry {
     /// already validated by the type-checker that produced the
     /// body.
     ///
-
     /// Side-condition: `body` should be a closed term that
     /// inhabits `ty`. The kernel doesn't re-check this here
     /// (the elaborator's responsibility); the trusted gate is
@@ -433,7 +413,6 @@ impl AxiomRegistry {
 /// Scan a parsed Verum module and register every axiom that carries a
 /// `@framework(identifier, "citation")` attribute.
 ///
-
 /// production default is now
 /// [`SubsingletonRegime::ClosedPropositionOnly`] per
 /// `verification-architecture.md` §A.Z.4 row "production callers
@@ -441,7 +420,6 @@ impl AxiomRegistry {
 /// is reachable via [`load_framework_axioms_legacy_unchecked`]
 /// for callers that intentionally need the pre-V8.1 shim.
 ///
-
 /// Equivalent to [`load_framework_axioms_strict`]; that function
 /// is kept as a discoverability alias.
 pub fn load_framework_axioms(
@@ -468,7 +446,6 @@ pub fn load_framework_axioms_legacy_unchecked(
 /// and body-is-Prop check violations as report rows
 /// rather than aborting on the first failure.
 ///
-
 /// This is the production loader entry point: every framework
 /// axiom that lands via `@framework(corpus, "citation")` is
 /// admission-checked against the full §4.4 K-FwAx soundness gate.
@@ -487,10 +464,8 @@ pub fn load_framework_axioms_strict(
 
 /// regime-explicit framework-axiom loader.
 ///
-
 /// This closes the architectural loop for trusted-boundary declarations:
 ///
-
 ///  1. Source `.vr` file declares `@framework(lurie_htt, "HTT 6.2.2.7")
 ///  axiom …;`.
 ///  2. `verum_fast_parser` parses it into an `Item` whose decl carries
@@ -503,12 +478,10 @@ pub fn load_framework_axioms_strict(
 ///  that names one of the loaded axioms succeeds against the
 ///  registered type.
 ///
-
 /// Errors that can surface in the report (none of which abort
 /// the loader — every module is fully scanned so the report can
 /// aggregate):
 ///
-
 /// - [`LoadAxiomsReport::registered`] — admitted axioms.
 /// - [`LoadAxiomsReport::duplicates`] — axioms with names already
 ///  in the registry.
@@ -524,7 +497,6 @@ pub fn load_framework_axioms_strict(
 ///  whose body matches the precise UIP-shape (rejected even
 ///  under LegacyUnchecked).
 ///
-
 /// The axiom type stored in the registry is a placeholder
 /// (`CoreTerm::Universe(Concrete(0))`) at this bring-up stage — the
 /// compiler's type elaborator is responsible for supplying the real

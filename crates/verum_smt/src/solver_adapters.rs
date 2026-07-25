@@ -33,15 +33,12 @@ use crate::portfolio_executor::{PortfolioSolver, SolverId, SolverVerdict};
 /// Adapts a `Z3Solver` session into a `PortfolioSolver` for use in the
 /// portfolio executor.
 ///
-
 /// The adapter owns a prepared Z3 solver — assertions must be added BEFORE
 /// wrapping it in the adapter, because the portfolio worker will invoke
 /// only `check_sat()`.
 ///
-
 /// ## Interrupt Handling
 ///
-
 /// Z3 supports cooperative cancellation via `Z3_interrupt()` on the
 /// context. The adapter checks the `interrupt` flag and calls the
 /// underlying cancellation mechanism when set.
@@ -51,7 +48,6 @@ where
 {
     /// Closure that performs the actual `check_sat` call.
     ///
-
     /// Using a closure (rather than a direct `Z3Solver` field) avoids
     /// lifetime entanglement with the Z3 context, which is essential for
     /// passing the adapter across thread boundaries.
@@ -69,7 +65,6 @@ where
 {
     /// Wrap a check_sat closure.
     ///
-
     /// The closure should perform any necessary Z3 state preparation and
     /// return the result. The closure is called exactly once per portfolio
     /// execution.
@@ -112,15 +107,12 @@ where
 
 /// Adapts a `Cvc5Backend` session into a `PortfolioSolver`.
 ///
-
 /// The adapter follows the same pattern as `Z3Adapter`: it wraps a closure
 /// that performs the actual SMT check. This lets us handle both the
 /// "real CVC5 linked" and "stub mode" paths uniformly.
 ///
-
 /// ## Stub Mode Behavior
 ///
-
 /// When CVC5 is not linked (no `cvc5-sys` features enabled), the adapter
 /// immediately returns `SolverVerdict::Error { message: "CVC5 not available" }`.
 /// The capability router already avoids routing to CVC5 in stub mode, so this
@@ -196,12 +188,10 @@ where
 
 /// Build a Z3 adapter from a fully-prepared assertion set.
 ///
-
 /// This adapter spins up a fresh `Z3Backend` (each worker thread gets its
 /// own Z3 context, as Z3 contexts are not thread-safe) and invokes the
 /// real `Z3Backend::check_sat()` API to actually decide the goal.
 ///
-
 /// The assertions are expected to be in Verum AST form. They are translated
 /// to Z3 terms via the existing `Z3Backend::check_sat(expr, ctx)` path
 /// that the `BackendSwitcher::solve_with_z3` function uses internally.
@@ -254,7 +244,6 @@ pub fn make_z3_adapter(
 
 /// Build a CVC5 adapter.
 ///
-
 /// In stub mode, returns an adapter that immediately fails with a clear
 /// error message. In linked mode, constructs a real CVC5 session.
 pub fn make_cvc5_adapter(

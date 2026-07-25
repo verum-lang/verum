@@ -203,10 +203,8 @@ impl CcTerm {
 /// Returns `None` if the term is already a value or no immediate
 /// redex applies.
 ///
-
 /// Reductions implemented:
 ///
-
 /// * **β**: `(λx. M) N ↦ M[x := N]`
 /// * **reset-value**: `reset v ↦ v`
 /// * **shift**: `reset (shift k. M) ↦ reset (M[k := λx. reset x])`

@@ -85,7 +85,6 @@ impl ExpansionConfig {
 
 /// A single event in the `debug_bindings` trace.
 ///
-
 /// Emitted by the expander only when `ExpansionConfig.debug_bindings`
 /// is `true`. Lets callers reconstruct the chronological order of
 /// quote-scope entries/exits, binding registrations, references,
@@ -180,7 +179,6 @@ pub enum ConstValue {
 impl ConstValue {
     /// Convert from MetaValue (the evaluator's const value type)
     ///
-
     /// This converts the rich MetaValue type to the simpler ConstValue
     /// used for hygiene purposes. AST nodes cannot be converted.
     pub fn from_meta_value(value: &verum_ast::MetaValue) -> Maybe<Self> {
@@ -500,7 +498,6 @@ pub type LiftEvalResult = Result<verum_ast::MetaValue, Text>;
 
 /// Evaluator callback for lift expressions
 ///
-
 /// This callback is invoked when a lift expression needs to be evaluated.
 /// It takes the expression to evaluate and returns either a MetaValue
 /// or an error message.
@@ -526,14 +523,12 @@ pub struct QuoteExpander {
     binding_stack: List<Map<Text, BindingInfo>>,
     /// Optional evaluator for lift expressions
     ///
-
     /// When set, lift expressions will be evaluated at compile time
     /// using this callback. The callback receives the expression to
     /// evaluate and should return the resulting MetaValue.
     lift_evaluator: Maybe<LiftEvaluator>,
     /// Recorded debug events.
     ///
-
     /// Populated only when `config.debug_bindings = true`. Stays
     /// empty (and zero-allocation) under the default configuration so
     /// production callers pay nothing.
@@ -581,15 +576,12 @@ impl QuoteExpander {
 
     /// Set the lift evaluator callback
     ///
-
     /// The lift evaluator is called when a `lift(expr)` expression needs
     /// to be evaluated. It should evaluate the expression in the current
     /// meta context and return the resulting value.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let meta_ctx = MetaContext::new();
     /// expander.set_lift_evaluator(Box::new(move |expr| {
@@ -635,7 +627,6 @@ impl QuoteExpander {
 
     /// Borrow the chronological list of recorded debug events.
     ///
-
     /// Only populated when the expander was constructed with
     /// `ExpansionConfig.debug_bindings = true`. Empty otherwise — the
     /// flag is the master gate for all event recording, so the per-
@@ -677,7 +668,6 @@ impl QuoteExpander {
 
     /// Enter a quote block
     ///
-
     /// Creates a fresh mark and pushes a new quote scope.
     pub fn enter_quote(
         &mut self,
@@ -743,7 +733,6 @@ impl QuoteExpander {
 
     /// Process a binding (let, fn parameter, etc.)
     ///
-
     /// Adds current marks to the binding and registers it.
     pub fn process_binding(
         &mut self,
@@ -779,7 +768,6 @@ impl QuoteExpander {
 
     /// Process a reference to an identifier
     ///
-
     /// Verifies that the reference is hygienic.
     pub fn process_reference(&mut self, name: &Text, span: Span) -> HygienicIdent {
         let scopes = self.context.current_scopes();
@@ -803,7 +791,6 @@ impl QuoteExpander {
 
     /// Splice a value into the quote
     ///
-
     /// For `$name` or `${expr}` splices.
     pub fn splice_value(
         &mut self,
@@ -859,7 +846,6 @@ impl QuoteExpander {
 
     /// Splice an expression into the quote
     ///
-
     /// For `${expr}` splices that need evaluation.
     pub fn splice_expr(
         &mut self,
@@ -873,27 +859,21 @@ impl QuoteExpander {
 
     /// Handle a lift expression
     ///
-
     /// For `lift(expr)` which evaluates at a higher stage and embeds
     /// the result into the generated code.
     ///
-
     /// # Evaluation
     ///
-
     /// If a lift evaluator is set, this will:
     /// 1. Evaluate the expression using the evaluator callback
     /// 2. Convert the resulting MetaValue to a ConstValue
     /// 3. Return a LiftedValue containing the constant
     ///
-
     /// If no evaluator is set, this returns a LiftedValue without
     /// the evaluated constant (deferred evaluation).
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// meta fn make_array(count: Int) -> Expr {
     ///  quote {
@@ -968,7 +948,6 @@ impl QuoteExpander {
 
     /// Evaluate a lift expression and return the raw MetaValue
     ///
-
     /// This is a lower-level interface that returns the MetaValue directly
     /// without converting it to ConstValue. Useful when you need to work
     /// with AST values or other complex types.
@@ -992,7 +971,6 @@ impl QuoteExpander {
 
     /// Handle a stage escape expression
     ///
-
     /// For `$(stage N){ expr }` which evaluates at a specific stage.
     pub fn stage_escape(
         &mut self,
@@ -1020,10 +998,8 @@ impl QuoteExpander {
 
     /// Handle a repetition splice
     ///
-
     /// For `$[for pattern in expr { body }]`.
     ///
-
     /// This method expands the body once for each element in the list,
     /// substituting the pattern variable with each element.
     pub fn expand_repetition(
@@ -1065,7 +1041,6 @@ impl QuoteExpander {
 
     /// Handle a repetition with multiple items
     ///
-
     /// For `$[for (a, b) in zip(list1, list2) { body }]`.
     pub fn expand_repetition_multi(
         &mut self,
@@ -1112,7 +1087,6 @@ impl QuoteExpander {
 
     /// Expand a single iteration of a repetition body
     ///
-
     /// This is called for each element in the iteration.
     pub fn expand_repetition_iteration(
         &mut self,
@@ -1199,7 +1173,6 @@ impl QuoteExpander {
 
     /// Apply call-site marks to an expression
     ///
-
     /// Walks the expression tree and adds call-site marks to all identifiers.
     /// This ensures that spliced values have proper hygiene marking.
     fn apply_call_site_marks_to_expr(&self, expr: Expr) -> Expr {
@@ -1213,7 +1186,6 @@ impl QuoteExpander {
 
     /// Apply stage marks to an expression
     ///
-
     /// Marks the expression with stage-specific scopes for multi-stage hygiene.
     fn apply_stage_marks_to_expr(&self, expr: Expr, stage: u32) -> Expr {
         // Create a stage-specific mark
@@ -1223,7 +1195,6 @@ impl QuoteExpander {
 
     /// Apply a mark to all identifiers in an expression tree
     ///
-
     /// This method recursively transforms the expression, adding the mark
     /// to all Path expressions which contain identifiers.
     fn apply_mark_to_expr(&self, expr: Expr, mark: Mark) -> Expr {
@@ -1432,7 +1403,6 @@ impl QuoteExpander {
 
 /// Repetition expander for $[for...] syntax
 ///
-
 /// Handles the expansion of repetition patterns in quotes.
 #[derive(Debug)]
 pub struct RepetitionExpander {
@@ -1504,7 +1474,6 @@ impl RepetitionExpander {
 
     /// Expand the body template
     ///
-
     /// In a real implementation, this would receive the actual list values
     /// and iterate over them. For now, it returns the body as-is.
     pub fn expand_body(

@@ -72,7 +72,6 @@ use crate::ordinal::Ordinal;
 
 /// An adjoint pair `L ⊣ R` between ∞-categories (HTT 5.2.2.1).
 ///
-
 /// **Algorithmic content**: source/target categories, the two
 /// functors' diagnostic names, and witness flags for unit/counit
 /// existence and the triangle identities.
@@ -148,13 +147,11 @@ impl SaftPreconditions {
 
 /// Decide whether a functor admits a *right adjoint* per HTT 5.5.2.9.
 ///
-
 /// **Preconditions** (kernel-checked):
 ///  1. Source is presentable.
 ///  2. Target is presentable.
 ///  3. The functor preserves all small colimits.
 ///
-
 /// Returns `true` iff all three hold. current surface trusts the witness
 /// flags; Future work will inspect each flag's structural witness.
 pub fn left_adjoint_exists(pre: &SaftPreconditions) -> bool {
@@ -163,7 +160,6 @@ pub fn left_adjoint_exists(pre: &SaftPreconditions) -> bool {
 
 /// Decide whether a functor admits a *left adjoint* (dual of HTT 5.5.2.9).
 ///
-
 /// **Preconditions** (kernel-checked):
 ///  1. Source is presentable.
 ///  2. Target is presentable.
@@ -189,7 +185,6 @@ pub enum AdjunctionDirection {
 
 /// Build an adjoint pair under SAFT preconditions (HTT 5.5.2.9).
 ///
-
 /// **Algorithm**:
 ///  1. Check the relevant precondition predicate.
 ///  2. Construct the missing adjoint as an ∞-functor name
@@ -197,7 +192,6 @@ pub enum AdjunctionDirection {
 ///  3. Witness unit/counit + triangle identities (always true by HTT
 ///  5.5.2.9 when preconditions hold).
 ///
-
 /// Returns `None` if preconditions fail.
 pub fn build_adjunction(
     given: impl Into<Text>,
@@ -245,7 +239,6 @@ pub fn triangle_identities_witness(adj: &Adjunction) -> bool {
 /// Compose two adjunctions: given `L_1 ⊣ R_1 : C → D` and
 /// `L_2 ⊣ R_2 : D → E`, produce `(L_2 ∘ L_1) ⊣ (R_1 ∘ R_2) : C → E`.
 ///
-
 /// Returns `None` if the source/target categories don't match
 /// (target of first = source of second).
 pub fn compose_adjunctions(first: &Adjunction, second: &Adjunction) -> Option<Adjunction> {

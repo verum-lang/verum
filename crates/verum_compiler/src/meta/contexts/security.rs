@@ -88,7 +88,6 @@ impl ResourceLimits {
 
 /// Security context for meta function execution
 ///
-
 /// Controls which contexts are enabled and enforces resource limits
 /// during compile-time evaluation.
 #[derive(Debug, Clone)]
@@ -218,7 +217,6 @@ impl SecurityContext {
 
     /// Set resource limits.
     ///
-
     /// Call `MetaContext::apply_security_context(sec)` (or the
     /// `MetaContext::from_security_context(sec)` builder) to actually
     /// gate evaluator/sandbox execution by these limits. Until that

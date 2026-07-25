@@ -74,11 +74,9 @@ use verum_common::{Map, Set};
 
 /// Result of tier analysis for a function.
 ///
-
 /// Contains tier decisions keyed by RefId, with optional span mapping for VBC codegen.
 /// The span_map allows VBC codegen to look up tier decisions by source location.
 ///
-
 /// VBC codegen uses ExprId-based lookup but escape analysis uses RefId internally.
 /// The ref_to_span map bridges this: VBC codegen looks up tier decisions by source
 /// span when direct RefId matching is unavailable, resolving the ExprId/RefId mismatch.
@@ -199,7 +197,6 @@ impl TierAnalysisResult {
 
     /// Get tier decision by span (for VBC codegen integration).
     ///
-
     /// This is the preferred lookup method when source spans are available.
     /// Returns None if no mapping exists for the span.
     #[must_use]
@@ -331,7 +328,6 @@ impl TierAnalysisConfig {
 
 /// Tier analyzer that produces tier decisions for VBC codegen.
 ///
-
 /// This is the main entry point for tier analysis. It coordinates:
 /// 1. Escape analysis (does reference escape?)
 /// 2. Dominance analysis (allocation dominates uses?)
@@ -582,7 +578,6 @@ impl TierAnalyzer {
 
     /// Collect all reference IDs from the CFG and build span mapping.
     ///
-
     /// This is the preferred method for VBC codegen integration as it
     /// extracts span information from DefSite/UseeSite for later lookup.
     fn collect_references_with_spans(&self, ref_to_span: &mut Map<RefId, Span>) -> Set<RefId> {
@@ -794,13 +789,10 @@ impl TierAnalyzer {
 
 /// Analyze a function and produce tier decisions.
 ///
-
 /// This is a convenience function for simple use cases.
 ///
-
 /// # Example
 ///
-
 /// ```rust,ignore
 /// let result = analyze_tiers(&cfg);
 /// for (ref_id, tier) in &result.decisions {

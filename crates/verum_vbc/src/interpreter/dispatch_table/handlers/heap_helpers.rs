@@ -54,7 +54,6 @@ use crate::value::Value;
 /// `TypeKind::Protocol` to avoid name collisions with the protocol
 /// declarations (the impl-typed records are what we want to allocate).
 ///
-
 /// Returns `None` when the type isn't loaded — caller falls back to
 /// the synthetic-id pattern: `verum_common::layout::SYNTHETIC_RECORD_TYPE_ID`
 /// for records and `verum_common::layout::synthetic_variant_type_id(tag)`
@@ -132,7 +131,6 @@ pub(super) fn wrap_in_variant(
 
 /// Allocate a `List<Byte>` heap value from a Rust byte slice.
 ///
-
 /// **Layout** — three-Value header `[len, cap, backing_ptr]` where
 /// backing is one Value-slot per element (each byte boxed as
 /// `Value::from_i64(b as i64)`). Matches the canonical List<T>

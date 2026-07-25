@@ -146,7 +146,6 @@ fn single_segment_path_name(expr: &Expr) -> Option<&str> {
 /// return the dot-joined form. Used to recognise mathlib4-cited
 /// / framework-cited apply targets that the corpus uses extensively.
 ///
-
 /// Returns `None` for non-resolvable shapes (calls, closures,
 /// generic-arg segments, etc.) — those need their own classification.
 fn dotted_path_text(expr: &Expr) -> Option<String> {
@@ -177,7 +176,6 @@ fn dotted_path_text(expr: &Expr) -> Option<String> {
 /// dot-joined dotted-path text when the innermost receiver is a
 /// single-segment `Path`. Returns `None` otherwise.
 ///
-
 /// Example: `mathlib4.lambda.ChurchRosser` parses as
 /// `Field { expr: Field { expr: Path(mathlib4), field: lambda }, field: ChurchRosser }`
 /// and resolves to `"mathlib4.lambda.ChurchRosser"`.
@@ -237,14 +235,12 @@ fn call_with_single_segment_callee(expr: &Expr) -> Option<(&str, &[Expr])> {
 /// If `tactic` is `Apply{lemma, args}` return the lemma name when the
 /// lemma expression resolves to either:
 ///
-
 ///  * a bare single-segment path — e.g. `apply foo;` (Apply.args
 ///  carries the actual argument list); or
 ///  * a single-segment-callee Call — e.g. `apply foo(x, y);` (the
 ///  fast parser places the entire `f(args)` inside Apply.lemma
 ///  and leaves Apply.args empty).
 ///
-
 /// Returned slice is the effective argument list — Apply.args for
 /// the bare-path shape, the call's own args for the Call shape.
 /// Helper so both `ProofBody::Tactic` and the structured-body
@@ -288,7 +284,6 @@ fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(String, &[Expr])> {
 /// If `body` is one of the V0-recognised single-apply shapes, return
 /// the lemma name + args:
 ///
-
 ///  * `ProofBody::Tactic(Apply{...})` — bare tactic-mode body.
 ///  * `ProofBody::Structured` with exactly one `Tactic(Apply{...})`
 ///  step and no `conclusion` — the shape produced by the parser
@@ -298,7 +293,6 @@ fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(String, &[Expr])> {
 ///  `conclusion: Some(Apply{...})` — alternative parser shape for
 ///  the same source pattern.
 ///
-
 /// Args are returned alongside so future translators can render them
 /// as positional arguments to `apply`.
 fn classify_single_apply(body: &ProofBody) -> Option<(String, &[Expr])> {
@@ -764,7 +758,6 @@ fn render_tactic_chain_lean(chain: &[ChainStep<'_>]) -> TranslatedProofBody {
 /// translate cleanly. Everything else falls back to `postulate` at
 /// the corpus-emission layer.
 ///
-
 /// **Coverage**:
 ///  * `ProofBody::Term(expr)` → `<expr>` (Agda accepts term-mode
 ///  proofs as the right-hand side of `name = body`).
@@ -853,14 +846,12 @@ fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
 /// proof terms in Agda's stdlib translate; everything else falls
 /// back to postulate.
 ///
-
 /// Coverage:
 ///  * `Reflexivity` → `refl` — the propositional-equality
 ///  constructor from `Relation.Binary.PropositionalEquality`.
 ///  * `Trivial` → `tt` — the unit constructor for `⊤`
 ///  (the trivial proposition).
 ///
-
 /// `Auto` / `Omega` / `Ring` etc. have no term-mode equivalents —
 /// they're decision procedures that only exist as tactics in
 /// Coq/Lean/Isabelle.
@@ -882,7 +873,6 @@ fn primitive_tactic_to_agda(tactic: &TacticExpr) -> Option<String> {
 /// to the postulate (axiom-declaration) form at the corpus-emission
 /// layer.
 ///
-
 /// **Coverage** :
 ///  * `ProofBody::Term(expr)` → `<expr>` (same as Lean / Agda).
 ///  * Single-apply (Tactic + Structured) → bare lemma name as
@@ -960,7 +950,6 @@ fn render_single_apply_dedukti(body: &ProofBody) -> TranslatedProofBody {
 /// direct term-form encodings in standard Dedukti libraries
 /// translate.
 ///
-
 /// Coverage:
 ///  * `Reflexivity` → `refl` — the propositional-equality
 ///  constructor (assumed to be present in the consumer's
@@ -984,7 +973,6 @@ fn primitive_tactic_to_dedukti(tactic: &TacticExpr) -> Option<String> {
 /// names like `auto`, `simp`, `blast` are first-class, and proofs
 /// are typically structured as `proof - ... qed` blocks.
 ///
-
 /// **Coverage** :
 ///  * `ProofBody::Term(expr)` → `by (rule <expr>)` — Isabelle's
 ///  reference-by-rule shape closest to Coq's `exact`.
@@ -1151,7 +1139,6 @@ fn primitive_tactic(body: &ProofBody) -> Option<&TacticExpr> {
 /// Translate a primitive tactic to its Coq equivalent. Returns `None`
 /// for non-primitive tactics (the caller falls back to admitted).
 ///
-
 /// **Why these tactics**: each is decidable enough that the foreign
 /// tool can re-discharge it with a single tactic invocation. The
 /// translation is direct: the Verum tactic name matches the Coq
@@ -1173,7 +1160,6 @@ fn primitive_tactic_to_coq(tactic: &TacticExpr) -> Option<String> {
 /// `None` for non-primitive tactics. Lean tactic names diverge
 /// slightly from Coq:
 ///
-
 ///  * `reflexivity` → `rfl`
 ///  * `omega` → `omega` (Mathlib provides this)
 ///  * `field` → `field_simp` (Mathlib)

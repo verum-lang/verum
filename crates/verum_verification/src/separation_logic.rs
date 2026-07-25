@@ -98,7 +98,6 @@ use verum_common::{List, Map, Maybe, Text, ToText};
 
 /// Address in the heap
 ///
-
 /// Addresses are represented symbolically as SMT expressions, allowing
 /// for both concrete addresses (constants) and symbolic addresses (variables).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -144,7 +143,6 @@ impl fmt::Display for Address {
 
 /// Value stored in the heap
 ///
-
 /// Values can be integers, booleans, addresses (for pointers), or
 /// structured data (records/tuples).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -199,7 +197,6 @@ impl Value {
 
 /// Heap as a partial function from addresses to values
 ///
-
 /// The heap is represented using Z3's array theory, where the heap is
 /// an array from addresses (integers) to values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -272,7 +269,6 @@ impl Heap {
 
 /// Separation logic assertion (spatial formula)
 ///
-
 /// Separation logic extends first-order logic with spatial connectives
 /// for reasoning about heap shape and ownership. Key assertions:
 /// - Emp: empty heap
@@ -283,55 +279,46 @@ impl Heap {
 pub enum SepProp {
     /// Empty heap assertion
     ///
-
     /// `emp` - asserts the heap is empty (no allocated locations)
     Emp,
 
     /// Points-to predicate
     ///
-
     /// `x ↦ v` - location x contains value v, and x is the only allocated location
     PointsTo(Address, Value),
 
     /// Points-to with field access
     ///
-
     /// `x.f ↦ v` - field f of location x contains value v
     FieldPointsTo(Address, Text, Value),
 
     /// Separating conjunction
     ///
-
     /// `P * Q` - heap can be split into disjoint parts satisfying P and Q
     SeparatingConj(Box<SepProp>, Box<SepProp>),
 
     /// Separating implication (magic wand)
     ///
-
     /// `P -* Q` - if given a heap satisfying P, can produce a heap satisfying Q
     MagicWand(Box<SepProp>, Box<SepProp>),
 
     /// Pure assertion (no heap constraint)
     ///
-
     /// `⌜φ⌝` - first-order formula φ that doesn't constrain the heap
     Pure(Formula),
 
     /// Predicate application (inductive predicates)
     ///
-
     /// `P(args)` - user-defined spatial predicate
     Predicate(Text, List<SmtExpr>),
 
     /// Existential quantification
     ///
-
     /// `∃x. P` - there exists a value x such that P holds
     Exists(List<Variable>, Box<SepProp>),
 
     /// Universal quantification (rare in SL)
     ///
-
     /// `∀x. P` - for all values x, P holds
     Forall(List<Variable>, Box<SepProp>),
 }
@@ -587,10 +574,8 @@ pub struct StandardPredicates;
 impl StandardPredicates {
     /// Linked list predicate
     ///
-
     /// `list(x, α)` - x points to a linked list with contents α
     ///
-
     /// Definition:
     /// ```text
     /// list(null, []) = emp
@@ -624,7 +609,6 @@ impl StandardPredicates {
 
     /// Binary tree predicate
     ///
-
     /// `tree(x, t)` - x points to a binary tree with shape t
     pub fn tree(root: Address, values: List<Value>) -> SepProp {
         SepProp::Predicate(
@@ -642,10 +626,8 @@ impl StandardPredicates {
 
     /// Array segment predicate
     ///
-
     /// `array(x, len, data)` - x points to an array of length len with contents data
     ///
-
     /// Definition:
     /// ```text
     /// array(x, 0, []) = emp
@@ -667,7 +649,6 @@ impl StandardPredicates {
 
     /// Stack segment predicate (for CBGR integration)
     ///
-
     /// `stack_segment(base, size)` - stack-allocated region
     pub fn stack_segment(base: Address, size: i64) -> SepProp {
         SepProp::Predicate(
@@ -678,7 +659,6 @@ impl StandardPredicates {
 
     /// CBGR-allocated object predicate
     ///
-
     /// `cbgr_object(addr, generation, epoch)` - CBGR-managed allocation
     pub fn cbgr_object(addr: Address, generation: i64, epoch: i64) -> SepProp {
         SepProp::Predicate(
@@ -699,7 +679,6 @@ impl StandardPredicates {
 
 /// Symbolic execution state with separation logic
 ///
-
 /// Tracks both the heap state (via separation logic assertion) and
 /// the path condition (pure first-order formula).
 #[derive(Debug, Clone)]
@@ -748,25 +727,20 @@ impl SymbolicState {
 
     /// Deallocate a heap cell (consume points-to assertion)
     ///
-
     /// This is the production implementation that uses frame inference to correctly
     /// consume the points-to assertion for the freed address while preserving the
     /// frame (the rest of the heap).
     ///
-
     /// ## Frame Inference Algorithm
     ///
-
     /// Given: current spatial assertion P * (addr -> _) where P is the frame
     /// After free(addr): spatial assertion becomes P (frame only)
     ///
-
     /// The algorithm:
     /// 1. Find and extract the points-to assertion for `addr` from the spatial assertion
     /// 2. Return the remaining assertions as the new spatial state (the frame)
     /// 3. If no points-to is found, this is a double-free or invalid free
     ///
-
     /// Uses the frame rule: extract the points-to for addr, return the frame.
     pub fn free(&mut self, addr: Address) {
         // Infer the frame by removing the points-to assertion for addr
@@ -790,7 +764,6 @@ impl SymbolicState {
 
     /// Infer the frame when freeing an address
     ///
-
     /// Returns (frame, found) where:
     /// - frame: the spatial assertion with the points-to for addr removed
     /// - found: whether a points-to assertion was found and removed
@@ -905,24 +878,19 @@ impl SymbolicState {
 
     /// Check if state is satisfiable
     ///
-
     /// Uses Z3 to check if the current symbolic state's constraints are satisfiable.
     /// This is the foundation for separation logic verification - if a state is
     /// unsatisfiable, we have detected a contradiction in the program logic.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Create Z3 solver context
     /// 2. Encode pure constraints as Z3 assertions
     /// 3. Encode heap consistency constraints (disjointness for separation)
     /// 4. Check satisfiability
     ///
-
     /// # Performance
     ///
-
     /// Typical check time: 1-10ms for simple states, up to 100ms for complex heaps.
     pub fn is_satisfiable(&self) -> bool {
         use z3::{SatResult, Solver};
@@ -1084,7 +1052,6 @@ impl SymbolicState {
 
     /// Encode separation constraints for the solver
     ///
-
     /// In separation logic, P * Q requires dom(P) and dom(Q) to be disjoint.
     /// We encode this as: for all addresses in P and Q, they must be distinct.
     fn encode_separation_constraints(&self, solver: &z3::Solver) -> Result<(), Text> {
@@ -1149,7 +1116,6 @@ impl Default for SymbolicState {
 
 /// Frame rule for compositional verification
 ///
-
 /// The frame rule allows local reasoning about heap-manipulating programs:
 /// ```text
 /// {P} c {Q}
@@ -1162,7 +1128,6 @@ pub struct FrameRule;
 impl FrameRule {
     /// Apply frame rule to a triple
     ///
-
     /// Returns true if the command doesn't modify the frame R
     pub fn can_frame(
         pre: &SepProp,
@@ -1231,7 +1196,6 @@ impl FrameRule {
 
 /// Encode separation logic assertions to Z3 SMT-LIB
 ///
-
 /// Uses Z3's array theory to represent heaps and encode separation logic
 /// constraints.
 pub struct SepLogicEncoder {
@@ -1268,7 +1232,6 @@ impl SepLogicEncoder {
 
     /// Encode separation logic assertion to first-order formula
     ///
-
     /// The encoding uses the "indirection" approach:
     /// - Heap is represented as an SMT array
     /// - Separating conjunction becomes disjoint union constraint
@@ -1388,7 +1351,6 @@ impl SepLogicEncoder {
 
     /// Get field offset for struct field access
     ///
-
     /// For SMT encoding, we need consistent, unique offsets for field names.
     /// Uses Blake3 hash for consistent hashing across the compiler pipeline.
     /// This is symbolic - actual runtime offsets would come from type layout.
@@ -1417,7 +1379,6 @@ impl Default for SepLogicEncoder {
 
 /// Weakest precondition for heap operations in separation logic
 ///
-
 /// Extends the standard wp calculus with heap operations:
 /// - `wp(x := alloc(v), Q) = ∃addr. (addr ↦ v) * (addr ↦ v -* Q[x/addr])`
 /// - `wp(free(x), Q) = (x ↦ _) * Q`
@@ -1499,7 +1460,6 @@ pub enum HeapCommand {
 
 /// Integration with Verum's CBGR memory model
 ///
-
 /// Maps CBGR operations to separation logic assertions
 #[derive(Debug)]
 pub struct CbgrSepLogic;
@@ -1507,7 +1467,6 @@ pub struct CbgrSepLogic;
 impl CbgrSepLogic {
     /// Convert CBGR allocation to separation logic
     ///
-
     /// A CBGR allocation creates a points-to assertion with generation/epoch metadata
     pub fn cbgr_alloc(addr: Address, val: Value, generation: i64, epoch: i64) -> SepProp {
         SepProp::sep_conj(
@@ -1546,16 +1505,13 @@ impl CbgrSepLogic {
 
 /// Verify a Hoare triple with separation logic
 ///
-
 /// Checks if `{pre} cmd {post}` is valid using separation logic and Z3
 ///
-
 /// # Arguments
 /// * `pre` - Precondition as a separation logic proposition
 /// * `cmd` - Heap command to verify
 /// * `post` - Postcondition as a separation logic proposition
 ///
-
 /// # Returns
 /// * `Ok(true)` if the triple is valid
 /// * `Ok(false)` if the triple is invalid (counterexample found)
@@ -1590,17 +1546,14 @@ pub fn verify_triple(pre: &SepProp, cmd: &HeapCommand, post: &SepProp) -> Result
 
 /// Verify a Hoare triple with full Z3 separation logic encoding
 ///
-
 /// This is the production-grade verification function that uses the
 /// SeparationLogicZ3Verifier for proper heap modeling with array theory.
 ///
-
 /// # Arguments
 /// * `pre` - Precondition as a separation logic proposition
 /// * `cmd` - Heap command to verify
 /// * `post` - Postcondition as a separation logic proposition
 ///
-
 /// # Returns
 /// * `Ok(SepLogicVerificationResult)` with verification result and optional counterexample
 /// * `Err(Text)` if verification fails

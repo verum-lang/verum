@@ -68,10 +68,8 @@ use verum_common::{List, Map, Text};
 
 /// Reference variable identifier for tracking in escape analysis
 ///
-
 /// Tracked by escape analysis to determine CBGR check eligibility.
 ///
-
 /// Note: Named `RefVariable` to avoid conflict with vcgen::Variable
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RefVariable {
@@ -136,7 +134,6 @@ impl BlockId {
 
 /// Result of escape analysis for a reference
 ///
-
 /// The escape status of a reference after analysis. Only `NoEscape` allows
 /// CBGR check elimination (promoting &T to &checked T with 0ns overhead).
 /// All other statuses require keeping the ~15ns CBGR check for memory safety.
@@ -144,7 +141,6 @@ impl BlockId {
 pub enum EscapeStatus {
     /// Reference doesn't escape - CBGR check can be eliminated
     ///
-
     /// This status indicates that the reference:
     /// - Doesn't escape function scope
     /// - Has no concurrent access
@@ -154,40 +150,34 @@ pub enum EscapeStatus {
 
     /// Reference escapes to heap - check required
     ///
-
     /// The reference is stored in a heap-allocated structure (Box, Heap, etc.)
     /// and may outlive the current function scope.
     EscapesToHeap,
 
     /// Reference escapes through closure - check required
     ///
-
     /// The reference is captured by a closure that may outlive the current scope.
     EscapesToClosure,
 
     /// Reference escapes through return - check required
     ///
-
     /// The reference is returned from the function and must remain valid
     /// for the caller's use.
     EscapesToReturn,
 
     /// Reference escapes through struct field - check required
     ///
-
     /// The reference is stored in a struct field that may outlive the current scope.
     EscapesToField,
 
     /// Reference crosses thread boundaries - check required
     ///
-
     /// The reference is shared with another thread, requiring CBGR for
     /// concurrent safety.
     EscapesToThread,
 
     /// Unknown escape status - conservatively keep check
     ///
-
     /// SAFETY: When escape status cannot be determined, we MUST keep
     /// the CBGR check to ensure memory safety. This is the conservative
     /// default that ensures zero false negatives.
@@ -198,10 +188,8 @@ pub enum EscapeStatus {
 impl EscapeStatus {
     /// Check if CBGR check can be safely eliminated
     ///
-
     /// # Safety
     ///
-
     /// Returns `true` ONLY when it has been proven safe to eliminate the check.
     /// Returns `false` for all uncertain or escaping cases.
     pub fn can_eliminate_check(&self) -> bool {
@@ -462,10 +450,8 @@ impl ControlFlowGraph {
 
     /// Check if block A dominates block B
     ///
-
     /// A dominates B if every path from entry to B goes through A.
     ///
-
     /// A dominates B if every path from entry to B goes through A.
     /// Used to verify allocation dominates all reference uses.
     pub fn dominates(&self, a: BlockId, b: BlockId) -> bool {
@@ -604,7 +590,6 @@ impl Function {
 
 /// Analysis result for a function
 ///
-
 /// Complete analysis result for a function: maps each reference to its escape status,
 /// records which CBGR checks can be eliminated, and provides timing information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -710,7 +695,6 @@ impl fmt::Display for EscapeAnalysisResult {
 
 /// Configuration for CBGR optimization
 ///
-
 /// Controls aggressiveness of CBGR elimination: conservative mode only
 /// eliminates trivially safe cases, aggressive mode enables interprocedural
 /// analysis at the cost of longer compile times.
@@ -775,7 +759,6 @@ impl Default for OptimizationConfig {
 
 /// CBGR optimization pass
 ///
-
 /// Performs escape analysis to determine which CBGR checks can be safely
 /// eliminated (promoting &T to &checked T). Guarantees zero false negatives --
 /// any check eliminated is proven safe. The promotion rule is:
@@ -887,13 +870,11 @@ impl CBGROptimizer {
 
     /// Analyze escape status of all references in a function
     ///
-
     /// Main entry point for escape analysis. Analyzes each reference variable
     /// in the function and determines its escape status by checking:
     /// (1) reference doesn't escape scope, (2) no concurrent access,
     /// (3) allocation dominates all uses, (4) lifetime is stack-bounded.
     ///
-
     /// Honours `config.timeout_ms` as a wall-clock per-function
     /// budget. When the budget is exhausted mid-analysis, the
     /// remaining variables are recorded as `EscapeStatus::Unknown`
@@ -1030,7 +1011,6 @@ impl CBGROptimizer {
 
     /// Check if allocation dominates all uses
     ///
-
     /// Verify that allocation dominates all uses: every path from entry to
     /// each use site goes through the allocation. This ensures the reference
     /// is valid (allocated) at all points where it is dereferenced.
@@ -1054,7 +1034,6 @@ impl CBGROptimizer {
 
     /// Check if variable lifetime is stack-bounded
     ///
-
     /// Check if variable lifetime is bounded by the stack frame (not heap-allocated).
     fn is_stack_bounded(&self, func: &Function, var: &RefVariable) -> bool {
         // Check if defined via stack allocation
@@ -1072,14 +1051,11 @@ impl CBGROptimizer {
 
 /// Analyze escape status for all references in a function
 ///
-
 /// Convenience function that creates an optimizer with default settings
 /// and analyzes escape status for all references in a function.
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let result = analyze_escape(&function);
 /// println!("Eliminated {} checks", result.eliminated_checks);
@@ -1091,15 +1067,12 @@ pub fn analyze_escape(func: &Function) -> EscapeAnalysisResult {
 
 /// Check if a CBGR check can be eliminated for a variable
 ///
-
 /// Returns `true` only if it can be proven that the reference doesn't
 /// escape and all four safety criteria are met (no escape, no concurrent
 /// access, allocation dominates uses, stack-bounded lifetime).
 ///
-
 /// # Safety
 ///
-
 /// This function guarantees zero false negatives. If it returns `true`,
 /// the check can be safely eliminated.
 pub fn can_eliminate_check(var: &RefVariable, analysis: &EscapeAnalysisResult) -> bool {
@@ -1112,11 +1085,9 @@ pub fn can_eliminate_check(var: &RefVariable, analysis: &EscapeAnalysisResult) -
 
 /// Optimize a function by recording which checks can be eliminated
 ///
-
 /// Records which CBGR checks can be eliminated during code generation.
 /// The actual elimination happens in the codegen phase.
 ///
-
 /// Note: The actual Function type doesn't support in-place modification
 /// of optimization flags in this simplified representation, so this
 /// function just performs analysis and returns the result.
@@ -1144,7 +1115,6 @@ pub struct OptimizedFunction {
 
 /// Prove that a variable's scope validity makes CBGR elimination safe
 ///
-
 /// Proves that a variable's scope validity (lifetime) is contained within
 /// the given scope, making CBGR check elimination safe.
 pub fn prove_scope_validity(var: &RefVariable, scope: &Scope, cfg: &ControlFlowGraph) -> bool {

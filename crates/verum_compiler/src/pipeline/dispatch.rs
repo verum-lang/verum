@@ -113,7 +113,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run type checking only (no execution)
     ///
-
     /// Note: For complex type checking scenarios, ensure RUST_MIN_STACK is set
     /// appropriately (e.g., 16MB) in the build/test environment.
     pub fn run_check_only(&mut self) -> Result<()> {
@@ -263,14 +262,12 @@ impl<'s> CompilationPipeline<'s> {
     /// Run interpreter mode
     /// Execute a pre-compiled VBC module against the given args.
     ///
-
     /// Used by the script-mode persistent cache: on a cache hit the
     /// runner deserialises the stored VBC bytes into a `VbcModule` and
     /// calls this method, skipping every front-end phase (parse,
     /// typecheck, verify, codegen) for a sub-millisecond cold start
     /// of unchanged scripts.
     ///
-
     /// Behaviour matches `phase_interpret_with_args` post-compile —
     /// builds a `VbcInterpreter`, resolves the entry function (`main`
     /// with `__verum_script_main` fallback), executes with or without

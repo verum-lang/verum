@@ -17,7 +17,6 @@ use verum_mlir_sys::{
 
 /// A context of IR, dialects, and passes.
 ///
-
 /// Contexts own various objects, such as types, locations, and dialect
 /// instances.
 #[derive(Debug)]
@@ -164,10 +163,8 @@ pub struct ContextRef<'c> {
 impl<'c> ContextRef<'c> {
     /// Creates a context reference from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirContext) -> Self {
         Self {
@@ -178,14 +175,11 @@ impl<'c> ContextRef<'c> {
 
     /// Returns a context.
     ///
-
     /// This function is different from `deref` because the correct lifetime is
     /// kept for the return type.
     ///
-
     /// # Safety
     ///
-
     /// The returned reference is safe to use only in the lifetime scope of the
     /// context reference.
     pub unsafe fn to_ref(&self) -> &'c Context {

@@ -116,7 +116,6 @@ pub enum HygieneViolation {
 impl HygieneViolation {
     /// Get the error code for this violation
     ///
-
     /// Error codes follow the M4xx range for meta-system errors.
     pub fn error_code(&self) -> &'static str {
         match self {

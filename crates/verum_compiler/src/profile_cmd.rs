@@ -162,7 +162,6 @@ impl<'s> ProfileCommand<'s> {
 
     /// Run runtime sampling profiling
     ///
-
     /// This mode executes the program with profiling enabled and collects
     /// actual runtime statistics using sampling.
     fn run_runtime(&mut self, _output: Option<&Path>, _suggest: bool) -> Result<()> {
@@ -216,7 +215,6 @@ impl<'s> ProfileCommand<'s> {
 
     /// Profile a single function using real AST analysis
     ///
-
     /// This walks the entire function AST to count:
     /// - CBGR managed references (&T, &mut T)
     /// - Checked references (&checked T)

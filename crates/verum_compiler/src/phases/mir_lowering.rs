@@ -1134,12 +1134,10 @@ impl LoweringContext {
 
     /// Convert AST Span to diagnostic LineColSpan
     ///
-
     /// Note: Full line/column conversion requires access to the source file
     /// which is managed at the Session level. This method provides a best-effort
     /// conversion using available information from the span.
     ///
-
     /// For accurate line/column information, diagnostics should be created at
     /// a higher level where Session is available, or the span should be stored
     /// and converted later via Session::convert_span().
@@ -1348,7 +1346,6 @@ impl LoweringContext {
 
     /// Convert a const evaluation result to a MIR constant
     ///
-
     /// Used by meta block evaluation to embed compile-time computed values
     /// directly into MIR as constants.
     fn const_value_to_mir_constant(&self, value: &ConstValue) -> MirConstant {
@@ -1405,7 +1402,6 @@ impl LoweringContext {
 
     /// Convert an AST literal to a MIR constant
     ///
-
     /// Handles all literal kinds defined in verum_ast::literal::LiteralKind,
     /// producing appropriate MIR constants for code generation.
     fn lower_literal_to_constant(&self, lit: &verum_ast::literal::Literal) -> MirConstant {
@@ -1641,16 +1637,13 @@ impl LoweringContext {
 
     /// Resolve field index from type information
     ///
-
     /// Queries the type of the local variable from type_cache, then looks up
     /// the field name in the struct definition to get its index.
     ///
-
     /// # Arguments
     /// * `local` - The local variable whose type contains the field
     /// * `field_name` - The name of the field to resolve
     ///
-
     /// # Returns
     /// The zero-based index of the field in the struct layout, or 0 if not found
     /// (with a diagnostic error logged).
@@ -1721,15 +1714,12 @@ impl LoweringContext {
 
     /// Resolve variant discriminant from type information
     ///
-
     /// Parses a variant path (e.g., `Result::Ok` or `Option::Some`) and looks up
     /// the discriminant value for the variant in the enum definition.
     ///
-
     /// # Arguments
     /// * `variant_path` - The AST path to the enum variant (e.g., `Result::Ok`)
     ///
-
     /// # Returns
     /// The discriminant value for the variant (usually the zero-based index), or 0
     /// if not found (with a diagnostic error logged).
@@ -1940,7 +1930,6 @@ impl LoweringContext {
 impl LoweringContext {
     /// Lower an expression - main entry point for expression lowering
     ///
-
     /// Uses iterative approaches for deeply nested structures to prevent stack overflow.
     /// Relies on RUST_MIN_STACK environment variable for stack size requirements.
     fn lower_expr(
@@ -2157,7 +2146,6 @@ impl LoweringContext {
     /// Fully iterative if expression lowering to handle deeply nested control flow
     /// Uses explicit continuation-passing to avoid stack overflow on deeply nested if/else chains
     ///
-
     /// This function unrolls nested if/else chains into a flat loop, preventing stack overflow
     /// regardless of nesting depth.
     fn lower_if_iterative(
@@ -6356,7 +6344,6 @@ impl LoweringContext {
 
     /// Lower assignment operators
     ///
-
     /// Handles both simple assignment (=) and compound assignments (+=, -=, etc.).
     /// Uses expr_to_place_mut to properly evaluate complex index expressions in
     /// assignment targets like `arr[i + 1] = value`.
@@ -6446,23 +6433,19 @@ impl LoweringContext {
 
     /// Convert expression to place with complex index evaluation support
     ///
-
     /// This version can evaluate complex index expressions that aren't simple variables.
     /// It modifies the MIR builder state by potentially creating temporaries and emitting
     /// statements to evaluate the index expression.
     ///
-
     /// # Arguments
     /// * `expr` - The expression to convert to a place
     /// * `current_block` - The current basic block being built
     ///
-
     /// # Returns
     /// A tuple of (Place, BlockId) where:
     /// - Place: The resulting place expression
     /// - BlockId: The potentially new current block after evaluation
     ///
-
     /// # Examples
     /// ```ignore
     /// // arr[i] where i is a variable -> simple lookup
@@ -7115,10 +7098,8 @@ impl LoweringContext {
 
     /// Lower `for await` loop (async iteration)
     ///
-
     /// Grammar: `for_await_loop = 'for' , 'await' , pattern , 'in' , expression , { loop_annotation } , block_expr`
     ///
-
     /// For await loops iterate over AsyncIterator types. They are lowered to:
     /// ```text
     /// let mut iter = async_iterable.into_async_iter(); // or assume already AsyncIterator
@@ -7132,7 +7113,6 @@ impl LoweringContext {
     /// }
     /// ```
     ///
-
     /// This generates a state machine that:
     /// 1. Creates the async iterator from the iterable expression
     /// 2. Enters a loop that calls next() and awaits the result
@@ -8575,11 +8555,9 @@ impl LoweringContext {
 
     /// Lower compound destructuring assignment: `(a, b) += (da, db)`
     ///
-
     /// Unlike simple destructuring assignment which binds new variables,
     /// compound destructuring updates existing variables in place.
     ///
-
     /// For `(a, b) += (da, db)`:
     /// 1. Load current values of a and b
     /// 2. Get corresponding elements from the RHS
@@ -8646,7 +8624,6 @@ impl LoweringContext {
 
     /// Lower a single element of compound destructuring
     ///
-
     /// For an identifier `a` with RHS value `da` and operation `+`:
     /// 1. Load current value of `a`
     /// 2. Compute `a + da`
@@ -8748,12 +8725,10 @@ impl LoweringContext {
 
     /// Lower pattern test for `is` expressions - tests match without creating bindings
     ///
-
     /// This is used by `x is Pattern` and `x !is Pattern` expressions to test
     /// whether a value matches a pattern, returning a boolean result without
     /// actually binding any pattern variables to scope.
     ///
-
     /// Unlike `lower_pattern_binding`, this function:
     /// - Does NOT create variable bindings for identifiers
     /// - Returns a boolean indicating match success
@@ -9146,7 +9121,6 @@ impl LoweringContext {
 
     /// Get discriminant value from pattern (for match lowering)
     ///
-
     /// Resolves the discriminant value for various pattern types:
     /// - Literals: Direct integer value or boolean (0/1)
     /// - Variants: Looks up discriminant from type registry

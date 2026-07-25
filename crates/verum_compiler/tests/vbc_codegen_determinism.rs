@@ -36,7 +36,6 @@ use std::process::Command;
 
 /// Fixture A — record type, while loop, assert_eq.
 ///
-
 /// Covers the original symptom matrix from commits 0723ad43 +
 /// 82303f94: protocol default methods, type-name imports, stdlib
 /// function lookups, generic monomorphisation around a small
@@ -78,7 +77,6 @@ fn main() {
 
 /// Fixture B — variant-constructor disambiguation (#76 family).
 ///
-
 /// Two user-declared sum types each have a `V4` variant with
 /// identical structure. Without deterministic codegen, the simple
 /// name `V4` can collapse onto whichever type registered first,
@@ -123,7 +121,6 @@ fn main() {
 
 /// Fixture C — stdlib method dispatch (#79 family).
 ///
-
 /// Multiple stdlib carrier types (Result, Maybe, …) all expose a
 /// method named `unwrap` with different panic-on-nothing semantics.
 /// The dispatcher must route by receiver type, not by first-
@@ -159,7 +156,6 @@ fn main() {
 
 /// Fixture D — generic monomorphisation across two carriers.
 ///
-
 /// `List<Pair>` inside a `Maybe<...>` exercises two layers of
 /// generic specialisation in the codegen. Historical
 /// non-determinism in mono-key ordering (HashMap iteration) would
@@ -265,7 +261,6 @@ fn wipe_disk_cache(root: &std::path::Path) {
 /// separate processes with the disk-cache wiped between runs,
 /// assert (exit_code, normalised_stderr) matches.
 ///
-
 /// `name` is used as the fixture file's basename and for failure
 /// reporting.
 fn run_determinism_contract(name: &str, source: &str) {

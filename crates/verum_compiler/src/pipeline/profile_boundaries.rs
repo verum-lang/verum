@@ -198,7 +198,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Convert an AST type to its canonical text representation.
     ///
-
     /// Used by both the profile-boundary checker and the
     /// protocol-coherence cluster.
     pub(super) fn type_to_text(&self, ty: &verum_ast::Type) -> Text {

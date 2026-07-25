@@ -190,7 +190,6 @@ unsafe extern "C" {
     pub fn LLVMCreateDIBuilder(M: LLVMModuleRef) -> LLVMDIBuilderRef;
     /// Deallocate a builder and everything it owns.
     ///
-
     /// The builder must be finalized before this.
     pub fn LLVMDisposeDIBuilder(Builder: LLVMDIBuilderRef);
     /// Construct any deferred debug info descriptors.
@@ -319,7 +318,6 @@ unsafe extern "C" {
 
     /// Create a descriptor for an imported function, type, or variable.
     ///
-
     /// Suitable for e.g. FORTRAN-style USE declarations.
     pub fn LLVMDIBuilderCreateImportedDeclaration(
         Builder: LLVMDIBuilderRef,
@@ -896,7 +894,6 @@ unsafe extern "C" {
 
     /// Insert a Declare DbgRecord before the given instruction.
     ///
-
     /// Only use in the "new debug format", when `LLVMIsNewDbgInfoFormat` is true.
     pub fn LLVMDIBuilderInsertDeclareRecordBefore(
         Builder: LLVMDIBuilderRef,
@@ -909,7 +906,6 @@ unsafe extern "C" {
 
     /// Insert a Declare DbgRecord at the end of the given basic block.
     ///
-
     /// If the basic block has a terminator instruction, the record is inserted before that
     /// terminator instruction. Only use in the "new debug format", when `LLVMIsNewDbgInfoFormat`
     /// is true.
@@ -924,7 +920,6 @@ unsafe extern "C" {
 
     /// Insert a new debug record before the given instruction.
     ///
-
     /// Only use in the "new debug format", when `LLVMIsNewDbgInfoFormat` is true.
     pub fn LLVMDIBuilderInsertDbgValueRecordBefore(
         Builder: LLVMDIBuilderRef,
@@ -937,7 +932,6 @@ unsafe extern "C" {
 
     /// Insert a new debug record at the end of the given basic block.
     ///
-
     /// If the basic block has a terminator instruction, the record is inserted before
     /// that terminator instruction. Only use in the "new debug format", when
     /// `LLVMIsNewDbgInfoFormat` is true.

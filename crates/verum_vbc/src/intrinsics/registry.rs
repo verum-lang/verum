@@ -44,7 +44,6 @@ use crate::instruction::{
 
 /// Global intrinsic registry singleton.
 ///
-
 /// Thread-safe lazy initialization ensures the registry is built exactly once.
 pub static INTRINSIC_REGISTRY: LazyLock<IntrinsicRegistry> = LazyLock::new(IntrinsicRegistry::new);
 
@@ -157,7 +156,6 @@ pub enum IntrinsicHint {
     /// (sandboxed scripts, capability-attenuated subroutines) get
     /// a typed refusal instead of silent execution.
     ///
-
     /// Coverage rule (enforced by
     /// `tests::test_syscall_intrinsics_require_permission`): every
     /// `IntrinsicCategory::Syscall` entry MUST carry this hint —
@@ -197,10 +195,8 @@ pub enum CodegenStrategy {
     /// Maps to MathExtended opcode (0x29) with a sub-opcode.
     /// Used for transcendental and special math functions.
     ///
-
     /// Zero-cost dispatch: ~2ns interpreter, 0ns AOT (direct LLVM intrinsic).
     ///
-
     /// # Sub-opcode Ranges
     /// - 0x00-0x0F: Trigonometric F64 (sin, cos, tan, asin, acos, atan, atan2)
     /// - 0x10-0x17: Trigonometric F32
@@ -1258,21 +1254,17 @@ impl IntrinsicRegistry {
 
     /// Looks up a generic intrinsic by base name and type suffix.
     ///
-
     /// This method supports the generic intrinsic declarations in core/sys/intrinsics.vr.
     /// When calling a generic intrinsic like `add<T>(a, b)`, the compiler monomorphizes
     /// and calls this method with the base name ("add") and type suffix ("i64" for Int).
     ///
-
     /// # Arguments
     /// * `base_name` - The generic intrinsic name (e.g., "add", "checked_add")
     /// * `type_suffix` - The type suffix (e.g., "i64", "u64", "f64", "i32", "u32")
     ///
-
     /// # Returns
     /// The specific intrinsic if found, or None.
     ///
-
     /// # Examples
     /// ```
     /// use verum_vbc::intrinsics::registry::IntrinsicRegistry;
@@ -1294,15 +1286,12 @@ impl IntrinsicRegistry {
 
     /// Resolves a generic intrinsic name to its type-specific name.
     ///
-
     /// This method returns the full intrinsic name that should be used in codegen.
     ///
-
     /// # Arguments
     /// * `base_name` - The generic intrinsic name (e.g., "add")
     /// * `type_suffix` - The type suffix (e.g., "i64" for Int)
     ///
-
     /// # Returns
     /// The resolved intrinsic name, or None if not found.
     pub fn resolve_generic_name(&self, base_name: &str, type_suffix: &str) -> Option<&'static str> {

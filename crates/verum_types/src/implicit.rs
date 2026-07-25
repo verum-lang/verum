@@ -95,7 +95,6 @@ pub enum ConstraintSource {
 
 /// Implicit argument resolution context.
 ///
-
 /// This structure tracks all implicit arguments and constraints during
 /// type inference, and provides methods to solve them.
 pub struct ImplicitResolver {
@@ -119,7 +118,6 @@ impl ImplicitResolver {
 
     /// Register a new implicit argument.
     ///
-
     /// Creates a fresh metavariable for the implicit parameter and
     /// tracks it for later resolution.
     pub fn register_implicit(&mut self, name: Text, expected_type: Type, span: Span) -> TypeVar {
@@ -135,7 +133,6 @@ impl ImplicitResolver {
 
     /// Add a constraint on an implicit argument.
     ///
-
     /// This records that a metavariable must unify with a specific type,
     /// based on how the function is used.
     pub fn add_constraint(
@@ -155,11 +152,9 @@ impl ImplicitResolver {
 
     /// Solve all implicit arguments.
     ///
-
     /// This performs constraint solving via unification to determine
     /// the values of all implicit arguments.
     ///
-
     /// Returns a substitution mapping metavariables to their inferred types.
     pub fn solve(&mut self) -> Result<Substitution> {
         let mut subst = Substitution::new();
@@ -201,7 +196,6 @@ impl ImplicitResolver {
 
     /// Solve with detailed error reporting for ambiguous cases.
     ///
-
     /// This variant provides more helpful error messages when resolution fails,
     /// including suggestions for explicit instantiation.
     pub fn solve_with_diagnostics(&mut self) -> Result<Substitution> {
@@ -249,7 +243,6 @@ impl ImplicitResolver {
 
     /// Get the inferred value for an implicit argument.
     ///
-
     /// Must be called after `solve()`.
     pub fn get_inferred(&self, metavar: TypeVar, subst: &Substitution) -> Maybe<Type> {
         let metavar_type = Type::Var(metavar);
@@ -287,7 +280,6 @@ impl Default for ImplicitResolver {
 
 /// Elaboration context for filling in implicit arguments.
 ///
-
 /// After solving implicit arguments, this structure helps insert
 /// the inferred values into the typed AST.
 pub struct ImplicitElaborator {
@@ -303,7 +295,6 @@ impl ImplicitElaborator {
 
     /// Elaborate a type by filling in implicit arguments.
     ///
-
     /// Replaces all metavariables with their inferred types.
     pub fn elaborate_type(&self, ty: &Type) -> Type {
         ty.apply_subst(&self.solution)
@@ -311,7 +302,6 @@ impl ImplicitElaborator {
 
     /// Get all inferred implicit arguments as a map.
     ///
-
     /// This can be used to generate explicit type applications
     /// for the elaborated AST.
     pub fn get_inferred_args(&self) -> Map<TypeVar, Type> {
@@ -325,7 +315,6 @@ impl ImplicitElaborator {
 
 /// Implicit argument context for tracking scope.
 ///
-
 /// This structure manages implicit argument scopes during type checking,
 /// allowing nested function definitions to have their own implicit parameters.
 pub struct ImplicitContext {
@@ -348,7 +337,6 @@ impl ImplicitContext {
 
     /// Exit the current scope and return the resolver.
     ///
-
     /// Returns None if there are no active scopes.
     pub fn exit_scope(&mut self) -> Maybe<ImplicitResolver> {
         // pop returns Option, convert to Maybe

@@ -65,25 +65,20 @@ use crate::backend_switcher::BackendChoice;
 
 /// The semantic verification strategy from a `@verify(...)` attribute.
 ///
-
 /// ## User-Facing API
 ///
-
 /// This enum is the public interface for verification intent. Each variant
 /// describes WHAT the user wants (speed, thoroughness, certification) —
 /// NOT which specific solver or algorithm should be used. The compiler
 /// maps these strategies to internal dispatch decisions.
 ///
-
 /// ## Migration Stability
 ///
-
 /// When the Verum compiler migrates to a custom in-house solver, existing
 /// user annotations remain valid without modification. Only the internal
 /// dispatch logic in `BackendSwitcher` changes.
 /// The nine-strategy verification ladder.
 ///
-
 /// Each variant is SOUND; they differ in completeness and cost. The
 /// ordering forms a monotone lift: a function that passes
 /// `@verify(reliable)` also passes `@verify(formal)` / `@verify(fast)`
@@ -387,7 +382,6 @@ impl VerifyStrategy {
 
     /// Parse a verify-attribute argument string into a strategy.
     ///
-
     /// Returns `None` for unrecognized values. Case-insensitive match.
     /// Legacy aliases (`quick`/`rapid`, `robust`, `cross_validate`,
     /// `synthesis`/`synth`) are preserved so existing `.vr` sources
@@ -666,7 +660,6 @@ impl VerifyStrategy {
 
     /// Map the strategy to an internal `BackendChoice` for the switcher.
     ///
-
     /// Returns `None` for strategies that don't require formal proof
     /// infrastructure (`Runtime`, `Static`, `Proof` — the last is
     /// user-supplied and bypasses SMT).
@@ -782,7 +775,6 @@ impl VerifyStrategy {
     /// timeout semantics
     /// for this strategy. Three layers:
     ///
-
     /// * **WallClock (default)** — real elapsed time matching user
     ///  expectations ("verify must complete in X seconds").
     ///  Non-deterministic on CI under load; simple to reason about.
@@ -794,7 +786,6 @@ impl VerifyStrategy {
     ///  top so partial results can be inspected post-mortem
     ///  regardless of the primary semantics.
     ///
-
     /// `Runtime` / `Static` / `Proof` never time out (they don't
     /// invoke an SMT solver) — return `TimeoutSemantics::None`.
     pub fn timeout_semantics(&self) -> TimeoutSemantics {
@@ -858,25 +849,20 @@ impl std::fmt::Display for VerifyStrategy {
 
 /// Extract the verify strategy from a Verum AST attribute list.
 ///
-
 /// Scans for `@verify(...)` attributes and parses their argument. Returns:
 /// - `Some(strategy)` if a `@verify(...)` attribute was found with a
 ///  recognized argument.
 /// - `None` if no `@verify` attribute is present OR the argument is
 ///  unrecognized (caller should emit a diagnostic).
 ///
-
 /// This is the primary entry point used by the compilation pipeline to
 /// convert AST attributes into a concrete dispatch strategy.
 ///
-
 /// ## Example usage (from compiler)
 ///
-
 /// ```rust,ignore
 /// use verum_smt::verify_strategy::{extract_from_attributes, VerifyStrategy};
 ///
-
 /// match extract_from_attributes(&func.attributes) {
 ///  Some(strategy) => {
 ///  if strategy.requires_smt() {
@@ -908,7 +894,6 @@ pub fn extract_from_attributes(
 
 /// Try to parse a VerifyStrategy from a single AST expression.
 ///
-
 /// Recognizes:
 /// - `ExprKind::Path` with a single identifier: `@verify(formal)`, `@verify(z3)`, etc.
 /// - `ExprKind::Literal(Text(...))` for quoted forms: `@verify("portfolio")`.

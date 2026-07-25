@@ -36,7 +36,6 @@ use verum_common::span::{FileId, LineColSpan, SourceFile, Span};
 
 /// A thread-safe registry of source files for span conversion.
 ///
-
 /// This registry maintains mappings from FileId to SourceFile, enabling
 /// accurate conversion of byte-offset Spans to line/column positions
 /// for diagnostic messages.
@@ -68,7 +67,6 @@ impl SourceFileRegistry {
 
     /// Register a source file with the given content.
     ///
-
     /// Returns the FileId assigned to this file.
     pub fn register_file(&self, name: impl Into<String>, source: impl Into<String>) -> FileId {
         let name: String = name.into();
@@ -98,7 +96,6 @@ impl SourceFileRegistry {
 
     /// Register a source file with a specific FileId.
     ///
-
     /// Use this when the FileId is already known (e.g., from the parser).
     pub fn register_file_with_id(
         &self,
@@ -137,12 +134,10 @@ impl SourceFileRegistry {
 
     /// Convert a Span to a LineColSpan using the registered source files.
     ///
-
     /// Returns a LineColSpan with:
     /// - The actual filename if the file is registered
     /// - Accurate line and column numbers from the source
     ///
-
     /// If the file is not registered, returns a fallback span with
     /// the FileId in the filename for debugging.
     pub fn span_to_line_col(&self, span: Span) -> LineColSpan {
@@ -199,7 +194,6 @@ impl SourceFileRegistry {
 
 /// Global source file registry for use when a local registry is not available.
 ///
-
 /// This is a fallback for code that doesn't have access to the TypeChecker's
 /// registry. Prefer using the TypeChecker's registry when possible.
 static GLOBAL_REGISTRY: std::sync::OnceLock<SourceFileRegistry> = std::sync::OnceLock::new();
@@ -211,7 +205,6 @@ pub fn global_registry() -> &'static SourceFileRegistry {
 
 /// Register a file in the global registry.
 ///
-
 /// This should be called during parsing to make source files available
 /// for error diagnostics throughout compilation.
 pub fn register_global_file(name: impl Into<String>, source: impl Into<String>) -> FileId {
@@ -229,7 +222,6 @@ pub fn register_global_file_with_id(
 
 /// Convert a Span to LineColSpan using the global registry.
 ///
-
 /// This is a convenience function for code that doesn't have access to
 /// a local registry. It provides a fallback that's better than "unknown".
 pub fn span_to_line_col(span: Span) -> LineColSpan {
@@ -238,11 +230,9 @@ pub fn span_to_line_col(span: Span) -> LineColSpan {
 
 /// Extract line and column numbers from a Span for call graph building.
 ///
-
 /// Returns a tuple of (line, column) where both are 1-based.
 /// For dummy spans or unknown files, returns (0, 0).
 ///
-
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts - Call Graph Verification
 pub fn span_to_line_column(span: Span) -> (u32, u32) {
     let lc = span_to_line_col(span);

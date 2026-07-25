@@ -17,17 +17,14 @@ use crate::literal_registry::ParsedLiteral;
 
 /// Parse XML literal at compile-time
 ///
-
 /// Semantic literal: `xml#"<root>...</root>"` is compile-time validated XML.
 /// The tagged literal syntax `tag#"content"` desugars to a meta-system call
 /// that parses and validates content at compile-time, producing type XmlDocument.
 ///
-
 /// # Arguments
 /// - `content`: The XML string
 /// - `span`: Source location for error reporting
 ///
-
 /// # Returns
 /// Validated XML on success
 pub fn parse_xml(

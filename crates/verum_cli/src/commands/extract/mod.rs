@@ -64,7 +64,6 @@ struct ExtractRequest {
     /// body) extracted via the AST node's `Span`. `None` for
     /// declarations without a body (axioms; signatures).
     ///
-
     /// When present and the target is Verum, the emitter splices
     /// this body verbatim — the Verum extracted file is then
     /// re-checkable by `verum check`. For other targets V12.1
@@ -628,7 +627,6 @@ fn comment_for_target(target: ExtractTarget) -> &'static str {
 /// Emit a per-target wrapper that delegates to a hand-written
 /// native function. Used by the `@extract(realize="...")` directive.
 ///
-
 /// The wrapper preserves the verified surface signature; the body
 /// is a single call into `native_fn`. This pattern ships verified
 /// specifications for primitives the runtime owns (intrinsic

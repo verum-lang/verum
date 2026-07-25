@@ -30,7 +30,6 @@ use super::sandbox::SandboxError;
 
 /// Extension trait providing arithmetic and comparison operations for MetaValue.
 ///
-
 /// These operations return `Result<MetaValue, SandboxError>` to properly
 /// handle type mismatches and division by zero.
 pub trait MetaValueOps: Sized {

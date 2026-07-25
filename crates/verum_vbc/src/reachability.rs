@@ -69,7 +69,6 @@ pub struct Reachability {
 
 /// Compute the conservative reachable set for `module`.
 ///
-
 /// Roots: the entry function (named `main`, when present), global
 /// ctors/dtors, every `Constant::Function` in the constant pool, and
 /// mount-alias targets. Callers with additional roots (e.g. exported

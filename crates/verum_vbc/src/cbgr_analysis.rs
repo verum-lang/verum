@@ -75,7 +75,6 @@ use crate::types::CbgrTier;
 
 /// Result of VBC-level escape analysis.
 ///
-
 /// Maps `(FunctionId, instruction_offset)` to the decided CBGR tier for each
 /// `Ref` or `RefMut` instruction in the module.
 #[derive(Debug, Clone)]
@@ -116,7 +115,6 @@ impl EscapeAnalysisStats {
 
 /// VBC-level escape analyzer for CBGR tier promotion.
 ///
-
 /// Performs a conservative analysis over decoded VBC instructions to determine
 /// which references can skip runtime generation checks.
 pub struct VbcEscapeAnalyzer {
@@ -131,7 +129,6 @@ impl VbcEscapeAnalyzer {
 
     /// Analyze a set of decoded VBC functions and produce tier decisions.
     ///
-
     /// For each `Ref` or `RefMut` instruction, determines whether it can be
     /// promoted to Tier 1 (zero-cost) or must remain Tier 0 (runtime-checked).
     pub fn analyze(&self, functions: &[VbcFunction]) -> EscapeAnalysisResult {
@@ -204,7 +201,6 @@ impl VbcEscapeAnalyzer {
 
     /// Decide the CBGR tier for a single Ref/RefMut instruction.
     ///
-
     /// Returns Tier1 if both:
     /// - The source register has local provenance (not a param, not heap-derived)
     /// - The destination register (the reference) does not escape
@@ -230,7 +226,6 @@ impl VbcEscapeAnalyzer {
 
     /// Build a provenance map for all registers in the function.
     ///
-
     /// Each register is classified as:
     /// - `Local`: defined by a local computation (let binding, literal, arithmetic)
     /// - `Param`: comes from a function parameter
@@ -342,7 +337,6 @@ impl VbcEscapeAnalyzer {
 
     /// Find all registers that "escape" the current function scope.
     ///
-
     /// A register escapes if it is:
     /// - Passed as a call argument (Call, CallM, CallClosure, TailCall, CallG)
     /// - Returned from the function (Ret)
@@ -444,7 +438,6 @@ enum RegisterProvenance {
 impl EscapeAnalysisResult {
     /// Look up the decided tier for a specific instruction.
     ///
-
     /// Returns `None` if the instruction at the given offset is not a Ref/RefMut,
     /// or was not analyzed.
     pub fn get_tier(&self, func_id: FunctionId, offset: usize) -> Option<CbgrTier> {
@@ -453,7 +446,6 @@ impl EscapeAnalysisResult {
 
     /// Look up the tier, defaulting to Tier 0 if not found.
     ///
-
     /// This is the recommended API for LLVM lowering: if no analysis result
     /// exists for an instruction, fall back to the safe default (full checks).
     pub fn tier_or_default(&self, func_id: FunctionId, offset: usize) -> CbgrTier {

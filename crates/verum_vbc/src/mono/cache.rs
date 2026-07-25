@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 /// Persistent cache for monomorphized functions.
 ///
-
 /// Stores specialized bytecode on disk for reuse across compilations.
 /// Cache directory structure: `~/.verum/cache/mono/{hash}.vbc`
 #[derive(Clone)]
@@ -143,7 +142,6 @@ impl MonomorphizationCache {
 
     /// Garbage collects old cache entries.
     ///
-
     /// Removes entries older than `max_age`.
     pub fn gc(&mut self, max_age: std::time::Duration) -> std::io::Result<usize> {
         let now = std::time::SystemTime::now();

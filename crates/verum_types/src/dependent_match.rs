@@ -42,11 +42,9 @@ use verum_common::{List, Map, Maybe, Set, Text};
 
 /// A motive for dependent pattern matching.
 ///
-
 /// The motive describes how the result type depends on the scrutinee value.
 /// It's a type-level function: for a scrutinee of type T, it returns a type.
 ///
-
 /// Example:
 /// ```verum
 /// // For vector_head : (n: Nat, Vec (n+1) T) -> T
@@ -91,13 +89,11 @@ impl Motive {
     /// Substitute a term in a type (for dependent type computation)
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-Level Computation
     ///
-
     /// This performs capture-avoiding substitution of a term into a type,
     /// which is essential for dependent type checking. When we apply a
     /// motive to a value, we need to replace occurrences of the bound
     /// variable with the actual term.
     ///
-
     /// # Examples
     /// - Motive: λn. List<T, n>
     /// - Term: succ(m)
@@ -453,7 +449,6 @@ impl Motive {
 
 /// A refined type environment after matching a constructor.
 ///
-
 /// When we match a constructor, we learn facts about type indices.
 /// For example, matching `cons(head, tail)` on `Vec n T` tells us
 /// that `n = m+1` for the length of `tail` being `m`.
@@ -750,12 +745,10 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Infer a motive from a match expression.
     ///
-
     /// The motive describes how the result type varies with the scrutinee.
     /// If all branches have the same type independent of the scrutinee,
     /// we create a simple (constant) motive.
     ///
-
     /// Algorithm:
     /// 1. Check if result_ty contains references to scrutinee indices
     /// 2. If yes, create a dependent motive
@@ -788,7 +781,6 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check if a type depends on the scrutinee
     ///
-
     /// This analyzes whether the result type contains references to
     /// indices from the scrutinee type.
     fn type_depends_on_scrutinee(&self, result_ty: &Type, scrutinee_ty: &Type) -> bool {
@@ -893,7 +885,6 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Refine the scrutinee type based on a pattern match.
     ///
-
     /// When we match a constructor pattern, we learn information about
     /// type indices. For example, matching `cons(h, t)` on `Vec n T`
     /// tells us that `n ≥ 1` and `t : Vec (n-1) T`.
@@ -954,7 +945,6 @@ impl<'a> DependentPatternChecker<'a> {
     /// Extract constructor information from the environment
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .1 - Inductive Types
     ///
-
     /// This looks up the constructor's type signature and extracts
     /// argument types and any index constraints. For dependent types,
     /// this is critical for computing index refinements.
@@ -1153,7 +1143,6 @@ impl<'a> DependentPatternChecker<'a> {
     /// Compute index substitutions from unifying constructor with scrutinee
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Index Substitution
     ///
-
     /// When we match a constructor against a scrutinee type, we learn
     /// facts about type indices. For example:
     /// - Matching Nil against List<T, n> tells us n = 0
@@ -1281,15 +1270,12 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check if a pattern match is exhaustive for a dependent type.
     ///
-
     /// For dependent types, exhaustiveness checking must account for
     /// type indices. Some patterns may be absurd (impossible) due to
     /// index constraints.
     ///
-
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Pattern Coverage for Indexed Types
     ///
-
     /// # Example
     /// ```verum
     /// // For List<T, n>, different cases required based on n:
@@ -1300,7 +1286,6 @@ impl<'a> DependentPatternChecker<'a> {
     ///  }
     /// ```
     ///
-
     /// NOTE: This method delegates to the unified exhaustiveness checker in
     /// `exhaustiveness::dependent` for the matrix-based algorithm while
     /// preserving dependent type index awareness.
@@ -1340,7 +1325,6 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Legacy check_exhaustiveness implementation (deprecated)
     ///
-
     /// Use check_exhaustiveness which delegates to the unified checker.
     #[deprecated(note = "Use check_exhaustiveness which uses the unified checker")]
     pub fn check_exhaustiveness_legacy(
@@ -1410,13 +1394,11 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check if a constructor is possible given the scrutinee type's indices.
     ///
-
     /// For indexed types like List<T, n>, some constructors may be impossible
     /// based on the index values. For example:
     /// - Nil is impossible if n = Succ(m) (non-zero length)
     /// - Cons is impossible if n = Zero (zero length)
     ///
-
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Index-aware exhaustiveness
     fn is_constructor_possible(
         &self,
@@ -1449,7 +1431,6 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check if two type indices are incompatible.
     ///
-
     /// This detects cases where indices clearly contradict each other,
     /// such as Zero vs Succ(n), or different concrete values.
     fn are_indices_incompatible(&self, idx1: &Type, idx2: &Type) -> bool {
@@ -1471,14 +1452,11 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check pattern coverage for indexed types.
     ///
-
     /// For indexed types, we need to verify that patterns cover all possible
     /// index values, not just all constructors.
     ///
-
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Pattern Coverage for Indexed Types
     ///
-
     /// # Example
     /// ```verum
     /// // Coverage depends on the length index:
@@ -1538,7 +1516,6 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check if a pattern is redundant (never matches).
     ///
-
     /// A pattern is redundant if:
     /// 1. It's absurd (impossible due to index constraints)
     /// 2. It's already covered by earlier patterns
@@ -1694,7 +1671,6 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Type check a match expression with dependent types.
     ///
-
     /// This extends regular pattern matching with:
     /// 1. Motive inference (how result type depends on scrutinee)
     /// 2. Constructor refinement (learning index constraints)
@@ -1703,10 +1679,8 @@ impl<'a> DependentPatternChecker<'a> {
     /// 5. With-clause verification for proof obligations
     /// 6. View pattern support
     ///
-
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Dependent Pattern Matching
     ///
-
     /// NOTE: This method now uses the unified exhaustiveness checker from
     /// `exhaustiveness::dependent` which provides the matrix-based algorithm
     /// with dependent type awareness.
@@ -1787,15 +1761,12 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check with-clause proof obligations for a pattern match arm.
     ///
-
     /// The with-clause specifies constraints that must hold when the pattern matches.
     /// For dependent types, these constraints refine the type information available
     /// in the match arm body.
     ///
-
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — lines 386-391
     ///
-
     /// # Example
     /// ```verum
     /// fn is_zero(n: Nat) -> bool with (n = 0) | (n ≠ 0) =
@@ -1846,14 +1817,11 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Check a view pattern.
     ///
-
     /// View patterns apply a view function to the scrutinee before pattern matching,
     /// allowing pattern matching on computed properties rather than constructors.
     ///
-
     /// Dependent pattern matching: type-aware case analysis where match arms refine dependent types — .2 lines 401-427
     ///
-
     /// # Example
     /// ```verum
     /// view Parity : Nat -> Type {
@@ -1861,7 +1829,6 @@ impl<'a> DependentPatternChecker<'a> {
     ///  Odd : (n: Nat) -> Parity(2 * n + 1)
     /// }
     ///
-
     /// fn is_even(n: Nat) -> bool =
     ///  match parity(n) { // View pattern
     ///  Even(_) => true,
@@ -1984,7 +1951,6 @@ impl<'a> DependentPatternChecker<'a> {
 
     /// Bind pattern variables with refined types from constructor matching.
     ///
-
     /// When we match a constructor, the pattern variables get refined types
     /// based on the constructor's argument types. For example:
     /// ```verum
@@ -2080,7 +2046,6 @@ impl<'a> DependentPatternChecker<'a> {
 
 /// Coverage analysis report for pattern matching.
 ///
-
 /// Provides detailed information about pattern coverage including
 /// missing cases and redundant patterns.
 #[derive(Debug, Clone)]

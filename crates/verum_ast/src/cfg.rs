@@ -80,7 +80,6 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// A cfg predicate for conditional compilation.
 ///
-
 /// This represents the condition inside `@cfg(...)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CfgPredicate {
@@ -167,7 +166,6 @@ pub enum CfgPredicateKind {
 
 /// Target platform configuration for conditional compilation.
 ///
-
 /// This struct holds all the information about the compilation target
 /// that cfg predicates can query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -418,7 +416,6 @@ impl Default for TargetConfig {
 
 /// Parse a cfg predicate from an attribute expression.
 ///
-
 /// This function converts a generic Expr (from the parser) into a
 /// structured CfgPredicate.
 pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
@@ -504,7 +501,6 @@ pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
 
 /// Evaluator for @cfg attributes on declarations.
 ///
-
 /// This struct manages the target configuration and provides methods
 /// to filter declarations based on cfg predicates.
 #[derive(Debug, Clone)]
@@ -549,11 +545,9 @@ impl CfgEvaluator {
 
     /// Check if an item with the given attributes should be included.
     ///
-
     /// Returns `true` if all @cfg attributes on the item evaluate to true,
     /// or if the item has no @cfg attributes.
     ///
-
     /// **Fail-open on parse failure**: when an `@cfg(...)` predicate
     /// is structurally malformed (e.g. `@cfg(...)` with no args, or
     /// `@cfg(some_macro_invocation())` instead of an identifier /
@@ -575,7 +569,6 @@ impl CfgEvaluator {
     /// ignored — callers (lints, diagnostics, strict-mode CI gates)
     /// can choose to surface this as a warn or error.
     ///
-
     /// Architectural note: the include decision still falls through
     /// on parse failure (fail-open) for forward-compatibility. This
     /// method just hands the failures back instead of swallowing
@@ -619,7 +612,6 @@ impl CfgEvaluator {
 
     /// Filter items from a module, keeping only those that pass cfg checks.
     ///
-
     /// This method is specifically designed for processing module items
     /// which are stored in a `List<Item>`.
     pub fn filter_items(&self, items: &List<crate::decl::Item>) -> List<crate::decl::Item> {
@@ -632,7 +624,6 @@ impl CfgEvaluator {
 
     /// Check if an individual Item should be included based on its @cfg attributes.
     ///
-
     /// Walks BOTH the outer `Item.attributes` list AND any inner-decl
     /// attribute list that the parser may have populated instead of
     /// the outer one. Per `verum_fast_parser/src/decl.rs`, type /
@@ -871,7 +862,6 @@ impl TargetConfig {
 
     /// Generic bare-metal target (no OS) - for custom embedded platforms
     ///
-
     /// # Arguments
     /// * `arch` - CPU architecture name
     /// * `pointer_width` - Pointer width in bits (8, 16, 24, 32, 64)

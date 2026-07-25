@@ -132,7 +132,6 @@ impl DerivePartialEq {
 
     /// Generate eq body for enum types
     ///
-
     /// Generates match expression:
     /// ```verum
     /// match (self, other) {

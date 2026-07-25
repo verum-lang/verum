@@ -24,12 +24,10 @@ use verum_lexer::Lexer;
 
 /// MOD-MED-1 — header-validation diagnostic.
 ///
-
 /// Two distinct soft-failure modes are surfaced as warnings (build
 /// continues, but the user sees a heads-up so they can fix the
 /// dangling decl):
 ///
-
 /// 1. `ForwardDeclNoSource` — `module foo;` (no body) at the top
 ///  level of a file references a submodule `foo` that has no
 ///  source file. The forward-decl is structurally valid (Rule 2 /
@@ -37,7 +35,6 @@ use verum_lexer::Lexer;
 ///  "this file IS module foo" semantics, they're getting silent
 ///  failure instead.
 ///
-
 /// 2. `InlineFilesystemOverlap` — `module foo { … }` (inline body)
 ///  at the top level of a file alongside an existing `<dir>/foo/`
 ///  directory. The inline `foo` would shadow filesystem-derived
@@ -138,7 +135,6 @@ impl ModuleHeaderWarning {
 /// AST against the filesystem. Returns one warning per header
 /// inconsistency found; an empty Vec means the file is clean.
 ///
-
 /// This is a pure function so it can be unit-tested independently;
 /// the loader calls it at parse time and the pipeline drains the
 /// list as diagnostics.
@@ -281,24 +277,20 @@ impl ModuleSource {
 
 /// Module loader - loads modules from the filesystem.
 ///
-
 /// Implements the file system mapping rules from Section 1.2 of the spec:
 /// - `lib.vr` or `main.vr` is the cog root
 /// - `foo.vr` defines module `foo`
 /// - `foo/bar.vr` defines module `foo.bar`
 /// - `foo/mod.vr` defines module `foo` with child modules
 ///
-
 /// Supports conditional compilation via @cfg attributes:
 /// - Module-level: @cfg on module declaration skips entire module
 /// - Item-level: @cfg on items filters them during parsing
 ///
-
 /// Cross-cog resolution: when a CogResolver is attached, the first segment
 /// of a module path is checked against registered external cog names.
 /// If matched, the module is loaded from the external cog's root directory.
 ///
-
 /// Supported file extension: `.vr`
 #[derive(Debug)]
 pub struct ModuleLoader {
@@ -308,7 +300,6 @@ pub struct ModuleLoader {
     /// whose first segment equals this name is treated as rooted at
     /// the cog itself — the prefix is stripped before file lookup.
     ///
-
     /// This is the canonicalisation seam. Without it, the same file
     /// appears under *two* dotted paths: the "absolute" form declared
     /// in the source (`module core.mesh.xds.resources;`) and the
@@ -334,7 +325,6 @@ pub struct ModuleLoader {
     loaded_files: Map<PathBuf, FileId>,
     /// Canonical ModulePath → stable ModuleId map.
     ///
-
     /// Without this, every call to `resolve_module(...)` would allocate
     /// a fresh ModuleId for the same canonical module path. Downstream,
     /// `ExportTable::add_export` checks `source_module` equality to
@@ -358,7 +348,6 @@ pub struct ModuleLoader {
 impl ModuleLoader {
     /// Create a new module loader with the given root path.
     ///
-
     /// Uses the host platform's cfg configuration.
     pub fn new(root_path: impl Into<PathBuf>) -> Self {
         Self {
@@ -443,7 +432,6 @@ impl ModuleLoader {
 
     /// Attach a CogResolver for cross-cog module resolution.
     ///
-
     /// When set, `mount http.client.Response` will check if "http" is an
     /// external cog and load from its installed root path.
     pub fn with_cog_resolver(mut self, resolver: crate::cog_resolver::CogResolver) -> Self {
@@ -458,10 +446,8 @@ impl ModuleLoader {
 
     /// Create a module loader for a specific target platform.
     ///
-
     /// # Arguments
     ///
-
     /// * `root_path` - Root directory for module search
     /// * `target_triple` - Target triple (e.g., "x86_64-unknown-linux-gnu")
     pub fn for_target(root_path: impl Into<PathBuf>, target_triple: &str) -> Self {
@@ -482,10 +468,8 @@ impl ModuleLoader {
 
     /// Create a module loader with a custom target configuration.
     ///
-
     /// # Arguments
     ///
-
     /// * `root_path` - Root directory for module search
     /// * `config` - Target configuration for cfg evaluation
     pub fn with_config(root_path: impl Into<PathBuf>, config: TargetConfig) -> Self {
@@ -511,7 +495,6 @@ impl ModuleLoader {
 
     /// Get mutable access to the cfg evaluator.
     ///
-
     /// Use this to enable features or customize cfg options.
     pub fn cfg_evaluator_mut(&mut self) -> &mut CfgEvaluator {
         &mut self.cfg_evaluator
@@ -519,10 +502,8 @@ impl ModuleLoader {
 
     /// Enable a feature flag for conditional compilation.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let mut loader = ModuleLoader::new("src/");
     /// loader.enable_feature("simd");
@@ -534,7 +515,6 @@ impl ModuleLoader {
 
     /// Load a module from a file.
     ///
-
     /// Searches for the module file using the mapping rules:
     /// 1. `path/to/module.vr`
     /// 2. `path/to/module/mod.vr`
@@ -593,7 +573,6 @@ impl ModuleLoader {
     /// Walk every candidate path and return the unique one that exists,
     /// or surface `E_MODULE_PATH_COLLISION` when more than one exists.
     ///
-
     /// Concrete failure mode this prevents: project ships BOTH
     /// `src/foo.vr` (Rule 2 — file form) AND `src/foo/mod.vr` (Rule 4 —
     /// directory form). Without this check the loader silently picks
@@ -728,10 +707,8 @@ impl ModuleLoader {
 
     /// Convert a module path to a filesystem path.
     ///
-
     /// Example: `std.collections.List` → `std/collections/List`.
     ///
-
     /// If the first segment matches the current `cog_name`, it is
     /// stripped — the loader's `root_path` is *already* the cog
     /// root. Without this, `core.mesh.xds.resources` would try to
@@ -741,7 +718,6 @@ impl ModuleLoader {
     /// the short form under a new ModuleId, leading to the
     /// "Conflicting export" class of bugs.
     ///
-
     /// Rejects path segments containing ".." or absolute path
     /// components to prevent path traversal attacks.
     fn module_path_to_file_path(&self, module_path: &ModulePath) -> PathBuf {
@@ -774,7 +750,6 @@ impl ModuleLoader {
     /// Load a file-relative mount (`mount ./foo.vr;` /
     /// `mount ../shared/util.vr as Util;`) — #5 / P1.5.
     ///
-
     /// `rel_path` is the literal source-relative path as
     /// written (already validated by the parser to start
     /// with `./` or `../` and end with `.vr`). It is
@@ -784,7 +759,6 @@ impl ModuleLoader {
     /// lie inside the cog root. Any escape collapses to
     /// `ModuleError::PathTraversal`.
     ///
-
     /// On success returns a `ModuleSource` carrying the
     /// resolved absolute path, the file contents, and a
     /// freshly-allocated FileId. The caller is responsible
@@ -792,7 +766,6 @@ impl ModuleLoader {
     /// resulting `ModuleInfo` under the mount alias
     /// (or the file's basename when no alias was supplied).
     ///
-
     /// Symlink handling: `canonicalize` is used so symlink
     /// chains are resolved before the sandbox check —
     /// otherwise a symlink that points outside the root
@@ -934,13 +907,11 @@ impl ModuleLoader {
 
     /// Parse a module source into an AST.
     ///
-
     /// Uses verum_parser to parse the source code into an AST module.
     /// Automatically:
     /// 1. Injects prelude import unless @![no_implicit_prelude] is present
     /// 2. Filters items based on @cfg attributes for conditional compilation
     ///
-
     /// Parses a module source into an AST, injecting the standard prelude
     /// import (`use std.prelude.*`) unless @![no_implicit_prelude] is present,
     /// and filtering items based on @cfg attributes for conditional compilation.
@@ -1000,19 +971,15 @@ impl ModuleLoader {
 
     /// Filter module items based on @cfg attributes.
     ///
-
     /// Removes items whose @cfg predicates evaluate to false for the current
     /// target configuration. This implements conditional compilation.
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// @cfg(unix)
     /// fn unix_only() { ... } // Removed when compiling for Windows
     ///
-
     /// @cfg(feature = "simd")
     /// fn simd_impl() { ... } // Removed unless "simd" feature is enabled
     /// ```
@@ -1022,21 +989,16 @@ impl ModuleLoader {
 
     /// Check if a module should be loaded based on its @cfg attributes.
     ///
-
     /// This is used to skip loading entire modules that don't match the
     /// target configuration (e.g., a module with @cfg(unix) when compiling
     /// for Windows).
     ///
-
     /// # Arguments
     ///
-
     /// * `attrs` - The @cfg attributes on the module declaration
     ///
-
     /// # Returns
     ///
-
     /// `true` if the module should be loaded, `false` to skip it.
     pub fn should_load_module(&self, attrs: &[verum_ast::Attribute]) -> bool {
         self.cfg_evaluator.should_include(attrs)
@@ -1044,13 +1006,11 @@ impl ModuleLoader {
 
     /// Inject the standard prelude import into a module.
     ///
-
     /// The prelude is automatically imported into every module unless the module
     /// has the @![no_implicit_prelude] attribute. The prelude import is added
     /// at the beginning of the import list to ensure it has the lowest resolution
     /// priority (explicit imports can shadow prelude items).
     ///
-
     /// Injects the standard prelude import. The prelude is inserted at the
     /// beginning of the import list so it has the lowest resolution priority
     /// (explicit imports and local bindings take precedence over prelude items).
@@ -1072,7 +1032,6 @@ impl ModuleLoader {
 
     /// Create the synthetic prelude import item.
     ///
-
     /// Creates: `use std.prelude.*;`
     fn create_prelude_import(&self, file_id: verum_ast::FileId) -> verum_ast::Item {
         use verum_ast::span::Span;
@@ -1145,15 +1104,12 @@ impl ModuleLoader {
 
 /// Trait for on-demand module resolution.
 ///
-
 /// This trait enables lazy loading of modules during type checking.
 /// When TypeChecker encounters an import for a module not in the registry,
 /// it calls this resolver to load and register the module.
 ///
-
 /// # Architecture
 ///
-
 /// ```text
 /// TypeChecker LazyModuleResolver
 /// ┌─────────────────┐ ┌────────────────────────────────┐
@@ -1166,24 +1122,19 @@ impl ModuleLoader {
 /// └─────────────────┘
 /// ```
 ///
-
 /// # Usage
 ///
-
 /// ```ignore
 /// use verum_modules::{ModuleLoader, LazyModuleResolver, ModuleRegistry};
 /// use std::sync::{Arc, Mutex};
 ///
-
 /// let loader = Arc::new(Mutex::new(ModuleLoader::new("src/")));
 /// let registry = ModuleRegistry::new();
 ///
-
 /// // TypeChecker uses the resolver for lazy loading
 /// type_checker.set_module_resolver(loader);
 /// ```
 ///
-
 /// Enables on-demand module resolution during type checking. When the type
 /// checker encounters an import for a module not in the registry, it calls
 /// the resolver to load and register it. The resolver searches for files
@@ -1191,36 +1142,27 @@ impl ModuleLoader {
 pub trait LazyModuleResolver: Send + Sync {
     /// Resolve a module by path, loading it if necessary.
     ///
-
     /// # Arguments
     ///
-
     /// * `module_path` - The module path (e.g., "std.collections.list")
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(ModuleInfo)` - The loaded module
     /// * `Err(ModuleError)` - If the module cannot be found or parsed
     fn resolve_module(&mut self, module_path: &str) -> ModuleResult<ModuleInfo>;
 
     /// Check if this resolver can handle a given module path.
     ///
-
     /// This allows multiple resolvers to be chained (e.g., stdlib resolver,
     /// local project resolver, dependency resolver).
     ///
-
     /// # Arguments
     ///
-
     /// * `module_path` - The module path to check
     ///
-
     /// # Returns
     ///
-
     /// * `true` if this resolver can potentially handle the path
     /// * `false` if another resolver should be tried
     fn can_resolve(&self, module_path: &str) -> bool;

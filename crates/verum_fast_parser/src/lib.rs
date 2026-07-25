@@ -120,7 +120,6 @@ pub use parser::{RecursiveParser, TokenStream, merge_spans, span_from_tokens};
 
 /// Fast parser for Verum compiler (direct AST construction).
 ///
-
 /// This parser is optimized for compilation speed, building AST directly
 /// without intermediate lossless syntax trees.
 pub struct FastParser {
@@ -143,7 +142,6 @@ impl FastParser {
 
     /// Parse a complete module from source text.
     ///
-
     /// This method provides better error diagnostics than `parse_module` because
     /// it can analyze the source text to determine specific lexer error types.
     pub fn parse_module_str(&self, source: &str, file_id: FileId) -> ParseResult<Module> {
@@ -153,7 +151,6 @@ impl FastParser {
 
     /// Parse a complete module in **script mode** (P1.2).
     ///
-
     /// In script mode, top-level statements (let-bindings, expression
     /// statements, defer / errdefer / provide) are accepted alongside
     /// regular items. Every collected statement is folded into a
@@ -400,20 +397,15 @@ impl FastParser {
 
     /// Parse multiple items from tokens (for staged metaprogramming).
     ///
-
     /// This is used when a meta function generates multiple items (e.g., a function
     /// and a type definition). It parses all items in the token stream until EOF.
     ///
-
     /// # Arguments
     ///
-
     /// * `tokens` - Token stream containing the generated code
     ///
-
     /// # Returns
     ///
-
     /// A list of parsed items, or an error if parsing fails.
     pub fn parse_items_tokens(&self, tokens: &List<Token>) -> Result<List<Item>, Text> {
         if tokens.is_empty() {
@@ -789,7 +781,6 @@ pub type VerumParser = FastParser;
 
 /// Simple parser wrapper for testing.
 ///
-
 /// This provides a simplified interface that takes just a source string,
 /// automatically creating the lexer and using a default file ID.
 pub struct Parser {
@@ -800,7 +791,6 @@ pub struct Parser {
 impl Parser {
     /// Create a new parser from source code.
     ///
-
     /// Uses a default file ID of 0. For production use with proper file tracking,
     /// use `FastParser::parse_module` directly.
     pub fn new(source: &str) -> Self {

@@ -71,7 +71,6 @@ impl Debouncer {
 
     /// Debounce an event for a given URI
     ///
-
     /// Returns immediately. The caller should check `should_execute` after
     /// waiting for the delay period to determine if the callback should run.
     pub fn debounce(&self, uri: Url) -> DebouncedTask {
@@ -168,7 +167,6 @@ impl DebouncerManager {
 
     /// Schedule a debounced callback for a URI
     ///
-
     /// The callback will be executed after the delay period if no new events
     /// for the same URI are received.
     pub fn schedule<F>(&self, uri: Url, callback: F)

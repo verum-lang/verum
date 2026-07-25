@@ -46,7 +46,6 @@ use verum_common::{List, Text};
 pub enum WhereClauseKind {
     /// Type constraint: `where type T: Ord`
     ///
-
     /// Used for generic type parameter protocol bounds.
     /// The type parameter must implement the specified protocols.
     TypeConstraint {
@@ -59,7 +58,6 @@ pub enum WhereClauseKind {
 
     /// Meta constraint: `where meta N > 0`
     ///
-
     /// Used for compile-time meta parameter constraints.
     /// The meta parameter must satisfy the compile-time predicate.
     MetaConstraint {
@@ -72,7 +70,6 @@ pub enum WhereClauseKind {
 
     /// Value refinement: `where value it > 0`
     ///
-
     /// Used for runtime value constraints in refinement types.
     /// The special identifier `it` refers to the refined value.
     ValueRefinement {
@@ -84,7 +81,6 @@ pub enum WhereClauseKind {
 
     /// Postcondition: `where ensures result >= 0`
     ///
-
     /// Used for function return value guarantees.
     /// The special identifier `result` refers to the return value.
     Postcondition {
@@ -192,7 +188,6 @@ impl DisambiguatedWhereClause {
 
     /// Validate that this where clause is used in the correct context
     ///
-
     /// - Type constraints: Only on generic functions/types
     /// - Meta constraints: Only on meta parameters
     /// - Value refinements: Only on refinement types

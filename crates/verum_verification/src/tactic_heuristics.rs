@@ -96,24 +96,19 @@ impl TacticSuggestion {
 /// Produce a ranked list of tactic suggestions for `goal`, skipping
 /// any tactic already in `exhausted`.
 ///
-
 /// The returned list is **ordered by confidence** (High → Medium →
 /// Low); inside a confidence class, rules fire in registration
 /// order. Callers typically show the top 3–5 to the user.
 ///
-
 /// # Guarantees
 ///
-
 /// - Deterministic: same goal + same exhausted set → same list.
 /// - Side-effect-free: no solver invocation, no mutation.
 /// - No false negatives in the shape analysis — if a rule matches
 ///  the goal's outer structure, it fires.
 ///
-
 /// # Example
 ///
-
 /// ```rust,ignore
 /// use verum_verification::tactic_heuristics::suggest_next_tactics;
 /// let goal = /* forall x. P(x) */;

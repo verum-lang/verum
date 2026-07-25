@@ -49,22 +49,18 @@ use verum_common::{List, Text};
 
 /// Unified result type for Verum operations
 ///
-
 /// This type can be used across all Verum crates, automatically converting from
 /// crate-specific error types via the `From` trait.
 pub type Result<T> = std::result::Result<T, VerumError>;
 
 /// Unified error type for the Verum platform
 ///
-
 /// This enum consolidates all error variants from across the Verum ecosystem into a single
 /// type hierarchy. This eliminates the need for multiple incompatible Result type aliases
 /// and enables seamless error propagation across crate boundaries.
 ///
-
 /// # Error Categories
 ///
-
 /// Errors are organized by source crate and functionality:
 /// - **CBGR Memory Safety** - UseAfterFree, DoubleFree, NullPointer
 /// - **Runtime** - ContextNotFound, TaskPanicked, ExecutionError
@@ -73,14 +69,11 @@ pub type Result<T> = std::result::Result<T, VerumError>;
 /// - **Parsing** - ParseErrors (list of parse errors)
 /// - **General** - IO, Network, Config, Other
 ///
-
 /// # Examples
 ///
-
 /// ```rust,ignore
 /// use verum_error::unified::{VerumError, Result};
 ///
-
 /// fn cross_crate_operation() -> Result<()> {
 ///  // Each ? automatically converts the specific error type
 ///  perform_cbgr_check()?; // From verum_cbgr::Error
@@ -96,7 +89,6 @@ pub enum VerumError {
     // ========================================================================
     /// Use-after-free detected: memory generation mismatch
     ///
-
     /// This occurs when code attempts to dereference a reference whose generation
     /// counter doesn't match the current generation in the allocator, indicating
     /// the memory has been freed and potentially reallocated.
@@ -110,7 +102,6 @@ pub enum VerumError {
 
     /// Double-free detected
     ///
-
     /// Attempting to free memory that has already been freed. This is caught
     /// by CBGR's generation tracking.
     #[error("double free: expected generation {expected}, found {actual}")]
@@ -123,14 +114,12 @@ pub enum VerumError {
 
     /// Null pointer dereference
     ///
-
     /// Attempting to dereference a null pointer (generation = GEN_UNALLOCATED).
     #[error("null pointer dereference")]
     NullPointer,
 
     /// Out of bounds access
     ///
-
     /// Array or slice access outside valid bounds.
     #[error("out of bounds: index {index}, length {length}")]
     OutOfBounds {
@@ -142,7 +131,6 @@ pub enum VerumError {
 
     /// Capability violation
     ///
-
     /// Attempted operation not permitted by the reference's capabilities.
     #[error("capability violation: {message}")]
     CapabilityViolation {
@@ -155,7 +143,6 @@ pub enum VerumError {
     // ========================================================================
     /// Context not found
     ///
-
     /// A required execution context (async, IO, etc.) was not available.
     #[error("context not found: {context_name}")]
     ContextNotFound {
@@ -165,7 +152,6 @@ pub enum VerumError {
 
     /// Task panicked
     ///
-
     /// An async task or thread panicked during execution.
     #[error("task panicked: {message}")]
     TaskPanicked {
@@ -175,7 +161,6 @@ pub enum VerumError {
 
     /// Execution error
     ///
-
     /// General execution error from the runtime.
     #[error("execution error: {message}")]
     ExecutionError {
@@ -185,7 +170,6 @@ pub enum VerumError {
 
     /// Stack overflow
     ///
-
     /// Call stack exceeded maximum depth.
     #[error("stack overflow: depth {depth}")]
     StackOverflow {
@@ -198,7 +182,6 @@ pub enum VerumError {
     // ========================================================================
     /// Type mismatch
     ///
-
     /// Expected one type but found another during type checking.
     #[error("type mismatch: expected {expected}, found {actual}")]
     TypeMismatch {
@@ -210,14 +193,12 @@ pub enum VerumError {
 
     /// Cannot infer lambda type
     ///
-
     /// Lambda expression requires explicit type annotation.
     #[error("cannot infer lambda type without annotation")]
     CannotInferLambda,
 
     /// Unbound variable
     ///
-
     /// Variable referenced before being defined.
     #[error("unbound variable: {name}")]
     UnboundVariable {
@@ -227,7 +208,6 @@ pub enum VerumError {
 
     /// Not a function type
     ///
-
     /// Attempted to call a non-function value.
     #[error("not a function: {ty}")]
     NotAFunction {
@@ -237,7 +217,6 @@ pub enum VerumError {
 
     /// Infinite type
     ///
-
     /// Type inference produced an infinite recursive type.
     #[error("infinite type: {var} = {ty}")]
     InfiniteType {
@@ -249,7 +228,6 @@ pub enum VerumError {
 
     /// Protocol not satisfied
     ///
-
     /// Type does not implement required protocol (trait).
     #[error("protocol not satisfied: {ty} does not implement {protocol}")]
     ProtocolNotSatisfied {
@@ -261,7 +239,6 @@ pub enum VerumError {
 
     /// Refinement constraint failed
     ///
-
     /// Value doesn't satisfy refinement type predicate.
     #[error("refinement constraint not satisfied: {predicate}")]
     RefinementFailed {
@@ -271,7 +248,6 @@ pub enum VerumError {
 
     /// Affine type violation
     ///
-
     /// Affine-typed value used more than once.
     #[error("affine type violation: {ty} used more than once")]
     AffineViolation {
@@ -281,7 +257,6 @@ pub enum VerumError {
 
     /// Missing context requirement
     ///
-
     /// Function requires a context that isn't available.
     #[error("missing context: {context}")]
     MissingContext {
@@ -294,7 +269,6 @@ pub enum VerumError {
     // ========================================================================
     /// Verification timeout
     ///
-
     /// SMT solver exceeded time limit.
     #[error("verification timeout after {timeout_ms}ms")]
     VerificationTimeout {
@@ -304,7 +278,6 @@ pub enum VerumError {
 
     /// Verification failed
     ///
-
     /// SMT solver found a counterexample or could not prove property.
     #[error("verification failed: {reason}")]
     VerificationFailed {
@@ -316,7 +289,6 @@ pub enum VerumError {
 
     /// Unsupported SMT feature
     ///
-
     /// Attempted to use an unsupported SMT solver feature.
     #[error("unsupported SMT feature: {feature}")]
     UnsupportedSMT {
@@ -329,7 +301,6 @@ pub enum VerumError {
     // ========================================================================
     /// Parse errors
     ///
-
     /// One or more parsing errors occurred. This variant holds a list of
     /// all parse errors to enable batch error reporting.
     #[error("parse errors: {}", format_parse_errors(.0))]
@@ -337,7 +308,6 @@ pub enum VerumError {
 
     /// Lexical analysis error
     ///
-
     /// Error during tokenization/lexing.
     #[error("lex error: {message}")]
     LexError {
@@ -350,7 +320,6 @@ pub enum VerumError {
     // ========================================================================
     /// I/O error
     ///
-
     /// File system or I/O operation failed.
     #[error("I/O error: {message}")]
     IoError {
@@ -360,7 +329,6 @@ pub enum VerumError {
 
     /// Network error
     ///
-
     /// Network operation failed.
     #[error("network error: {message}")]
     NetworkError {
@@ -370,7 +338,6 @@ pub enum VerumError {
 
     /// Configuration error
     ///
-
     /// Invalid or missing configuration.
     #[error("configuration error: {message}")]
     ConfigError {
@@ -380,7 +347,6 @@ pub enum VerumError {
 
     /// Timeout error
     ///
-
     /// Operation exceeded time limit.
     #[error("timeout: operation exceeded {timeout_ms}ms")]
     Timeout {
@@ -393,7 +359,6 @@ pub enum VerumError {
     // ========================================================================
     /// Other error
     ///
-
     /// Catch-all for errors that don't fit other categories.
     #[error("{message}")]
     Other {
@@ -403,7 +368,6 @@ pub enum VerumError {
 
     /// Not implemented
     ///
-
     /// Feature or functionality not yet implemented.
     #[error("not implemented: {feature}")]
     NotImplemented {
@@ -436,7 +400,6 @@ impl VerumError {
 
     /// Check if this error is recoverable
     ///
-
     /// Recoverable errors can potentially be retried or handled gracefully.
     pub fn is_recoverable(&self) -> bool {
         matches!(
@@ -450,7 +413,6 @@ impl VerumError {
 
     /// Check if this error is fatal
     ///
-
     /// Fatal errors indicate memory corruption or security violations that
     /// should terminate the program.
     pub fn is_fatal(&self) -> bool {

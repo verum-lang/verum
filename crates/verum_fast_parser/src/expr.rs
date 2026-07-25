@@ -56,7 +56,6 @@ use crate::parser::{ParseResult, RecursiveParser};
 /// Known meta-function names as defined in grammar/verum.ebnf Section 2.20.6
 /// These are valid after @ prefix in expression context.
 ///
-
 /// Meta-functions use `@` prefix in expression context. Grammar:
 /// meta_function_call = '@' , meta_function_name , [ '(' , arg_list , ')' ] ;
 /// Only known meta-function names are valid after `@` prefix.
@@ -132,10 +131,8 @@ const KNOWN_META_FUNCTIONS: &[&str] = &[
 /// Attributes that are ONLY valid on declarations, NOT as expressions.
 /// Using these as @name(...) in expression context is an ERROR.
 ///
-
 /// These are declaration-level attributes per grammar/verum.ebnf Section 2.16
 ///
-
 /// NOTE: This does NOT include function MODIFIERS like `pure`, `async`, `unsafe`, `meta`
 /// which are keywords (e.g., `pure fn foo()`), not attributes (`@pure fn foo()`).
 const DECLARATION_ONLY_ATTRIBUTES: &[&str] = &[
@@ -740,14 +737,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if an expression is a potential destructuring target.
     ///
-
     /// This returns true for expressions that can be converted to assignment patterns:
     /// - Tuples: `(a, b, c)`
     /// - Arrays: `[a, b, c]`
     /// - Records: `Point { x, y }`
     /// - Parenthesized expressions (which might contain destructuring)
     ///
-
     /// These are distinguished from simple assignment targets (place expressions).
     fn is_destructuring_target(expr: &Expr) -> bool {
         matches!(
@@ -758,28 +753,22 @@ impl<'a> RecursiveParser<'a> {
 
     /// Convert an expression to an assignment pattern for destructuring assignment.
     ///
-
     /// This function converts tuple, array, and record expressions to their
     /// corresponding pattern forms. Each element in the pattern must be
     /// either a valid place expression (assignable) or a wildcard.
     ///
-
     /// Returns an error if the expression cannot be converted to a valid
     /// assignment pattern (e.g., contains literals or function calls).
     ///
-
     /// Unified destructuring system: converts LHS expressions to assignment patterns.
     /// Converts an expression into an assignment pattern for destructuring.
     ///
-
     /// Destructuring assignment allows extracting values from compound structures
     /// into individual variables. This function converts the LHS expression into
     /// a pattern that can be used to perform the destructuring.
     ///
-
     /// # Supported Patterns
     ///
-
     /// | Expression | Pattern | Example |
     /// |------------|---------|---------|
     /// | Identifier | Binding | `x = value` |
@@ -790,10 +779,8 @@ impl<'a> RecursiveParser<'a> {
     /// | Record | Struct | `Point { x, y } = point` |
     /// | Record with rest | Struct | `Config { timeout, .. } = cfg` |
     ///
-
     /// # Errors
     ///
-
     /// Returns `ParseError::assignment_invalid` for expressions that cannot
     /// be valid assignment targets (literals, function calls, operators, etc.).
     fn expr_to_assignment_pattern(expr: &Expr) -> Result<Pattern, ParseError> {
@@ -948,12 +935,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Converts a record expression to a record pattern.
     ///
-
     /// Handles two cases:
     /// - `Point { x, y }` - destructures all fields
     /// - `Config { timeout, .. }` - destructures some fields, ignores rest
     ///
-
     /// Note: Struct update syntax `Point { x, ..base }` is NOT allowed in
     /// destructuring assignment; use `..` alone to ignore remaining fields.
     fn record_expr_to_pattern(
@@ -1004,7 +989,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Converts a range expression to a rest pattern for arrays.
     ///
-
     /// - `..` → anonymous rest (discard remaining elements)
     /// - `..rest` → named rest (capture remaining elements into `rest`)
     fn range_to_rest_pattern(end: &Maybe<Box<Expr>>, span: Span) -> Result<Pattern, ParseError> {
@@ -1564,14 +1548,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an expression with minimum binding power (Pratt parsing core).
     ///
-
     /// This is the heart of the Pratt parser. It handles:
     /// - Prefix operators (unary)
     /// - Infix operators (binary) with proper precedence
     /// - Postfix operators
     /// - Right-associativity through binding power adjustments
     ///
-
     /// Uses an iterative approach with an explicit operator stack to handle
     /// deeply nested expressions without stack overflow.
     pub fn parse_expr_bp(&mut self, min_bp: u8) -> ParseResult<Expr> {
@@ -1814,7 +1796,6 @@ impl<'a> RecursiveParser<'a> {
     /// Check if an expression is a block-form that doesn't return a value.
     /// Such expressions should not continue with binary operators.
     ///
-
     /// This handles cases like:
     ///  unsafe { stmt; }
     ///  *ptr = value;
@@ -1969,7 +1950,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a prefix expression (unary operators or primary expression).
     ///
-
     /// Uses an iterative approach with an explicit stack to handle chains of
     /// unary operators (e.g., `---x`, `***ptr`) without deep recursion.
     pub(crate) fn parse_prefix_expr(&mut self) -> ParseResult<Expr> {
@@ -2590,7 +2570,6 @@ impl<'a> RecursiveParser<'a> {
     /// Try to parse a postfix operator applied to the given expression.
     /// Returns (new_expr, true) if a postfix was found, (lhs, false) otherwise.
     ///
-
     /// PERF: Takes ownership of lhs to avoid O(n²) cloning in postfix chains.
     /// For `a.b.c.d()`, previously each step cloned the entire prefix.
     /// Now we move lhs into Box directly - zero cloning!
@@ -3623,12 +3602,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if the current `<` token starts a generic type expression rather than a comparison.
     ///
-
     /// This uses lookahead to find the matching `>` and checks what follows.
     /// Generic type expressions are followed by: `.`, `(`, `;`, `,`, `)`, `]`, `}`, or `>`
     /// (indicating a nested generic or end of expression context).
     ///
-
     /// This enables parsing patterns like:
     /// - `Repository<User>.find(1)` - context method call
     /// - `List<Int>.new()` - static method call
@@ -3724,11 +3701,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if the current `<` token starts generic type arguments for a method call.
     ///
-
     /// This is similar to `is_generic_type_expr_lookahead()` but specifically for method calls.
     /// For a generic method call like `.method<T>()`, the closing `>` must be followed by `(`.
     ///
-
     /// This prevents misinterpreting comparisons like `.field < value` as generic args.
     fn is_generic_method_call_lookahead(&self) -> bool {
         // We're at a `<` token. Look ahead to find the matching `>`.
@@ -3802,12 +3777,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if `nursery` keyword starts a nursery expression.
     ///
-
     /// Disambiguates between:
     /// - `nursery { body }` or `nursery( options ) { body }` - nursery expression
     /// - `nursery = ...`, `nursery.field`, etc. - `nursery` used as an identifier
     ///
-
     /// A nursery expression is detected when `nursery` is followed by `{` or `(`.
     fn is_nursery_expr_lookahead(&self) -> bool {
         // We're at the `nursery` keyword. Check what follows.
@@ -3838,12 +3811,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if `select` keyword starts a select expression.
     ///
-
     /// Disambiguates between:
     /// - `select { arms }` or `select biased { arms }` - select expression
     /// - `select(...)` or `select.field` - function call or field access using `select` as identifier
     ///
-
     /// A select expression is detected when `select` is followed by `{` or `biased {`.
     fn is_select_expr_lookahead(&self) -> bool {
         // We're at the `select` keyword. Check what follows.
@@ -4218,7 +4189,6 @@ impl<'a> RecursiveParser<'a> {
     /// Stream literals and comprehensions support lazy, potentially infinite sequences.
     /// Grammar: stream_expr = 'stream' , '[' , stream_body , ']' ;
     ///
-
     /// Syntax variants:
     /// - `stream[]` -> empty stream
     /// - `stream[expr]` -> single-element finite stream
@@ -4358,7 +4328,6 @@ impl<'a> RecursiveParser<'a> {
     /// Unified implementation used by both list comprehensions (RBracket)
     /// and brace-delimited comprehensions like set/gen/map (RBrace).
     ///
-
     /// Grammar:
     /// comprehension_clause = 'for' pattern 'in' expression
     ///  | 'let' pattern [ ':' type ] '=' expression
@@ -4789,7 +4758,6 @@ impl<'a> RecursiveParser<'a> {
     /// - A positional argument: `expr`
     /// - A named argument: `name: expr`
     ///
-
     /// Named arguments use the syntax `identifier: expression` where the identifier
     /// is followed by a colon (not a double-colon path separator).
     fn parse_call_arg(&mut self) -> ParseResult<Expr> {
@@ -5493,7 +5461,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a recover body - either match arms or closure syntax.
     ///
-
     /// Grammar v2.8:
     /// ```ebnf
     /// recover_body = recover_match_arms | recover_closure ;
@@ -5502,7 +5469,6 @@ impl<'a> RecursiveParser<'a> {
     /// recover_closure_body = block_expr | expression ;
     /// ```
     ///
-
     /// Examples:
     /// - Match arms: `recover { SomeError(msg) => handle(msg), _ => default() }`
     /// - Closure: `recover |e| { handle_error(e) }` or `recover |e| log_error(e)`
@@ -5599,7 +5565,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a recover closure parameter.
     ///
-
     /// Grammar: closure_param (pattern with optional type annotation)
     /// Example: `e` or `e: Error` or `_`
     fn parse_recover_closure_param(&mut self) -> ParseResult<RecoverClosureParam> {
@@ -5620,13 +5585,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single quantifier binding with optional type, domain, and guard.
     ///
-
     /// Grammar (verum.ebnf v2.12):
     /// ```ebnf
     /// quantifier_binding = pattern , [ ':' , type_expr ] , [ 'in' , expression ] , [ 'where' , expression ] ;
     /// ```
     ///
-
     /// Examples:
     /// - `x: Int` - typed binding
     /// - `x in list` - domain binding (type inferred from collection element type)
@@ -5634,7 +5597,6 @@ impl<'a> RecursiveParser<'a> {
     /// - `x: Int where x > 0` - typed with guard
     /// - `x in list where x > 0` - domain with guard
     ///
-
     /// Quantifier bindings support pattern, optional type, optional domain, and optional guard.
     fn parse_quantifier_binding(
         &mut self,
@@ -5698,11 +5660,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a primary expression with optional prefix operators, but WITHOUT postfix operators.
     ///
-
     /// This is used by quantifier parsing where we need to handle postfix operators (especially `.`)
     /// manually to distinguish between field access and body separator.
     ///
-
     /// Order: prefix* primary (no postfix)
     fn parse_primary_with_prefix_only(&mut self) -> ParseResult<Expr> {
         // Collect prefix unary operators
@@ -5763,11 +5723,9 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a domain expression for quantifier binding.
     /// Stops before `,` (next binding), `.` (body separator), `where` (guard clause).
     ///
-
     /// This parser is tricky because we need to allow method chains like `items.filter(|x| x > 0)`
     /// but stop at the body separator `.` in `forall x in items . P(x)`.
     ///
-
     /// For domain expressions, we stop at comparison operators because the body typically
     /// starts with a comparison like `x > 0`.
     fn parse_quantifier_domain_expr(&mut self) -> ParseResult<Expr> {
@@ -5776,7 +5734,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a guard expression for quantifier binding (stops before `,`, `.`, `=>`).
     ///
-
     /// For guard expressions, we MUST allow comparisons because the guard IS typically
     /// a comparison expression like `x > 0`.
     fn parse_quantifier_guard_expr(&mut self) -> ParseResult<Expr> {
@@ -5785,13 +5742,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an expression in quantifier context with special handling for `.`.
     ///
-
     /// Strategy: Parse a primary expression, then handle postfix/infix operators manually,
     /// being careful about `.` which could be either:
     /// 1. Field/method access (continue parsing)
     /// 2. Body separator (stop parsing)
     ///
-
     /// The `allow_comparisons` parameter controls whether comparison operators are parsed:
     /// - false: Stop at comparisons (for domain expressions where body starts with comparison)
     /// - true: Allow comparisons (for guard expressions which ARE comparisons)
@@ -6037,12 +5992,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Look ahead to find the token kind that appears after balanced parentheses.
     ///
-
     /// Starting from position `start`, scans forward to find the matching `)` for an
     /// opening `(` (assumed to be just before `start`), then returns the token kind
     /// that follows.
     ///
-
     /// Returns `None` if:
     /// - The parentheses aren't balanced within the lookahead limit
     /// - We reach end of input before finding the closing paren
@@ -6075,7 +6028,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse one or more quantifier bindings separated by commas.
     ///
-
     /// Returns the list of bindings.
     fn parse_quantifier_bindings(
         &mut self,
@@ -6144,11 +6096,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if the current `(` starts parenthesized bindings vs a tuple pattern.
     ///
-
     /// Parenthesized bindings: `(x: Int, y: Int)` - each binding has type annotation
     /// Tuple pattern: `(a, b): (Int, Int)` - pattern followed by type annotation
     ///
-
     /// Returns true if this looks like parenthesized bindings.
     fn is_parenthesized_bindings(&self) -> bool {
         // Must be at `(`
@@ -6167,14 +6117,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a universal quantifier expression: `forall x: T. body` or `forall x in S. body`
     ///
-
     /// Grammar (verum.ebnf v2.12):
     /// ```ebnf
     /// forall_expr = 'forall' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
     /// quantifier_binding = pattern , [ ':' , type_expr ] , [ 'in' , expression ] , [ 'where' , expression ] ;
     /// ```
     ///
-
     /// Supported syntax variants:
     /// - `forall x: Int. P(x)` - type-annotated
     /// - `forall x in collection. P(x)` - domain-based (type inferred from collection)
@@ -6182,7 +6130,6 @@ impl<'a> RecursiveParser<'a> {
     /// - `forall x: Int where x > 0. P(x)` - with guard
     /// - `forall x: Int, y: Int. P(x, y)` - multiple bindings
     ///
-
     /// Universal quantifier: `forall bindings . body` or `forall bindings => body`
     /// Used in verification contracts and formal proofs.
     fn parse_forall_expr(&mut self) -> ParseResult<Expr> {
@@ -6217,14 +6164,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an existential quantifier expression: `exists x: T. body` or `exists x in S. body`
     ///
-
     /// Grammar (verum.ebnf v2.12):
     /// ```ebnf
     /// exists_expr = 'exists' , quantifier_binding , { ',' , quantifier_binding } , '.' , expression ;
     /// quantifier_binding = pattern , [ ':' , type_expr ] , [ 'in' , expression ] , [ 'where' , expression ] ;
     /// ```
     ///
-
     /// Supported syntax variants:
     /// - `exists x: Int. P(x)` - type-annotated
     /// - `exists x in collection. P(x)` - domain-based (type inferred from collection)
@@ -6232,7 +6177,6 @@ impl<'a> RecursiveParser<'a> {
     /// - `exists x: Int where x > 0. P(x)` - with guard
     /// - `exists x: Int, y: Int. P(x, y)` - multiple bindings
     ///
-
     /// Existential quantifier: `exists bindings . body` or `exists bindings => body`
     /// Used in verification contracts and formal proofs.
     fn parse_exists_expr(&mut self) -> ParseResult<Expr> {
@@ -6301,7 +6245,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse all loop annotations: `{ invariant EXPR | decreases EXPR }*`
     ///
-
     /// Grammar: loop_annotation = 'invariant' , expression | 'decreases' , expression ;
     /// Returns (invariants, decreases) as two lists.
     fn parse_loop_annotations(&mut self) -> ParseResult<(List<Expr>, List<Expr>)> {
@@ -6689,7 +6632,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a select expression for async multiplexing.
     ///
-
     /// Grammar: select_expr = 'select' , [ 'biased' ] , '{' , select_arms , '}' ;
     /// select_arm = { attribute } , pattern , '=' , await_expr , [ 'if' , expr ] , '=>' , expr ;
     /// Syntax:
@@ -6701,7 +6643,6 @@ impl<'a> RecursiveParser<'a> {
     /// }
     /// ```
     ///
-
     /// Spec: grammar/verum.ebnf - select_expr production
     fn parse_select_expr(&mut self) -> ParseResult<Expr> {
         use verum_ast::expr::SelectArm;
@@ -6738,7 +6679,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse select arms inside a select expression.
     ///
-
     /// Each arm is comma-separated and has the form:
     /// - `binding = future.await [if guard] => body` for future arms
     /// - `default => body` for the default arm
@@ -6764,24 +6704,20 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single select arm.
     ///
-
     /// Four forms (with optional attributes):
     /// 1. `[@attrs] else => body` - the else/fallback arm
     /// 2. `[@attrs] default => body` - alias for else (deprecated)
     /// 3. `[@attrs] pattern = future_expr.await [if guard] => body` - a future arm
     ///
-
     /// Pattern matching supports full pattern syntax:
     /// - Identifier patterns: `x = future.await => x`
     /// - Enum/variant patterns: `Ok(data) = fetch().await => data`
     /// - Record patterns: `Message.Command { cmd, args } = recv().await => ...`
     ///
-
     /// Attributes on arms allow optimization hints:
     /// - `@cold` - mark arm as unlikely to be taken
     /// - `@likely` - hint that this arm is frequently taken
     ///
-
     /// Each select arm: `[attrs] pattern = await_expr [if guard] => body_expr`
     /// Supports `else =>` and `default =>` as fallback arms.
     fn parse_select_arm(&mut self) -> ParseResult<verum_ast::expr::SelectArm> {
@@ -6860,7 +6796,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if an expression is an await expression.
     ///
-
     /// Used for validating select arm futures.
     /// The expression must end with `.await` to be valid in a select arm.
     fn is_await_expr(expr: &Expr) -> bool {
@@ -6873,17 +6808,13 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse nursery expression for structured concurrency.
     ///
-
     /// Grammar: nursery_expr = 'nursery' , [ nursery_options ] , block_expr , [ nursery_handlers ] ;
     ///
-
     /// Structured concurrency: all tasks spawned in a nursery must complete before the
     /// nursery scope exits. Supports timeout, error handling, and cancellation.
     ///
-
     /// # Examples
     ///
-
     /// ```verum
     /// // Basic nursery
     /// nursery {
@@ -6891,13 +6822,11 @@ impl<'a> RecursiveParser<'a> {
     ///  let b = spawn fetch_b();
     /// }
     ///
-
     /// // With timeout
     /// nursery(timeout: 5.seconds) {
     ///  let result = spawn fetch_data();
     /// }
     ///
-
     /// // With handlers
     /// nursery {
     ///  spawn task();
@@ -7019,7 +6948,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse nursery options: timeout, on_error, max_tasks
     ///
-
     /// Grammar: nursery_options = '(' , nursery_option , { ',' , nursery_option } , ')' ;
     fn parse_nursery_options(&mut self) -> ParseResult<verum_ast::expr::NurseryOptions> {
         use verum_ast::expr::{NurseryErrorBehavior, NurseryOptions};
@@ -7106,7 +7034,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse nursery handlers: on_cancel and/or recover
     ///
-
     /// Grammar:
     ///  nursery_handlers = nursery_cancel , [ nursery_recover ] | nursery_recover ;
     ///  nursery_cancel = 'on_cancel' , block_expr ;
@@ -7156,16 +7083,13 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a quote expression: quote { token_tree } or quote(N) { token_tree }
     ///
-
     /// Quote expressions are used in meta functions to generate code at compile-time.
     /// The optional stage parameter specifies the target stage for N-level staged compilation.
     ///
-
     /// Syntax:
     /// - `quote { token_tree }` - Generate code for the default stage (N-1)
     /// - `quote(N) { token_tree }` - Generate code for stage N
     ///
-
     /// Quote captures code as a token tree for staged metaprogramming.
     /// `quote { ... }` targets the default stage (N-1); `quote(N) { ... }` targets stage N.
     fn parse_quote_expr(&mut self) -> ParseResult<Expr> {
@@ -7230,15 +7154,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a stage escape expression: $(stage N){ expr }
     ///
-
     /// Stage escapes are used inside quote blocks to evaluate expressions at a specific
     /// stage level. This enables inserting computed values into generated code.
     ///
-
     /// Syntax:
     /// - `$(stage N){ expr }` - Evaluate expr at stage N
     ///
-
     /// Stage escape evaluates an expression at a specific compilation stage within a quote block.
     fn parse_stage_escape_expr(&mut self) -> ParseResult<Expr> {
         let start_pos = self.stream.position();
@@ -7288,15 +7209,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a lift expression: lift(expr)
     ///
-
     /// Lift expressions are syntactic sugar for `$(stage current){ expr }`,
     /// moving a compile-time value into the generated code at the current stage.
     ///
-
     /// Syntax:
     /// - `lift(expr)` - Lift expr into the current stage
     ///
-
     /// Lift is sugar for `$(stage current){ expr }` — moves compile-time value into generated code.
     fn parse_lift_expr(&mut self) -> ParseResult<Expr> {
         let start_pos = self.stream.position();
@@ -7319,7 +7237,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a meta-function expression: @file, @line, @cfg(cond), @const expr, etc.
     ///
-
     /// Meta-functions are compile-time intrinsics that provide:
     /// - Source location: @file, @line, @column, @module, @function
     /// - Configuration: @cfg(condition)
@@ -7327,7 +7244,6 @@ impl<'a> RecursiveParser<'a> {
     /// - Token manipulation: @stringify(tokens), @concat(a, b)
     /// - Diagnostics: @error("msg"), @warning("msg")
     ///
-
     /// Spec: grammar/verum.ebnf Section 2.20.6 - Meta-Level Functions
     fn parse_meta_function_expr(&mut self) -> ParseResult<Expr> {
         let start_pos = self.stream.position();
@@ -7608,11 +7524,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a throw expression: `throw expr`
     ///
-
     /// Throws an error value in a function with a `throws` clause.
     /// Unlike `return` which has an optional value, `throw` requires an expression.
     ///
-
     /// Example:
     /// ```verum
     /// fn validate(s: Text) throws(ValidationError) -> Bool {
@@ -7660,7 +7574,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse typeof expression - runtime type introspection
     /// `typeof(expr)` returns TypeInfo { id: TypeId, name: Text, kind: TypeKind, protocols: List<Text> }
     ///
-
     /// Syntax: `typeof(expression)`
     /// Returns: TypeInfo { id: TypeId, name: Text, kind: TypeKind, protocols: List<Text> }
     fn parse_typeof_expr(&mut self) -> ParseResult<Expr> {
@@ -7748,16 +7661,13 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse tensor data inside braces
     ///
-
     /// Handles both flat and nested tensor literals:
     /// - 1D: {1.0, 2.0, 3.0, 4.0}
     /// - 2D: {{1.0, 2.0}, {3.0, 4.0}}
     /// - Broadcast: {1.0} expands to fill shape
     ///
-
     /// Returns an expression that can be evaluated to the tensor data.
     ///
-
     /// NOTE: In tensor context, braces create arrays, not sets!
     /// This is different from general Verum syntax where {1, 2, 3} is a set.
     fn parse_tensor_data(&mut self) -> ParseResult<Expr> {
@@ -7807,7 +7717,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a single tensor element
     ///
-
     /// If the element starts with a brace, treat it as nested tensor data (array),
     /// otherwise parse as a normal expression.
     fn parse_tensor_element(&mut self) -> ParseResult<Expr> {
@@ -7826,7 +7735,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a macro invocation: path!(args) or path![args] or path!{args}
     ///
-
     /// Spec: grammar/verum.ebnf - meta_call production
     /// Grammar: meta_call = path , '!' , meta_call_args
     ///  meta_call_args = '(' , token_tree , ')' | '[' , token_tree , ']' | '{' , token_tree , '}'
@@ -7951,7 +7859,6 @@ impl<'a> RecursiveParser<'a> {
     /// paren/bracket/brace combination. If the stream is not at an opener,
     /// this is a no-op. Infallible and never advances past a non-opener.
     ///
-
     /// Used by the Issue-#5 recovery path in `parse_macro_call` so that a
     /// `assert!(x)` / `println!(...)` diagnostic doesn't leave the parser
     /// pointed back at the same token for the next recovery iteration.
@@ -7984,7 +7891,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse macro arguments with delimiters: (tt) or [tt] or {tt}
     ///
-
     /// This builds a full token tree AST for macro processing while also
     /// capturing the raw text for backward compatibility.
     fn parse_macro_args(&mut self) -> ParseResult<verum_ast::expr::MacroArgs> {
@@ -8035,7 +7941,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a complete token tree with full AST representation.
     ///
-
     /// Returns both the structured token tree and the raw text representation.
     /// This enables both advanced macro processing and backward compatibility.
     fn parse_token_tree_full(
@@ -8394,12 +8299,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a capability literal: Capability.ReadOnly
     ///
-
     /// Syntax: Capability.CapabilityName
     /// where CapabilityName is one of: ReadOnly, WriteOnly, ReadWrite, Admin, Transaction,
     /// Network, FileSystem, Query, Execute, Logging, Metrics, Config, Cache, Auth, Custom(name)
     ///
-
     /// This follows Verum's path syntax using `.` instead of Rust's `::`.
     /// Consistent with RuntimeCapability.READ_ONLY syntax in the documentation.
     fn parse_capability(&mut self) -> ParseResult<verum_ast::expr::Capability> {
@@ -8428,7 +8331,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a capability set with | operator: Capability.ReadOnly | Capability.Query
     ///
-
     /// Syntax: capability (| capability)*
     pub(crate) fn parse_capability_set(&mut self) -> ParseResult<verum_ast::expr::CapabilitySet> {
         use verum_ast::expr::CapabilitySet;
@@ -8450,7 +8352,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Convert a path to a type.
     ///
-
     /// This is used when parsing type property expressions like `Int.size` where
     /// we've already parsed `Int` as an expression path and need to convert it to a type.
     /// Try to convert an expression to a type for type property access.
@@ -8461,43 +8362,33 @@ impl<'a> RecursiveParser<'a> {
     /// - `(&unsafe Int)` -> unsafe reference to Int type
     /// - `(&mut Int)` -> mutable reference to Int type
     ///
-
     /// Returns None if the expression cannot be interpreted as a type.
     ///
-
     /// # PascalCase Heuristic
     ///
-
     /// Since the parser doesn't have access to type information (name resolution happens
     /// later), we use a naming convention heuristic to distinguish type property access
     /// from regular field access:
     ///
-
     /// - **PascalCase** names (starting with uppercase) are assumed to be types
     /// - **snake_case/camelCase** names (starting with lowercase) are assumed to be variables
     ///
-
     /// ## Examples
     ///
-
     /// - `Int.size` → parsed as TypeProperty (correct)
     /// - `point.size` → parsed as Field access (correct)
     /// - `MyType.alignment` → parsed as TypeProperty (correct)
     ///
-
     /// ## Known Limitation
     ///
-
     /// If a variable is named with PascalCase (e.g., `let Point = get_point();`),
     /// expressions like `Point.size` will be incorrectly parsed as TypeProperty
     /// instead of field access. This is acceptable because:
     ///
-
     /// 1. Verum convention is snake_case for variables (enforced by style lints)
     /// 2. Type checking will catch this misuse and provide a clear error
     /// 3. Fixing this requires name resolution during parsing (fundamentally changes architecture)
     ///
-
     /// Known limitation: PascalCase heuristic is used since name resolution isn't available at parse time.
     fn expr_to_type_for_property(&self, expr: &Expr) -> Option<Type> {
         match &expr.kind {
@@ -8654,12 +8545,10 @@ impl<'a> RecursiveParser<'a> {
     }
 
     ///
-
     /// Handles:
     /// - Simple names: `Int`, `Float`, `MyType`
     /// - Multi-segment paths: `std.collections.List`
     ///
-
     /// Note: Generic types like `List<Int>` are handled separately since they would
     /// be parsed differently in expression context (with `<` as comparison operator).
     fn path_to_type(&self, path: Path) -> ParseResult<Type> {
@@ -8759,7 +8648,6 @@ pub fn block_parser_recursive(parser: &mut RecursiveParser) -> ParseResult<Block
 /// Validate format-tagged literal content at parse time.
 /// Returns `None` if valid, `Some(error_message)` if invalid.
 ///
-
 /// Currently validates:
 /// - `json#"..."` - basic JSON structure validation
 fn validate_format_tag(tag: &str, content: &Text) -> Option<String> {
@@ -8772,7 +8660,6 @@ fn validate_format_tag(tag: &str, content: &Text) -> Option<String> {
 
 /// Basic shell-command validation at parse time.
 ///
-
 /// Catches structural errors that would surely crash a shell:
 ///  * unbalanced single quotes (within the literal text — interpolations
 ///  are stripped first because they are replaced by escaped tokens at
@@ -8780,7 +8667,6 @@ fn validate_format_tag(tag: &str, content: &Text) -> Option<String> {
 ///  * unbalanced double quotes
 ///  * trailing backslash with no following character
 ///
-
 /// Does NOT attempt to parse shell syntax — that is intentional. The
 /// shell-layer auto-escape contract guarantees safety regardless of the
 /// command body, so this validator is only a usability check ("did you

@@ -58,7 +58,6 @@ use stdlib_support::{vtest_run_capture, workspace_root};
 /// directive was satisfied (panic fired AND message matched the
 /// `@expected-panic` substring).
 ///
-
 /// `scenario` names the fixture in the failure message so a CI diff
 /// identifies which dispatch contract regressed.
 fn assert_dispatch_panic(scenario: &str, fixture: &std::path::Path) {

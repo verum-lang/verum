@@ -542,7 +542,6 @@ impl<'s> VerifyCommand<'s> {
 
     /// Verify a theorem/lemma/corollary using the proof verification engine
     ///
-
     /// This verifies:
     /// 1. The proposition is well-formed
     /// 2. The proof body (if present) correctly proves the proposition
@@ -688,7 +687,6 @@ impl<'s> VerifyCommand<'s> {
 
     /// Verify a single function using Z3 SMT solver
     ///
-
     /// This performs real verification of:
     /// 1. Preconditions (requires clauses) - must be satisfiable
     /// 2. Postconditions (ensures clauses) - must hold given preconditions
@@ -1119,7 +1117,6 @@ impl<'s> VerifyCommand<'s> {
 
     /// Extract file location (path, line, column) from a span
     ///
-
     /// Converts a byte-offset Span to a human-readable FileLocation
     /// by looking up the source file and computing line/column positions.
     fn extract_file_location(&self, span: Span) -> FileLocation {
@@ -1596,7 +1593,6 @@ impl<'s> VerifyCommand<'s> {
 
     /// Render the per-obligation breakdown ("Slowest obligations").
     ///
-
     /// Sorts every verified function by its elapsed time descending and
     /// prints the top 10 as a ranked table. At current instrumentation
     /// obligation-level timing is not yet collected separately from
@@ -1698,17 +1694,14 @@ impl<'s> VerifyCommand<'s> {
     /// `textDocument/publishDiagnostics` payload that an external
     /// JSON-RPC adapter can forward directly to the IDE.
     ///
-
     /// Schema per line:
     ///
-
     ///  { "function": "<name>",
     ///  "severity": "error" | "warning",
     ///  "message": "<one-line summary>",
     ///  "elapsed_ms": <number>,
     ///  "counterexample": "<string>" | null }
     ///
-
     /// We deliberately emit a Verum-flavored JSON object rather than a
     /// verbatim LSP `Diagnostic` — the LSP shape needs `range`
     /// (start/end line+column), which the verifier doesn't track at
@@ -1867,7 +1860,6 @@ pub struct VerificationReport {
     start_time: Instant,
     /// Optional per-obligation timings keyed by function name.
     ///
-
     /// Populated when the verifier has obligation-level
     /// instrumentation available (currently: none of the
     /// in-tree verify paths — this is the slot a future
@@ -1876,7 +1868,6 @@ pub struct VerificationReport {
     /// `--profile-obligation` renderer falls back to
     /// aggregate-per-function rows in that case.
     ///
-
     /// The key is the function name (matching `results`'s
     /// first tuple element); the value is
     /// `[(obligation_label, elapsed), …]` in order of
@@ -1901,14 +1892,12 @@ impl VerificationReport {
 
     /// Record per-obligation timings for a function.
     ///
-
     /// Called by instrumentation-aware verifiers after
     /// discharging each obligation. Labels are caller-chosen
     /// (typical: `"pre"`, `"post"`, `"refinement(x)"`,
     /// `"loop_inv(i)"`, `"termination"`) — the renderer
     /// displays them verbatim.
     ///
-
     /// Multiple calls for the same function name append to
     /// the existing timing list, preserving discharge order.
     pub fn add_obligation_timings(&mut self, function: Text, timings: List<(Text, Duration)>) {
@@ -2034,7 +2023,6 @@ impl VerificationReport {
 
 /// Internal error type for verification.
 ///
-
 /// `Failed` carries both a human-readable description and an
 /// optional structured [`CounterExample`]. The structured form
 /// lets the outer `VerificationError::CannotProve` thread the

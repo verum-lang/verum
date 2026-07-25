@@ -20,7 +20,6 @@ use crate::error::CliError;
 
 /// Execute `verum config show`.
 ///
-
 /// * `json` — emit machine-readable JSON instead of the human-friendly
 ///  panel.
 pub fn execute(json_output: bool) -> Result<(), CliError> {
@@ -148,7 +147,6 @@ fn print_json(
 
 /// Execute `verum config validate`.
 ///
-
 /// Loads and validates verum.toml without printing the full feature set.
 /// Exits 0 on success; exits non-zero with diagnostics on failure.
 pub fn validate() -> Result<(), CliError> {

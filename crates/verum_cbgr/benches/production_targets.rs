@@ -38,7 +38,6 @@ struct AllocationSlot {
 /// 3. Compare generations
 /// 4. Branch on mismatch -> panic path
 ///
-
 /// This is the hot path that must be < 15ns.
 #[inline(never)]
 fn cbgr_check_inline(thin_ref: &ThinRef, slot: &AllocationSlot) -> bool {

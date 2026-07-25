@@ -32,7 +32,6 @@ use super::CompilationPipeline;
 
 /// Outcome of an SMT-based refinement check at a return site.
 ///
-
 /// When a function declares a refinement on its return type
 /// (e.g., `Int{> 0}`), the compiler checks via SMT that the return
 /// expression satisfies the predicate. Three outcomes: Verified
@@ -227,10 +226,8 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Verify return refinement using full Z3 SMT integration.
     ///
-
     /// Performs comprehensive SMT-based verification:
     ///
-
     ///  1. Extracts all return values from the function body.
     ///  2. Uses syntactic checking as a fast path for simple cases.
     ///  3. Falls back to Z3 SMT solver for complex cases.
@@ -516,14 +513,11 @@ pub(super) fn extract_return_values(
 
 /// Simple syntactic check for common refinement patterns.
 ///
-
 /// Returns `Some(true)` if definitely satisfied, `Some(false)` if
 /// violated, `None` if inconclusive (needs SMT).
 ///
-
 /// Examples:
 ///
-
 ///  * `x + 1` satisfies `result > x` (syntactic: x+1 > x always true for Int).
 ///  * `5` satisfies `result > 0` (syntactic: 5 > 0 is true).
 ///  * `-5` violates `result > 0` (syntactic: -5 > 0 is false).

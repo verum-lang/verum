@@ -138,7 +138,6 @@ impl DeriveClone {
 
     /// Generate clone body for enum types
     ///
-
     /// Generates a match expression that handles each variant:
     /// ```verum
     /// match self {

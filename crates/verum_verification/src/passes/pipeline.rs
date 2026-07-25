@@ -34,11 +34,9 @@ use super::{
 
 /// pipeline-level halt policy.
 ///
-
 /// Mediates between the two valid contracts that the V0 pipeline
 /// could not separate:
 ///
-
 ///  * **Default** — halt on `SoundnessCritical` failure; continue
 ///  through `Informational` failures. This is the new V8 default
 ///  and matches the practical separation between formation
@@ -115,14 +113,12 @@ impl VerificationPipeline {
     /// Run all passes, halting per the configured
     /// [`PipelineMode`].
     ///
-
     /// Halt semantics by mode (V8, B7):
     ///  * `Default` (V8 default) — halt on `SoundnessCritical`
     ///  pass failure; continue through `Informational` ones.
     ///  * `StrictFailFast` (pre-V8) — halt on any pass failure.
     ///  * `Aggregate` — never halt; collect every diagnostic.
     ///
-
     /// The failed pass's result IS pushed into the returned list so
     /// callers can read the diagnostic; only the *subsequent*
     /// passes are skipped (or run, depending on mode).
@@ -153,7 +149,6 @@ impl VerificationPipeline {
     /// and not always available; callers that want the full
     /// pipeline should use [`Self::full_verification_pipeline`].
     ///
-
     /// Renamed from `default_pipeline`: the original name
     /// was misleading because users reasonably expected "default
     /// verification" to include SMT discharge. The 5-pass
@@ -161,7 +156,6 @@ impl VerificationPipeline {
     /// want kernel + hygiene + transition advice without paying
     /// the SMT round-trip cost.
     ///
-
     /// V8 backwards-compat shape: defaults the kernel-recheck
     /// VVA policy to [`crate::extension_policy::ExtensionPolicy::AllRulesActive`]
     /// (the pre-V8 always-on rule set). Callers wanting Year 0–2
@@ -177,14 +171,12 @@ impl VerificationPipeline {
     /// static-analysis pipeline with explicit
     /// kernel-recheck VVA governance policy.
     ///
-
     /// `kernel_policy` is propagated to the [`KernelRecheckPass`]
     /// via its [`KernelRecheckPass::with_policy`] builder, so
     /// VVA-gated rules (currently `vfe_7` =
     /// `K-Refine-omega`) only fire when the policy admits them
     /// for the surrounding scope.
     ///
-
     /// Per rollout calendar:
     ///  * **Year 0–2** — `ExtensionPolicy::OptInOnly` (modules must
     ///  `@require_extension(vfe_N)` to engage VVA rules).
@@ -192,7 +184,6 @@ impl VerificationPipeline {
     ///  default-on; opt out via `@disable_extension(vfe_N)`).
     ///  * **Year 4+** — `ExtensionPolicy::Mandatory` (no opt-out).
     ///
-
     /// V8 default remains `AllRulesActive` to avoid regressions
     /// in the existing test corpus + stdlib bring-up; the
     /// production CLI should select `OptInOnly` once the project
@@ -246,7 +237,6 @@ impl VerificationPipeline {
     /// refinement obligations. Fail-fast applies (#187 contract):
     /// any pass returning `success == false` halts the rest.
     ///
-
     /// SMT verification is the default-on terminal pass; modules
     /// passing the static-analysis chain have their refinement
     /// types subjected to Z3 portfolio dispatch.

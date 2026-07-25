@@ -62,7 +62,6 @@ pub trait CoreSourceTrait: Send + Sync {
 
 /// Local filesystem stdlib source.
 ///
-
 /// Reads files from a local directory, allowing live editing.
 #[derive(Debug, Clone)]
 pub struct LocalCoreSource {
@@ -158,7 +157,6 @@ impl CoreSourceTrait for LocalCoreSource {
 
 /// Stdlib source backed by the local filesystem.
 ///
-
 /// The stdlib is always resolved from the local `core/` directory.
 /// Previously this had an `Embedded` variant using a phf map compiled into
 /// the binary; that approach has been removed in favor of filesystem-only access.
@@ -170,7 +168,6 @@ pub struct CoreSource {
 impl CoreSource {
     /// Auto-detect the stdlib source from the filesystem.
     ///
-
     /// Resolution chain (first match wins):
     /// 1. `VERUM_CORE_PATH` environment variable (explicit override)
     /// 2. `./core/` directory (in-repo development — the primary case)
@@ -344,7 +341,6 @@ pub struct StdlibModuleInfo {
 
 /// Resolves stdlib modules from a CoreSource.
 ///
-
 /// Analyzes the flat file list to discover modules and their dependencies.
 pub struct CoreSourceResolver<'a> {
     source: &'a dyn CoreSourceTrait,
@@ -615,13 +611,11 @@ impl<'a> CoreSourceResolver<'a> {
 
 /// Global stdlib source for the compilation session.
 ///
-
 /// Initialized once per compilation and shared across all modules.
 static GLOBAL_CORE_SOURCE: std::sync::OnceLock<CoreSource> = std::sync::OnceLock::new();
 
 /// Initialize global stdlib source.
 ///
-
 /// Should be called once at the start of compilation.
 pub fn init_global_core_source(source: CoreSource) {
     let _ = GLOBAL_CORE_SOURCE.set(source);
@@ -629,7 +623,6 @@ pub fn init_global_core_source(source: CoreSource) {
 
 /// Get the global stdlib source.
 ///
-
 /// Panics if not initialized.
 pub fn global_core_source() -> &'static CoreSource {
     GLOBAL_CORE_SOURCE

@@ -153,10 +153,8 @@ impl EscapeCategory {
 
 /// CBGR allocation operation.
 ///
-
 /// Allocates memory with CBGR tracking (generation + epoch).
 ///
-
 /// ```mlir
 /// %ref = verum.cbgr_alloc %value {
 ///  tier = 0 : i32,
@@ -235,10 +233,8 @@ impl CbgrAllocOp {
 
 /// CBGR reallocation operation.
 ///
-
 /// Reallocates a CBGR reference with a new value, preserving generation.
 ///
-
 /// ```mlir
 /// %new_ref = verum.cbgr_realloc %ref, %new_value : !llvm.struct<(ptr, i32, i32)>
 /// ```
@@ -266,7 +262,6 @@ impl CbgrReallocOp {
 
 /// CBGR check operation - validates reference validity.
 ///
-
 /// ```mlir
 /// %valid = verum.cbgr_check %ref, %expected_gen {
 ///  check_caps = true,
@@ -328,7 +323,6 @@ impl CbgrCheckOp {
 
 /// CBGR generation extraction operation.
 ///
-
 /// ```mlir
 /// %gen = verum.cbgr_get_gen %ref : i32
 /// ```
@@ -352,7 +346,6 @@ impl CbgrGetGenOp {
 
 /// CBGR increment generation operation.
 ///
-
 /// ```mlir
 /// %new_ref = verum.cbgr_inc_gen %ref : !llvm.struct<(ptr, i32, i32)>
 /// ```
@@ -379,7 +372,6 @@ impl CbgrIncGenOp {
 
 /// CBGR dereference operation with validation.
 ///
-
 /// ```mlir
 /// %value = verum.cbgr_deref %ref {
 ///  validate = true,
@@ -432,7 +424,6 @@ impl CbgrDerefOp {
 
 /// CBGR unchecked dereference - for Checked/Unsafe tiers.
 ///
-
 /// ```mlir
 /// %value = verum.cbgr_deref_unchecked %ref : !llvm.ptr -> T
 /// ```
@@ -459,7 +450,6 @@ impl CbgrDerefUncheckedOp {
 
 /// CBGR store operation with mutation tracking.
 ///
-
 /// ```mlir
 /// verum.cbgr_store %ref, %value {
 ///  validate = true,
@@ -502,7 +492,6 @@ impl CbgrStoreOp {
 
 /// CBGR drop operation with optional invalidation.
 ///
-
 /// ```mlir
 /// verum.cbgr_drop %ref {
 ///  invalidate = true,
@@ -553,7 +542,6 @@ impl CbgrDropOp {
 
 /// CBGR borrow scope - tracks exclusive/shared borrows.
 ///
-
 /// ```mlir
 /// %result = verum.cbgr_borrow_scope {
 ///  borrow_kind = "exclusive"
@@ -621,7 +609,6 @@ impl CbgrBorrowYieldOp {
 
 /// CBGR promote operation - promotes to a higher tier.
 ///
-
 /// ```mlir
 /// %checked_ref = verum.cbgr_promote %managed_ref {
 ///  from_tier = 0 : i32,
@@ -703,7 +690,6 @@ impl CbgrDemoteOp {
 
 /// CBGR escape annotation - marks escape analysis results.
 ///
-
 /// ```mlir
 /// %annotated = verum.cbgr_escape_annotate %ref {
 ///  escape_category = 0 : i32, // NoEscape

@@ -7,21 +7,16 @@ use std::fmt;
 
 /// An optional value that can be either `Some(T)` or `None`.
 ///
-
 /// This is the semantic equivalent of Option in other languages.
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::Maybe;
 ///
-
 /// let some_value: Maybe<i32> = Maybe::Some(42);
 /// let no_value: Maybe<i32> = Maybe::None;
 ///
-
 /// assert_eq!(some_value.unwrap(), 42);
 /// assert!(no_value.is_none());
 /// ```
@@ -48,10 +43,8 @@ impl<T> Maybe<T> {
 
     /// Unwraps the maybe, returning the contained value.
     ///
-
     /// # Panics
     ///
-
     /// Panics if the value is `None`.
     #[inline]
     pub fn unwrap(self) -> T {
@@ -171,16 +164,13 @@ impl<T> Maybe<T> {
 
     /// Converts from `&Maybe<T>` to `Maybe<&T>`.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let x: Maybe<u32> = Maybe::Some(2);
     /// assert_eq!(x.as_ref(), Maybe::Some(&2));
     ///
-
     /// let x: Maybe<u32> = Maybe::None;
     /// assert_eq!(x.as_ref(), Maybe::None);
     /// ```
@@ -194,12 +184,10 @@ impl<T> Maybe<T> {
 
     /// Converts from `&mut Maybe<T>` to `Maybe<&mut T>`.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let mut x: Maybe<u32> = Maybe::Some(2);
     /// match x.as_mut() {
     ///  Maybe::Some(v) => *v = 42,
@@ -217,12 +205,10 @@ impl<T> Maybe<T> {
 
     /// Takes the value out of the maybe, leaving a `None` in its place.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let mut x: Maybe<u32> = Maybe::Some(2);
     /// let y = x.take();
     /// assert_eq!(x, Maybe::None);
@@ -237,12 +223,10 @@ impl<T> Maybe<T> {
     /// returning the old value if present,
     /// leaving a `Some` in its place without deinitializing either one.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let mut x: Maybe<u32> = Maybe::Some(2);
     /// let old = x.replace(5);
     /// assert_eq!(x, Maybe::Some(5));
@@ -271,20 +255,16 @@ impl<T> Maybe<T> {
 
     /// Returns the contained value or a default.
     ///
-
     /// Applies the function `f` to the contained value (if any),
     /// or returns the provided default (if not).
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let x = Maybe::Some("foo");
     /// assert_eq!(x.map_or(42, |v| v.len()), 3);
     ///
-
     /// let x: Maybe<&str> = Maybe::None;
     /// assert_eq!(x.map_or(42, |v| v.len()), 42);
     /// ```
@@ -302,17 +282,14 @@ impl<T> Maybe<T> {
     /// Maps a `Maybe<T>` to `U` by applying a function to a contained value,
     /// or computes a default (if not).
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let k = 21;
     /// let x = Maybe::Some("foo");
     /// assert_eq!(x.map_or_else(|| 2 * k, |v| v.len()), 3);
     ///
-
     /// let x: Maybe<&str> = Maybe::None;
     /// assert_eq!(x.map_or_else(|| 2 * k, |v| v.len()), 42);
     /// ```
@@ -330,20 +307,16 @@ impl<T> Maybe<T> {
 
     /// Flattens a `Maybe<Maybe<T>>` into a `Maybe<T>`.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let x: Maybe<Maybe<i32>> = Maybe::Some(Maybe::Some(6));
     /// assert_eq!(Maybe::Some(6), x.flatten());
     ///
-
     /// let x: Maybe<Maybe<i32>> = Maybe::Some(Maybe::None);
     /// assert_eq!(Maybe::None, x.flatten());
     ///
-
     /// let x: Maybe<Maybe<i32>> = Maybe::None;
     /// assert_eq!(Maybe::None, x.flatten());
     /// ```
@@ -360,19 +333,15 @@ impl<T> Maybe<T> {
 
     /// Converts from `Maybe<T>` to `Option<T>`.
     ///
-
     /// This is useful for interop with standard library code that expects `Option`.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let x: Maybe<u32> = Maybe::Some(2);
     /// assert_eq!(x.to_option(), Some(2));
     ///
-
     /// let x: Maybe<u32> = Maybe::None;
     /// assert_eq!(x.to_option(), None);
     /// ```
@@ -386,19 +355,15 @@ impl<T> Maybe<T> {
 
     /// Converts from `Option<T>` to `Maybe<T>`.
     ///
-
     /// This is useful for converting from standard library Option types.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let x: Option<u32> = Some(2);
     /// assert_eq!(Maybe::from_option(x), Maybe::Some(2));
     ///
-
     /// let x: Option<u32> = None;
     /// assert_eq!(Maybe::from_option(x), Maybe::None);
     /// ```
@@ -412,7 +377,6 @@ impl<T> Maybe<T> {
 
     /// Transforms the `Maybe<T>` into a `std::result::Result<T, E>`, mapping `Some(v)` to `Ok(v)` and `None` to `Err(err)`.
     ///
-
     /// This is the std Result version, useful when working with async code or stdlib.
     #[inline]
     pub fn ok_or_std<E>(self, err: E) -> std::result::Result<T, E> {
@@ -424,7 +388,6 @@ impl<T> Maybe<T> {
 
     /// Transforms the `Maybe<T>` into a `std::result::Result<T, E>`, mapping `Some(v)` to `Ok(v)` and `None` to `Err(err())`.
     ///
-
     /// This is the std Result version, useful when working with async code or stdlib.
     #[inline]
     pub fn ok_or_else_std<E, F>(self, err: F) -> std::result::Result<T, E>
@@ -441,7 +404,6 @@ impl<T> Maybe<T> {
 
     /// Converts from `&Maybe<T>` to `Maybe<&T::Target>`.
     ///
-
     /// Coerces the Maybe through Deref and returns it.
     #[inline]
     pub fn as_deref(&self) -> Maybe<&T::Target>
@@ -456,7 +418,6 @@ impl<T> Maybe<T> {
 
     /// Converts from `&mut Maybe<T>` to `Maybe<&mut T::Target>`.
     ///
-
     /// Coerces the Maybe through DerefMut and returns it.
     #[inline]
     pub fn as_deref_mut(&mut self) -> Maybe<&mut T::Target>
@@ -505,10 +466,8 @@ impl<T> Maybe<T> {
 
     /// Returns the contained value with a custom panic message.
     ///
-
     /// # Panics
     ///
-
     /// Panics if the value is `None` with a custom message.
     #[inline]
     pub fn expect(self, msg: &str) -> T {
@@ -520,7 +479,6 @@ impl<T> Maybe<T> {
 
     /// Inserts value into the maybe, then returns a mutable reference to it.
     ///
-
     /// If the maybe already contains a value, the old value is dropped.
     #[inline]
     pub fn insert(&mut self, value: T) -> &mut T {
@@ -611,10 +569,8 @@ impl<T> Maybe<T> {
 
     /// Returns the contained value without checking (unsafe).
     ///
-
     /// # Safety
     ///
-
     /// Calling this method on None is undefined behavior.
     #[inline]
     pub unsafe fn unwrap_unchecked(self) -> T {
@@ -661,12 +617,10 @@ impl<T> Maybe<T> {
 impl<T: Copy> Maybe<&T> {
     /// Maps a `Maybe<&T>` to a `Maybe<T>` by copying the contents of the maybe.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let x = 12;
     /// let opt_x = Maybe::Some(&x);
     /// assert_eq!(opt_x, Maybe::Some(&12));
@@ -682,12 +636,10 @@ impl<T: Copy> Maybe<&T> {
 impl<T: Clone> Maybe<&T> {
     /// Maps a `Maybe<&T>` to a `Maybe<T>` by cloning the contents of the maybe.
     ///
-
     /// # Examples
     /// ```
     /// use verum_common::Maybe;
     ///
-
     /// let x = 12;
     /// let opt_x = Maybe::Some(&x);
     /// assert_eq!(opt_x, Maybe::Some(&12));
@@ -718,7 +670,6 @@ impl<T: Clone> Maybe<&mut T> {
 
 /// An iterator over a reference to the [`Maybe::Some`] variant of a [`Maybe`].
 ///
-
 /// This `struct` is created by the [`Maybe::iter`] method.
 pub struct MaybeIter<T> {
     inner: Maybe<T>,

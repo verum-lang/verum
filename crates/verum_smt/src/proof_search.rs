@@ -50,7 +50,6 @@ use crate::verify::{ProofResult, VerificationCost, VerificationError, Verificati
 
 /// Type signature for structural matching
 ///
-
 /// Represents the shape of an expression for pattern matching purposes.
 /// Used to find lemmas that could apply based on structure rather than
 /// exact syntactic match.
@@ -79,11 +78,9 @@ pub enum SignatureType {
 
 /// Proof hints database for automation
 ///
-
 /// Stores lemmas, tactics, and patterns that can be used to automatically
 /// prove goals. The database uses pattern matching to find applicable hints.
 ///
-
 /// Hints database for automated proof search. Stores lemmas with priorities (0-1000),
 /// tactic hints keyed by goal pattern, and decision procedures for decidable fragments.
 /// Lemmas can be registered with `@hint(priority = N)` or `@hint(pattern = "...")`.
@@ -123,12 +120,10 @@ impl HintsDatabase {
 
     /// Register a lemma hint
     ///
-
     /// # Arguments
     /// - `pattern`: Pattern to match against goals
     /// - `hint`: The lemma hint to apply
     ///
-
     /// # Example
     /// ```ignore
     /// db.register_lemma("_ + _ = _", LemmaHint {
@@ -143,7 +138,6 @@ impl HintsDatabase {
 
     /// Register a lemma by name for direct lookup
     ///
-
     /// This allows lemmas to be retrieved by name rather than pattern matching.
     /// Useful for explicitly applying named lemmas in proofs.
     pub fn register_named_lemma(&mut self, name: Text, hint: LemmaHint) {
@@ -156,7 +150,6 @@ impl HintsDatabase {
 
     /// Lookup lemma by name
     ///
-
     /// Returns the lemma hint with the given name, if it exists.
     pub fn lookup_lemma_by_name(&self, name: &Text) -> Maybe<&LemmaHint> {
         let pattern = format!("@name:{}", name).into();
@@ -168,12 +161,10 @@ impl HintsDatabase {
 
     /// Find lemmas by type signature
     ///
-
     /// Searches for lemmas that could apply based on the shape of their
     /// conclusion. More sophisticated than pattern matching - analyzes
     /// the logical structure.
     ///
-
     /// # Example
     /// ```ignore
     /// // Find all lemmas concluding with equality
@@ -202,7 +193,6 @@ impl HintsDatabase {
 
     /// Compute type signature of an expression
     ///
-
     /// Creates a structural fingerprint for matching.
     /// Examples:
     /// - `x + y = z` → Eq(Add(Var, Var), Var)
@@ -297,11 +287,9 @@ impl HintsDatabase {
 
     /// Forward reasoning: given hypotheses, find applicable lemmas
     ///
-
     /// Searches for lemmas whose premises match the available hypotheses.
     /// This enables forward chaining from known facts.
     ///
-
     /// # Example
     /// ```ignore
     /// // Hypotheses: [x > 0, y > 0]
@@ -329,11 +317,9 @@ impl HintsDatabase {
 
     /// Backward reasoning: given goal, find lemmas that could prove it
     ///
-
     /// Searches for lemmas whose conclusions unify with the goal.
     /// Returns the premises that would need to be proven.
     ///
-
     /// # Example
     /// ```ignore
     /// // Goal: x + y > 0
@@ -410,7 +396,6 @@ impl HintsDatabase {
 
     /// Automatic lemma selection based on goal characteristics
     ///
-
     /// Uses heuristics to rank lemmas by applicability:
     /// - Syntactic similarity to goal
     /// - Lemma priority
@@ -440,7 +425,6 @@ impl HintsDatabase {
 
     /// Compute heuristic score for lemma applicability
     ///
-
     /// Higher score = more likely to be useful
     fn compute_lemma_score(&self, lemma: &LemmaHint, goal: &Expr) -> f64 {
         let mut score = 0.0;
@@ -481,7 +465,6 @@ impl HintsDatabase {
 
     /// Find applicable hints for a goal
     ///
-
     /// Returns hints sorted by priority (higher priority first).
     pub fn find_hints(&mut self, goal: &Expr) -> List<ApplicableHint> {
         let start = Instant::now();
@@ -524,7 +507,6 @@ impl HintsDatabase {
 
     /// Extract pattern from expression for matching
     ///
-
     /// Converts expressions into canonical patterns for indexing.
     /// Examples:
     /// - `x + y = z` → `_ + _ = _`
@@ -809,7 +791,6 @@ impl HintsDatabase {
 
     /// Create an arithmetic lemma
     ///
-
     /// Generates standard arithmetic lemmas based on the description:
     /// - "commutativity" -> a + b = b + a
     /// - "associativity" -> (a + b) + c = a + (b + c)
@@ -1006,7 +987,6 @@ impl HintsDatabase {
 
     /// Create a boolean lemma
     ///
-
     /// Generates standard boolean lemmas based on the description:
     /// - "double_negation" -> !!a = a
     /// - "de_morgan" -> !(a && b) = !a || !b
@@ -1125,7 +1105,6 @@ impl HintsDatabase {
 
     /// Create an implication lemma
     ///
-
     /// Generates implication-related lemmas:
     /// - "modus_ponens" -> (a && (a => b)) => b
     /// - "contrapositive" -> (a => b) = (!b => !a)
@@ -1314,7 +1293,6 @@ impl HintsDatabase {
 
     /// Create an equality lemma
     ///
-
     /// Generates equality-related lemmas:
     /// - "reflexivity" -> a = a
     /// - "symmetry" -> (a = b) => (b = a)
@@ -1464,11 +1442,9 @@ impl HintsDatabase {
 
     /// Instantiate a lemma with specific terms
     ///
-
     /// Given a lemma (possibly quantified) and a list of instantiation terms,
     /// produces a concrete instance of the lemma.
     ///
-
     /// # Example
     /// ```ignore
     /// // Lemma: forall x. P(x)
@@ -1500,11 +1476,9 @@ impl HintsDatabase {
 
     /// Extract universal quantifiers from lemma
     ///
-
     /// Returns (variables, body) where variables are the quantified variables
     /// and body is the formula after removing quantifiers.
     ///
-
     /// # Example
     /// ```ignore
     /// // Input: forall x. forall y. P(x, y)
@@ -1659,7 +1633,6 @@ impl Default for HintsDatabase {
 
 /// Lemma hint for proof automation
 ///
-
 /// A lemma hint for proof automation. Lemmas are stored with a name, priority
 /// (higher = tried first), the lemma expression, and an optional structural pattern
 /// for matching against proof goals.
@@ -1686,7 +1659,6 @@ pub struct TacticHint {
 
 /// Decision procedure hint
 ///
-
 /// A verified decision procedure for a decidable theory fragment. Includes:
 /// - SAT/tautology checking (propositional formulas)
 /// - Linear arithmetic (Simplex for QF_LIA/QF_LRA)
@@ -1817,7 +1789,6 @@ impl ApplicableHint {
 
 /// Proof goal to be proven
 ///
-
 /// A proof goal: a proposition to prove under a set of hypotheses.
 /// Theorem syntax: `theorem name(params): proposition { proof_term }`
 /// Goals carry an expression, a list of hypothesis expressions, and an optional label.
@@ -1864,7 +1835,6 @@ impl ProofGoal {
 
 /// Proof term representing evidence
 ///
-
 /// Proof terms are first-class evidence values. They represent:
 /// - Direct proof construction: `modus_ponens(p, pq)` applies implication
 /// - Proof by cases: pattern match on disjunction `P ∨ Q`
@@ -1904,7 +1874,6 @@ pub enum ProofTerm {
 
 /// Proof tree representing proof structure
 ///
-
 /// A proof tree representing hierarchical proof structure. Each node holds a goal,
 /// an optional tactic that was applied, and child subproofs. The tree is complete
 /// when all leaves are discharged (no remaining subgoals).
@@ -1967,10 +1936,8 @@ impl ProofTree {
 
 /// Proof tactic for goal transformation
 ///
-
 /// Tactics transform proof goals into simpler subgoals.
 ///
-
 /// Proof tactics transform proof goals into simpler subgoals. Available tactics:
 /// - `simp`: simplify using lemma database (automatic rewriting)
 /// - `ring`: normalize ring expressions (commutativity, associativity, distributivity)
@@ -2171,7 +2138,6 @@ pub enum ProofTactic {
 
 /// An arm of a [`ProofTactic::Match`].
 ///
-
 /// Mirrors `verum_ast::decl::TacticMatchArm` but with its body already
 /// lowered into the SMT-facing IR.
 #[derive(Debug, Clone)]
@@ -2205,7 +2171,6 @@ impl ProofTactic {
 
 /// Simplified constructor representation for induction
 ///
-
 /// Used by the induction tactic to represent constructors of inductive types.
 /// In a full implementation, this would be replaced by proper ADT introspection.
 #[derive(Debug, Clone)]
@@ -2271,12 +2236,10 @@ impl GoalFingerprint {
 
 /// Automated proof search engine with backtracking
 ///
-
 /// Uses hints, tactics, and decision procedures to automatically
 /// prove goals. Implements iterative deepening depth-first search
 /// with cycle detection for completeness.
 ///
-
 /// Automated proof search engine using iterative deepening DFS with backtracking
 /// and cycle detection. The search strategy tries tactics in priority order:
 /// 1. assumption (hypothesis matches goal)
@@ -2344,14 +2307,12 @@ pub struct ProofSearchEngine {
     /// recursive-arg indices per constructor (parallel to the
     /// `variant_map` ctor list for the same type).
     ///
-
     /// For each constructor, the inner `Vec<usize>` lists the argument
     /// positions that recurse on the parent type. E.g. for
     /// `List<T> = Nil | Cons(T, List<T>)`, the entry would be
     /// `vec![vec![], vec![1]]` — `Nil` has no recursive args, `Cons`
     /// recurses on its second argument (index 1).
     ///
-
     /// Populated externally via `register_variant_recursion`. When a
     /// type is registered via `register_variant_type` without
     /// recursion info, its constructors are treated as non-recursive —
@@ -2362,7 +2323,6 @@ pub struct ProofSearchEngine {
 
     /// Names of hypotheses whose static type is `Bool`.
     ///
-
     /// Populated externally via `register_bool_hypothesis` from the
     /// caller's typing context. Drives the `cases_on h` flow for plain
     /// path-typed hypotheses: when the hypothesis identifier is in this
@@ -2370,7 +2330,6 @@ pub struct ProofSearchEngine {
     /// subgoals. Without this, plain Path hypotheses fall through to
     /// the catch-all error arm (no metadata = no case split).
     ///
-
     /// Same architectural shape as `variant_map`: the engine itself
     /// holds zero hardcoded knowledge of which variables are Bool —
     /// the truth comes from registration, never from name matching.
@@ -2505,16 +2464,13 @@ impl ProofSearchEngine {
     /// (same length, same order); each inner `Vec<usize>` lists the
     /// argument positions that recurse on the parent type.
     ///
-
     /// Example for `List<T> = Nil | Cons(T, List<T>)`:
     ///
-
     ///  engine.register_variant_type("List".into(),
     ///  vec!["Nil".into(), "Cons".into()]);
     ///  engine.register_variant_recursion("List".into(),
     ///  vec![vec![], vec![1]]); // Cons recurses on arg 1
     ///
-
     /// Types registered via `register_variant_type` alone are treated
     /// as non-recursive — `induction` reduces to case analysis with
     /// no recursive subgoals, which is correct for `Color = Red |
@@ -2559,7 +2515,6 @@ impl ProofSearchEngine {
     /// split it into the two boolean cases (h := true / h := false).
     /// Idempotent — re-registering the same name has no effect.
     ///
-
     /// Without this registration, the engine has no way to tell whether
     /// a Path-shaped hypothesis is a Bool variable or some other type.
     /// Pre-fix the dispatcher had a permanently-false stub here, which
@@ -2607,13 +2562,11 @@ impl ProofSearchEngine {
 
     /// Attempt to automatically prove a goal with backtracking
     ///
-
     /// Uses iterative deepening depth-first search:
     /// 1. Try to prove at depth 1, 2, 3, ... up to max_depth
     /// 2. At each depth, use DFS with backtracking
     /// 3. Detect cycles to avoid infinite loops
     ///
-
     /// Returns Ok if a proof is found, Err otherwise.
     pub fn auto_prove(&mut self, context: &Context, goal: &Expr) -> VerificationResult {
         // Convenience wrapper: builds a hypothesis-free `ProofGoal` and
@@ -2819,7 +2772,6 @@ impl ProofSearchEngine {
 
     /// Apply lemma to prove goal
     ///
-
     /// This method implements full lemma application:
     /// 1. Parse lemma structure (premises => conclusion)
     /// 2. Attempt to unify lemma conclusion with goal
@@ -2827,14 +2779,12 @@ impl ProofSearchEngine {
     /// 4. Recursively verify premises
     /// 5. Return proof if all premises verified
     ///
-
     /// # Lemma Forms Supported
     /// - Direct assertion: `P` (no premises)
     /// - Conditional: `P => Q` (single premise)
     /// - Multi-conditional: `P1 => P2 => ... => Q` (multiple premises)
     /// - Universal quantification: `forall x. P(x)` (needs instantiation)
     ///
-
     /// # Example
     /// ```ignore
     /// // Goal: x + y = y + x
@@ -2936,21 +2886,18 @@ impl ProofSearchEngine {
 
     /// Apply tactic
     ///
-
     /// This method implements tactic application in the proof search engine:
     /// 1. Construct a ProofGoal from the goal expression
     /// 2. Execute the tactic to generate subgoals
     /// 3. Recursively prove all subgoals
     /// 4. Return proof result if all subgoals are proven
     ///
-
     /// # Tactic Application Process
     /// - Tactics transform goals into simpler subgoals
     /// - If a tactic produces no subgoals, the goal is proven
     /// - If a tactic produces subgoals, each must be recursively proven
     /// - Failure to prove any subgoal causes the tactic to fail
     ///
-
     /// # Example
     /// ```ignore
     /// // Goal: P ∧ Q
@@ -3063,7 +3010,6 @@ impl ProofSearchEngine {
 
     /// Execute tactic to transform proof goal
     ///
-
     /// Execute a tactic to transform a proof goal into zero or more subgoals.
     /// Returns empty list if the goal is fully discharged, or a list of remaining subgoals.
     pub fn execute_tactic(
@@ -3298,7 +3244,6 @@ impl ProofSearchEngine {
 
     /// Try reflexivity tactic
     ///
-
     /// Goal must be an equality where lhs == rhs
     fn try_reflexivity(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         match &goal.goal.kind {
@@ -3321,7 +3266,6 @@ impl ProofSearchEngine {
 
     /// Try assumption tactic
     ///
-
     /// Check if goal is in hypotheses
     fn try_assumption(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         for hyp in &goal.hypotheses {
@@ -3338,7 +3282,6 @@ impl ProofSearchEngine {
 
     /// Try intro tactic
     ///
-
     /// Introduce hypothesis for implication
     fn try_intro(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         match &goal.goal.kind {
@@ -3361,7 +3304,6 @@ impl ProofSearchEngine {
 
     /// Try split tactic
     ///
-
     /// Split conjunction into separate goals
     fn try_split(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         match &goal.goal.kind {
@@ -3386,17 +3328,14 @@ impl ProofSearchEngine {
 
     /// Try apply tactic
     ///
-
     /// Apply a lemma to the goal
     ///
-
     /// The Apply tactic:
     /// 1. Looks up the lemma in the hints database
     /// 2. Attempts to unify the lemma conclusion with the goal
     /// 3. Generates subgoals for each premise of the lemma
     /// 4. Returns ProofTerm::Apply with the lemma name and premise proofs
     ///
-
     /// # Example
     /// ```ignore
     /// // Goal: x + y = y + x
@@ -3451,7 +3390,6 @@ impl ProofSearchEngine {
 
     /// Extract lemma structure into (premises, conclusion)
     ///
-
     /// Parses lemma into its logical structure:
     /// - `P` => ([], P)
     /// - `P => Q` => ([P], Q)
@@ -3480,7 +3418,6 @@ impl ProofSearchEngine {
 
     /// Try to unify two expressions
     ///
-
     /// Returns a substitution map if unification succeeds.
     /// This is a simplified unification algorithm that handles:
     /// - Literal matching
@@ -3604,7 +3541,6 @@ impl ProofSearchEngine {
 
     /// Apply substitution to an expression
     ///
-
     /// Replaces all occurrences of variables in the substitution map
     /// with their bound values.
     fn apply_substitution(expr: &Expr, subst: &Map<Text, Expr>) -> Expr {
@@ -3671,10 +3607,8 @@ impl ProofSearchEngine {
 
     /// Try induction tactic
     ///
-
     /// Generate induction subgoals
     ///
-
     /// The Induction tactic performs structural induction on a variable:
     /// 1. Identifies the type of the induction variable from context
     /// 2. Determines the constructors for that type
@@ -3682,7 +3616,6 @@ impl ProofSearchEngine {
     /// 4. Generates an inductive case goal for each recursive constructor,
     ///  adding the inductive hypothesis (IH) to the context
     ///
-
     /// # Example
     /// ```ignore
     /// // Goal: forall n: Nat. P(n)
@@ -3691,7 +3624,6 @@ impl ProofSearchEngine {
     /// // Inductive case: forall k. P(k) => P(succ(k))
     /// ```
     ///
-
     /// Structural induction: generates base case P(0) and inductive step forall k. P(k) => P(succ(k)).
     /// Infers the variable type from the goal context to determine constructors.
     fn try_induction(
@@ -3759,7 +3691,6 @@ impl ProofSearchEngine {
 
     /// Infer the type of a variable from the goal context.
     ///
-
     /// Pre-fix this function used hardcoded naming heuristics ("starts
     /// with `n` → Nat", "contains `list` → List", etc.) — a textbook
     /// instance of compiler-side stdlib-type-name knowledge that
@@ -3767,14 +3698,12 @@ impl ProofSearchEngine {
     /// misclassified any non-numeric variable as natural-number-typed
     /// induction.
     ///
-
     /// Post-fix: walk the goal looking for an equality `var == Ctor(...)`
     /// or `var == Ctor`. Resolve the constructor through the existing
     /// `variant_map` registry (populated externally via
     /// `register_variant_type`). The parent type's name comes from
     /// metadata, never from string matching.
     ///
-
     /// Returns `ProofError::TacticFailed` when no constructor for `var`
     /// is observable in the goal — the caller is expected to either
     /// register the type via `register_variant_type` or provide an
@@ -3881,13 +3810,11 @@ impl ProofSearchEngine {
     /// Get constructors for a variant type from the metadata
     /// registry.
     ///
-
     /// Pre-fix this hardcoded `Nat`, `List`, `Tree`/`BinaryTree`, and
     /// `Bool` with their constructors and rejected every user-defined
     /// type with "Unknown inductive type" — same compiler-side
     /// stdlib-name knowledge violation as #18, #19, #21, #34.
     ///
-
     /// Post-fix:
     /// - Constructor names come from `variant_map` (populated via
     ///  `register_variant_type`).
@@ -3935,7 +3862,6 @@ impl ProofSearchEngine {
 
     /// Instantiate a goal for a different variable
     ///
-
     /// Replaces var with new_var in the goal expression.
     fn instantiate_goal_for_var(goal: &Expr, var: &Text, new_var: &Text) -> Expr {
         Self::substitute_var(goal, var, new_var)
@@ -3943,7 +3869,6 @@ impl ProofSearchEngine {
 
     /// Instantiate a goal for a constructor term
     ///
-
     /// Replaces var with a constructor application in the goal.
     fn instantiate_goal_for_term(goal: &Expr, var: &Text, ctor_term: &Expr) -> Expr {
         Self::substitute_var_with_expr(goal, var, ctor_term)
@@ -4055,10 +3980,8 @@ impl ProofSearchEngine {
 
     /// Try simplify tactic
     ///
-
     /// Simplify goal using rewrite rules
     ///
-
     /// The Simplify tactic:
     /// 1. Applies algebraic simplification rules (e.g., x + 0 = x, x * 1 = x)
     /// 2. Performs constant folding (e.g., 2 + 3 = 5)
@@ -4066,7 +3989,6 @@ impl ProofSearchEngine {
     /// 4. Uses Z3 to verify that simplified form is equivalent to original
     /// 5. If goal becomes trivial (e.g., true = true), returns no subgoals
     ///
-
     /// # Algebraic Rules Applied
     /// - Identity: x + 0 = x, x * 1 = x, x && true = x, x || false = x
     /// - Annihilation: x * 0 = 0, x && false = false, x || true = true
@@ -4074,7 +3996,6 @@ impl ProofSearchEngine {
     /// - Double negation: !!x = x
     /// - Constant folding: evaluate operations on literals
     ///
-
     /// # Example
     /// ```ignore
     /// // Goal: (x + 0) * 1 = x
@@ -4082,7 +4003,6 @@ impl ProofSearchEngine {
     /// // Reflexivity => QED (no subgoals)
     /// ```
     ///
-
     /// Simplification: applies rewrite rules from the lemma database to normalize the goal.
     /// Example: `(x + 0) * 1 = x` simplifies to `x = x`, then reflexivity discharges it.
     fn try_simplify(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
@@ -4124,7 +4044,6 @@ impl ProofSearchEngine {
 
     /// Simplify an expression using algebraic rules
     ///
-
     /// Applies simplification rules recursively to normalize the expression.
     fn simplify_expr(expr: &Expr) -> Expr {
         use ExprKind::*;
@@ -4654,7 +4573,6 @@ impl ProofSearchEngine {
 
     /// Structural pattern match used by the tactic-level `match`.
     ///
-
     /// Handles the pattern kinds that have a meaningful structural
     /// meaning on a simplified expression: wildcard, rest, identifier
     /// (with optional `@` subpattern), and literal. Richer pattern kinds
@@ -4685,7 +4603,6 @@ impl ProofSearchEngine {
 
     /// Try auto tactic
     ///
-
     /// Automatic proof search
     fn try_auto(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         // Fast path: trivially-true literal goals (e.g. `ensures true`).
@@ -4725,7 +4642,6 @@ impl ProofSearchEngine {
 
     /// Check if two expressions are structurally equal, ignoring spans.
     ///
-
     /// The AST carries byte-offset spans on every `Ident`, `Path`, and `Literal`,
     /// and the derived `PartialEq` is span-sensitive. That is exactly wrong for
     /// proof-search equality: the hypothesis `n == 7` from the `requires` clause
@@ -4925,7 +4841,6 @@ impl ProofSearchEngine {
 
     /// Use Z3 to discharge proof goal
     ///
-
     /// Discharge a proof goal via Z3 SMT solver. Translates the goal to Z3 formula,
     /// checks satisfiability with configurable timeout (default 5000ms), and returns
     /// a proof term if the negation is UNSAT (i.e., the goal is valid).
@@ -5280,13 +5195,11 @@ impl ProofSearchEngine {
 
     /// Try apply with explicit arguments
     ///
-
     /// This extends `try_apply` by allowing explicit instantiation of universally
     /// quantified variables in the lemma. For example:
     /// - apply lemma_name with [arg1, arg2] substitutes the first two forall-bound
     ///  variables with arg1 and arg2 respectively.
     ///
-
     /// Lemma application with explicit instantiation of universally quantified variables.
     /// `apply lemma_name with [arg1, arg2]` substitutes the first N forall-bound
     /// variables with the given arguments, then checks if the instantiated conclusion
@@ -5842,7 +5755,6 @@ impl ProofSearchEngine {
 
     /// Ring tactic: normalize ring expressions
     ///
-
     /// Ring normalization: rewrites both sides of an equation using ring axioms
     /// (commutativity, associativity, distributivity) and checks equality.
     fn try_ring(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
@@ -5884,7 +5796,6 @@ impl ProofSearchEngine {
 
     /// Field tactic: normalize field expressions
     ///
-
     /// Field normalization: extends ring normalization with division (multiplicative inverses).
     fn try_field(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         // Field tactic handles division in addition to ring operations
@@ -5915,7 +5826,6 @@ impl ProofSearchEngine {
 
     /// Omega tactic: linear integer arithmetic solver
     ///
-
     /// Omega: decides linear integer arithmetic (Presburger arithmetic) via Cooper's algorithm.
     /// Only applies to goals in the decidable QF_LIA fragment.
     fn try_omega(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
@@ -5995,7 +5905,6 @@ impl ProofSearchEngine {
 
     /// Blast tactic: tableau prover for propositional/first-order logic
     ///
-
     /// Blast: tableau prover for propositional and simple first-order logic.
     /// Uses aggressive decomposition tactics and backtracking search.
     fn try_blast(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
@@ -6041,7 +5950,6 @@ impl ProofSearchEngine {
 
     /// SMT tactic: dispatch to SMT solver
     ///
-
     /// SMT dispatch: delegates goal to an SMT solver (Z3 or CVC5). Supports custom
     /// SMT theories (BitVector, Array, etc.) and configurable timeout.
     fn try_smt(
@@ -6069,14 +5977,12 @@ impl ProofSearchEngine {
 
     /// Rewrite the goal using a specific equality hypothesis.
     ///
-
     /// `hypothesis` is the user-named hypothesis (e.g. `h0`, `h1`, or a
     /// pattern-bound name). It is resolved to an index via
     /// [`find_hypothesis_index`]; the hypothesis at that index must be
     /// an equality `a = b`, otherwise we error out naming both the
     /// hypothesis and its actual shape.
     ///
-
     /// Pre-fix this scanned for the first equality hypothesis in the
     /// goal regardless of the user's chosen name, silently rewriting
     /// with the wrong hypothesis when the user asked for `rewrite h2`
@@ -6133,7 +6039,6 @@ impl ProofSearchEngine {
     /// Rewrite at a specific named target inside the goal using the
     /// given equality hypothesis.
     ///
-
     /// Same hypothesis resolution as [`try_rewrite`]: the named
     /// hypothesis is looked up by index, not via first-equality scan.
     /// Target-localised rewriting (limit substitution to the named
@@ -6152,17 +6057,14 @@ impl ProofSearchEngine {
 
     /// Unfold definition
     ///
-
     /// Replaces a defined name with its definition in the goal.
     /// This tactic looks up definitions in a registry and performs inline expansion.
     ///
-
     /// Common unfolds:
     /// - `unfold not` replaces `¬P` with `P => False`
     /// - `unfold iff` replaces `P ↔ Q` with `(P => Q) ∧ (Q => P)`
     /// - `unfold ne` replaces `a ≠ b` with `¬(a = b)`
     ///
-
     /// Unfold a definition by name and substitute in the goal. Standard unfolds:
     /// - `unfold not`: replaces `not P` with `P => False`
     /// - `unfold iff`: replaces `P <-> Q` with `(P => Q) /\ (Q => P)`
@@ -6636,12 +6538,10 @@ impl ProofSearchEngine {
 
     /// Try cases on hypothesis
     ///
-
     /// Performs case analysis on a hypothesis. For a disjunction hypothesis (P ∨ Q),
     /// generates two subgoals: one assuming P and one assuming Q.
     /// For an inductive type, generates one subgoal per constructor.
     ///
-
     /// Case analysis on a hypothesis. For disjunction (P or Q), generates two subgoals
     /// (one assuming P, one assuming Q). For inductive types, generates one subgoal per constructor.
     fn try_cases_on(
@@ -6741,12 +6641,10 @@ impl ProofSearchEngine {
 
     /// Try destruct hypothesis
     ///
-
     /// Destructs a compound hypothesis into its components.
     /// For conjunction (P ∧ Q), adds both P and Q as separate hypotheses.
     /// For existential (∃x. P(x)), introduces the witness and the property.
     ///
-
     /// Destruct a compound hypothesis into components. For conjunction (P /\ Q),
     /// adds both P and Q as separate hypotheses. For existential (exists x. P(x)),
     /// introduces the witness variable and the property as separate hypotheses.
@@ -6881,7 +6779,6 @@ impl ProofSearchEngine {
     /// if the head's name is not registered as a constructor of any variant
     /// type in `variant_map`.
     ///
-
     /// `variant_map` is the single source of truth for which names are variant
     /// constructors and what type they belong to. Populated externally from
     /// `type T is A | B | ...;` declarations via `register_variant_type`. No
@@ -6903,14 +6800,12 @@ impl ProofSearchEngine {
 
     /// Try exact proof term
     ///
-
     /// The `exact` tactic closes a goal by providing a term that exactly matches the goal type.
     /// This is sound only if:
     /// 1. The term is a hypothesis in the current context with the same type as the goal
     /// 2. The term is a named lemma/axiom whose conclusion unifies with the goal
     /// 3. The term is the literal expression `true` and the goal is `true`
     ///
-
     /// This is a foundational tactic that MUST verify the proof term.
     fn try_exact(&mut self, term: &Text, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
         // Strategy 1: Check if term names a hypothesis
@@ -7253,7 +7148,6 @@ impl ProofSearchEngine {
 /// `witness_text`. Used by the `Exists` tactic to instantiate an
 /// existential goal's bound variable with the user-provided witness.
 ///
-
 /// Walks: Path, Literal, Binary, Unary, Paren, Call (functional
 /// part + args), MethodCall (receiver + args), Field, Index, Cast,
 /// Tuple, TupleIndex, and leaves other shapes unchanged — the same
@@ -7432,7 +7326,6 @@ struct GoalAnalysis {
 
 /// Analyse the structure of a `ProofGoal` to guide tactic selection.
 ///
-
 /// All inspection is performed on the AST `ExprKind` — no debug-format
 /// string matching.
 fn analyze_goal(goal: &ProofGoal) -> GoalAnalysis {
@@ -7627,7 +7520,6 @@ fn compute_depth(expr: &Expr) -> usize {
 
 /// Execute the oracle tactic on `goal`.
 ///
-
 /// `confidence` — the minimum softmax probability required before a
 /// candidate is dispatched. Typical values: 0.7 (permissive) to 0.95
 /// (strict). Defaults to 0.9 when unspecified.
@@ -7675,14 +7567,12 @@ pub(crate) fn try_oracle_tactic(
 
 /// Generate proof-term candidates from structural goal analysis.
 ///
-
 /// In a real deployment this calls the language model via
 /// `@intrinsic("llm.query_log_probs")`. At compile/test time we simulate
 /// the LLM by inspecting the `GoalAnalysis` (which was derived from AST
 /// structure, not debug strings) and returning a ranked list of
 /// known-good tactic strategies.
 ///
-
 /// Returns `Vec<(tactic_sequence, raw_score)>` where scores are *unnormalised*
 /// log-probability surrogates (higher = more likely to succeed).
 fn generate_oracle_candidates(analysis: &GoalAnalysis) -> Vec<(String, f64)> {
@@ -7745,11 +7635,9 @@ fn generate_oracle_candidates(analysis: &GoalAnalysis) -> Vec<(String, f64)> {
 
 /// Apply temperature-scaled softmax normalisation to raw candidate scores.
 ///
-
 /// Implements the numerically stable log-sum-exp trick:
 ///  p_i = exp((s_i − max_s) / τ) / Σ_j exp((s_j − max_s) / τ)
 ///
-
 /// Returns a new vector of `(name, probability)` pairs. The probabilities
 /// sum to 1.0 (modulo floating-point rounding).
 fn softmax_score(candidates: &[(String, f64)], temperature: f64) -> Vec<(String, f64)> {
@@ -7786,12 +7674,10 @@ fn softmax_score(candidates: &[(String, f64)], temperature: f64) -> Vec<(String,
 
 /// Attempt to apply an oracle candidate tactic to a goal.
 ///
-
 /// The candidate is a tactic name (e.g. `"auto"`, `"category_simp"`) or a
 /// semicolon-separated sequence (e.g. `"intro; auto"`). We split on `"; "`
 /// and dispatch each step via `try_named_tactic`.
 ///
-
 /// The result is verified by the SMT backend through the normal `execute_tactic`
 /// / `try_named_tactic` path — the oracle is NEVER trusted without verification.
 fn try_apply_oracle_candidate(
@@ -8010,7 +7896,6 @@ pub enum ModelValue {
 impl ProofSearchEngine {
     /// SAT decision procedure with soundness guarantee
     ///
-
     /// SAT decision procedure with soundness guarantee.
     /// Verified decision procedure: `@decide fn is_tautology(prop) -> Bool with result = true <-> |- prop`
     /// Returns (satisfiable, proof_certificate):
@@ -8065,7 +7950,6 @@ impl ProofSearchEngine {
 
     /// Linear arithmetic decision procedure (Simplex algorithm)
     ///
-
     /// Linear arithmetic decision procedure using Simplex algorithm.
     /// Decides quantifier-free linear integer/real arithmetic formulas (QF_LIA / QF_LRA).
     pub fn linear_arithmetic_decide(
@@ -8098,7 +7982,6 @@ impl ProofSearchEngine {
 
     /// Presburger arithmetic decision procedure (Cooper's algorithm)
     ///
-
     /// Presburger arithmetic decision procedure via Cooper's algorithm.
     /// Decides linear integer arithmetic WITH quantifiers (full Presburger arithmetic).
     /// Z3 handles quantifier elimination for this fragment automatically.
@@ -8118,7 +8001,6 @@ impl ProofSearchEngine {
 
 /// Function extracted from proof
 ///
-
 /// A function extracted from a constructive proof via the Curry-Howard correspondence.
 /// Given a proof of `exists!(q, r: Nat). a = b * q + r /\ r < b`, extraction yields
 /// an executable `div_mod(a, b)` function. Supports extraction directives:
@@ -8142,7 +8024,6 @@ pub struct ExtractedFunction {
 impl ProofSearchEngine {
     /// Extract computational program from constructive proof
     ///
-
     /// Extract computational program from constructive proof (`@extract` directive).
     /// Extracts the computational content from existence proofs (e.g., `exists!(q, r).`),
     /// turning proofs into executable programs. The extracted function inherits the
@@ -8216,10 +8097,8 @@ impl ProofSearchEngine {
 
     /// Convert proof term to executable expression
     ///
-
     /// Erases proof-irrelevant parts and extracts computational content.
     ///
-
     /// Convert proof term to executable expression. Erases proof-irrelevant parts
     /// (axioms, SMT proofs become unit) and retains computational content (lambdas
     /// become function params, cases become match expressions). Supports `@extract_witness`
@@ -8260,7 +8139,6 @@ impl ProofSearchEngine {
 
     /// Extract witness from existence proof
     ///
-
     /// Extract witness from existence proof: given a proof of `exists x. P(x)`,
     /// returns the witness value x. Used by `@extract_witness` directive:
     /// `fn next_prime(n: Nat) -> Nat is witness_of(exists_prime_above(n))`

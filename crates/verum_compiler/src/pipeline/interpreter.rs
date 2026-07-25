@@ -162,21 +162,18 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Tier-parity exit-code propagation.
     ///
-
     /// When the entry point returns an `Int`, surface it to the OS as the
     /// process exit status — matching what AOT compilation produces (where
     /// `main`'s return value lands directly in `_exit`). Without this, the
     /// interpreter would run `fn main() -> Int { 1 }` to completion but
     /// the process would exit 0, silently masking failures.
     ///
-
     /// Behaviour:
     /// - `Int` value → record exit code = `value as i32`.
     /// - `Bool` → record 0 for true, 1 for false (Unix convention).
     /// - `Unit` / `Nil` / anything else → leave exit code as `None`,
     ///  which the CLI maps to `0`.
     ///
-
     /// **Why record instead of `std::process::exit`?** The pipeline runs
     /// inside a CLI driver that needs to perform post-execution work —
     /// persisting the script-mode VBC cache, flushing telemetry, printing
@@ -187,7 +184,6 @@ impl<'s> CompilationPipeline<'s> {
     /// code from `Session::take_exit_code()` after housekeeping and
     /// translates to `process::exit` there.
     ///
-
     /// Called from BOTH `phase_interpret` (no-args entry) and
     /// `phase_interpret_with_args` (args-aware entry) so behaviour is
     /// uniform across `verum run file.vr` and `verum run file.vr a b`.
@@ -236,7 +232,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 5b: Interpretation with arguments
     ///
-
     /// VBC-first architecture: AST → VBC Codegen → VBC Interpreter with args
     pub(super) fn phase_interpret_with_args(
         &mut self,
@@ -344,17 +339,14 @@ impl<'s> CompilationPipeline<'s> {
     /// Find the program entry function in the VBC module and return
     /// its function ID.
     ///
-
     /// Strict mode separation (matches the AST-level
     /// `EntryDetectionPhase::detect_entry_point`):
     ///
-
     ///  • **Application** entry = `main` (in a non-script module).
     ///  Prefer it when present.
     ///  • **Script** entry = `__verum_script_main` (the synthesised
     ///  wrapper from script-tagged modules).
     ///
-
     /// The two are not interchangeable. A `fn main` declared *inside*
     /// a script module is a regular callable function, not the
     /// program entry — the AST-level pass already filtered such
@@ -394,11 +386,9 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run test execution with output capture.
     ///
-
     /// This executes the program via the VBC interpreter with stdout/stderr captured.
     /// Used by vtest for running `run` and `run-panic` tests.
     ///
-
     /// Returns:
     /// - `Ok(TestExecutionResult)` on successful execution (even if panic)
     /// - `Err` only for compilation errors
@@ -455,7 +445,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 5b: Interpret with output capture for test execution.
     ///
-
     /// Supports two modes:
     /// 1. **main() mode**: If the module has a `main` function, execute it (traditional).
     /// 2. **@test mode**: If no `main` exists, discover all `@test`-annotated functions
@@ -618,14 +607,11 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 7 (Tier 1): Compile to native executable (AOT mode)
     ///
-
     /// This compiles the source to a standalone native executable that can be run
     /// independently. Uses the VBC → LLVM IR path (NOT MLIR, which is GPU-only).
     ///
-
     /// Pipeline: Source → AST → TypedAST → VBC → LLVM IR → Object → Executable
     ///
-
     /// See the Phase 7 architecture comment above `phase_interpret()` for details.
     pub fn run_native_compilation(&mut self) -> Result<PathBuf> {
         let start = Instant::now();

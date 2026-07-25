@@ -45,7 +45,6 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register arithmetic builtins with context requirements
 ///
-
 /// All arithmetic functions are Tier 0 (always available) since they
 /// perform pure computation without accessing external state.
 pub fn register_builtins(map: &mut BuiltinRegistry) {

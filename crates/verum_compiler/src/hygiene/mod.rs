@@ -121,7 +121,6 @@ impl HygieneContext {
 
     /// Enter a new scope
     ///
-
     /// Creates a new scope of the given kind and pushes it onto the stack.
     pub fn enter_scope(&mut self, kind: ScopeKind) -> ScopeId {
         let scope_id = self.fresh_scope_id();
@@ -167,7 +166,6 @@ impl HygieneContext {
 
     /// Enter a macro expansion
     ///
-
     /// Pushes a macro expansion mark and scope.
     pub fn enter_macro_expansion(&mut self, macro_name: &str) -> ExpansionInfo {
         let mark = self.marks.push(MarkKind::MacroExpansion);
@@ -223,7 +221,6 @@ impl HygieneContext {
 
     /// Generate a unique identifier (gensym)
     ///
-
     /// The generated identifier is guaranteed to not conflict with any
     /// user-written code.
     pub fn gensym(&self, base: &str) -> Text {
@@ -248,7 +245,6 @@ impl HygieneContext {
 
     /// Generate a hygienic identifier using suffix format (legacy)
     ///
-
     /// This creates a unique identifier based on the given name that
     /// won't conflict with user code, using the simple `name__id` format.
     pub fn generate(&self, base_name: &str) -> Text {

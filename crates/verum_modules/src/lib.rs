@@ -190,11 +190,9 @@ use verum_ast::{FileId, Item, Module as AstModule};
 
 /// A loaded module with metadata.
 ///
-
 /// This represents a fully parsed module ready for name resolution.
 /// Includes profile information for language profile enforcement.
 ///
-
 /// Represents a fully loaded, parsed module with its metadata, exports, imports,
 /// child relationships, and language profile. This is the primary unit of
 /// organization in the Verum module system.
@@ -315,7 +313,6 @@ impl ModuleInfo {
 
 /// The module registry - central storage for all loaded modules.
 ///
-
 /// This is the single source of truth for module information during compilation.
 #[derive(Debug, Clone)]
 pub struct ModuleRegistry {
@@ -362,7 +359,6 @@ impl ModuleRegistry {
     /// once at startup so the type-resolver does not re-derive aliases
     /// per call.
     ///
-
     /// MOD-CRIT-1: this is the funnel point that closes the loader/
     /// resolver path-dedup incoherence — every alias decision lives in
     /// one map, owned by the registry, queried by every consumer
@@ -427,7 +423,6 @@ impl ModuleRegistry {
 
     /// Register a module.
     ///
-
     /// Dedupes by canonical module path: if a module with the same
     /// path is already registered, the existing entry's ModuleId is
     /// returned and the incoming `module.id` is ignored. This is
@@ -438,7 +433,6 @@ impl ModuleRegistry {
     /// "different source_modules" in `ExportTable::add_export` and
     /// raise spurious "Conflicting export" errors.
     ///
-
     /// The existing-entry's exports are merged with the incoming
     /// module's exports so that partial registrations (e.g. entry
     /// created by the loader, exports filled in by a later pass)
@@ -483,7 +477,6 @@ impl ModuleRegistry {
     /// (`core.foo.bar`) or the cog-relative form (`foo.bar`) —
     /// both canonicalise to the same key.
     ///
-
     /// Stdlib modules are registered from `core/` with their bare paths
     /// (`shell.exec`, `io.process`); user code addresses them via either
     /// the bare form or the `core.` prefix. This method probes both —
@@ -515,7 +508,6 @@ impl ModuleRegistry {
     /// canonical path first; on miss, consults the registered
     /// path_aliases map and probes the canonical translation.
     ///
-
     /// MOD-CRIT-1: the type-resolver's `get_module_with_path_aliases`
     /// (infer.rs) used to host a hardcoded alias table, creating two
     /// independent canonical-path maps (loader's `module_path_to_id`
@@ -545,11 +537,9 @@ impl ModuleRegistry {
 
     /// Update a module's exports by adding items from another export table.
     ///
-
     /// This is used for glob re-exports (`public import path.*`).
     /// The source exports are copied to the target module's export table.
     ///
-
     /// Returns the number of *new* exports actually added to the target —
     /// items already present in the target's exports do NOT count. The
     /// closure driver in `resolve_glob_reexports` consumes this count to
@@ -602,7 +592,6 @@ impl ModuleRegistry {
 
     /// Drop every module whose canonical path is NOT in `keep`.
     ///
-
     /// Returns `(kept, dropped)` counts. The `path_to_id` map is
     /// rewritten to mirror the surviving module set so subsequent
     /// `get_by_path` lookups are still consistent. Path aliases are
@@ -611,7 +600,6 @@ impl ModuleRegistry {
     /// simply yields `None` on the next probe (which is the desired
     /// "not loaded" behaviour for the on-demand loader).
     ///
-
     /// This is the keystone of the on-demand stdlib loader: after the
     /// usual full / cached load populates the registry, the pipeline
     /// computes the user's reachable set and calls this method to
@@ -661,29 +649,23 @@ impl Default for ModuleRegistry {
 
 /// A reference-counted, interior-mutable handle to a [`ModuleRegistry`].
 ///
-
 /// This is the canonical shape for sharing a registry across the compiler's
 /// concurrently-compiled module set. Most components — `verum_types`,
 /// `verum_compiler`, `verum_lsp` — store one of these and call [`Self::read`]
 /// / [`Self::write`] to access the inner registry.
 ///
-
 /// The newtype encapsulates the locking choice (currently
 /// `Shared<parking_lot::RwLock<ModuleRegistry>>`); future refactors can switch
 /// to a different concurrent map (e.g. `DashMap`) without touching call sites.
 ///
-
 /// # Why this exists
 ///
-
 /// Earlier code spelled out the wrapping inline at every construction site:
 ///
-
 /// ```ignore
 /// let reg = Shared::new(parking_lot::RwLock::new(ModuleRegistry::new()));
 /// ```
 ///
-
 /// That repetition is both verbose and a foot-gun: tests and dev tools
 /// frequently constructed `Shared::new(ModuleRegistry::new())` (no `RwLock`)
 /// and silently passed a `Shared<ModuleRegistry>` into APIs expecting a
@@ -713,7 +695,6 @@ impl SharedModuleRegistry {
     /// Construct from an already-wrapped registry. Accepts any
     /// `Shared<RwLock<ModuleRegistry>>`-compatible handle.
     ///
-
     /// Useful at module boundaries where another component has already done
     /// the wrapping. Avoids double-locking.
     pub fn from_raw(inner: Shared<parking_lot::RwLock<ModuleRegistry>>) -> Self {
@@ -775,12 +756,10 @@ impl From<ModuleRegistry> for SharedModuleRegistry {
 impl ModuleRegistry {
     /// Create a deep clone of the registry with a fresh ID counter.
     ///
-
     /// This is used for test performance optimization: the stdlib modules are
     /// registered once, then each test gets a deep clone of the registry with
     /// its own ID counter for user modules.
     ///
-
     /// The `Shared<ModuleInfo>` entries are shared (reference count incremented)
     /// but the ID counter is fresh, starting at max_existing_id + 1.
     pub fn deep_clone(&self) -> Self {
@@ -798,7 +777,6 @@ impl ModuleRegistry {
 
     /// Create a registry pre-populated with another registry's contents.
     ///
-
     /// This is an alias for `deep_clone` that makes the intent clearer.
     pub fn with_base(base: &Self) -> Self {
         base.deep_clone()

@@ -72,11 +72,9 @@ const ITER_TYPE_TYPED_ARRAY: i64 = 9;
 
 /// IterNew (0xC0) - Create iterator from iterable.
 ///
-
 /// Format: `IterNew dst, src`
 /// Creates an iterator over src and stores in dst.
 ///
-
 /// Type discrimination is performed by examining the ObjectHeader's type_id:
 /// - TypeId::LIST (512) → ITER_TYPE_LIST
 /// - TypeId::MAP (513) → ITER_TYPE_MAP
@@ -84,7 +82,6 @@ const ITER_TYPE_TYPED_ARRAY: i64 = 9;
 /// - TypeId::ARRAY (518) → ITER_TYPE_ARRAY
 /// - TypeId::RANGE (517) → ITER_TYPE_RANGE (special handling)
 ///
-
 /// Iterator protocol: creates an iterator object from a collection or range. The iterator
 /// holds a type tag (LIST/SET/MAP/ARRAY/RANGE), the source reference, and a cursor index.
 /// Each call to IterNext advances the cursor and returns the next element or nil.
@@ -279,7 +276,6 @@ fn resolve_protocol_next(
 
 /// IterNext (0xC1) - Get next element from iterator.
 ///
-
 /// Format: `IterNext dst, has_next_dst, iter`
 /// Advances iterator, sets dst to next value (or unit if exhausted),
 /// and sets has_next_dst to bool indicating if there was a value.
@@ -768,11 +764,9 @@ pub(in super::super) fn handle_iter_next(
 
 /// NewRange (0xCC) - Create a new range for iteration.
 ///
-
 /// Encoding: opcode + dst + start + end + inclusive (1 byte)
 /// Effect: Creates a Range object that can be iterated with IterNew/IterNext.
 ///
-
 /// Range layout in memory (3 Values at data offset) - must match IterNext expectations:
 ///  [0] start: Starting value (Int)
 ///  [1] end: Ending value (Int)

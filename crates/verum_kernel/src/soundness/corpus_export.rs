@@ -81,7 +81,6 @@ pub struct TheoremParam {
 /// so foreign tools see the universe-quantified statement rather than
 /// an undeclared identifier.
 ///
-
 /// Protocol bounds (`S: RichS`) are preserved as a per-backend comment
 /// hint rather than as a typeclass instance, because instance lowering
 /// requires the protocol to be exported as a Coq Class / Lean class
@@ -139,7 +138,6 @@ pub struct TheoremSpec {
     /// the load-bearing piece that makes the type-structure gate
     /// (#140) actually fire.
     ///
-
     /// Parameters whose types fall back are still emitted with a
     /// generic `Type` placeholder so the binding exists; the
     /// foreign tool then validates that the proposition's free
@@ -172,7 +170,6 @@ pub struct TheoremSpec {
     /// taught a particular proof-body shape silently degrade to
     /// admitted-with-comment instead of producing malformed output.
     ///
-
     /// **Why a per-backend map (rather than a single proof_text)**:
     /// Coq and Lean tactic syntax diverges enough that a single
     /// canonical form would over-constrain the translator
@@ -223,7 +220,6 @@ impl TheoremSpec {
     /// the renderer then emits a generic `Type` placeholder so the
     /// binding still exists at the foreign-tool level.
     ///
-
     /// `params` is a slice of `(parameter_name, parameter_type)` pairs
     /// extracted from the theorem's AST by the audit walker. Names
     /// should already be sanitised to valid foreign-tool identifiers.
@@ -271,7 +267,6 @@ impl TheoremSpec {
     /// land in the per-backend map; fallbacks leave the entry absent
     /// so the per-format renderer reverts to `Admitted.` / `:= by sorry`.
     ///
-
     /// **Why a builder method (vs. inline construction)**: every
     /// audit walker that builds a TheoremSpec follows the same
     /// translate-the-translatable-pieces pattern; centralising the
@@ -452,7 +447,6 @@ impl CorpusBackend for CoqCorpusBackend {
 
 /// Compute a stable provenance signature for an emitted theorem file.
 ///
-
 /// The signature is a BLAKE3 hash over the canonical source-state
 /// fingerprint: `(kernel_version || backend_id || module_path ||
 /// theorem_name || proposition_text || has_proof_body || declared_strategy)`.
@@ -460,7 +454,6 @@ impl CorpusBackend for CoqCorpusBackend {
 /// `TheoremSpec` they have on hand and verify that the emitted file
 /// came from EXACTLY the corpus state Verum claims.
 ///
-
 /// **The trust shift**: a third-party reviewer pulls the published
 /// `theorem_5_1.v` file out of MSFS supplementary material, runs
 /// `verum verify-signature theorem_5_1.v`, and gets a binary verdict
@@ -468,7 +461,6 @@ impl CorpusBackend for CoqCorpusBackend {
 /// against the named kernel version. No need to re-run the whole
 /// pipeline to verify provenance.
 ///
-
 /// **Output format**: `<kernel_version>:<32-byte-hex-blake3>` — the
 /// kernel version is included so future Verum versions can refuse
 /// to verify signatures from incompatible kernel revisions.
@@ -616,7 +608,6 @@ fn sanitise_for_comment(text: &str) -> String {
 /// suitable for embedding between the theorem name and the colon-
 /// separator. Empty when no params.
 ///
-
 /// Type-translation failures fall back to a generic `Type` placeholder
 /// (Coq) / `Type` (Lean) so the parameter binding still exists at the
 /// foreign-tool level — the foreign tool then validates that the
@@ -644,7 +635,6 @@ fn render_params_for_backend(spec: &TheoremSpec, backend_id: &str) -> String {
 /// embedding between the theorem name and the value parameters.
 /// Empty when no generics.
 ///
-
 /// Both Coq and Lean accept the curly-brace implicit-argument form.
 /// Bound annotations (e.g., `S : RichS`) are preserved as a per-
 /// generic comment directly preceding the binding so foreign-tool
@@ -700,7 +690,6 @@ pub fn all_corpus_backends() -> Vec<Box<dyn CorpusBackend>> {
 /// theorems and `<name> : <type>` followed by `<name> = <expr>` for
 /// theorems whose proof body translated cleanly.
 ///
-
 /// **Architectural significance**: Agda's MLTT foundation is the
 /// only one in the multi-kernel set without UIP or impredicative
 /// hierarchies — the corpus-theorem cross-check via Agda
@@ -854,7 +843,6 @@ fn sanitise_for_agda_line_comment(text: &str) -> String {
 /// for axioms, `def name : type := body.` for definitions / proven
 /// theorems with a translation.
 ///
-
 /// **Architectural significance**: Dedukti is a **logical
 /// framework** — it embeds many proof systems uniformly via
 /// rewriting. Adding it to the cross-format gate provides a
@@ -973,7 +961,6 @@ fn sanitise_for_dedukti_comment(text: &str) -> String {
 /// every theorem becomes one self-contained theory with the
 /// statement and proof.
 ///
-
 /// **Architectural significance**: Isabelle/HOL is classical
 /// higher-order logic — neither CIC (Coq + Lean) nor MLTT (Agda).
 /// Adding Isabelle gives the cross-format gate three distinct

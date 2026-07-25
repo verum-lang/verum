@@ -37,7 +37,6 @@ use verum_common::{Heap, List, Text};
 
 /// Tensor refinement verifier
 ///
-
 /// Integrates tensor shape verification with refinement type checking,
 /// providing a unified interface for verifying both value constraints
 /// and shape constraints on tensors.
@@ -62,15 +61,12 @@ impl TensorRefinementVerifier {
 
     /// Verify a tensor type with refinement constraints
     ///
-
     /// Checks both:
     /// 1. Shape constraints (dimensions must be compatible)
     /// 2. Value constraints (refinement predicates)
     ///
-
     /// # Examples
     ///
-
     /// ```verum
     /// type SquareMatrix<T, N> = Tensor<T, [N, N]>{N > 0}
     /// ```
@@ -133,13 +129,11 @@ impl TensorRefinementVerifier {
 
     /// Verify tensor operation constraints
     ///
-
     /// Given an operation (matmul, elementwise, etc.) and operand types,
     /// verifies that:
     /// 1. Shapes are compatible
     /// 2. Refinement predicates are preserved
     ///
-
     /// Returns the result type with propagated constraints.
     pub fn verify_tensor_operation(
         &mut self,
@@ -352,11 +346,9 @@ impl TensorRefinementVerifier {
 
     /// Get the target shape for a reshape operation
     ///
-
     /// The target shape should be stored in the operation metadata or
     /// extracted from the operation's type annotation.
     ///
-
     /// Note: In a full implementation, this would be called with operation
     /// metadata containing the target shape. For now, returns an error.
     fn get_reshape_target_shape(&self) -> Result<List<Expr>, TensorRefinementError> {
@@ -372,7 +364,6 @@ impl TensorRefinementVerifier {
 
     /// Verify that reshape preserves total element count
     ///
-
     /// Checks that prod(old_shape) == prod(new_shape) using SMT solving.
     fn verify_reshape_compatibility(
         &self,
@@ -421,7 +412,6 @@ impl TensorRefinementVerifier {
 
     /// Compute the product of shape dimensions as Z3 Int
     ///
-
     /// For now, this returns a constant value by extracting literal dimensions.
     /// Full implementation would handle symbolic dimensions.
     fn compute_shape_product(

@@ -337,14 +337,12 @@ fn escape_dot(s: &str) -> String {
 /// Walk a [`verum_ast::decl::ProofBody`] and collect every cited
 /// identifier reachable from tactic-application positions.
 ///
-
 /// Identifiers are projected to their last path segment (e.g.
 /// `core.proof.foo_lemma` → `foo_lemma`). After projection the set
 /// is filtered against `allowlist` (the corpus's known item names);
 /// non-matching identifiers (locally-bound hypotheses, anonymous
 /// arguments, framework-call patterns) are dropped.
 ///
-
 /// Returns a sorted, deduplicated list of bare names.
 pub fn collect_proof_citations(
     body: &verum_ast::decl::ProofBody,

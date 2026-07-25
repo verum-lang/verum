@@ -88,7 +88,6 @@ impl Default for Z3Config {
 
 /// Z3 Context Manager - Handles Z3 context lifecycle
 ///
-
 /// Note: z3-rs 0.19+ has made Context::new() require Config, and Context is stored in thread-local.
 /// We use the provided with_z3_config API for proper context management.
 pub struct Z3ContextManager {
@@ -213,7 +212,6 @@ impl Z3ContextManager {
 
     /// Whether the configured policy enables interpolation.
     ///
-
     /// Z3's built-in interpolation API was removed in modern
     /// releases; embedders that need interpolants now route the
     /// queries through `verum_smt::interpolation` (a higher-level
@@ -254,7 +252,6 @@ pub struct Z3Solver<'ctx> {
 impl<'ctx> Z3Solver<'ctx> {
     /// Create a new solver with optional logic specialization
     ///
-
     /// Logics: QF_LIA, QF_BV, QF_NRA, QF_AUFLIA, etc.
     pub fn new(logic: Maybe<&str>) -> Self {
         let solver = match logic {
@@ -288,7 +285,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Assert with tracking for unsat core
     ///
-
     /// MEMORY FIX: Caps named_assertions at 10_000 entries. When the limit is
     /// reached, the oldest half of entries are removed to prevent unbounded growth.
     pub fn assert_tracked(&mut self, formula: &Bool, name: &str) {
@@ -335,12 +331,10 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Auto-select tactic based on problem analysis using FormulaGoalAnalyzer
     ///
-
     /// This method uses the advanced `FormulaGoalAnalyzer` from the tactics module
     /// to analyze the current solver assertions and select an optimal tactic
     /// based on detected theory characteristics.
     ///
-
     /// ## Performance
     /// - Analysis overhead: <100us
     /// - Typical speedup: 2-5x for specialized problems (QF_BV, QF_LIA, etc.)
@@ -351,11 +345,9 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Auto-select tactic for a specific goal.
     ///
-
     /// Uses the FormulaGoalAnalyzer to determine optimal tactics for the given goal.
     /// Returns a TacticCombinator that can be composed with other tactics.
     ///
-
     /// Routes through the process-wide [`global_tactic_cache`] (#103)
     /// so repeated obligations within a verification session skip
     /// the nine Z3 probes.
@@ -366,7 +358,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Analyze problem and select best tactic
     ///
-
     /// Uses a combination of Z3 probes for efficient theory detection:
     /// - `is-qfbv`: Quantifier-free bit-vectors
     /// - `is-qflia`: Quantifier-free linear integer arithmetic
@@ -374,7 +365,6 @@ impl<'ctx> Z3Solver<'ctx> {
     /// - `has-quantifiers`: Quantified formulas
     /// - `is-propositional`: Pure propositional logic
     ///
-
     /// The returned tactic is a conditional composition that automatically
     /// applies the most appropriate strategy based on problem characteristics.
     fn analyze_and_select_tactic(&self) -> Tactic {
@@ -704,7 +694,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Extract proof witness for verification
     ///
-
     /// This method performs deep proof tree traversal to extract:
     /// - All axiom references used in the proof
     /// - The total number of proof steps
@@ -743,7 +732,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Extract proof information by traversing the proof DAG
     ///
-
     /// Returns a tuple of (used_axioms, proof_steps) extracted from the proof tree.
     /// Uses memoization via visited set to avoid reprocessing shared subproofs.
     fn extract_proof_info(&self, proof: &Dynamic) -> (Set<Text>, usize) {
@@ -759,7 +747,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Recursively traverse the proof DAG to collect axiom references and count steps
     ///
-
     /// This function handles all Z3 proof node types and extracts axiom names
     /// from relevant proof rules (PR_ASSERTED, PR_HYPOTHESIS, PR_TH_LEMMA, etc.)
     fn traverse_proof_dag(
@@ -853,7 +840,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Extract a meaningful axiom name from a formula AST
     ///
-
     /// Attempts to identify named constants or function applications
     /// to produce a human-readable axiom identifier.
     fn extract_axiom_name_from_formula(&self, formula: &Dynamic) -> Text {
@@ -874,7 +860,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Format a proof term into a proper representation
     ///
-
     /// Produces a structured representation of the proof tree
     /// instead of relying on debug formatting.
     fn format_proof_term(&self, proof: &Dynamic) -> Text {
@@ -965,7 +950,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Get the last extracted proof (raw format)
     ///
-
     /// Returns the proof from the most recent SAT/UNSAT check.
     pub fn get_last_proof(&self) -> Maybe<Text> {
         self.last_proof.clone()
@@ -994,13 +978,11 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Advanced model extraction with complete function interpretations
     ///
-
     /// Extracts comprehensive model information including:
     /// - All constant values
     /// - Complete function interpretations with all cases
     /// - Sort universes (if available)
     ///
-
     /// Returns None if no model is available (UNSAT or Unknown).
     pub fn advanced_extract_model(&mut self) -> Maybe<AdvancedModelExtractor> {
         match self.check_sat() {
@@ -1019,7 +1001,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Extract complete function model for a specific function
     ///
-
     /// This is useful when you only need one function's interpretation
     /// rather than the entire model.
     pub fn extract_function_interpretation(
@@ -1035,11 +1016,9 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Extract all constants from the current model
     ///
-
     /// Quick helper to get just the constant values without
     /// extracting complete function interpretations.
     ///
-
     /// Note: This calls check_sat(), so make sure to call it only once per query.
     pub fn extract_constants(&mut self) -> Map<Text, Text> {
         // Call check_sat to get result
@@ -1065,11 +1044,9 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Get minimal unsat core using binary search minimization
     ///
-
     /// This method improves diagnostic quality by reducing unsat cores
     /// to their minimal set. Uses binary search for O(n log n) complexity.
     ///
-
     /// Performance: 30-40% smaller cores than raw Z3 output
     pub fn get_minimal_unsat_core(&mut self) -> Result<UnsatCore, Text> {
         // Get initial unsat core from Z3
@@ -1143,7 +1120,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Check if subset of named assertions is UNSAT
     ///
-
     /// PERF: Uses push/pop on existing solver instead of creating new Solver.
     /// This prevents memory leak of ~500KB per call (50K calls = 25GB!).
     fn is_unsat_with_subset(&mut self, subset: &[Text]) -> Result<bool, Text> {
@@ -1173,7 +1149,6 @@ impl<'ctx> Z3Solver<'ctx> {
 
 /// Advanced result with unsat cores, proofs, and optimization objectives.
 ///
-
 /// Provides detailed information beyond simple SAT/UNSAT for debugging,
 /// optimization, and proof generation scenarios.
 pub enum AdvancedResult {
@@ -1205,7 +1180,6 @@ pub enum AdvancedResult {
 
 /// Unsat core - minimal set of assertions causing UNSAT
 ///
-
 /// When an SMT solver determines that a formula is unsatisfiable, it can
 /// often provide an "unsat core" - a subset of the input assertions that
 /// is still unsatisfiable. This is useful for:
@@ -1213,7 +1187,6 @@ pub enum AdvancedResult {
 /// - Generating Craig interpolants
 /// - Proof compression and optimization
 ///
-
 /// # Example
 /// ```ignore
 /// let core = solver.get_unsat_core();
@@ -1225,14 +1198,12 @@ pub enum AdvancedResult {
 pub struct UnsatCore {
     /// Set of assertion names/labels that form the unsat core
     ///
-
     /// Each assertion is identified by the label given when it was added
     /// to the solver via `assert_and_track`.
     pub assertions: Set<Text>,
 
     /// Whether this unsat core is minimal (no proper subset is UNSAT)
     ///
-
     /// Minimal unsat cores are more expensive to compute but provide
     /// tighter explanations for why a formula is unsatisfiable.
     pub is_minimal: bool,
@@ -1242,7 +1213,6 @@ pub struct UnsatCore {
 
 /// Interpolation for compositional verification
 ///
-
 /// Computes Craig interpolants for modular verification.
 pub struct InterpolationEngine {
     solver: Solver,
@@ -1270,21 +1240,17 @@ impl InterpolationEngine {
 
     /// Compute interpolants between partitions
     ///
-
     /// Returns interpolant I such that: A => I and I ∧ B => false
     ///
-
     /// This implements Craig interpolation using an industrial-grade algorithm:
     /// 1. Verify that A ∧ B is UNSAT (required for interpolation)
     /// 2. Extract unsat core to identify relevant clauses
     /// 3. Compute interpolant using model-based projection
     /// 4. Verify interpolant correctness: A => I and I ∧ B => false
     ///
-
     /// Algorithm based on McMillan's interpolation system and
     /// model-based interpolation (MBI) techniques from Gurfinkel & Vizel.
     ///
-
     /// Performance: O(n²) where n = |unsat_core|, optimized with caching
     pub fn compute_interpolants(&mut self) -> Maybe<List<Bool>> {
         // Check if conjunction is UNSAT (required for interpolation)
@@ -1364,7 +1330,6 @@ impl InterpolationEngine {
 
     /// Check if two formulas are structurally equal
     ///
-
     /// Uses Z3's native AST comparison via Z3_is_eq_ast for efficient
     /// structural equality check, instead of string-based comparison.
     fn formulas_equal(&self, f1: &Bool, f2: &Bool) -> bool {
@@ -1393,7 +1358,6 @@ impl InterpolationEngine {
 
     /// Project interpolant onto shared variables only
     ///
-
     /// Uses quantifier elimination to remove variables not in shared_vars.
     /// For quantifier-free formulas, this simplifies to substitution and simplification.
     fn project_onto_shared_vars(
@@ -1442,7 +1406,6 @@ impl InterpolationEngine {
 
     /// Strengthen interpolant to ensure I ∧ B => false
     ///
-
     /// Uses counterexample-guided refinement:
     /// 1. Check if I ∧ B is SAT
     /// 2. If SAT, extract model and add blocking clause to I
@@ -1521,7 +1484,6 @@ impl InterpolationEngine {
 
     /// Verify that interpolants satisfy the interpolation properties
     ///
-
     /// For each interpolant I between partitions A and B:
     /// 1. A => I (I is implied by A)
     /// 2. I ∧ B => false (I and B are inconsistent)
@@ -1576,7 +1538,6 @@ impl InterpolationEngine {
 
     /// Compute trivial interpolants when no core is available
     ///
-
     /// Returns sequence of 'true' interpolants, which trivially satisfy
     /// interpolation properties for simple cases.
     fn compute_trivial_interpolants(&self) -> List<Bool> {
@@ -1609,11 +1570,9 @@ struct Partition {
 
 /// Parallel portfolio solver using multiple strategies
 ///
-
 /// Launches multiple solvers with different tactics in parallel,
 /// returns the first result (portfolio approach).
 ///
-
 /// Note: Z3 Context is not Send/Sync, so true parallelism requires
 /// process-based approach or careful unsafe FFI. This is a sequential
 /// fallback implementation.
@@ -1689,14 +1648,11 @@ impl Default for ParallelSolver {
 
 /// Solving strategy for SMT portfolio solving
 ///
-
 /// Different SMT solving strategies are optimal for different problem domains.
 /// The parallel solver tries multiple strategies to find the best approach.
 ///
-
 /// # Strategies
 ///
-
 /// - **Default**: General-purpose SAT/SMT combination
 /// - **BitBlasting**: Converts bitvector operations to SAT (good for hardware verification)
 /// - **LinearArithmetic**: Simplex-based algorithm for linear constraints
@@ -1949,7 +1905,6 @@ impl ProofCache {
 
     /// Store proof witness
     ///
-
     /// MEMORY FIX: Partial eviction instead of clearing entire cache.
     /// Removes oldest 25% of entries to avoid cache thrashing.
     pub fn insert(&mut self, constraint: Text, witness: ProofWitness) {
@@ -2043,7 +1998,6 @@ pub enum BvOverflowError {
 
 /// Bitvector width configuration for different integer types
 ///
-
 /// Maps Verum's semantic integer types to their bitvector widths:
 /// - i8/u8: 8 bits
 /// - i16/u16: 16 bits
@@ -2075,7 +2029,6 @@ impl IntegerWidth {
 
     /// Determine integer width from a type name
     ///
-
     /// Recognizes standard Verum integer type names and maps them to widths.
     /// Returns W64 for unknown types (safe default for verification).
     pub fn from_type_name(type_name: &str) -> Self {
@@ -2101,21 +2054,17 @@ impl IntegerWidth {
 
 /// Bitvector overflow checker using Z3's built-in overflow predicates
 ///
-
 /// This struct provides methods for generating overflow verification conditions
 /// for fixed-width integer arithmetic operations. It leverages Z3's bitvector
 /// theory with overflow checking predicates:
 ///
-
 /// - `bvadd_no_overflow`: Addition overflow check
 /// - `bvsub_no_underflow`: Subtraction underflow check
 /// - `bvmul_no_overflow`: Multiplication overflow check
 /// - `bvneg_no_overflow`: Negation overflow check (for signed integers)
 ///
-
 /// ## Usage
 ///
-
 /// ```rust,ignore
 /// let checker = BvOverflowChecker::new(IntegerWidth::W32, true);
 /// let left = BV::from_i64(100, 32);
@@ -2123,10 +2072,8 @@ impl IntegerWidth {
 /// let no_overflow = checker.check_add_overflow(&left, &right);
 /// ```
 ///
-
 /// ## Performance
 ///
-
 /// Overflow checks add minimal overhead (<5ns per check) as they use Z3's
 /// native bitvector overflow predicates which are compiled to efficient
 /// bit-level operations.
@@ -2145,7 +2092,6 @@ impl BvOverflowChecker {
 
     /// Create a checker for a specific type name
     ///
-
     /// Automatically determines width and signedness from the type name.
     pub fn from_type_name(type_name: &str) -> Self {
         let width = IntegerWidth::from_type_name(type_name);
@@ -2165,11 +2111,9 @@ impl BvOverflowChecker {
 
     /// Check if addition of two bitvectors can overflow
     ///
-
     /// For signed integers, checks both positive and negative overflow.
     /// For unsigned integers, only checks for wrap-around overflow.
     ///
-
     /// Returns a Bool that is true if the addition does NOT overflow.
     pub fn check_add_overflow(&self, left: &BV, right: &BV) -> Bool {
         left.bvadd_no_overflow(right, self.signed)
@@ -2177,11 +2121,9 @@ impl BvOverflowChecker {
 
     /// Check if subtraction of two bitvectors can underflow
     ///
-
     /// For signed integers, checks for both underflow and overflow.
     /// For unsigned integers, checks for wrap-around underflow.
     ///
-
     /// Returns a Bool that is true if the subtraction does NOT underflow.
     pub fn check_sub_underflow(&self, left: &BV, right: &BV) -> Bool {
         left.bvsub_no_underflow(right, self.signed)
@@ -2189,11 +2131,9 @@ impl BvOverflowChecker {
 
     /// Check if subtraction of two bitvectors can overflow (signed only)
     ///
-
     /// This only applies to signed integers where a - b can overflow
     /// when both have opposite signs.
     ///
-
     /// Returns a Bool that is true if the subtraction does NOT overflow.
     pub fn check_sub_overflow(&self, left: &BV, right: &BV) -> Bool {
         left.bvsub_no_overflow(right)
@@ -2201,11 +2141,9 @@ impl BvOverflowChecker {
 
     /// Check if multiplication of two bitvectors can overflow
     ///
-
     /// For signed integers, checks both positive and negative overflow.
     /// For unsigned integers, checks for wrap-around overflow.
     ///
-
     /// Returns a Bool that is true if the multiplication does NOT overflow.
     pub fn check_mul_overflow(&self, left: &BV, right: &BV) -> Bool {
         left.bvmul_no_overflow(right, self.signed)
@@ -2213,11 +2151,9 @@ impl BvOverflowChecker {
 
     /// Check if multiplication of two bitvectors can underflow (signed only)
     ///
-
     /// This only applies to signed integers where negative * positive
     /// can result in a value too negative to represent.
     ///
-
     /// Returns a Bool that is true if the multiplication does NOT underflow.
     pub fn check_mul_underflow(&self, left: &BV, right: &BV) -> Bool {
         left.bvmul_no_underflow(right)
@@ -2225,11 +2161,9 @@ impl BvOverflowChecker {
 
     /// Check if negation of a bitvector can overflow
     ///
-
     /// For signed integers, the only overflow case is negating MIN_VALUE
     /// (e.g., negating -128 for i8 would require +128 which is out of range).
     ///
-
     /// Returns a Bool that is true if the negation does NOT overflow.
     pub fn check_neg_overflow(&self, val: &BV) -> Bool {
         val.bvneg_no_overflow()
@@ -2253,7 +2187,6 @@ impl BvOverflowChecker {
 
 /// Verification context for overflow checking
 ///
-
 /// Tracks type information and variable bindings needed to generate
 /// overflow verification conditions from arithmetic expressions.
 #[derive(Debug, Clone)]
@@ -2339,23 +2272,18 @@ impl OverflowVerificationContext {
 
 /// Overflow verification condition generator
 ///
-
 /// Generates Z3 bitvector overflow predicates for arithmetic expressions.
 /// Works with verum_ast expression types to extract overflow conditions.
 ///
-
 /// ## Example
 ///
-
 /// ```rust,ignore
 /// use verum_ast::{Expr, ExprKind, BinOp};
 /// use verum_smt::z3_backend::{OverflowVcGenerator, OverflowVerificationContext};
 ///
-
 /// let mut ctx = OverflowVerificationContext::new();
 /// let generator = OverflowVcGenerator::new();
 ///
-
 /// // For expression: x + y
 /// let conditions = generator.generate_overflow_vc(&expr, &ctx)?;
 /// for condition in conditions {
@@ -2378,11 +2306,9 @@ impl OverflowVcGenerator {
 
     /// Generate overflow verification conditions for an expression
     ///
-
     /// Recursively traverses the expression tree and generates no-overflow
     /// conditions for all arithmetic operations (+, -, *, unary -).
     ///
-
     /// Returns a list of Bool constraints, each representing a no-overflow
     /// condition that must hold for the expression to be overflow-safe.
     pub fn generate_overflow_vc(
@@ -2533,7 +2459,6 @@ impl OverflowVcGenerator {
 
     /// Convert an expression to a bitvector for overflow checking
     ///
-
     /// This creates symbolic bitvectors for variables and concrete ones for literals.
     fn expr_to_bv(
         &self,
@@ -2638,7 +2563,6 @@ impl OverflowVcGenerator {
 
     /// Infer signedness from an expression's context
     ///
-
     /// Attempts to determine if the expression operates on signed values.
     /// Falls back to context defaults if type cannot be determined.
     fn infer_signedness(
@@ -2670,7 +2594,6 @@ impl OverflowVcGenerator {
 
 /// Convenience function to check a single expression for overflow safety
 ///
-
 /// Returns true if all overflow conditions are satisfiable (i.e., overflow is possible),
 /// false if the expression is proven overflow-safe, or an error if checking failed.
 pub fn verify_no_overflow(

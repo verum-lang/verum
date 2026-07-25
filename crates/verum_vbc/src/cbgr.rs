@@ -62,14 +62,12 @@ pub use crate::types::CbgrTier;
 
 /// Code generation strategy for dereference operations.
 ///
-
 /// Describes HOW to generate code for dereferencing a reference,
 /// based on the tier decision from escape analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DereferenceCodegen {
     /// Inline CBGR validation (Tier 0 - Managed)
     ///
-
     /// Generates code that:
     /// 1. Loads current generation from allocation header
     /// 2. Compares with expected generation in reference
@@ -77,7 +75,6 @@ pub enum DereferenceCodegen {
     /// 4. Branches to panic on mismatch
     /// 5. Proceeds with dereference on success
     ///
-
     /// Overhead: ~15ns (5-7 instructions)
     InlineCbgrCheck {
         /// Expected generation (filled during codegen)
@@ -90,21 +87,17 @@ pub enum DereferenceCodegen {
 
     /// Direct pointer access (Tier 1 - Checked)
     ///
-
     /// Generates a single pointer load - no validation needed
     /// because the compiler proved this reference is safe.
     ///
-
     /// Overhead: 0ns (1 instruction)
     DirectAccess,
 
     /// Unchecked pointer access (Tier 2 - Unsafe)
     ///
-
     /// Generates a single pointer load with no metadata.
     /// Developer has provided proof of safety.
     ///
-
     /// Overhead: 0ns (1 instruction)
     UncheckedAccess,
 }
@@ -132,7 +125,6 @@ impl DereferenceCodegen {
 
     /// Create pending CBGR check strategy (values filled during codegen).
     ///
-
     /// Used during static analysis when generation/epoch values
     /// are not yet known. Values will be filled via `with_values()`.
     #[must_use]
@@ -199,7 +191,6 @@ impl DereferenceCodegen {
 
 /// Required capability for an operation.
 ///
-
 /// Capabilities are fine-grained permissions that can be checked
 /// at compile-time or runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -219,7 +210,6 @@ pub enum RequiredCapability {
 impl RequiredCapability {
     /// Get capability bit mask.
     ///
-
     /// Matches the bit layout in CBGR runtime:
     /// - Read: 0x01
     /// - Write: 0x02
@@ -326,7 +316,6 @@ impl CapabilityCheckCodegen {
 
 /// Combined dereference + capability check strategy.
 ///
-
 /// This represents the complete code generation decision for
 /// a reference operation, combining CBGR validation with
 /// capability checking.
@@ -419,7 +408,6 @@ impl CbgrDereferenceStrategy {
 
 /// Statistics for CBGR code generation.
 ///
-
 /// Tracks how many references of each tier were generated.
 #[derive(Debug, Clone, Default)]
 pub struct CbgrCodegenStats {

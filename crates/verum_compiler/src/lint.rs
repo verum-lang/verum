@@ -419,7 +419,6 @@ impl LintConfig {
 
     /// Parse lint settings from CLI flags.
     ///
-
     /// Accepts flags like:
     /// - `-D missing_intrinsic` (deny)
     /// - `-W intrinsic_deprecated` (warn)
@@ -464,7 +463,6 @@ impl LintConfig {
 
 /// Intrinsic diagnostics generator.
 ///
-
 /// Generates diagnostics for intrinsic-related errors and warnings
 /// according to the configured lint levels.
 pub struct IntrinsicDiagnostics<'a> {
@@ -479,7 +477,6 @@ impl<'a> IntrinsicDiagnostics<'a> {
 
     /// Generate diagnostic for missing intrinsic.
     ///
-
     /// Returns `None` if the lint is set to `Allow`.
     pub fn missing_intrinsic(&self, name: &str, span: Option<Span>) -> Option<Diagnostic> {
         let level = self.config.level_for(IntrinsicLint::MissingImplementation);
@@ -625,7 +622,6 @@ impl<'a> IntrinsicDiagnostics<'a> {
 
     /// Generate diagnostic for generic VBC codegen warning.
     ///
-
     /// This is used for general codegen errors that don't fit specific categories.
     pub fn codegen_warning(
         &self,
@@ -653,7 +649,6 @@ impl<'a> IntrinsicDiagnostics<'a> {
 
     /// Build a diagnostic with the given parameters.
     ///
-
     /// Note: Span information is included in the message text, not in the
     /// diagnostic metadata. This matches the original behavior in pipeline.rs
     /// and avoids the need to convert byte-offset spans to LineColSpan.
@@ -687,13 +682,10 @@ impl<'a> IntrinsicDiagnostics<'a> {
 
 /// Staged metaprogramming lint categories.
 ///
-
 /// These lints enforce the Stage Coherence Rule and other staged meta constraints.
 ///
-
 /// ## Diagnostic Codes
 ///
-
 /// ### Errors (E10xx)
 /// - E1001: Stage mismatch in quote expression
 /// - E1002: Cross-stage function call
@@ -701,7 +693,6 @@ impl<'a> IntrinsicDiagnostics<'a> {
 /// - E1004: Cyclic stage dependency
 /// - E1005: Invalid stage escape
 ///
-
 /// ### Warnings (W10xx)
 /// - W1001: Unused stage definition
 /// - W1002: Function can be downgraded to lower stage
@@ -709,46 +700,39 @@ impl<'a> IntrinsicDiagnostics<'a> {
 pub enum StagedMetaLint {
     /// E1001: Quote generates code for wrong stage.
     ///
-
     /// The Stage Coherence Rule requires that a Stage N function can only
     /// directly generate Stage N-1 code via `quote { ... }`.
     StageMismatch,
 
     /// E1002: Cross-stage function call.
     ///
-
     /// Higher stage functions cannot directly call lower stage functions.
     /// They must generate code that calls them.
     CrossStageCall,
 
     /// E1003: Stage overflow.
     ///
-
     /// The stage level exceeds the configured `max_stage` in Verum.toml.
     StageOverflow,
 
     /// E1004: Cyclic stage dependency.
     ///
-
     /// A circular dependency between staged functions would create
     /// an infinite compilation loop.
     CyclicStage,
 
     /// E1005: Invalid stage escape.
     ///
-
     /// The `$(stage N) { ... }` escape specifies an invalid stage.
     InvalidStageEscape,
 
     /// W1001: Unused stage definition.
     ///
-
     /// A `meta(N)` function is defined but never invoked during compilation.
     UnusedStage,
 
     /// W1002: Stage can be downgraded.
     ///
-
     /// A `meta(N)` function only generates code for Stage N-2 or lower,
     /// so it could be simplified to `meta(N-1)`.
     StageDowngrade,
@@ -860,7 +844,6 @@ impl StagedMetaLint {
 
 /// Staged meta diagnostics generator.
 ///
-
 /// Generates diagnostics for staged metaprogramming errors and warnings.
 /// Uses the same configuration approach as IntrinsicDiagnostics.
 pub struct StagedMetaDiagnostics<'a> {
@@ -910,7 +893,6 @@ impl<'a> StagedMetaDiagnostics<'a> {
 
     /// Generate diagnostic for stage mismatch (E1001).
     ///
-
     /// Emitted when `quote { ... }` generates code for the wrong stage.
     pub fn stage_mismatch(
         &self,
@@ -933,7 +915,6 @@ impl<'a> StagedMetaDiagnostics<'a> {
 
     /// Generate diagnostic for cross-stage call (E1002).
     ///
-
     /// Emitted when a higher stage function tries to call a lower stage function.
     pub fn cross_stage_call(
         &self,
@@ -955,7 +936,6 @@ impl<'a> StagedMetaDiagnostics<'a> {
 
     /// Generate diagnostic for stage overflow (E1003).
     ///
-
     /// Emitted when a function declares a stage higher than max_stage.
     pub fn stage_overflow(
         &self,
@@ -977,7 +957,6 @@ impl<'a> StagedMetaDiagnostics<'a> {
 
     /// Generate diagnostic for cyclic stage dependency (E1004).
     ///
-
     /// Emitted when staged functions form a cycle.
     pub fn cyclic_stage(&self, cycle: &[&str], span: Option<Span>) -> Diagnostic {
         let level = self.level_for(StagedMetaLint::CyclicStage);
@@ -994,7 +973,6 @@ impl<'a> StagedMetaDiagnostics<'a> {
 
     /// Generate diagnostic for invalid stage escape (E1005).
     ///
-
     /// Emitted when `$(stage N) { ... }` uses an invalid stage.
     pub fn invalid_stage_escape(
         &self,
@@ -1016,7 +994,6 @@ impl<'a> StagedMetaDiagnostics<'a> {
 
     /// Generate diagnostic for unused stage (W1001).
     ///
-
     /// Emitted when a `meta(N)` function is never invoked.
     pub fn unused_stage(
         &self,
@@ -1041,7 +1018,6 @@ impl<'a> StagedMetaDiagnostics<'a> {
 
     /// Generate diagnostic for stage downgrade opportunity (W1002).
     ///
-
     /// Emitted when a function could use a lower stage.
     pub fn stage_downgrade(
         &self,
@@ -1211,7 +1187,6 @@ mod tests {
 
 /// Stdlib-specific lint categories.
 ///
-
 /// Warnings in the W05xx range flag API calls that are
 /// technically correct but semantically hazardous — usually
 /// because they silently conflate two distinct domain cases
@@ -1292,12 +1267,10 @@ impl StdlibLint {
 
 /// Detect whether a call-site looks like `SOMETHING.get(KEY)`.
 ///
-
 /// Takes the method name and the receiver-type name (as the
 /// type-checker sees it). Returns `Some(StdlibLint::MapGetHazard)`
 /// when the two combine to the flagged shape, else `None`.
 ///
-
 /// We deliberately key on a string receiver-type name rather
 /// than a concrete `Type` value so this helper can be invoked
 /// from any AST-walker layer that has the receiver's name —
@@ -1305,7 +1278,6 @@ impl StdlibLint {
 /// stringly-typed receiver check is one `str::starts_with`;
 /// fast enough to run on every call-site.
 ///
-
 /// Accepts both `Map` and `Map<K, V>` forms.
 pub fn detect_stdlib_hazard(method_name: &str, receiver_type_name: &str) -> Option<StdlibLint> {
     if method_name != "get" {
@@ -1523,7 +1495,6 @@ mod stdlib_lint_tests {
 
 /// A W0505 finding produced by the AST walker.
 ///
-
 /// Carries the source span of the call-site so the diagnostic
 /// renderer can anchor the warning. The receiver-type-name
 /// information isn't available at pure AST level (only the
@@ -1545,24 +1516,19 @@ pub struct StdlibLintFinding {
 
 /// Walk a `Module` looking for stdlib-hazard method calls.
 ///
-
 /// Returns a list of `StdlibLintFinding`s — one per flagged
 /// site. Uses the existing AST `Visitor` trait so this walker
 /// never drifts from the AST's actual shape — a new expression
 /// variant added upstream is automatically traversed.
 ///
-
 /// # Coverage
 ///
-
 /// Currently flags only the W0505 `map_get_hazard` family.
 /// The walker descends into every expression position; the
 /// `Visitor` default `walk_expr` handles every variant.
 ///
-
 /// # Heuristic-only detection
 ///
-
 /// Without type info, the walker uses name-based matching on
 /// the receiver's Debug rendering: "contains `Map` but not
 /// `HashMap`/`BTreeMap`". Matches the `detect_stdlib_hazard`

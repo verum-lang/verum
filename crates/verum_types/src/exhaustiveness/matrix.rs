@@ -43,7 +43,6 @@ pub struct PatternRow {
     /// (`extract_guarded_patterns`) can consume real guard
     /// expressions instead of placeholder `true` literals.
     ///
-
     /// `None` when the row has no top-level guard. Note that
     /// `has_guard == true && guard.is_none()` is a valid state — it
     /// means the row carries a guard nested inside an or-pattern (or
@@ -845,7 +844,6 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
 
 /// Specialize the matrix for a specific constructor
 ///
-
 /// This filters rows that match the constructor and expands their sub-patterns.
 pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> CoverageMatrix {
     let mut specialized = CoverageMatrix::new(matrix.scrutinee_ty.clone());

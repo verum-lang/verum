@@ -58,28 +58,23 @@ pub enum ContractError {
 
 /// Parse a contract# literal into a structured ContractSpec.
 ///
-
 /// # Arguments
 /// * `literal_content` - The string content inside the contract# literal
 /// * `span` - Source span for error reporting
 ///
-
 /// # Returns
 /// * `Ok(ContractSpec)` if parsing succeeds
 /// * `Err(ContractError)` if parsing fails
 ///
-
 /// # Example
 /// ```ignore
 /// use verum_smt::contract::parse_contract_literal;
 /// use verum_common::Text;
 /// use verum_ast::Span;
 ///
-
 /// let content: Text = "requires x > 0; ensures result >= 0;".into();
 /// let spec = parse_contract_literal(&content, Span::dummy()).unwrap();
 ///
-
 /// assert_eq!(spec.preconditions.len(), 1);
 /// assert_eq!(spec.postconditions.len(), 1);
 /// ```
@@ -91,18 +86,15 @@ pub fn parse_contract_literal(literal_content: &Text, span: Span) -> ContractRes
 
 /// Verify a contract specification against a function body.
 ///
-
 /// This is the main entry point for contract verification. It translates the
 /// contract and function body to SMT, invokes the solver, and reports results.
 ///
-
 /// # Arguments
 /// * `context` - Z3 context for SMT solving
 /// * `spec` - The parsed contract specification
 /// * `function_body` - Optional expression representing the function body
 /// * `input_bindings` - Variable bindings for function parameters
 ///
-
 /// # Returns
 /// * `Ok(VerificationCost)` if verification succeeds
 /// * `Err(ContractError)` if verification fails
@@ -238,7 +230,6 @@ pub fn verify_contract(
 
 /// Extract contract literal from an expression.
 ///
-
 /// Checks if the expression is a contract# literal and returns its content.
 pub fn extract_contract_from_expr(expr: &Expr) -> Option<Text> {
     match &expr.kind {
@@ -252,7 +243,6 @@ pub fn extract_contract_from_expr(expr: &Expr) -> Option<Text> {
 
 /// Find all contract literals in a list of expressions.
 ///
-
 /// This is useful for extracting contracts from function annotations.
 pub fn find_contract_literals(exprs: &[Expr]) -> List<(Text, Span)> {
     exprs
@@ -263,7 +253,6 @@ pub fn find_contract_literals(exprs: &[Expr]) -> List<(Text, Span)> {
 
 /// Merge multiple contract specifications into one.
 ///
-
 /// This combines preconditions, postconditions, and invariants from
 /// multiple contract# literals into a single specification.
 pub fn merge_contracts(contracts: &[ContractSpec]) -> ContractSpec {
@@ -286,7 +275,6 @@ pub fn merge_contracts(contracts: &[ContractSpec]) -> ContractSpec {
 
 /// Validate a contract specification for semantic correctness.
 ///
-
 /// Checks for:
 /// - Use of `result` only in postconditions
 /// - Use of `old()` only in postconditions
@@ -389,7 +377,6 @@ fn contains_old(expr: &Expr) -> bool {
 
 /// Loop invariant verification
 ///
-
 /// Verifies that a loop invariant:
 /// 1. Holds before the loop (initialization)
 /// 2. Is preserved by the loop body (preservation)
@@ -605,7 +592,6 @@ pub fn verify_loop_invariant(
 
 /// Termination verification using ranking functions
 ///
-
 /// Verifies that a loop terminates by proving:
 /// 1. Ranking function is non-negative
 /// 2. Ranking function decreases on each iteration
@@ -784,33 +770,26 @@ pub fn verify_termination(
 
 /// Frame condition verification
 ///
-
 /// Verifies that a function only modifies variables in its modifies clause.
 /// All other variables should be unchanged.
 ///
-
 /// # Z3-Based Verification
 ///
-
 /// This implementation uses Z3 to verify frame conditions by:
 /// 1. Creating SMT variables for pre-state and post-state of each variable
 /// 2. Translating the function body to establish relationships between states
 /// 3. Asserting that variables NOT in the modifies clause remain unchanged
 /// 4. Checking for any counterexamples where a non-modified variable changes
 ///
-
 /// # Arguments
 ///
-
 /// * `context` - Z3 context for SMT solving
 /// * `modifies_vars` - Variables that the function is allowed to modify
 /// * `all_vars` - All variables in scope with their types
 /// * `function_body` - The function body expression to analyze
 ///
-
 /// # Returns
 ///
-
 /// * `Ok(VerificationCost)` if frame condition is satisfied (no unauthorized modifications)
 /// * `Err(ContractError)` if a variable outside the modifies clause could be changed
 pub fn verify_frame_condition(
@@ -927,12 +906,10 @@ pub fn verify_frame_condition(
 
 /// Extract variables that could possibly be modified by an expression
 ///
-
 /// This function performs a conservative analysis to identify variables
 /// that appear in assignment contexts (left-hand side of assignments,
 /// mutable references, etc.)
 ///
-
 /// The analysis is performed by walking the expression tree and looking for:
 /// 1. Assignment operators (=, +=, -=, etc.) with path expressions on the left
 /// 2. Method calls that are known to mutate (push, pop, insert, remove, etc.)
@@ -1027,17 +1004,14 @@ fn extract_modified_vars_impl(expr: &Expr, modified: &mut List<Text>) {
 
 /// Extract effects from a loop body for invariant preservation verification
 ///
-
 /// This function analyzes a loop body expression and extracts the effects
 /// (assignments) that modify state variables. Each effect is represented as
 /// a tuple of (variable_name, expression) where expression computes the new value.
 ///
-
 /// # Arguments
 /// * `loop_body` - The loop body expression to analyze
 /// * `state_vars` - The state variables that could be modified
 ///
-
 /// # Returns
 /// A list of (variable_name, effect_expression) pairs
 fn extract_loop_body_effects(

@@ -604,10 +604,8 @@ impl LifetimeAnalyzer {
 
     /// Perform lifetime analysis.
     ///
-
     /// Honours every config gate:
     ///
-
     /// * `infer_lifetimes` (default `true`) — gates Phase 1
     ///  (create lifetimes for every reference). Disabling it
     ///  skips Phase 1 entirely; downstream phases see an empty
@@ -626,7 +624,6 @@ impl LifetimeAnalyzer {
     ///  a one-line summary; consumers query the field via the
     ///  public `detailed_diagnostics()` accessor.
     ///
-
     /// Before this wire-up three of the four gates were inert —
     /// the fields existed and were configurable on `with_config`
     /// but `analyze` ignored them.

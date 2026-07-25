@@ -313,7 +313,6 @@ impl WarningCollector {
 
 /// Prelude shadowing checker.
 ///
-
 /// Checks if definitions shadow prelude items and generates warnings.
 #[derive(Debug)]
 pub struct PreludeShadowingChecker {
@@ -336,7 +335,6 @@ impl PreludeShadowingChecker {
 
     /// Register standard prelude items.
     ///
-
     /// This registers the common items from std.prelude.
     pub fn register_standard_prelude(&mut self) {
         // Types
@@ -374,7 +372,6 @@ impl PreludeShadowingChecker {
 
     /// Check if a name shadows a prelude item.
     ///
-
     /// Returns a warning if shadowing is detected.
     pub fn check_shadowing(
         &self,

@@ -19,7 +19,6 @@ use crate::SyntaxKind;
 
 /// Trivia represents non-semantic source elements.
 ///
-
 /// These are attached to tokens (leading or trailing) rather than stored
 /// as separate nodes in the syntax tree.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -47,7 +46,6 @@ pub enum DocCommentKind {
 
 /// Compact text storage for trivia content.
 ///
-
 /// For short trivia (most whitespace), we inline the text.
 /// For longer trivia (comments), we use heap allocation.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -236,7 +234,6 @@ impl fmt::Debug for Trivia {
 
 /// Compact storage for trivia lists.
 ///
-
 /// Most tokens have 0-2 trivia items attached, so we use SmallVec
 /// to avoid heap allocation for common cases.
 pub type TriviaList = SmallVec<[Trivia; 2]>;
@@ -287,11 +284,9 @@ impl TriviaListExt for TriviaList {
 
 /// Trivia attachment rules following Swift-style ownership.
 ///
-
 /// - Token owns TRAILING trivia up to (not including) next newline
 /// - Token owns LEADING trivia starting from first newline sequence
 ///
-
 /// This ensures that:
 /// - Comments on the same line stay with their token
 /// - Indentation belongs to the following token
@@ -306,7 +301,6 @@ pub enum TriviaPosition {
 
 /// Classifies a sequence of trivia characters into structured trivia items.
 ///
-
 /// This function parses raw source text and produces a list of trivia items.
 pub fn classify_trivia(text: &str) -> TriviaList {
     let mut result = TriviaList::new();
@@ -434,7 +428,6 @@ pub fn classify_trivia(text: &str) -> TriviaList {
 
 /// Split trivia into leading and trailing based on newline boundaries.
 ///
-
 /// Trailing trivia: everything up to (not including) the first newline
 /// Leading trivia: everything from the first newline onward
 pub fn split_trivia(trivia: TriviaList) -> (TriviaList, TriviaList) {

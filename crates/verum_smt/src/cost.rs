@@ -199,7 +199,6 @@ impl VerificationCost {
 
     /// Merge two verification costs
     ///
-
     /// Combines the duration and check counts, preserving the location
     /// and category of the first cost.
     pub fn merge(self, other: VerificationCost) -> Self {
@@ -301,7 +300,6 @@ pub struct CostMeasurement {
 impl CostMeasurement {
     /// Start measuring verification cost.
     ///
-
     /// The location is also used as the default category.
     pub fn start(location: impl Into<Text>) -> Self {
         let loc = location.into();

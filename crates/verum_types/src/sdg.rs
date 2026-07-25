@@ -72,7 +72,6 @@ impl Infinitesimal {
 /// A polynomial in one variable with f64 coefficients,
 /// stored low-to-high (index = degree).
 ///
-
 /// `[3.0, 2.0, 5.0]` represents `3 + 2x + 5x²`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolynomialMap {
@@ -129,7 +128,6 @@ impl PolynomialMap {
     /// term with `d^k` for `k > inf.order` is dropped — that is
     /// the Kock–Lawvere quotient).
     ///
-
     /// Returns the resulting polynomial in `d`, with coefficients
     /// `[f(x), f'(x), f''(x)/2!, ..., f^(k)(x)/k!]`.
     pub fn evaluate_at_perturbation(&self, x: f64, inf: Infinitesimal) -> List<f64> {

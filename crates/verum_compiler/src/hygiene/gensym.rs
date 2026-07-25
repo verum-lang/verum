@@ -44,7 +44,6 @@ impl GensymGenerator {
 
     /// Generate a new unique identifier
     ///
-
     /// The generated identifier is guaranteed to never conflict with
     /// user-written code.
     pub fn gensym(&self, base: &str) -> Text {
@@ -111,7 +110,6 @@ impl Clone for GensymGenerator {
 
 /// Suffix-based hygiene generator (legacy, for backward compatibility)
 ///
-
 /// This generates identifiers using the simpler `name__id` format
 /// used by the original HygieneContext.
 #[derive(Debug)]

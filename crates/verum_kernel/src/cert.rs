@@ -15,22 +15,18 @@ use crate::KernelError;
 
 /// A proof certificate produced by an SMT backend.
 ///
-
 /// The kernel consumes this via [`crate::replay_smt_cert`] and
 /// reconstructs a [`crate::CoreTerm`] witness. This is the primary
 /// mechanism that takes Z3 / CVC5 / E / Vampire / Alt-Ergo **out of
 /// the TCB**: a bug in a solver that produced a spurious "proof"
 /// will fail the replay here, not leak into accepted theorems.
 ///
-
 /// The certificate format is backend-neutral: each backend's native
 /// proof trace is normalized into the common shape by
 /// `verum_smt::proof_extraction` before landing here.
 ///
-
 /// # Envelope versioning
 ///
-
 /// `schema_version` identifies the certificate envelope format. The
 /// kernel rejects any certificate whose `schema_version` is greater
 /// than [`CERTIFICATE_SCHEMA_VERSION`] — this lets forward
@@ -39,10 +35,8 @@ use crate::KernelError;
 /// "legacy unversioned" for backward compatibility with pre-envelope
 /// certificates on disk.
 ///
-
 /// # Metadata
 ///
-
 /// `metadata` is a free-form key/value store for non-trust-relevant
 /// annotations (tactics used, solver options, timing, obligation
 /// provenance, …). The kernel never reads these fields — they are
@@ -82,7 +76,6 @@ pub struct SmtCertificate {
 
 /// Current SmtCertificate envelope schema version.
 ///
-
 /// Bump this constant whenever the envelope shape changes
 /// incompatibly. The kernel rejects any certificate whose
 /// `schema_version` exceeds this value, which gives tooling a clean
@@ -93,13 +86,11 @@ impl SmtCertificate {
     /// Construct a new certificate with the current schema version
     /// and [`verum_version`] filled in from the crate metadata.
     ///
-
     /// `created_at` is left empty; callers that want timestamps
     /// should populate them via [`with_created_at`] (the kernel
     /// crate is intentionally free of `chrono`/`std::time::SystemTime`
     /// dependencies to keep the TCB minimal).
     ///
-
     /// [`verum_version`]: Self::verum_version
     /// [`with_created_at`]: Self::with_created_at
     pub fn new(
@@ -138,7 +129,6 @@ impl SmtCertificate {
     /// Validate the envelope schema. Returns [`Err`] if the schema
     /// version is newer than this kernel build understands.
     ///
-
     /// Version `0` is accepted as "legacy unversioned" for backward
     /// compatibility with pre-1.0 on-disk certificates.
     pub fn validate_schema(&self) -> Result<(), KernelError> {

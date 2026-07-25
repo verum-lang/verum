@@ -412,11 +412,9 @@ impl OptimizationPhase {
 
     /// Run escape analysis pass
     ///
-
     /// Identifies NoEscape references for optimization opportunities.
     /// NoEscape references can have checks eliminated and use SBGL optimization.
     ///
-
     /// Escape analysis: determines which references can be promoted from
     /// Tier 0 (~15ns managed) to Tier 1 (0ns compiler-proven safe).
     /// SBGL analysis restricted to NoEscape references only (conservative).
@@ -705,14 +703,11 @@ impl OptimizationPhase {
 
     /// Apply SBGL optimization (Stack-Based Garbage-free Lists)
     ///
-
     /// **RESTRICTION**: SBGL optimization applies ONLY to NoEscape references.
     /// Escaping references cannot use SBGL as it would violate memory safety.
     ///
-
     /// Emits warnings for attempted SBGL on escaping references.
     ///
-
     /// SBGL analysis restricted to NoEscape references only (conservative).
     fn sbgl_optimization(
         &mut self,
@@ -766,11 +761,9 @@ impl OptimizationPhase {
 
     /// Eliminate proven-safe checks
     ///
-
     /// Uses static analysis to identify CBGR and bounds checks that
     /// are guaranteed to succeed, then eliminates them from the code.
     ///
-
     /// Typical elimination rate: 50-90% of checks
     /// CBGR check elimination: removes generation counter checks for
     /// references proven safe via escape analysis or SBGL.
@@ -933,7 +926,6 @@ impl OptimizationPhase {
 
     /// Try to evaluate array length as a constant
     ///
-
     /// Attempts to determine array length from:
     /// 1. Type information (MirType::Array has explicit size)
     /// 2. Constant definitions
@@ -980,7 +972,6 @@ impl OptimizationPhase {
 
     /// Try to get constant value from an operand
     ///
-
     /// Extracts integer constant values from operands for use in constant
     /// evaluation during bounds check elimination and loop analysis.
     fn try_const_operand(&self, operand: &Operand) -> Option<i64> {
@@ -993,7 +984,6 @@ impl OptimizationPhase {
 
     /// Find if a place is an induction variable
     ///
-
     /// Analyzes the loop structure to detect induction variables with patterns:
     /// - `i = init; while i < N { ... i = i + step }` (canonical form)
     /// - `for i in 0..N { ... }` (range iteration)
@@ -1236,11 +1226,9 @@ impl OptimizationPhase {
 
     /// Inline functions
     ///
-
     /// Performs aggressive function inlining based on cost model.
     /// In AOT mode, can inline across module boundaries.
     ///
-
     /// Cross-module inlining: inline functions across module boundaries in AOT.
     fn function_inlining(&mut self, modules: &mut [MirModule]) {
         tracing::debug!("Running function inlining pass");
@@ -1359,11 +1347,9 @@ impl OptimizationPhase {
 
     /// SIMD vectorization
     ///
-
     /// Auto-vectorizes loops for SIMD instructions (AVX2, AVX512, NEON).
     /// Only applies safety-preserving vectorizations.
     ///
-
     /// SIMD vectorization: auto-vectorize loops with safety-preserving transforms.
     fn vectorization(&mut self, func: &mut MirFunction) {
         tracing::debug!("Running SIMD vectorization for function: {}", func.name);
@@ -1447,7 +1433,6 @@ impl OptimizationPhase {
 
     /// Apply vectorized loop transformation to MIR
     ///
-
     /// Replaces the original loop with the vectorized version:
     /// 1. Creates preheader block for alignment prologue
     /// 2. Replaces loop body with vectorized statements
@@ -1916,7 +1901,6 @@ impl OptimizationPhase {
 
     /// Dead code elimination
     ///
-
     /// Removes unreachable code and unused definitions.
     fn dead_code_elimination(&mut self, func: &mut MirFunction) {
         tracing::debug!("Running dead code elimination for function: {}", func.name);
@@ -2374,14 +2358,12 @@ impl CompilationPhase for OptimizationPhase {
 
 /// Run all optimization passes on MIR modules using the full internal MIR structure
 ///
-
 /// **MAIN OPTIMIZATION ENTRY POINT** - This function implements the complete
 /// optimization pipeline on the full internal MIR representation with:
 /// - Functions, locals, basic blocks in SSA form
 /// - CFG (Control Flow Graph) structure
 /// - Complete type information
 ///
-
 /// Optimizations performed:
 /// - Escape analysis for CBGR reference classification
 /// - CBGR check elimination (50-90% typical)
@@ -2393,7 +2375,6 @@ impl CompilationPhase for OptimizationPhase {
 /// - Function inlining (O2+)
 /// - SIMD vectorization (O3)
 ///
-
 /// Called from:
 /// - OptimizationPhase::execute() via the pipeline orchestrator
 /// - mir_lowering.rs for early optimization before phase output

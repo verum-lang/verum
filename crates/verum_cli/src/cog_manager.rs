@@ -124,7 +124,6 @@ impl CogManager {
     /// install/update/remove/publish/yank operation so a crash
     /// doesn't lose audit history.
     ///
-
     /// Failures are logged via `tracing::warn!` — they don't
     /// propagate as `CliError` because audit persistence is a
     /// best-effort cross-cut, not a load-bearing primary
@@ -718,7 +717,6 @@ impl CogManager {
 
     /// Check git status for uncommitted changes
     ///
-
     /// Returns an error if there are uncommitted changes in the working directory.
     /// This prevents publishing cogs with local modifications.
     fn check_git_status(&self) -> Result<()> {

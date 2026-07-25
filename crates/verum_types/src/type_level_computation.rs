@@ -225,7 +225,6 @@ impl From<CommonTypeLevelError> for TypeLevelError {
 
 /// Type-level function definition
 ///
-
 /// Represents a function that computes types from values.
 /// These are defined with `fn name(params) -> Type = body`.
 #[derive(Debug, Clone, PartialEq)]
@@ -281,24 +280,19 @@ impl TypeLevelFunction {
 
 /// Type-level evaluator for dependent types
 ///
-
 /// This evaluator computes types from values, enabling dependent types where
 /// types can depend on runtime values (computed at compile-time).
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// use verum_types::type_level_computation::{TypeLevelEvaluator, TypeLevelFunction};
 /// use verum_types::ty::Type;
 /// use verum_ast::expr::{Expr, ExprKind};
 /// use verum_common::List;
 ///
-
 /// let mut eval = TypeLevelEvaluator::new();
 ///
-
 /// // Define: fn type_fn(b: bool) -> Type = if b then i32 else Text
 /// let type_fn = TypeLevelFunction::simple(
 ///  "type_fn".into(),
@@ -307,7 +301,6 @@ impl TypeLevelFunction {
 /// );
 /// eval.register_function(type_fn);
 ///
-
 /// // Compute type: type_fn(true) => i32
 /// let args = List::from(vec![true.into()]);
 /// let result = eval.apply_function(&"type_fn".into(), &args)?;
@@ -360,7 +353,6 @@ impl TypeLevelEvaluator {
 
     /// Create an evaluator with a specific [`TypeLevelConfig`].
     ///
-
     /// Honours `config.enable_cache` directly — when `false`, the
     /// `apply_function` cache lookup and store sites short-circuit
     /// so an embedder driving experimental type functions can
@@ -368,19 +360,16 @@ impl TypeLevelEvaluator {
     /// debugging non-pure type-level functions and for caching
     /// benchmarks).
     ///
-
     /// `max_depth` (#302) is load-bearing — `apply_function`
     /// caps recursion depth at this value and returns
     /// `RecursionLimitExceeded` on overflow rather than crashing
     /// the host with a Rust stack overflow.
     ///
-
     /// `reduction_strategy` and `smt_timeout_ms` remain
     /// forward-looking — surfaced via recipe-#8 tracing at
     /// construction so an operator's non-default value doesn't
     /// appear to silently take effect.
     ///
-
     /// Pre-fix the entire `TypeLevelConfig` was inert: the struct
     /// existed and had builders (`strict()` / `lazy()` /
     /// `with_max_depth` / `with_smt_timeout`) but the only
@@ -445,13 +434,10 @@ impl TypeLevelEvaluator {
 
     /// Apply a type-level function with the given arguments
     ///
-
     /// This evaluates `function_name(args)` to produce a type.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_types::type_level_computation::TypeLevelEvaluator;
     /// use verum_types::const_eval::ConstValue;
@@ -556,7 +542,6 @@ impl TypeLevelEvaluator {
 
     /// Evaluate an expression as a type
     ///
-
     /// This is the core of type-level computation. It evaluates expressions
     /// that produce types (conditionals, matches, constructor applications).
     pub fn eval_as_type(&mut self, expr: &Expr) -> Result<Type> {
@@ -716,7 +701,6 @@ impl TypeLevelEvaluator {
 
     /// Evaluate type-level conditional with new IfCondition/Block structure
     ///
-
     /// This handles the full IfCondition structure which supports:
     /// - Multiple conditions combined with &&
     /// - Let-pattern conditions for destructuring
@@ -794,7 +778,6 @@ impl TypeLevelEvaluator {
 
     /// Evaluate a block expression as a type
     ///
-
     /// For type-level computation, we only care about the final expression in the block.
     /// Statements in blocks are not meaningful at the type level.
     fn eval_block_as_type(&mut self, block: &verum_ast::expr::Block) -> Result<Type> {
@@ -923,7 +906,6 @@ impl TypeLevelEvaluator {
 
     /// Bind pattern variables to values, returning names that were bound
     ///
-
     /// Returns a list of (name, previous_value) tuples for proper scoping.
     fn bind_pattern(
         &mut self,
@@ -1008,7 +990,6 @@ impl TypeLevelEvaluator {
 
     /// Substitute meta parameters in a type with computed values
     ///
-
     /// This resolves all meta parameters in the type using the current
     /// value environment and type-level functions.
     pub fn substitute_meta(&mut self, ty: &Type) -> Result<Type> {
@@ -1118,7 +1099,6 @@ impl Default for TypeLevelEvaluator {
 
 /// Implementation of the unified TypeLevelComputation trait from verum_common
 ///
-
 /// This provides a standardized interface for type-level computation that
 /// can be used across the codebase. It wraps the existing TypeLevelEvaluator
 /// methods to conform to the common trait interface.
@@ -1180,7 +1160,6 @@ impl TypeLevelComputation for TypeLevelEvaluator {
 
 /// Type-level natural number operations
 ///
-
 /// These implement the standard Peano arithmetic operations at the type level.
 /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2
 pub mod nat {
@@ -1307,25 +1286,20 @@ pub mod meta {
 
 /// Type equality checking for dependent types
 ///
-
 /// This module provides functions for checking type equality in the presence
 /// of dependent types, where types may contain computed values.
 ///
-
 /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — (Equality Types)
 pub mod equality {
     use super::*;
 
     /// Check if two types are definitionally equal
     ///
-
     /// Two types are definitionally equal if they reduce to the same normal form.
     /// This is used for type checking dependent types.
     ///
-
     /// # Examples
     ///
-
     /// ```ignore
     /// use verum_types::type_level_computation::equality::types_equal;
     /// use verum_types::ty::Type;
@@ -1503,7 +1477,6 @@ pub mod equality {
 
     /// Check if two predicates are equivalent
     ///
-
     /// This checks if p1 ⟺ p2 (i.e., p1 implies p2 and p2 implies p1).
     /// We use a multi-layered approach:
     /// 1. Structural equality (fast path)
@@ -1536,7 +1509,6 @@ pub mod equality {
 
     /// Check semantic equivalence using SMT solver (stub after cycle-break).
     ///
-
     /// Previously delegated to `verum_smt::SubsumptionChecker` to check
     /// both directions `p1 ⇒ p2` and `p2 ⇒ p1`. The SMT path was moved
     /// out of `verum_types` to break the circular dependency with
@@ -1757,7 +1729,6 @@ pub mod equality {
 
     /// Convert an expression to an EqTerm for proof construction.
     ///
-
     /// This is a simplified conversion that handles common cases.
     /// For full conversion with type inference, use TypeChecker::expr_to_eq_term.
     fn expr_to_eq_term_simple(expr: &Expr) -> EqTerm {
@@ -1787,10 +1758,8 @@ pub mod equality {
 
     /// Create a proof of reflexivity: x = x
     ///
-
     /// Constructs `refl(x)` which proves `x = x` for any value x.
     ///
-
     /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — (lines 126-128)
     pub fn refl_proof(_ty: &Type, value: &Expr) -> EqTerm {
         // Convert the value to an EqTerm and wrap in Refl
@@ -1800,17 +1769,14 @@ pub mod equality {
 
     /// Create a proof of symmetry: x = y implies y = x
     ///
-
     /// Given a proof `p : x = y`, constructs a proof of `y = x` using
     /// the J eliminator (path induction).
     ///
-
     /// The proof works by:
     /// - motive P(a, _) = (a = x), where we want to prove y = x
     /// - base: refl(x) proves x = x (when the equality is reflexive)
     /// - J(p, motive, base) : y = x
     ///
-
     /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — (line 134)
     pub fn sym_proof(eq_proof: &EqTerm) -> EqTerm {
         // For symmetry, we use J eliminator:
@@ -1849,17 +1815,14 @@ pub mod equality {
 
     /// Create a proof of transitivity: x = y and y = z implies x = z
     ///
-
     /// Given proofs `p : x = y` and `q : y = z`, constructs a proof of `x = z`
     /// using the J eliminator.
     ///
-
     /// The proof works by eliminating on q:
     /// - motive P(a, _) = (x = a), where we want to show x = z
     /// - base: λa. λp. p -- identity, when q is refl, p : x = y = x = a
     /// - J(q, motive, base)(p) : x = z
     ///
-
     /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — (lines 135-136)
     pub fn trans_proof(eq1: &EqTerm, eq2: &EqTerm) -> EqTerm {
         // For transitivity, we eliminate on eq2 : y = z
@@ -1898,12 +1861,10 @@ pub mod equality {
 
 /// Arithmetic property proofs for type-level computation
 ///
-
 /// This module provides proofs of arithmetic properties that are used
 /// in dependent type checking. These are compile-time proofs that enable
 /// more precise type checking.
 ///
-
 /// Proofs are constructed using natural number induction, represented as:
 /// `nat_ind(motive, base, step, n)` where:
 /// - motive: the property being proven as a function of n
@@ -1911,14 +1872,12 @@ pub mod equality {
 /// - step: proof that motive(m) implies motive(Succ(m))
 /// - n: the natural number being inducted on
 ///
-
 /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 (lines 249-251)
 pub mod arithmetic_proofs {
     use super::*;
 
     /// Helper to construct a natural number induction proof term.
     ///
-
     /// nat_ind : Π(P: Nat -> Type). P(Zero) -> (Π(m: Nat). P(m) -> P(Succ(m))) -> Π(n: Nat). P(n)
     fn nat_induction(motive: EqTerm, base: EqTerm, step: EqTerm, n: EqTerm) -> EqTerm {
         EqTerm::App {
@@ -1976,14 +1935,12 @@ pub mod arithmetic_proofs {
 
     /// Proof that addition is commutative: plus(m, n) = plus(n, m)
     ///
-
     /// This is proven by induction on m:
     /// - Base case: plus(Zero, n) = n = plus(n, Zero) (requires plus_zero_right)
     /// - Inductive case: plus(Succ(m'), n) = Succ(plus(m', n))
     ///  = Succ(plus(n, m')) (by IH)
     ///  = plus(n, Succ(m')) (by plus_succ_right)
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 (lines 249-251)
     pub fn plus_comm_proof(m: &Type, n: &Type) -> Result<EqTerm> {
         if !is_nat_type(m) || !is_nat_type(n) {
@@ -2036,10 +1993,8 @@ pub mod arithmetic_proofs {
 
     /// Proof that addition is associative: plus(plus(m, n), p) = plus(m, plus(n, p))
     ///
-
     /// This is proven by induction on m.
     ///
-
     /// Implicit arguments and instance search for dependent types — .1 (line 529)
     pub fn plus_assoc_proof(m: &Type, n: &Type, p: &Type) -> Result<EqTerm> {
         if !is_nat_type(m) || !is_nat_type(n) || !is_nat_type(p) {
@@ -2204,7 +2159,6 @@ pub mod arithmetic_proofs {
 
     /// Proof that zero is the additive identity: plus(Zero, n) = n
     ///
-
     /// This is immediate by the definition of plus:
     /// plus(Zero, n) := n
     pub fn plus_zero_left_proof(n: &Type) -> Result<EqTerm> {
@@ -2223,7 +2177,6 @@ pub mod arithmetic_proofs {
 
     /// Proof that zero is the additive identity: plus(n, Zero) = n
     ///
-
     /// This requires induction since plus is defined by recursion on the first argument.
     pub fn plus_zero_right_proof(n: &Type) -> Result<EqTerm> {
         if !is_nat_type(n) {
@@ -2267,7 +2220,6 @@ pub mod arithmetic_proofs {
 
     /// Proof that one is the multiplicative identity: mult(1, n) = n
     ///
-
     /// Since mult(Succ(Zero), n) = plus(n, mult(Zero, n)) = plus(n, Zero) = n
     pub fn mult_one_left_proof(n: &Type) -> Result<EqTerm> {
         if !is_nat_type(n) {
@@ -2289,7 +2241,6 @@ pub mod arithmetic_proofs {
 
     /// Proof that one is the multiplicative identity: mult(n, 1) = n
     ///
-
     /// This requires induction on n.
     pub fn mult_one_right_proof(n: &Type) -> Result<EqTerm> {
         if !is_nat_type(n) {
@@ -2359,30 +2310,24 @@ pub mod arithmetic_proofs {
 
 /// Indexed types for length-indexed lists and bounded integers
 ///
-
 /// This module provides support for indexed types like Fin<n> and List<T, n>
 /// where the index is a compile-time value.
 ///
-
 /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .3 (lines 259-271)
 pub mod indexed {
     use super::*;
 
     /// Create a Fin<n> type - integers in range [0, n)
     ///
-
     /// Fin<n> is the type of natural numbers less than n, providing
     /// compile-time bounds checking for array indexing.
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// fn safe_index<T, n: meta Nat>(list: List<T, n>, i: Fin<n>) -> T
     /// ```
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .3 (lines 259-264)
     pub fn fin_type(n: usize) -> Type {
         // Create refined integer type: i: Int where 0 <= i && i < n
@@ -2398,10 +2343,8 @@ pub mod indexed {
 
     /// Create a length-indexed list type: List<T, n>
     ///
-
     /// This represents a list with exactly n elements of type T.
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 (lines 254-255)
     pub fn indexed_list_type(element_type: Type, length: usize) -> Type {
         Type::Generic {
@@ -2412,10 +2355,8 @@ pub mod indexed {
 
     /// Create a matrix type: Matrix<T, rows, cols>
     ///
-
     /// Represents a 2D array with compile-time dimensions.
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .1 (lines 225-227)
     pub fn matrix_type(element_type: Type, rows: usize, cols: usize) -> Type {
         Type::Generic {

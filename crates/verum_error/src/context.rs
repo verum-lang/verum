@@ -82,28 +82,22 @@ use verum_common::{List, Map, Text};
 
 /// Error with context chain
 ///
-
 /// Wraps an error with additional contextual information, allowing errors
 /// to accumulate context as they propagate up the call stack.
 ///
-
 /// Supports both text contexts (human-readable breadcrumbs) and structured
 /// contexts (machine-readable key-value pairs) for rich diagnostics.
 ///
-
 /// # Examples
 ///
-
 /// ```rust
 /// use verum_error::{VerumError, ErrorKind};
 /// use verum_error::context::{ErrorContext, ContextError};
 ///
-
 /// fn inner() -> Result<(), VerumError> {
 ///  Err(VerumError::io("connection refused"))
 /// }
 ///
-
 /// fn outer() -> Result<(), ContextError<VerumError>> {
 ///  inner().context("Failed to connect to database")?;
 ///  Ok(())
@@ -158,19 +152,15 @@ impl<E> ContextError<E> {
 
     /// Add a single structured context key-value pair
     ///
-
     /// This allows adding machine-readable data to the error for logging
     /// and monitoring systems.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::context::ContextError;
     ///
-
     /// let error = VerumError::new("Connection failed", ErrorKind::Network);
     /// let ctx_error = ContextError::new(error, "Failed to connect")
     ///  .add_structured("user_id", 12345)
@@ -188,23 +178,19 @@ impl<E> ContextError<E> {
 
     /// Add multiple structured context key-value pairs from a map
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_common::{Map, Text};
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::context::ContextError;
     /// use verum_error::structured_context::{ContextValue, ToContextValue};
     ///
-
     /// let error = VerumError::new("Error", ErrorKind::Other);
     /// let mut map: Map<Text, ContextValue> = Map::new();
     /// map.insert("key1".to_string().into(), 42.to_context_value());
     /// map.insert("key2".to_string().into(), "value".to_context_value());
     ///
-
     /// let ctx_error = ContextError::new(error, "Context")
     ///  .add_structured_map(map);
     /// ```
@@ -244,7 +230,6 @@ impl<E> ContextError<E> {
 
     /// Get all structured contexts
     ///
-
     /// Returns a reference to the map of structured context data.
     pub fn structured_contexts(&self) -> &Map<Text, ContextValue> {
         &self.structured_contexts
@@ -252,20 +237,16 @@ impl<E> ContextError<E> {
 
     /// Get a specific structured context value by key
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::context::ContextError;
     ///
-
     /// let error = VerumError::new("Error", ErrorKind::Other);
     /// let ctx_error = ContextError::new(error, "Context")
     ///  .add_structured("user_id", 12345);
     ///
-
     /// assert!(ctx_error.get_structured_context("user_id").is_some());
     /// assert_eq!(ctx_error.get_structured_context("user_id").unwrap().as_int(), Some(12345));
     /// ```
@@ -275,7 +256,6 @@ impl<E> ContextError<E> {
 
     /// Get all structured contexts from all layers of the context chain
     ///
-
     /// This merges structured contexts from all layers, with values from
     /// outer layers taking precedence over inner layers when keys conflict.
     pub fn all_structured_contexts(&self) -> Map<Text, ContextValue> {
@@ -330,14 +310,12 @@ impl<E: std::error::Error + 'static> std::error::Error for ContextError<E> {
 
 /// Extension trait for adding context to Results
 ///
-
 /// Provides ergonomic methods for adding context to error values:
 /// - `context()` - Static context string
 /// - `with_context()` - Lazy context via closure (zero-cost on success)
 pub trait ErrorContext<T, E> {
     /// Add static context to an error
     ///
-
     /// # Performance
     /// The context string is always evaluated, even on success.
     /// Use `with_context()` for expensive formatting.
@@ -345,21 +323,17 @@ pub trait ErrorContext<T, E> {
 
     /// Add lazy context to an error
     ///
-
     /// # Performance
     /// **Zero-cost on success path** - The closure is only called if there's an error.
     /// This is the preferred method for expensive formatting operations.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_common::Text;
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::context::ErrorContext;
     ///
-
     /// fn load_data(id: u64) -> Result<Text, verum_error::context::ContextError<VerumError>> {
     ///  Err(VerumError::new("Database error", ErrorKind::Database))
     ///  .with_context(|| format!("Failed to load data {}", id).into())
@@ -385,7 +359,6 @@ impl<T, E> ErrorContext<T, E> for Result<T, E> {
 
 /// Conversion from ContextError<E> to VerumError
 ///
-
 /// This allows ContextError chains to be converted to the unified VerumError type
 /// while preserving the context information in the error message.
 impl<E: fmt::Display> From<ContextError<E>> for VerumError {
@@ -408,7 +381,6 @@ impl<E: fmt::Display> From<ContextError<E>> for VerumError {
 
 /// Specialized context errors for different subsystems
 ///
-
 /// These provide domain-specific context with appropriate error kinds.
 /// Lexer context error
 pub type LexContextError = ContextError<VerumError>;

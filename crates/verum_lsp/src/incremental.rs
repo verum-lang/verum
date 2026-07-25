@@ -342,18 +342,14 @@ pub fn calculate_hash(text: &str) -> u64 {
 
 /// Find AST nodes affected by a change range
 ///
-
 /// # Arguments
 ///
-
 /// * `module` - The AST module to search
 /// * `changed_range` - The LSP range that changed
 /// * `text` - The source text for byte-offset to line/column conversion
 ///
-
 /// # Returns
 ///
-
 /// A vector of spans that overlap with the changed range
 pub fn find_affected_nodes(module: &Module, changed_range: Range, text: &str) -> Vec<Span> {
     let mut affected = Vec::new();
@@ -370,21 +366,16 @@ pub fn find_affected_nodes(module: &Module, changed_range: Range, text: &str) ->
 
 /// Check if a Verum span overlaps with an LSP range
 ///
-
 /// This function converts the byte-offset span to an LSP range and checks for overlap.
 ///
-
 /// # Arguments
 ///
-
 /// * `span` - The byte-offset span to check
 /// * `range` - The LSP range to check against
 /// * `text` - The source text for byte-offset to line/column conversion
 ///
-
 /// # Returns
 ///
-
 /// `true` if the span overlaps with the range, `false` otherwise
 fn span_overlaps_range(span: &Span, range: &Range, text: &str) -> bool {
     use verum_common::span_utils::lsp::span_to_lsp_range;
@@ -654,7 +645,6 @@ mod tests {
 
 /// A managed document with full incremental parsing support.
 ///
-
 /// This wraps `verum_parser::IncrementalDocument` for use in the LSP server,
 /// providing additional LSP-specific functionality like range conversion.
 #[derive(Debug)]

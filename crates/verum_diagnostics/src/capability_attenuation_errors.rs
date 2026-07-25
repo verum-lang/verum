@@ -60,15 +60,12 @@ pub mod error_codes {
 
 /// E0306: Capability Violation Error Builder
 ///
-
 /// This error occurs when a function attempts to use a capability that was not
 /// declared in its `using` clause. This is a security violation as it breaks
 /// the capability attenuation contract.
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// fn process_data() -> Result<()>
 ///  using [Database::Query]
@@ -214,15 +211,12 @@ impl CapabilityViolationError {
 
 /// E0307: Sub-Context Not Found Error Builder
 ///
-
 /// This error occurs when referencing a sub-context that doesn't exist in the
 /// context hierarchy. For example, `Database.Read` when `Database` only defines
 /// `Query` and `Execute` sub-contexts.
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// using [Database.Read] // E0307: Read not found in Database
 /// ```
@@ -328,15 +322,12 @@ impl SubContextNotFoundError {
 
 /// E0308: Capability Not Provided Error Builder
 ///
-
 /// This error occurs when a function requires a capability that has not been
 /// provided in the environment. The capability is declared in the `using` clause
 /// but no provider has been installed.
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// fn main() {
 ///  let data = read_file("data.txt")?; // E0308: FileSystem::Read not provided
@@ -436,14 +427,11 @@ impl CapabilityNotProvidedError {
 
 /// E0309: Partial Implementation Warning Builder
 ///
-
 /// This warning occurs when a context implementation only provides some of the
 /// sub-contexts, not all of them. This is allowed but should be documented.
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// implement FileSystem for ReadOnlyFS {
 ///  // Only implements Read, not Write or Admin

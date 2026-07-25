@@ -103,7 +103,6 @@ impl ImportOrigin {
 
 /// Provenance record stored alongside each glob-imported name.
 ///
-
 /// `module_path` keeps the original import source so the eviction
 /// warning can name both the loser and the winner.
 #[derive(Debug, Clone)]
@@ -124,7 +123,6 @@ impl ImportProvenance {
     /// provenance) be allowed to overwrite an existing entry whose
     /// provenance is `existing`?
     ///
-
     /// Rules:
     ///  - Strictly higher priority → overwrite.
     ///  - Strictly lower priority → preserve (return false).

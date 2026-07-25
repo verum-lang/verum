@@ -156,7 +156,6 @@ enum SmtRequest {
 /// Handle to the SMT worker thread. Clone freely — all clones talk to
 /// the same worker. `Send + Sync`.
 ///
-
 /// Internal channel is a `SyncSender` with a small bound so a runaway
 /// flood of validation requests applies back-pressure on the UI thread
 /// rather than growing memory.
@@ -169,7 +168,6 @@ impl SmtWorkerHandle {
     /// Spawn a dedicated OS thread that owns a `RefinementVerifier` and
     /// services `SmtRequest`s from the returned handle.
     ///
-
     /// The thread is named `verum-smt-worker` for visibility in profiler
     /// / `ps` output. It panics only if `std::thread::spawn` fails (OOM);
     /// the worker loop itself swallows verifier panics and returns
@@ -190,7 +188,6 @@ impl SmtWorkerHandle {
 
     /// Run an SMT refinement check against the worker.
     ///
-
     /// Returns [`SmtCheckResult::Unknown`] when the worker is gone
     /// (shutdown, panic) — the LSP server stays alive even if SMT dies.
     pub async fn verify_refinement(
@@ -218,7 +215,6 @@ impl SmtWorkerHandle {
 
     /// Run an SMT refinement check with an outer timeout.
     ///
-
     /// Distinct from the solver's own `smt_timeout`: this bounds the
     /// round-trip including queueing, so an unresponsive solver can't
     /// block `on-type` validation.

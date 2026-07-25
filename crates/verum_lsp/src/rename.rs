@@ -372,7 +372,6 @@ fn find_conflict(
 
 /// Prepare rename operation (check if renaming is valid)
 ///
-
 /// Returns the range and current name if renaming is possible,
 /// or None if the symbol cannot be renamed.
 pub fn prepare_rename(
@@ -514,7 +513,6 @@ pub fn rename_with_validation(
 
 /// Perform cross-file rename across the workspace
 ///
-
 /// This requires access to all documents in the workspace to find
 /// all references to the symbol across files.
 pub fn rename_cross_file(
@@ -572,7 +570,6 @@ pub fn rename_cross_file(
 
 /// Find the exact range of a word at a position.
 ///
-
 /// Delegates to `verum_common::text_utf8::find_word_bounds` for the
 /// UTF-8-safe walk; the previous implementation mixed byte offsets
 /// and char indices, silently mis-locating words in non-ASCII source

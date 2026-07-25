@@ -89,7 +89,6 @@ pub struct BitfieldStats {
 
 /// Bitfield code generation context.
 ///
-
 /// Provides LLVM IR generation for bitfield accessor methods.
 pub struct BitfieldLowering<'ctx> {
     /// LLVM context
@@ -156,14 +155,12 @@ impl<'ctx> BitfieldLowering<'ctx> {
 
     /// Generate code to extract a bitfield value.
     ///
-
     /// # Parameters
     /// - `container`: The loaded container value
     /// - `field`: The field specification
     /// - `layout`: The overall bitfield layout
     /// - `name`: Name for the resulting value
     ///
-
     /// # Returns
     /// The extracted field value, zero-extended to the field's natural type.
     pub fn build_field_get(
@@ -210,7 +207,6 @@ impl<'ctx> BitfieldLowering<'ctx> {
 
     /// Generate code to set a bitfield value.
     ///
-
     /// # Parameters
     /// - `container`: The loaded container value
     /// - `new_value`: The new field value to set
@@ -218,7 +214,6 @@ impl<'ctx> BitfieldLowering<'ctx> {
     /// - `layout`: The overall bitfield layout
     /// - `name`: Name for the resulting value
     ///
-
     /// # Returns
     /// The updated container value with the field modified.
     pub fn build_field_set(

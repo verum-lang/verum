@@ -176,7 +176,6 @@ use handlers::tensor_extended::handle_tensor_extended;
 
 /// Result of executing a single instruction handler.
 ///
-
 /// This enum allows handlers to communicate control flow decisions back to
 /// the dispatch loop without using exceptions or early returns.
 #[derive(Debug)]
@@ -194,7 +193,6 @@ pub enum DispatchResult {
 
 /// Handler function type for opcode dispatch.
 ///
-
 /// Each handler reads its operands from bytecode (via state), executes the
 /// operation, and returns a DispatchResult indicating what the loop should do.
 pub type Handler = fn(&mut InterpreterState) -> InterpreterResult<DispatchResult>;
@@ -205,14 +203,12 @@ pub type Handler = fn(&mut InterpreterState) -> InterpreterResult<DispatchResult
 
 /// Static dispatch table mapping opcode bytes to handler functions.
 ///
-
 /// This is a 256-entry array for O(1) lookup. Unimplemented opcodes map to
 /// `handle_not_implemented` which returns an appropriate error.
 pub static DISPATCH_TABLE: [Handler; 256] = build_dispatch_table();
 
 /// Builds the dispatch table at compile time.
 ///
-
 /// CRITICAL: Opcode mappings MUST match instruction.rs definitions exactly.
 /// See instruction.rs for the authoritative opcode layout.
 const fn build_dispatch_table() -> [Handler; 256] {
@@ -558,14 +554,11 @@ const fn build_dispatch_table() -> [Handler; 256] {
 
 /// Process a function return: pop frame, record stats, handle awaited tasks.
 ///
-
 /// This is the core return-handling logic used by Ret/RetV handlers and
 /// by the dispatch loop for implicit returns at end of function.
 ///
-
 /// # Task #18 — escaping-ref stabilisation
 ///
-
 /// `pop_frame` (called below) bumps the slot-generation of every
 /// register in the callee's frame.  If the returned `Value` is a CBGR
 /// register-slot ref whose encoded `abs_index` points INTO the callee's
@@ -574,7 +567,6 @@ const fn build_dispatch_table() -> [Handler; 256] {
 /// next `push_frame` reinitialises the slot to `Value::unit()`, so even
 /// a no-check variant would deref garbage.
 ///
-
 /// The fix: before pop_frame, detect this escape pattern and materialise
 /// the referenced value into a heap-allocated `Box<UnsafeCell<Value>>`
 /// cell stored on `state.escape_cells`.  Replace the returned `Value`
@@ -584,7 +576,6 @@ const fn build_dispatch_table() -> [Handler; 256] {
 /// before falling through to register-slot CBGR validation), and the
 /// slot's now-stale generation is never consulted.
 ///
-
 /// **String literals are not a special case** — `&"hello"` puts a
 /// SmallStr NaN-box into the freshly-`alloc_fresh`'d slot, then `Ref`
 /// encodes a CBGR register ref to that slot.  The stabilisation here
@@ -1219,7 +1210,6 @@ fn handle_not_implemented(_state: &mut InterpreterState) -> InterpreterResult<Di
 
 /// Optimized dispatch loop using function table.
 ///
-
 /// This is ~30-50% faster than match-based dispatch for hot loops
 /// due to better branch prediction and reduced code size.
 pub fn dispatch_loop_table(state: &mut InterpreterState) -> InterpreterResult<Value> {
@@ -1228,7 +1218,6 @@ pub fn dispatch_loop_table(state: &mut InterpreterState) -> InterpreterResult<Va
 
 /// Dispatch loop for nested/callback execution.
 ///
-
 /// This variant tracks the entry stack depth and returns when the stack depth
 /// falls back to the entry level after a return. This is essential for re-entrant
 /// execution (e.g., FFI callbacks, closure calls) where we want to return control

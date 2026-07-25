@@ -212,7 +212,6 @@ impl CvcStrategyCache {
 /// Extended problem characteristics including theory-specific flags needed
 /// for fine-grained routing decisions.
 ///
-
 /// This extends the base `ProblemCharacteristics` from `strategy_selection`
 /// with additional theory detection not exposed by Z3 probes alone.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -362,7 +361,6 @@ pub struct CapabilityRouter {
 impl CapabilityRouter {
     /// Create a new router with the given configuration.
     ///
-
     /// Automatically detects CVC5 availability at construction time.
     pub fn new(config: RouterConfig) -> Self {
         Self {
@@ -406,7 +404,6 @@ impl CapabilityRouter {
 
     /// Main entry point: decide which solver to use for a goal.
     ///
-
     /// Priority order:
     /// 1. If CVC5 is unavailable → Z3 only
     /// 2. If security-critical → cross-validate
@@ -479,7 +476,6 @@ impl CapabilityRouter {
 
     /// Determine if there's a clear theory winner for this goal.
     ///
-
     /// Returns `Some(winner)` when the goal falls into a theory where one
     /// solver is objectively better. Returns `None` when both solvers are
     /// competitive.

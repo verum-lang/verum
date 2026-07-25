@@ -84,7 +84,6 @@ impl<S: Into<String>> From<S> for CogName {
 /// `>=2, <3`) onto a `Ranges<Version>` requires evaluating the req
 /// against every concrete candidate version.
 ///
-
 /// The [`PubGrubBuilder`] collects every `(name, version)` pair the
 /// caller knows about, then materialises each `(name, req)` edge as
 /// a finite [`Ranges<Version>`] — the union of single-version
@@ -193,7 +192,6 @@ pub fn resolve(
 
 /// Internal adapter implementing PubGrub's [`DependencyProvider`].
 ///
-
 /// Reuses the [`pubgrub::OfflineDependencyProvider`] as the actual
 /// provider — it already implements every trait method correctly
 /// for the case where the dependency graph is fully known up front.
@@ -360,7 +358,6 @@ fn map_pubgrub_error(err: PubGrubError<VerumProvider>, provider: &VerumProvider)
 
 /// Map PubGrub's NoSolution derivation into a P4.3 VersionConflict.
 ///
-
 /// The full PubGrub derivation is a tree of incompatibilities; for
 /// the typed-error surface we summarise it to the (most recent)
 /// conflicted package and the requirement chain that touched it.

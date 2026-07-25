@@ -55,13 +55,11 @@ pub fn protocol_enabled() -> bool {
 
 /// Dump an SMT-LIB query to the configured directory.
 ///
-
 /// `prefix` names the caller (e.g. `"z3-obligation"` or
 /// `"cvc5-subgoal"`); the filename is
 /// `<prefix>-<counter>.smt2`. Silently no-ops when the env var
 /// is unset — safe to call unconditionally.
 ///
-
 /// Returns the path written to (for callers that want to log
 /// the location), or None if dumping is disabled / the write
 /// failed.

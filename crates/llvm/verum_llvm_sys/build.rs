@@ -92,13 +92,11 @@ fn has_llvm_config(dir: &Path) -> bool {
 
 /// Find LLVM installation directory
 ///
-
 /// Search order:
 /// 1. VERUM_LLVM_DIR environment variable (explicit override)
 /// 2. Local llvm/install/ directory — built automatically via
 ///  `llvm/build.sh` if missing.
 ///
-
 /// System LLVM is NOT used — we require our own build for
 /// consistency. Auto-invocation of `llvm/build.sh` keeps
 /// `cargo build` self-contained: a fresh checkout that lacks

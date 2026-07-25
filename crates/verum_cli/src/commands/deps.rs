@@ -11,7 +11,6 @@ static DEFAULT_REGISTRY_URL: &str = "https://vcogs.io";
 
 /// Add a dependency to the project manifest
 ///
-
 /// # Arguments
 /// * `name` - Package name to add
 /// * `version` - Optional version constraint (defaults to "*")
@@ -55,13 +54,11 @@ pub fn add(name: &str, version: Option<Text>, dev: bool, build: bool) -> Result<
 
 /// Remove a dependency from the project manifest
 ///
-
 /// # Arguments
 /// * `name` - Package name to remove
 /// * `dev` - Remove from dev dependencies only
 /// * `build` - Remove from build dependencies only
 ///
-
 /// If neither `dev` nor `build` is specified, removes from all sections.
 pub fn remove(name: &str, dev: bool, build: bool) -> Result<()> {
     let manifest_dir = Manifest::find_manifest_dir()?;

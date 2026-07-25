@@ -155,7 +155,6 @@ impl Default for UnsatCoreConfig {
 
 /// Unsat core extractor
 ///
-
 /// Note: In z3 0.19.4, Context is thread-local and doesn't need to be stored.
 pub struct UnsatCoreExtractor {
     /// Configuration
@@ -477,7 +476,6 @@ pub struct CoreAnalysis {
 
 /// Advanced core minimization strategies
 ///
-
 /// Note: In z3 0.19.4, Context is thread-local and doesn't need to be stored.
 pub struct CoreMinimizer;
 
@@ -601,14 +599,12 @@ impl CoreMinimizer {
 
 /// Simplifies unsat cores to make them more understandable
 ///
-
 /// After extracting an unsat core, we can simplify it to make error messages clearer:
 /// - Replace complex assertions with simpler equivalents
 /// - Merge related assertions
 /// - Identify root causes
 /// - Generate human-readable explanations
 ///
-
 /// Simplifies unsat cores for human-readable verification error messages.
 /// Identifies root cause constraints, merges related assertions, and generates
 /// explanations showing why a refinement predicate or contract could not be proven.
@@ -627,7 +623,6 @@ impl UnsatCoreSimplifier {
 
     /// Simplify an unsat core for better readability
     ///
-
     /// This applies various simplification strategies:
     /// 1. Formula simplification (remove redundant terms)
     /// 2. Grouping related assertions
@@ -717,7 +712,6 @@ impl UnsatCoreSimplifier {
 
     /// Identify root causes of unsatisfiability
     ///
-
     /// Attempts to find the "core of the core" - the minimal set of assertions
     /// that explain the conflict.
     fn identify_root_causes(&self, assertions: &List<TrackedAssertion>) -> List<RootCause> {
@@ -830,7 +824,6 @@ impl UnsatCoreSimplifier {
 
     /// Merge redundant assertions in a core
     ///
-
     /// If multiple assertions are logically equivalent or one implies another,
     /// keep only the strongest one.
     pub fn merge_redundant(&self, assertions: &List<TrackedAssertion>) -> List<TrackedAssertion> {

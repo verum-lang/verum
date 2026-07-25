@@ -28,26 +28,20 @@ use super::requirement::{ContextRef, ContextRequirement};
 
 /// Context group - a named set of contexts for reuse
 ///
-
 /// Context group expansion: resolving context group names to their constituent contexts recursively — Context Requirements
 ///
-
 /// Context groups provide a way to define reusable sets of contexts.
 /// This is particularly useful for cross-cutting concerns that are
 /// commonly used together.
 ///
-
 /// # Properties
 ///
-
 /// - **name**: The group name (e.g., "WebContext", "Observability")
 /// - **contexts**: List of contexts in this group
 /// - **doc_comment**: Optional documentation
 ///
-
 /// # Examples
 ///
-
 /// ```no_run
 /// use verum_types::di::group::ContextGroup;
 /// # use verum_types::di::requirement::ContextRef;
@@ -56,7 +50,6 @@ use super::requirement::{ContextRef, ContextRequirement};
 /// # let auth_ref = ContextRef::new("Auth".into(), std::any::TypeId::of::<()>());
 /// # let metrics_ref = ContextRef::new("Metrics".into(), std::any::TypeId::of::<()>());
 ///
-
 /// let web_context = ContextGroup::new(
 ///  "WebContext".into(),
 ///  vec![logger_ref, db_ref, auth_ref, metrics_ref]
@@ -76,7 +69,6 @@ pub struct ContextGroup {
 
 /// Registry of context groups for a module or program
 ///
-
 /// Stores all defined context groups and provides lookup functionality.
 #[derive(Debug, Clone, Default)]
 pub struct ContextGroupRegistry {
@@ -87,24 +79,19 @@ pub struct ContextGroupRegistry {
 impl ContextGroup {
     /// Create a new context group
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The group name
     /// * `contexts` - Iterator of context references
     ///
-
     /// # Examples
     ///
-
     /// ```no_run
     /// use verum_types::di::group::ContextGroup;
     /// # use verum_types::di::requirement::ContextRef;
     /// # let logger_ref = ContextRef::new("Logger".into(), std::any::TypeId::of::<()>());
     /// # let db_ref = ContextRef::new("Database".into(), std::any::TypeId::of::<()>());
     ///
-
     /// let group = ContextGroup::new(
     ///  "WebContext".into(),
     ///  vec![logger_ref, db_ref]
@@ -120,10 +107,8 @@ impl ContextGroup {
 
     /// Create an empty context group
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The group name
     pub fn empty(name: Text) -> Self {
         ContextGroup {
@@ -135,10 +120,8 @@ impl ContextGroup {
 
     /// Add a context to this group
     ///
-
     /// # Arguments
     ///
-
     /// * `context` - The context reference to add
     pub fn add_context(&mut self, context: ContextRef) {
         self.contexts.push(context);
@@ -161,10 +144,8 @@ impl ContextGroup {
 
     /// Check if this group contains a specific context
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The context name to check
     pub fn contains(&self, name: &str) -> bool {
         self.contexts.iter().any(|c| c.name.as_str() == name)
@@ -172,25 +153,19 @@ impl ContextGroup {
 
     /// Expand this group into a context requirement
     ///
-
     /// Converts the group into a ContextRequirement containing all contexts.
     ///
-
     /// # Returns
     ///
-
     /// A ContextRequirement with all contexts from this group
     ///
-
     /// # Examples
     ///
-
     /// ```no_run
     /// use verum_types::di::group::ContextGroup;
     /// # use verum_types::di::requirement::ContextRef;
     /// # let contexts = vec![];
     ///
-
     /// let group = ContextGroup::new("WebContext".into(), contexts);
     /// let requirement = group.expand();
     /// // requirement now contains all contexts from WebContext
@@ -206,15 +181,12 @@ impl ContextGroup {
 
     /// Validate this context group
     ///
-
     /// Checks:
     /// - At least one context in the group
     /// - No duplicate contexts
     ///
-
     /// # Returns
     ///
-
     /// `Ok(())` if valid, `Err(GroupError)` otherwise
     pub fn validate(&self) -> Result<(), GroupError> {
         // Must have at least one context
@@ -239,21 +211,16 @@ impl ContextGroup {
 
     /// Merge this group with another
     ///
-
     /// Creates a new group containing contexts from both groups.
     /// Duplicates are removed.
     ///
-
     /// # Arguments
     ///
-
     /// * `other` - The other group to merge
     /// * `new_name` - Name for the merged group
     ///
-
     /// # Examples
     ///
-
     /// ```no_run
     /// use verum_types::di::group::ContextGroup;
     /// # use verum_types::di::requirement::ContextRef;
@@ -261,7 +228,6 @@ impl ContextGroup {
     /// # let db = ContextRef::new("Database".into(), std::any::TypeId::of::<()>());
     /// # let auth = ContextRef::new("Auth".into(), std::any::TypeId::of::<()>());
     ///
-
     /// let web = ContextGroup::new("WebContext".into(), vec![logger, db]);
     /// let admin = ContextGroup::new("AdminContext".into(), vec![auth]);
     /// let combined = web.merge(&admin, "FullContext".into());
@@ -293,16 +259,12 @@ impl ContextGroupRegistry {
 
     /// Register a context group
     ///
-
     /// # Arguments
     ///
-
     /// * `group` - The group to register
     ///
-
     /// # Returns
     ///
-
     /// `Ok(())` if successful, `Err(GroupError)` if group name already exists
     pub fn register(&mut self, group: ContextGroup) -> Result<(), GroupError> {
         if self.groups.contains_key(&group.name) {
@@ -315,16 +277,12 @@ impl ContextGroupRegistry {
 
     /// Get a context group by name
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The group name
     ///
-
     /// # Returns
     ///
-
     /// `Some(&ContextGroup)` if found, `None` otherwise
     pub fn get(&self, name: &str) -> Maybe<&ContextGroup> {
         self.groups.get(&name.into()).and_then(Maybe::Some)
@@ -332,10 +290,8 @@ impl ContextGroupRegistry {
 
     /// Check if a group is registered
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The group name to check
     pub fn has_group(&self, name: &str) -> bool {
         self.groups.contains_key(&name.into())
@@ -343,16 +299,12 @@ impl ContextGroupRegistry {
 
     /// Expand a group into a context requirement
     ///
-
     /// # Arguments
     ///
-
     /// * `name` - The group name to expand
     ///
-
     /// # Returns
     ///
-
     /// `Ok(ContextRequirement)` if found, `Err(GroupError)` otherwise
     pub fn expand(&self, name: &str) -> Result<ContextRequirement, GroupError> {
         match self.get(name) {

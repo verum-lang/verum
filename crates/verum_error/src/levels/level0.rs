@@ -57,7 +57,6 @@ use verum_common::Text;
 
 /// Refinement constraint violation
 ///
-
 /// Indicates a refinement type predicate was not satisfied.
 /// This should be caught at compile-time by SMT verification.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -109,7 +108,6 @@ impl From<RefinementError> for VerumError {
 
 /// Affine type violation
 ///
-
 /// Indicates a value was used after being moved or used more than once.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Affine type violation: {message}")]
@@ -148,7 +146,6 @@ impl From<AffineError> for VerumError {
 
 /// Context requirement violation
 ///
-
 /// Indicates a function requiring a context was called without it.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Context requirement not satisfied: {context}")]

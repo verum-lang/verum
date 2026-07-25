@@ -166,7 +166,6 @@ impl LinearConstraint {
 /// a true RHS) OR the constraint set is *trivially unsatisfiable*
 /// (contains `0 = 1` or analogue) — discharging the goal `false ⇒ ⊥`.
 ///
-
 /// Future work: full Omega-test elimination; V2 promotion: full
 /// Cooper's algorithm for divisibility constraints.
 pub fn tactic_lia(constraints: &[LinearConstraint]) -> TacticOutcome {
@@ -390,7 +389,6 @@ impl UnionFind {
 /// V0 congruence tactic: given a list of input equalities and a target
 /// equation, decides whether the target is in the equational closure.
 ///
-
 /// current surface: equality-closure only (no congruence-closure on
 /// uninterpreted function applications); V1 promotion to full E-graph
 /// saturation.

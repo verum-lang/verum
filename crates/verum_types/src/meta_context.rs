@@ -83,11 +83,9 @@ use verum_common::{List, Set, Text};
 
 /// Compiler-provided meta contexts.
 ///
-
 /// These are the only contexts that can be used in `meta fn`.
 /// Each maps to a compiler intrinsic implementation.
 ///
-
 /// Spec: core/meta/contexts.vr
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetaContext {
@@ -186,10 +184,8 @@ impl MetaContext {
 
 /// Predefined context groups for convenience.
 ///
-
 /// Groups bundle related meta contexts for common use cases.
 ///
-
 /// Spec: core/meta/contexts.vr lines 2847-3102
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetaContextGroup {
@@ -415,7 +411,6 @@ pub enum MetaContextValidation {
 
 /// Validator for meta function context requirements.
 ///
-
 /// Ensures that `meta fn` only uses compiler-provided meta contexts.
 pub struct MetaContextValidator {
     /// Set of valid meta context names.
@@ -462,16 +457,12 @@ impl MetaContextValidator {
 
     /// Validate a list of context requirements for a meta function.
     ///
-
     /// # Arguments
     ///
-
     /// * `context_names` - List of context names from the `using` clause
     ///
-
     /// # Returns
     ///
-
     /// - `MetaContextValidation::Valid` if all contexts are valid meta contexts
     /// - `MetaContextValidation::Invalid` if any runtime contexts are used
     pub fn validate(&self, context_names: &[Text]) -> MetaContextValidation {

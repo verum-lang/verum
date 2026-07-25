@@ -38,7 +38,6 @@ use super::CompilationPipeline;
 impl<'s> CompilationPipeline<'s> {
     /// Lower a VBC module to LLVM IR.
     ///
-
     /// This is the core of the CPU compilation path. It translates VBC bytecode
     /// instructions to LLVM IR, applying tier-aware CBGR optimizations.
     pub(super) fn lower_vbc_to_llvm<'ctx>(
@@ -298,21 +297,16 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Analyze VBC module to determine compilation paths for each function.
     ///
-
     /// This phase analyzes the VBC bytecode to determine whether functions
     /// should be compiled via the CPU path (LLVM IR) or GPU path (MLIR).
     ///
-
     /// # Arguments
     ///
-
     /// * `vbc_module` - The VBC module to analyze
     /// * `target_config` - Target configuration (GPU availability, thresholds, etc.)
     ///
-
     /// # Returns
     ///
-
     /// Returns Ok(()) if all functions can be compiled, or an error if GPU
     /// compilation is required but unavailable.
     pub(super) fn analyze_compilation_paths(

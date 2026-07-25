@@ -10259,16 +10259,13 @@ pub(super) fn list_push(
 
 /// Dispatch built-in methods on variant types (Result, Maybe).
 ///
-
 /// Variant layout in data section: [tag:u32][field_count:u32][payload:Value * field_count]
 /// TypeId range 0x8000+ indicates variant objects.
 ///
-
 /// Conventions:
 ///  Result<T, E> = Ok(T) | Err(E) → Ok = tag 0, Err = tag 1
 ///  Maybe<T> = None | Some(T) → None = tag 0 (field_count=0), Some = tag 1
 ///
-
 /// `method_full` is the qualified call-site method name (e.g.
 /// `"Result.unwrap"` vs `"Maybe.unwrap"`). When it starts with
 /// `Result.` the dispatcher applies Result semantics — `unwrap`

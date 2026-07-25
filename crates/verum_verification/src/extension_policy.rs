@@ -133,7 +133,6 @@ impl EnabledExtensions {
     /// unioned (a function can opt out of an extension its
     /// module didn't take a position on).
     ///
-
     /// Conflict resolution: `@require_extension(vfe_X)` always
     /// wins over `@disable_extension(vfe_X)` for the same X
     /// in the same scope (the item is being explicit that it

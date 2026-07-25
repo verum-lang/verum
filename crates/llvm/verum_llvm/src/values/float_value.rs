@@ -26,10 +26,8 @@ pub struct FloatValue<'ctx> {
 impl<'ctx> FloatValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
-
     /// # Safety
     ///
-
     /// The ref must be valid and of type float.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
@@ -81,19 +79,15 @@ impl<'ctx> FloatValue<'ctx> {
 
     /// Determines whether or not a `FloatValue` is a constant.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f64_type = context.f64_type();
     /// let f64_val = f64_type.const_float(1.2);
     ///
-
     /// assert!(f64_val.is_const());
     /// ```
     pub fn is_const(self) -> bool {
@@ -102,19 +96,15 @@ impl<'ctx> FloatValue<'ctx> {
 
     /// Obtains a constant `FloatValue`'s value and whether or not it lost info.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f64_type = context.f64_type();
     /// let f64_1_2 = f64_type.const_float(1.2);
     ///
-
     /// assert_eq!(f64_1_2.get_constant(), Some((1.2, false)));
     /// ```
     pub fn get_constant(self) -> Option<(f64, bool)> {

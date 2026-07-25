@@ -78,7 +78,6 @@ use crate::ordinal::Ordinal;
 
 /// A Cartesian fibration `p : E → C` (HTT 3.1.1).
 ///
-
 /// **Algorithmic content **: the source `E`, target `C`, the
 /// functor's diagnostic name, and a witness flag asserting the
 /// Cartesian-lifting property. V0 trusts the flag; Future work will check
@@ -121,7 +120,6 @@ impl CartesianFibration {
 
 /// A p-Cartesian morphism `f : e' → e` in `E` (HTT 3.1.1.1).
 ///
-
 /// **Definition**: `f` is p-Cartesian iff for every `e'' ∈ E` and
 /// every `g : e'' → e` such that `p(g) = p(f) ∘ p(h)` for some
 /// `h : p(e'') → p(e')`, there exists a unique lift `g̃ : e'' → e'`
@@ -142,7 +140,6 @@ pub struct CartesianMorphism {
 
 /// Decide whether a morphism is p-Cartesian (HTT 3.1.1.1).
 ///
-
 /// V0 algorithmic surface: returns the witness flag stored on the
 /// `CartesianMorphism`. Future work: inspect the universal-property
 /// lift directly.
@@ -157,14 +154,11 @@ pub fn is_cartesian(_p: &CartesianFibration, f: &CartesianMorphism) -> bool {
 /// The Straightening / Unstraightening equivalence of ∞-categories
 /// (HTT 3.2.0.1).
 ///
-
 /// **Statement**: for every ∞-category `C`, there is an equivalence
 /// of ∞-categories
 ///
-
 ///  `St : coCart(C) ≃ Fun(C, ∞-Cat) : Un`
 ///
-
 /// where `coCart(C)` is the ∞-category of coCartesian fibrations
 /// over `C` and `Fun(C, ∞-Cat)` is the ∞-category of `C`-indexed
 /// ∞-categorical diagrams. The unstraightening `Un` is the
@@ -206,7 +200,6 @@ pub fn build_straightening_equivalence(c: &InfinityCategory) -> StraighteningEqu
 /// `C`-indexed diagram coincides with the ∞-Grothendieck
 /// construction shipped in [`crate::grothendieck`].
 ///
-
 /// This makes the Grothendieck construction the *concrete
 /// algorithmic content* of the unstraightening direction of the
 /// HTT 3.2.0.1 equivalence. current surface returns the constructed

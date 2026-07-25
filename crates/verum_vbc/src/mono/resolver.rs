@@ -172,7 +172,6 @@ impl Version {
 
     /// Checks if this version is compatible with another.
     ///
-
     /// Compatible means: same major version and other.minor >= self.minor.
     pub fn compatible_with(&self, other: &Version) -> bool {
         self.major == other.major && self.minor <= other.minor
@@ -185,7 +184,6 @@ impl Version {
 
 /// Resolver for generic instantiations.
 ///
-
 /// Implements a three-level resolution strategy:
 /// 1. Check stdlib precompiled specializations
 /// 2. Check persistent cache (with validation)
@@ -333,7 +331,6 @@ impl MonomorphizationResolver {
 
     /// Validates a cached specialization.
     ///
-
     /// Full validation includes:
     /// 1. Compiler version compatibility
     /// 2. Type definition hash match

@@ -197,14 +197,12 @@ fn aot_runs_weft_hello_world_without_bind() {
 /// Direct probe for the native Result combinator dispatch
 /// (task #12, fundamental fix in `vbc/interpreter`).
 ///
-
 /// Pre-fix the interpreter panicked with
 /// `Panic: method 'Result.map_err' not found on value` from
 /// `core/net/tcp.vr:321`. Post-fix `dispatch_variant_method`
 /// handles `map` / `map_err` / `and_then` / `or_else` natively
 /// (commits d7bc4628 + ad85fc4d), monomorphisation-free.
 ///
-
 /// Probe avoids OS dependencies — pure Result variant + closure
 /// work — so it is a clean acceptance gate for the dispatch path
 /// independent of any later runtime issues (#17).
@@ -293,7 +291,6 @@ fn interpreter_bind_pinned_known_failure() {
 
 /// Pinned regression for task #13 (AOT runtime helpers).
 ///
-
 /// Today the AOT path skips `env_ctx_*`, `os_mmap`,
 /// `os_alloc_segment`, `swap`, `get_thread_id` during VBC→LLVM
 /// lowering and the resulting binary segfaults (exit 139). Gated

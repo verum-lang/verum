@@ -463,7 +463,6 @@ fn universe_inhabits_successor() {
 
 /// Polymorphic identity: `λ (A : Type) (x : A). x : (A : Type) → A → A`.
 ///
-
 /// This is the canonical smoke test for Π-introduction + App-elim
 /// with capture-avoiding substitution. `infer` must return the
 /// exact Π-type (not a shape-head abstraction) so App can destructure.
@@ -669,14 +668,12 @@ fn verify_full_rejects_mismatched_type() {
 
 /// M-VVA Sub-2.3 (definitional_eq lifting, 2026-04-28).
 ///
-
 /// Pin the new behaviour: `verify_full` accepts a term whose inferred
 /// type is β-equivalent (but not structurally identical) to the
 /// expected type. Pre-fix this would have been rejected by
 /// `structural_eq`; post-fix the kernel's β-/ι-/δ-aware
 /// `definitional_eq_with_axioms` accepts the conversion.
 ///
-
 /// Construction: an identity lambda over Unit → Unit. We compare
 /// against an expected Π-type whose codomain is `(λT. T) Unit` —
 /// a β-redex that normalises to `Unit` but is NOT structurally equal
@@ -976,7 +973,6 @@ fn glue_rejects_non_universe_carrier() {
 
 /// `elim e motive cases : motive e` — shape-level Elim rule.
 ///
-
 /// Elim now requires motive's TYPE be a Π and scrutinee's type to match the Π's
 /// domain. Result remains the syntactic `App(motive, scrutinee)`
 /// (β-reduction is downstream's job; returning the codomain would

@@ -133,14 +133,12 @@ pub fn execute(
 
 /// Run VBC interpreted (Tier 0).
 ///
-
 /// Routes through the canonical `CompilationPipeline::run_interpreter`,
 /// which applies the same load_stdlib_modules / load_project_modules /
 /// safety_gate / type_check / dependency_analysis / verify (if SMT) /
 /// cbgr_analysis / phase_interpret_with_args sequence that
 /// `verum build` and `vtest` already share.
 ///
-
 /// **History**: this function previously rebuilt `VbcCodegen` +
 /// `Interpreter` in place from a manually-merged AST, bypassing
 /// every static-analysis phase. That made `verum run --tier 0`

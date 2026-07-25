@@ -952,10 +952,8 @@ fn generic_arg_to_lean_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
 /// classical extensions), so the cross-format gate gains a
 /// MLTT-side independent re-check the moment this backend lands.
 ///
-
 /// Surface conventions:
 ///
-
 ///  * Universe: `Set` (Agda's term for `Type`/`Prop`).
 ///  * Equality: `_≡_` (propositional equality from
 ///  `Relation.Binary.PropositionalEquality`).
@@ -1275,10 +1273,8 @@ fn generic_arg_to_agda_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
 /// hierarchy. Adding it brings classical HOL into the foundation
 /// matrix alongside CIC (Coq + Lean) and MLTT (Agda).
 ///
-
 /// Surface conventions:
 ///
-
 ///  * Equality: `=` (not `≡`).
 ///  * Logic: `∧` / `∨` / `⟶` / `⟷` (Isabelle uses Unicode HOL
 ///  symbols by default in modern Isabelle releases).
@@ -1574,10 +1570,8 @@ fn generic_arg_to_isabelle_text(arg: &verum_ast::ty::GenericArg) -> Option<Strin
 /// re-check artefacts emitted from any of the four upstream
 /// backends, providing a meta-validation pass.
 ///
-
 /// Surface conventions:
 ///
-
 ///  * Equality: `eq T x y` (encoded; no infix operator).
 ///  * Logic: `and` / `or` / `imp` / `iff` (named connectives in the
 ///  stdlib; no operator notation by default).

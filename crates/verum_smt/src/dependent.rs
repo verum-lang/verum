@@ -46,11 +46,9 @@ use crate::verify::{ProofResult, VerificationCost, VerificationError, Verificati
 
 /// Dependent function type: Pi(x: A) -> B(x)
 ///
-
 /// Represents a function type where the return type B can depend on the
 /// input value x. This is the foundation for dependent types.
 ///
-
 /// Examples:
 /// - replicate<T>(n: Nat) -> List<T, n> // Return type depends on n
 /// - make_vector<T>(n: Nat{> 0}) -> List<T, n> // With refinement
@@ -76,7 +74,6 @@ impl PiType {
 
     /// Check if return type actually depends on parameter
     ///
-
     /// Traverses the return type to determine if it references the parameter.
     pub fn is_dependent(&self) -> bool {
         self.type_references_name(&self.return_type, &self.param_name)
@@ -317,11 +314,9 @@ impl PiType {
 
 /// Dependent pair type: Sigma(x: A, B(x))
 ///
-
 /// Represents a pair where the type of the second component can depend on
 /// the value of the first component.
 ///
-
 /// Examples:
 /// - (n: Nat, List<T, n>) // Pair of natural n and list of length n
 /// - (success: Bool, if success then AST else Error) // Dependent pair
@@ -348,11 +343,9 @@ impl SigmaType {
 
 /// Equality type: Eq<A, x, y>
 ///
-
 /// Represents propositional equality between two values of type A.
 /// This is used in formal proofs.
 ///
-
 /// Propositional equality: `Eq<A, x, y>` with reflexivity `refl<A, x> : Eq<A, x, x>`,
 /// symmetry, transitivity, and substitution principle `subst(eq, px) -> P(y)`.
 #[derive(Debug, Clone)]
@@ -377,7 +370,6 @@ impl EqualityType {
 
     /// Check if this is a reflexive equality (x = x)
     ///
-
     /// Performs structural equality check on expressions.
     pub fn is_reflexive(&self) -> bool {
         self.exprs_equal(&self.lhs, &self.rhs)
@@ -489,11 +481,9 @@ impl EqualityType {
 
 /// SMT backend support for dependent types
 ///
-
 /// This provides the infrastructure for verifying dependent type constraints
 /// using Z3's advanced features.
 ///
-
 /// SMT backend for verifying dependent type constraints using Z3's quantifiers,
 /// custom theories, and bounded proof search with configurable depth limits.
 pub struct DependentTypeBackend {
@@ -515,12 +505,10 @@ impl DependentTypeBackend {
 
     /// Verify a Pi type constraint
     ///
-
     /// Checks that a function with type (x: A) -> B(x) is well-typed.
     /// This involves verifying that for all valid inputs of type A,
     /// the output has type B(x).
     ///
-
     /// Pi type verification: `(x: A) -> B(x)`. The return type B may depend on the
     /// input value x. Verifies well-formedness of B under the binding of x, checks
     /// refinement predicates are non-contradictory, and enforces quantifier depth limits.
@@ -580,10 +568,8 @@ impl DependentTypeBackend {
 
     /// Verify a Sigma type constraint
     ///
-
     /// Checks that a dependent pair (x: A, B(x)) is well-typed.
     ///
-
     /// Sigma type verification: `(x: A, B(x))`. The type of the second component
     /// depends on the value of the first. Refinement types desugar to sigma types:
     /// `Int{> 0}` becomes `(n: Int, Proof(n > 0))`.
@@ -646,10 +632,8 @@ impl DependentTypeBackend {
 
     /// Verify an equality type
     ///
-
     /// Checks propositional equality using Z3's built-in equality.
     ///
-
     /// Equality type verification: `Eq<A, x, y>` checks propositional equality
     /// using Z3's built-in equality. Both sides must have the same Z3 sort.
     pub fn verify_equality(
@@ -718,7 +702,6 @@ impl DependentTypeBackend {
 
     /// Get the sort name for a Dynamic Z3 value
     ///
-
     /// This is a helper for error messages when types don't match.
     fn get_sort_name(value: &Dynamic) -> &'static str {
         if value.as_int().is_some() {
@@ -766,11 +749,9 @@ impl DependentTypeBackend {
 
     /// Verify Fin type constraint: value < bound
     ///
-
     /// The Fin<n> type represents natural numbers less than n.
     /// This method verifies that a value satisfies the Fin constraint.
     ///
-
     /// Fin<n> type verification: bounded natural numbers `0 <= value < bound`.
     /// Fin types enable safe indexing: `index(list: List<T, n>, i: Fin<n>) -> T`.
     pub fn verify_fin_type(
@@ -909,7 +890,6 @@ impl DependentTypeBackend {
 
     /// Register a custom SMT theory
     ///
-
     /// Register a custom SMT theory with named sorts, functions, and axioms.
     /// Example: BitVector theory with `bv_add`, `bv_mul`, `bv_and` and commutativity axiom.
     pub fn register_theory(&mut self, theory: CustomTheory) {
@@ -1285,7 +1265,6 @@ impl DependentTypeBackend {
 
     /// Check for circular dependencies between types
     ///
-
     /// Uses Tarjan's strongly connected components algorithm to detect cycles
     /// in the type dependency graph. This ensures mutual recursion is properly
     /// detected and reported.
@@ -1309,7 +1288,6 @@ impl DependentTypeBackend {
 
     /// Detect all circular dependencies in a type
     ///
-
     /// Returns a list of cycles found, with each cycle represented as a list
     /// of type names involved in the cycle.
     pub fn detect_circular_dependencies(&self, ty: &Type) -> List<List<Text>> {
@@ -1320,7 +1298,6 @@ impl DependentTypeBackend {
 
     /// Check circular dependencies for inductive types
     ///
-
     /// Verifies that an inductive type definition doesn't have circular
     /// dependencies that would make it ill-formed.
     pub fn check_inductive_cycles(&self, inductive: &InductiveType) -> Result<(), Text> {
@@ -1516,14 +1493,12 @@ pub enum DependentGoal {
 impl DependentTypeBackend {
     /// Unified entry point for dependent-type verification.
     ///
-
     /// Dispatches to the appropriate verifier based on the goal kind:
     /// - `DependentGoal::Pi` → `verify_pi_type`
     /// - `DependentGoal::Sigma` → `verify_sigma_type`
     /// - `DependentGoal::Equality` → `verify_equality`
     /// - `DependentGoal::Fin` → `verify_fin_type`
     ///
-
     /// This is the single entry point that downstream code (e.g.,
     /// `verum_verification`) should call for dependent-type
     /// verification goals.
@@ -1545,7 +1520,6 @@ impl DependentTypeBackend {
 
 /// Graph structure for tracking type dependencies
 ///
-
 /// Used for circular dependency detection using Tarjan's SCC algorithm.
 /// Nodes represent types, edges represent dependencies.
 #[derive(Debug)]
@@ -1836,7 +1810,6 @@ impl TypeDependencyGraph {
 
     /// Tarjan's strongly connected components algorithm
     ///
-
     /// Returns a list of SCCs, where each SCC is a list of node IDs.
     fn tarjan_scc(&self) -> List<List<usize>> {
         let mut state = TarjanState::new();
@@ -1938,29 +1911,24 @@ impl TarjanState {
 
 /// Extension trait for Translator to support dependent types
 ///
-
 /// This trait provides scope management for dependent type checking,
 /// enabling variable bindings to be properly scoped during type elaboration.
 ///
-
 /// Enables scoped variable bindings for Pi type `(x: A) -> B(x)` and Sigma type
 /// `(x: A, B(x))` verification, where inner types depend on outer bindings.
 pub trait TranslatorExt<'ctx> {
     /// Clone for a new scope (needed for dependent type checking)
     ///
-
     /// Creates a new translator that shares the same Z3 context but has its
     /// own copy of the bindings. This allows binding new variables in inner
     /// scopes without affecting the outer scope.
     ///
-
     /// The cloned translator inherits all existing bindings from the parent
     /// scope, enabling proper variable shadowing semantics.
     fn clone_for_scope(&self) -> Translator<'ctx>;
 
     /// Create a child scope with additional bindings
     ///
-
     /// This is a convenience method that clones the translator and adds
     /// new bindings in one step.
     fn with_binding(&self, name: Text, value: Dynamic) -> Translator<'ctx>;
@@ -2010,11 +1978,9 @@ impl<'ctx> TranslatorExt<'ctx> for Translator<'ctx> {
 
 /// Custom SMT theory for domain-specific verification
 ///
-
 /// Allows defining custom sorts, functions, and axioms for specific
 /// domains (e.g., bit-vectors, arrays, algebraic data types).
 ///
-
 /// Custom SMT theories allow domain-specific sorts, functions, and axioms.
 /// Example: `theory BitVector { sort BV<n>; function bv_add(BV<n>, BV<n>): BV<n>; }`
 #[derive(Debug, Clone)]
@@ -2080,11 +2046,9 @@ pub struct CustomFunction {
 
 /// Proof term for formal verification
 ///
-
 /// Represents a constructive proof that can be checked independently.
 /// This is the foundation for proof-carrying code.
 ///
-
 /// Proof terms are first-class values: `type Proof<P: Prop> is evidence of P`.
 /// Constructors include reflexivity, symmetry, transitivity, modus ponens,
 /// conjunction intro/elim, and assumption. Enables proof-carrying code.
@@ -2115,7 +2079,6 @@ impl ProofTerm {
 
     /// Verify the proof term is well-formed
     ///
-
     /// Performs structural validation of the proof term:
     /// - No circular dependencies in proof structure
     /// - All referenced dependencies exist
@@ -2182,7 +2145,6 @@ impl ProofTerm {
 
 /// Proof structure
 ///
-
 /// Represents the actual proof construction using proof rules.
 #[derive(Debug, Clone)]
 pub enum ProofStructure {
@@ -2230,7 +2192,6 @@ pub enum ProofStructure {
 
 /// Quantifier handler for first-class ∀ and ∃ support
 ///
-
 /// Handles first-class universal and existential quantifiers for dependent types.
 /// Type-level functions compute types from values (e.g., `matrix_type(rows, cols) -> Type`).
 /// Automated proof search uses strategies: assumption, reflexivity, intro, split, apply,
@@ -2250,7 +2211,6 @@ impl QuantifierHandler {
 
     /// Add trigger pattern for quantifier instantiation
     ///
-
     /// Trigger patterns guide Z3's E-matching algorithm for quantifier
     /// instantiation, crucial for performance.
     pub fn add_pattern(&mut self, quantifier: Text, pattern: TriggerPattern) {
@@ -2271,7 +2231,6 @@ impl Default for QuantifierHandler {
 
 /// Trigger pattern for E-matching
 ///
-
 /// Patterns tell Z3 when to instantiate a quantified variable.
 #[derive(Debug, Clone)]
 pub struct TriggerPattern {
@@ -2303,10 +2262,8 @@ impl TriggerPattern {
 
 /// Proof certificate for independent verification
 ///
-
 /// Generates machine-checkable proofs that can be verified by other tools.
 ///
-
 /// Generates machine-checkable certificates in Dedukti, Coq, Lean, OpenTheory, or
 /// Metamath format. Each certificate includes axioms, definitions, proof terms, and
 /// checksums for independent verification by external proof checkers.
@@ -2362,7 +2319,6 @@ impl ProofCertificateGenerator {
 
     /// Encode proof in target format
     ///
-
     /// Encodes proof structures according to the target certificate format.
     /// Each proof rule is translated to its corresponding notation:
     /// - Refl: Reflexivity proof
@@ -2424,7 +2380,6 @@ impl ProofCertificateGenerator {
 
     /// Compute checksum for certificate integrity verification
     ///
-
     /// Uses a simple hash based on theorem content for deterministic verification.
     /// In production, this would use SHA-256 or similar cryptographic hash.
     fn compute_checksum(&self, theorems: &[CertificateTheorem]) -> Text {
@@ -2516,11 +2471,9 @@ pub enum CertificateError {
 
 /// Universe level in the type hierarchy
 ///
-
 /// Universe levels: concrete (0, 1, 2, ...), variable (for polymorphism),
 /// max (for type formers), succ (successor). Cumulativity: Type_i <: Type_(i+1).
 ///
-
 /// Universe levels can be:
 /// - Concrete: specific natural number (0, 1, 2, ...)
 /// - Variable: level variable for universe polymorphism
@@ -2643,7 +2596,6 @@ impl PartialOrd for UniverseLevel {
 
 /// Universe constraint for level inference
 ///
-
 /// Constraints generated during type checking to ensure
 /// universe consistency.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2678,7 +2630,6 @@ impl UniverseConstraint {
 
 /// Universe constraint solver
 ///
-
 /// Solves universe constraints to determine level assignments.
 pub struct UniverseConstraintSolver {
     /// Collected constraints
@@ -2718,7 +2669,6 @@ impl UniverseConstraintSolver {
 
     /// Solve constraints using iterative refinement
     ///
-
     /// Returns Ok(()) if constraints are satisfiable, Err with message otherwise.
     pub fn solve(&mut self) -> Result<(), Text> {
         // Collect all variables
@@ -2875,12 +2825,10 @@ impl Default for UniverseConstraintSolver {
 
 /// Inductive type definition
 ///
-
 /// Inductive types: `inductive Nat : Type { zero : Nat, succ : Nat -> Nat }`.
 /// Indexed: `inductive List<A> : Nat -> Type { nil : List<A, 0>, cons : ... }`.
 /// Induction principle automatically derived from constructor signatures.
 ///
-
 /// Supports:
 /// - Parameterized inductive types (List<T>)
 /// - Indexed inductive types (Vec<T, n>)
@@ -2951,7 +2899,6 @@ impl InductiveType {
     /// Finalise the inductive type — populate the induction + recursion
     /// principles from the current constructor set.
     ///
-
     /// This is the builder's terminal call. Previously, callers had to
     /// invoke `generate_induction_principle()` manually *after*
     /// assembling the type, and the `recursion_principle` field was
@@ -2962,11 +2909,9 @@ impl InductiveType {
     /// carried `Maybe::None` for both principles and the `induction`
     /// tactic silently failed to find an induction scheme.
     ///
-
     /// `finalize` closes that gap: call it at the end of the builder
     /// chain and both principles are guaranteed to be in place.
     ///
-
     /// ```ignore
     /// let nat = InductiveType::new(Text::from("Nat"))
     ///  .with_constructor(zero_ctor)
@@ -2975,7 +2920,6 @@ impl InductiveType {
     /// assert!(nat.induction_principle.is_some());
     /// ```
     ///
-
     /// The recursion principle is generated from the induction
     /// principle by replacing the motive's type with a concrete return
     /// type (for now, the target type T itself — full dependent
@@ -2990,14 +2934,12 @@ impl InductiveType {
 
     /// Populate `recursion_principle` from the constructor set.
     ///
-
     /// The recursion principle is the non-dependent specialisation of
     /// the induction principle — where the induction principle's
     /// motive `P : T -> Type` ranges over all type-valued predicates,
     /// the recursion principle fixes a concrete return type `R` and
     /// provides a `T -> R` recursor:
     ///
-
     /// ```verum
     /// fn nat_rec<R>
     ///  (base: R)
@@ -3005,7 +2947,6 @@ impl InductiveType {
     ///  (n: Nat) -> R
     /// ```
     ///
-
     /// For the bring-up phase we derive the recursion principle by
     /// reusing the induction-principle generator and treating it as a
     /// structural template. Full specialisation to `R`-parameterised
@@ -3031,7 +2972,6 @@ impl InductiveType {
 
     /// Generate the induction principle for this type
     ///
-
     /// For a type like:
     /// ```verum
     /// inductive Nat : Type {
@@ -3040,7 +2980,6 @@ impl InductiveType {
     /// }
     /// ```
     ///
-
     /// Generates:
     /// ```verum
     /// fn nat_ind<P: Nat -> Type>
@@ -3314,11 +3253,9 @@ impl InductiveType {
 
     /// Check strict positivity of type occurrences
     ///
-
     /// Ensures the type being defined only appears in strictly positive
     /// positions in constructor arguments, preventing non-termination.
     ///
-
     /// This is crucial for soundness: negative occurrences allow encoding
     /// Russell's paradox, leading to logical inconsistency.
     pub fn check_strict_positivity(&self) -> Result<(), Text> {
@@ -3561,7 +3498,6 @@ impl ConstructorArg {
 
 /// Coinductive type definition
 ///
-
 /// Coinductive types defined by destructors (observations) rather than constructors.
 /// Productivity checker ensures corecursive definitions make progress.
 #[derive(Debug, Clone)]
@@ -3622,7 +3558,6 @@ impl Destructor {
 
 /// Higher Inductive Type definition
 ///
-
 /// HITs have both point constructors (like regular inductive types)
 /// and path constructors (equality proofs between points).
 #[derive(Debug, Clone)]
@@ -3674,7 +3609,6 @@ impl HigherInductiveType {
 
 /// Path constructor for HITs
 ///
-
 /// Represents an equality between two terms.
 #[derive(Debug, Clone)]
 pub struct PathConstructor {
@@ -3723,7 +3657,6 @@ pub struct HigherPathConstructor {
 
 /// Resource quantity for quantitative type theory
 ///
-
 /// Usage quantities: `0` (erased, compile-time only), `1` (linear, use exactly once),
 /// `omega` (unrestricted, use any number of times). Graded modalities enable
 /// resource tracking: `fn linear_use(x: Text @1) -> Text @1`.
@@ -3743,7 +3676,6 @@ pub use verum_types::ty::Quantity;
 
 /// Quantified type binding
 ///
-
 /// Represents `x :^q A` where q is the quantity.
 #[derive(Debug, Clone)]
 pub struct QuantifiedBinding {
@@ -3791,7 +3723,6 @@ impl QuantifiedBinding {
 
 /// View type definition
 ///
-
 /// View type: provides alternative pattern matching interface for a base type.
 /// Example: `view Parity : Nat -> Type { Even(n), Odd(n) }` with a view function
 /// `parity(n: Nat) -> Parity(n)` that computes the view.
@@ -3849,14 +3780,12 @@ pub struct ViewCase {
 
 /// Proposition marker
 ///
-
 /// Types in Prop are proof-irrelevant: all proofs are considered equal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Prop;
 
 /// Squash type (propositional truncation)
 ///
-
 /// ||A|| : Prop for any A : Type
 /// Forgets the computational content, keeping only existence.
 #[derive(Debug, Clone)]
@@ -3875,7 +3804,6 @@ impl Squash {
 
 /// Subset type with irrelevant proof
 ///
-
 /// { x : A | P(x) }^Prop
 /// The proof of P(x) is erased at runtime.
 #[derive(Debug, Clone)]

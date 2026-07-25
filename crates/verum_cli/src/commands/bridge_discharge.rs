@@ -104,7 +104,6 @@ pub struct DischargeReport {
 
 /// Walk a `Module` and accumulate per-bridge callsite results.
 ///
-
 /// `aggregator` is a mutable map from bridge-name → BridgeReport. The
 /// caller calls `walk_module` for every parsed `.vr` file in the
 /// corpus, then promotes the map into the final `DischargeReport`.
@@ -185,7 +184,6 @@ fn visit_proof_step(
 
 /// Recursively walk a `TacticExpr` looking for `Apply { lemma, args }`.
 ///
-
 /// Tactic combinators (Then / OrElse / Repeat / etc.) are walked into
 /// so that nested `apply` calls inside `then` chains are picked up.
 fn visit_tactic_for_apply(
@@ -415,7 +413,6 @@ fn expr_to_text(e: &Expr) -> String {
 
 /// Promote a per-bridge aggregator into the final `DischargeReport`.
 ///
-
 /// Computes totals and identifies bridges referenced in the corpus
 /// that don't have a dispatcher entry (the "unknown_bridges" gap).
 pub fn finalise_report(

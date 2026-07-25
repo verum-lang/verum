@@ -38,14 +38,12 @@ fn freshen_template_vars(ty: &Type) -> Type {
 impl TypeChecker {
     /// Check compound destructuring assignment: (x, y) += (dx, dy)
     ///
-
     /// For compound destructuring, all pattern variables must already exist and be mutable.
     /// This function validates:
     /// 1. Pattern structure matches value structure (tuple with tuple, array with array)
     /// 2. Each element supports the compound operation
     /// 3. All pattern identifiers refer to existing mutable variables
     ///
-
     /// Unified destructuring: consistent pattern syntax for let bindings, match arms, and function parameters
     pub(crate) fn check_compound_destructuring_pattern(
         &mut self,
@@ -3048,7 +3046,6 @@ impl TypeChecker {
 
     /// Bind patterns in a tuple-style variant payload.
     ///
-
     /// Examples:
     /// - `Some(x)` where Some has payload type T
     /// - `Ok(value, error)` where Ok has payload type (T, E)
@@ -3157,12 +3154,10 @@ impl TypeChecker {
 
     /// Bind patterns in a record-style variant payload.
     ///
-
     /// Examples:
     /// - `Error { code, message }` where Error has payload { code: Int, message: Text }
     /// - `Person { name, age, .. }` with rest pattern ignoring extra fields
     ///
-
     /// Record-style variant patterns: matching "Node { left, right }" to destructure named-field variants
     pub(crate) fn bind_variant_record_payload(
         &mut self,

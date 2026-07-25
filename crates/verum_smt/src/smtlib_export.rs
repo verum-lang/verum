@@ -298,7 +298,6 @@ pub fn export_verification_problem(predicate: &Expr, var_name: &str, var_type: &
 
 /// Export refinement type check to SMT-LIB2
 ///
-
 /// Checks if a value satisfies a refinement predicate.
 /// Encodes as: ∃v. ¬predicate(v) (to check for counterexamples)
 pub fn export_refinement_check(predicate: &Expr, var_name: &str, var_type: &Type) -> Text {

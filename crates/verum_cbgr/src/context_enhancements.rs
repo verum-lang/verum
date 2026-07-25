@@ -63,7 +63,6 @@ use verum_common::Set;
 
 /// Dataflow state at a program point
 ///
-
 /// Tracks the state of references and values as they flow through
 /// different calling contexts.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -180,7 +179,6 @@ pub enum Predicate {
 
 /// Flow-sensitive context with dataflow state
 ///
-
 /// Extends calling context with per-block dataflow state.
 #[derive(Debug, Clone)]
 pub struct FlowSensitiveContext {
@@ -254,7 +252,6 @@ impl FlowSensitiveContext {
 
 /// Heuristics for determining function importance
 ///
-
 /// Important functions get higher depth limit for more precise analysis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImportanceMetrics {
@@ -285,7 +282,6 @@ impl ImportanceMetrics {
 
     /// Compute overall importance score (0.0 - 1.0)
     ///
-
     /// Higher score = more important = higher depth limit
     #[must_use]
     pub fn importance_score(&self) -> f64 {
@@ -308,7 +304,6 @@ impl ImportanceMetrics {
 
     /// Determine depth limit based on importance
     ///
-
     /// - Score 0.0-0.3: depth 1 (trivial functions)
     /// - Score 0.3-0.6: depth 3 (normal functions)
     /// - Score 0.6-0.8: depth 5 (important functions)
@@ -337,7 +332,6 @@ impl Default for ImportanceMetrics {
 
 /// Adaptive depth policy
 ///
-
 /// Dynamically adjusts context depth based on function importance.
 #[derive(Debug, Clone)]
 pub struct AdaptiveDepthPolicy {
@@ -416,7 +410,6 @@ impl AdaptiveDepthPolicy {
 
 /// Abstract context for compression
 ///
-
 /// Represents an equivalence class of concrete contexts.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AbstractContext {
@@ -441,15 +434,12 @@ impl AbstractContext {
 
     /// Abstract from concrete context
     ///
-
     /// Extracts abstract predicates from the dataflow states in the concrete context.
     /// This enables context compression by identifying contexts with equivalent abstract
     /// predicate patterns even if their concrete predicates differ.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Collect all predicates from dataflow states
     /// 2. Classify each predicate as True, False, or Unknown:
     ///  - If a predicate appears in all states with same polarity -> True/False
@@ -457,15 +447,12 @@ impl AbstractContext {
     ///  - If a predicate doesn't affect escape analysis -> omit (optimization)
     /// 3. Simplify by merging redundant predicates
     ///
-
     /// # Example
     ///
-
     /// ```text
     /// Concrete predicates:
     ///  - BlockTrue(B1), IsNotNull(R1), BlockFalse(B2)
     ///
-
     /// Abstract predicates:
     ///  - True (R1 is always non-null on all paths)
     ///  - Unknown (B1/B2 may vary)
@@ -484,7 +471,6 @@ impl AbstractContext {
 
     /// Extract abstract predicates from a concrete context's dataflow states
     ///
-
     /// Analyzes predicates across all dataflow states to determine their abstract
     /// equivalents for context compression.
     fn extract_abstract_predicates(context: &FlowSensitiveContext) -> Vec<AbstractPredicate> {
@@ -573,7 +559,6 @@ impl AbstractContext {
 
 /// Abstract call pattern
 ///
-
 /// Compresses call chains by identifying recurring patterns.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CallPattern {
@@ -638,7 +623,6 @@ pub enum AbstractPredicate {
 
 /// Helper for tracking predicate presence across dataflow states
 ///
-
 /// Used during abstract predicate extraction to determine if a predicate
 /// holds in all states (True), no states (False), or some states (Unknown).
 #[derive(Debug, Clone, Default)]
@@ -661,7 +645,6 @@ impl PredicateTracker {
 
 /// Context equivalence class
 ///
-
 /// Groups similar contexts for compression.
 #[derive(Debug, Clone)]
 pub struct ContextEquivalenceClass {
@@ -728,7 +711,6 @@ impl ContextEquivalenceClass {
 
 /// Context compressor
 ///
-
 /// Merges similar contexts to reduce exponential explosion.
 #[derive(Debug, Clone)]
 pub struct ContextCompressor {
@@ -929,7 +911,6 @@ impl EnhancedStats {
 
 /// Configuration for parallel context analysis
 ///
-
 /// Controls when and how to parallelize context-sensitive analysis.
 #[derive(Debug, Clone)]
 pub struct ParallelConfig {
@@ -985,7 +966,6 @@ impl Default for ParallelConfig {
 
 /// Statistics for parallel analysis
 ///
-
 /// Tracks parallelism effectiveness and performance metrics.
 #[derive(Debug, Clone, Default)]
 pub struct ParallelStats {
@@ -1034,7 +1014,6 @@ impl ParallelStats {
 
 /// Thread-safe result accumulator for parallel analysis
 ///
-
 /// Uses Mutex for safe concurrent updates. For very high contention,
 /// could be replaced with lock-free structures.
 #[derive(Debug)]
@@ -1069,7 +1048,6 @@ impl<T> ParallelResultAccumulator<T> {
 
     /// Get all results (consumes accumulator)
     ///
-
     /// Returns None if the Arc still has multiple references (should not happen
     /// in correct usage, but we handle it gracefully rather than panicking).
     #[must_use]
@@ -1088,7 +1066,6 @@ impl<T> ParallelResultAccumulator<T> {
 
     /// Get all results by cloning (requires T: Clone)
     ///
-
     /// Use this when you need results but may still have concurrent references.
     #[must_use]
     pub fn clone_results(&self) -> (HashMap<usize, T>, usize)
@@ -1130,7 +1107,6 @@ impl<T> Clone for ParallelResultAccumulator<T> {
 
 /// Parallel context analyzer
 ///
-
 /// Analyzes multiple contexts in parallel using Rayon's work-stealing scheduler.
 #[derive(Debug, Clone)]
 pub struct ParallelContextAnalyzer {
@@ -1164,11 +1140,9 @@ impl ParallelContextAnalyzer {
 
     /// Analyze contexts in parallel.
     ///
-
     /// Returns results indexed by context position in input vector.
     /// Honours the full `ParallelConfig`:
     ///
-
     /// * `threshold` — already gated through `should_parallelize`.
     /// * `max_threads > 0` — runs the parallel section inside a
     ///  bespoke `rayon::ThreadPool` capped to that many workers
@@ -1263,7 +1237,6 @@ impl ParallelContextAnalyzer {
 
     /// Analyze equivalence classes in parallel
     ///
-
     /// Each equivalence class is analyzed independently, making this
     /// embarrassingly parallel with no synchronization needed.
     pub fn analyze_equivalence_classes<F, T>(
@@ -1374,7 +1347,6 @@ impl Default for ParallelContextAnalyzer {
 
 /// Context-sensitive analyzer with parallel support
 ///
-
 /// Integrates parallel analysis into the enhanced context-sensitive workflow.
 pub struct ContextSensitiveAnalyzer {
     /// Base configuration
@@ -1417,10 +1389,8 @@ impl ContextSensitiveAnalyzer {
     /// `with_all_enhancements()` constructor when `cfg` is
     /// `EnhancedContextConfig::all_enabled()`.
     ///
-
     /// Specifically:
     ///
-
     /// * `cfg.adaptive_depth == true` → install an
     ///  `AdaptiveDepthPolicy::new(default_depth, max_depth)`.
     ///  Pre-existing policies are replaced so the policy
@@ -1433,7 +1403,6 @@ impl ContextSensitiveAnalyzer {
     ///  `flow_sensitive_enabled()` for downstream analyses that
     ///  gate flow-sensitive bookkeeping on it.
     ///
-
     /// Before this wire-up the booleans were inert — set on the
     /// config but read by no consumer.
     #[must_use]
@@ -1526,7 +1495,6 @@ impl ContextSensitiveAnalyzer {
 
     /// Analyze contexts in parallel
     ///
-
     /// Returns analysis results for each context. Uses parallel execution
     /// if threshold is met, otherwise falls back to sequential.
     pub fn analyze_contexts_parallel<F, T>(

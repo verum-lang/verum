@@ -491,10 +491,8 @@ impl KernelRejectReasonKind {
 
 /// Re-checks one proposed tactic step against the goal.
 ///
-
 /// Two implementations ship:
 ///
-
 ///  * [`PatternKernelChecker`] — text-shape recogniser; accepts
 ///  `apply NAME` when `NAME` is in the goal's textual lemma
 ///  list, plus a fixed canonical-tactic head set. V0 mode.
@@ -503,7 +501,6 @@ impl KernelRejectReasonKind {
 ///  resolve through the registry (kernel-attested), not just
 ///  through the LLM's textual context.
 ///
-
 /// Both honour the **fail-closed contract**: if the checker can't
 /// *prove* the step is sound it MUST reject.
 pub trait KernelChecker: std::fmt::Debug + Send + Sync {
@@ -535,7 +532,6 @@ pub trait KernelChecker: std::fmt::Debug + Send + Sync {
 ///  `blast`, `smt`.
 ///  * Lines starting with `//` (comments) — admitted as no-ops.
 ///
-
 /// Anything else is rejected. V1 wires in the full kernel
 /// re-check (refinement-type elaboration, depth check, framework
 /// axiom resolution, …).
@@ -558,13 +554,11 @@ pub fn canonical_tactics() -> &'static [&'static str] {
 /// Canonical tactic heads accepted by `parse_step`. Every entry is
 /// either:
 ///
-
 ///  * A name from `verum_verification::tactic_combinator::TacticCombinator`
 ///  (`skip` / `fail` / etc.); or
 ///  * A canonical decision-procedure / surface tactic the catalogue
 ///  documents elsewhere (`auto` / `simp` / `linarith` / etc.).
 ///
-
 /// Adding a new head here is the right place to extend the
 /// PatternKernelChecker's accept set. The KernelInferChecker layers
 /// kernel-attestation on top of this for `apply NAME` resolution.

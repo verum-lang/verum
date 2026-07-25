@@ -61,14 +61,11 @@ use crate::meta::{ConstValue, MetaContext, MetaRegistry};
 
 /// Phase 3: Macro Expansion
 ///
-
 /// Processes all macro invocations and compile-time code generation.
 /// Integrates MetaLinter for safety validation before execution.
 ///
-
 /// # Architecture
 ///
-
 /// ```text
 /// MacroExpansionPhase
 /// ├── DeriveRegistry - @derive(Debug, Clone, etc.)
@@ -356,7 +353,6 @@ impl MacroExpansionPhase {
 
     /// Expand macros in a single item
     ///
-
     /// Processes:
     /// 1. @derive attributes on types
     /// 2. Meta functions (with linting)
@@ -384,7 +380,6 @@ impl MacroExpansionPhase {
 
     /// Process a function declaration
     ///
-
     /// 1. If meta function, lint it with MetaLinter
     /// 2. Process tagged literals in body
     /// 3. Process interpolations in body
@@ -450,7 +445,6 @@ impl MacroExpansionPhase {
 
     /// Lint a meta function before execution
     ///
-
     /// Uses MetaLinter to detect unsafe patterns like:
     /// - String concatenation (injection risk)
     /// - I/O operations (forbidden in meta context)
@@ -578,7 +572,6 @@ impl MacroExpansionPhase {
 
     /// Process an expression for tagged literals and interpolations
     ///
-
     /// This is the core of compile-time literal processing.
     fn process_expr(&mut self, expr: &Expr) -> Result<Expr, Diagnostic> {
         match &expr.kind {
@@ -717,7 +710,6 @@ impl MacroExpansionPhase {
 
     /// Process a tagged literal like d#"2024-01-15" or rx#"[a-z]+"
     ///
-
     /// 1. Look up handler in LiteralRegistry
     /// 2. Execute handler at compile-time
     /// 3. Replace with validated/parsed value
@@ -927,10 +919,8 @@ impl MacroExpansionPhase {
 
     /// Lower a parsed `sh#"..."` literal into a real Call AST node:
     ///
-
     ///  sh(<lit0> + Escaper.posix(&<expr1>) + <lit1> + ...)
     ///
-
     /// Plain literals with no interpolations collapse to `sh("text")`.
     fn lower_shell_cmd(
         &self,
@@ -1044,7 +1034,6 @@ impl MacroExpansionPhase {
 
     /// Convert a ConstValue (from meta function execution) to an AST Expr
     ///
-
     /// This is used when a user-defined tagged literal handler or interpolation
     /// handler returns a compile-time value that needs to be spliced back into
     /// the AST.
@@ -1126,7 +1115,6 @@ impl MacroExpansionPhase {
 
     /// Process interpolation expression like sql"SELECT * WHERE id = {id}"
     ///
-
     /// 1. Look up @interpolation_handler for the handler name
     /// 2. Execute handler at compile-time
     /// 3. Replace with generated code
@@ -1253,7 +1241,6 @@ impl MacroExpansionPhase {
 
     /// Process format string: f"Hello {name}!"
     ///
-
     /// Format strings are kept as InterpolatedString expressions.
     /// The type checker handles them directly, inferring Text type
     /// and type-checking embedded expressions.
@@ -1290,7 +1277,6 @@ impl MacroExpansionPhase {
     /// with a string literal as first argument); any other call falls through
     /// to ordinary call processing.
     ///
-
     /// Supported format syntax:
     ///  - `{}` anonymous placeholder
     ///  - `{:spec}` anonymous with spec (spec is discarded in the parts
@@ -1302,7 +1288,6 @@ impl MacroExpansionPhase {
     /// format-string AST or an auxiliary binding step, and the call sites in
     /// the stdlib/L2 test suite only use the anonymous form.
     ///
-
     /// On malformed format strings or a mismatch between `{}` count and
     /// supplied arg count, returns `None` so the typechecker can surface the
     /// usual "unknown function `format`" diagnostic instead of us inventing
@@ -1420,7 +1405,6 @@ impl MacroExpansionPhase {
 
     /// Process SQL interpolation: sql"SELECT * WHERE id = {id}"
     ///
-
     /// SECURITY: Generates parameterized query to prevent SQL injection
     fn process_sql_interpolation(
         &mut self,
@@ -1496,7 +1480,6 @@ impl MacroExpansionPhase {
 
     /// Process HTML interpolation: html"<h1>{title}</h1>"
     ///
-
     /// SECURITY: Auto-escapes interpolated values to prevent XSS
     fn process_html_interpolation(
         &mut self,
@@ -1665,7 +1648,6 @@ impl MacroExpansionPhase {
 
     /// Extract derive names from attributes
     ///
-
     /// Parses @derive(Debug, Clone, Serialize) style attributes.
     ///
     /// Special-case: `@command(...)` on a type implicitly requests
@@ -1859,7 +1841,6 @@ impl CompilationPhase for MacroExpansionPhase {
 /// finding ANY quote means hard-rejecting the module with a
 /// pointed diagnostic.
 ///
-
 /// The walker is fail-fast: it stops at the first hit so large
 /// modules with many quotes don't pay an O(N) walk cost when one
 /// span is enough to flag the violation. The walker handles every

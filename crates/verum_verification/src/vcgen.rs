@@ -80,11 +80,9 @@ fn path_segment_to_str(seg: &PathSegment) -> &str {
 
 /// Context for contract expression parsing
 ///
-
 /// Indicates the type of contract clause being parsed, which affects
 /// how certain constructs (like `result` and `old()`) are interpreted.
 ///
-
 /// Indicates the type of contract clause being parsed, affecting how `result`
 /// and `old()` are interpreted. In preconditions, `result` is invalid and
 /// `old(x)` is equivalent to `x`. In postconditions, `result` refers to the
@@ -144,7 +142,6 @@ impl ContractContext {
 
 /// Source location for verification diagnostics
 ///
-
 /// Tracks where in the source code a verification condition originated,
 /// enabling precise error messages and counterexample reporting.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -172,7 +169,6 @@ impl SourceLocation {
 
     /// Create from an AST span
     ///
-
     /// Note: This uses byte offsets as line/column since we don't have
     /// access to the source file for proper line/column computation.
     pub fn from_span(span: Span, file: Text) -> Self {
@@ -208,7 +204,6 @@ impl fmt::Display for SourceLocation {
 
 /// Variable identifier in verification formulas
 ///
-
 /// Variables are uniquely identified by name and an optional SSA version
 /// for handling mutable state in wp computation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -309,7 +304,6 @@ impl VarType {
 
 /// SMT expression for verification conditions
 ///
-
 /// Represents terms in the verification logic, including arithmetic,
 /// function applications, and array operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -617,7 +611,6 @@ impl SmtExpr {
 
 /// Logical formula for verification conditions
 ///
-
 /// First-order logic predicates used in verification conditions.
 /// Formulas express preconditions, postconditions, loop invariants, and
 /// safety properties. They are ultimately encoded as SMT-LIB assertions
@@ -724,7 +717,6 @@ impl Formula {
 
     /// Substitute a variable in the formula with an expression
     ///
-
     /// Implements Q[x/e] from the weakest precondition calculus.
     pub fn substitute(&self, var: &Variable, replacement: &SmtExpr) -> Formula {
         match self {
@@ -1057,7 +1049,6 @@ impl Formula {
 
 /// Kind of verification condition
 ///
-
 /// Categorizes VCs for reporting and prioritization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VCKind {
@@ -1125,7 +1116,6 @@ impl VCKind {
 
 /// A verification condition to be checked
 ///
-
 /// A logical formula to be checked by the SMT solver. If the negation is UNSAT,
 /// the VC is valid and the corresponding safety property is proven.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1317,7 +1307,6 @@ impl VerificationCondition {
 
     /// Get the formula for this verification condition
     ///
-
     /// Returns a reference to the formula that needs to be proven.
     /// This formula is used by the SMT verifier.
     pub fn to_formula(&self) -> Formula {
@@ -1331,7 +1320,6 @@ impl VerificationCondition {
 
     /// Get the SMT-LIB encoding of this VC
     ///
-
     /// Returns a complete SMT-LIB 2.6 script that can be sent to a solver.
     /// The formula is negated (for satisfiability checking) - if UNSAT,
     /// the VC is valid.
@@ -1381,7 +1369,6 @@ impl VerificationCondition {
 
 /// Symbol table for VC generation
 ///
-
 /// Tracks variable types, function signatures, and loop invariants
 /// during VC generation.
 #[derive(Debug, Clone, Default)]
@@ -1462,7 +1449,6 @@ impl SymbolTable {
 
     /// Add an array length binding
     ///
-
     /// Associates a variable name with its length expression for bounds checking.
     pub fn add_array_length(&mut self, name: impl Into<Text>, length: SmtExpr) {
         self.array_lengths.insert(name.into(), length);
@@ -1470,7 +1456,6 @@ impl SymbolTable {
 
     /// Get the length expression for an array variable
     ///
-
     /// Returns the SMT expression representing the array's length if known.
     pub fn get_array_length(&self, name: &str) -> Maybe<SmtExpr> {
         match self.array_lengths.get(&Text::from(name)) {
@@ -1486,7 +1471,6 @@ impl SymbolTable {
 
 /// Verification Condition Generator
 ///
-
 /// Generates verification conditions from Verum AST using Dijkstra's weakest
 /// precondition calculus. Converts function bodies to SSA, extracts contracts,
 /// and produces VCs that are sent to the SMT solver for validation.
@@ -1500,7 +1484,6 @@ pub struct VCGenerator {
     current_function: Maybe<Text>,
     /// Precondition of the function currently under VC generation.
     ///
-
     /// Hoare triple: `{P} body {Q}` says "if `P` holds before `body`,
     /// then `Q` holds after". Concretely, **every** VC generated
     /// inside the body must be discharged *under the assumption that
@@ -1515,7 +1498,6 @@ pub struct VCGenerator {
     /// pessimistic — the master-audit (D-2) ranked this CRITICAL for
     /// any non-trivial `requires`/`ensures` use.
     ///
-
     /// `push_vc` consults this field and wraps every pushed VC in
     /// `precondition => vc.formula` whenever it's set. Cleared by
     /// `generate_vcs` after function processing.
@@ -1547,7 +1529,6 @@ impl VCGenerator {
 
     /// Generate verification conditions for a function
     ///
-
     /// VC generation rule for functions:
     ///  VC(f) = forall params. Precondition => wp(body, Postcondition)
     /// The wp is computed backwards from the postcondition through the function body.
@@ -1614,7 +1595,6 @@ impl VCGenerator {
 
     /// Weakest precondition for a block
     ///
-
     /// wp(S1; S2; ...; Sn, Q) = wp(S1, wp(S2, ..., wp(Sn, Q)))
     pub fn wp_block(&mut self, block: &Block, postcondition: &Formula) -> Formula {
         let mut current_post = postcondition.clone();
@@ -1726,7 +1706,6 @@ impl VCGenerator {
 
     /// Weakest precondition for assignment
     ///
-
     /// wp(x := e, Q) = Q[x/e]
     fn wp_assignment(
         &mut self,
@@ -2200,7 +2179,6 @@ impl VCGenerator {
 
     /// Weakest precondition for return statement
     ///
-
     /// wp(return e, Q) = Q[result/e]
     fn wp_return(&mut self, value: Option<&Expr>, postcondition: &Formula) -> Formula {
         let result_var = Variable::result();
@@ -2585,7 +2563,6 @@ impl VCGenerator {
 
     /// Extract the loop variable from a pattern
     ///
-
     /// For patterns like `x`, `(a, b)`, or `Point { x, y }`, extracts
     /// the primary variable for use in loop verification.
     fn extract_pattern_variable(&self, pattern: &Pattern) -> Variable {
@@ -2612,7 +2589,6 @@ impl VCGenerator {
 
     /// Extract iteration bounds from a for loop iterator expression
     ///
-
     /// Returns (start_bound, end_bound, is_range) where:
     /// - For range expressions: actual start/end values
     /// - For collections: symbolic bounds and is_range = false
@@ -2672,7 +2648,6 @@ impl VCGenerator {
 
     /// Extract array length from a type annotation
     ///
-
     /// For array types like `[i32; 10]`, extracts the length (10).
     /// For slice types or non-array types, returns None.
     fn extract_type_length(&self, ty: &verum_ast::Type) -> Option<SmtExpr> {
@@ -2690,7 +2665,6 @@ impl VCGenerator {
 
     /// Extract array length from an array literal expression
     ///
-
     /// For array literals like `[1, 2, 3]`, returns the length (3).
     /// For repeat expressions like `[0; 10]`, returns the size (10).
     fn extract_array_literal_length(&self, expr: &Expr) -> Option<SmtExpr> {
@@ -2715,14 +2689,12 @@ impl VCGenerator {
 
     /// Get the length expression for an array expression
     ///
-
     /// Attempts to resolve the array's length from multiple sources:
     /// 1. Symbol table (if the array is a known variable with tracked length)
     /// 2. Method calls like arr.len()
     /// 3. Field accesses (e.g., self.data)
     /// 4. Uninterpreted len() function as fallback for SMT solving
     ///
-
     /// Resolves array length for bounds check elimination. Checks symbol table
     /// for known variables with tracked length, method calls like arr.len(),
     /// field accesses, and falls back to uninterpreted len() for SMT solving.
@@ -2780,10 +2752,8 @@ impl VCGenerator {
 
     /// Push a verification condition.
     ///
-
     /// Two transforms apply, in order:
     ///
-
     ///  1. **Precondition wrap (S2 fix).** When a function-scoped
     ///  precondition is armed via `current_precondition`, the
     ///  pushed VC is rewritten as `precondition => vc.formula`.
@@ -2814,7 +2784,6 @@ impl VCGenerator {
 
     /// Extract contract (precondition, postcondition) from function
     ///
-
     /// Parses contract specifications from function attributes and body.
     /// Supports:
     /// - @requires(expr) attributes for preconditions
@@ -2823,10 +2792,8 @@ impl VCGenerator {
     /// - @decreases(expr) attributes for termination measures
     /// - contract#"requires ...; ensures ..." literals in function body
     ///
-
     /// # Design by Contract (DbC)
     ///
-
     /// Follows Bertrand Meyer's Design by Contract:
     /// - Preconditions: What the caller must ensure before the call
     /// - Postconditions: What the callee guarantees after the call
@@ -2918,7 +2885,6 @@ impl VCGenerator {
 
     /// Parse a contract expression from an AST expression
     ///
-
     /// Handles special contract constructs like:
     /// - old(expr): Value of expression at function entry
     /// - result: Return value in postconditions
@@ -3046,14 +3012,12 @@ impl VCGenerator {
 
     /// Parse a quantified expression (forall or exists)
     ///
-
     /// Supports multiple formats:
     /// - `forall(x, y, body)` - simple variable binding
     /// - `forall(x: Int, y: Bool, body)` - typed variable binding
     /// - `forall(|x: Int, y: Bool| body)` - closure-style binding
     /// - `forall([x, y], body)` - array-style binding with implicit types
     ///
-
     /// Parses quantified expressions in contracts. Supports multiple binding styles:
     /// forall(x, y, body), forall(x: Int, y: Bool, body), forall(|x: Int| body),
     /// and forall([x, y], body) with implicit types.
@@ -3283,10 +3247,8 @@ impl VCGenerator {
 
     /// Parse a contract literal string
     ///
-
     /// Format: contract#"requires expr1; ensures expr2; ..."
     ///
-
     /// Supported clauses:
     /// - requires: Precondition
     /// - ensures: Postcondition
@@ -3328,7 +3290,6 @@ impl VCGenerator {
 
     /// Parse a contract expression string into a Formula
     ///
-
     /// This performs simple expression parsing for contract strings.
     /// For complex expressions, use the full parser.
     fn parse_contract_string(&self, expr_str: &str, context: ContractContext) -> Formula {
@@ -3529,7 +3490,6 @@ impl VCGenerator {
 
     /// Parse a quantifier string expression
     ///
-
     /// Formats:
     /// - "x: Int. body" - explicit type
     /// - "x. body" - inferred type
@@ -3609,7 +3569,6 @@ impl VCGenerator {
 
     /// Generate verification conditions from extracted contracts
     ///
-
     /// Creates VCs for:
     /// - Precondition checking at function entry
     /// - Postcondition checking at function exit
@@ -3645,7 +3604,6 @@ impl VCGenerator {
 
     /// Handle old() expressions in postconditions
     ///
-
     /// Transforms postcondition formulas by:
     /// - Replacing old(x) with x_old (parameter snapshot)
     /// - Setting up parameter snapshots at function entry
@@ -3660,7 +3618,6 @@ impl VCGenerator {
 
     /// Transform a postcondition formula to handle old() references
     ///
-
     /// Replaces old(expr) predicates with references to snapshot variables
     pub fn transform_old_in_postcondition(
         &self,
@@ -3797,18 +3754,14 @@ impl Default for VCGenerator {
 
 /// Generate verification conditions for a function
 ///
-
 /// This is the main entry point for VC generation.
 ///
-
 /// # Example
 ///
-
 /// ```rust,ignore
 /// use verum_verification::vcgen::generate_vcs;
 /// use verum_ast::decl::FunctionDecl;
 ///
-
 /// let func: FunctionDecl = /* ... */;
 /// let vcs = generate_vcs(&func);
 /// for vc in vcs.iter() {
@@ -3822,7 +3775,6 @@ pub fn generate_vcs(func: &FunctionDecl) -> List<VerificationCondition> {
 
 /// Compute weakest precondition for a statement
 ///
-
 /// Implements the wp rules from Dijkstra's calculus.
 pub fn wp(stmt: &Stmt, postcondition: Formula) -> Formula {
     let mut generator = VCGenerator::new();
@@ -3831,7 +3783,6 @@ pub fn wp(stmt: &Stmt, postcondition: Formula) -> Formula {
 
 /// Substitute a variable with an expression in a formula
 ///
-
 /// Implements Q[x/e] from the weakest precondition calculus.
 pub fn substitute(formula: Formula, var: Variable, expr: SmtExpr) -> Formula {
     formula.substitute(&var, &expr)
@@ -3839,7 +3790,6 @@ pub fn substitute(formula: Formula, var: Variable, expr: SmtExpr) -> Formula {
 
 /// Convert a verification condition to SMT-LIB format
 ///
-
 /// Returns a complete SMT-LIB 2.6 script ready for solver input.
 pub fn vc_to_smtlib(vc: &VerificationCondition) -> Text {
     vc.to_smtlib()

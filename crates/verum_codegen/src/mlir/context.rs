@@ -137,7 +137,6 @@ impl MlirConfig {
     /// `shared_library_paths` registered via `with_shared_library` /
     /// the field directly.
     ///
-
     /// Closes the inert-defense gap around `MlirConfig.shared_library_paths`:
     /// the field had a builder but no consumer in the AOT codegen path
     /// (which is GPU-targeted and runs through `optimize_gpu` /
@@ -175,7 +174,6 @@ pub struct MlirContext {
 impl MlirContext {
     /// Create a new MLIR context with all required dialects.
     ///
-
     /// This properly registers all dialects (including arith, func, scf, etc.)
     /// to enable type inference in MLIR operations.
     pub fn new() -> Result<Self> {
@@ -264,7 +262,6 @@ pub struct SymbolEntry {
 
 /// Main MLIR code generator for GPU path.
 ///
-
 /// This provides the GPU compilation path:
 /// VBC → MLIR → GPU binaries (CUDA/ROCm/Vulkan/Metal)
 pub struct MlirCodegen<'ctx> {
@@ -369,33 +366,25 @@ impl<'ctx> MlirCodegen<'ctx> {
 
     /// Lower a VBC module to MLIR (GPU compilation path).
     ///
-
     /// This is the primary method for GPU code generation:
     /// AST → VBC → MLIR → GPU binaries.
     ///
-
     /// # Arguments
     ///
-
     /// * `vbc_module` - The VBC bytecode module to lower
     /// * `gpu_target` - The GPU target platform (CUDA, ROCm, Vulkan, Metal)
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_codegen::mlir::{MlirCodegen, MlirConfig, GpuTarget};
     ///
-
     /// let config = MlirConfig::default();
     /// let mut codegen = MlirCodegen::new(&mlir_ctx, config)?;
     ///
-
     /// // Lower VBC to MLIR for GPU
     /// codegen.lower_vbc_module(&vbc_module, GpuTarget::Cuda)?;
     ///
-
     /// // Run GPU-specific optimization passes
     /// codegen.optimize()?;
     /// ```

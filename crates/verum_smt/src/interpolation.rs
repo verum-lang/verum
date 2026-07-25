@@ -56,7 +56,6 @@ use crate::Context;
 
 /// Interpolant between two formulas
 ///
-
 /// For formulas A and B where A ∧ B is UNSAT, an interpolant I satisfies:
 /// 1. A ⇒ I
 /// 2. I ∧ B ⇒ ⊥
@@ -225,11 +224,9 @@ pub enum InterpolationAlgorithm {
 
 /// Craig interpolation engine using Z3's MBI capabilities
 ///
-
 /// This engine provides multiple interpolation algorithms using Z3's
 /// quantifier elimination and model-based projection.
 ///
-
 /// Note: In z3 0.19.4, Context is thread-local and implicit, so it's not stored here.
 pub struct InterpolationEngine {
     /// Configuration
@@ -328,7 +325,6 @@ impl InterpolationEngine {
 
     /// Compute interpolant between two formulas
     ///
-
     /// Given A and B where A ∧ B is UNSAT, compute I such that:
     /// - A ⇒ I
     /// - I ∧ B ⇒ ⊥
@@ -400,10 +396,8 @@ impl InterpolationEngine {
 
     /// Collect all free variables in a formula
     ///
-
     /// Uses the shared variable_extraction module for consistent behavior across the crate.
     ///
-
     /// This properly handles:
     /// - Simple variable references (x, y, z)
     /// - Variables inside compound expressions (x + y, f(x, y))
@@ -415,7 +409,6 @@ impl InterpolationEngine {
 
     /// McMillan's interpolation algorithm (resolution-proof based)
     ///
-
     /// Extracts interpolant from resolution proof. Produces strongest interpolant.
     fn mcmillan_interpolate(&self, a: &Bool, b: &Bool, shared: &List<Text>) -> Result<Bool, Text> {
         // McMillan's algorithm extracts interpolant from resolution proof
@@ -446,7 +439,6 @@ impl InterpolationEngine {
 
     /// Pudlák's interpolation algorithm (dual to McMillan)
     ///
-
     /// Produces weakest interpolant by swapping A and B and negating.
     fn pudlak_interpolate(&self, a: &Bool, b: &Bool, shared: &List<Text>) -> Result<Bool, Text> {
         // Pudlák is dual to McMillan: compute McMillan(B, A) and negate
@@ -476,7 +468,6 @@ impl InterpolationEngine {
 
     /// Model-Based Interpolation (Z3's native approach)
     ///
-
     /// Uses model-based quantifier elimination to compute interpolant.
     /// This is Z3's primary interpolation method.
     fn mbi_interpolate(&self, a: &Bool, b: &Bool, shared: &List<Text>) -> Result<Bool, Text> {
@@ -561,19 +552,15 @@ impl InterpolationEngine {
 
     /// Perform quantifier elimination using Z3 tactics
     ///
-
     /// Uses Z3's quantifier elimination (qe) tactic to eliminate
     /// existentially quantified variables from a formula.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Build existential quantifier: ∃ vars. formula
     /// 2. Apply Z3's qe tactic to eliminate quantifier
     /// 3. Simplify the result using ctx-simplify tactic
     ///
-
     /// This is key for model-based interpolation where we need to
     /// project formulas onto shared variable subsets.
     fn quantifier_eliminate(&self, formula: &Bool, vars: &List<Text>) -> Result<Bool, Text> {
@@ -693,7 +680,6 @@ impl InterpolationEngine {
 
     /// Ping-pong interpolation
     ///
-
     /// Iteratively refine interpolant by alternating between A and B sides.
     fn pingpong_interpolate(&self, a: &Bool, b: &Bool, shared: &List<Text>) -> Result<Bool, Text> {
         const MAX_ITERATIONS: usize = 10;
@@ -739,7 +725,6 @@ impl InterpolationEngine {
 
     /// Pogo (one-sided) interpolation
     ///
-
     /// Builds interpolant incrementally from one side only.
     fn pogo_interpolate(&self, a: &Bool, b: &Bool, shared: &List<Text>) -> Result<Bool, Text> {
         let mut clauses = List::new();
@@ -803,7 +788,6 @@ impl InterpolationEngine {
 
     /// Compute sequence interpolants for a path
     ///
-
     /// Given formulas [F1, F2, ..., Fn] where conjunction is UNSAT,
     /// compute interpolants [I1, I2, ..., I(n-1)] where:
     /// - F1 ⇒ I1
@@ -947,7 +931,6 @@ pub struct TreeNode {
 
 /// Compositional verifier using interpolation
 ///
-
 /// Enables modular verification by computing summaries of modules
 /// using interpolation and composing them hierarchically.
 pub struct CompositionalVerifier {
@@ -1069,7 +1052,6 @@ pub struct ModularProof {
 
 /// Abstraction refinement using interpolation (CEGAR)
 ///
-
 /// Counter-Example Guided Abstraction Refinement loop using
 /// interpolation to refine spurious counterexamples.
 pub struct AbstractionRefinement {
@@ -1104,7 +1086,6 @@ impl AbstractionRefinement {
 
     /// CEGAR loop (Counter-Example Guided Abstraction Refinement)
     ///
-
     /// Iteratively refine abstraction until property holds or
     /// real counterexample is found.
     pub fn cegar(
@@ -1168,14 +1149,12 @@ impl AbstractionRefinement {
 
     /// Check if counterexample is spurious
     ///
-
     /// A counterexample is spurious if it exists in the abstract system
     /// but not in the concrete system. We check this by:
     /// 1. Extracting concrete values from the model
     /// 2. Building a concrete trace using those values
     /// 3. Checking if the concrete trace violates the property
     ///
-
     /// If the concrete trace does NOT violate the property, the counterexample is spurious.
     fn check_spurious(
         &self,

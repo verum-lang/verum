@@ -78,7 +78,6 @@ impl std::error::Error for CertStoreError {}
 /// common contract every
 /// certificate-store backing implements.
 ///
-
 /// Keyed by declaration name (stable across runs); lookup
 /// returns `Maybe::None` rather than an error so callers can
 /// gracefully fall through to the admitted scaffold when no cert
@@ -109,7 +108,6 @@ pub trait CertificateStore: Send + Sync {
 
 /// on-disk certificate store.
 ///
-
 /// Layout: each cert lives at `<root>/<sanitised-name>.smt-cert.json`.
 /// The sanitisation rule maps declaration names to a filesystem-safe
 /// shape — only alphanumeric ASCII, underscore, dash, and dot are
@@ -117,7 +115,6 @@ pub trait CertificateStore: Send + Sync {
 /// sanitise to the empty string are rejected with
 /// [`CertStoreError::InvalidName`].
 ///
-
 /// The store creates `root` lazily on first `save`; readers gracefully
 /// handle a missing root directory (returns `Maybe::None`).
 pub struct FileSystemCertificateStore {

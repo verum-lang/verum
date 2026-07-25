@@ -835,7 +835,6 @@ impl Default for RefinementAnalysisEngine {
 
 /// Refinement propagation pass - Industrial-Grade Implementation.
 ///
-
 /// This pass eliminates redundant refinement checks by propagating
 /// predicate information through SSA values.
 pub struct RefinementPropagationPass {

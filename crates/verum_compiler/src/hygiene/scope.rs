@@ -165,7 +165,6 @@ pub enum BindingKind {
 
 /// A set of scopes (for sets-of-scopes hygiene)
 ///
-
 /// An identifier's meaning is determined by the set of scopes it carries.
 /// Resolution finds the binding whose scopes are a subset of the identifier's
 /// scopes, preferring the most specific (largest subset).

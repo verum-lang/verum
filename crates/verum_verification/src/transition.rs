@@ -190,7 +190,6 @@ impl TransitionStep {
 
 /// Analyzer for gradual verification transitions
 ///
-
 /// Analyzes code to recommend when and how to transition between
 /// verification levels, based on:
 /// - Code stability (test coverage, change frequency)
@@ -447,7 +446,6 @@ impl TransitionAnalyzer {
 
 /// Code metrics for transition analysis
 ///
-
 /// Captures code stability, complexity, and quality indicators used to recommend
 /// verification level transitions (runtime -> static -> proof).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -68,14 +68,12 @@ pub fn apply_global(manifest: &mut Manifest) -> Result<()> {
 /// One-shot helper for single-file commands that don't have a
 /// `verum.toml`.
 ///
-
 /// Synthesizes a default Application-profile manifest, applies any
 /// installed CLI overrides (`-Z …`, `--no-cubical`, etc.), validates,
 /// and returns the resulting [`LanguageFeatures`]. This is the
 /// canonical path for `verum run FILE.vr` / `verum check FILE.vr` /
 /// `verum build FILE.vr` where no project manifest exists.
 ///
-
 /// Use this instead of `CompilerOptions::default().language_features`
 /// — the latter silently drops every CLI override.
 pub fn scratch_features() -> Result<verum_compiler::language_features::LanguageFeatures> {
@@ -91,7 +89,6 @@ pub fn scratch_features() -> Result<verum_compiler::language_features::LanguageF
 /// Translate a fully-merged manifest into the compiler-facing
 /// [`verum_compiler::language_features::LanguageFeatures`] value.
 ///
-
 /// Called by the build/check/run/test dispatchers after
 /// `apply_global(&mut manifest)` so every compilation sees the same
 /// unified feature set. Validation happens inside the compiler, but we
@@ -236,7 +233,6 @@ pub fn manifest_to_features(
 
 /// CLI-addressable language-feature overrides shared across commands.
 ///
-
 /// Use `#[clap(flatten)]` to inject these into a subcommand's argument
 /// struct. The resulting values get applied to the loaded `Manifest`
 /// via [`apply_to`] before the compilation pipeline runs.
@@ -345,7 +341,6 @@ pub struct LanguageFeatureOverrides {
     // ------------------------------------------------------------------
     /// Set any manifest value by dotted path (repeatable).
     ///
-
     /// Example: `-Z types.universe_polymorphism=true`
     ///  `-Z runtime.async_worker_threads=8`
     ///  `-Z safety.mls_level=secret`
@@ -361,7 +356,6 @@ pub struct LanguageFeatureOverrides {
 impl LanguageFeatureOverrides {
     /// Apply all overrides (high-level + generic) to a loaded manifest.
     ///
-
     /// High-level flags are applied first, so `-Z` overrides win on
     /// conflict. This matches the documented precedence order.
     pub fn apply_to(&self, manifest: &mut Manifest) -> Result<()> {
@@ -443,11 +437,9 @@ impl LanguageFeatureOverrides {
 
 /// Parse `KEY=VALUE` and apply to the manifest by dotted path.
 ///
-
 /// Supported sections: `types.*`, `runtime.*`, `codegen.*`, `meta.*`,
 /// `protocols.*`, `context.*`, `safety.*`, `test.*`, `debug.*`, `verify.*`.
 ///
-
 /// Unknown keys return a descriptive error so typos surface immediately
 /// rather than being silently ignored.
 fn apply_raw_override(m: &mut Manifest, raw: &str) -> Result<()> {

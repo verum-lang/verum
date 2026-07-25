@@ -124,15 +124,12 @@ pub use well_known_types::{
 
 /// Maybe type - Semantic name for optional values
 ///
-
 /// **MANDATORY**: Use `Maybe<T>` instead of `Option<T>` in all Verum code.
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::{Maybe, Text};
 ///
-
 /// fn find_item(id: i32) -> Maybe<Text> {
 ///  if id > 0 {
 ///  Some(Text::from("Found"))
@@ -142,45 +139,36 @@ pub use well_known_types::{
 /// }
 /// ```
 ///
-
 /// Verum semantic type — mandatory in all Verum code
 pub type Maybe<T> = Option<T>;
 
 /// Result type - Semantic name for error handling
 ///
-
 /// Re-export of std::result::Result with semantic naming context.
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::{Result, Text};
 ///
-
 /// fn parse_number(s: &str) -> Result<i32, Text> {
 ///  s.parse().map_err(|e| Text::from(format!("Parse error: {}", e)))
 /// }
 /// ```
 ///
-
 /// Verum semantic type — mandatory in all Verum code
 pub type Result<T, E> = std::result::Result<T, E>;
 
 /// Heap type - Semantic name for heap-allocated values
 ///
-
 /// **MANDATORY**: Use `Heap<T>` instead of `Box<T>` in all Verum code.
 ///
-
 /// # Examples
 /// ```
 /// use verum_common::Heap;
 ///
-
 /// let boxed: Heap<i32> = Heap::new(42);
 /// ```
 ///
-
 /// Verum semantic type — mandatory in all Verum code
 #[allow(clippy::disallowed_types)]
 pub type Heap<T> = Box<T>;

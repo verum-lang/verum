@@ -158,7 +158,6 @@ impl ColdFunctionRegistry {
 
     /// Get optimization hint for code generation
     ///
-
     /// Returns true if the function should be deprioritized in optimization.
     pub fn get_optimization_hint(&self, function_name: &str) -> OptimizationHint {
         if self.is_cold(function_name) {
@@ -210,7 +209,6 @@ impl AnnotationRegistry {
 
     /// Check if we're about to drop a Result with @must_handle error type
     ///
-
     /// This should be called when:
     /// - A let binding doesn't use the Result
     /// - An expression statement evaluates to a Result

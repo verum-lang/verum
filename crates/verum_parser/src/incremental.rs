@@ -48,7 +48,6 @@ use crate::syntax_bridge::{EventBasedParse, EventBasedParser};
 
 /// Incremental parsing engine integrated with the Verum parser.
 ///
-
 /// This provides the high-level API for incremental parsing, combining:
 /// - Tree manipulation from `verum_syntax::IncrementalEngine`
 /// - Parsing logic from `EventBasedParser`
@@ -121,7 +120,6 @@ impl IncrementalParserEngine {
 
     /// Record an edit without immediately applying it.
     ///
-
     /// This is useful for batching edits in rapid succession.
     pub fn record_edit(&mut self, edit: TextEdit) {
         self.change_tracker.record_edit(edit);
@@ -277,7 +275,6 @@ impl Default for IncrementalParserEngine {
 
 /// A document with incremental parsing support for LSP integration.
 ///
-
 /// This provides a complete document management solution with:
 /// - Incremental parsing on edits
 /// - Version tracking
@@ -391,7 +388,6 @@ pub struct BenchmarkResult {
 
 /// Benchmark incremental parsing vs full parsing.
 ///
-
 /// Returns detailed statistics about the performance of both approaches.
 pub fn benchmark_incremental_vs_full(
     source: &str,

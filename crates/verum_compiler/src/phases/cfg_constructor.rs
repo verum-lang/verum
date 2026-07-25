@@ -108,7 +108,6 @@ pub struct FunctionCfg {
 
 /// Constructs Control Flow Graphs from AST modules for tier analysis.
 ///
-
 /// The constructor walks the AST and builds CFGs with DefSite/UseeSite tracking
 /// that can be passed to `TierAnalyzer` for escape analysis and tier determination.
 pub struct CfgConstructor {

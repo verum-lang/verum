@@ -43,7 +43,6 @@ use super::{
 impl<'s> CompilationPipeline<'s> {
     /// Compile a string of source code (simple API)
     ///
-
     /// This is a convenience method for testing and simple use cases.
     /// It compiles the given source code as a single module.
     pub fn compile_string(&mut self, source: &str) -> Result<()> {
@@ -143,7 +142,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run multi-pass compilation on multiple source files.
     ///
-
     /// This is the main entry point for the multi-pass architecture.
     /// It processes all source files through three distinct passes.
     pub fn compile_multi_pass(&mut self, sources: &Map<Text, Text>) -> Result<()> {
@@ -492,19 +490,16 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Compile a multi-file project by discovering all .vr files.
     ///
-
     /// This method uses the ModuleLoader to:
     /// 1. Discover all .vr files in the project directory
     /// 2. Load and parse each module
     /// 3. Register modules in the session's ModuleRegistry
     /// 4. Run multi-pass compilation
     ///
-
     /// Discovers .vr files following module-file mapping (foo.vr = module foo,
     /// foo/mod.vr = directory module). Registers in session's ModuleRegistry,
     /// then runs multi-pass compilation.
     ///
-
     /// Note: For deep recursion scenarios, ensure RUST_MIN_STACK is set
     /// appropriately (e.g., 16MB) in the build/test environment.
     pub fn compile_project(&mut self) -> Result<()> {
@@ -594,21 +589,17 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Type-check a multi-file project without code generation.
     ///
-
     /// This method discovers all .vr files in the project directory and runs
     /// multi-pass type checking without generating any code. It's useful for:
     /// - IDE integration (quick feedback)
     /// - CI/CD pipelines (validation only)
     /// - Development workflows (check before run)
     ///
-
     /// Returns a CheckResult with diagnostics and statistics.
     ///
-
     /// Runs check-only mode: discovers modules, parses, type checks, but does
     /// not generate code. Returns diagnostics and statistics.
     ///
-
     /// Note: For deep recursion scenarios (type inference, import resolution,
     /// module dependency analysis), ensure RUST_MIN_STACK is set appropriately
     /// (e.g., 16MB) in the build/test environment.

@@ -54,7 +54,6 @@ use verum_common::Text;
 /// Solve a set of universe constraints, returning the solved
 /// substitution or an error describing the unsatisfiable constraint.
 ///
-
 /// This is the top-level entry point for universe constraint solving
 /// in the type-checking pipeline.
 pub fn solve_universe_constraints(

@@ -964,11 +964,9 @@ impl ModuleMerger {
 
     /// Fixes up function references in bytecode.
     ///
-
     /// This is **CRITICAL** for correctness - rewrites all CALL, CALL_G, CALL_V,
     /// TAIL_CALL instructions to point to the correct function IDs in the merged module.
     ///
-
     /// The algorithm:
     /// 1. For each function's bytecode range
     /// 2. Scan for call-related opcodes
@@ -1230,7 +1228,6 @@ impl ModuleMerger {
 
 /// Incremental module merger for hot-reload scenarios.
 ///
-
 /// Supports adding new specializations without rebuilding the entire module.
 pub struct IncrementalMerger {
     /// Base merged module.

@@ -22,7 +22,6 @@ use walkdir::WalkDir;
 
 /// Behaviour when the parser cannot turn a source file into an AST.
 ///
-
 /// - **Fallback** (default): silently apply whitespace normalisation
 ///  and import sorting; print a warning naming the file. Backwards-
 ///  compatible with pre-policy behaviour.
@@ -642,7 +641,6 @@ pub fn format_string(source: &str) -> Result<Text> {
 /// format -) implements this so an LSP / editor extension can pipe
 /// the buffer through without a temp-file dance.
 ///
-
 /// `filename_hint` is used for diagnostics and future
 /// project-config resolution; the file at that path is NOT read.
 pub fn execute_stdin(filename_hint: Option<String>) -> Result<()> {

@@ -301,11 +301,9 @@ impl Backtrace {
 
     /// Capture the current call stack.
     ///
-
     /// This uses std::backtrace::Backtrace to capture the current call stack
     /// and converts each frame into our StackFrame representation.
     ///
-
     /// Note: Backtrace capture respects the RUST_BACKTRACE environment variable.
     /// Set RUST_BACKTRACE=1 to enable backtrace capture.
     pub fn capture() -> Self {
@@ -379,7 +377,6 @@ impl Backtrace {
 
     /// Capture backtrace using the backtrace crate (when feature enabled)
     ///
-
     /// This provides more detailed backtrace information than the standard library
     /// implementation, including inlined frames and symbol resolution.
     #[cfg(feature = "backtrace")]

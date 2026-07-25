@@ -20,7 +20,6 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// Policy for the safety-gate walker.
 ///
-
 /// Each flag maps 1:1 to a `[safety]` field in `Verum.toml`. When a
 /// flag is `true`, the corresponding construct is allowed; when
 /// `false`, the walker emits a clean diagnostic pointing at the
@@ -49,7 +48,6 @@ pub struct SafetyPolicy {
 impl SafetyPolicy {
     /// All permissive defaults — no gate fires.
     ///
-
     /// Note: `ffi_boundary` is "lenient" in this constructor (not the
     /// project-default "strict") so the name "permissive" remains
     /// accurate — strict mode emits a warning on every extern fn
@@ -160,7 +158,6 @@ fn walk_item(item: &Item, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
 /// MLS classification level — re-exported from
 /// `verum_common::mls::MlsLevel` (#282 Phase 2a).
 ///
-
 /// Pre-#282 this enum was private to safety_gate. Promoting it to
 /// the shared layer lets the type checker (Phase 2b) and the
 /// context system (Phase 3) consume the same lattice without
@@ -249,7 +246,6 @@ fn pattern_to_name(p: &verum_ast::pattern::Pattern) -> verum_common::Text {
 ///  `@classification` joined with every parameter's
 ///  `@classification`) is < the manifest floor.
 ///
-
 /// Phase 1 covered the call-site friction layer for dangerous
 /// declarations. Phase 2b extends the trigger to functions that
 /// merely RECEIVE classified data (a Secret-classified parameter
@@ -259,20 +255,17 @@ fn pattern_to_name(p: &verum_ast::pattern::Pattern) -> verum_common::Text {
 /// at `verum_types::infer`.
 /// Default low-classification sink registry (#283 Phase 3a).
 ///
-
 /// These context names are recognized as sinks where classified
 /// data leaks observably out of the program (logs, files, network
 /// packets). When a function with a Secret-or-higher classification
 /// `using` one of these contexts, the surface gate emits a leak
 /// warning unless the function is explicitly marked `@declassify`.
 ///
-
 /// The list is conservative — only contexts whose semantic is
 /// "this is publicly observable output" are sinks. Pure-compute
 /// contexts (Database queries that return Secret data, validation
 /// services) are NOT sinks; they're classified-data CONSUMERS.
 ///
-
 /// The registry is hardcoded at the prefix level — any context
 /// whose final path segment matches one of these is a sink.
 /// Phase 3 full-form will extend this with manifest-driven custom
@@ -319,7 +312,6 @@ fn has_declassify_attr(attrs: &List<verum_ast::attr::Attribute>) -> bool {
 ///  Network, …), AND
 ///  3. is NOT marked `@declassify`.
 ///
-
 /// This is the surface-level information-flow check: classified
 /// data + observable sink + no explicit declassification = leak.
 /// Full type-level taint propagation (where every classified value

@@ -44,7 +44,6 @@ use verum_common::{List, Maybe, Text};
 
 /// Error recovery coordinator for the compiler.
 ///
-
 /// Provides intelligent recovery strategies for various compiler errors,
 /// enabling continued compilation and useful error messages even in the
 /// presence of errors.
@@ -464,13 +463,11 @@ impl ErrorRecovery {
 
     /// Check if this is a refinement type mismatch.
     ///
-
     /// A refinement type mismatch occurs when two types have the same base type
     /// but different constraints. For example:
     /// - `Int{x > 0}` vs `Int{x >= 0}` (same base `Int`, different constraints)
     /// - `Float{x != 0}` vs `Float` (one has constraint, one doesn't)
     ///
-
     /// This function recognizes several refinement type syntaxes:
     /// - `Type{constraint}` - inline refinement
     /// - `Type where constraint` - where-clause refinement
@@ -492,7 +489,6 @@ impl ErrorRecovery {
 
     /// Extract the base type from a potentially refined type.
     ///
-
     /// Handles the following syntaxes:
     /// - `Type{constraint}` -> `Type`
     /// - `Type where constraint` -> `Type`
@@ -565,7 +561,6 @@ impl ErrorRecovery {
 
     /// Suggest fixes for a syntax error based on common patterns.
     ///
-
     /// Analyzes the error context and suggests likely missing tokens.
     pub fn suggest_syntax_fixes(&self, error_context: &SyntaxErrorContext) -> List<RecoveryAction> {
         let mut suggestions = List::new();
@@ -680,7 +675,6 @@ impl ErrorRecovery {
 
     /// Suggest fixes for an undefined identifier.
     ///
-
     /// Uses Levenshtein distance and other heuristics to find similar names.
     pub fn suggest_fixes_for_undefined_name(
         &self,

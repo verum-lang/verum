@@ -22,10 +22,8 @@ use std::time::Instant;
 
 /// Enhanced error reporting for GAT inference failures
 ///
-
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4
 ///
-
 /// Provides rich, actionable diagnostics when GAT type inference fails,
 /// including:
 /// - Detailed constraint analysis
@@ -140,7 +138,6 @@ pub enum GATInferenceSuggestion {
 impl TypeChecker {
     /// Create detailed error for GAT inference failure
     ///
-
     /// Analyzes failed constraints to provide actionable diagnostics.
     fn create_gat_error(
         &self,
@@ -205,16 +202,13 @@ impl TypeChecker {
 
     /// Check if two protocol bounds are compatible
     ///
-
     /// Bounds are compatible if:
     /// 1. They require the same protocol (fast path - exact equality)
     /// 2. One bound subsumes the other (e.g., Copy subsumes Clone because Copy: Clone)
     /// 3. Transitively related through the protocol hierarchy
     ///
-
     /// Protocol coherence: ensuring unique implementations across the program, orphan rules, overlap detection — Coherence Rules
     ///
-
     /// For GAT constraint checking, two bounds are "compatible" if they can both be
     /// satisfied by the same type. This means checking if one protocol is a
     /// subprotocol of the other (either direction works for compatibility).
@@ -276,7 +270,6 @@ impl TypeChecker {
 
     /// Check if protocol arguments are compatible
     ///
-
     /// Type arguments must be compatible for the bounds to be compatible.
     fn protocol_args_compatible(&self, args1: &List<Type>, args2: &List<Type>) -> bool {
         // If different number of arguments, not compatible
@@ -296,7 +289,6 @@ impl TypeChecker {
 
     /// Check if two types are compatible for bound checking
     ///
-
     /// Types are compatible if they unify or one is a subtype of the other.
     fn types_compatible_for_bounds(&self, t1: &Type, t2: &Type) -> bool {
         // Exact equality
@@ -329,13 +321,11 @@ impl TypeChecker {
 
     /// Check if one protocol subsumes another (transitive inheritance check)
     ///
-
     /// Returns true if:
     /// - p1 == p2 (reflexive)
     /// - p1 inherits from p2 (p1 is subprotocol of p2)
     /// - p2 inherits from p1 (p2 is subprotocol of p1)
     ///
-
     /// Both directions are checked because for bound compatibility, we care
     /// whether there exists a type that can satisfy both bounds, which is
     /// possible if either protocol inherits from the other.
@@ -612,17 +602,14 @@ impl TypeChecker {
 
 /// Performance-optimized GAT inference engine
 ///
-
 /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .4
 ///
-
 /// Implements advanced optimizations for GAT type inference:
 /// - Constraint caching (memoization)
 /// - Incremental solving (dependency tracking)
 /// - Early pruning (quick feasibility checks)
 /// - Constraint simplification
 ///
-
 /// Performance characteristics:
 /// - Cache hit: O(1) ~1ms
 /// - Incremental: O(changed) instead of O(total)
@@ -949,7 +936,6 @@ impl OptimizedGATInference {
 
     /// Simplify constraints by removing redundancies using logical implication
     ///
-
     /// This performs three simplification passes:
     /// 1. Deduplication: Remove exact duplicates
     /// 2. Subsumption: Remove weaker constraints implied by stronger ones
@@ -995,7 +981,6 @@ impl OptimizedGATInference {
 
     /// Remove bounds that are subsumed by more specific bounds
     ///
-
     /// If T: Ord and T: Eq, and Ord extends Eq, we only need T: Ord
     fn remove_subsumed_bounds(&self, constraints: &List<GATConstraint>) -> List<GATConstraint> {
         if constraints.len() <= 1 {
@@ -1045,7 +1030,6 @@ impl OptimizedGATInference {
 
     /// Quick feasibility check using protocol hierarchy
     ///
-
     /// Checks for obvious contradictions in constraints:
     /// 1. Positive/negative bound conflicts (T: Clone vs T: !Clone)
     /// 2. Incompatible protocol requirements
@@ -1146,7 +1130,6 @@ impl OptimizedGATInference {
 
     /// Check if two protocols are inherently incompatible
     ///
-
     /// Some protocol combinations are known to be impossible to satisfy together.
     fn are_protocols_incompatible(&self, p1: &Text, p2: &Text) -> bool {
         // Known incompatible pairs (can be extended)
@@ -1166,7 +1149,6 @@ impl OptimizedGATInference {
 
     /// Build dependency graph for a GAT by traversing type bindings
     ///
-
     /// Finds dependent GATs by examining:
     /// 1. Associated types in bindings that reference other GATs
     /// 2. Type parameters that contain GAT applications
@@ -1351,20 +1333,16 @@ impl OptimizedGATInference {
 
     /// Solve GAT constraints using proper constraint unification
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Group constraints by type variable
     /// 2. For each variable, find candidate types from bindings
     /// 3. Filter candidates by checking all bounds are satisfied
     /// 4. Find intersection of valid candidates
     /// 5. Return the most specific type that satisfies all constraints
     ///
-
     /// # Returns
     ///
-
     /// - `Some(type)` if a solution exists
     /// - `None` if constraints are unsatisfiable
     fn solve_gat_constraints(
@@ -1564,7 +1542,6 @@ impl OptimizedGATInference {
 
     /// Find the most specific type among valid candidates
     ///
-
     /// Uses protocol hierarchy to determine specificity:
     /// - A type implementing Ord is more specific than one only implementing Eq
     fn find_most_specific_type(

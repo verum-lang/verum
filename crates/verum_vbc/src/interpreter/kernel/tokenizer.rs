@@ -38,7 +38,6 @@ use std::sync::Arc;
 
 /// Tokenizer handle for BPE or SentencePiece tokenizers.
 ///
-
 /// When the `tokenizers` feature is enabled, this wraps a real HuggingFace tokenizer.
 /// Otherwise, it's a stub that tracks metadata only.
 pub struct TokenizerHandle {
@@ -75,12 +74,10 @@ mod real_impl {
 
     /// Load BPE tokenizer from vocab and merges files.
     ///
-
     /// # Arguments
     /// * `vocab_path` - Path to vocab.json file
     /// * `merges_path` - Path to merges.txt file
     ///
-
     /// # Returns
     /// A tokenizer handle, or None if loading fails.
     pub fn load_bpe(vocab_path: &str, merges_path: &str) -> Option<TokenizerHandle> {
@@ -99,16 +96,13 @@ mod real_impl {
 
     /// Load pretrained tokenizer by model name or path.
     ///
-
     /// This function attempts to load a tokenizer from a local path first.
     /// If the path contains "tokenizer.json", it loads directly.
     /// Otherwise, it tries common tokenizer file names in the directory.
     ///
-
     /// # Arguments
     /// * `model_name` - The path to a tokenizer.json file or a directory containing one
     ///
-
     /// # Returns
     /// A tokenizer handle, or None if loading fails.
     pub fn load_pretrained(model_name: &str) -> Option<TokenizerHandle> {
@@ -146,11 +140,9 @@ mod real_impl {
 
     /// Load SentencePiece tokenizer from model file.
     ///
-
     /// # Arguments
     /// * `model_path` - Path to .model file or tokenizer.json
     ///
-
     /// # Returns
     /// A tokenizer handle, or None if loading fails.
     pub fn load_spm(model_path: &str) -> Option<TokenizerHandle> {
@@ -193,12 +185,10 @@ mod real_impl {
 
     /// Encode text to tokens using the tokenizer.
     ///
-
     /// # Arguments
     /// * `tokenizer` - The tokenizer handle
     /// * `text` - The text to encode
     ///
-
     /// # Returns
     /// A vector of token IDs, or None if encoding fails.
     pub fn encode(tokenizer: &TokenizerHandle, text: &str) -> Option<Vec<u32>> {
@@ -208,12 +198,10 @@ mod real_impl {
 
     /// Decode tokens to text using the tokenizer.
     ///
-
     /// # Arguments
     /// * `tokenizer` - The tokenizer handle
     /// * `tokens` - The token IDs to decode
     ///
-
     /// # Returns
     /// The decoded text, or None if decoding fails.
     pub fn decode(tokenizer: &TokenizerHandle, tokens: &[u32]) -> Option<String> {
@@ -222,13 +210,11 @@ mod real_impl {
 
     /// Encode text with special tokens.
     ///
-
     /// # Arguments
     /// * `tokenizer` - The tokenizer handle
     /// * `text` - The text to encode
     /// * `add_special_tokens` - Whether to add special tokens (e.g., [CLS], [SEP])
     ///
-
     /// # Returns
     /// A vector of token IDs, or None if encoding fails.
     pub fn encode_with_special_tokens(
@@ -242,12 +228,10 @@ mod real_impl {
 
     /// Batch encode multiple texts.
     ///
-
     /// # Arguments
     /// * `tokenizer` - The tokenizer handle
     /// * `texts` - The texts to encode
     ///
-
     /// # Returns
     /// A vector of token ID vectors, or None if encoding fails.
     pub fn encode_batch(tokenizer: &TokenizerHandle, texts: &[&str]) -> Option<Vec<Vec<u32>>> {
@@ -257,12 +241,10 @@ mod real_impl {
 
     /// Batch decode multiple token sequences.
     ///
-
     /// # Arguments
     /// * `tokenizer` - The tokenizer handle
     /// * `token_sequences` - The token ID sequences to decode
     ///
-
     /// # Returns
     /// A vector of decoded texts, or None if decoding fails.
     pub fn decode_batch(
@@ -359,12 +341,10 @@ use stub_impl as impl_mod;
 
 /// Load BPE tokenizer from vocabulary and merges files.
 ///
-
 /// # Arguments
 /// * `vocab_path` - Path to vocab.json file
 /// * `merges_path` - Path to merges.txt file
 ///
-
 /// # Returns
 /// A tokenizer handle, or None if loading fails.
 #[inline]
@@ -374,11 +354,9 @@ pub fn dispatch_tokenizer_load_bpe(vocab_path: &str, merges_path: &str) -> Optio
 
 /// Load pretrained tokenizer by model name.
 ///
-
 /// # Arguments
 /// * `model_name` - The name or path of the pretrained model
 ///
-
 /// # Returns
 /// A tokenizer handle, or None if loading fails.
 #[inline]
@@ -388,11 +366,9 @@ pub fn dispatch_tokenizer_load_pretrained(model_name: &str) -> Option<TokenizerH
 
 /// Load SentencePiece tokenizer from model file.
 ///
-
 /// # Arguments
 /// * `model_path` - Path to .model or tokenizer.json file
 ///
-
 /// # Returns
 /// A tokenizer handle, or None if loading fails.
 #[inline]
@@ -402,12 +378,10 @@ pub fn dispatch_tokenizer_load_spm(model_path: &str) -> Option<TokenizerHandle> 
 
 /// Encode text to tokens.
 ///
-
 /// # Arguments
 /// * `tokenizer` - The tokenizer handle
 /// * `text` - The text to encode
 ///
-
 /// # Returns
 /// A vector of token IDs, or None if encoding fails.
 #[inline]
@@ -417,12 +391,10 @@ pub fn dispatch_tokenizer_encode(tokenizer: &TokenizerHandle, text: &str) -> Opt
 
 /// Decode tokens to text.
 ///
-
 /// # Arguments
 /// * `tokenizer` - The tokenizer handle
 /// * `tokens` - The token IDs to decode
 ///
-
 /// # Returns
 /// The decoded text, or None if decoding fails.
 #[inline]

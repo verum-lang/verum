@@ -141,7 +141,6 @@ impl Default for AbstractionConfig {
 
 /// Abstract predicate representing an equivalence class of predicates
 ///
-
 /// An abstract predicate groups together multiple predicates that can be
 /// merged during abstraction. The canonical form represents the abstracted
 /// version, while the equivalence class contains all original predicates
@@ -220,7 +219,6 @@ impl AbstractPredicate {
 
     /// Canonicalize a predicate (Level 1: syntactic normalization)
     ///
-
     /// This performs:
     /// - Simplification (constant folding, identity elimination)
     /// - Canonical ordering (for commutative operators)
@@ -232,7 +230,6 @@ impl AbstractPredicate {
 
     /// Normalize predicate to canonical form
     ///
-
     /// Ensures that equivalent predicates have the same representation:
     /// - AND/OR arguments in sorted order
     /// - Double negation eliminated
@@ -347,7 +344,6 @@ impl AbstractPredicate {
 
 /// Main predicate abstraction engine
 ///
-
 /// This is the core component that performs predicate abstraction to merge
 /// similar paths and prevent exponential path explosion.
 pub struct PredicateAbstractor {
@@ -457,20 +453,15 @@ impl PredicateAbstractor {
 
     /// Merge similar paths to prevent explosion
     ///
-
     /// This is the main entry point for path merging. It groups paths by
     /// similarity and merges groups into abstract representatives.
     ///
-
     /// # Arguments
     ///
-
     /// * `paths` - List of path conditions to merge
     ///
-
     /// # Returns
     ///
-
     /// Reduced list of path conditions (with abstracted predicates)
     pub fn merge_similar_paths(&mut self, paths: List<PathCondition>) -> List<PathCondition> {
         let start = std::time::Instant::now();
@@ -503,17 +494,13 @@ impl PredicateAbstractor {
 
     /// Abstract a predicate to the given level
     ///
-
     /// # Arguments
     ///
-
     /// * `pred` - Predicate to abstract
     /// * `level` - Target abstraction level (0-4)
     ///
-
     /// # Returns
     ///
-
     /// Abstracted predicate at the specified level
     pub fn abstract_predicate(&mut self, pred: &PathPredicate, level: u32) -> PathPredicate {
         let start = std::time::Instant::now();
@@ -563,7 +550,6 @@ impl PredicateAbstractor {
 
     /// Check if two predicates are similar enough to merge
     ///
-
     /// Uses multiple strategies:
     /// 1. Structural hash similarity
     /// 2. Z3-based semantic equivalence (if enabled)
@@ -685,7 +671,6 @@ impl PredicateAbstractor {
 
     /// Level 2 abstraction: Subsumption
     ///
-
     /// If predicate is specific, abstract to more general form
     fn abstract_level2(&self, pred: &PathPredicate) -> PathPredicate {
         // First normalize
@@ -717,7 +702,6 @@ impl PredicateAbstractor {
 
     /// Level 3 abstraction: Widening
     ///
-
     /// After N iterations, widen to more abstract form. The
     /// `use_widening` config gate enables/disables the level-3
     /// widening behaviour entirely — when `false`, level-3 falls
@@ -774,7 +758,6 @@ impl PredicateAbstractor {
 
     /// Check if two predicates are structurally similar
     ///
-
     /// Structural similarity means they have the same shape but possibly
     /// different block IDs.
     fn structurally_similar(&self, p1: &PathPredicate, p2: &PathPredicate) -> bool {

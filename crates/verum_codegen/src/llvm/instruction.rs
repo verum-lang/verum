@@ -97,7 +97,6 @@ fn checked_malloc_instr<'ctx>(
 
 /// Get or declare a libc-free `strtol(nptr, endptr, base) -> i64` wrapper.
 ///
-
 /// **Libc-free**: open-coded base-10 integer parser emitted as
 /// `verum_internal_strtol` (internal-linkage). Skips leading
 /// whitespace, accepts optional `+`/`-`, accumulates digits, stops
@@ -105,12 +104,10 @@ fn checked_malloc_instr<'ctx>(
 /// Verum `parse_int` path; non-10 bases fall through to base-10
 /// (typical caller convention).
 ///
-
 /// Signature matches libc: `(ptr nptr, ptr endptr_unused, i32 base) -> i64`.
 /// `endptr` is ignored by the wrapper since callers consistently
 /// pass NULL for it.
 ///
-
 /// See `docs/architecture/no-libc-architecture.md`.
 pub(crate) fn get_or_declare_internal_strtol<'ctx>(
     llvm_ctx: &'ctx verum_llvm::context::Context,
@@ -1982,7 +1979,6 @@ fn write_literal<'ctx>(
 
 /// Get or declare a libc-free `puts(s) -> i32` wrapper.
 ///
-
 /// **Libc-free**: emits an internal-linkage wrapper that calls
 /// `verum_internal_strlen` + `verum_internal_write` (both already
 /// libc-free — see runtime.rs). The wrapper writes the string to
@@ -1990,7 +1986,6 @@ fn write_literal<'ctx>(
 /// observable behaviour. Returns 0 on success (non-negative;
 /// matches libc puts's return-value contract).
 ///
-
 /// See `docs/architecture/no-libc-architecture.md`.
 fn get_or_declare_internal_puts<'ctx>(
     llvm_ctx: &'ctx verum_llvm::context::Context,
@@ -2075,7 +2070,6 @@ fn get_or_declare_internal_puts<'ctx>(
 
 /// Get or declare a libc-free `strcmp(a, b) -> i32` wrapper.
 ///
-
 /// **Libc-free**: emits an internal-linkage byte-by-byte
 /// comparison loop instead of declaring `extern "C" fn strcmp`.
 /// LLVM's optimiser inlines the body at -O2+ so the wrapper has
@@ -2442,7 +2436,6 @@ fn build_fptosi_sat_i64<'ctx>(
 /// Emit a call to verum_text_free(text_obj) to free an owned Text object.
 /// Frees both the character buffer and the 24-byte header.
 ///
-
 /// Uses a single call to an outlined helper function rather than inlining
 /// 4 basic blocks per free. This prevents block explosion when many owned
 /// text registers are freed at function exit (Ret/RetV).
@@ -2467,7 +2460,6 @@ fn emit_text_free<'ctx>(
 
 /// Resolve an LLVM function by name, handling stdlib/user name collisions.
 ///
-
 /// When a compiled stdlib function and a user function share a name but
 /// have different arities, `declare_functions` renames the colliding one
 /// to `func_name__arityN`. This function first tries the primary name,
@@ -9893,11 +9885,9 @@ pub fn lower_instruction<'ctx>(
 
 /// Lower a `PermissionAssert { scope_tag, target_id }` to LLVM IR.
 ///
-
 /// Three paths, all driven by the compile-time-known policy on the
 /// `FunctionContext`:
 ///
-
 /// * **No policy installed** → trusted-application AOT run. Emit
 ///  nothing; the assert is a no-op at runtime, matching the
 ///  interpreter's allow-all default behaviour when no script
@@ -9915,7 +9905,6 @@ pub fn lower_instruction<'ctx>(
 ///  compact branch-on-equal sequences and folds the constants
 ///  aggressively.
 ///
-
 /// The panic path is inlined per call site rather than routed
 /// through a runtime helper. Inlining keeps the policy sealed in
 /// the binary (no function symbol an attacker could intercept) and
@@ -10041,7 +10030,6 @@ fn lower_permission_assert<'ctx>(
 /// exact code to distinguish capability violations from logic
 /// panics (which exit 1 via `Assert` / `Panic`).
 ///
-
 /// Builder cursor is left after a terminating `unreachable` — the
 /// caller positions to a fresh block before continuing.
 fn emit_permission_panic<'ctx>(
@@ -10106,12 +10094,10 @@ fn scope_tag_name(tag: u8) -> &'static str {
 
 /// Lower ArithExtended instruction to LLVM IR.
 ///
-
 /// Handles checked, wrapping, saturating arithmetic, bit-counting, and
 /// other extended integer operations via LLVM intrinsics.
 /// Lower a CallM (method call) instruction to LLVM IR.
 ///
-
 /// This is the largest single instruction handler, covering:
 /// - Channel/Heap/Mutex constructor dispatch
 /// - Strategy 0: Inline LLVM IR for len/is_empty/capacity, text methods, sync primitives
@@ -10120,7 +10106,6 @@ fn scope_tag_name(tag: u8) -> &'static str {
 /// - Strategy 4: Direct LLVM function call
 /// Lower a Call (function call) instruction to LLVM IR.
 ///
-
 /// Handles direct function calls including:
 /// - Channel.new constructor dispatch
 /// - Compiled stdlib function calls (with func_id_base offset)
@@ -21774,7 +21759,6 @@ fn lower_arith_extended<'ctx>(
 
 /// Lower MathExtended instruction to LLVM IR.
 ///
-
 /// Handles transcendental math functions (sin, cos, exp, log, sqrt, etc.)
 /// via LLVM intrinsics.
 /// Lower a `MathExtended` sub-opcode to LLVM IR.
@@ -26000,7 +25984,6 @@ fn lower_char_extended<'ctx>(
 
 /// Lower SimdExtended instruction to LLVM IR.
 ///
-
 /// Implements scalar fallback operations matching the interpreter behavior.
 /// These operate on f64 register values (NaN-boxed representation).
 /// When LLVM vector type information is available (via typed SIMD API),
@@ -26706,13 +26689,11 @@ fn lower_log_extended<'ctx>(
 
 /// Lower the generic `Opcode::Extended` (#167 Part A) instruction to LLVM IR.
 ///
-
 /// The Extended opcode carves a 256-entry secondary opcode space out of one
 /// byte (0x1F) of the primary opcode space; sub-ops here are first-class
 /// instructions that don't fit any pre-existing extension namespace
 /// (Math/Tensor/Cbgr/Ffi/...). Currently defined sub-ops:
 ///
-
 ///  * `0x00` Reserved — forward-compat anchor; encoders MUST NOT emit;
 ///  decoders accept it as a no-op.
 ///  * `0x10` ProcessExit — first-class divergent termination
@@ -26756,7 +26737,6 @@ fn resolve_named_field_index(
 /// guessed slot, never a silent zero (the class this instruction
 /// retires read 40 bytes into a 16-byte BigInt).
 ///
-
 /// `dst=Some` lowers a READ (loaded slot PHI-merged into dst);
 /// `value=Some` lowers a WRITE (store per case, no merge value).
 fn lower_field_named_dynamic<'ctx>(
@@ -27364,13 +27344,11 @@ fn lower_extended<'ctx>(
 
 /// Lower CubicalExtended (0xDE) instruction to LLVM IR.
 ///
-
 /// Routes the cubical-type-theory primitive to the corresponding
 /// `verum_cubical_<op>` runtime extern. The runtime is a thin C-ABI
 /// shim around `verum_types::cubical` that performs the CCHM
 /// reduction. Two ops are folded inline:
 ///
-
 ///  * `IntervalI0` / `IntervalI1` — load the constant interval
 ///  endpoint (0 / 1 stored as i64 sentinel — the runtime reads
 ///  them with the same encoding).
@@ -27380,7 +27358,6 @@ fn lower_extended<'ctx>(
 ///  to the runtime so the resulting Path carrier is well-formed
 ///  for any consumer (including Transport/Hcomp folding).
 ///
-
 /// Future improvements (#81 follow-up):
 ///  * Constant-fold `Transport(refl, x) → x` when the type-path
 ///  argument is known statically.
@@ -27389,7 +27366,6 @@ fn lower_extended<'ctx>(
 ///  when interval values are Booleans, matching the runtime's
 ///  semantics for the Bool model of I.
 ///
-
 /// All other sub-ops route through `verum_cubical_<op>`. The runtime
 /// signature is uniform: each takes the args by i64 (Value bits)
 /// and returns an i64 path/equiv/value handle. Variadic args are
@@ -29150,7 +29126,6 @@ fn lower_math_binary_f64<'ctx>(
 
 /// Lower FfiExtended instruction to LLVM IR.
 ///
-
 /// This implements zero-cost FFI for AOT compilation by generating direct
 /// LLVM calls and memory operations instead of libffi dynamic dispatch.
 fn lower_ffi_extended<'ctx>(
@@ -32172,11 +32147,9 @@ fn lower_ffi_extended<'ctx>(
 
 /// Convert VBC CType to LLVM BasicTypeEnum.
 ///
-
 /// Returns None for Void type (used for function return types).
 /// This is the core type mapping for zero-cost FFI: VBC CType → LLVM Type.
 ///
-
 /// # Type Mappings
 /// | CType | LLVM Type | Size |
 /// |-------|-----------|------|
@@ -32461,11 +32434,9 @@ fn safe_int_rem<'ctx>(
 }
 
 ///
-
 /// Implements: result = base^exp using the square-and-multiply algorithm
 /// Time complexity: O(log exp)
 ///
-
 /// For negative exponents, returns 0 (integer division truncates).
 fn lower_int_pow<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -32600,7 +32571,6 @@ fn lower_int_pow<'ctx>(
 
 /// Lower float power using llvm.pow.f64 intrinsic.
 ///
-
 /// Generates: call double @llvm.pow.f64(double %base, double %exp)
 fn lower_float_pow<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -32631,7 +32601,6 @@ fn lower_float_pow<'ctx>(
 
 /// Lower Throw instruction.
 ///
-
 /// Throws an exception by:
 /// 1. Storing the exception value in the exception slot
 /// 2. Jumping to the current exception handler (if any)
@@ -32680,12 +32649,10 @@ fn lower_throw<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, error_reg: Reg) -> Res
 
 /// Lower TryBegin instruction.
 ///
-
 /// Sets up structured exception handling by:
 /// 1. Creating a handler block at the specified offset
 /// 2. Pushing the handler onto the exception handler stack
 ///
-
 /// Note: In VBC, handler_offset is relative to the current instruction.
 /// In LLVM lowering, we create a new basic block for the handler.
 fn lower_try_begin<'ctx>(_ctx: &mut FunctionContext<'_, 'ctx>, _handler_offset: i32) -> Result<()> {
@@ -32697,7 +32664,6 @@ fn lower_try_begin<'ctx>(_ctx: &mut FunctionContext<'_, 'ctx>, _handler_offset: 
 
 /// Lower TryEnd instruction.
 ///
-
 /// Ends a try block by:
 /// 1. Popping the exception handler from the stack
 /// 2. Jumping to the continuation block (normal exit)
@@ -32720,7 +32686,6 @@ fn lower_try_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 
 /// Lower GetException instruction.
 ///
-
 /// Gets the current exception value and stores it in the destination register.
 /// Build a RUNTIME type-id switch dispatch for a method call whose
 /// target could not be statically resolved (2026-07-09).
@@ -33012,7 +32977,6 @@ fn ctx_bridge_slot(ctx: &mut FunctionContext<'_, '_>, ctx_type: u32) -> Result<u
 
 /// Lower CtxGet instruction.
 ///
-
 /// Retrieves a context value by type ID from the thread-local context stack.
 /// The result is stored in the destination register.
 ///
@@ -33044,7 +33008,6 @@ fn lower_ctx_get<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ctx_type: 
 
 /// Lower CtxProvide instruction.
 ///
-
 /// Pushes a context value onto the thread-local context stack.
 /// The value remains active until CtxEnd is called.
 /// The dense slot installed here is pushed on the FunctionContext
@@ -33083,7 +33046,6 @@ fn lower_ctx_provide<'ctx>(
 
 /// Lower CtxEnd instruction.
 ///
-
 /// Ends the innermost open provide scope. The bridge `env_ctx_end`
 /// takes the SLOT id to clear (slot-flat TLS semantics) — NOT a provide
 /// nesting depth. Before CTX-AOT-INCOHERENCE-1 leg 1 this passed the
@@ -33124,7 +33086,6 @@ fn lower_ctx_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
 
 /// Lower CtxCheckNegative instruction.
 ///
-
 /// Emits a runtime check that a specific context is NOT present in the context
 /// stack. If the context IS present, calls `verum_panic` with an error message.
 /// This enforces `using [!Context]` negative constraints at runtime.
@@ -33245,7 +33206,6 @@ fn vbc_to_llvm_ordering(ordering: u8) -> AtomicOrdering {
 
 /// Lower AtomicLoad instruction.
 ///
-
 /// Generates LLVM atomic load with the specified ordering.
 fn lower_atomic_load<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -33303,7 +33263,6 @@ fn lower_atomic_load<'ctx>(
 
 /// Lower AtomicStore instruction.
 ///
-
 /// Generates LLVM atomic store with the specified ordering.
 fn lower_atomic_store<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -33376,7 +33335,6 @@ fn lower_atomic_store<'ctx>(
 
 /// Lower AtomicCas instruction.
 ///
-
 /// Generates LLVM cmpxchg instruction.
 fn lower_atomic_cas<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -33529,7 +33487,6 @@ fn lower_atomic_cas<'ctx>(
 
 /// Lower AtomicFence instruction.
 ///
-
 /// Generates LLVM fence instruction with the specified ordering.
 /// Special case: ordering 0xFF means spin_hint (CPU pause/yield).
 fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ordering: u8) -> Result<()> {
@@ -33605,7 +33562,6 @@ fn lower_atomic_fence<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ordering: u8) -
 
 /// Lower GetE instruction (array element access).
 ///
-
 /// Generates GEP + load for array element access.
 /// Array is assumed to be a pointer to elements.
 fn lower_get_element<'ctx>(
@@ -33738,7 +33694,6 @@ fn lower_get_element<'ctx>(
 
 /// Lower SetE instruction (array element assignment).
 ///
-
 /// Generates GEP + store for array element assignment.
 fn lower_set_element<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
@@ -34438,13 +34393,11 @@ fn apply_ffi_memory_attributes<'ctx>(
 
 /// Emit error protocol checking after an FFI call.
 ///
-
 /// For errno-based protocols, generates LLVM IR branching:
 /// - NegOneErrno: if result == -1 → read errno, store negated errno
 /// - NullErrno: if result == null → read errno, store negated errno
 /// - ZeroSuccess: if result != 0 → store result as error code (negated)
 ///
-
 /// Convention: negative values in ret_reg signal errors, positive = success.
 /// User code checks via pattern matching or comparison.
 fn emit_ffi_error_protocol_check<'ctx>(
@@ -34879,7 +34832,6 @@ fn emit_ffi_error_protocol_check<'ctx>(
 
 /// Store FFI return value with ownership tracking.
 ///
-
 /// Integer returns narrower than 64 bits are sign-extended to i64 to match
 /// the VBC value model. Without this, a libc function declared to return
 /// C `int` (i32) leaves the upper 32 bits of x0 undefined on AArch64; if a
@@ -34934,7 +34886,6 @@ fn store_ffi_void_value<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, ret_reg: u16)
 // ====================================================================
 /// Marks the destination register based on a function's return type.
 ///
-
 /// This ensures that Call/CallM results are properly tracked for downstream
 /// instructions (GetE/SetE need list tracking, ToString needs float/string tracking, etc.).
 /// CALLM-RETNAME-OBJ-MARK-1 (#41): last-resort obj-type stamp for a call

@@ -705,13 +705,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Verify SMT query with automatic fallback from Z3 to CVC5
 ///
-
 /// This function provides solver redundancy:
 /// 1. First attempts verification with Z3
 /// 2. On timeout or failure, falls back to CVC5
 /// 3. Returns first successful result
 ///
-
 /// Use this for critical verification queries where reliability is paramount.
 pub fn verify_with_fallback<F>(z3_verifier: F, timeout_ms: u64) -> Result<SmtResult>
 where
@@ -744,13 +742,11 @@ where
 
 /// Portfolio solving: run Z3 and CVC5 in parallel, return first result
 ///
-
 /// This approach can significantly improve solving time on difficult queries:
 /// - Both solvers run concurrently
 /// - First solver to return a result wins
 /// - Other solver is terminated
 ///
-
 /// Performance: 2x faster on average for complex queries (benchmarked)
 pub fn verify_portfolio<F, G>(z3_verifier: F, cvc5_verifier: G) -> Result<SmtResult>
 where

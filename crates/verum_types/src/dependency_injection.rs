@@ -440,17 +440,14 @@ impl DITypeChecker {
 
     /// Phase 4: Resolve protocol dependencies
     ///
-
     /// This phase resolves protocol-based dependencies by:
     /// 1. Finding all DependencyRef::Protocol entries in constructors
     /// 2. Looking up types that implement each protocol
     /// 3. Verifying exactly one injectable type implements each protocol
     /// 4. Adding edges to the dependency graph for protocol dependencies
     ///
-
     /// # Errors
     ///
-
     /// Returns an error if:
     /// - No injectable type implements a required protocol
     /// - Multiple injectable types implement the same protocol (ambiguity)
@@ -563,13 +560,11 @@ impl DITypeChecker {
 
     /// Phase 6: Validate scope thread-safety constraints
     ///
-
     /// Singleton-scoped providers are shared across threads, so they must be
     /// thread-safe (Send + Sync). This phase checks:
     /// - Singleton providers do not contain known non-Send/non-Sync fields
     /// - Request-scoped providers are warned if they hold non-Send resources
     ///
-
     /// The actual Send/Sync check is structural: known non-thread-safe types
     /// (RawPtr, Cell, RefCell, UnsafeCell, Rc) produce hard errors when found
     /// in Singleton-scoped injectables.

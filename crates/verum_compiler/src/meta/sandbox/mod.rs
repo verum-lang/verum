@@ -59,12 +59,10 @@ use crate::meta::context::{ConstValue, MetaContext};
 
 /// Sandbox for meta function execution with comprehensive I/O restrictions
 ///
-
 /// The sandbox enforces that meta functions can only perform pure computations
 /// and cannot execute I/O operations like file access, network calls, or
 /// process spawning.
 ///
-
 /// **Defense in Depth**: Multiple enforcement layers ensure no forbidden
 /// operations can occur, even if one layer fails.
 #[derive(Debug, Clone)]
@@ -98,7 +96,6 @@ impl MetaSandbox {
 
     /// Execute an expression in the sandbox
     ///
-
     /// This is the main entry point for executing meta functions at compile-time.
     pub fn execute(&self, ctx: &MetaContext, expr: &Expr) -> Result<ConstValue, SandboxError> {
         self.executor.execute(ctx, expr)

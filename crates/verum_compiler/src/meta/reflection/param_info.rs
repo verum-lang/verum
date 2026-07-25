@@ -22,7 +22,6 @@ pub enum SelfKind {
 
 /// Function parameter information
 ///
-
 /// Matches: core/meta/reflection.vr ParamInfo
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamInfo {

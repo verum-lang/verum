@@ -77,7 +77,6 @@ impl ContentHash {
     /// Compute the content hash of a source string with a metadata
     /// tag.
     ///
-
     /// The tag is mixed into the digest so otherwise-equal sources
     /// from different "lifecycles" (e.g. parsed-with-meta-expansion
     /// vs raw-source) don't collide. Use `"raw"` for verbatim source,
@@ -154,7 +153,6 @@ impl ModuleNodeId {
 /// `OnceLock` discipline means computation runs at most once per
 /// process per artifact, regardless of contention.
 ///
-
 /// The artifact slots are intentionally generic over the concrete
 /// types so CAMG can stay architecture-only: the type-checker, parser,
 /// codegen, etc. each know which artifact slot they own and supply
@@ -172,7 +170,6 @@ pub struct ModuleArtifacts {
     /// `Arc<dyn Any + Send + Sync>` so consumers downcast to their
     /// expected concrete type.
     ///
-
     /// `DashMap` for lock-free per-tag insertion / read; `OnceLock`
     /// inside guards "compute once" semantics on the first access.
     pub slots: DashMap<Text, Arc<OnceLock<Arc<dyn std::any::Any + Send + Sync>>>>,
@@ -191,7 +188,6 @@ impl ModuleArtifacts {
     /// runs at most once per slot per process; subsequent callers
     /// receive a cheap `Arc::clone` of the cached value.
     ///
-
     /// Type-erasure happens at the storage boundary: the closure
     /// returns the concrete type, this method downcasts on read.
     /// Callers that pass the wrong concrete type for an existing tag

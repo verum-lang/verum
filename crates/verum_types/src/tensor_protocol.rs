@@ -81,7 +81,6 @@ use verum_common::ConstValue;
 
 /// NestedArray type representation
 ///
-
 /// Represents compile-time nested arrays for tensor literal validation.
 /// This is a type-level construct used during type checking.
 #[derive(Debug, Clone, PartialEq)]
@@ -114,7 +113,6 @@ impl NestedArray {
 
 /// Tensor literal validator
 ///
-
 /// Validates tensor literals at compile-time according to FromTensorLiteral protocol.
 pub struct TensorLiteralValidator {
     /// Const evaluator for shape computation
@@ -131,13 +129,10 @@ impl TensorLiteralValidator {
 
     /// Validate tensor literal shape against expected dimensions
     ///
-
     /// Returns Ok(()) if shape matches, Err with diagnostic if mismatch.
     ///
-
     /// # Spec Compliance
     ///
-
     /// Implements compile-time validation from tensor protocol specification:
     /// ```verum
     /// meta {
@@ -188,7 +183,6 @@ impl TensorLiteralValidator {
 
     /// Validate nested array structure matches expected shape
     ///
-
     /// For 2D tensors, validates that the literal has correct nesting structure.
     /// Example: `{{1, 2}, {3, 4}}` for shape [2, 2]
     pub fn validate_nesting(
@@ -228,10 +222,8 @@ impl TensorLiteralValidator {
 
     /// Generate example nesting structure for error messages
     ///
-
     /// # Visibility
     ///
-
     /// This method is `pub` to enable external testing but is not part of the stable API.
     pub fn nesting_example(&self, shape: &[usize]) -> String {
         match shape.len() {
@@ -294,13 +286,10 @@ impl Default for TensorLiteralValidator {
 
 /// Create the FromTensorLiteral protocol definition
 ///
-
 /// This protocol is used for compile-time tensor literal construction.
 ///
-
 /// # Spec Compliance
 ///
-
 /// Implements protocol from tensor protocol specification:
 /// ```verum
 /// protocol FromTensorLiteral<Shape: meta [usize], T> {
@@ -376,7 +365,6 @@ pub fn create_from_tensor_literal_protocol() -> Protocol {
 
 /// Register FromTensorLiteral protocol in the protocol checker
 ///
-
 /// This should be called during standard protocol registration.
 pub fn register_tensor_literal_protocol(checker: &mut crate::protocol::ProtocolChecker) {
     let protocol = create_from_tensor_literal_protocol();

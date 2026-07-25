@@ -260,7 +260,6 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// A DICompileUnit provides an anchor for all debugging information generated during this instance of compilation.
     ///
-
     /// * `language` - Source programming language
     /// * `file` - File info
     /// * `producer` - Identify the producer of debugging information and code. Usually this is a compiler version string.
@@ -322,7 +321,6 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// A DIFunction provides an anchor for all debugging information generated for the specified subprogram.
     ///
-
     /// * `scope` - Function scope.
     /// * `name` - Function name.
     /// * `linkage_name` - Mangled function name, if any.
@@ -1017,7 +1015,6 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// Construct a placeholders derived type to be used when building debug info with circular references.
     ///
-
     /// All placeholders must be replaced before calling finalize().
     pub unsafe fn create_placeholder_derived_type(
         &self,
@@ -1032,7 +1029,6 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// Deletes a placeholder, replacing all uses of it with another derived type.
     ///
-
     /// # Safety:
     /// This and any other copies of this placeholder made by Copy or Clone
     /// become dangling pointers after calling this method.
@@ -1047,7 +1043,6 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
     /// Construct any deferred debug info descriptors. May generate invalid metadata if debug info
     /// is incomplete. Module/function verification can then fail.
     ///
-
     /// Call before any kind of code generation (including verification). Can be called more than once.
     pub fn finalize(&self) {
         unsafe { LLVMDIBuilderFinalize(self.builder) };
@@ -1315,12 +1310,10 @@ impl DILexicalBlock<'_> {
 
 /// A debug location within the source code. Contains the following information:
 ///
-
 /// - line, column
 /// - scope
 /// - inlined at
 ///
-
 /// Created by `create_debug_location` of `DebugInfoBuilder` and consumed by
 /// `set_current_debug_location` of `Builder`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -1384,10 +1377,8 @@ impl<'ctx> DIGlobalVariableExpression<'ctx> {
 
 /// Specialized metadata node that contains a DWARF-like expression.
 ///
-
 /// # Remarks
 ///
-
 /// See also the [LLVM language reference](https://llvm.org/docs/LangRef.html#diexpression).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct DIExpression<'ctx> {

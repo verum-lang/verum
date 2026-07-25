@@ -404,7 +404,6 @@ impl CoverageReport {
 /// only on mechanised / partial / OutOfScopeForMsfs entries, with no
 /// `AxiomCited` or `Pending` items in MSFS scope?
 ///
-
 /// Returns true iff the trusted boundary BEYOND ZFC + 2-inacc is
 /// EMPTY for MSFS — the paper's claim "MSFS proven 100%
 /// from-first-principles in Verum (modulo ZFC + 2-inacc)" is
@@ -480,7 +479,6 @@ mod tests {
 
     /// **THE MSFS SELF-CONTAINMENT INVARIANT.**
     ///
-
     /// This is the contract test that distinguishes "MSFS proven
     /// 100% from-first-principles in Verum" from a paper-cited
     /// admission. Iff this test passes, the paper's claim is

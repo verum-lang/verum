@@ -387,10 +387,8 @@ pub struct TacticEntry {
 
 /// Single dispatch interface for the canonical combinator catalogue.
 ///
-
 /// Contract:
 ///
-
 ///  * `entries()` returns one [`TacticEntry`] per combinator covered.
 ///  * `lookup(name)` returns `Some` for every name the catalogue
 ///  ships; `None` for unknown names.
@@ -398,7 +396,6 @@ pub struct TacticEntry {
 ///  combinators — used by the docs generator and the runtime
 ///  simplifier alike.
 ///
-
 /// Implementations MAY restrict their entry set (e.g. a cubical-only
 /// catalogue could ship only the path-induction-style combinators).
 /// The reference [`DefaultTacticCatalog`] covers all 15 canonical
@@ -555,7 +552,6 @@ fn entry_for(c: TacticCombinator) -> TacticEntry {
 
 /// Map a [`LawId`] to the surface combinators that participate in it.
 ///
-
 /// The catalogue's `participants` field is the *only* per-law metadata
 /// the verification crate adds on top of the `verum_smt::tactic_laws`
 /// canonical inventory — name / lhs / rhs / rationale all come from
@@ -580,7 +576,6 @@ fn participants_for(id: LawId) -> Vec<TacticCombinator> {
 
 /// Canonical algebraic-laws inventory.
 ///
-
 /// **Single source of truth** — the prose (`name` / `lhs` / `rhs` /
 /// `rationale`) is projected from
 /// [`verum_smt::tactic_laws::CANONICAL_LAW_TABLE`]. Adding or

@@ -21,10 +21,8 @@ use verum_common::{List, Map, Text};
 
 /// Publish a cog to the Verum registry
 ///
-
 /// # Implementation
 ///
-
 /// This function:
 /// 1. Validates the manifest (verum.toml)
 /// 2. Builds the cog tarball (.vr archive)
@@ -32,26 +30,20 @@ use verum_common::{List, Map, Text};
 /// 4. Uploads to the central registry
 /// 5. Updates the registry index
 ///
-
 /// # Arguments
 ///
-
 /// * `dry_run` - If true, performs all steps except actual upload
 /// * `allow_dirty` - If true, allows publishing with uncommitted changes
 ///
-
 /// # Examples
 ///
-
 /// ```no_run
 /// use verum_cli::cog::publish;
 ///
-
 /// # fn main() -> anyhow::Result<()> {
 /// // Normal publish
 /// publish(false, false)?;
 ///
-
 /// // Dry run (preview what would be published)
 /// publish(true, false)?;
 /// # Ok(())
@@ -142,33 +134,25 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
 
 /// Search for cogs in the Verum registry
 ///
-
 /// # Implementation
 ///
-
 /// Uses the registry API to perform fuzzy search on cog names,
 /// descriptions, keywords, and categories.
 ///
-
 /// # Arguments
 ///
-
 /// * `query` - Search query string
 /// * `limit` - Maximum number of results to return
 ///
-
 /// # Examples
 ///
-
 /// ```no_run
 /// use verum_cli::cog::search;
 ///
-
 /// # fn main() -> anyhow::Result<()> {
 /// // Search for HTTP-related cogs
 /// search("http", 10)?;
 ///
-
 /// // Search for crypto cogs
 /// search("crypto", 20)?;
 /// # Ok(())
@@ -215,10 +199,8 @@ pub fn search(query: &str, limit: usize) -> Result<()> {
 
 /// Install a cog from the Verum registry
 ///
-
 /// # Implementation
 ///
-
 /// This function:
 /// 1. Resolves the cog version (latest if not specified)
 /// 2. Downloads the cog from the registry
@@ -227,27 +209,21 @@ pub fn search(query: &str, limit: usize) -> Result<()> {
 /// 5. Updates verum.toml with the dependency
 /// 6. Updates the lockfile (verum.lock)
 ///
-
 /// # Arguments
 ///
-
 /// * `name` - Cog name to install
 /// * `version` - Optional version requirement (uses latest if None)
 ///
-
 /// # Examples
 ///
-
 /// ```no_run
 /// use verum_cli::cog::install;
 /// use verum_common::Text;
 ///
-
 /// # fn main() -> anyhow::Result<()> {
 /// // Install latest version
 /// install("http-client", None)?;
 ///
-
 /// // Install specific version
 /// install("http-client", Some(Text::from("1.2.3")))?;
 /// # Ok(())

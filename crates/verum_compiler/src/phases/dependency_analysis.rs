@@ -44,7 +44,6 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Span as DiagSpan};
 
 /// Dependency requirements for an item
 ///
-
 /// These requirements are propagated through the dependency graph during
 /// semantic analysis. Any item that uses another item inherits its requirements.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -177,7 +176,6 @@ impl ItemRequirements {
 
 /// Target profile with constraint flags
 ///
-
 /// These flags are set based on `@cfg(no_alloc)`, `@cfg(no_std)`, etc.
 #[derive(Debug, Clone, Default)]
 pub struct TargetProfile {

@@ -108,10 +108,8 @@ pub enum SpecializationError {
 
     /// Negative bound violated - type implements a protocol it should not
     ///
-
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     ///
-
     /// This error occurs when a type T has a bound `T: !Protocol` but T actually
     /// implements Protocol. For example:
     /// ```verum
@@ -132,7 +130,6 @@ pub enum SpecializationError {
 
     /// Implementation status unknown for negative bound check
     ///
-
     /// When checking a generic type variable against a negative bound,
     /// we cannot determine if it satisfies the bound until instantiation.
     #[error("cannot verify negative bound for unresolved type")]
@@ -428,14 +425,11 @@ impl SpecializationError {
 
 /// Result of checking a negative bound
 ///
-
 /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
 ///
-
 /// Used to represent the three possible outcomes when checking if a type
 /// satisfies a negative bound (T: !Protocol):
 ///
-
 /// - `Satisfied`: Type does NOT implement the protocol (bound satisfied)
 /// - `Violated`: Type DOES implement the protocol (bound violated)
 /// - `Unknown`: Cannot determine (type variable or unknown type)
@@ -443,23 +437,19 @@ impl SpecializationError {
 pub enum NegativeBoundResult {
     /// Type does NOT implement the protocol (bound satisfied)
     ///
-
     /// Example: `Text: !Copy` is Satisfied because Text is not Copy
     Satisfied,
 
     /// Type DOES implement the protocol (bound violated)
     ///
-
     /// Example: `Int: !Copy` is Violated because Int IS Copy
     Violated,
 
     /// Cannot determine implementation status
     ///
-
     /// This occurs when the type is a type variable or otherwise unresolved.
     /// The bound will be checked again when the type is instantiated.
     ///
-
     /// Example: `T: !Copy` where T is a type parameter is Unknown
     Unknown,
 }
@@ -504,13 +494,10 @@ impl SpecializationSelector {
 
     /// Select the most specific implementation for a protocol on a type
     ///
-
     /// This is the main entry point for specialization selection.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Check cache for previous decision
     /// 2. Find all candidate implementations
     /// 3. Rank candidates by specialization lattice
@@ -685,10 +672,8 @@ impl SpecializationSelector {
 
     /// Check if where clauses are satisfied for a type
     ///
-
     /// Handles both positive bounds (T: Protocol) and negative bounds (T: !Protocol).
     ///
-
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     fn check_where_clauses(
         &self,
@@ -730,28 +715,21 @@ impl SpecializationSelector {
 
     /// Check if a type satisfies a negative bound (T: !Protocol)
     ///
-
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     ///
-
     /// # Algorithm
     ///
-
     /// 1. For concrete types: Check if there's an implementation of Protocol for T
     ///  - If yes -> Violated (type DOES implement)
     ///  - If no -> Satisfied (type does NOT implement)
     ///
-
     /// 2. For type variables: Cannot determine until instantiation
     ///  - Return Unknown, defer checking to instantiation time
     ///
-
     /// 3. For built-in types: Check against known implementations
     ///
-
     /// # Examples
     ///
-
     /// ```verum
     /// // T: !Copy
     /// // For T = Text -> Satisfied (Text is not Copy)
@@ -909,7 +887,6 @@ impl SpecializationSelector {
 
     /// Check if a built-in type implements a protocol.
     ///
-
     /// Delegates to the centralized `primitive_implements_protocol` registry in
     /// `verum_common`, which is the single source of truth for primitive type
     /// protocol implementations.
@@ -941,16 +918,12 @@ impl SpecializationSelector {
 
     /// Check negative specialization constraints
     ///
-
     /// For @specialize(negative), verify that excluded bounds are NOT satisfied
     ///
-
     /// # Specification
     ///
-
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .4 lines 623-638
     ///
-
     /// Negative specialization allows implementations for types that DON'T satisfy
     /// certain bounds. For example:
     /// ```verum
@@ -958,23 +931,18 @@ impl SpecializationSelector {
     /// implement<T: !Clone> MyProtocol for List<T> { }
     /// ```
     ///
-
     /// This implementation applies ONLY when T does NOT implement Clone.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Check if implementation has specialization metadata
     /// 2. If specialization is marked as `is_default`, check for negative bounds
     /// 3. For each where clause, check for negative protocol bounds (T: !Protocol)
     /// 4. Verify that the type does NOT satisfy the negative bounds
     /// 5. Return false if any negative bound IS satisfied (impl should not apply)
     ///
-
     /// # Returns
     ///
-
     /// - `true`: Implementation is valid and should be considered
     /// - `false`: Implementation should be excluded (negative bound satisfied)
     fn check_negative_constraints(
@@ -1045,15 +1013,12 @@ impl SpecializationSelector {
 
     /// Check if a ProtocolBound represents a negative bound
     ///
-
     /// Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .4 - Negative Reasoning
     ///
-
     /// Negative bounds are indicated in two ways:
     /// 1. The ProtocolBound's `is_negative` flag (preferred, set by parser)
     /// 2. Legacy: protocol path starting with '!' (for backward compatibility)
     ///
-
     /// Negative bounds enable mutual exclusion patterns in specialization:
     /// ```verum
     /// implement<T> MyProtocol for T where T: Send + !Sync {
@@ -1120,7 +1085,6 @@ impl SpecializationSelector {
 
     /// Check if two types match for implementation purposes
     ///
-
     /// Production implementation using proper unification semantics:
     /// - Type variables are treated as universally quantified in the implementation
     /// - Concrete types must match structurally
@@ -1325,7 +1289,6 @@ impl SpecializationSelector {
 
     /// Extract implementation type for negative bound checking
     ///
-
     /// Returns the type that should be checked against negative bounds
     fn extract_impl_type_for_negative_check(&self, impl_info: &ProtocolImpl) -> Maybe<Type> {
         // For negative specialization, we check the for_type
@@ -1334,7 +1297,6 @@ impl SpecializationSelector {
 
     /// Extract negative TypeBounds from a type if present
     ///
-
     /// Checks if the type has any negative protocol bounds in its structure
     fn extract_negative_type_bounds(&self, _ty: &Type) -> Option<List<TypeBound>> {
         // In the current implementation, negative bounds are stored in where clauses
@@ -1344,7 +1306,6 @@ impl SpecializationSelector {
 
     /// Check if a type satisfies a negative TypeBound
     ///
-
     /// Returns true if the type DOES satisfy the bound (meaning negative check fails)
     fn check_negative_type_bound(
         &self,
@@ -1390,7 +1351,6 @@ impl SpecializationSelector {
 
     /// Rank candidates by specialization lattice
     ///
-
     /// Returns maximal elements (most specific implementations)
     fn rank_by_lattice(
         &self,
@@ -1631,7 +1591,6 @@ impl CoherenceChecker {
 
     /// Check coherence for a protocol
     ///
-
     /// Verifies that no overlapping implementations exist without a
     /// specialization relationship between them.
     pub fn check_protocol(
@@ -1669,30 +1628,24 @@ impl CoherenceChecker {
 
     /// Check if two implementations overlap
     ///
-
     /// Two implementations overlap if there exists a concrete type that could
     /// match both implementation patterns. However, implementations with
     /// complementary negative bounds do NOT overlap.
     ///
-
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     ///
-
     /// # Negative Bounds and Mutual Exclusion
     ///
-
     /// Negative bounds create mutual exclusion between implementations:
     /// ```verum
     /// implement<T: Clone + !Copy> DeepClone for T { ... } // impl1
     /// implement<T: Copy> DeepClone for T { ... } // impl2
     /// ```
     ///
-
     /// These implementations do NOT overlap because:
     /// - impl1 requires T: !Copy (T must NOT implement Copy)
     /// - impl2 requires T: Copy (T MUST implement Copy)
     ///
-
     /// No type can satisfy both constraints simultaneously, so they are
     /// mutually exclusive and can coexist without ambiguity.
     pub fn overlaps(&self, impl1: &ProtocolImpl, impl2: &ProtocolImpl) -> bool {
@@ -1729,17 +1682,13 @@ impl CoherenceChecker {
 
     /// Check if two implementations have mutually exclusive bounds
     ///
-
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     ///
-
     /// Returns true if the implementations have complementary bounds that
     /// make it impossible for any type to satisfy both.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Collect all bounds from both implementations' where clauses
     /// 2. For each positive bound P in impl1, check if impl2 has !P
     /// 3. For each negative bound !P in impl1, check if impl2 has P
@@ -1813,7 +1762,6 @@ impl CoherenceChecker {
 
     /// Check if two bounds are complementary (one positive, one negative, same protocol)
     ///
-
     /// Example:
     /// - T: Copy and T: !Copy are complementary
     /// - T: Clone and T: !Clone are complementary
@@ -1963,7 +1911,6 @@ impl ProtocolCheckerExt for ProtocolChecker {
 impl SpecializationSelector {
     /// Resolve protocol method call with specialization
     ///
-
     /// This is called during type inference when resolving a method call
     /// on a protocol.
     pub fn resolve_protocol_method(

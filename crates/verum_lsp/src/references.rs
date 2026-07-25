@@ -568,7 +568,6 @@ fn span_to_location(span: &verum_ast::Span, uri: &Url, text: &str) -> Location {
 
 /// Find all categorized references to a named symbol in a document.
 ///
-
 /// Unlike `find_references` (which takes a cursor position), this searches
 /// by symbol name directly. Used by code lens to count references.
 pub fn find_references_by_name(

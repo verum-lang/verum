@@ -57,7 +57,6 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// Operator to protocol mapping configuration
 ///
-
 /// This struct holds the complete mapping from operators to their protocols.
 /// The mappings can be customized or extended for different language configurations.
 #[derive(Debug, Clone)]

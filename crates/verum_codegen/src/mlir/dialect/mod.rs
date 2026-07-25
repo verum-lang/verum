@@ -125,7 +125,6 @@ pub use context_system::{
 
 /// The Verum MLIR dialect.
 ///
-
 /// This dialect provides Verum-specific operations and types that cannot
 /// be directly represented in standard MLIR dialects.
 pub struct VerumDialect {
@@ -151,7 +150,6 @@ impl VerumDialect {
 
     /// Register the dialect with an MLIR context.
     ///
-
     /// Note: Since we're using existing MLIR dialects for lowering,
     /// we don't need to register a custom dialect. The Verum operations
     /// are represented using standard MLIR constructs with special

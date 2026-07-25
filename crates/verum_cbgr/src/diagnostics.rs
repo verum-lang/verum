@@ -163,7 +163,6 @@ impl DiagnosticsConfig {
 
 /// CBGR diagnostics generator.
 ///
-
 /// Converts analysis results into standardized diagnostics.
 pub struct CbgrDiagnostics {
     config: DiagnosticsConfig,

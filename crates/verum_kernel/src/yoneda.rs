@@ -91,13 +91,11 @@ impl Presheaf {
 
 /// The Yoneda embedding `y: C → PSh(C)` — V0 algorithmic builder.
 ///
-
 /// **Construction (HTT 1.2.1)**: for every object `x ∈ C`, the
 /// representable presheaf `y(x) = Hom_C(-, x)` is built. The
 /// embedding is fully faithful (Yoneda lemma) and lands in the
 /// representable subcategory `PSh^repr(C)`.
 ///
-
 /// **Decidable property**: `y` is fully faithful at every level.
 /// Proof: by Yoneda lemma, `Hom_PSh(y(x), y(y)) ≃ Hom_C(x, y)`.
 /// current surface: returns the embedding's source/target identification
@@ -120,7 +118,6 @@ pub struct YonedaEmbedding {
 
 /// Build the presheaf ∞-category `PSh(C) = [C^op, ∞-Set]`.
 ///
-
 /// **Universe rule (HTT 5.5)**: `PSh(C)` lives one *universe* up
 /// from `C`. If `C: U_κ`, then `PSh(C): U_{κ+1}` where `κ+1`
 /// denotes the *next inaccessible cardinal*, not the ordinal
@@ -140,7 +137,6 @@ pub fn presheaf_category(c: &InfinityCategory) -> InfinityCategory {
 
 /// Build the Yoneda embedding `y: C → PSh(C)` (HTT 1.2.1).
 ///
-
 /// **Algorithm**: construct the target `PSh(C)`, identify the
 /// embedding as a fully-faithful functor, and certify the level at
 /// which fullness holds (the source's level by HTT 1.2.1).
@@ -158,13 +154,11 @@ pub fn yoneda_embedding(c: &InfinityCategory) -> YonedaEmbedding {
 /// The Yoneda lemma: `Hom_PSh(C)(y(x), p) ≃ p(x)` natural in `x`
 /// and `p`. current surface returns the identification witness.
 ///
-
 /// **Mathematical content**: every natural transformation
 /// `α : y(x) → p` is determined by its component at the identity
 /// `id_x ∈ y(x)(x) = Hom_C(x, x)`, namely `α_x(id_x) ∈ p(x)`.
 /// The map `α ↦ α_x(id_x)` is a bijection (the Yoneda lemma).
 ///
-
 /// V0 produces the identification's two endpoints + witness flag.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct YonedaLemma {
@@ -228,12 +222,10 @@ pub struct KanExtension {
 /// Build the left Kan extension `Lan_f(p)` along a fully-faithful
 /// functor `f`. V0 algorithmic surface (HTT 4.3.3.7).
 ///
-
 /// **Preconditions**:
 ///  - `f` is fully faithful (current surface trusts caller declaration).
 ///  - The target category has appropriate colimits.
 ///
-
 /// Returns `None` when preconditions fail.
 pub fn build_kan_extension(
     along_functor_name: impl Into<Text>,

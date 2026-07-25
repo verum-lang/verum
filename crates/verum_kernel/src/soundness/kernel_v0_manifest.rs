@@ -118,12 +118,10 @@ pub fn iou_citation(rule: &KernelV0Rule) -> &str {
 /// The canonical 10-rule kernel_v0 manifest. Mirrors
 /// `core/verify/kernel_v0/README.md`'s "10 minimal rules" table.
 ///
-
 /// **Stable contract**: this list is the single source of truth for
 /// the Rust ↔ Verum bootstrap-mirror invariant. Adding a rule
 /// requires:
 ///
-
 ///  1. Creating `core/verify/kernel_v0/rules/k_<name>.vr` with the
 ///  `introduce_<name>` constructor + `k_<name>_sound` soundness
 ///  lemma.
@@ -131,7 +129,6 @@ pub fn iou_citation(rule: &KernelV0Rule) -> &str {
 ///  Rust-side trusted base).
 ///  3. Adding the entry to this manifest.
 ///
-
 /// Drift across these three sites is the audit failure mode.
 pub fn manifest() -> Vec<KernelV0Rule> {
     // Path relative to the Verum project root (the directory
@@ -317,7 +314,6 @@ pub enum ManifestIssue {
 /// [`ManifestIssue`] per drift point detected. An empty result
 /// means the Rust ↔ Verum mirror is consistent.
 ///
-
 /// `project_root` should be the project's `manifest_dir` — the
 /// directory containing `verum.toml`. The function searches the
 /// project root + every additional `extra_search_roots` entry for

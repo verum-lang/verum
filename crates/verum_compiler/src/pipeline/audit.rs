@@ -34,12 +34,10 @@ use super::CompilationPipeline;
 impl<'s> CompilationPipeline<'s> {
     /// Count internal stdlib type registration errors.
     ///
-
     /// These are errors that occur when registering stdlib types, functions,
     /// protocols, and impl blocks into the type checker. They are suppressed
     /// during normal compilation but tracked for quality metrics.
     ///
-
     /// Returns (type_errors, func_errors, proto_errors, impl_errors, details)
     pub fn count_stdlib_type_errors(&mut self) -> (usize, usize, usize, usize, Vec<String>) {
         // Load stdlib modules if not yet loaded
@@ -154,12 +152,10 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Count all stdlib errors including full body type checking.
     ///
-
     /// This runs the full type checker (including function bodies, impl blocks, etc.)
     /// on all core/ modules to identify all type errors. Returns a map of
     /// error category -> count, plus detailed error messages.
     ///
-
     /// Returns (total_errors, category_counts, details)
     pub fn count_stdlib_body_errors(
         &mut self,

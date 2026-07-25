@@ -6,7 +6,6 @@
 
 /// Text type (semantic alternative to String)
 ///
-
 /// This is the fundamental string type in Verum, following v6.0-BALANCED naming.
 pub type Text = String;
 

@@ -50,7 +50,6 @@ use crate::cbgr_elimination::{BlockId, ControlFlowGraph, RefVariable};
 
 /// Decision for array bounds check
 ///
-
 /// Result of static analysis for an array access: eliminate (proven safe),
 /// hoist (move check to loop preheader), or keep (cannot prove safety).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,7 +191,6 @@ impl ArrayAccess {
 
 /// Simplified expression representation for analysis
 ///
-
 /// Note: In production, use verum_ast::expr::Expr
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Expression {
@@ -380,7 +378,6 @@ impl ArrayBounds {
 
 /// Index constraint from refinement type
 ///
-
 /// Example: index: Int where 0 <= index < N
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexConstraint {
@@ -425,7 +422,6 @@ impl IndexConstraint {
 
 /// Loop invariant for bounds elimination
 ///
-
 /// Tracks the induction variable, its bounds, and any proven stride relationship
 /// to enable bounds check elimination within the loop body.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -516,7 +512,6 @@ impl ValueRange {
 
     /// Intersect two ranges (take narrower bounds)
     ///
-
     /// Uses SMT solver for symbolic expressions when constants are not available.
     pub fn intersect(&self, other: &ValueRange) -> ValueRange {
         ValueRange {
@@ -528,7 +523,6 @@ impl ValueRange {
 
     /// Narrow lower bound: return max(a, b) using SMT if needed
     ///
-
     /// For symbolic expressions, uses Z3 to determine which bound is larger.
     /// Falls back to conservative choice (first argument) if SMT is inconclusive.
     fn narrow_lower_smt(a: &Expression, b: &Expression) -> Expression {
@@ -558,7 +552,6 @@ impl ValueRange {
 
     /// Narrow upper bound: return min(a, b) using SMT if needed
     ///
-
     /// For symbolic expressions, uses Z3 to determine which bound is smaller.
     /// Falls back to conservative choice (first argument) if SMT is inconclusive.
     fn narrow_upper_smt(a: &Expression, b: &Expression) -> Expression {
@@ -586,7 +579,6 @@ impl ValueRange {
 
     /// Check if a >= b is always true using SMT
     ///
-
     /// Returns true if a >= b holds for all possible values.
     /// Uses Z3 to check if NOT(a >= b) is UNSAT.
     fn smt_check_ge(a: &Expression, b: &Expression) -> bool {
@@ -620,7 +612,6 @@ impl ValueRange {
 
     /// Check if a <= b is always true using SMT
     ///
-
     /// Returns true if a <= b holds for all possible values.
     fn smt_check_le(a: &Expression, b: &Expression) -> bool {
         use z3::ast::Ast;
@@ -696,7 +687,6 @@ impl ValueRange {
 
 /// Main bounds check elimination engine
 ///
-
 /// Main engine for eliminating runtime bounds checks. Uses refinement types,
 /// loop invariants, meta parameters, and dataflow analysis to prove array
 /// accesses safe. Target: >80% elimination rate, <50ms per function.
@@ -752,13 +742,10 @@ impl BoundsCheckEliminator {
 
     /// Analyze array access and decide on bounds check
     ///
-
     /// This is the main entry point for bounds check elimination analysis.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Try refinement type analysis
     /// 2. Try loop invariant analysis
     /// 3. Try dataflow analysis
@@ -841,7 +828,6 @@ impl BoundsCheckEliminator {
 
     /// Check if refinement proves index is within bounds
     ///
-
     /// Example:
     /// - array: List<T> where len(array) == 100
     /// - index: Int where 0 <= index < 100
@@ -869,18 +855,15 @@ impl BoundsCheckEliminator {
 
     /// Extract index constraint from refinement expression
     ///
-
     /// This is the production implementation that handles full predicate AST parsing.
     /// It recognizes multiple patterns for bounds constraints:
     ///
-
     /// - `lower <= var && var < upper` (canonical form)
     /// - `var >= lower && var < upper` (alternative form)
     /// - `lower <= var < upper` (chained comparison, desugared)
     /// - `0 <= var && var < len(arr)` (common array pattern)
     /// - Complex expressions with arithmetic (e.g., `i * stride < len`)
     ///
-
     /// The extraction is compositional, recursively processing nested conjunctions
     /// and building a complete constraint set.
     fn extract_index_constraint(
@@ -1208,14 +1191,11 @@ impl BoundsCheckEliminator {
 
     /// Prove bounds constraint using SMT solver
     ///
-
     /// Uses Z3 to verify that the index constraint ensures safe array access.
     /// The goal is to prove: lower <= index < upper AND upper <= array_len
     ///
-
     /// ## Strategy
     ///
-
     /// We check if the negation of the bounds property is UNSAT:
     /// - If UNSAT: bounds are always satisfied (eliminate check)
     /// - If SAT: found counterexample where bounds fail (keep check)
@@ -1359,7 +1339,6 @@ impl BoundsCheckEliminator {
 
     /// Check if loop invariant proves array access is safe
     ///
-
     /// Example:
     /// - Loop: for i in 0..array.len()
     /// - Access: array[i]
@@ -1407,7 +1386,6 @@ impl BoundsCheckEliminator {
 
     /// Check if expr1 == expr2 or expr1 < expr2 symbolically
     ///
-
     /// This handles common patterns:
     /// - Direct equality
     /// - Constant comparison
@@ -1536,17 +1514,14 @@ impl BoundsCheckEliminator {
 
     /// Check if bounds check can be hoisted out of loop
     ///
-
     /// Hoisting is safe when we can prove the bounds check will always pass
     /// for all values the index can take during loop execution.
     ///
-
     /// We can hoist when:
     /// 1. Index is a linear function of induction variable: i * k + c
     /// 2. Array length is loop-invariant (doesn't change during loop)
     /// 3. We can compute worst-case index (max value in iteration space)
     ///
-
     /// Check hoisting: move bounds check from loop body to loop preheader.
     /// Requires: (1) index is linear function of induction variable (i*k+c),
     /// (2) array length is loop-invariant, (3) worst-case index is computable.
@@ -1795,12 +1770,10 @@ impl DataflowAnalyzer {
 
     /// Combine ranges for addition operation
     ///
-
     /// For addition `left + right`, the resulting range is:
     /// - lower = left.lower + right.lower
     /// - upper = left.upper + right.upper
     ///
-
     /// This is sound because if a in [l1, u1] and b in [l2, u2],
     /// then a + b in [l1 + l2, u1 + u2].
     fn combine_add_ranges(&self, left: &Expression, right: &Expression) -> ValueRange {
@@ -1901,16 +1874,13 @@ impl DataflowAnalyzer {
 
     /// Combine ranges for multiplication
     ///
-
     /// For multiplication `a * b` where `a in [l1, u1]` and `b in [l2, u2]`,
     /// the resulting range depends on the signs of the operands:
     ///
-
     /// - Both non-negative: [l1 * l2, u1 * u2]
     /// - Both non-positive: [u1 * u2, l1 * l2]
     /// - Mixed signs: [min(l1*u2, u1*l2), max(l1*l2, u1*u2)]
     ///
-
     /// Interval arithmetic for multiplication: compute [lower, upper] of product.
     /// Both non-negative: [l1*l2, u1*u2]; both non-positive: [u1*u2, l1*l2];
     /// mixed signs: [min(l1*u2, u1*l2), max(l1*l2, u1*u2)].
@@ -2081,7 +2051,6 @@ impl fmt::Display for EliminationStats {
 
 /// Meta parameter constraint for compile-time bounds
 ///
-
 /// Example: Array<T, N> where N is known at compile time
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetaConstraint {
@@ -2109,7 +2078,6 @@ impl MetaConstraint {
 
     /// Check if constraint is satisfied for given value
     ///
-
     /// This is the production implementation that handles various constraint forms:
     /// - `value < N` (strict upper bound)
     /// - `value <= N` (inclusive upper bound)
@@ -2117,21 +2085,16 @@ impl MetaConstraint {
     /// - `0 <= value < N` (range constraint)
     /// - Complex arithmetic constraints
     ///
-
     /// The evaluation substitutes:
     /// 1. The meta parameter (e.g., "N") with its resolved value (from `with_value`)
     /// 2. Common index variables ("index", "i", "value") with the input value
     ///
-
     /// # Arguments
     ///
-
     /// * `index_value` - The value to test against the constraint (substituted for index variables)
     ///
-
     /// # Returns
     ///
-
     /// `true` if the constraint is satisfied, `false` otherwise
     pub fn verify(&self, index_value: usize) -> bool {
         // First substitute the meta parameter with its resolved value
@@ -2174,7 +2137,6 @@ impl MetaConstraint {
 
     /// Substitute meta parameter with a concrete value.
     ///
-
     /// Thin wrapper around `substitute_var` that pulls the parameter
     /// name from `self.param_name`. Currently has no in-tree caller
     /// — kept here as a documented part of the legacy compatibility
@@ -2401,7 +2363,6 @@ impl std::error::Error for BoundsError {}
 
 /// Analyze array access with bounds check elimination
 ///
-
 /// This is a convenience function for single-access analysis.
 pub fn analyze_bounds_check(
     access: &ArrayAccess,

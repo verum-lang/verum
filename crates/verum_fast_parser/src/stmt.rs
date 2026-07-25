@@ -23,7 +23,6 @@ use crate::parser::{ParseResult, RecursiveParser};
 impl<'a> RecursiveParser<'a> {
     /// Parse a single statement.
     ///
-
     /// Statements include:
     /// - Let bindings (including let-else)
     /// - Expression statements
@@ -204,14 +203,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a block: `{ stmt1; stmt2; expr }`
     ///
-
     /// A block consists of zero or more statements followed by an optional
     /// trailing expression (no semicolon).
     ///
-
     /// Parse a block `{ ... }`.
     ///
-
     /// Recursion depth is checked to prevent stack overflow from
     /// deeply nested blocks like `{ { { { ... } } } }`.
     pub fn parse_block(&mut self) -> ParseResult<Block> {
@@ -664,18 +660,15 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an errdefer statement: `errdefer expr;` or `errdefer { block }`
     ///
-
     /// Errdefer is similar to defer but only executes when the scope exits
     /// via an error path (e.g., when a function returns an error or panics).
     ///
-
     /// Grammar from verum.ebnf v2.8:
     /// ```text
     /// defer_stmt = 'defer' , defer_body | 'errdefer' , defer_body ;
     /// defer_body = expression , ';' | block_expr ;
     /// ```
     ///
-
     /// Examples:
     /// - `errdefer file.close();` - expression form
     /// - `errdefer { cleanup(); log_error(); }` - block form
@@ -735,7 +728,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a provide statement: `provide ContextName = expr;`
     /// or block-scoped provide: `provide ContextName = expr in { block }`
     ///
-
     /// Supports both simple context names and path-based contexts:
     /// - Simple: `provide Logger = logger_impl;`
     /// - Path-based: `provide FileSystem.Write = write_impl;`
@@ -743,7 +735,6 @@ impl<'a> RecursiveParser<'a> {
     /// - Block-scoped: `provide Database = db in { query_users() }`
     /// - Block-scoped with alias: `provide Database as backup = db in { query_users() }`
     ///
-
     /// Grammar (context provide with aliases and sub-context paths):
     /// ```text
     /// provide_stmt = 'provide' , context_path , [ 'as' , identifier ] , '=' , expression , ( ';' | 'in' , block_expr ) ;
@@ -1158,7 +1149,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if an expression is a "block-form" expression that ends with `}`.
     ///
-
     /// Block-form expressions naturally terminate and don't require semicolons
     /// even in non-tail position. This includes:
     /// - Block expressions: `{ ... }`
@@ -1210,12 +1200,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Look ahead to determine if this is a let-else statement.
     ///
-
     /// We need to distinguish:
     /// Check if the current `@name(...)` construct looks like a macro call expression
     /// rather than an attribute attached to a declaration.
     ///
-
     /// Rules:
     /// - If followed by `;` → macro call expression statement
     /// - If followed by declaration keyword (type, fn, let, etc.) → attribute
@@ -1319,13 +1307,11 @@ impl<'a> RecursiveParser<'a> {
     /// rather than an attribute. Used by `parse_attributes()` to stop parsing
     /// attributes when it encounters something like `@asm("lfence");`.
     ///
-
     /// An `@name(...)` is a meta-expression (not attribute) when:
     /// - Followed by `;` (expression statement)
     /// - Followed by `}` (trailing expression)
     /// - At end of input
     ///
-
     /// This prevents `@cfg(...) @asm(...);` from parsing @asm as an attribute.
     pub(crate) fn looks_like_meta_expression_not_attribute(&self) -> bool {
         // We're at @ token
@@ -1375,7 +1361,6 @@ impl<'a> RecursiveParser<'a> {
     /// - `let x = expr else { ... }` (let-else)
     /// - `let x = expr;` (regular let)
     ///
-
     /// This requires scanning ahead to find the `else` keyword after the initializer.
     fn looks_like_let_else(&self) -> bool {
         let saved_pos = self.stream.position();
@@ -1513,7 +1498,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Advance stream past an expression.
     ///
-
     /// This is a heuristic approach - we scan forward until we hit a likely
     /// expression boundary (semicolon, closing delimiter, keyword, etc.)
     fn advance_past_expr(&mut self) {

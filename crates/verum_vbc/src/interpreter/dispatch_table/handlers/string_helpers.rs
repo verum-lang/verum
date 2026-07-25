@@ -325,11 +325,9 @@ pub(super) fn is_array_type_id(type_id: u32) -> bool {
 
 /// Recursively compares two values for deep equality.
 ///
-
 /// Handles primitives, strings, and nested variant types (Maybe<T>, Result<T,E>, etc.).
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload:Value]
 ///
-
 /// NOTE: This function calls `get_array_length` and `get_array_element` which remain
 /// in dispatch_table.rs. When those are extracted, the imports here will need updating.
 /// **Visibility**: `pub(in crate::interpreter::dispatch_table)` so the

@@ -43,7 +43,6 @@
 
 /// Lexical class of a single source byte.
 ///
-
 /// Stored as `u8` in the mask buffer (the enum's repr is `u8` so
 /// `mem::transmute` round-trips cleanly through the buffer).
 #[repr(u8)]
@@ -70,7 +69,6 @@ pub enum ByteClass {
 
 /// Per-byte lexical classification of a source file.
 ///
-
 /// Length always equals `content.len()` (in bytes, not chars) so
 /// indexing by absolute byte offset is direct.
 pub struct LexMask {
@@ -80,7 +78,6 @@ pub struct LexMask {
 impl LexMask {
     /// Build a mask by scanning `content` once, left to right.
     ///
-
     /// The scanner is fault-tolerant: an unterminated string or
     /// block comment runs to end-of-file. We deliberately do not
     /// surface lex errors here — lint must keep running even on

@@ -24,10 +24,8 @@ pub struct PhiValue<'ctx> {
 impl<'ctx> PhiValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
-
     /// # Safety
     ///
-
     /// The ref must be valid and of type phi.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
@@ -76,7 +74,6 @@ impl<'ctx> PhiValue<'ctx> {
 
     /// # Safety
     ///
-
     /// The index must be smaller [PhiValue::count_incoming].
     pub unsafe fn get_incoming_unchecked(
         self,

@@ -108,13 +108,11 @@ fn path_segment_to_str(seg: &PathSegment) -> &str {
 
 /// A Hoare triple: {P} c {Q}
 ///
-
 /// Represents a correctness specification for a command:
 /// - P: Precondition (must hold before execution)
 /// - c: Command (the program fragment)
 /// - Q: Postcondition (must hold after execution)
 ///
-
 /// The triple is valid iff: ∀σ. P(σ) => Q(⟦c⟧(σ))
 /// where σ is a program state and ⟦c⟧ is the semantic function.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,20 +172,17 @@ impl fmt::Display for HoareTriple {
 
 /// Commands in Hoare logic
 ///
-
 /// These represent the imperative core of the language.
 /// Each command has a well-defined semantics in terms of state transformations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     /// Skip (no-op): skip
     ///
-
     /// Semantics: ⟦skip⟧(σ) = σ
     Skip,
 
     /// Assignment: x := e
     ///
-
     /// Semantics: ⟦x := e⟧(σ) = σ[x ↦ ⟦e⟧(σ)]
     Assign {
         /// Variable being assigned
@@ -198,7 +193,6 @@ pub enum Command {
 
     /// Sequential composition: c1; c2
     ///
-
     /// Semantics: ⟦c1; c2⟧(σ) = ⟦c2⟧(⟦c1⟧(σ))
     Seq {
         /// First command
@@ -209,7 +203,6 @@ pub enum Command {
 
     /// Conditional: if b then c1 else c2
     ///
-
     /// Semantics:
     /// ⟦if b then c1 else c2⟧(σ) = if ⟦b⟧(σ) then ⟦c1⟧(σ) else ⟦c2⟧(σ)
     If {
@@ -223,11 +216,9 @@ pub enum Command {
 
     /// While loop: while b inv I do c
     ///
-
     /// Semantics: Fixed point of:
     /// ⟦while b do c⟧(σ) = if ⟦b⟧(σ) then ⟦while b do c⟧(⟦c⟧(σ)) else σ
     ///
-
     /// Requires loop invariant I for verification.
     While {
         /// Loop condition
@@ -247,7 +238,6 @@ pub enum Command {
 
     /// For loop: for x in range do c
     ///
-
     /// Desugars to while loop with appropriate bounds
     For {
         /// Loop variable
@@ -264,26 +254,22 @@ pub enum Command {
 
     /// Assert statement: assert(P)
     ///
-
     /// Semantics: ⟦assert(P)⟧(σ) = if P(σ) then σ else error
     Assert(Formula),
 
     /// Assume statement: assume(P)
     ///
-
     /// Semantics: ⟦assume(P)⟧(σ) = if P(σ) then σ else undefined
     Assume(Formula),
 
     /// Havoc statement: havoc(x)
     ///
-
     /// Non-deterministically assigns to x.
     /// Semantics: ⟦havoc(x)⟧(σ) = σ[x ↦ *] where * is any value
     Havoc(Variable),
 
     /// Function call: x := f(args)
     ///
-
     /// Requires function contract for verification.
     Call {
         /// Variable to assign result (if any)
@@ -403,7 +389,6 @@ impl fmt::Display for Command {
 
 /// Weakest precondition calculator
 ///
-
 /// Implements Dijkstra's weakest precondition calculus for Hoare logic.
 /// Given a command c and postcondition Q, computes the weakest precondition
 /// wp(c, Q) such that {wp(c, Q)} c {Q} is valid.
@@ -448,7 +433,6 @@ impl WPCalculator {
 
     /// Compute weakest precondition: wp(c, Q)
     ///
-
     /// Returns the weakest precondition that ensures Q holds after executing c.
     pub fn wp(&self, command: &Command, postcondition: &Formula) -> Result<Formula, WPError> {
         match command {
@@ -758,15 +742,12 @@ impl WPCalculator {
 
     /// Generate termination verification conditions for a single measure
     ///
-
     /// For a loop with measure M, generates:
     /// 1. Well-foundedness: I ∧ b => M >= 0
     /// 2. Strict decrease: I ∧ b => wp(body, M' < M)
     ///
-
     /// where M' is the measure after executing the body.
     ///
-
     /// Generates termination VCs for a single measure expression:
     /// 1. Well-foundedness: I /\ b => M >= 0
     /// 2. Strict decrease: I /\ b => wp(body, M' < M)
@@ -819,7 +800,6 @@ impl WPCalculator {
 
     /// Generate termination verification conditions for lexicographic measures
     ///
-
     /// For measures (m1, m2, ..., mn), the lexicographic ordering is:
     /// (m1', m2', ..., mn') < (m1, m2, ..., mn) iff
     ///  m1' < m1, OR
@@ -827,12 +807,10 @@ impl WPCalculator {
     ///  (m1' = m1 AND m2' = m2 AND m3' < m3), OR
     ///  ...
     ///
-
     /// We generate:
     /// 1. Well-foundedness for all measures: I ∧ b => (m1 >= 0 ∧ m2 >= 0 ∧ ... ∧ mn >= 0)
     /// 2. Lexicographic decrease: I ∧ b => wp(body, lexicographic_lt(measures', measures))
     ///
-
     /// Generates termination VCs for lexicographic measures:
     /// 1. Well-foundedness: I /\ b => (m1 >= 0 /\ m2 >= 0 /\ ... /\ mn >= 0)
     /// 2. Lexicographic decrease: I /\ b => wp(body, lex_lt(measures', measures))
@@ -914,7 +892,6 @@ impl WPCalculator {
 
     /// Build a formula representing lexicographic less-than
     ///
-
     /// Given current measures (m1, m2, ..., mn) and before measures (b1, b2, ..., bn),
     /// constructs:
     ///  (m1 < b1) OR
@@ -922,7 +899,6 @@ impl WPCalculator {
     ///  (m1 = b1 AND m2 = b2 AND m3 < b3) OR
     ///  ...
     ///
-
     /// This is the standard lexicographic ordering used in termination proofs.
     fn build_lexicographic_decrease(
         &self,
@@ -964,15 +940,12 @@ impl WPCalculator {
 
     /// Validate that a measure expression is well-formed
     ///
-
     /// A well-formed measure must:
     /// 1. Be of an ordered type (integers, natural numbers, tuples thereof)
     /// 2. Have a well-founded ordering (non-negative integers satisfy this)
     ///
-
     /// Returns true if the measure appears to be well-formed.
     ///
-
     /// Currently exercised only by tests; gated `#[cfg(test)]` so the
     /// production binary doesn't carry it. Promoting to a non-test API
     /// requires a proper caller in the verification pipeline (the
@@ -1018,7 +991,6 @@ impl Default for WPCalculator {
 
 /// Main Hoare logic verification engine
 ///
-
 /// Provides verification of Hoare triples using WP calculus and SMT solving.
 #[derive(Debug)]
 pub struct HoareLogic {
@@ -1047,7 +1019,6 @@ impl HoareLogic {
 
     /// Generate verification condition from a Hoare triple
     ///
-
     /// Returns a formula whose validity implies the triple is correct.
     /// VC: P => wp(c, Q)
     pub fn generate_vc(&self, triple: &HoareTriple) -> Result<VerificationCondition, WPError> {
@@ -1066,14 +1037,11 @@ impl HoareLogic {
 
     /// Verify a Hoare triple using WP calculus and SMT
     ///
-
     /// Returns `Ok(true)` if the triple is valid (VC is proven),
     /// or an error if verification failed or could not be completed.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Generate verification condition: P => wp(c, Q)
     /// 2. Convert VC formula to Z3 AST
     /// 3. Assert the negation of the VC (to check validity via UNSAT)
@@ -1082,10 +1050,8 @@ impl HoareLogic {
     ///  - SAT: VC is invalid (counterexample exists)
     ///  - Unknown: Timeout or resource limit
     ///
-
     /// # Performance
     ///
-
     /// Typical verification times:
     /// - Simple arithmetic: <10ms
     /// - Loop invariants: 10-100ms
@@ -1168,7 +1134,6 @@ impl HoareLogic {
 
     /// Convert a Formula to Z3 Bool AST
     ///
-
     /// Recursively translates the verification formula into Z3's internal
     /// representation for SMT solving.
     fn formula_to_z3(&self, formula: &Formula) -> Result<Bool, WPError> {
@@ -1568,7 +1533,6 @@ impl HoareLogic {
 
     /// Convert an SmtExpr to Z3 BV AST (bitvector-specific)
     ///
-
     /// Handles bitvector constants and operations, converting integer expressions
     /// to bitvectors when needed for mixed-mode operations.
     fn expr_to_z3_bv(&self, expr: &SmtExpr) -> Result<BV, WPError> {
@@ -1739,7 +1703,6 @@ impl HoareLogic {
 
     /// Convert array select operation to Z3
     ///
-
     /// Handles both proper Z3 array theory operations and fallback to
     /// uninterpreted functions when array type cannot be determined.
     fn expr_to_z3_select(&self, arr: &SmtExpr, idx: &SmtExpr) -> Result<Dynamic, WPError> {
@@ -1765,7 +1728,6 @@ impl HoareLogic {
 
     /// Convert array store operation to Z3
     ///
-
     /// Returns a new array with the element at the given index updated.
     fn expr_to_z3_store(
         &self,
@@ -1807,7 +1769,6 @@ impl HoareLogic {
 
     /// Convert a tuple field access to Z3
     ///
-
     /// Tuples are modeled as arrays indexed by field position.
     fn expr_to_z3_tuple_access(&self, tuple: &SmtExpr, field_idx: i64) -> Result<Dynamic, WPError> {
         let tuple_name = match tuple {
@@ -1863,14 +1824,11 @@ impl HoareLogic {
 
     /// Convert an expression to a command
     ///
-
     /// This is the production implementation that handles all expression types
     /// and converts them to Hoare logic commands.
     ///
-
     /// ## Expression Categories
     ///
-
     /// 1. **Literals**: Produce skip (no side effects)
     /// 2. **Variables**: Produce skip (no side effects, just lookup)
     /// 3. **Binary/Unary ops**: Produce skip (pure computations)
@@ -2064,7 +2022,6 @@ impl HoareLogic {
 
     /// Convert a statement to a command
     ///
-
     /// This is the production implementation that handles all statement types
     /// and converts them to Hoare logic commands.
     fn stmt_to_command(&self, stmt: &Stmt) -> Result<Command, WPError> {
@@ -2499,7 +2456,6 @@ impl HoareLogic {
 
     /// Convert an expression to a variable (for assignment targets)
     ///
-
     /// Handles complex assignment targets like:
     /// - Simple variables: `x = ...`
     /// - Field access: `obj.field = ...` (modeled as obj_field)
@@ -2553,7 +2509,6 @@ impl HoareLogic {
 
     /// Convert a pattern to a variable
     ///
-
     /// Handles complex patterns for let bindings:
     /// - Simple identifiers: `let x = ...`
     /// - Wildcards: `let _ = ...` (no binding)
@@ -2701,11 +2656,9 @@ impl HoareLogic {
 
     /// Convert a pattern to a condition formula for matching
     ///
-
     /// This implements pattern matching semantics by generating conditions
     /// that determine whether a value matches a pattern structure.
     ///
-
     /// Generates conditions for pattern matching: wildcard always matches,
     /// literal patterns check equality, variant patterns check tag and bind fields,
     /// struct patterns check all field matches, tuple patterns check component matches.
@@ -3067,7 +3020,6 @@ impl HoareLogic {
 
     /// Extract variable bindings from a pattern
     ///
-
     /// Returns a list of (variable_name, expression_to_extract) pairs
     /// that represent the bindings introduced by the pattern.
     fn extract_pattern_bindings(
@@ -3304,13 +3256,11 @@ impl Default for HoareLogic {
 
 /// Frame rule for local reasoning
 ///
-
 /// The frame rule allows reasoning about local state changes:
 /// {P} c {Q}
 /// ───────────────────────────── (frame: vars(R) ∩ mod(c) = ∅)
 /// {P ∧ R} c {Q ∧ R}
 ///
-
 /// If c doesn't modify variables in R, then R is preserved.
 #[derive(Debug)]
 pub struct FrameRule;
@@ -3734,7 +3684,6 @@ impl WPError {
 
 /// Compute weakest precondition for a command and postcondition
 ///
-
 /// This is a convenience function that creates a WPCalculator and computes WP.
 pub fn wp(command: &Command, postcondition: &Formula) -> Result<Formula, WPError> {
     let calculator = WPCalculator::new();
@@ -3743,7 +3692,6 @@ pub fn wp(command: &Command, postcondition: &Formula) -> Result<Formula, WPError
 
 /// Generate verification condition from a Hoare triple
 ///
-
 /// This is a convenience function that creates a HoareLogic instance and generates VC.
 pub fn generate_vc(triple: &HoareTriple) -> Result<VerificationCondition, WPError> {
     let logic = HoareLogic::new();

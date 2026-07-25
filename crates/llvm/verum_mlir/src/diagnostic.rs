@@ -49,10 +49,8 @@ impl<'c> Diagnostic<'c> {
 
     /// Creates a diagnostic from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirDiagnostic) -> Self {
         Self {

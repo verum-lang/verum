@@ -69,7 +69,6 @@ impl CounterExample {
     /// assignment whose variable name does not appear in the
     /// violated constraint string.
     ///
-
     /// This is the cheap, no-callback minimizer: it's pure, it
     /// needs no re-solve, and it produces the smallest
     /// counterexample that still mentions every variable the
@@ -77,13 +76,11 @@ impl CounterExample {
     /// model including unrelated bindings (e.g. helper predicate
     /// constants the user never wrote); those are noise.
     ///
-
     /// The semantic minimizer (`CounterExampleMinimizer::minimize`)
     /// is strictly more powerful but requires a re-solve
     /// callback — use it when the caller has solver access.
     /// This syntactic pass is the always-available default.
     ///
-
     /// After the pass runs, `description` is regenerated so the
     /// human-readable form matches the pruned assignment set.
     pub fn minimize_syntactic(mut self) -> Self {
@@ -398,32 +395,25 @@ impl<'a> CounterExampleExtractor<'a> {
 
     /// Try to minimize the counterexample by removing unnecessary variables.
     ///
-
     /// Uses delta debugging to find the minimal set of variable assignments
     /// that still violate the constraint. This helps users understand which
     /// variables are actually relevant to the failure.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Start with the full counterexample
     /// 2. Try removing each variable one at a time
     /// 3. If the constraint still fails without a variable, remove it permanently
     /// 4. Repeat until no more variables can be removed
     ///
-
     /// # Parameters
     ///
-
     /// - `counterexample`: The original counterexample to minimize
     /// - `constraint_checker`: Predicate that returns `true` if the given
     ///  assignments violate the constraint (i.e., still a valid counterexample)
     ///
-
     /// # Returns
     ///
-
     /// A minimal counterexample with the fewest variables that still violate
     /// the constraint. In the worst case, returns the original counterexample.
     pub fn minimize<F>(
@@ -591,7 +581,6 @@ pub struct CounterExampleMinimizer;
 impl CounterExampleMinimizer {
     /// Minimize counterexample by removing unnecessary variable assignments
     ///
-
     /// Uses delta debugging to find minimal failing input.
     pub fn minimize<F>(counterexample: &CounterExample, is_failing: F) -> CounterExample
     where
@@ -616,33 +605,26 @@ impl CounterExampleMinimizer {
 
     /// Find multiple minimal counterexamples (diversification)
     ///
-
     /// Uses iterative model enumeration to find diverse counterexamples.
     /// Each iteration adds a blocking clause to exclude the previous model,
     /// forcing the solver to find a different satisfying assignment.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Find initial counterexample using is_failing predicate
     /// 2. Add blocking clause to exclude this assignment
     /// 3. Repeat until max_examples reached or no more models exist
     /// 4. Minimize each counterexample using delta debugging
     ///
-
     /// # Parameters
     ///
-
     /// - `constraint`: The constraint being verified (for error messages)
     /// - `var_names`: Variables to include in counterexamples
     /// - `is_failing`: Predicate that returns true if assignment violates constraint
     /// - `max_examples`: Maximum number of counterexamples to find
     ///
-
     /// # Returns
     ///
-
     /// List of diverse, minimal counterexamples
     pub fn find_diverse<F>(
         constraint: &str,
@@ -878,7 +860,6 @@ impl CounterExampleCategorizer {
 
 /// Failure category for pattern-based suggestions.
 ///
-
 /// Used to classify verification failures and provide targeted fix suggestions
 /// based on common error patterns encountered during SMT verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1020,7 +1001,6 @@ impl fmt::Display for FailureCategory {
 
 /// Conservative "does this constraint string mention `var`?" test.
 ///
-
 /// Used by `CounterExample::minimize_syntactic` to decide which
 /// assignments to keep. We require the variable name to be
 /// surrounded by non-identifier characters (or start/end of

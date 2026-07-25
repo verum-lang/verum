@@ -39,17 +39,14 @@ fn convert_span(ast_span: Span, source_file: Option<&SourceFile>) -> verum_diagn
 
 /// Parse email literal at compile-time
 ///
-
 /// Semantic literal: `email#"user@example.com"` is compile-time validated.
 /// Validates local-part and domain per RFC 5321/5322. Produces type Email.
 ///
-
 /// # Arguments
 /// - `content`: The email address string
 /// - `span`: Source location for error reporting
 /// - `source_file`: Optional source file for accurate span conversion
 ///
-
 /// # Returns
 /// Validated email address on success
 pub fn parse_email(

@@ -71,7 +71,6 @@ impl Default for PrettyConfig {
 
 /// Pretty printer for Verum AST.
 ///
-
 /// This printer converts AST nodes back to well-formatted source code.
 #[derive(Debug)]
 pub struct PrettyPrinter {
@@ -3029,7 +3028,6 @@ impl PrettyPrinter {
 
     /// Formats a list of quantifier bindings for forall/exists expressions.
     ///
-
     /// Output forms:
     /// - `x: Int` - type-based
     /// - `x in items` - collection-based

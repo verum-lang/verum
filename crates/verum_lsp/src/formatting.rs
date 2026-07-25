@@ -685,7 +685,6 @@ impl TriviaPreservingFormatter {
 
     /// Format a field list.
     ///
-
     /// Honours `VerumFormatConfig.trailing_commas`: when `true`
     /// (the default), every field emission terminates with `,\n`,
     /// including the last one — matching the documented house style
@@ -926,7 +925,6 @@ pub fn format_document(text: &str) -> List<TextEdit> {
 
 /// Format a document honouring caller-supplied formatting config.
 ///
-
 /// The LSP `formatting` request carries `FormattingOptions` (tab
 /// size, insert-spaces) that the editor sourced from the user's
 /// own settings. The fallback formatter previously hardcoded
@@ -1394,12 +1392,10 @@ pub fn format_on_type(text: &str, position: Position, ch: char) -> List<TextEdit
 
 /// Format after `|>` (pipeline operator): align continuation to pipeline start.
 ///
-
 /// Verum's pipeline operator chains expressions vertically. When the user
 /// types `|>` we indent the continuation to one level deeper than the
 /// expression that started the pipeline chain, producing:
 ///
-
 /// ```verum
 /// data
 ///  |> transform
@@ -1612,10 +1608,8 @@ fn calculate_indent_for_closing_brace(lines: &[&str], current_line: usize) -> us
 
 /// Calculate the proper indentation for a new line.
 ///
-
 /// The logic mirrors Verum's block structure:
 ///
-
 /// | Previous line ends with | Indent change |
 /// |-------------------------|---------------|
 /// | `{` or `[` | +1 level |

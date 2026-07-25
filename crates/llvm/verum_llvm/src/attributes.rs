@@ -100,18 +100,14 @@ impl Attribute {
     /// likely be removed in the future in favor of `Attribute`s being generically
     /// defined.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let enum_attribute = context.create_enum_attribute(0, 10);
     ///
-
     /// assert!(enum_attribute.is_enum());
     /// ```
     pub fn is_enum(self) -> bool {
@@ -122,18 +118,14 @@ impl Attribute {
     /// likely be removed in the future in favor of `Attribute`s being generically
     /// defined.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let string_attribute = context.create_string_attribute("my_key_123", "my_val");
     ///
-
     /// assert!(string_attribute.is_string());
     /// ```
     pub fn is_string(self) -> bool {
@@ -144,15 +136,12 @@ impl Attribute {
     /// likely be removed in the future in favor of `Attribute`s being generically
     /// defined.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::attributes::Attribute;
     ///
-
     /// let context = Context::create();
     /// let kind_id = Attribute::get_named_enum_kind_id("sret");
     /// let type_attribute = context.create_type_attribute(
@@ -160,7 +149,6 @@ impl Attribute {
     ///  context.i32_type().into(),
     /// );
     ///
-
     /// assert!(type_attribute.is_type());
     /// ```
     pub fn is_type(self) -> bool {
@@ -169,18 +157,14 @@ impl Attribute {
 
     /// Gets the enum kind id associated with a builtin name.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::attributes::Attribute;
     ///
-
     /// // This kind id doesn't exist:
     /// assert_eq!(Attribute::get_named_enum_kind_id("foobar"), 0);
     ///
-
     /// // These are real kind ids:
     /// assert_eq!(Attribute::get_named_enum_kind_id("align"), 1);
     /// assert_eq!(Attribute::get_named_enum_kind_id("builtin"), 5);
@@ -193,47 +177,36 @@ impl Attribute {
 
     /// Gets the kind id associated with an enum `Attribute`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let enum_attribute = context.create_enum_attribute(0, 10);
     ///
-
     /// assert_eq!(enum_attribute.get_enum_kind_id(), 0);
     /// ```
     /// Gets the kind id associated with an enum or type `Attribute`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let enum_attribute = context.create_enum_attribute(0, 10);
     ///
-
     /// assert_eq!(enum_attribute.get_enum_kind_id(), 0);
     /// ```
     ///
-
     /// This function also works for type `Attribute`s.
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::attributes::Attribute;
     /// use verum_llvm::types::AnyType;
     ///
-
     /// let context = Context::create();
     /// let kind_id = Attribute::get_named_enum_kind_id("sret");
     /// let any_type = context.i32_type().as_any_type_enum();
@@ -242,7 +215,6 @@ impl Attribute {
     ///  any_type,
     /// );
     ///
-
     /// assert_eq!(type_attribute.get_enum_kind_id(), kind_id);
     /// ```
     pub fn get_enum_kind_id(self) -> u32 {
@@ -257,14 +229,11 @@ impl Attribute {
 
     /// Gets the last enum kind id associated with builtin names.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::attributes::Attribute;
     ///
-
     /// assert_eq!(Attribute::get_last_enum_kind_id(), 56);
     /// ```
     pub fn get_last_enum_kind_id() -> u32 {
@@ -273,18 +242,14 @@ impl Attribute {
 
     /// Gets the value associated with an enum `Attribute`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let enum_attribute = context.create_enum_attribute(0, 10);
     ///
-
     /// assert_eq!(enum_attribute.get_enum_value(), 10);
     /// ```
     pub fn get_enum_value(self) -> u64 {
@@ -295,18 +260,14 @@ impl Attribute {
 
     /// Gets the string kind id associated with a string attribute.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let string_attribute = context.create_string_attribute("my_key", "my_val");
     ///
-
     /// assert_eq!(string_attribute.get_string_kind_id().to_str(), Ok("my_key"));
     /// ```
     /// Panics if the attribute is not a string attribute. The underlying LLVM C API
@@ -322,18 +283,14 @@ impl Attribute {
 
     /// Gets the string value associated with a string attribute.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let string_attribute = context.create_string_attribute("my_key", "my_val");
     ///
-
     /// assert_eq!(string_attribute.get_string_value().to_str(), Ok("my_val"));
     /// ```
     pub fn get_string_value(&self) -> &CStr {
@@ -347,16 +304,13 @@ impl Attribute {
 
     /// Gets the type associated with a type attribute.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::attributes::Attribute;
     /// use verum_llvm::types::AnyType;
     ///
-
     /// let context = Context::create();
     /// let kind_id = Attribute::get_named_enum_kind_id("sret");
     /// let any_type = context.i32_type().as_any_type_enum();
@@ -365,7 +319,6 @@ impl Attribute {
     ///  any_type,
     /// );
     ///
-
     /// assert!(type_attribute.is_type());
     /// assert_eq!(type_attribute.get_type_value(), any_type);
     /// assert_ne!(type_attribute.get_type_value(), context.i64_type().as_any_type_enum());

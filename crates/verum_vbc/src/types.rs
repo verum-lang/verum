@@ -17,7 +17,6 @@ use smallvec::SmallVec;
 
 /// String identifier - byte offset into string table.
 ///
-
 /// StringId enables O(1) access to strings: seek to offset, read length, read bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct StringId(pub u32);
@@ -29,7 +28,6 @@ impl StringId {
 
 /// Type identifier - index into type table.
 ///
-
 /// Built-in types have predefined IDs (0-15), user types start at 16.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct TypeId(pub u32);
@@ -382,7 +380,6 @@ pub struct ContextRef(pub u32);
 
 /// Type reference that may contain generic parameters.
 ///
-
 /// TypeRef represents types as they appear in function signatures and expressions,
 /// potentially containing unresolved generic parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -414,12 +411,10 @@ pub enum TypeRef {
 
     /// Rank-2 polymorphic function type: fn<R>(params) -> return_type
     ///
-
     /// Type parameters are universally quantified inside the function type,
     /// meaning the function must work for ALL instantiations of the type parameters.
     /// This enables patterns like transducers: fn<R>(Reducer<B, R>) -> Reducer<A, R>
     ///
-
     /// Spec: grammar/verum.ebnf - rank2_function_type
     Rank2Function {
         /// Number of universally quantified type parameters (local to this function type).
@@ -589,7 +584,6 @@ pub enum CbgrTier {
 
 /// Reference capability flags for CBGR permission checking.
 ///
-
 /// CBGR capability checks ensure references have required permissions before access.
 /// Read/Write/Execute capabilities are verified at dereference points. The `subsumes()`
 /// method checks permission inclusion (e.g., ReadWrite subsumes Read). Methods
@@ -634,7 +628,6 @@ impl ReferenceCapability {
 
     /// Check if one capability subsumes another.
     ///
-
     /// Returns true if `self` provides all permissions required by `required`.
     /// Used to verify that a reference has sufficient capabilities for an operation.
     #[must_use]
@@ -790,7 +783,6 @@ impl TryFrom<u8> for Variance {
 
 /// Type descriptor in the type table.
 ///
-
 /// Contains all metadata about a type including generic parameters,
 /// fields, variants, and protocol implementations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

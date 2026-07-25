@@ -86,7 +86,6 @@ use verum_ast::expr::{Expr, ExprKind};
 
 /// Classification of a single apply-graph leaf.
 ///
-
 /// A leaf is a node whose body either (a) doesn't recurse further
 /// (axiom — no `apply` callsites in its body) or (b) is a kernel
 /// bridge consumed by the dispatcher (`kernel_*_strict`). Theorem
@@ -189,7 +188,6 @@ impl LeafComposition {
 
 /// One symbol's classification in the workspace-wide symbol table.
 ///
-
 /// At graph-construction time every theorem / axiom declaration in
 /// the workspace is inserted with one of the three entry kinds.
 /// `Theorem` entries carry their proof body so the walker can recurse;
@@ -278,21 +276,18 @@ pub struct DependentTheorem {
 /// **Reverse-walk the apply-graph from `axiom_name`** and enumerate
 /// every theorem whose transitive proof depends on the named axiom.
 ///
-
 /// Algorithm: build a reverse adjacency map (axiom → callers) by
 /// walking every theorem's `apply_targets` once, then BFS forward
 /// from `axiom_name` over the reverse edges, collecting reachable
 /// theorem nodes. Cycle-safe via the visited set, so mutual
 /// recursion / self-reference terminates.
 ///
-
 /// Each returned [`DependentTheorem`] carries the chain of
 /// intermediate symbols from the theorem down to the axiom. When
 /// multiple chains reach the axiom from the same theorem, the
 /// shortest path (BFS) is recorded; the diagnostic only needs
 /// some witness, not every chain.
 ///
-
 /// **Architectural rationale (task #318).** When an axiom rejects
 /// at compile time, mathematicians shouldn't have to manually trace
 /// dependency chains in a 200-theorem corpus. This walker
@@ -300,12 +295,10 @@ pub struct DependentTheorem {
 /// diagnostic primitive — the data already exists; the walker
 /// surfaces it.
 ///
-
 /// **Performance**: O(N + E) where N = symbols, E = total
 /// apply-edges in the workspace. Microsecond-scale on the MSFS
 /// corpus (~100 theorems, ~500 edges).
 ///
-
 /// **Returned order**: lexicographic by theorem name, so the
 /// diagnostic's listing is deterministic across runs.
 pub fn dependent_theorems(graph: &ApplyGraph, axiom_name: &str) -> Vec<DependentTheorem> {
@@ -374,22 +367,18 @@ pub fn dependent_theorems(graph: &ApplyGraph, axiom_name: &str) -> Vec<Dependent
 
 /// **Render a dependency-aware diagnostic note** for an axiom rejection.
 ///
-
 /// Returns a multi-line `String` formatted as a `note:` block listing
 /// every theorem whose transitive proof depends on `axiom_name`.
 /// When the axiom has no dependents, returns `None` so the caller can
 /// skip emitting an empty note.
 ///
-
 /// `theorem_sources` is an optional map from theorem name to source
 /// path; when provided, each listed dependent is rendered with its
 /// `(file_path)` location for easy navigation. When absent, the
 /// listing is name-only.
 ///
-
 /// Intended layout:
 ///
-
 /// ```text
 /// note: 7 downstream theorems transitively depend on this axiom:
 ///  - msfs_lemma_3_4_outputs_in_s_s_global (math/s_definable/lemma_3_4.vr)
@@ -397,7 +386,6 @@ pub fn dependent_theorems(graph: &ApplyGraph, axiom_name: &str) -> Vec<Dependent
 ///  - ...
 /// ```
 ///
-
 /// Caller responsibility: this function only formats; it does not
 /// emit to a diagnostic surface. Callers attach the returned string
 /// to the existing diagnostic (e.g., via the verum_diagnostics
@@ -442,14 +430,12 @@ pub fn render_dependent_theorems_note(
 /// (cycle-safe via the visited set), so mutual recursion is
 /// finite-time.
 ///
-
 /// `max_depth` caps the walk depth as a safety stop (defensive: a
 /// well-formed corpus reaches every leaf in 4–6 hops, but a
 /// pathological cycle around the visited-set would still terminate
 /// finitely; the depth cap is just a *display-friendly* termination
 /// criterion).
 ///
-
 /// Returns the [`LeafComposition`] — read-only summary the audit
 /// gate emits as JSON / human-readable text.
 pub fn walk_transitive(graph: &ApplyGraph, root: &str, max_depth: usize) -> LeafComposition {
@@ -567,10 +553,8 @@ fn walk_node(
 /// proof* (mathlib4, Coq stdlib, Lean stdlib, ZFC) versus a genuine
 /// workspace-discovery gap.
 ///
-
 /// **Recognised prefixes** (matched at the start of the dotted path):
 ///
-
 ///  - `mathlib4.` — Lean 4 mathlib
 ///  - `mathlib.` — generic mathlib (Lean 3 / 4 hybrid corpus)
 ///  - `coq_stdlib.` — Coq standard library
@@ -581,7 +565,6 @@ fn walk_node(
 ///  - `agda_stdlib.` — Agda standard library
 ///  - `isabelle.` — Isabelle/HOL library
 ///
-
 /// **Why this lives in the apply-graph walker, not on the
 /// `@framework` attribute**: the attribute is on the *target*'s
 /// declaration site (the lemma stub). When the target lives outside
@@ -591,7 +574,6 @@ fn walk_node(
 /// boundary fallback that was already in place for stdlib kernel
 /// bridges.
 ///
-
 /// **Discharges**: `kernel_v0/lemmas/*.vr` apply chains land on these
 /// prefixes (e.g., `apply mathlib4.lambda.ChurchRosser`). Without
 /// this classifier they'd surface as `Unresolved` and the audit gate
@@ -713,7 +695,6 @@ pub fn build_apply_graph_from_modules(modules: &[&verum_ast::Module]) -> ApplyGr
 /// Walk a `ProofBody` and collect every `apply <symbol>(args)`
 /// target's name in encounter order. Skips non-apply tactics.
 ///
-
 /// This is the compile-time half of the apply-graph: invoking it on
 /// every theorem in the workspace populates each `SymbolEntry::Theorem`'s
 /// `apply_targets` list. Pure AST walk — no semantic resolution.
@@ -814,7 +795,6 @@ fn walk_tactic(tactic: &TacticExpr, targets: &mut Vec<String>) {
 /// for primitive-tactic calls — they're not theorem references at
 /// the kernel level.
 ///
-
 /// The list mirrors the canonical `TacticExpr::*` primitive variants
 /// + a small set of stdlib-built-in alias names that elaborator-time
 /// resolution treats as primitives (`refl` for Reflexivity, etc.).

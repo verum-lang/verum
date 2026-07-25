@@ -201,7 +201,6 @@ impl<'s> TableGenParser<'s> {
 
     /// Adds the given TableGen source string.
     ///
-
     /// The string must be null-terminated and is not copied, hence it is
     /// required to live until the source code is parsed.
     pub fn add_source_raw(self, source: &'s CStr) -> Result<Self, Error> {
@@ -214,7 +213,6 @@ impl<'s> TableGenParser<'s> {
 
     /// Adds the given TableGen source string.
     ///
-
     /// The string is copied into a null-terminated [`CString`].
     pub fn add_source(mut self, source: &str) -> Result<Self, Error> {
         let string = CString::new(source).map_err(TableGenError::from)?;
@@ -237,7 +235,6 @@ impl<'s> TableGenParser<'s> {
 
     /// Parses the TableGen source files and returns a [`RecordKeeper`].
     ///
-
     /// Due to limitations of TableGen, parsing TableGen is not thread-safe.
     /// In order to provide thread-safety, this method ensures that any
     /// concurrent parse operations are executed sequentially.
@@ -266,7 +263,6 @@ impl Drop for TableGenParser<'_> {
 
 /// Reference to TableGen source file.
 ///
-
 /// See [`TableGenParser::source_info`](TableGenParser::source_info) and
 /// [`RecordKeeper::source_info`](RecordKeeper::source_info).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

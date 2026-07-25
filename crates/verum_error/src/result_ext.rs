@@ -37,27 +37,22 @@ use verum_common::{Map, Text};
 
 /// Extension trait for adding structured context to Result types
 ///
-
 /// Provides methods for adding single key-value pairs or maps of structured
 /// data to errors. The structured data is preserved through error propagation
 /// and can be formatted as JSON, YAML, or Logfmt.
 pub trait ResultStructuredContext<T, E> {
     /// Add a single structured context key-value pair
     ///
-
     /// # Performance
     /// The key and value are always evaluated, even on success.
     /// Use `with_structured_fn()` for expensive computations.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::prelude::*;
     ///
-
     /// fn example(user_id: u64) -> Result<(), ContextError<VerumError>> {
     ///  Err(VerumError::new("Error", ErrorKind::Other))
     ///  .with_structured("user_id", user_id)
@@ -70,27 +65,22 @@ pub trait ResultStructuredContext<T, E> {
 
     /// Add multiple structured context key-value pairs from a map
     ///
-
     /// # Performance
     /// The map is always evaluated, even on success.
     /// Use `with_structured_map_fn()` for expensive map construction.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_common::{Map, Text};
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::prelude::*;
     ///
-
     /// fn example() -> Result<(), ContextError<VerumError>> {
     ///  let mut map: Map<Text, ContextValue> = Map::new();
     ///  map.insert("key1".to_string().into(), 42.to_context_value());
     ///  map.insert("key2".to_string().into(), "value".to_context_value());
     ///
-
     ///  Err(VerumError::new("Error", ErrorKind::Other))
     ///  .with_structured_map(map)
     /// }
@@ -100,32 +90,26 @@ pub trait ResultStructuredContext<T, E> {
 
 /// Extension trait for lazy structured context evaluation
 ///
-
 /// Provides zero-cost methods where closures are only evaluated on error.
 /// This is the preferred method for expensive context value computations.
 pub trait ResultStructuredContextFn<T, E> {
     /// Add a structured context using a closure (zero-cost on success)
     ///
-
     /// # Performance
     /// **Zero-cost on success path** - The closure is only called if there's an error.
     /// This is the preferred method for expensive context value creation.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::prelude::*;
     ///
-
     /// fn expensive_computation() -> i64 {
     ///  // Simulated expensive operation
     ///  42
     /// }
     ///
-
     /// fn example() -> Result<(), ContextError<VerumError>> {
     ///  Err(VerumError::new("Error", ErrorKind::Other))
     ///  .with_structured_fn(|| ("computed_value", expensive_computation()))
@@ -139,27 +123,22 @@ pub trait ResultStructuredContextFn<T, E> {
 
     /// Add multiple structured contexts using a closure (zero-cost on success)
     ///
-
     /// # Performance
     /// **Zero-cost on success path** - The closure is only called if there's an error.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_common::{Map, Text};
     /// use verum_error::{VerumError, ErrorKind};
     /// use verum_error::prelude::*;
     ///
-
     /// fn build_context() -> Map<Text, ContextValue> {
     ///  let mut map: Map<Text, ContextValue> = Map::new();
     ///  map.insert("key1".to_string().into(), 42.to_context_value());
     ///  map
     /// }
     ///
-
     /// fn example() -> Result<(), ContextError<VerumError>> {
     ///  Err(VerumError::new("Error", ErrorKind::Other))
     ///  .with_structured_map_fn(|| build_context())
@@ -227,7 +206,6 @@ where
 
 /// Extension trait for adding structured context to ContextError results (for chaining)
 ///
-
 /// This trait is automatically implemented for Result<T, ContextError<E>> and allows
 /// chaining structured contexts on already-wrapped errors.
 pub trait ContextErrorStructuredExt<T, E> {

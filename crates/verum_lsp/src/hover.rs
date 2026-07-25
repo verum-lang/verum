@@ -18,7 +18,6 @@ use verum_types::attr::registry;
 
 /// Generate hover information for a position in the document.
 ///
-
 /// When `cbgr` is provided and the cursor is on a `&` sigil, a detailed
 /// CBGR analysis (tier, escape, promotion availability) is returned instead
 /// of the usual symbol hover.
@@ -279,7 +278,6 @@ fn format_protocol_hover(protocol: &verum_ast::ProtocolDecl) -> String {
 
 /// Get hover information for an attribute at the given position
 ///
-
 /// Checks if the position is on an attribute (text starting with '@')
 /// and returns documentation from the AttributeRegistry.
 fn get_attribute_hover(document: &DocumentState, position: Position) -> Option<Hover> {
@@ -307,7 +305,6 @@ fn get_attribute_hover(document: &DocumentState, position: Position) -> Option<H
 
 /// Extract attribute name if the position is within an attribute
 ///
-
 /// Returns the attribute name (without '@') if the cursor is positioned
 /// on an attribute like `@inline`, `@derive(...)`, etc.
 fn extract_attribute_at_position(line: &str, offset: usize) -> Option<String> {

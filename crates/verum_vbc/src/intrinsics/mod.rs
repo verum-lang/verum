@@ -79,7 +79,6 @@ pub struct IntrinsicInfo {
 
 /// Lookup an intrinsic by name.
 ///
-
 /// Returns None if the intrinsic is not registered.
 #[inline]
 pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {

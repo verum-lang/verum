@@ -511,7 +511,6 @@ impl UnifiedDashboard {
 
     /// Print the unified performance dashboard combining all analysis results.
     ///
-
     /// Displays a comprehensive dashboard with Unicode line-drawing combining:
     /// - Compilation time breakdown (parsing, type checking, verification, codegen)
     /// - CBGR analysis results (reference breakdown, overhead)

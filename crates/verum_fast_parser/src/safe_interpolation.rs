@@ -22,13 +22,11 @@ use verum_common::{List, Text};
 
 /// Parse the content of an interpolated string into parts and expressions.
 ///
-
 /// Given a string like "Hello {name}, you are {age} years old",
 /// returns:
 /// - parts: ["Hello ", ", you are ", " years old"]
 /// - exprs: [name_expr, age_expr]
 ///
-
 /// The parts array always has one more element than exprs:
 /// parts[0] {exprs[0]} parts[1] {exprs[1]} ... parts[n]
 pub fn parse_interpolated_content(
@@ -146,11 +144,9 @@ pub fn parse_interpolated_content(
 
 /// Parse an expression from a string (used for interpolation content)
 ///
-
 /// MEMORY SAFETY FIX: This function now properly manages token lifetime
 /// without using Box::leak, preventing memory accumulation during parsing.
 ///
-
 /// Special directives supported:
 /// - `@raw expr`: Marks the expression as raw (no escaping) for HTML-safe strings
 fn parse_interpolation_expr(
@@ -274,15 +270,12 @@ fn parse_interpolation_expr(
 /// Wrap an interpolation expression with stdlib formatter calls
 /// based on the format spec — Python-style grammar:
 ///
-
 /// `[[fill]align][sign][#][0][width][.precision][type]`
 ///
-
 /// Supported specs (compose using existing stdlib methods on
 /// `core/base/primitives.vr` and `core/text/text.vr`; no ad-hoc
 /// opcodes — every formatter call is a regular method dispatch):
 ///
-
 ///  - `x` → `expr.to_hex()`
 ///  - `X` → `expr.to_hex().to_uppercase()` (case via Text.to_uppercase)
 ///  - `o` → `expr.to_octal()`
@@ -295,7 +288,6 @@ fn parse_interpolation_expr(
 ///  - `0Nx` zero-padded hex of width N
 ///  - `Nx` hex padded with spaces to width N
 ///
-
 /// Anything not matching falls through to plain ToString — better
 /// than rejecting valid programs while a future native FormatValue
 /// opcode (richer specs: precision / sign / alternate / fill char /
@@ -572,7 +564,6 @@ fn char_literal(value: char, span: verum_ast::Span) -> Expr {
 
 /// Split an interpolation expression into (expr_str, format_spec).
 ///
-
 /// Mirrors the bracket-aware logic of `strip_format_spec` but
 /// returns the spec instead of dropping it.
 fn split_expr_and_spec(expr_str: &str) -> (&str, Option<&str>) {
@@ -593,7 +584,6 @@ fn split_expr_and_spec(expr_str: &str) -> (&str, Option<&str>) {
 
 /// Strip format specifier from an interpolation expression.
 ///
-
 /// Given `x:02` returns `x`, given `val:.2f` returns `val`.
 /// Given `name` returns `name` (no specifier).
 /// Given `:?` returns `` (empty expression, for debug format).
@@ -617,11 +607,9 @@ fn strip_format_spec(expr_str: &str) -> &str {
 
 /// Unescape an expression string extracted from an interpolation.
 ///
-
 /// This handles escape sequences that appear in the interpolated string content
 /// and converts them to the actual characters they represent for Verum parsing.
 ///
-
 /// For example: `\"hello\"` becomes `"hello"`, `\\n` becomes `\n`, etc.
 fn unescape_interpolation_expr(s: &str) -> String {
     let mut result = String::with_capacity(s.len());

@@ -659,19 +659,16 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
 
 /// Entry point for `verum audit --framework-conflicts [--format FORMAT]`.
 ///
-
 /// Walks every `@framework(corpus, ...)` marker in the project,
 /// collects the distinct corpus identifiers, and audits them
 /// against the well-known incompatibility matrix
 /// (`verum_verification::KNOWN_INCOMPATIBLE_PAIRS`). Each match
 /// prints the conflict reason + literature citation.
 ///
-
 /// Exits non-zero if any incompatible pair is found — the project's
 /// axiom bundle would derive False, breaking every theorem (per
 /// and the framework-compat module's V0 catalogue).
 ///
-
 /// reads conflicts from the static Rust matrix
 /// shipped at `crates/verum_verification/src/framework_compat.rs`.
 /// will add per-package declarative conflicts so the
@@ -817,14 +814,12 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
 /// (ZFC family / MLTT / HoTT / Cubical / CIC) and surface
 /// cross-foundation conflicts.
 ///
-
 /// Walks every `.vr` file under the project, collects every
 /// `@framework(<name>, "<citation>")` attribute via
 /// [`verum_kernel::framework_citation::collect_framework_citations`],
 /// then partitions the manifest by foundation via
 /// [`verum_kernel::foundation_profile::FoundationDistribution`].
 ///
-
 /// **Three categories of report data**:
 /// 1. Per-foundation citation count — observability for the
 /// meta-theoretic shape of the corpus.
@@ -836,7 +831,6 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
 /// Exits non-zero on any conflict — the corpus would derive
 /// `False` if both foundations are simultaneously assumed.
 ///
-
 /// **Why separate from `--framework-conflicts`**: that gate operates
 /// at the framework-name level (the literal `@framework(<name>, ...)`
 /// argument) and uses `verum_verification::audit_framework_set`'s
@@ -849,7 +843,6 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
 /// citation living in HoTT — currently compatible, but if MSFS were
 /// reclassified to MLTT+UIP, the conflict would surface here).
 ///
-
 /// Output: `target/audit-reports/foundation-profiles.json`.
 pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::foundation_profile::{FoundationDistribution, FoundationProfile};
@@ -1006,13 +999,11 @@ pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> 
 
 /// `verum audit --accessibility` (item 4).
 ///
-
 /// Walks every `@enact(...)` marker (and EpsilonOf-tagged
 /// declaration) in the project, cross-references against
 /// `@accessibility(λ)` annotations on the same item, and
 /// surfaces every site that lacks an accessibility certificate.
 ///
-
 /// Per Diakrisis Axi-4: M (the metaisation 2-functor) must be
 /// λ-accessible for transfinite iterations to exist (Theorem
 /// 10.T5 — `Fix(M) ≠ ∅`). The kernel cannot internally prove
@@ -1021,7 +1012,6 @@ pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> 
 /// `@accessibility(λ)` on each `@enact` marker. This audit is
 /// the CI gate: missing annotations → non-zero exit.
 ///
-
 /// Plain output: per-item table with (kind, name, file,
 /// has-accessibility, λ-if-any). JSON: schema_version=1 with
 /// items array.
@@ -1284,7 +1274,6 @@ fn print_accessibility_report_json(
 /// to the rule tables in `docs/verification/trusted-kernel.md` +
 /// VVA §4.4 / §4.4a.
 ///
-
 /// The audit is a static cross-reference: every entry has a
 /// `crates/verum_kernel/src/<file>.rs` implementation and at least
 /// one regression test under `crates/verum_kernel/tests/`. External
@@ -1617,7 +1606,6 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
 /// to reach stdlib declarations (apply-graph transitive walker, future
 /// dependency-graph audits).
 ///
-
 /// Discovery order:
 /// 1. `VERUM_STDLIB_ROOT` env var — explicit override.
 /// 2. `core/` directory adjacent to the verum binary.
@@ -1626,7 +1614,6 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
 /// 4. Hardcoded development locations (`~/projects/oldman/verum-lang/
 /// verum/core/`) for repeatable demos.
 ///
-
 /// Returns an empty vector if no stdlib root is found — the caller
 /// then operates on the corpus alone, with stdlib symbols surfacing
 /// as `unresolved` per the apply-graph fallback contract.
@@ -1769,7 +1756,6 @@ fn stdlib_root_candidates() -> Vec<PathBuf> {
 /// Parse a single `.vr` file without running semantic analysis. We only need
 /// the top-level item list + attributes.
 ///
-
 /// Post-parse the @delegate(target) attribute pre-pass runs so audit
 /// walkers see the synthesised proof bodies (#146 / MSFS-L4.14).
 /// Without this step a corpus theorem with `@delegate(target_full)` and
@@ -1966,7 +1952,6 @@ pub fn audit_kernel_recheck() -> Result<()> {
 
 /// Entry point for `verum audit --kernel-recheck [--format FORMAT]`.
 ///
-
 /// Walks every `.vr` file under the manifest root, runs
 /// `KernelRecheck::recheck_module` on each, and reports per-file
 /// admitted / rejected counts. Returns `CliError::VerificationFailed`
@@ -2160,10 +2145,8 @@ pub fn audit_kernel_soundness() -> Result<()> {
 
 /// Entry-point for `verum audit --kernel-soundness [--format FORMAT]`.
 ///
-
 /// Drives the kernel-soundness corpus + cross-export pipeline:
 ///
-
 /// 1. **Drift check** — confirms the Rust-side rule list
 /// (`verum_kernel::canonical_rules()`) has the expected variant
 /// count. A one-sided edit between the Rust enum and the
@@ -2180,7 +2163,6 @@ pub fn audit_kernel_soundness() -> Result<()> {
 /// 4. **Honest IOUs** — the report lists every admitted lemma
 /// with its meta-theoretic prerequisite reason verbatim.
 ///
-
 /// Exits non-zero only on drift; admitted lemmas are accountability
 /// surface, not failures. When the corpus is fully discharged
 /// (admitted_count = 0), the gate flips to `kernel_soundness_holds_unconditionally`
@@ -3654,17 +3636,14 @@ fn print_external_prover_replay_json(
 
 /// `verum audit --kernel-v0-roster` — bootstrap-meta-theory roster.
 ///
-
 /// Walks the canonical 10-rule kernel_v0 manifest
 /// ([`verum_kernel::soundness::kernel_v0_manifest`]) and the
 /// `core/verify/kernel_v0/rules/` directory on disk; cross-references
 /// the two to detect drift (manifest entry without source file, or
 /// orphan source file without manifest entry).
 ///
-
 /// **Three layers of observability**:
 ///
-
 /// 1. **Roster** — per-rule (name, lemma symbol, file path,
 /// Proved / Admitted, IOU citation).
 /// 2. **Discharge headline** — proved-count vs admitted-count vs
@@ -3674,7 +3653,6 @@ fn print_external_prover_replay_json(
 /// Adding a rule to `proof_checker.rs` without mirroring it in
 /// `kernel_v0/rules/k_<name>.vr` fails this gate.
 ///
-
 /// Output: `target/audit-reports/kernel-v0-roster.json`.
 pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::soundness::DischargeStatus;
@@ -3842,14 +3820,12 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
 
 /// Entry-point for `verum audit --codegen-attestation [--format FORMAT]`.
 ///
-
 /// Walks the canonical 6-pass codegen attestation manifest from
 /// [`verum_kernel::codegen_attestation`] and reports per-pass status
 /// (Discharged / AdmittedWithIou / NotYetAttested). Each pass entry
 /// carries its semantic invariant + concrete proof obligation
 /// describing what would discharge it.
 ///
-
 /// **Architecture**: this is the *foundation layer* for task #162's
 /// CompCert-style verified-compilation chain. The V0 manifest leaves
 /// every entry `NotYetAttested`; subsequent commits flip individual
@@ -3858,13 +3834,11 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
 /// reports progress along that chain and surfaces the IOU surface as
 /// a first-class L4 line-item.
 ///
-
 /// **Failure semantics**: this gate exits non-zero only if the
 /// manifest claims "all attested" but the data layer disagrees — i.e.
 /// it is a literal-claim guard. Pending entries are observability,
 /// not failure.
 ///
-
 /// Output: `target/audit-reports/codegen-attestation.json`.
 pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::codegen_attestation::{
@@ -4568,20 +4542,17 @@ pub fn audit_bridge_discharge() -> Result<()> {
 
 /// Entry-point for `verum audit --bridge-discharge [--format FORMAT]`.
 ///
-
 /// Walks every `.vr` module in the manifest project, finds every
 /// `apply kernel_*_strict(args)` invocation in proof bodies, and
 /// invokes [`verum_kernel::dispatch_intrinsic`] against the
 /// literal-arg call sites. Reports per-bridge:
 ///
-
 /// * **callsites_total** — total `apply` invocations
 /// * **callsites_literal_args** — invocations whose args reduce to literals
 /// * **callsites_non_literal** — invocations with non-literal args
 /// * **dispatcher_decisions** — per-callsite `Decision { holds, reason }`
 /// * **false_discharges** — count where `holds: false`
 ///
-
 /// **Architecture**: this is the *observability layer* for task #80's
 /// L4 promotion path. It introduces no per-bridge hardcoding — every
 /// bridge auto-registers through the dispatcher table, and every
@@ -4589,7 +4560,6 @@ pub fn audit_bridge_discharge() -> Result<()> {
 /// Adding a new `kernel_<verb>_strict` bridge requires only registering
 /// the dispatcher entry; this audit picks up the discharge automatically.
 ///
-
 /// Exits non-zero when:
 /// * any bridge invocation has `holds: false` (false discharge — the
 /// proof body cited the bridge but the dispatcher's structural
@@ -4779,7 +4749,6 @@ pub fn audit_ladder_monotonicity() -> Result<()> {
 
 /// Entry-point for `verum audit --ladder-monotonicity [--format FORMAT]`.
 ///
-
 /// For every theorem-shaped item with a `@verify(<strategy>)`
 /// annotation, dispatches the obligation at every backbone strategy
 /// from `Runtime` up to and including the declared strategy. Verifies
@@ -4787,7 +4756,6 @@ pub fn audit_ladder_monotonicity() -> Result<()> {
 /// `Closes` at any strategy `S_strict`, it MUST `Close` at every
 /// coarser backbone strategy `S_coarser ≤ S_strict`.
 ///
-
 /// **Architectural promise**: pre-fix the verification ladder's
 /// strict-ν-monotonicity claim was implementation-by-design; the
 /// dispatcher's *implementation table* was checked
@@ -4796,12 +4764,10 @@ pub fn audit_ladder_monotonicity() -> Result<()> {
 /// backbone, and inversion (stricter Closes while coarser fails)
 /// fails the gate with a precise diagnostic.
 ///
-
 /// **Performance**: N theorems × ≤ 12 dispatches each. Each dispatch
 /// is the existing per-strategy backend invocation; monotonicity
 /// check is a pure structural inspection of the walk report.
 ///
-
 /// Exits non-zero when any theorem violates the invariant.
 pub fn audit_ladder_monotonicity_with_format(format: AuditFormat) -> Result<()> {
     use verum_verification::ladder_dispatch::{
@@ -4985,7 +4951,6 @@ pub fn audit_cross_format_roundtrip_with_backend(
 
 /// Entry-point for `verum audit --cross-format-roundtrip [--format FORMAT]`.
 ///
-
 /// Walks every `@theorem`/`@lemma`/`@corollary` declaration in the
 /// project, renders each through every registered
 /// [`CorpusBackend`](verum_kernel::soundness::corpus_export::CorpusBackend)
@@ -4995,14 +4960,12 @@ pub fn audit_cross_format_roundtrip_with_backend(
 /// each emitted file. Aggregates per-theorem foreign-verdicts into
 /// a structured report.
 ///
-
 /// **Architectural promise**: the corpus's claim "this corpus is
 /// machine-verified by independent foreign systems" is no longer
 /// "we emit certificates and someone runs coqc manually" — it's
 /// "the audit itself emits AND re-checks AND reports per-theorem
 /// foreign-tool verdicts in one hermetic operation."
 ///
-
 /// **Tool availability**: when `coqc` / `lean` is missing on PATH,
 /// the per-format section is reported as `tool_missing` (not a
 /// failure — just observability) and the gate exits 0 unless any
@@ -5010,7 +4973,6 @@ pub fn audit_cross_format_roundtrip_with_backend(
 /// without Coq still passes the audit; CI with Coq gets the full
 /// foreign re-check.
 ///
-
 /// Exits non-zero only when an AVAILABLE foreign tool reports a real
 /// failure on at least one emitted file.
 pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<()> {
@@ -5331,7 +5293,6 @@ fn audit_cross_format_roundtrip_inner(
 /// `proof_checker::Certificate::verify()` on each, exits non-zero on
 /// any rejection.
 ///
-
 /// This is the trust-base regression suite — every kernel
 /// implementation claiming Verum compatibility must accept all
 /// canonical certificates. The library currently covers identity,
@@ -5717,7 +5678,6 @@ fn proof_term_library_candidates() -> Vec<std::path::PathBuf> {
 
 /// Verify provenance signatures on emitted cross-format files.
 ///
-
 /// Walks the corpus, recomputes each theorem's expected
 /// `verum_signature` header via
 /// [`verum_kernel::soundness::corpus_export::compute_provenance_signature`],
@@ -5725,7 +5685,6 @@ fn proof_term_library_candidates() -> Vec<std::path::PathBuf> {
 /// top of the on-disk
 /// `target/audit-reports/cross-format-roundtrip/{coq,lean}/*` files.
 ///
-
 /// **Reproducibility primitive.** A third-party reviewer pulls the
 /// published `.v` / `.lean` files out of MSFS supplementary material,
 /// runs this gate, and gets a binary verdict: the files came from
@@ -5733,7 +5692,6 @@ fn proof_term_library_candidates() -> Vec<std::path::PathBuf> {
 /// or they didn't. No need to re-run the entire pipeline to verify
 /// provenance — just recompute the hash and compare.
 ///
-
 /// **Exit semantics.** Non-zero on any signature mismatch (file
 /// drift) or missing signature header (file emitted by older kernel).
 /// Always emits per-file verdict to JSON.
@@ -6007,14 +5965,12 @@ fn extract_signature_header(text: &str) -> Option<String> {
 
 /// Run the kernel-soundness IOU dashboard.
 ///
-
 /// Enumerates every kernel rule whose soundness lemma in
 /// `core/verify/kernel_soundness/` carries an `Admitted { reason }`
 /// status; groups by [`verum_kernel::soundness::RuleCategory`]; emits
 /// structured JSON + plain summary so reviewers + CI can track the
 /// IOU set over time.
 ///
-
 /// **Architectural significance.** This is the metric-driven
 /// foundation for the path to "constructively verified from first
 /// principles" (Phase 1 of the trust-base reduction roadmap). The
@@ -6023,7 +5979,6 @@ fn extract_signature_header(text: &str) -> Option<String> {
 /// dashboard surfacing the admit set, discharge effort has no
 /// measurable target.
 ///
-
 /// **Discharge prioritisation.** The output groups admits by
 /// category and lists each with its concrete IOU reason (e.g.,
 /// "substitution-lemma", "β-confluence", "CCHM Kan-filling", "modal-
@@ -6031,7 +5986,6 @@ fn extract_signature_header(text: &str) -> Option<String> {
 /// DCCT cohesive triple-adjunction"). Domain experts pick the
 /// category matching their expertise and tackle the admits in batch.
 ///
-
 /// **Exit semantics.** Always exits 0 — this is an observability
 /// gate. CI tracks the admit count over time via the JSON output;
 /// the proof-honesty CI gate's analogue ratchets the admit floor
@@ -6246,20 +6200,17 @@ pub fn audit_apply_graph() -> Result<()> {
 
 /// Entry-point for `verum audit --apply-graph [--format FORMAT]`.
 ///
-
 /// Walks every theorem in the project and classifies its TRANSITIVE
 /// apply-chain leaves. Each `apply <symbol>(args)` resolves through
 /// the workspace symbol table to its body; the recursion terminates
 /// at axiom leaves classified as `kernel_strict` / `framework_axiom` /
 /// `placeholder_axiom` / `unresolved`.
 ///
-
 /// This is the load-bearing complement to `--bridge-discharge` (which
 /// only checks the immediate apply): `--apply-graph` follows the
 /// chain across `_full` forms and stdlib delegates, so a placeholder
 /// leak deep in the chain surfaces.
 ///
-
 /// Exits non-zero when any theorem's composition has
 /// `placeholder_axiom > 0` or `unresolved > 0` — those theorems are
 /// not yet L4 load-bearing.
@@ -6272,14 +6223,12 @@ pub fn audit_apply_graph() -> Result<()> {
 /// Run the unified audit-bundle: all load-bearing gates in dependency
 /// order, aggregated into a single JSON report + plain summary.
 ///
-
 /// **Architecture (protocol-driven).** Each load-bearing gate is
 /// invoked with `--format json`, the JSON output captured, and merged
 /// into a top-level `gates: { <name>: <gate_json>, ... }` object plus
 /// an aggregate `l4_load_bearing: bool` summary. Adding a future
 /// gate is one new entry in the runner registry.
 ///
-
 /// **Failure semantics.** Each gate's per-theorem verdict is
 /// independent — bridge-discharge can fail (false discharge in
 /// proof body) without the apply-graph audit caring. The bundle
@@ -6288,7 +6237,6 @@ pub fn audit_apply_graph() -> Result<()> {
 /// so a CI pipeline gets the complete observable evidence even when
 /// an early gate fails.
 ///
-
 /// **JSON shape.**
 /// ```json
 /// {
@@ -6439,7 +6387,6 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
  /// without aborting the bundle — the bundle is observability
  /// across all gates, not a fail-fast pipeline.
  ///
-
  /// Per-gate JSON stdout is silenced inside the bundle: gates
  /// invoked under `AuditFormat::Json` normally print their
  /// payload to stdout, but the bundle's clean output requires
@@ -8070,7 +8017,6 @@ fn print_coord_report(
 /// view, computing the max-of-cited-coords inference for each
 /// theorem/lemma/corollary/axiom.
 ///
-
 /// Per defect 2: every theorem in the project
 /// gets a (Fw, ν, τ) coordinate inferred from the maximum
 /// (lex on OrdinalDepth) of the framework coordinates cited
@@ -8665,7 +8611,6 @@ fn function_body_contains_raw_self(decl: &verum_ast::decl::FunctionDecl) -> bool
 
 /// entry-point — `verum audit --hygiene-strict`.
 ///
-
 /// Walks every top-level **free** function (not inside `implement`
 /// or `protocol`) whose signature has no self-receiver, and flags
 /// any body that mentions the `self` keyword. Exits non-zero if any
@@ -9429,7 +9374,6 @@ fn print_owl2_report_json(
 /// Round-trip status as classified by the operational coherence
 /// layer. Mirrors the docs/verification/proof-corpora taxonomy.
 ///
-
 /// `Decidable` — finitely-axiomatised closure; canonicalisation
 /// terminates in single-exponential time.
 /// `SemiDecidable` — open closure (e.g. unbounded universe-ascent);
@@ -10901,7 +10845,6 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
 
 /// One `@kernel_discharge` citation site found in the corpus.
 ///
-
 /// Hoisted to module scope (out of [`audit_kernel_discharged_axioms`]) so
 /// the JSON-rendering helper [`render_kernel_discharge_json`] can take
 /// it by reference without inheriting the function's local-scope.
@@ -10915,14 +10858,12 @@ struct DischargeCite {
 /// **Render the kernel-discharged-axioms audit report as JSON**, with
 /// task #318 / #188 dependency-aware metadata.
 ///
-
 /// Every entry in the `discharges` array carries the existing four
 /// fields (`axiom`, `intrinsic`, `file`, `recognised`) plus a new
 /// `dependents` array (only populated for unrecognised entries) listing
 /// each downstream theorem that transitively depends on the rejected
 /// axiom — name + chain + source path.
 ///
-
 /// Used by both the Plain-format-side disk-write (for the audit
 /// bundle dispatcher) and the Json-format primary output, so both
 /// emission paths produce identical bytes.
@@ -11001,14 +10942,12 @@ fn render_kernel_discharge_json(
 /// and verifies that every cited dispatcher name appears in
 /// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
 ///
-
 /// This is the **machine-checked cross-link** between the host stdlib's
 /// paper-cited `@axiom` declarations and the algorithmic V0 kernel surfaces:
 /// when an axiom carries `@kernel_discharge(...)`, we audit-prove (a) the
 /// named dispatcher exists, (b) the trusted-base-shrinkage gain is
 /// observable in the report.
 ///
-
 /// Exits non-zero on any unmatched citation.
 pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
     use verum_ast::expr::ExprKind;
@@ -14310,7 +14249,6 @@ struct ManifestFieldEntry {
 
 /// Enumerate every manifest field and its wiring status (#290).
 ///
-
 /// **Maintenance contract**: when a new manifest field is added to
 /// `LanguageFeatures` or `CompilerOptions`, this table MUST grow a
 /// row. The pin tests verify representative entries are present.

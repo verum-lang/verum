@@ -75,7 +75,6 @@ use crate::parser::{ParseResult, RecursiveParser};
 impl<'a> RecursiveParser<'a> {
     /// Parse a complete module (list of top-level items).
     ///
-
     /// When [`Self::script_mode`] is on, top-level statements
     /// (let-bindings, expression-statements, defer, …) are also
     /// accepted and folded into a single synthesised
@@ -232,7 +231,6 @@ impl<'a> RecursiveParser<'a> {
     /// Synthesise the `__verum_script_main` wrapper that holds every
     /// top-level statement collected during script-mode parsing.
     ///
-
     /// The wrapper is a regular private `FunctionDecl` so all
     /// downstream passes (resolver, type-check, codegen) treat it
     /// uniformly. The compiler entry-detection pass recognises the
@@ -240,7 +238,6 @@ impl<'a> RecursiveParser<'a> {
     /// `Module::is_script()` and uses it as the script's entry
     /// point (P1.3).
     ///
-
     /// **Tail-expression semantics.** Following the standard
     /// Verum / Rust block-as-expression rule, when the last collected
     /// statement is an expression-statement *without* a trailing
@@ -1199,14 +1196,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an extern block containing FFI function declarations.
     ///
-
     /// Grammar:
     /// ```ebnf
     /// extern_block = 'extern' , [ string_lit ] , '{' , { extern_fn } , '}' ;
     /// extern_fn = [ visibility ] , 'fn' , identifier , '(' , param_list , ')' , [ '->' , type ] , ';' ;
     /// ```
     ///
-
     /// Examples:
     /// ```verum
     /// extern "C" {
@@ -1347,38 +1342,29 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse meta modifier with optional stage level for staged metaprogramming.
     ///
-
     /// # Syntax
     ///
-
     /// ```text
     /// meta_modifier = 'meta' [ '(' stage_level ')' ]
     /// stage_level = integer_lit (* Non-negative integer, 1 if omitted *)
     /// ```
     ///
-
     /// # Staged Metaprogramming Semantics
     ///
-
     /// Verum supports N-level staged metaprogramming:
     ///
-
     /// - **Stage 0**: Runtime execution (normal functions, no `meta` keyword)
     /// - **Stage 1**: Compile-time execution (`meta fn` or `meta(1) fn`)
     /// - **Stage N**: N-th level meta (`meta(N) fn` where N ≥ 2)
     ///
-
     /// # Stage Coherence Rule
     ///
-
     /// A Stage N function can only DIRECTLY generate Stage N-1 code.
     /// To generate lower-stage code, the output must contain meta functions
     /// that perform further generation.
     ///
-
     /// # Examples
     ///
-
     /// ```verum
     /// meta fn derive_eq() { ... } // Stage 1: generates runtime code
     /// meta(1) fn derive_eq() { ... } // Same as above (explicit)
@@ -1386,10 +1372,8 @@ impl<'a> RecursiveParser<'a> {
     /// meta(3) fn dsl_compiler() { ... } // Stage 3: generates Stage 2 code
     /// ```
     ///
-
     /// # Returns
     ///
-
     /// `(is_meta, stage_level)` where:
     /// - `is_meta = false, stage_level = 0` if no `meta` keyword
     /// - `is_meta = true, stage_level = 1` for plain `meta`
@@ -1731,14 +1715,12 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a throws clause: throws(ErrorType | OtherError)
     ///
-
     /// Grammar (verum.ebnf v2.8):
     /// ```ebnf
     /// throws_clause = 'throws' , '(' , error_type_list , ')' ;
     /// error_type_list = type_expr , { '|' , type_expr } ;
     /// ```
     ///
-
     /// Example: `fn parse(input: Text) throws(ParseError | ValidationError) -> AST`
     fn parse_throws_clause(&mut self) -> ParseResult<Maybe<ThrowsClause>> {
         if self.stream.consume(&TokenKind::Throws).is_none() {
@@ -2643,7 +2625,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a context type declaration.
     /// Syntax: context type Name<T> is protocol { ... };
     ///
-
     /// This is an alternative syntax for declaring context protocols using the
     /// unified type declaration style.
     fn parse_type_decl_with_context(
@@ -2795,7 +2776,6 @@ impl<'a> RecursiveParser<'a> {
     /// first non-`{` token inside the braces is a `.` followed by an identifier,
     /// indicating a copattern body rather than a regular block.
     ///
-
     /// We look at peek offsets:
     ///  - offset 0 : `{`
     ///  - offset 1 : `.`
@@ -2807,11 +2787,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a copattern body: `{ .obs1 => expr1, .obs2 => expr2, ... }`.
     ///
-
     /// This is the body of a `cofix fn` that defines a coinductive value by
     /// specifying the result of every observation/destructor.
     ///
-
     /// Grammar:
     /// ```ebnf
     /// copattern_body = '{' , copattern_arm , { ',' , copattern_arm } , [ ',' ] , '}' ;
@@ -3521,7 +3499,6 @@ impl<'a> RecursiveParser<'a> {
     /// (`@serialize(...) Ok`) or a meta-type alias body (`@builtin_path`,
     /// `@Expr`).
     ///
-
     /// Walk past `@X` and an optional `(…)` arg list, then peek. If an
     /// identifier (the variant's own name) follows, this is an attribute
     /// on a variant; otherwise — `;`, `,`, `|`, `)`, `where`, EOF — the
@@ -4097,11 +4074,9 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse record fields.
     ///
-
     /// Grammar: field = { attribute } , [ visibility ] , identifier , ':' , type_expr , [ field_default ] ;
     ///  field_default = '=' , expression ;
     ///
-
     /// Fields can have default values: `field: Type = default_expr` for builder pattern support.
     fn parse_record_field(&mut self) -> ParseResult<RecordField> {
         let start_pos = self.stream.position();
@@ -4205,7 +4180,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Extract BitSpec from @bits(N) and @offset(N) attributes.
     ///
-
     /// This enables first-class bitfield support where field attributes define bit layout:
     /// ```verum
     /// @bitfield
@@ -4216,7 +4190,6 @@ impl<'a> RecursiveParser<'a> {
     /// };
     /// ```
     ///
-
     /// Bitfield system: `@bits(N)` sets bit width, `@offset(N)` sets bit offset.
     /// Used with `@repr(packed)` types for hardware register layouts and protocol headers.
     fn extract_bit_spec_from_attributes(
@@ -4288,7 +4261,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse protocol items.
     ///
-
     /// SAFETY: Includes forward progress check to prevent infinite loops
     /// on malformed input.
     fn parse_protocol_items(&mut self) -> ParseResult<Vec<ProtocolItem>> {
@@ -4702,7 +4674,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a standalone protocol declaration.
     /// Syntax: [context] protocol Name<T> [extends Base1 + Base2] { ... }
     ///
-
     /// # Arguments
     /// * `attrs` - Attributes applied to the protocol
     /// * `vis` - Visibility modifier
@@ -5001,7 +4972,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse implementation items.
     ///
-
     /// SAFETY: Includes forward progress check to prevent infinite loops
     /// on malformed input.
     fn parse_impl_items(&mut self) -> ParseResult<Vec<ImplItem>> {
@@ -5672,7 +5642,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a mount declaration.
     ///
-
     /// Mount statements can have @cfg attributes for conditional compilation:
     /// ```verum
     /// @cfg(target_os = "linux")
@@ -5778,7 +5747,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a mount tree.
     ///
-
     /// Recursion depth is checked to prevent stack overflow from
     /// deeply nested mount groups like `mount a.{b.{c.{d.{...}}}}`.
     fn parse_mount_tree(&mut self) -> ParseResult<MountTree> {
@@ -5936,7 +5904,6 @@ impl<'a> RecursiveParser<'a> {
     /// `true` when the upcoming tokens form a file-relative
     /// mount (`./...` or `../...`). Disambiguators:
     ///
-
     ///  * `Dot Slash` → `./...` (one-character dot
     ///  followed by `/`)
     ///  * `DotDot Slash` → `../...` (lexer emits `..` as
@@ -5944,7 +5911,6 @@ impl<'a> RecursiveParser<'a> {
     ///  token used elsewhere
     ///  for range syntax)
     ///
-
     /// A normal relative module mount is `Dot Ident`, never
     /// `Dot Slash` / `DotDot Slash`, so the lookahead does
     /// not collide with the existing `mount .config.X;` form.
@@ -5965,13 +5931,11 @@ impl<'a> RecursiveParser<'a> {
     /// against the constraints documented on
     /// `MountTreeKind::File`:
     ///
-
     ///  * starts with `./` or `../`
     ///  * ends with `.vr`
     ///  * contains no `\\0` / `\\n` / `\\r`
     ///  * does NOT escape the cog root via excessive `..`
     ///
-
     /// Path-traversal validation happens here (parser layer)
     /// rather than in the loader so a malformed mount becomes
     /// a parse error with a span that points at the literal
@@ -6210,7 +6174,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a meta (macro) declaration.
     ///
-
     /// Syntax:
     /// ```text
     /// meta name(param1: fragment, param2: fragment) {
@@ -6219,7 +6182,6 @@ impl<'a> RecursiveParser<'a> {
     /// }
     /// ```
     ///
-
     /// Where fragment can be: expr, stmt, type, pattern, ident, path, tt, item, block
     fn parse_meta(&mut self, vis: Visibility) -> ParseResult<Item> {
         let start_pos = self.stream.position();
@@ -6375,13 +6337,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a context declaration.
     ///
-
     /// Supports both sync and async contexts:
     /// - `context Database { ... }` (sync)
     /// - `async context Database { ... }` (async)
     /// - `context async Database { ... }` (async, alternative syntax)
     ///
-
     /// Note: The caller may have already consumed 'context' and 'async' keywords
     /// depending on the parsing path taken.
     fn parse_context(&mut self, vis: Visibility, is_async: bool) -> ParseResult<Item> {
@@ -6500,12 +6460,10 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a context method signature.
     ///
-
     /// Supports both sync and async methods:
     /// - `fn query(sql: Text) -> Result<Rows>` (sync)
     /// - `async fn query(sql: Text) -> Result<Rows>` (async)
     ///
-
     /// Also supports attributes on methods:
     /// - `@deprecated("Use X instead") fn old_method() -> T;`
     fn parse_context_method_with_attrs(
@@ -6679,13 +6637,11 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a context group alias declaration.
     ///
-
     /// # Syntax
     /// ```text
     /// using Name = [Context1, Context2, ...]
     /// ```
     ///
-
     /// This is an alternative syntax to:
     /// ```text
     /// context group Name { Context1, Context2, ... }
@@ -6852,7 +6808,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse a context layer declaration.
     ///
-
     /// # Grammar
     /// ```text
     /// layer_def = visibility 'layer' identifier layer_body ;
@@ -6861,7 +6816,6 @@ impl<'a> RecursiveParser<'a> {
     /// layer_expr = identifier { '+' identifier } ;
     /// ```
     ///
-
     /// # Examples
     /// ```verum
     /// layer DatabaseLayer {
@@ -6941,19 +6895,14 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an FFI boundary declaration.
     ///
-
     /// # Arguments
     ///
-
     /// * `attrs` - Attributes parsed before the ffi keyword, including cfg conditions.
     ///
-
     /// # Platform-Specific Boundaries
     ///
-
     /// FFI boundaries can have cfg attributes for platform-specific code:
     ///
-
     /// ```verum
     /// #[cfg(target_os = "windows")]
     /// ffi Kernel32 {
@@ -7501,7 +7450,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Extract calling convention from @extern attribute.
     ///
-
     /// Grammar: @extern("C") or @extern("C", calling_convention = "stdcall")
     fn extract_calling_convention(&self, attrs: &[Attribute]) -> CallingConvention {
         for attr in attrs {
@@ -7546,7 +7494,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Extract ownership from @ownership attribute.
     ///
-
     /// Grammar: @ownership(borrow) | @ownership(transfer_to = "ptr") | @ownership(transfer_from = "ptr") | @ownership(shared)
     fn extract_ownership(&self, attr: &Attribute) -> ParseResult<Ownership> {
         if let Some(args) = &attr.args
@@ -7720,7 +7667,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse attributes: @attr or @attr(args)
     ///
-
     /// Note: This parses ALL @name constructs as attributes. The distinction between
     /// attributes and meta-function expressions is handled at the statement level
     /// in `looks_like_macro_call_not_attribute()` in stmt.rs.
@@ -8152,7 +8098,6 @@ impl<'a> RecursiveParser<'a> {
     /// Parse a view declaration.
     /// Syntax: view Name<T> : ParamType -> ReturnType { constructors }
     ///
-
     /// Views provide alternative pattern interfaces for dependent types:
     /// `view Parity : Nat -> Type { Even(n: Nat) -> Parity(2*n), Odd(n: Nat) -> Parity(2*n+1) }`
     /// Enables pattern matching via view functions rather than structural decomposition.
@@ -8315,7 +8260,6 @@ impl<'a> RecursiveParser<'a> {
 
     /// Parse an active pattern declaration.
     ///
-
     /// Grammar:
     /// ```ebnf
     /// pattern_def = visibility , 'pattern' , identifier , [ pattern_type_params ]
@@ -8324,7 +8268,6 @@ impl<'a> RecursiveParser<'a> {
     /// pattern_params = [ param , { ',' , param } ] ;
     /// ```
     ///
-
     /// Examples:
     /// - Simple: `pattern Even(n: Int) -> Bool = n % 2 == 0;`
     /// - Parameterized: `pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = lo <= n <= hi;`
@@ -8436,25 +8379,20 @@ impl<'a> RecursiveParser<'a> {
 /// recursive depth probe for
 /// HIT path-constructor endpoints.
 ///
-
 /// A 1-cell path-constructor's endpoints are bare expressions (`Var`,
 /// `App`, …) — depth 0. An n-cell endpoint is itself a parenthesised
 /// range `(a..b)` — depth = 1 + max-depth-of-inner-endpoints. The
 /// variant parser uses this to compute `path_dim`:
 ///
-
 ///  `dim = max(depth(lhs), depth(rhs)) + 1`
 ///
-
 /// (Adding 1 because the outer `..` itself is one dimensional step.)
 ///
-
 /// Examples (depth in `()`s):
 ///  * `Base` → depth 0
 ///  * `(loop_a..loop_b)` (`Paren` of `Range`) → depth 1
 ///  * `((p..q)..(r..s))` → depth 2
 ///
-
 /// Non-path expressions return depth 0 unconditionally — the parser
 /// treats anything that isn't a `Paren(Range(_, _))` as a point
 /// endpoint.

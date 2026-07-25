@@ -143,7 +143,6 @@ pub use try_operator_errors::{
 
 /// Error code constants for quick reference
 ///
-
 /// For full error code information with explanations, use the `error_codes` module:
 /// ```rust,ignore
 /// use verum_diagnostics::error_codes::lookup_error;

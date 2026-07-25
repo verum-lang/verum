@@ -18,7 +18,6 @@ use crate::value::Value;
 
 /// Assert (0xC2) - Assert condition is true.
 ///
-
 /// Encoding: opcode + cond + message_id (varint)
 /// Effect: If `cond` is false, raises an assertion failure error.
 pub(in super::super) fn handle_assert(
@@ -51,7 +50,6 @@ pub(in super::super) fn handle_assert(
 
 /// Panic (0xD7) - Terminate execution with error message.
 ///
-
 /// Encoding: opcode + message_id (varint)
 /// Effect: Raises a Panic error with the message from string pool.
 pub(in super::super) fn handle_panic(
@@ -71,7 +69,6 @@ pub(in super::super) fn handle_panic(
 
 /// Unreachable (0xD8) - Marker for unreachable code paths.
 ///
-
 /// Encoding: opcode (no operands)
 /// Effect: Raises an Unreachable error - indicates a code path that should never execute.
 pub(in super::super) fn handle_unreachable(
@@ -84,7 +81,6 @@ pub(in super::super) fn handle_unreachable(
 
 /// DebugPrint (0xC5) - Print value to stdout for debugging.
 ///
-
 /// Encoding: opcode + value_reg
 /// Output: Prints the value to stdout with a newline.
 pub(in super::super) fn handle_debug_print(
@@ -668,7 +664,6 @@ fn format_set_for_print_depth(
 
 /// Spec (0xD4) - JIT specialization hint.
 ///
-
 /// Encoding: opcode + reg + type_id (varint)
 /// Effect: No-op in interpreter (JIT optimization hint).
 pub(in super::super) fn handle_spec(
@@ -682,11 +677,9 @@ pub(in super::super) fn handle_spec(
 
 /// Guard (0xD5) - Type guard (deopt if mismatch).
 ///
-
 /// Encoding: opcode + reg + expected_type_id + deopt_offset
 /// Effect: If value doesn't match expected type, deoptimize (in JIT) or continue (interpreter).
 ///
-
 /// In interpreter, this validates type compatibility but doesn't deoptimize.
 pub(in super::super) fn handle_guard(
     state: &mut InterpreterState,
@@ -705,7 +698,6 @@ pub(in super::super) fn handle_guard(
 
 /// Requires (0xDA) - Contract precondition check.
 ///
-
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
 pub(in super::super) fn handle_requires(
@@ -733,7 +725,6 @@ pub(in super::super) fn handle_requires(
 
 /// Ensures (0xDB) - Contract postcondition check.
 ///
-
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
 pub(in super::super) fn handle_ensures(
@@ -761,7 +752,6 @@ pub(in super::super) fn handle_ensures(
 
 /// Invariant (0xDC) - Loop invariant check.
 ///
-
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
 pub(in super::super) fn handle_invariant(

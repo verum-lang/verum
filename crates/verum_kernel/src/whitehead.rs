@@ -174,12 +174,10 @@ impl WhiteheadCriterion {
 /// Decide whether a Whitehead criterion certifies equivalence at the
 /// stated bound (HTT 1.2.4.3).
 ///
-
 /// **Decidable**: no bridge admits. Returns `true` iff:
 ///  1. Every per-level witness `PiLevelIso.induces_iso` is true.
 ///  2. The certificate is complete (every level k ∈ [0, n] covered).
 ///
-
 /// V0 algorithmic surface; V1 promotion will inspect the structural
 /// content of each iso witness.
 pub fn is_equivalence_via_whitehead(criterion: &WhiteheadCriterion) -> bool {
@@ -189,13 +187,11 @@ pub fn is_equivalence_via_whitehead(criterion: &WhiteheadCriterion) -> bool {
 /// Promote a verified Whitehead criterion to an
 /// [`InfinityEquivalence`] with **empty** bridge audit.
 ///
-
 /// This is the trusted-base-shrinkage primitive: equivalences certified
 /// via Whitehead bypass the [`crate::infinity_category::is_equivalence_at`]
 /// limit-level bridge admit (`CohesiveAdjunctionUnitCounit`) and produce
 /// audit-clean equivalence values.
 ///
-
 /// Returns `None` if the criterion fails the decidable predicate.
 pub fn whitehead_promote(
     criterion: &WhiteheadCriterion,
@@ -225,7 +221,6 @@ pub fn whitehead_promote(
 /// every weak equivalence is an honest equivalence — i.e. weak
 /// equivalence and equivalence coincide.
 ///
-
 /// current surface: the witness flag `holds` is always `true` (HTT 1.2.4.3
 /// is a theorem, not a conditional admit). The kernel re-checks at
 /// every citation site.

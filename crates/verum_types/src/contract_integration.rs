@@ -31,7 +31,6 @@ use verum_common::{List, Text};
 
 /// Placeholder for VerifiedContract (will be imported from verum_compiler)
 ///
-
 /// In practice, verum_types should not depend on verum_compiler.
 /// Instead, we use a minimal trait-based interface to avoid circular dependencies.
 pub trait VerifiedContractLike {
@@ -50,7 +49,6 @@ pub trait VerifiedContractLike {
 
 /// Registry of verified contracts for type checking
 ///
-
 /// This is a trait to avoid circular dependencies between verum_types and verum_compiler.
 /// The actual implementation lives in verum_compiler/src/phases/verified_contract.rs
 pub trait VerifiedContractRegistryLike {
@@ -66,7 +64,6 @@ pub trait VerifiedContractRegistryLike {
 
 /// Contract-aware type checking context
 ///
-
 /// This structure is added to TypeChecker to enable contract-based type strengthening.
 #[derive(Debug, Clone)]
 pub struct ContractContext {

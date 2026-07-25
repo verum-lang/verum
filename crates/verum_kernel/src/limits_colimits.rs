@@ -182,7 +182,6 @@ pub struct Colimit {
 /// HTT 5.5.3.5: every presheaf ∞-category `PSh(C)` admits all small
 /// limits. Decidable predicate — returns true for every shape.
 ///
-
 /// current surface: structurally always true for presheaf categories,
 /// since they are presentable and presentability implies
 /// completeness (HTT 5.5.0.1 + HTT 5.5.2.4).
@@ -204,13 +203,11 @@ pub fn presheaf_admits_colimits(_c: &InfinityCategory, _shape: LimitShape) -> bo
 /// Compute the limit of a diagram in `PSh(C)` per HTT 5.1.2.3
 /// (pointwise computation): `(lim D)(x) = lim_i D(i)(x)`.
 ///
-
 /// **Preconditions** (kernel-checked):
 ///  1. The diagram is non-empty (has at least one vertex)
 ///  OR is the empty diagram (which produces the terminal object).
 ///  2. The target category is a presheaf category.
 ///
-
 /// Returns `None` if preconditions fail.
 pub fn compute_limit_in_psh(diagram: &LimitDiagram) -> Option<Limit> {
     if diagram.vertices.is_empty() && diagram.shape != LimitShape::Terminal {

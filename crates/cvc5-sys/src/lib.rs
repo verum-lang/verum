@@ -77,7 +77,6 @@ use std::os::raw::{c_char, c_int, c_uint};
 
 /// True if CVC5 was actually linked into this binary.
 ///
-
 /// When false, all FFI functions return default/null values and `init()`
 /// returns `false`. This allows downstream crates to compile and run even
 /// without CVC5 available, with the trade-off that `Cvc5Backend::new()`
@@ -90,7 +89,6 @@ pub const CVC5_LINKED: bool = cfg!(any(
 
 /// The CVC5 version this crate was built against.
 ///
-
 /// Format: `"MAJOR.MINOR.PATCH"`.
 pub const CVC5_VERSION: &str = "1.3.3";
 
@@ -136,7 +134,6 @@ pub type cvc5_proof = *mut c_void;
 
 /// Result of a satisfiability check.
 ///
-
 /// Matches CVC5's `cvc5_result_t` enum:
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,7 +148,6 @@ pub enum Cvc5Result {
 
 /// Term kinds — the 200+ operations CVC5 supports.
 ///
-
 /// This enum is a selection of the most commonly used kinds. The full list is
 /// in `cvc5/cvc5_kind.h`. Values match the CVC5 C API exactly.
 #[repr(C)]
@@ -365,7 +361,6 @@ unsafe extern "C" {
 
     /// Get the proof in a specific format (CVC5 1.3.0+).
     ///
-
     /// `format`: one of `"cpc"`, `"alethe"`, `"lfsc"`, `"dot"`.
     pub fn cvc5_solver_get_proof_format(
         solver: cvc5_solver,
@@ -444,7 +439,6 @@ unsafe extern "C" {
 
 /// Initialize CVC5 backend. Returns `true` on success, `false` if unavailable.
 ///
-
 /// This function is safe to call from multiple threads but only returns `true`
 /// if CVC5 was statically or dynamically linked at build time.
 pub fn init() -> bool {

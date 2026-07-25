@@ -121,13 +121,11 @@ use crate::proof_checker::{Certificate, Term};
 /// Elaboration context — name lookup tables for de-Bruijn-index
 /// computation + global axiom registry.
 ///
-
 /// **Local binders** are tracked as a `Vec<String>` (innermost-last).
 /// `Var(0)` corresponds to `local_binders.last()`. When entering a
 /// `Pi` / `Lam` body, the elaborator pushes the new binder name; on
 /// exit it pops.
 ///
-
 /// **Global axioms** are indexed in a `BTreeMap<String, AxiomEntry>`.
 /// Apply-targets that resolve to a known axiom name pull the axiom's
 /// term + claimed type from this table. Foreign citations
@@ -196,7 +194,6 @@ impl ElabContext {
     /// `Some(idx)` when `name` is in the local binder stack;
     /// `None` otherwise.
     ///
-
     /// **De-Bruijn convention**: `Var(0)` = innermost binder = the
     /// last entry in `local_binders`. The arithmetic flips the
     /// stack-position to a de-Bruijn index.
@@ -281,7 +278,6 @@ impl std::error::Error for ElabError {}
 /// Build an `App` chain from a head term and a list of argument terms.
 /// `App` is left-associative: `App(App(App(head, a1), a2), a3)`.
 ///
-
 /// Returns `head` unchanged when `args` is empty.
 pub fn build_app_chain(head: Term, args: Vec<Term>) -> Term {
     args.into_iter()
@@ -291,7 +287,6 @@ pub fn build_app_chain(head: Term, args: Vec<Term>) -> Term {
 /// **Apply-target resolver.** Given an apply-target name, return the
 /// kernel `Term` representing it.
 ///
-
 ///  - **Local binder**: produces `Var(de-Bruijn-index)`.
 ///  - **Registered axiom**: produces `Var(local_depth + axiom_position)`.
 ///  The axiom slot encoding works because [`close_over_axioms`]
@@ -327,7 +322,6 @@ pub fn placeholder_proposition() -> Term {
 
 /// **Translate a Verum proposition Expr to a kernel Term.**
 ///
-
 /// This is the load-bearing step that makes elaborated certificates
 /// prove the *original theorem statement* rather than the trivial
 /// `Universe(0)` placeholder. Without it, `Certificate::verify`
@@ -335,10 +329,8 @@ pub fn placeholder_proposition() -> Term {
 /// true. With it, `verify` checks "the term inhabits the
 /// proposition the user wrote".
 ///
-
 /// Coverage:
 ///
-
 ///  - `Literal(Bool::*)` → `Universe(0)` (trivially-inhabited).
 ///  - `Path` / `Field` / `Call` → axiom resolution + App chain via
 ///  [`expr_to_term`].
@@ -347,7 +339,6 @@ pub fn placeholder_proposition() -> Term {
 ///  `unop_to_axiom_name`; the surrounding context must register
 ///  the matching axiom (see [`register_propositional_connectives`]).
 ///
-
 /// Quantifiers, blocks, conditionals, pattern matches return
 /// [`ElabError::UnsupportedExpression`].
 pub fn proposition_to_term(prop: &Expr, ctx: &ElabContext) -> Result<Term, ElabError> {
@@ -410,7 +401,6 @@ pub fn proposition_to_term(prop: &Expr, ctx: &ElabContext) -> Result<Term, ElabE
 /// operators that aren't propositional connectives (arithmetic,
 /// assignment).
 ///
-
 /// **Soundness invariant**: callers must register the corresponding
 /// axiom (via [`ElabContext::register_axiom`]) before elaborating a
 /// proposition that uses it. See [`register_propositional_connectives`]
@@ -447,7 +437,6 @@ fn unop_to_axiom_name(op: verum_ast::expr::UnOp) -> Option<&'static str> {
 /// elaboration that needs to translate `Binary` / `Unary`
 /// propositions.
 ///
-
 /// Each axiom is registered with claimed type `Universe(0)` — the
 /// opaque-polymorphic form. The kernel-side type-check is
 /// structural: the connective is a value of `Universe(0)`,
@@ -455,7 +444,6 @@ fn unop_to_axiom_name(op: verum_ast::expr::UnOp) -> Option<&'static str> {
 /// `claimed_type` is a chain of `Universe(0)` values the kernel
 /// verifies cleanly.
 ///
-
 /// A future primitive-encoding upgrade replaces these opaque axioms
 /// with explicit Leibniz / Church / Pi forms so the connectives are
 /// *understood* by the kernel, not merely *applied*: e.g. `Eq`
@@ -483,7 +471,6 @@ pub fn register_propositional_connectives(ctx: &mut ElabContext) {
 
 /// **Register the kernel_v0 lemma stubs** as axioms in `ctx`.
 ///
-
 /// The five lemma stubs in `core/verify/kernel_v0/lemmas/` carry
 /// `@framework(<system>, "<path>")` citations that pin upstream
 /// proofs of fundamental meta-theorems (substitution lemma,
@@ -492,7 +479,6 @@ pub fn register_propositional_connectives(ctx: &mut ElabContext) {
 /// `core/verify/kernel_v0/rules/k_*.vr` discharge their soundness
 /// IOUs by `apply`-ing these lemma names.
 ///
-
 /// Registering them up-front lets the elaborator resolve those
 /// `apply` chains without forcing every corpus theorem to register
 /// the lemma names individually. Each stub carries claimed type
@@ -517,7 +503,6 @@ pub fn register_kernel_v0_lemmas(ctx: &mut ElabContext) {
 /// **Register the canonical kernel-bridge dispatcher names** as
 /// axioms in `ctx`.
 ///
-
 /// Kernel rule files in `core/verify/kernel_v0/rules/` carry
 /// `@kernel_discharge("kernel_<rule>_strict")` annotations. The
 /// proof body of each rule's soundness lemma reduces to
@@ -545,7 +530,6 @@ pub fn register_kernel_bridge_dispatchers(ctx: &mut ElabContext) {
 
 /// **Close the body and its type over the registered axiom table.**
 ///
-
 /// Wraps `body` in a `Lam`-chain and `body_type` in a matching
 /// `Pi`-chain — one binder per registered axiom, in axiom-table
 /// (BTreeMap key) order. The result is a closed `Term` (no free
@@ -566,13 +550,11 @@ pub fn close_over_axioms(ctx: &ElabContext, body: Term, body_type: Term) -> (Ter
 
 /// **Certificate from a constructed term + claimed type.**
 ///
-
 /// Constructs a [`Certificate`] and runs the kernel re-checker on
 /// it as the contract pin: if the elaborator produced a term that
 /// doesn't type-check at the claimed type, return
 /// [`ElabError::KernelRejection`] with the kernel's error message.
 ///
-
 /// **De Bruijn criterion**: this is the load-bearing step. Until
 /// [`Certificate::verify`] succeeds, the elaborator's output is
 /// *suspected* — the trust base is the kernel checker, not this
@@ -601,10 +583,8 @@ use verum_ast::expr::{Expr, ExprKind};
 
 /// **Elaborate one tactic expression to a kernel `Term`.**
 ///
-
 /// Tactics that emit kernel-readable terms:
 ///
-
 ///  - `Apply { lemma, args }` — `App` chain: head is the resolved
 ///  lemma / axiom / local binder; arguments are the translated
 ///  argument expressions.
@@ -614,7 +594,6 @@ use verum_ast::expr::{Expr, ExprKind};
 ///  `DefinitionalEquality::Refl`; it works for goals where the
 ///  just-introduced binder is the witness.
 ///
-
 /// All other [`TacticExpr`] variants return
 /// [`ElabError::UnsupportedTactic`] carrying the variant name so
 /// downstream tooling can route around them. Adding support for
@@ -715,23 +694,19 @@ pub fn elaborate_tactic(tactic: &TacticExpr, ctx: &mut ElabContext) -> Result<Te
 
 /// **Elaborate a sequenced tactic chain.**
 ///
-
 /// `Seq(steps)` represents `tactic_1; tactic_2; ...; tactic_n` —
 /// a sequence whose intermediate steps modify the elaboration
 /// context (typically by introducing binders) and whose final
 /// step produces the proof term.
 ///
-
 /// Currently supports:
 ///
-
 ///  - Intermediate `Intro(idents)` steps — push binders onto the
 ///  local context. Other intermediate-step forms return
 ///  [`ElabError::UnsupportedTactic`].
 ///  - A single final step (any tactic that
 ///  [`elaborate_tactic`] handles).
 ///
-
 /// The result is wrapped in a `Lam`-chain matching the introduced
 /// binders, and the binders are popped before returning so the
 /// context remains balanced for the surrounding scope.
@@ -829,7 +804,6 @@ fn tactic_variant_name(t: &TacticExpr) -> &'static str {
 
 /// **Elaborate a proof body to a kernel `Term`.**
 ///
-
 ///  - `ProofBody::Tactic(t)` — delegates to [`elaborate_tactic`].
 ///  - `ProofBody::Term(e)` — direct Curry-Howard proof term;
 ///  delegates to [`expr_to_term`]. Handles the
@@ -841,7 +815,6 @@ fn tactic_variant_name(t: &TacticExpr) -> &'static str {
 ///  (`have`/`show`/`obtain`/`calc`/`cases`/…) still return
 ///  [`ElabError::UnsupportedTactic`].
 ///
-
 /// `ByMethod` proof bodies are not yet handled and return
 /// [`ElabError::UnsupportedTactic`].
 pub fn elaborate_proof_body(body: &ProofBody, ctx: &mut ElabContext) -> Result<Term, ElabError> {
@@ -880,7 +853,6 @@ fn degenerate_structured_to_tactic(s: &ProofStructure) -> Option<&TacticExpr> {
 
 /// **Elaborate a complete theorem.** Top-level entry point.
 ///
-
 /// 1. Verify the theorem has a proof body (else
 ///  [`ElabError::NoProofBody`]).
 /// 2. Elaborate the proof body to a `Term` via
@@ -897,7 +869,6 @@ fn degenerate_structured_to_tactic(s: &ProofStructure) -> Option<&TacticExpr> {
 /// 5. [`finalise_certificate`] re-verifies via the kernel checker —
 ///  the load-bearing step that enforces the de Bruijn criterion.
 ///
-
 /// The certificate's metadata records `claimed_type_source:
 /// verification_goal` when the unified converter handled the
 /// proposition or `placeholder` when it fell back, so JSON
@@ -961,12 +932,10 @@ pub fn expr_to_path_name(expr: &Expr) -> Option<String> {
 
 /// **Translate a Verum `Expr` to a kernel `Term`.**
 ///
-
 ///  - `Path(name)` — resolves via [`resolve_apply_target`].
 ///  - `Field(obj, field)` — composes path name then resolves.
 ///  - `Call(f, args)` — recursive translation + `App` chain.
 ///
-
 /// Other expression forms (literals, conditionals, lambda
 /// expressions, type-level constructs) return
 /// [`ElabError::UnsupportedExpression`] with the variant tag.

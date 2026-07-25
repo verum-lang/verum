@@ -262,7 +262,6 @@ pub struct ParallelSolver {
 
 /// Problem instance shared between workers
 ///
-
 /// Uses SMT-LIB string representation for thread safety.
 /// Each worker parses these strings in its own context.
 #[derive(Debug, Clone)]
@@ -896,7 +895,6 @@ impl Worker {
 
     /// Load problem into solver
     ///
-
     /// Parses SMT-LIB strings from the shared problem and reconstructs
     /// them as Z3 AST in this worker's context.
     fn load_problem(&self, solver: &Solver) -> bool {
@@ -1101,12 +1099,10 @@ impl Default for PortfolioSolver {
 
 /// SMT-LIB string parser for parallel solving
 ///
-
 /// Parses SMT-LIB2 format assertions and reconstructs them as Z3 AST
 /// in the current thread's context. This enables sharing formulas
 /// between parallel workers without sharing Z3 AST objects directly.
 ///
-
 /// Supports a subset of SMT-LIB2:
 /// - Arithmetic: +, -, *, /, mod
 /// - Comparisons: =, <, <=, >, >=, distinct

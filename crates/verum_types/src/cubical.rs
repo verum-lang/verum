@@ -184,7 +184,6 @@ impl CubicalTerm {
 
     /// Reduce a cubical term to Weak Head Normal Form.
     ///
-
     /// Applies the five core reduction rules until no more apply:
     /// 1. `transport refl x ↦ x`
     /// 2. `hcomp base (const sides) ↦ base`

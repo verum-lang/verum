@@ -192,7 +192,6 @@ pub struct MonoPhaseResult {
 
 /// Main monomorphization phase.
 ///
-
 /// Orchestrates the entire monomorphization pipeline:
 /// 1. Resolve all instantiations (core/cache/pending)
 /// 2. Specialize pending functions
@@ -235,7 +234,6 @@ impl MonomorphizationPhase {
 
     /// Executes the monomorphization phase.
     ///
-
     /// Takes a user module and instantiation graph, returns a monomorphized module.
     pub fn execute(
         &mut self,
@@ -458,7 +456,6 @@ impl MonomorphizationPhase {
 
 /// Monomorphizes a module with default configuration.
 ///
-
 /// This is the main entry point for simple use cases.
 pub fn monomorphize(
     user_module: VbcModule,

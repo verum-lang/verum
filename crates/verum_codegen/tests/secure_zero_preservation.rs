@@ -61,14 +61,12 @@ use verum_llvm::values::FunctionValue;
 
 /// Build a one-function LLVM module:
 ///
-
 ///  define void @secrets() {
 ///  %buf = alloca [32 x i8]
 ///  call void @llvm.memset.p0.i64(ptr %buf, i8 0, i64 32, i1 true)
 ///  ret void
 ///  }
 ///
-
 /// The volatile bit on the memset is the security-critical
 /// property — without it, LLVM's optimiser elides the call once
 /// the buffer is proved dead at function exit.

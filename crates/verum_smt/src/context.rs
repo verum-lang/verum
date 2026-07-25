@@ -9,7 +9,6 @@ use std::time::Duration;
 
 /// Z3 context wrapper with configuration.
 ///
-
 /// The context manages Z3's internal state and provides access to the solver.
 /// It's designed to be cheap to clone (uses Arc internally).
 #[derive(Debug, Clone)]
@@ -22,14 +21,12 @@ struct ContextInner {
     config: ContextConfig,
     /// Optional shared routing-stats collector.
     ///
-
     /// When set, every `Context::check(...)` call records the routing
     /// choice (`Z3Only`) plus its outcome and elapsed time into the
     /// collector. This is how `verum build --smt-stats` learns about
     /// real solver work: the compiler installs the session's shared
     /// `Arc<RoutingStats>` on the Context at construction time.
     ///
-
     /// `None` = no telemetry overhead, existing behavior unchanged.
     routing_stats: Option<Arc<crate::routing_stats::RoutingStats>>,
 }
@@ -53,7 +50,6 @@ impl Context {
 
     /// Install a shared routing-stats collector on this context.
     ///
-
     /// Returns a new `Context` value (internal state is in an Arc, so
     /// this is cheap). Once installed, every call to
     /// [`Context::check`] records a Z3-routed query into the collector
@@ -81,12 +77,10 @@ impl Context {
 
     /// Create a new solver instance.
     ///
-
     /// Forwards every relevant `ContextConfig` field to the
     /// fresh solver so toggling any documented knob has the
     /// expected effect:
     ///
-
     /// - `timeout` → Z3's per-solver `timeout` Params key.
     /// - `unsat_core` → `unsat_core` Params key (must be set
     ///  before any assertion that should appear in a core).
@@ -96,7 +90,6 @@ impl Context {
     ///  construct their own Z3 contexts).
     /// - `model_generation` → `model` Params key.
     ///
-
     /// `memory_limit_mb` and `random_seed` are global Z3 params
     /// (process-wide), forwarded via `set_global_param` here so
     /// each fresh solver respects the most-recently-seen
@@ -147,7 +140,6 @@ impl Context {
 
     /// Check if the solver assertions are satisfiable.
     ///
-
     /// When a routing-stats collector is installed on this context,
     /// records the call as `SolverChoice::Z3Only` plus the outcome and
     /// elapsed time, so `verum smt-stats` reflects real work.
@@ -160,7 +152,6 @@ impl Context {
 
     /// Check satisfiability with assumptions.
     ///
-
     /// Also records into the installed routing-stats collector (if any).
     pub fn check_assumptions(
         &self,
@@ -211,7 +202,6 @@ impl Context {
 
     /// Whether the configured policy enables pre-solve simplification.
     ///
-
     /// Surfaces `ContextConfig.simplify` as a public read so callers
     /// driving custom assert paths can branch on the stance without
     /// re-reading the config struct.
@@ -222,7 +212,6 @@ impl Context {
     /// Assert a formula on the solver, applying Z3's `simplify`
     /// tactic first when `ContextConfig.simplify == true`.
     ///
-
     /// Closes the inert-defense pattern around the documented
     /// "Enable simplification before solving" gate. Pre-fix the
     /// flag was set on the config but no code path consulted it —
@@ -230,12 +219,10 @@ impl Context {
     /// the configured stance. Now callers that route assertions
     /// through this method get the configured behaviour for free.
     ///
-
     /// Direct `solver.assert(&formula)` callers are unaffected; the
     /// wiring is opt-in via this method so existing pipelines
     /// don't change shape.
     ///
-
     /// The simplify pass is best-effort: when it can't reduce the
     /// formula to a single Bool (e.g., the simplified result is a
     /// non-Bool AST), the original formula is asserted unchanged.

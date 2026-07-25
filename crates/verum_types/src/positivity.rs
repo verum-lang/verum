@@ -166,7 +166,6 @@ pub fn check_record_body_positivity(
 /// are acceptable (would under-report); false-positives are not
 /// (would over-flag legitimate code).
 ///
-
 /// `self_var` is the placeholder TypeVar (if any) the type-decl
 /// pre-pass installed for this name; the walker treats `Type::Var`
 /// of that variable as a target reference, which is necessary to

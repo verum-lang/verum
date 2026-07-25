@@ -110,18 +110,14 @@ pub type Result<T, E = VerumError> = std::result::Result<T, E>;
 
 /// Unified error type for the Verum platform
 ///
-
 /// This type consolidates all error categories from across the platform,
 /// providing a single error type with rich context and diagnostic information.
 ///
-
 /// # Examples
 ///
-
 /// ```rust
 /// use verum_error::{VerumError, ErrorKind};
 ///
-
 /// let err = VerumError::new("out of bounds", ErrorKind::Memory);
 /// assert_eq!(err.kind(), ErrorKind::Memory);
 /// ```
@@ -188,7 +184,6 @@ impl fmt::Display for ErrorLocation {
 
 /// Error categories aligned with 5-level architecture
 ///
-
 /// Each kind maps to a specific level of the error handling system:
 /// - Level 0: Type/Refinement/Context errors (prevented at compile-time)
 /// - Level 1: Verification errors (SMT solver failures)

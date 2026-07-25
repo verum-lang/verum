@@ -23,7 +23,6 @@ impl RegistryMirror {
 
     /// Sync with upstream registry
     ///
-
     /// Syncs packages from upstream registry. Package specification can be:
     /// - "cog_name" - syncs latest version
     /// - "cog_name@version" - syncs specific version
@@ -175,7 +174,6 @@ impl RegistryMirror {
 
     /// Serve mirror over HTTP
     ///
-
     /// Endpoints:
     /// - GET /index.json - Package index
     /// - GET /cogs/{name}/{version}/{name}-{version}.tar.gz - Package download

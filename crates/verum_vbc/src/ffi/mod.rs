@@ -80,7 +80,6 @@ pub use runtime::{FfiError, FfiRuntime, ResolvedSymbol};
 
 /// FFI C type enumeration for marshalling.
 ///
-
 /// This mirrors the CType in module.rs but is used at runtime.
 /// For struct-by-value types, we use StructValue which carries the layout index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +129,6 @@ pub enum CTypeRuntime {
 impl CTypeRuntime {
     /// Creates a CTypeRuntime from a CType with an optional layout index.
     ///
-
     /// For StructValue and StructPtr types, the layout_idx must be provided.
     /// For other types, layout_idx is ignored.
     pub fn from_ctype_with_layout(ct: crate::module::CType, layout_idx: Option<u16>) -> Self {
@@ -229,10 +227,8 @@ impl CTypeRuntime {
 impl From<crate::module::CType> for CTypeRuntime {
     /// Infallible conversion kept for backwards compatibility.
     ///
-
     /// # Panics
     ///
-
     /// Panics for `StructPtr` / `StructValue` since both require a
     /// per-struct layout index that this signature cannot carry.
     /// Prefer [`try_from_ctype`][Self::try_from_ctype] when you have

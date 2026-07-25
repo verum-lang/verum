@@ -92,11 +92,9 @@ use verum_vbc::mono::{
 
 /// VBC monomorphization phase.
 ///
-
 /// Specializes generic VBC functions with concrete type arguments.
 /// This is a required step before interpretation or further lowering to MLIR.
 ///
-
 /// Uses the industrial-grade implementation from `verum_vbc::mono`.
 pub struct VbcMonomorphizationPhase {
     /// Monomorphization cache directory.
@@ -177,11 +175,9 @@ impl VbcMonomorphizationPhase {
 
     /// Monomorphize a VBC module, specializing generic functions with concrete types.
     ///
-
     /// This is the public entry point for the AOT compilation path.
     /// Wraps the internal `process_module()` logic with a `VbcModuleData` wrapper.
     ///
-
     /// Returns the monomorphized module on success, or diagnostic errors on failure.
     pub fn monomorphize(&mut self, module: &VbcModule) -> Result<VbcModule, List<Diagnostic>> {
         // Fast path: with no seeded instantiations there is nothing to

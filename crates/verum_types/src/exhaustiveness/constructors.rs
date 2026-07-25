@@ -125,7 +125,6 @@ impl TypeConstructors {
 
 /// Get all constructors for a type
 ///
-
 /// This is the main entry point for constructor enumeration.
 pub fn get_type_constructors(ty: &Type, env: &TypeEnv) -> TypeConstructors {
     match ty {

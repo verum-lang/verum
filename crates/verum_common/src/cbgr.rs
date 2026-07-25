@@ -262,7 +262,6 @@ pub mod flags {
 
 /// Capability preset for CBGR references
 ///
-
 /// These are common capability combinations. For fine-grained control,
 /// use the `caps::` constants directly.
 #[repr(u32)]
@@ -367,15 +366,12 @@ impl CbgrErrorCode {
 
 /// Compact CBGR tracking header (8 bytes) for VBC interpreter.
 ///
-
 /// **IMPORTANT**: This is an internal-only type for the VBC interpreter's
 /// heap management. For the full runtime header that matches stdlib, use
 /// [`AllocationHeader`] (32 bytes).
 ///
-
 /// # Layout
 ///
-
 /// ```text
 /// ┌────────────────────────────────────────────────────────────────────┐
 /// │ generation: AtomicU32 (4 bytes) - GEN_UNALLOCATED(0) = invalid │
@@ -383,17 +379,13 @@ impl CbgrErrorCode {
 /// └────────────────────────────────────────────────────────────────────┘
 /// ```
 ///
-
 /// # Validity Model
 ///
-
 /// An allocation is valid when `generation > 0` (GEN_INITIAL or higher).
 /// Invalid/deallocated memory has `generation = GEN_UNALLOCATED (0)`.
 ///
-
 /// # Note on Epoch
 ///
-
 /// The epoch field is 16 bits (stored in upper 16 bits of epoch_caps).
 /// This is the truncated value from the 64-bit global epoch. Comparison
 /// uses only these 16 bits: `expected_epoch == (global_epoch & 0xFFFF)`.
@@ -401,11 +393,9 @@ impl CbgrErrorCode {
 pub struct CbgrHeader {
     /// Packed atomic field: generation (upper 32 bits) | epoch_caps (lower 32 bits).
     ///
-
     /// Packing into a single AtomicU64 eliminates TOCTOU races between generation
     /// and epoch checks during validation, ensuring both are read atomically.
     ///
-
     /// Layout: [generation:u32][epoch:u16 | caps:u16]
     packed: AtomicU64,
 }
@@ -473,7 +463,6 @@ impl CbgrHeader {
     /// Increment the generation (called after mutation).
     /// Returns the new generation value.
     ///
-
     /// Handles wraparound: when generation reaches GEN_MAX, advances the global
     /// epoch and resets to GEN_INITIAL. Uses compare_exchange to prevent the
     /// generation from transiently holding GEN_MAX+1 or wrapping to
@@ -518,7 +507,6 @@ impl CbgrHeader {
 
     /// Validate a reference against expected generation and epoch.
     ///
-
     /// This is the hot path - must be < 15ns.
     /// Uses a single atomic load to read both generation and epoch together,
     /// eliminating TOCTOU races.
@@ -549,7 +537,6 @@ impl CbgrHeader {
 
     /// Invalidate this allocation (called on dealloc).
     ///
-
     /// Sets generation to GEN_UNALLOCATED (0) to mark as invalid.
     /// Preserves epoch and capabilities in the lower 32 bits.
     #[inline]
@@ -573,13 +560,10 @@ impl CbgrHeader {
 
 /// Full allocation header with metadata (32 bytes).
 ///
-
 /// **IMPORTANT**: This layout MUST match `core/mem/header.vr` exactly!
 ///
-
 /// # Layout (matches core/mem/header.vr)
 ///
-
 /// ```text
 /// Offset Size Field Description
 /// ──────────────────────────────────────────────────────────────────────
@@ -633,7 +617,6 @@ impl AllocationHeader {
 
     /// Create a new allocation header.
     ///
-
     /// Matches stdlib: `AllocationHeader.new(size, alignment, type_id, capabilities)`
     #[inline]
     pub fn new(size: u32, alignment: u32, type_id: u32, capabilities: u16) -> Self {
@@ -721,7 +704,6 @@ impl AllocationHeader {
     /// Load generation and epoch together (optimized path).
     /// Matches stdlib: `load_generation_epoch_fast(&self) -> (UInt32, UInt16)`
     ///
-
     /// This is the HOT PATH for validation - ~15ns.
     #[inline(always)]
     pub fn load_generation_epoch_fast(&self, ordering: Ordering) -> (u32, u16) {
@@ -735,7 +717,6 @@ impl AllocationHeader {
     /// Increment generation and return NEW value.
     /// Matches stdlib: `increment_generation(&mut self) -> UInt32`
     ///
-
     /// Handles wraparound by advancing global epoch and resetting to GEN_INITIAL
     /// when generation reaches GEN_MAX. Uses compare_exchange to prevent the
     /// generation from transiently reaching GEN_MAX+1 (0xFFFFFFFF) or wrapping
@@ -772,10 +753,8 @@ impl AllocationHeader {
 
     /// Validate reference against expected generation and epoch.
     ///
-
     /// This is the core CBGR validation - must be < 15ns.
     ///
-
     /// Uses a double-check pattern to mitigate TOCTOU: after checking epoch,
     /// re-reads generation to detect concurrent modifications. If generation
     /// changed between the two reads, returns GenerationMismatch.
@@ -822,10 +801,8 @@ impl AllocationHeader {
 
     /// Try to get the allocation header from a user data pointer.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must have been allocated with this header layout.
     #[inline]
     pub unsafe fn try_from_user_ptr(user_ptr: *const u8) -> Option<*const Self> {
@@ -839,10 +816,8 @@ impl AllocationHeader {
 
     /// Get a mutable reference from user pointer.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must have been allocated with this header layout.
     #[inline]
     pub unsafe fn try_from_user_ptr_mut(user_ptr: *mut u8) -> Option<*mut Self> {
@@ -857,10 +832,8 @@ impl AllocationHeader {
     /// Get pointer to user data (after header).
     /// Matches stdlib: `user_ptr(&self) -> &unsafe Byte`
     ///
-
     /// # Safety
     ///
-
     /// The caller must ensure that the header was allocated with sufficient
     /// space for user data following it. The returned pointer is only valid
     /// for the lifetime of the allocation.
@@ -884,7 +857,6 @@ impl AllocationHeader {
 
 /// A tracked allocation with CBGR header
 ///
-
 /// This wraps an allocation that has a CbgrHeader prepended to it.
 pub struct TrackedAllocation {
     /// Pointer to the user data (after CbgrHeader)
@@ -894,10 +866,8 @@ pub struct TrackedAllocation {
 impl TrackedAllocation {
     /// Create a TrackedAllocation from a user data pointer
     ///
-
     /// # Safety
     ///
-
     /// The pointer must have been allocated with a CbgrHeader prepended.
     #[inline]
     pub unsafe fn from_user_ptr(ptr: *mut u8) -> Self {
@@ -948,20 +918,15 @@ impl TrackedAllocation {
 
 /// Allocate zeroed memory with CBGR tracking header
 ///
-
 /// Returns a TrackedAllocation if successful, None if allocation fails.
 ///
-
 /// # Arguments
 ///
-
 /// * `size` - Size of user data in bytes
 /// * `align` - Alignment requirement (must be power of 2)
 ///
-
 /// # Safety
 ///
-
 /// This function is safe to call but the returned allocation must be
 /// properly freed using `tracked_dealloc`.
 pub fn tracked_alloc_zeroed(size: usize, align: usize) -> Result<TrackedAllocation, CbgrErrorCode> {
@@ -1007,10 +972,8 @@ pub fn tracked_alloc_zeroed(size: usize, align: usize) -> Result<TrackedAllocati
 
 /// Deallocate a tracked allocation
 ///
-
 /// # Safety
 ///
-
 /// The allocation must have been created by `tracked_alloc_zeroed` and
 /// must not have been deallocated already.
 pub unsafe fn tracked_dealloc(allocation: TrackedAllocation) {
@@ -1035,7 +998,6 @@ pub unsafe fn tracked_dealloc(allocation: TrackedAllocation) {
 /// Global epoch counter.
 /// Matches stdlib: `GLOBAL_EPOCH.epoch: UInt64`
 ///
-
 /// The epoch increments whenever any allocation's generation wraps around.
 /// This prevents ABA problems where a deallocated slot is reused.
 static GLOBAL_EPOCH: AtomicU64 = AtomicU64::new(0);
@@ -1050,7 +1012,6 @@ pub fn current_epoch() -> u64 {
 /// Advance to next epoch (called on generation wraparound).
 /// Matches stdlib: `EpochManager.increment_epoch() -> UInt64`
 ///
-
 /// Returns the new epoch value.
 #[inline]
 pub fn advance_epoch() -> u64 {

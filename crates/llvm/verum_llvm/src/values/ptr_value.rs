@@ -22,10 +22,8 @@ pub struct PointerValue<'ctx> {
 impl<'ctx> PointerValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
-
     /// # Safety
     ///
-
     /// The ref must be valid and of type pointer.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
@@ -60,15 +58,12 @@ impl<'ctx> PointerValue<'ctx> {
 
     /// Determines whether or not a `PointerValue` is a constant.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let void_type = context.void_type();
     /// ```

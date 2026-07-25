@@ -25,7 +25,6 @@ impl<'s> CompilationPipeline<'s> {
     /// functions. Returns true if any GPU kernel annotation is found, enabling
     /// automatic GPU compilation without an explicit `--gpu` flag.
     ///
-
     /// This runs after Phase 2 (parsing) and before type checking so that the
     /// backend selection (CPU-only vs CPU+GPU) can be informed early.
     pub(super) fn detect_gpu_kernels(module: &Module) -> bool {

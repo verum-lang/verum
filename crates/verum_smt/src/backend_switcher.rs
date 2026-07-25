@@ -123,7 +123,6 @@ pub struct SwitcherConfig {
     /// `[smt.z3]` settings parsed from `verum.toml` and translated
     /// via `SmtConfig::to_switcher_config()`.
     ///
-
     /// The umbrella `timeout_ms` still wins when the supplied
     /// `Z3Config.global_timeout_ms` is `Maybe::None`, so a manifest
     /// that sets `[smt] timeout_ms = N` without overriding
@@ -289,7 +288,6 @@ impl SmtBackendSwitcher {
     /// Build per-backend solver configs that inherit the umbrella
     /// `SwitcherConfig.timeout_ms`.
     ///
-
     /// Pre-fix the constructor used `Z3Config::default()` /
     /// `Cvc5Config::default()` directly, so the umbrella
     /// `SwitcherConfig.timeout_ms` was inert: callers setting it via
@@ -298,7 +296,6 @@ impl SmtBackendSwitcher {
     /// per-backend solver budgets — both backends always ran with
     /// their own hard-coded 30-second defaults regardless.
     ///
-
     /// This helper threads `config.timeout_ms` into both per-backend
     /// configs at construction time so a single manifest setting
     /// covers every solver instance the switcher spawns.
@@ -371,7 +368,6 @@ impl SmtBackendSwitcher {
 
     /// Create a switcher backed by a caller-provided shared `RoutingStats`.
     ///
-
     /// Used by the compiler's verification phases: every switcher built
     /// during a compilation session shares the session's single
     /// `RoutingStats` handle, so per-session telemetry is aggregated
@@ -395,22 +391,18 @@ impl SmtBackendSwitcher {
 
     /// Solve using a verification strategy from a `@verify(...)` attribute.
     ///
-
     /// This is the primary entry point for SMT-backed goal discharge in the
     /// compiler: the verification phase reads `@verify(...)` from function
     /// attributes, converts it to a `VerifyStrategy`, and calls this method.
     ///
-
     /// # Behavior by strategy
     ///
-
     /// - `Runtime` / `Static`: returns `None` — caller should NOT invoke SMT.
     /// - `Formal`: dispatches via capability router.
     /// - `ForceZ3` / `ForceCvc5`: dispatches to the specified backend.
     /// - `Portfolio`: runs both solvers in parallel, first-wins.
     /// - `CrossValidate`: runs both solvers to completion, requires agreement.
     ///
-
     /// The current backend is temporarily overridden for the duration of this
     /// call and restored afterward. This lets the switcher serve both its
     /// default-configured mode and per-goal overrides from attributes.
@@ -728,7 +720,6 @@ impl SmtBackendSwitcher {
     /// Capability-based routing: each goal is analyzed and routed to the
     /// best solver based on its theory signature.
     ///
-
     /// Decision flow (see `capability_router::CapabilityRouter::route`):
     /// 1. If CVC5 unavailable → Z3 only.
     /// 2. If goal is security-critical → cross-validate both solvers.
@@ -736,7 +727,6 @@ impl SmtBackendSwitcher {
     /// 4. If goal is complex or mixed-theory → portfolio (parallel).
     /// 5. Default → Z3.
     ///
-
     /// This is the recommended dispatch strategy for production use.
     fn solve_capability(&mut self, assertions: &List<Expr>) -> SolveResult {
         use crate::capability_router::{CapabilityRouter, SolverChoice};
@@ -809,7 +799,6 @@ impl SmtBackendSwitcher {
 
     /// Heuristic analysis of assertions for routing purposes.
     ///
-
     /// This is a lightweight AST-walk that identifies theory signatures
     /// without invoking the SMT solver. It errs on the side of portfolio
     /// mode for ambiguous cases, trusting the router to make the final call.
@@ -854,7 +843,6 @@ impl SmtBackendSwitcher {
 
     /// Scan a single expression for theory signatures.
     ///
-
     /// Performs a recursive AST walk, identifying theory-specific constructs
     /// (strings, bit-vectors, arrays, quantifiers, etc.) to feed the
     /// capability router. The detected signals are used by the router to
@@ -1012,7 +1000,6 @@ impl SmtBackendSwitcher {
 
     /// Detect theory signatures from a function/method name.
     ///
-
     /// Uses a curated list of known theory-indicating identifiers. This is a
     /// heuristic that works well for Verum stdlib conventions but may miss
     /// user-defined functions that implement theory operations.
@@ -1070,7 +1057,6 @@ impl SmtBackendSwitcher {
 
     /// Cross-validate: run both solvers and require agreement.
     ///
-
     /// Divergence is reported as an error — the caller should treat this
     /// as a solver bug or encoding issue requiring investigation. All
     /// divergence events are logged in `routing_stats` for post-hoc analysis.
@@ -1260,22 +1246,18 @@ impl SmtBackendSwitcher {
 
     /// Dispatch a `Synthesize`-strategy query to CVC5's SyGuS engine.
     ///
-
     /// This is **not** a satisfiability check. The caller provides a
     /// specification (the `assertions`) and the expected output is a
     /// *synthesized function body* that makes the specification hold.
     ///
-
     /// Return contract:
     ///
-
     /// * `SolveResult::Sat { model: Some(body) }` — SyGuS succeeded;
     ///  `body` is the synthesized function in SMT-LIB 2 format.
     /// * `SolveResult::Error { error }` — SyGuS is unavailable (CVC5
     ///  not linked with parser support) or the synthesis problem has
     ///  no solution within the default grammar.
     ///
-
     /// The previous implementation *silently* rerouted this to a
     /// capability-based satisfiability check. That produced Sat/Unsat
     /// answers for a caller who expected a synthesized program —
@@ -1283,20 +1265,16 @@ impl SmtBackendSwitcher {
     /// diagnostic path: either synthesis happened (Sat with body), or
     /// it didn't (Error with reason).
     ///
-
     /// ## Current coverage
     ///
-
     /// The implementation calls `cvc5_advanced::synthesize`. Under
     /// stub / no-cvc5-parser builds that entry point returns
     /// `Cvc5AdvancedError::Unsupported`, which this function maps to
     /// a `SolveResult::Error` — surfacing the unavailability to the
     /// user instead of masking it.
     ///
-
     /// Assertion-to-specification translation:
     ///
-
     /// The caller's `assertions` are serialised as a SyGuS problem
     /// preamble (`set-logic ALL`, `constraint` per assertion,
     /// `check-synth`). A user-supplied `synth-fun` declaration is
@@ -1821,7 +1799,6 @@ impl SwitcherStats {
 impl SwitcherConfig {
     /// Load configuration from environment variables
     ///
-
     /// Environment variables:
     /// - `VERUM_SMT_BACKEND`: Backend choice (z3, cvc5, auto, portfolio)
     /// - `VERUM_SMT_FALLBACK`: Enable fallback (true/false)
@@ -1864,14 +1841,12 @@ impl SwitcherConfig {
 
     /// Load from TOML file
     ///
-
     /// Expected TOML format:
     /// ```toml
     /// default_backend = "z3" # or "cvc5", "auto", "portfolio"
     /// timeout_ms = 30000
     /// verbose = false
     ///
-
     /// [fallback]
     /// enabled = true
     /// on_timeout = true
@@ -1879,7 +1854,6 @@ impl SwitcherConfig {
     /// on_error = true
     /// max_attempts = 2
     ///
-
     /// [portfolio]
     /// enabled = false
     /// mode = "first" # or "consensus", "vote"
@@ -1887,7 +1861,6 @@ impl SwitcherConfig {
     /// timeout_per_solver = 30000
     /// kill_on_first = true
     ///
-
     /// [validation]
     /// enabled = false
     /// validate_sat = false
@@ -1994,7 +1967,6 @@ impl SwitcherConfig {
 
 /// Convert a `SolveResult` to the portfolio/telemetry `SolverVerdict` format.
 ///
-
 /// Used for cross-validation divergence event logging, where we need to
 /// record exactly what each solver returned.
 fn solve_result_to_verdict(result: &SolveResult) -> crate::portfolio_executor::SolverVerdict {
@@ -2093,7 +2065,6 @@ mod inert_field_pin_tests {
     /// 30-second default). Post-fix, the per-backend configs inherit
     /// the umbrella value via `build_backends`.
     ///
-
     /// We can't read the per-backend timeouts after construction
     /// without mutable access (Z3Backend doesn't expose its config),
     /// but we can pin the public contract that `build_backends`
@@ -2127,7 +2098,6 @@ mod inert_field_pin_tests {
     /// from manifest but no consumer read it — flipping it had zero
     /// effect on dispatch.
     ///
-
     /// We exercise the dispatch with empty assertions (trivially SAT
     /// for both backends) and confirm `solve_cross_validate` was the
     /// path taken by checking that the routing-stats agreement

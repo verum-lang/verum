@@ -458,7 +458,6 @@ fn enforcement_valid_dependent_call_accepted() {
 /// Dependent refinement enforcement: `safe_get(5, 10)` MUST be rejected
 /// because the refinement on `i` says `i < len` and here `len=5, i=10`.
 ///
-
 /// This test was previously a FIXME tripwire documenting the bug that
 /// the refinement checker did not substitute concrete literal arguments
 /// into earlier-param refinements at call sites. The fix is in
@@ -468,7 +467,6 @@ fn enforcement_valid_dependent_call_accepted() {
 /// `RefinementChecker::substitute_in_expr` for each earlier argument
 /// into subsequent parameters' predicates before calling `check_expr`.
 ///
-
 /// Related: `crates/verum_types/src/refinement.rs:1285`
 /// (`substitute_in_expr`), `crates/verum_types/src/infer.rs:47704`
 /// (`register_function_signature` populating `function_param_names`).

@@ -39,14 +39,12 @@ use super::{CfgBuildContext, CompilationPipeline};
 impl<'s> CompilationPipeline<'s> {
     /// Phase 4a: Tier analysis
     ///
-
     /// Performs tier analysis on all functions in the module. This phase:
     /// 1. Builds control flow graphs (CFGs) for each function
     /// 2. Runs escape analysis to determine reference tier selection
     /// 3. Decides which references can be promoted from Tier 0 (~15ns) to Tier 1 (0ns)
     /// 4. Logs analysis statistics for optimization feedback
     ///
-
     /// CBGR analysis: builds CFGs, runs escape analysis to promote references from
     /// Tier 0 (~15ns managed) to Tier 1 (0ns compiler-proven safe, `&checked T`).
     pub(super) fn phase_cbgr_analysis(&self, module: &Module) -> Result<()> {
@@ -188,7 +186,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Build a control flow graph from a function declaration
     ///
-
     /// Creates a complete CFG for escape analysis. This builds:
     /// - Entry block for function entry with parameter definitions
     /// - Blocks for if/else branches
@@ -197,7 +194,6 @@ impl<'s> CompilationPipeline<'s> {
     /// - Exit blocks
     /// - Control flow edges between blocks
     ///
-
     /// CFG construction for escape analysis: creates basic blocks for branches,
     /// match arms, loops, with control flow edges for dataflow analysis.
     pub(super) fn build_function_cfg(

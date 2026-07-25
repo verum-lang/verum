@@ -39,11 +39,9 @@ fn convert_span(ast_span: Span, source_file: Option<&SourceFile>) -> verum_diagn
 
 /// Parse regex literal at compile-time
 ///
-
 /// Tagged text literal: `rx#"pattern"` is compile-time validated regex.
 /// Produces type Regex. Catches syntax errors at compile time.
 ///
-
 /// Validates regex patterns at compile-time, catching syntax errors early.
 /// Supports:
 /// - Basic patterns: `[a-z]+`, `\d{3}-\d{4}`
@@ -53,25 +51,21 @@ fn convert_span(ast_span: Span, source_file: Option<&SourceFile>) -> verum_diagn
 /// - Quantifiers: `+`, `*`, `?`, `{n,m}`
 /// - Alternation: `pattern1|pattern2`
 ///
-
 /// # Arguments
 /// - `content`: The regex pattern string
 /// - `span`: Source location for error reporting
 /// - `source_file`: Optional source file for accurate span conversion
 ///
-
 /// # Returns
 /// Validated regex pattern wrapped in `ParsedLiteral::Regex` on success,
 /// or a diagnostic error with precise location on failure
 ///
-
 /// # Examples
 /// ```
 /// use verum_compiler::literal_parsers::parse_regex;
 /// use verum_ast::{Span, FileId};
 /// use verum_common::Text;
 ///
-
 /// let span = Span::new(0, 10, FileId::new(0));
 /// let result = parse_regex(&Text::from("[a-z]+"), span, None);
 /// assert!(result.is_ok());

@@ -77,7 +77,6 @@ impl PrecisionKind {
 
 /// Format a `Duration` at the requested precision.
 ///
-
 /// `Microseconds` → milliseconds, integer (`42ms`) — unchanged from the
 /// historical default. `Nanoseconds` → microseconds with one decimal
 /// (`41.7µs`), or nanoseconds (`842ns`) if sub-microsecond, so per-check
@@ -218,7 +217,6 @@ fn collect_profile_data(input: &str) -> std::result::Result<ProfileData, String>
 
 /// Extract reference type counts from a function's AST.
 ///
-
 /// Walks parameter types, return type, and body to count &T, &checked T,
 /// and &unsafe T references, plus expression count and loop depth.
 fn extract_function_ref_counts(func: &verum_ast::FunctionDecl) -> FunctionRefCount {
@@ -572,7 +570,6 @@ fn run_profile(
 
 /// Render `verum profile --all` as a single, correlated dashboard.
 ///
-
 /// Emulates the output shape documented in
 /// `docs/detailed/25-developer-tooling.md §6`:
 /// compilation-time breakdown + runtime breakdown + ranked hot-spots +
@@ -764,7 +761,6 @@ fn profile_memory(
 /// Return a copy of `data` with `function_ref_counts` narrowed to the
 /// names allowed by `sampling.function_filter`.
 ///
-
 /// We currently only filter the per-function ref-count view — tier
 /// statistics are global and cheap, so recomputing them is overkill
 /// for the small set of functions a user usually targets.

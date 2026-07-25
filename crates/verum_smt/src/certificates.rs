@@ -39,7 +39,6 @@ use crate::proof_term_unified::ProofTerm;
 
 /// Supported proof certificate formats
 ///
-
 /// Certificate formats for exporting machine-checkable proofs.
 /// Dedukti is the universal proof checker; OpenTheory targets the HOL family;
 /// Lean, Coq, and Metamath target specific proof assistants.
@@ -94,7 +93,6 @@ impl CertificateFormat {
 
 /// Proof certificate
 ///
-
 /// A proof certificate containing the format, axioms, definitions, proof term,
 /// and integrity checksum. Can be independently verified by the target proof checker.
 #[derive(Debug, Clone)]
@@ -209,7 +207,6 @@ impl Certificate {
 
     /// Verify certificate signature
     ///
-
     /// Returns Ok(()) if signature is valid, Err otherwise
     pub fn verify_signature(&self) -> Result<(), CertificateError> {
         let signature_bytes = match &self.signature {
@@ -282,7 +279,6 @@ impl Certificate {
 
     /// Verify the entire certificate chain
     ///
-
     /// This verifies:
     /// 1. The certificate's own integrity and signature
     /// 2. All dependencies exist and are valid
@@ -436,7 +432,6 @@ pub struct CertificateMetadata {
 
 /// Proof certificate generator
 ///
-
 /// Generates machine-checkable certificates by translating proof terms to the
 /// target format's syntax (e.g., Coq vernacular, Lean tactics, Dedukti terms).
 pub struct CertificateGenerator {
@@ -486,7 +481,6 @@ impl CertificateGenerator {
 
     /// Generate certificate from proof
     ///
-
     /// Generate a certificate from a proof term by translating to the target format,
     /// computing checksums, and attaching metadata (version, timestamp).
     pub fn generate(
@@ -515,13 +509,11 @@ impl CertificateGenerator {
 
     /// Generate a theorem-statement-only "stub" certificate (#285).
     ///
-
     /// Emits the target-format theorem declaration with a placeholder
     /// proof body (`Admitted.` for Coq, `sorry` for Lean, axiom-form
     /// for Dedukti / Metamath / OpenTheory, and a JSON record with
     /// proof_status="admitted" for JSON).
     ///
-
     /// This is the load-bearing entry point for the standard
     /// `verum verify --emit-proof-certificate=lean` CLI surface,
     /// which doesn't yet thread the SMT verifier's proof term back
@@ -529,7 +521,6 @@ impl CertificateGenerator {
     /// want full proof terms still go through `generate(&proof,
     /// theorem)` from embedder code.
     ///
-
     /// Architectural value: gives users a typed-surface artefact
     /// they can import into Coq/Lean and discharge by hand or with
     /// their own tactics, even before Verum's verifier surfaces the
@@ -623,7 +614,6 @@ impl CertificateGenerator {
 
     /// Generate Coq vernacular
     ///
-
     /// Generate Coq vernacular: `Theorem name: prop. Proof. proof_term. Qed.`
     fn to_coq(&self, proof: &ProofTerm, theorem: &Theorem) -> Result<Text, CertificateError> {
         let mut output = Text::new();
@@ -1880,7 +1870,6 @@ impl CertificateGenerator {
 
 /// Cross-verification report
 ///
-
 /// Cross-verification report: generates certificates in multiple formats (Dedukti,
 /// Coq, Lean) and independently validates each, ensuring the proof is correct
 /// across different proof checkers.
@@ -1931,7 +1920,6 @@ impl ValidationResult {
 
 /// Cross-verify theorem across multiple formats
 ///
-
 /// Cross-verify a theorem by generating certificates in all requested formats
 /// and independently checking each. All must succeed for the theorem to be validated.
 pub fn cross_verify(
@@ -1970,7 +1958,6 @@ pub fn cross_verify(
 
 /// Cross-verify theorem with full chain verification
 ///
-
 /// This performs comprehensive verification including:
 /// - Certificate generation in multiple formats
 /// - Integrity checking
@@ -2071,7 +2058,6 @@ impl From<std::io::Error> for CertificateError {
 
 /// Certificate store for managing and verifying certificate chains
 ///
-
 /// Stores certificates indexed by theorem name and format.
 /// Used for chain verification and dependency management.
 #[derive(Debug, Clone)]
@@ -2126,7 +2112,6 @@ impl CertificateStore {
 
     /// Verify all certificates in the store
     ///
-
     /// Returns a report of all verification results
     pub fn verify_all(&self) -> CertificateStoreVerificationReport {
         let mut report = CertificateStoreVerificationReport {
@@ -2194,7 +2179,6 @@ impl CertificateStoreVerificationReport {
 
 /// Compute SHA-256 checksum of content
 ///
-
 /// Returns 32 bytes (256 bits) representing the SHA-256 hash
 fn compute_sha256_checksum(content: &Text) -> List<u8> {
     let mut hasher = Sha256::new();

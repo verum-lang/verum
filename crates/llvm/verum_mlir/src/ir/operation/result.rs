@@ -24,10 +24,8 @@ impl<'c, 'a> OperationResult<'c, 'a> {
 
     /// Creates an operation result from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(value: MlirValue) -> Self {
         Self {

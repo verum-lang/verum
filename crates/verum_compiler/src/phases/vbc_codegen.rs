@@ -54,7 +54,6 @@ use verum_vbc::codegen::{CodegenConfig, TierContext, VbcCodegen};
 
 /// VBC code generation phase.
 ///
-
 /// Compiles typed AST modules to VBC bytecode with tier-aware instructions.
 pub struct VbcCodegenPhase {
     /// Configuration for tier analysis.
@@ -177,13 +176,11 @@ impl VbcCodegenPhase {
 
     /// Runs tier analysis on a module and returns TierContext.
     ///
-
     /// This method:
     /// 1. Builds CFGs from all functions in the module using CfgConstructor
     /// 2. Runs TierAnalyzer on each CFG to determine reference tiers
     /// 3. Aggregates results into a TierContext for VBC codegen
     ///
-
     /// The tier decisions enable VBC codegen to emit tier-appropriate instructions:
     /// - Tier 0: ChkRef + Deref (runtime CBGR validation, ~15ns)
     /// - Tier 1: Deref directly (compiler-proven safe, 0ns)

@@ -565,25 +565,18 @@ impl From<String> for SourceFile {
 
 /// Parse source code into AST.
 ///
-
 /// This is Phase 1 of the compilation pipeline.
 ///
-
 /// # Arguments
 ///
-
 /// * `source` - Source code to parse
 ///
-
 /// # Returns
 ///
-
 /// Parsed AST module or parse error
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let ast = verum_compiler::api::parse("fn main() { print(\"hello\"); }")?;
 /// ```
@@ -603,29 +596,22 @@ pub fn parse(source: &str) -> Result<Module, CompilationError> {
 
 /// Parse and type check source code.
 ///
-
 /// This runs Phases 1-4 of the compilation pipeline:
 /// - Phase 1: Lexical parsing
 /// - Phase 2: Meta registry (minimal)
 /// - Phase 3: Macro expansion
 /// - Phase 4: Semantic analysis (type checking)
 ///
-
 /// # Arguments
 ///
-
 /// * `source` - Source code to compile
 ///
-
 /// # Returns
 ///
-
 /// Typed AST (HIR) module or compilation error
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let typed = verum_compiler::api::typecheck("fn main() { let x: Int = 42; }")?;
 /// ```
@@ -651,7 +637,6 @@ pub fn typecheck(source: &str) -> Result<HirModule, CompilationError> {
 
 /// Run the common pipeline (Source → TypedAST).
 ///
-
 /// This runs Phases 1-4b of the compilation pipeline:
 /// - Phase 1: Lexical parsing
 /// - Phase 2: Meta registry
@@ -660,32 +645,24 @@ pub fn typecheck(source: &str) -> Result<HirModule, CompilationError> {
 /// - Phase 4: Semantic analysis (type inference, refinements)
 /// - Phase 4b: Context validation (if enabled)
 ///
-
 /// The common pipeline is the core of the language implementation and should
 /// be fully verified against the language specification.
 ///
-
 /// # Arguments
 ///
-
 /// * `sources` - Source files to compile
 /// * `config` - Pipeline configuration
 ///
-
 /// # Returns
 ///
-
 /// Common pipeline result containing typed AST and diagnostics
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let config = CommonPipelineConfig::default();
 /// let result = run_common_pipeline(&[SourceFile::load("main.vr")?], &config)?;
 ///
-
 /// if result.has_errors() {
 ///  for diag in &result.diagnostics {
 ///  eprintln!("{}", diag);
@@ -1099,27 +1076,20 @@ pub fn run_common_pipeline(
 
 /// Compile source code to VBC bytecode.
 ///
-
 /// This runs Phases 1-5 of the compilation pipeline:
 /// - Phases 1-4b: Common pipeline
 /// - Phase 5: VBC code generation
 ///
-
 /// # Arguments
 ///
-
 /// * `source` - Source code to compile
 ///
-
 /// # Returns
 ///
-
 /// VBC module or compilation error
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let vbc = verum_compiler::api::compile_to_vbc("fn main() { print(42); }")?;
 /// ```
@@ -1216,30 +1186,23 @@ pub fn ensure_scripting_compiler_installed() {
 
 /// Run full compilation pipeline.
 ///
-
 /// This runs all phases from source to final output:
 /// - Phases 1-4b: Common pipeline
 /// - Phase 5: VBC code generation
 /// - Phase 6: Monomorphization (see `phases/vbc_mono.rs`)
 /// - Phase 7: Execution/compilation (tier-dependent)
 ///
-
 /// # Arguments
 ///
-
 /// * `sources` - Source files to compile
 /// * `config` - Compiler configuration
 ///
-
 /// # Returns
 ///
-
 /// Full compilation result including artifacts
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let config = CompilerConfig {
 ///  target_tier: ExecutionTier::Aot,

@@ -466,10 +466,8 @@ impl PoloniusAnalyzer {
 
     /// Perform Polonius analysis.
     ///
-
     /// Honours every `PoloniusConfig` gate:
     ///
-
     /// * `max_iterations` — already honoured by the Datalog
     ///  fixed-point loop in `compute_output_facts`.
     /// * `location_sensitive` (default `true`) — surfaced via
@@ -481,7 +479,6 @@ impl PoloniusAnalyzer {
     ///  wrap the analyser with `MoveTracker` integration check
     ///  this flag before consulting the tracker.
     ///
-
     /// Before this wire-up `location_sensitive` and `check_moves`
     /// were inert.
     #[must_use]

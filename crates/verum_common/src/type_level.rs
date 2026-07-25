@@ -50,7 +50,6 @@ use crate::{Maybe, Text};
 
 /// Unified error type for type-level computation
 ///
-
 /// Combines error variants from both AST and SMT backends.
 #[derive(Debug, Clone)]
 pub enum TypeLevelError {
@@ -203,7 +202,6 @@ pub type TypeLevelResult<T> = std::result::Result<T, TypeLevelError>;
 
 /// Capabilities of a type-level computation backend
 ///
-
 /// Allows code to query what features are available before attempting
 /// operations that may not be supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -297,7 +295,6 @@ impl VerificationResult {
 
 /// Core trait for type-level computation
 ///
-
 /// Provides basic evaluation and simplification capabilities.
 /// Implemented by both AST and SMT backends.
 pub trait TypeLevelComputation {
@@ -313,25 +310,21 @@ pub trait TypeLevelComputation {
 
     /// Evaluate an expression to a constant value
     ///
-
     /// Returns `None` if the expression cannot be evaluated at compile-time.
     fn eval_to_const(&self, expr: &Self::Expr) -> TypeLevelResult<Maybe<Self::Value>>;
 
     /// Evaluate an expression as a type
     ///
-
     /// Used for type-level functions that return types.
     fn eval_as_type(&mut self, expr: &Self::Expr) -> TypeLevelResult<Self::Type>;
 
     /// Simplify an expression
     ///
-
     /// Performs algebraic simplifications and constant folding.
     fn simplify_expr(&self, expr: &Self::Expr) -> TypeLevelResult<Self::Expr>;
 
     /// Normalize a type
     ///
-
     /// Reduces type-level computations to normal form.
     fn normalize_type(&mut self, ty: &Self::Type) -> TypeLevelResult<Self::Type>;
 
@@ -344,13 +337,11 @@ pub trait TypeLevelComputation {
 
 /// Extended trait for SMT-capable computation backends
 ///
-
 /// Provides constraint verification and satisfiability checking
 /// using an SMT solver.
 pub trait SmtCapableComputation: TypeLevelComputation {
     /// Verify that a constraint is valid (always true)
     ///
-
     /// Uses SMT solver to check if the negation is unsatisfiable.
     fn verify_constraint(
         &self,
@@ -367,7 +358,6 @@ pub trait SmtCapableComputation: TypeLevelComputation {
 
     /// Verify a refinement predicate
     ///
-
     /// Checks that a refined type's predicate is satisfiable.
     fn verify_refinement(
         &mut self,
@@ -378,7 +368,6 @@ pub trait SmtCapableComputation: TypeLevelComputation {
 
     /// Check subtype relationship with refinements
     ///
-
     /// Verifies that `sub` is a subtype of `sup`, including
     /// checking refinement predicates.
     fn check_subtype(
@@ -391,7 +380,6 @@ pub trait SmtCapableComputation: TypeLevelComputation {
 
 /// Reduction strategy for type-level computation
 ///
-
 /// Controls how type-level expressions are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ReductionStrategy {

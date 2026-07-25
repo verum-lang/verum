@@ -69,7 +69,6 @@ const FORMAT_MESSAGE_IGNORE_INSERTS: DWORD = 0x00000200;
 
 /// Windows-specific FFI platform implementation.
 ///
-
 /// Uses the Windows API for dynamic library loading and memory management.
 pub struct WindowsPlatform {
     /// Cached handle to kernel32.dll for common operations.

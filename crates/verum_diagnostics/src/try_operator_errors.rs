@@ -46,24 +46,19 @@ pub const E0205: &str = "E0205";
 
 /// Creates a diagnostic for E0203: Result type mismatch
 ///
-
 /// This error occurs when a function returns Result<T, E1>, but the `?` operator
 /// tries to propagate Result<U, E2> where E1 and E2 are not compatible.
 ///
-
 /// # Parameters
 ///
-
 /// - `span`: The location of the `?` operator
 /// - `inner_error_type`: The error type from the inner Result (E2)
 /// - `outer_error_type`: The expected error type from the function signature (E1)
 /// - `expr_span`: The span of the expression being propagated
 /// - `function_return_span`: The span of the function's return type declaration
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// fn process_config() -> Result<Config, AppError> {
 ///  let content = read_file("config.txt")?; // Returns Result<Text, IoError>
@@ -160,30 +155,24 @@ pub fn e0203_result_type_mismatch(
 
 /// Creates a diagnostic for E0204: Multiple conversion paths detected
 ///
-
 /// This error occurs when there are multiple ways to convert from one error type
 /// to another, creating ambiguity in which path the `?` operator should use.
 ///
-
 /// # Parameters
 ///
-
 /// - `span`: The location of the `?` operator
 /// - `from_type`: The source error type
 /// - `to_type`: The target error type
 /// - `paths`: List of conversion path descriptions
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// // Multiple conversion paths:
 /// implement From<ErrorA> for AppError { /* direct */ }
 /// implement From<ErrorA> for ErrorB { /* indirect */ }
 /// implement From<ErrorB> for AppError { /* indirect */ }
 ///
-
 /// fn process() -> Result<Data, AppError> {
 ///  operation_a()?; // E0204: ambiguous - ErrorA -> AppError (direct or via ErrorB?)
 /// }
@@ -277,24 +266,19 @@ pub fn e0204_multiple_conversion_paths(
 
 /// Creates a diagnostic for E0205: Cannot use `?` in non-Result context
 ///
-
 /// This error occurs when the `?` operator is used in a function that doesn't
 /// return a Result or Maybe type.
 ///
-
 /// # Parameters
 ///
-
 /// - `span`: The location of the `?` operator
 /// - `expr_type`: The type of the expression (Result<T, E> or Maybe<T>)
 /// - `function_return_type`: The actual return type of the function
 /// - `function_name`: Optional name of the function
 /// - `function_return_span`: Optional span of the function's return type
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// fn compute(x: Int) -> Int {
 ///  let value = parse_int("42")?; // E0205: function returns Int, not Result
@@ -376,13 +360,10 @@ pub fn e0205_try_in_non_result_context(
 
 /// Creates a diagnostic for nested Result types with `?` operator
 ///
-
 /// This is a variant of E0205 specifically for nested Result<Result<T, E1>, E2>.
 ///
-
 /// # Example
 ///
-
 /// ```verum
 /// fn nested_operation() -> Result<Data, AppError> {
 ///  let result: Result<Result<Data, IoError>, ParseError> = complex_op();

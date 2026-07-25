@@ -43,10 +43,8 @@ impl<'c> Dialect<'c> {
 
     /// Creates a dialect from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(dialect: MlirDialect) -> Self {
         Self {

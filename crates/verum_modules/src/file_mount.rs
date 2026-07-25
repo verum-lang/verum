@@ -112,13 +112,11 @@ impl ResolvedFileMount {
 /// return the deduplicated list of files to register as
 /// modules.
 ///
-
 /// The starting set is the user's already-parsed entry
 /// points (cog root .vr files); the returned list excludes
 /// those entries so callers can simply concat both lists
 /// into the registry.
 ///
-
 /// `parse_one` is a caller-supplied callback that converts
 /// a raw `ModuleSource` into a `verum_ast::Module`. The
 /// callback shape (rather than a hard dep on
@@ -191,7 +189,6 @@ where
 /// Derive a synthetic module name for a file mount. Alias
 /// wins; otherwise the file basename (without `.vr`).
 ///
-
 /// The basename fallback uses the LAST path component, so
 /// `../shared/util.vr` becomes `util`. Callers that want
 /// path-disambiguated names should specify an explicit alias.

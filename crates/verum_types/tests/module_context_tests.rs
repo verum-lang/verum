@@ -576,7 +576,6 @@ fn test_cross_function_type_variables() {
 
 /// Benchmark test: verify 10K LOC < 100ms performance target
 ///
-
 /// This test only enforces timing requirements in release mode.
 /// In debug mode, it reports performance but does not fail on slow timing.
 #[test]

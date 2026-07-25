@@ -92,7 +92,6 @@ fn segment_name_str(segment: &PathSegment) -> Option<&str> {
 
 /// Register reflection builtins with context requirements
 ///
-
 /// All reflection functions require MetaTypes context since they access
 /// type information from the type registry.
 pub fn register_builtins(map: &mut BuiltinRegistry) {

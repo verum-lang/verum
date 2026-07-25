@@ -119,7 +119,6 @@ pub enum ContextResolution {
 
 /// Context get operation - retrieves a context value.
 ///
-
 /// ```mlir
 /// %db = verum.context_get "Database" {
 ///  resolution = "direct",
@@ -197,7 +196,6 @@ impl ContextGetOp {
 
 /// Context get with fallback operation.
 ///
-
 /// ```mlir
 /// %db = verum.context_get_or "Database", %default : !verum.context<Database>
 /// ```
@@ -225,7 +223,6 @@ impl ContextGetOrOp {
 
 /// Context try-get operation - returns Maybe<T>.
 ///
-
 /// ```mlir
 /// %maybe_db = verum.context_try_get "Database" : !verum.maybe<!verum.context<Database>>
 /// ```
@@ -255,7 +252,6 @@ impl ContextTryGetOp {
 
 /// Context provide operation - provides a context value.
 ///
-
 /// ```mlir
 /// verum.context_provide "Database" = %db {
 ///  lifetime = "scoped",
@@ -316,7 +312,6 @@ impl ContextProvideOp {
 
 /// Context provide with alias operation.
 ///
-
 /// ```mlir
 /// verum.context_provide_as "Database", "db" = %conn : !verum.context<Database>
 /// ```
@@ -353,7 +348,6 @@ impl ContextProvideAsOp {
 
 /// Context scope operation - provides context for a region.
 ///
-
 /// ```mlir
 /// %result = verum.context_scope ["Database" = %db, "Logger" = %log] {
 ///  // body uses provided contexts
@@ -412,7 +406,6 @@ impl ContextYieldOp {
 
 /// Context require operation - asserts context availability.
 ///
-
 /// ```mlir
 /// verum.context_require ["Database", "Logger"] {
 ///  message = "Database and Logger contexts required"
@@ -453,7 +446,6 @@ impl ContextRequireOp {
 
 /// Context check operation - returns bool for context availability.
 ///
-
 /// ```mlir
 /// %has_db = verum.context_has "Database" : i1
 /// ```
@@ -484,7 +476,6 @@ impl ContextHasOp {
 
 /// Context with operation - transforms a context value.
 ///
-
 /// ```mlir
 /// %result = verum.context_with "Database" {
 ///  ^bb0(%db: !verum.context<Database>):
@@ -536,7 +527,6 @@ impl ContextWithYieldOp {
 
 /// Context push frame operation - for manual stack management.
 ///
-
 /// ```mlir
 /// %frame = verum.context_push_frame : !verum.context_frame
 /// ```
@@ -557,7 +547,6 @@ impl ContextPushFrameOp {
 
 /// Context pop frame operation.
 ///
-
 /// ```mlir
 /// verum.context_pop_frame %frame : !verum.context_frame
 /// ```
@@ -582,7 +571,6 @@ impl ContextPopFrameOp {
 
 /// Context monomorphize marker - marks a context access for monomorphization.
 ///
-
 /// ```mlir
 /// %db = verum.context_mono "Database" {
 ///  concrete_type = !my.database_impl,

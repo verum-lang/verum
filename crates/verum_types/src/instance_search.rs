@@ -67,7 +67,6 @@ impl InstanceCandidate {
 
 /// The registry of all known protocol implementations.
 ///
-
 /// Indexed by `(protocol, target_type)` for O(1) lookup; stores
 /// a `Vec<InstanceCandidate>` per key to detect coherence violations.
 #[derive(Debug, Default, Clone)]
@@ -97,7 +96,6 @@ impl InstanceRegistry {
 
     /// Find the protocol implementation for `(protocol, target_type)`.
     ///
-
     /// Returns:
     /// * `SearchResult::Unique(candidate)` — exactly one implementation.
     /// * `SearchResult::NotFound` — no `implement P for T` in the project.
@@ -111,7 +109,6 @@ impl InstanceRegistry {
     /// Policy-aware search. Called from the compiler with values from
     /// `[protocols].resolution_strategy` and `[protocols].blanket_impls`.
     ///
-
     /// `resolution_strategy`:
     ///  * `"most_specific"` (default) — pick the most specific impl;
     ///  ambiguity is an error.
@@ -120,7 +117,6 @@ impl InstanceRegistry {
     ///  * `"error"` — any overlap is an error, even if one is more
     ///  specific.
     ///
-
     /// `blanket_impls`: when false, candidates with a wildcard target
     ///  (blanket `impl<T> P for T`) are excluded from the search.
     pub fn search_with_policy(
@@ -272,7 +268,6 @@ impl InstanceResolver {
 
     /// Search for a protocol instance with superclass resolution.
     ///
-
     /// If no direct implementation of `protocol` for `target` exists,
     /// searches for implementations of sub-protocols that extend `protocol`.
     /// For example, if we need `Group for Z3` but only have
@@ -351,19 +346,16 @@ impl InstanceResolver {
 
 /// Extended coherence checking with SMT integration.
 ///
-
 /// When two implementations of the same protocol exist for overlapping
 /// type patterns (e.g., `implement Functor for List<T>` and
 /// `implement Functor for List<Int>`), the basic duplicate check finds
 /// them. The SMT-based check goes further:
 ///
-
 /// 1. Encodes both implementations as SMT assertions
 /// 2. Checks specialization ordering (is one strictly more specific?)
 /// 3. If one specializes the other → resolved (most specific wins)
 /// 4. If unordered and produce different results → coherence violation
 ///
-
 /// Connects to `crates/verum_smt/src/protocol_smt.rs` for encoding
 /// and `specialization_coherence.rs` for specialization ordering.
 pub fn smt_check_coherence(registry: &InstanceRegistry, smt_available: bool) -> CoherenceReport {
@@ -404,7 +396,6 @@ pub fn smt_check_coherence(registry: &InstanceRegistry, smt_available: bool) -> 
 
 /// Compute the specificity score of an implementation.
 ///
-
 /// Higher specificity = more concrete type arguments.
 /// - Concrete types (Int, Bool, MyStruct): +2
 /// - Constrained type vars (T: Protocol): +1

@@ -1143,7 +1143,6 @@ fn test_unicode_in_strings() {
 
 /// Test deeply nested control flow structures
 ///
-
 /// Spawns a separate thread with a large stack to handle deep recursion.
 /// The default test thread stack is often too small for deeply nested AST processing.
 #[test]

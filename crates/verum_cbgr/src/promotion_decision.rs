@@ -85,13 +85,11 @@ use verum_common::{Map, Maybe, Set, Text};
 
 /// Information about async boundaries in the control flow graph
 ///
-
 /// This tracks which basic blocks contain await points and thus represent
 /// suspension boundaries for the async state machine. References that escape
 /// across async boundaries may need CBGR protection even if they don't escape
 /// the function.
 ///
-
 /// Async functions are compiled to state machines where each await point
 /// suspends the current stack frame. A reference defined before an await
 /// and used after it crosses a suspension boundary -- the stack may be
@@ -112,12 +110,10 @@ pub struct AsyncBoundaryInfo {
 impl AsyncBoundaryInfo {
     /// Compute async boundary information from the CFG and effect info
     ///
-
     /// # Parameters
     /// - `cfg`: The control flow graph
     /// - `effect_info`: Effect analysis results with async markers
     ///
-
     /// # Returns
     /// Async boundary information for the function
     #[must_use]
@@ -166,12 +162,10 @@ impl AsyncBoundaryInfo {
 
 /// Information about exception paths in the control flow graph
 ///
-
 /// This tracks which blocks are on exception handling paths, including
 /// try/catch blocks and cleanup handlers. References escaping into exception
 /// paths require careful handling.
 ///
-
 /// Exception paths (try/catch/defer/finally) create alternate control flow that
 /// may deallocate resources. A reference defined in a try block and used in a
 /// catch/cleanup handler may point to freed memory if the exception is triggered
@@ -191,11 +185,9 @@ pub struct ExceptionPathInfo {
 impl ExceptionPathInfo {
     /// Compute exception path information from the CFG
     ///
-
     /// # Parameters
     /// - `cfg`: The control flow graph
     ///
-
     /// # Returns
     /// Exception path information for the function
     #[must_use]
@@ -249,14 +241,11 @@ impl ExceptionPathInfo {
 
 /// Promotion Decision Engine
 ///
-
 /// The central component of Phase 4 that coordinates all analysis phases
 /// and produces final promotion decisions for references.
 ///
-
 /// # Architecture
 ///
-
 /// ```text
 /// +-------------------+ +--------------------+ +------------------+
 /// | Escape Analyzer | --> | Dominance Info | --> | Promotion |
@@ -271,10 +260,8 @@ impl ExceptionPathInfo {
 ///  +------------------+
 /// ```
 ///
-
 /// # Thread Safety
 ///
-
 /// The engine is single-threaded per function analysis. For parallel
 /// compilation, create one engine per function.
 #[derive(Debug)]
@@ -310,16 +297,12 @@ pub struct PromotionDecisionEngine {
 impl PromotionDecisionEngine {
     /// Create a new promotion decision engine for a function
     ///
-
     /// # Parameters
     ///
-
     /// - `cfg`: Control flow graph for the function
     ///
-
     /// # Returns
     ///
-
     /// A new engine ready to analyze references
     #[must_use]
     pub fn new(cfg: ControlFlowGraph) -> Self {
@@ -377,7 +360,6 @@ impl PromotionDecisionEngine {
 
     /// Analyze all references in the function
     ///
-
     /// Runs Phase 2 (escape analysis) and prepares reference information
     /// for promotion decisions.
     pub fn analyze(&mut self) {
@@ -529,13 +511,11 @@ impl PromotionDecisionEngine {
 
     /// Apply extra safety checks for conservative mode
     ///
-
     /// Performs comprehensive safety analysis including:
     /// 1. Single-block usage check (fast path)
     /// 2. Async/await boundary crossing analysis
     /// 3. Exception path analysis
     ///
-
     /// Verifies the four criteria for automatic &T to &checked T promotion:
     /// (1) reference doesn't escape function scope, (2) no concurrent access,
     /// (3) allocation dominates all uses, (4) lifetime is stack-bounded.
@@ -566,24 +546,19 @@ impl PromotionDecisionEngine {
 
     /// Verify that a reference does not span async/await boundaries
     ///
-
     /// A reference spans an await boundary if:
     /// 1. It is defined before an await point
     /// 2. It is used after the await point (in a continuation block)
     ///
-
     /// This is unsafe because the async runtime may move the task's stack
     /// frame during suspension, invalidating stack-based references.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Check if the function is async
     /// 2. Find all blocks where the reference is used
     /// 3. Check if any use is in a continuation block while definition is pre-await
     ///
-
     /// Criterion 4 (lifetime is stack-bounded): async functions suspend the stack
     /// at await points. If a reference is defined pre-await and used post-await,
     /// its stack frame may have been relocated, making it unsafe for promotion.
@@ -627,20 +602,16 @@ impl PromotionDecisionEngine {
 
     /// Verify that a reference is not invalidated by exception paths
     ///
-
     /// Exception paths can invalidate references when:
     /// 1. The reference is defined in a throwing block
     /// 2. Exception handlers may run cleanup code that deallocates
     /// 3. The reference is used in handler or cleanup blocks
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Check if any use site is in an exception handler
     /// 2. Check if definition is in a throwing block with uses in cleanup
     ///
-
     /// Criterion 1 (no escape): exception handlers/cleanup blocks may run after
     /// deallocation. If a reference is used in a handler or cleanup block while
     /// defined in a throwing block, it may reference freed memory.
@@ -698,19 +669,14 @@ impl PromotionDecisionEngine {
 
     /// Get promotion decision for a reference
     ///
-
     /// This is the main API for codegen integration.
     ///
-
     /// # Parameters
     ///
-
     /// - `ref_id`: Reference identifier
     ///
-
     /// # Returns
     ///
-
     /// Promotion decision for the reference
     #[must_use]
     pub fn get_decision(&self, ref_id: RefId) -> PromotionDecision {
@@ -927,7 +893,6 @@ impl fmt::Display for PromotionDecisionStats {
 
 /// Tier selection for code generation
 ///
-
 /// Maps promotion decisions to CBGR reference tiers for codegen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodegenTier {
@@ -970,7 +935,6 @@ impl From<PromotionDecision> for CodegenTier {
 
 /// Codegen directive for a reference
 ///
-
 /// Provides all information needed by codegen to generate
 /// appropriate code for reference operations.
 #[derive(Debug, Clone)]
@@ -1076,10 +1040,8 @@ impl EngineBuilder {
 
     /// Build the engine
     ///
-
     /// # Panics
     ///
-
     /// Panics if CFG is not set
     #[must_use]
     pub fn build(self) -> PromotionDecisionEngine {

@@ -207,21 +207,16 @@ impl ExhaustivenessResult {
 
 /// Check if a set of patterns is exhaustive for a given type
 ///
-
 /// This is the main entry point for exhaustiveness checking.
 ///
-
 /// # Arguments
 ///
-
 /// * `patterns` - The patterns to check
 /// * `scrutinee_ty` - The type being matched against
 /// * `env` - Type environment for looking up type definitions
 ///
-
 /// # Returns
 ///
-
 /// An `ExhaustivenessResult` containing:
 /// - Whether the match is exhaustive
 /// - Witnesses for uncovered cases
@@ -241,7 +236,6 @@ pub fn check_exhaustiveness(
 
 /// Check exhaustiveness with custom configuration
 ///
-
 /// This allows fine-grained control over the exhaustiveness checking process,
 /// including whether to use refinement-aware analysis and SMT verification.
 pub fn check_exhaustiveness_with_options<'a>(
@@ -414,7 +408,6 @@ pub fn check_exhaustiveness_with_options<'a>(
 
 /// Extract guarded patterns from matrix for SMT verification.
 ///
-
 /// Honours the row's `guard: Option<Arc<Expr>>` field populated by
 /// `build_matrix` from `PatternKind::Guard { pattern, guard }`. Pre-fix
 /// the matrix didn't carry the real guard expression — a placeholder
@@ -423,7 +416,6 @@ pub fn check_exhaustiveness_with_options<'a>(
 /// false-positive that defeated the entire SMT-backed exhaustiveness
 /// path).
 ///
-
 /// Rows whose `guard` is `None` but whose `has_guard` is `true`
 /// represent the nested-guard case (a `Guarded` column inside an
 /// or-pattern) where the expression isn't liftable to the row level.
@@ -513,7 +505,6 @@ fn analyze_range_patterns_in_matrix(matrix: &CoverageMatrix) -> Option<RangeOver
 
 /// Find patterns that are redundant (unreachable)
 ///
-
 /// Performance: O(n²) where n = number of patterns (was O(n³) before optimization)
 fn find_redundant_patterns(matrix: &CoverageMatrix) -> List<usize> {
     let mut redundant = List::new();
@@ -581,7 +572,6 @@ fn find_uncovered_cases(
 
 /// Find uncovered cases for Bool scrutinee
 ///
-
 /// Bool is treated as a 2-variant enum {true, false}. A literal `true`
 /// covers the `true` case, `false` covers the `false` case, and a wildcard
 /// covers both. Guarded patterns do NOT provide definitive coverage because
@@ -649,12 +639,10 @@ fn check_bool_coverage(col: &PatternColumn, covers_true: &mut bool, covers_false
 
 /// Find uncovered cases for numeric types (Int, Float)
 ///
-
 /// Numeric types have infinite domains. They are exhaustive only if:
 /// - There is a non-guarded wildcard/ident pattern, OR
 /// - There is a non-guarded range pattern that covers the entire domain
 ///
-
 /// Literal-only matches without a wildcard are always non-exhaustive for
 /// infinite types. Guard-only patterns require a wildcard fallback.
 fn find_uncovered_numeric(
@@ -762,7 +750,6 @@ fn find_uncovered_int_value(
 
 /// Find uncovered cases for Tuple scrutinee
 ///
-
 /// Tuples have a single constructor `()` with element types as arguments.
 /// We use the constructor-based approach: specialize the matrix for the
 /// tuple constructor, then recursively check each element argument.
@@ -826,7 +813,6 @@ fn is_constructor_covered(
 
 /// Check if a specialized matrix (expanded constructor args) is exhaustive.
 ///
-
 /// The matrix has columns corresponding to constructor argument types.
 /// We process the first column: for each constructor of arg_types[0],
 /// specialize and recurse on the remaining columns. This correctly handles
@@ -1093,7 +1079,6 @@ impl<'a> Default for ExhaustivenessConfig<'a> {
 impl<'a> ExhaustivenessConfig<'a> {
     /// Create a configuration with all advanced features enabled.
     ///
-
     /// Note: to actually use SMT guard verification, callers must also
     /// inject a `guard_verifier` (e.g. from
     /// `verum_smt::exhaustiveness_backend::SmtGuardVerifier`).

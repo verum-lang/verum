@@ -165,14 +165,12 @@ impl std::fmt::Display for AttributeValidationWarning {
 
 /// Trait for attribute validation.
 ///
-
 /// This trait allows external crates to provide custom validation logic
 /// without creating circular dependencies. The parser uses this trait
 /// to validate attributes during parsing.
 pub trait AttributeValidatorTrait: Send + Sync {
     /// Validate attributes for a specific target.
     ///
-
     /// Returns a list of validation warnings. Validation should not fail
     /// hard - instead, issues should be returned as warnings for backward
     /// compatibility.
@@ -188,12 +186,10 @@ pub trait AttributeValidatorTrait: Send + Sync {
 
 /// Default attribute validator for the parser.
 ///
-
 /// This validator can be configured to either:
 /// - Allow all attributes (default, for backward compatibility)
 /// - Validate against a basic built-in set of known attributes
 ///
-
 /// For full validation with the attribute registry, use the validator
 /// from verum_types (via the compiler).
 #[derive(Debug, Clone)]
@@ -345,7 +341,6 @@ impl AttributeValidator {
 
     /// Core validation logic for any target.
     ///
-
     /// This method provides basic validation against known attribute targets.
     /// For full validation, use the registry-based validator from verum_types.
     pub fn validate_attrs(
@@ -683,7 +678,6 @@ impl AttributeValidatorTrait for AttributeValidator {
 
 /// Convenience function to validate attributes with default configuration.
 ///
-
 /// This is useful for quick validation without creating a validator instance.
 #[must_use]
 pub fn validate_parsed_attributes(

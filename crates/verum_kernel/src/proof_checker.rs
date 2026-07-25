@@ -811,7 +811,6 @@ const WHNF_FUEL_CEILING: usize = 1 << 20; // 1,048,576 head-reductions.
 /// β-reduce the head of a term to weak head normal form. Repeats
 /// until no top-level redex remains.
 ///
-
 /// **DEFECT-3 fix (kernel-audit-2026-05-08).** Now fuel-bounded.
 /// Without the bound, an ill-typed input like
 /// `App(λ.App(Var(0), Var(0)), λ.App(Var(0), Var(0)))` (the CoC
@@ -923,7 +922,6 @@ fn whnf_fuel(mut term: Term, mut fuel: usize) -> (Term, usize) {
 /// WHNF and then compared structurally; under binders, α-equivalence
 /// is automatic via de Bruijn indices.
 ///
-
 /// **η-equivalence (T-Eta-Conv)** — `λx. (f x) ≡ f` when `x` (de
 /// Bruijn 0 in the body) does not occur free in the CONTENT of `f`.
 /// This is the standard CIC rule extending β with extensional
@@ -987,11 +985,9 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
 /// `Var(0)` and `f` does not contain `Var(0)` free, AND `f` (after
 /// shifting down) is equal to `other`.
 ///
-
 /// This is the soundness gate for T-Eta-Conv: the bound variable
 /// must not "leak" into the function part of the application.
 ///
-
 /// **DEFECT-1 fix (kernel-audit-2026-05-08).** Previously the
 /// argument `x` was matched syntactically against `Var(0)`; this
 /// missed valid η-redexes whose argument β-reduces to `Var(0)` (e.g.
@@ -1234,10 +1230,8 @@ pub enum CheckError {
 /// Infer the type of `term` in `ctx`. Returns the unique type or
 /// a `CheckError` naming the rejecting kernel rule.
 ///
-
 /// **The six rules at a glance.**
 ///
-
 ///  T-Var: `ctx[i]` = T → Var(i) : T
 ///  T-Univ: Universe(n) : Universe(n+1)
 ///  T-Pi-Form: A : Universe(n), B : Universe(m) under (A:: ctx)
@@ -1514,7 +1508,6 @@ impl Certificate {
     /// claimed type in an empty context. Any free variable in either
     /// term or type is a structural error rejected here.
     ///
-
     /// **DEFECT-4 fix (kernel-audit-2026-05-08).** Independently
     /// type-check `claimed_type` and confirm its own type is some
     /// `Universe(_)` *before* the inferred-vs-claimed comparison.

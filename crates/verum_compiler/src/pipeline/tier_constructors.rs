@@ -59,7 +59,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Create a pipeline for VBC → LLVM JIT mode.
     ///
-
     /// This mode compiles Verum source through VBC to LLVM IR, then executes
     /// immediately using LLVM's JIT engine. This is the preferred path for:
     /// - Development/debugging with fast iteration
@@ -72,7 +71,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Create a pipeline for VBC → LLVM AOT mode.
     ///
-
     /// This mode compiles Verum source through VBC to LLVM IR, then generates
     /// a native executable. This is the preferred path for:
     /// - Production builds (Tier 3)
@@ -85,7 +83,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run VBC → LLVM JIT compilation and execution.
     ///
-
     /// This is the main entry point for the CPU JIT compilation path:
     /// 1. Parse source to AST
     /// 2. Type check
@@ -94,10 +91,8 @@ impl<'s> CompilationPipeline<'s> {
     /// 5. Lower VBC to LLVM IR
     /// 6. Execute via LLVM JIT
     ///
-
     /// # Returns
     ///
-
     /// Returns the exit code from the main function, or an error if compilation fails.
     pub fn run_vbc_jit(&mut self) -> Result<i64> {
         let start = Instant::now();
@@ -153,7 +148,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run VBC → LLVM AOT compilation.
     ///
-
     /// This is the main entry point for the CPU AOT compilation path:
     /// 1. Parse source to AST
     /// 2. Type check
@@ -164,10 +158,8 @@ impl<'s> CompilationPipeline<'s> {
     /// 7. Generate object file
     /// 8. Link into executable
     ///
-
     /// # Returns
     ///
-
     /// Returns the path to the generated executable.
     pub fn run_vbc_aot(&mut self) -> Result<PathBuf> {
         let start = Instant::now();

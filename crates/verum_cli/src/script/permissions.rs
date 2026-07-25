@@ -410,7 +410,6 @@ impl PermissionSet {
 /// Path-prefix match: `path` is authorised by `target` if, after
 /// best-effort normalisation, `path` starts at or below `target`.
 ///
-
 /// "Best effort" because we operate on lexical paths — we don't
 /// canonicalise via the filesystem (which would refuse symlinks and
 /// non-existent paths). For the purposes of permission checks, lexical
@@ -430,7 +429,6 @@ fn path_prefix_matches(path: &Path, target: &str) -> bool {
 
 /// Net target match: a grant `target` matches a request `(host, port)`.
 ///
-
 /// Target forms:
 ///  - `"host"` — any port on this host
 ///  - `"host:port"` — exact host + port

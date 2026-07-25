@@ -32,7 +32,6 @@ use crate::target_spec::TargetSpec;
 /// path. Returns a list of predicate strings (e.g.,
 /// `target_os = "linux"`).
 ///
-
 /// Also infers platform cfg from module paths containing platform
 /// segments (e.g., `sys.darwin.io` implies `target_os = "macos"`).
 pub fn extract_cfg_predicates(
@@ -90,7 +89,6 @@ pub fn target_predicates_satisfied(predicates: &[Text], target: &TargetSpec) -> 
 
 /// Convert a `@cfg` expression argument to a predicate string.
 ///
-
 /// Handles two shapes the grammar allows:
 ///  * `target_os = "linux"` — `Binary` with `BinOp::Assign`
 ///  * `unix` / `windows` — bare `Path` identifier

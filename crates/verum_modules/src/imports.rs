@@ -16,14 +16,12 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// Convert an AST Path to a ModulePath.
 ///
-
 /// This function extracts the path segments from an AST Path and converts
 /// them to a ModulePath suitable for module resolution. It properly handles:
 /// - Named segments (identifiers)
 /// - Generic arguments (ignored for module paths)
 /// - Self/super/crate keywords
 ///
-
 /// Converts an AST Path to a ModulePath. Module paths follow hierarchical
 /// structure: absolute paths start from crate root (crate.*), relative paths
 /// use self/super/direct names. Path segments are dot-separated identifiers.
@@ -109,7 +107,6 @@ pub fn path_to_module_path_resolved(
 
 /// Extract the last segment name from a Path.
 ///
-
 /// Returns the name of the last segment if it's an identifier,
 /// or an error if the path is empty or ends with a keyword.
 pub fn path_last_segment_name(path: &Path) -> Option<Text> {
@@ -121,7 +118,6 @@ pub fn path_last_segment_name(path: &Path) -> Option<Text> {
 
 /// Get the parent path (all segments except the last).
 ///
-
 /// Returns None if the path has 0 or 1 segments.
 pub fn path_parent(path: &Path) -> Option<ModulePath> {
     if path.segments.len() <= 1 {
@@ -264,7 +260,6 @@ impl ImportedItem {
 
 /// Filter for glob imports.
 ///
-
 /// Glob filters allow fine-grained control over which items are imported
 /// from a glob import. Supports two modes:
 /// 1. Hiding mode: `import std.io.* hiding Read` - imports everything except Read
@@ -374,7 +369,6 @@ impl ImportResolver {
 
     /// Resolve an import declaration.
     ///
-
     /// This performs the following steps:
     /// 1. Parse the import path
     /// 2. Find the target module
@@ -382,7 +376,6 @@ impl ImportResolver {
     /// 4. Resolve items
     /// 5. Handle renaming
     ///
-
     /// Resolves an import declaration by: (1) parsing the import path,
     /// (2) finding the target module, (3) checking visibility, (4) resolving
     /// items, and (5) handling renaming.
@@ -707,7 +700,6 @@ impl ImportResolver {
 
     /// Resolve a glob import with filtering: `import std.io.* hiding Read`
     ///
-
     /// This method supports filtering glob imports in two modes:
     /// 1. Hiding mode: Import all items except those in the filter
     /// 2. Selection mode: Import only items in the filter

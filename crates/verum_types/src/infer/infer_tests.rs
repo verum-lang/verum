@@ -262,18 +262,15 @@ mod mount_cycle_tests {
     /// indefinitely when a module re-exported a sibling whose last segment
     /// matched the target type name, e.g.
     ///
-
     /// ```ignore
     /// // core/tmp_repro/mod.vr (module path "core.tmp_repro")
     /// public mount core.tmp_repro.sub;
     /// ```
     ///
-
     /// Looking up type `sub` in module `core.tmp_repro` would match the mount,
     /// strip the last segment back to `core.tmp_repro`, and re-enter the same
     /// AST — SIGBUSing after ~32k recursive frames in release builds.
     ///
-
     /// The fix threads a visited-set through
     /// `find_type_declaration_with_source_module_inner`; re-entry now returns
     /// `None` instead of blowing the stack.

@@ -323,13 +323,11 @@ pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
 
 /// Structural (syntactic) equality of two [`CoreTerm`] values.
 ///
-
 /// This is the kernel's conversion check at bring-up. Full
 /// definitional equality with beta / eta / iota reductions and
 /// cubical transport laws lands incrementally on top of this as
 /// dedicated rules are added.
 ///
-
 /// note: this remains the "exact-syntactic-equality"
 /// primitive callers can still use when they want byte-identity
 /// comparison. The new [`definitional_eq`] is the
@@ -901,7 +899,6 @@ fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
 /// `OrdinalDepth`. This enum is the bridge — a tagged union
 /// of the canonical ε-token shapes the Actic spec admits.
 ///
-
 /// Per defect 3: Actic ε-arithmetic is a
 /// different ordinal arithmetic from the kernel's
 /// Cantor-normal-form `OrdinalDepth`. This type captures the
@@ -932,7 +929,6 @@ pub enum EpsInvariant {
 /// convert an Actic ε-invariant to the kernel's
 /// Cantor-normal-form [`crate::OrdinalDepth`].
 ///
-
 /// Per item 5 + Diakrisis Actic
 /// 12-actic/03-epsilon-invariant.md: the Actic ε-coordinate
 /// and the kernel's modal-depth ordinal are *different*
@@ -943,7 +939,6 @@ pub enum EpsInvariant {
 /// order-preserving embedding exists. This function is that
 /// embedding.
 ///
-
 /// Properties (verified by tests):
 ///  * `convert(Zero) == finite(0)` — identity.
 ///  * `convert(Finite(n)) == finite(n)` — finite preservation.
@@ -954,7 +949,6 @@ pub enum EpsInvariant {
 ///  * Monotonicity: `eps1 ≤ eps2` (Actic order) implies
 ///  `convert(eps1).lt_or_eq(&convert(eps2))` (kernel lex).
 ///
-
 /// The bridge is **canonical** (independent of how the Actic
 /// ε-token was constructed) and **lossless** under the V0
 /// encoding — every Actic ε that fits Cantor-normal-form
@@ -977,12 +971,10 @@ pub fn convert_eps_to_md_omega(eps: &EpsInvariant) -> crate::OrdinalDepth {
 
 /// definitional (β-aware) equality on [`CoreTerm`] values.
 ///
-
 /// Normalises both sides via [`normalize`] and then performs
 /// structural comparison. Two terms compare equal under
 /// `definitional_eq` iff they have the same β-normal form.
 ///
-
 /// This is the right equality for typing-rule conversion
 /// checks: PathTy endpoint matching, App domain matching, etc.
 /// Replacing [`structural_eq`] with this is monotone (only
@@ -1010,7 +1002,6 @@ pub fn definitional_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
 /// [`crate::AxiomRegistry::register_definition`]) before
 /// β-normalising.
 ///
-
 /// Behaviour vs [`normalize`]:
 ///  • Opaque postulates (`body = None`) are LEFT as-is —
 ///  `Axiom { name: "..." }` references stay neutral. This is
@@ -1023,7 +1014,6 @@ pub fn definitional_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
 ///  which guarantees identical behaviour to [`normalize`] for
 ///  every variant other than `Axiom`.
 ///
-
 /// Step limit ([`NORMALIZE_STEP_LIMIT`]) shared with [`normalize`];
 /// δ-unfolds count against the same budget as β-reductions.
 pub fn normalize_with_axioms(term: &CoreTerm, axioms: &crate::AxiomRegistry) -> CoreTerm {
@@ -1047,7 +1037,6 @@ pub fn normalize_with_axioms(term: &CoreTerm, axioms: &crate::AxiomRegistry) -> 
 /// behaviour stays in lock-step with [`normalize`] and
 /// [`normalize_with_axioms`] for every CoreTerm variant.
 ///
-
 /// The eliminator β-rule fires when an `Elim { scrutinee, motive,
 /// cases }` term is encountered with a scrutinee of the form
 /// `App-chain(Var(C), arg1, ..., argn)` where `C` matches the
@@ -1062,7 +1051,6 @@ pub fn normalize_with_axioms(term: &CoreTerm, axioms: &crate::AxiomRegistry) -> 
 /// eliminator β-rule (Coq / Lean / Agda all generate this shape
 /// automatically).
 ///
-
 /// **Path constructors** are NOT handled here — their β-rule
 /// involves path substitution and is tracked under §7.4 V3.1.
 /// When the scrutinee normalises to anything other than a
@@ -1104,7 +1092,6 @@ fn decompose_app_spine(term: &CoreTerm) -> Option<(Text, Vec<CoreTerm>)> {
 
 /// δ-reduction-aware definitional equality.
 ///
-
 /// Normalises both sides via [`normalize_with_axioms`] (β + δ)
 /// and compares structurally. Two terms compare equal iff they
 /// have the same βδ-normal form against the supplied axiom
@@ -1145,18 +1132,15 @@ pub fn definitional_eq_with_axioms(
 
 /// Early-exit free-variable test (#100, task #44).
 ///
-
 /// Returns `true` iff `name` occurs free in `term`. Walks the
 /// term recursively but returns at the first occurrence — much
 /// faster than computing the full `free_vars` set when only one
 /// answer is needed.
 ///
-
 /// Used by [`substitute`] as a precondition check to short-circuit
 /// the no-op case (`name` doesn't appear → substitute returns a
 /// shallow clone instead of recursively reconstructing).
 ///
-
 /// Binder semantics: `name` is shadowed by `Pi`/`Lam`/`Sigma`
 /// binders that bind `name` exactly — sub-trees under those
 /// binders are skipped, matching `substitute`'s shadow-stop rule.
@@ -1306,20 +1290,17 @@ pub fn var_occurs_free(term: &CoreTerm, name: &str) -> bool {
 
 /// V8 — collect the **free variable set** of a [`CoreTerm`].
 ///
-
 /// A variable `Var(name)` is *free* in a term iff no enclosing
 /// binder (`Pi`, `Lam`, `Sigma`, `Refine`) introduces a binding
 /// for `name`. The walker descends through every sub-term while
 /// maintaining a binder-stack; on encountering a `Var`, it checks
 /// whether `name` is in the stack — if not, it's free.
 ///
-
 /// Returned set is a [`std::collections::BTreeSet`] for
 /// deterministic iteration (the caller often renders the set
 /// into a diagnostic message; sorted output keeps test golden
 /// values stable across hash-DOS-randomised builds).
 ///
-
 /// Used by [`crate::axiom::AxiomRegistry::register_subsingleton`]
 /// to enforce the `K-FwAx` closed-proposition route per
 /// `verification-architecture.md` §4.4.
@@ -1508,22 +1489,18 @@ fn free_vars_rec(
 
 /// Replay an [`SmtCertificate`] into a [`CoreTerm`] witness.
 ///
-
 /// This is the routine that puts Z3 / CVC5 / E / Vampire / Alt-Ergo
 /// **outside** the TCB: any SMT-produced proof must be independently
 /// reconstructed here before the kernel will admit it as a witness.
 ///
-
 /// # Supported certificate shapes
 ///
-
 /// The first phase of the replay ships support for **trust-tag
 /// certificates** — a minimal shape the SMT layer emits when a goal
 /// closes via the standard `Unsat`-means-valid protocol. The
 /// certificate's `trace` is a single-byte tag identifying which of
 /// three rule families the backend used:
 ///
-
 /// * `0x01` — **refl**: the obligation was discharged by
 ///  syntactic reflexivity (`E == E`).
 /// * `0x02` — **asserted**: the obligation matched a hypothesis
@@ -1531,7 +1508,6 @@ fn free_vars_rec(
 /// * `0x03` — **smt_unsat**: the backend reported `Unsat` on the
 ///  negated obligation using a generic theory combination.
 ///
-
 /// For each recognised tag the replay constructs a `CoreTerm::Axiom`
 /// labelled with the backend's name and the rule family. This is
 /// weaker than a full LCF-style step-by-step proof reconstruction —
@@ -1539,7 +1515,6 @@ fn free_vars_rec(
 /// gives the kernel a well-defined *entry point* for more rigorous
 /// replay as the SMT layer starts emitting richer traces.
 ///
-
 /// **Obligation-hash semantics (V8, doc/code reconciliation).**
 /// This function checks that `cert.obligation_hash` is non-empty
 /// (rejecting with [`KernelError::MissingObligationHash`] on
@@ -1552,7 +1527,6 @@ fn free_vars_rec(
 /// threads the expected hash through and rejects on mismatch via
 /// [`KernelError::ObligationHashMismatch`].
 ///
-
 /// Future phases (one per backend): parse Z3's `(proof …)` tree
 /// format, CVC5's `ALETHE` format, reconstruct each rule's witness
 /// term compositionally.
@@ -1620,7 +1594,6 @@ pub fn replay_smt_cert(_ctx: &Context, cert: &SmtCertificate) -> Result<CoreTerm
 /// V8 — replay an SMT certificate **and** verify its
 /// `obligation_hash` matches the supplied `expected_hash`.
 ///
-
 /// This is the soundness-correct path for any caller that has a
 /// concrete goal in hand (e.g., the gradual-verification driver
 /// computing the expected obligation hash from the goal AST and
@@ -1628,7 +1601,6 @@ pub fn replay_smt_cert(_ctx: &Context, cert: &SmtCertificate) -> Result<CoreTerm
 /// non-comparison primitive [`replay_smt_cert`] with the explicit
 /// hash equality check the V0 doc *claimed* but didn't perform.
 ///
-
 /// Behaviour:
 ///  1. Hash equality is checked **before** replay so a mismatched
 ///  certificate doesn't waste backend-table dispatch work.
@@ -1662,13 +1634,11 @@ pub const CONJUNCTION_NAME: &str = "∧";
 
 /// Build the canonical Bool conjunction `p1 ∧ p2` as a CoreTerm.
 ///
-
 /// Internally the conjunction is encoded as a curried application
 /// `App(App(Var("∧"), p1), p2)` rather than a dedicated AST variant,
 /// so existing kernel infrastructure (substitute, free_vars,
 /// normalize) treats it uniformly with other binary operators.
 ///
-
 /// **Idempotence**: `make_conjunction(p, p)` does NOT collapse to
 /// `p` — that would require knowing the predicate has Bool type,
 /// which the kernel re-checker enforces at refinement-formation
@@ -1702,22 +1672,18 @@ pub fn is_conjunction(t: &CoreTerm) -> Option<(&CoreTerm, &CoreTerm)> {
 
 /// K-Refine Refine fold:
 ///
-
 ///  `Refine(Refine(B, x: p₁), x: p₂)` → `Refine(B, x: p₁ ∧ p₂)`
 ///
-
 /// When the outer and inner binders differ, the inner predicate is
 /// alpha-renamed to use the outer binder so the conjunction is
 /// well-scoped (substitute(p₁, inner_binder, Var(outer_binder))).
 ///
-
 /// Returns `Some(folded)` when the term has the canonical
 /// nested-Refine shape; `None` otherwise. Idempotent under
 /// composition: applying twice produces the same shape (the second
 /// application sees `Refine(B, p₁ ∧ p₂)` which is no longer
 /// `Refine(Refine, _)` — fold doesn't trigger).
 ///
-
 /// Soundness: the fold preserves the refinement semantics —
 /// `{ x : { y : B | p₁(y) } | p₂(x) }` ≡ `{ x : B | p₁(x) ∧ p₂(x) }`
 /// for every `x : B` in the underlying type theory (predicate-

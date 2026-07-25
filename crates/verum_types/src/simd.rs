@@ -107,7 +107,6 @@ impl std::error::Error for SimdTypeError {}
 
 /// Valid SIMD element types.
 ///
-
 /// These are the types that can be used as elements in Vec<T, N>.
 /// Each type has a known bit width used for lane count calculations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -325,7 +324,6 @@ impl SimdTargetFeature {
 
 /// SIMD type validation checker
 ///
-
 /// Provides compile-time validation for SIMD operations ensuring:
 /// - Element types implement SimdElement protocol
 /// - Lane counts are valid powers of 2
@@ -430,7 +428,6 @@ impl SimdTypeChecker {
 
     /// Validate a Vec<T, N> type.
     ///
-
     /// Checks:
     /// - T is a valid SimdElement type
     /// - N is a power of 2
@@ -515,7 +512,6 @@ impl SimdTypeChecker {
 
     /// Validate a Mask<N> type.
     ///
-
     /// Checks:
     /// - N is a power of 2
     /// - N is a valid lane count for some SIMD width
@@ -558,7 +554,6 @@ impl SimdTypeChecker {
 
     /// Validate a SIMD intrinsic call.
     ///
-
     /// Checks operand types match and operation is valid for element type.
     pub fn validate_intrinsic(
         &mut self,
@@ -768,7 +763,6 @@ impl SimdTypeChecker {
 
     /// Validate @multiversion attribute configuration.
     ///
-
     /// Checks:
     /// - All target features are valid
     /// - Features are supported on target platform

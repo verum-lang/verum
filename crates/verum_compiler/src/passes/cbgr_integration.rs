@@ -80,32 +80,25 @@ impl Default for CbgrPassConfig {
 
 /// CBGR optimization pass for automatic reference tier promotion
 ///
-
 /// This pass analyzes references in MIR functions and automatically promotes
 /// them from `&T` (CBGR-managed, ~15ns overhead) to `&checked T` (0ns overhead)
 /// when escape analysis proves safety.
 ///
-
 /// # Algorithm
 ///
-
 /// 1. Build CFG from MIR function
 /// 2. Run tier analysis (escape + dominance)
 /// 3. Apply tier decisions to MIR
 /// 4. Generate statistics
 ///
-
 /// # Example
 ///
-
 /// ```rust,ignore
 /// use verum_compiler::passes::cbgr_integration::CbgrOptimizationPass;
 ///
-
 /// let mut pass = CbgrOptimizationPass::new(CbgrPassConfig::default());
 /// let result = pass.run_on_function(&mut mir_function)?;
 ///
-
 /// println!("Promoted {} references", result.stats.tier1_count);
 /// ```
 pub struct CbgrOptimizationPass {
@@ -129,10 +122,8 @@ impl CbgrOptimizationPass {
 
     /// Run the CBGR optimization pass on a single function
     ///
-
     /// # Returns
     ///
-
     /// - `Ok(PassResult)`: Success with tier analysis statistics
     /// - `Err(List<Diagnostic>)`: Analysis failed with diagnostics
     pub fn run_on_function(
@@ -455,7 +446,6 @@ impl CbgrOptimizationPass {
 
     /// Apply tier decisions to MIR
     ///
-
     /// Updates reference layouts based on tier analysis:
     /// - Tier 1: Mark as promoted (CBGR checks eliminated)
     /// - Tier 0: Keep ThinRef with CBGR validation

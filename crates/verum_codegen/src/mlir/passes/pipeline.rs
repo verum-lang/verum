@@ -285,7 +285,6 @@ impl PipelineStats {
 
 /// Pass pipeline for Verum MLIR.
 ///
-
 /// Manages the sequence of optimization passes and provides
 /// a unified interface for running them.
 pub struct PassPipeline<'c> {
@@ -420,12 +419,10 @@ impl<'c> PassPipeline<'c> {
 
     /// Configure LLVM lowering passes.
     ///
-
     /// This configures the LLVM lowering pipeline using the comprehensive
     /// `create_to_llvm()` pass which handles all dialect conversions in
     /// the correct order with proper type converters.
     ///
-
     /// The comprehensive pass handles:
     /// - arith, cf, func, index, math → LLVM
     /// - memref → LLVM (with proper data layout)

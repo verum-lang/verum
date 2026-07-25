@@ -88,7 +88,6 @@ impl Default for CodegenConfig {
 
 /// High-level code generator
 ///
-
 /// Provides a simple interface for compiling LLVM IR to native code.
 pub struct Codegen<'ctx> {
     module: LlvmModule<'ctx>,

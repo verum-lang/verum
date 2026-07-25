@@ -43,10 +43,8 @@ impl ExecutionEngine {
     /// Invokes a function in a module. The `arguments` argument includes
     /// pointers to results of the function as well as arguments.
     ///
-
     /// # Safety
     ///
-
     /// This function modifies memory locations pointed by the `arguments`
     /// argument. If those pointers are invalid or misaligned, calling this
     /// function might result in undefined behavior.
@@ -68,10 +66,8 @@ impl ExecutionEngine {
 
     /// Register a symbol. This symbol will be accessible to the JIT'd codes.
     ///
-
     /// # Safety
     ///
-
     /// This function makes a pointer accessible to the execution engine. If a
     /// given pointer is invalid or misaligned, calling this function might
     /// result in undefined behavior.

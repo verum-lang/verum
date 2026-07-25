@@ -23,7 +23,6 @@ use crate::{CoreTerm, KernelError, UniverseLevel};
 
 /// Compute the M-iteration depth of a [`CoreTerm`].
 ///
-
 /// The depth function is the operational realisation of the Diakrisis
 /// metaisation modality `M`: every construct that semantically *speaks
 /// about* a lower-depth object bumps the depth by one. Framework axioms
@@ -32,7 +31,6 @@ use crate::{CoreTerm, KernelError, UniverseLevel};
 /// a universe-level construction), and named-type references that
 /// originate in the standard library all raise the count.
 ///
-
 /// The depth bound is consumed by the `K-Refine` rule: a refinement
 /// `{ x : base | P(x) }` is well-formed only when
 /// `m_depth(P) < m_depth(base) + 1`, i.e. `m_depth(P) ≤ m_depth(base)`.
@@ -40,10 +38,8 @@ use crate::{CoreTerm, KernelError, UniverseLevel};
 /// comprehension), which — via Yanofsky 2003 — closes every
 /// self-referential paradox schema in a cartesian-closed setting.
 ///
-
 /// The function is defined recursively:
 ///
-
 ///  * `Var`, `Universe(n)` — zero (variables have no M-iteration;
 ///  the universe level is reported as depth to align with the
 ///  stratification of the depth hierarchy).
@@ -59,7 +55,6 @@ use crate::{CoreTerm, KernelError, UniverseLevel};
 ///  about* their stated body).
 ///  * `SmtProof` — `0` (certificates themselves carry no M-iteration).
 ///
-
 /// Time complexity: O(n) in the size of the term tree. The kernel
 /// invokes this at each `Refine` / `Inductive` / `Axiom` check point;
 /// a single polynomial walk per well-formedness query.
@@ -183,14 +178,12 @@ pub fn m_depth(term: &CoreTerm) -> usize {
 /// Ordinal-valued modal-depth for the K-Refine-omega kernel rule
 /// (Theorem 136.T transfinite stratification).
 ///
-
 /// Encoding: Cantor-normal-form prefix below ε_0, mirroring the
 /// stdlib `core.theory_interop.coord::Ordinal` shape (single source
 /// of truth between kernel and stdlib). The kernel keeps its own
 /// definition because it cannot depend on stdlib at the trust
 /// boundary.
 ///
-
 ///  `OrdinalDepth { omega_coeff: 0, finite_offset: n }` encodes `n`
 ///  `OrdinalDepth { omega_coeff: 1, finite_offset: 0 }` encodes `ω`
 ///  `OrdinalDepth { omega_coeff: 1, finite_offset: k }` encodes `ω + k`
@@ -233,7 +226,6 @@ impl OrdinalDepth {
 
     /// `+ 1` — adds one to the ordinal in Cantor-normal form.
     ///
-
     /// **Soundness fix B4 **: pre-fix, the implementation
     /// used `finite_offset.saturating_add(1)`, which silently capped
     /// finite_offset at u32::MAX. The kernel rule
@@ -243,7 +235,6 @@ impl OrdinalDepth {
     /// modal operators the predicate actually contained. Soundness
     /// hole.
     ///
-
     /// V2 (this revision): when `finite_offset == u32::MAX`, the
     /// successor advances to the **next omega tier**: `(c, MAX) +
     /// 1 = (c + 1, 0)`. The omega coefficient itself saturates at
@@ -254,7 +245,6 @@ impl OrdinalDepth {
     /// and the K-rule then correctly rejects since
     /// `(MAX, MAX).lt(&(MAX, MAX)) == false`).
     ///
-
     /// V3 will lift this to ω² + ε_0 limit-ordinal arithmetic per
     /// Cantor-normal form §3.2 (Pohlers 2009); for /V2 the
     /// ω·n + k encoding is sufficient because `m_depth_omega` walks
@@ -303,29 +293,24 @@ impl OrdinalDepth {
 
 /// Modal-depth — `K-Refine-omega` modal-depth function `md^ω`.
 ///
-
 /// Per Definition 136.D1 (transfinite modal language L^ω_α):
 ///
-
 ///  md^ω(atomic) = 0
 ///  md^ω(□φ) = md^ω(φ) + 1
 ///  md^ω(◇φ) = md^ω(φ) + 1
 ///  md^ω(⋀_{i<κ} P_i) = sup_i md^ω(P_i)
 ///  md^ω(structural) = max(md^ω of children)
 ///
-
 /// Walks the term tree once, descending through all term shapes.
 /// For non-modal terms the walk reduces to `max-of-children` which
 /// preserves bit-identical behaviour with the V0 skeleton (modal
 /// operators were the only Rank-bumping shapes anyway).
 ///
-
 /// Termination: well-founded over the term tree depth (every
 /// recursion descends to a strictly smaller subterm). Per Lemma
 /// 136.L0 the ordinal recursion is well-defined for every term in
 /// the canonical-primitive language L^ω_α.
 ///
-
 /// Blocks: Berry, paradoxical Löb, paraconsistent
 /// Curry, Beth-Monk ω-iteration, and any ω·k or ω^ω modal-paradox
 /// witness. The K-Refine-omega rule (`check_refine_omega`) routes
@@ -462,20 +447,16 @@ pub(crate) fn ord_max(a: OrdinalDepth, b: OrdinalDepth) -> OrdinalDepth {
 
 /// Modal-depth — `K-Refine-omega` rule entry point.
 ///
-
 /// Verifies the transfinite-stratification invariant
 ///
-
 /// ```text
 ///  md^ω(P) < md^ω(A) + 1
 /// ```
 ///
-
 /// for a refinement type `{x : A | P(x)}`. V0 calls `m_depth_omega`
 /// (skeleton) and applies the lex-ordinal `lt` test; Future work will route
 /// modal operators through the full md^ω computation.
 ///
-
 /// Returns `Ok(())` when the invariant holds, otherwise
 /// `KernelError::ModalDepthExceeded` with both ranks rendered as
 /// canonical Unicode text.

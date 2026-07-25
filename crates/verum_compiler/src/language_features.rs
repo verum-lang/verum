@@ -23,7 +23,6 @@ use verum_common::Text;
 
 /// Full set of language feature flags consumed by the compiler.
 ///
-
 /// Fields map 1:1 to the `[types] / [runtime] / [codegen] / [meta] /
 /// [protocols] / [context] / [safety] / [test] / [debug]` sections of
 /// `verum.toml`. Changes here must be mirrored on the CLI side
@@ -375,7 +374,6 @@ impl LanguageFeatures {
     /// Validate consistency of feature flags. Errors surface the offending
     /// section and field, suitable for direct display to the user.
     ///
-
     /// Consistency rules:
     /// - `types.refinement` requires either `types.dependent` or some verification path.
     /// - `types.cubical` requires `types.dependent` (Path types depend on dependent typing).

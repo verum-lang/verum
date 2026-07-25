@@ -46,7 +46,6 @@ use crate::ty::{EqConst, EqTerm, ProjComponent};
 
 /// Translate an `EqTerm` into a `CubicalTerm`.
 ///
-
 /// Terms the cubical core does not model (arbitrary function
 /// application, projections, J) become opaque `Value` strings built
 /// from a canonical textual representation so that syntactic
@@ -230,7 +229,6 @@ fn format_eq_term(term: &EqTerm) -> String {
 /// normalizer. Both terms are translated to `CubicalTerm`, reduced to
 /// WHNF, and compared structurally.
 ///
-
 /// This is strictly more permissive than syntactic equality on
 /// `EqTerm` — every pair that is syntactically equal is also cubically
 /// equal, and additional identities like `transport Refl x ≡ x`,

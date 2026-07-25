@@ -154,7 +154,6 @@ pub struct LLVMOrcCJITDylibSearchOrderElement {
 
 /// A JITDylib search order.
 ///
-
 /// The list is terminated with an element containing a null pointer for the JD
 /// field.
 pub type LLVMOrcCJITDylibSearchOrder = *mut LLVMOrcCJITDylibSearchOrderElement;
@@ -177,11 +176,9 @@ pub struct LLVMOrcCLookupSetElement {
 
 /// A set of symbols to look up / generate.
 ///
-
 /// The list is terminated with an element containing a null pointer for the
 /// Name field.
 ///
-
 /// The creator is responsible for freeing the set and ensuring all strings
 /// are retained for the set's lifetime.
 pub type LLVMOrcCLookupSet = *mut LLVMOrcCLookupSetElement;
@@ -230,7 +227,6 @@ pub type LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction = extern "C" fn(
 
 /// Disposer for a custom generator.
 ///
-
 /// Will be called by ORC when the JITDylib that the generator is attached to
 /// is destroyed.
 pub type LLVMOrcDisposeCAPIDefinitionGeneratorFunction = extern "C" fn(Ctx: *mut ::libc::c_void);

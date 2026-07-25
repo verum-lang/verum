@@ -442,7 +442,6 @@ impl Token {
 
 /// Token kinds in the Verum language.
 ///
-
 /// Uses the `logos` derive macro for fast lexing.
 ///
 
@@ -984,7 +983,6 @@ pub enum TokenKind {
     /// - \p{Mn}: Non-spacing marks (diacritics)
     /// - \p{Mc}: Spacing marks
     ///
-
     /// Examples: `α`, `β`, `γ`, `Δ`, `∑`, `∏`, `café`, `naïve`, `数据`, `データ`
     #[regex(r"[\p{L}\p{Nl}_][\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}_]*", |lex| Text::from(lex.slice()))]
     Ident(Text),
@@ -993,20 +991,17 @@ pub enum TokenKind {
     /// Float literal with optional suffix: `3.14`, `1.0e10`, `2.5E-3`, `1e10`
     /// Also supports hexadecimal floats (IEEE 754): `0x1p0`, `0x1.8p10`, `0x1.Fp-3`
     ///
-
     /// Match:
     ///  - digit(s), dot, digit(s), optional exponent, optional suffix
     ///  - digit(s), exponent (no dot), optional suffix
     ///  - 0x hex digits, optional fraction, p/P exponent (hexfloat)
     ///
-
     /// Hexfloat format (IEEE 754):
     ///  0x<mantissa>[.<fraction>]p[+-]<exponent>
     ///  - mantissa/fraction: hex digits (0-9, a-f, A-F)
     ///  - exponent: decimal digits (power of 2)
     ///  - Example: 0x1.8p10 = 1.5 × 2^10 = 1536.0
     ///
-
     /// Note: Float patterns have higher priority than integer patterns to match scientific notation.
     /// Hexfloat patterns have highest priority to avoid conflict with hex integers.
     /// Suffix variants have higher priority than non-suffix to avoid ambiguity.
@@ -1112,12 +1107,10 @@ pub enum TokenKind {
 
     /// Text literal: `"hello"` or `"""multiline raw"""`
     ///
-
     /// Simplified architecture (no r#"..."# syntax):
     /// - `"..."` - plain string with escape processing
     /// - `"""..."""` - raw multiline (no escapes, whitespace preserved)
     ///
-
     /// Accepts any escape sequence - validation happens at parse time
     #[regex(r#"""""#, parse_multiline_string)]
     #[regex(r####"r#{1,4}""####, parse_raw_string, priority = 100)]
@@ -1147,7 +1140,6 @@ pub enum TokenKind {
     /// Grammar: `contract_literal = 'contract' '#' (plain_string | raw_string)`
     /// Contains preconditions (`requires`), postconditions (`ensures`), and invariants.
     ///
-
     /// # Syntax
     /// ```verum
     /// contract#"""
@@ -1170,7 +1162,6 @@ pub enum TokenKind {
     /// chemistry (chem), music, URL (url), email, shell (sh), TOML (toml)
     /// NOTE: contract#"..." is a SEPARATE token (compiler intrinsic)
     ///
-
     /// Simplified literal architecture (no r#"..."# or tag#"..."# syntax):
     /// - `tag#"..."` - plain string with escape processing
     /// - `tag#"""..."""` - raw multiline (no escapes)
@@ -1241,7 +1232,6 @@ pub enum TokenKind {
 
     /// Character literal: Single-quoted characters including escape sequences
     ///
-
     /// Supports:
     /// - Simple ASCII chars: 'a', 'b', '@', '!'
     /// - Escape sequences: '\n', '\t', '\\', '\''
@@ -1249,18 +1239,15 @@ pub enum TokenKind {
     /// - Unicode escapes: '\u{1F600}' (1-6 hex digits)
     /// - Unicode chars: Multi-byte UTF-8 characters
     ///
-
     /// Priority 110 ensures Char literals take precedence over Lifetimes (priority 100)
     /// This allows 'a' to be a char literal while 'abc becomes a lifetime
     ///
-
     /// Pattern explanation:
     /// - `'[^'\\]'` matches any single char except quote or backslash: 'a', '世', etc.
     /// - `'\\x[0-9a-fA-F]{2}'` matches hex escapes: '\x41'
     /// - `'\\u\{[0-9a-fA-F]{1,6}\}'` matches unicode escapes: '\u{1F600}'
     /// - `'\\[nrt\\'"]'` matches other escape sequences: '\n', '\t', '\\', '\''
     ///
-
     /// INVALID patterns (multi-character literals) - must have LOWER priority than Lifetime (100)
     /// so that patterns like 'abc are lexed as lifetimes, not errors.
     /// These patterns specifically target actual multi-character literals like 'ab' or 'abc',
@@ -1270,7 +1257,6 @@ pub enum TokenKind {
     /// - `'[^'\\][\w]+'?` matches multi-char literals like 'ab', 'abc' (alphanumeric continuation)
     /// - `'\\[nrt\\'"]\\[nrt\\'"]+'?` matches multi-escape like '\n\t'
     ///
-
     /// These return None which becomes TokenKind::Error.
     /// Priority 50 ensures these are checked AFTER Lifetime (100) and Char (110) patterns.
     #[regex(r#"'[^'\\][\w]+'?"#, |_lex| Option::<char>::None, priority = 50)]
@@ -2035,13 +2021,10 @@ fn parse_float_with_suffix(lex: &mut logos::Lexer<TokenKind>) -> Option<FloatLit
 
 /// Parse hexadecimal floating-point literal (IEEE 754 format).
 ///
-
 /// Format: 0x<mantissa>[.<fraction>]p[+-]<exponent>
 ///
-
 /// The value is calculated as: mantissa × 2^exponent
 ///
-
 /// Examples:
 /// - `0x1p0` = 1.0 × 2^0 = 1.0
 /// - `0x1p1` = 1.0 × 2^1 = 2.0
@@ -2095,12 +2078,10 @@ fn parse_hexfloat_with_suffix(lex: &mut logos::Lexer<TokenKind>) -> Option<Float
 
 /// Split hexfloat literal into numeric part and optional suffix.
 ///
-
 /// Unlike `split_numeric_suffix`, this function handles the complexity of hexfloats
 /// where a-f/A-F are valid hex digits in the mantissa but can also be suffix starts
 /// after the exponent.
 ///
-
 /// Valid suffix examples: `0x1p0_f32`, `0x1.8p10_f64`
 /// Not a suffix: `0xAB_CDp0` (C and D are hex digits in the mantissa before 'p')
 fn split_hexfloat_suffix(s: &str) -> (&str, Maybe<Text>) {
@@ -2149,7 +2130,6 @@ fn split_hexfloat_suffix(s: &str) -> (&str, Maybe<Text>) {
 
 /// Parse hex mantissa with optional fractional part.
 ///
-
 /// Examples:
 /// - "1" → 1.0
 /// - "1.8" → 1.5 (1 + 8/16)
@@ -2178,7 +2158,6 @@ fn parse_hex_mantissa(s: &str) -> Option<f64> {
 
 /// Parse hex fractional digits.
 ///
-
 /// Each hex digit after the decimal point represents 1/16, 1/256, etc.
 /// Example: ".8" = 8/16 = 0.5
 ///  ".C" = 12/16 = 0.75
@@ -2374,7 +2353,6 @@ fn parse_string(lex: &mut logos::Lexer<TokenKind>) -> Option<Text> {
 
 /// Find closing `"""` in a string, handling quote doubling.
 ///
-
 /// When N >= 3 consecutive quotes are found, the last 3 close the string
 /// and any preceding (N-3) quotes are literal content. Returns
 /// `(content_end_byte, total_bytes_consumed)` or None if no closing `"""`.
@@ -3059,7 +3037,6 @@ pub fn unescape_string(s: &str) -> Text {
 /// This is a custom callback for logos that manually tracks nesting depth.
 /// Returns `logos::Skip` to indicate the token should be skipped.
 ///
-
 /// Example:
 /// ```verum
 /// /* outer /* inner */ still outer */

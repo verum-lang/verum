@@ -235,13 +235,11 @@ pub struct ProductivityDiagnostic {
 
 /// Check productivity of a corecursive function definition.
 ///
-
 /// Called from the type checker when `is_cofix = true`.
 /// `body_calls` is a list of `(callee_name, guard_depth)` pairs extracted
 /// from the function body, where `guard_depth` counts how many coinductive
 /// constructors wrap each recursive call site.
 ///
-
 /// Returns a non-empty `Vec` of diagnostics when the definition is
 /// non-productive (i.e. at least one recursive call has `guard_depth == 0`).
 /// Returns an empty `Vec` when the definition is productive.

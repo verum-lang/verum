@@ -378,10 +378,8 @@ pub fn skip_until(tokens: &[Token], start: usize, sync: SyncPoint) -> usize {
 /// Apply a recovery strategy to advance the parser state.
 /// Returns the new position and an optional synthetic token to insert.
 ///
-
 /// # Arguments
 ///
-
 /// * `strategy` - The recovery strategy to apply
 /// * `tokens` - The token slice being parsed
 /// * `error_pos` - The position where the error occurred

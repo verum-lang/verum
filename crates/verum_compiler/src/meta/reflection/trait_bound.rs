@@ -8,7 +8,6 @@ use verum_common::{List, Text};
 
 /// Information about a trait/protocol bound
 ///
-
 /// Matches: core/meta/reflection.vr TraitBound
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitBound {

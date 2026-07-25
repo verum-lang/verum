@@ -51,7 +51,6 @@ impl<'s> CompilationPipeline<'s> {
     /// Phase 2.9: Safety feature gates (unsafe blocks, unsafe fn,
     /// `@ffi` / extern fn, per `[safety]` in verum.toml).
     ///
-
     /// **Runs independently of verify_mode** so `--verify runtime`
     /// cannot silently bypass the gate. Invoked by BOTH the
     /// interpreter and AOT paths before type-checking. Emits a
@@ -86,7 +85,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Stdlib-hazard lint pass.
     ///
-
     /// Pure AST walk; runs before type checking so the user sees
     /// W05xx warnings even when the module has type errors that
     /// would stop the pipeline at `phase_type_check`. Findings
@@ -997,15 +995,12 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 3b: Dependency analysis for embedded constraints
     ///
-
     /// This phase validates that items are compatible with the target profile's
     /// constraints (no_alloc, no_std, embedded, cbgr_static_only, no_gpu).
     ///
-
     /// It runs after type checking to ensure all types are resolved before
     /// analyzing their dependency requirements.
     ///
-
     /// Validates items against target profile constraints (no_alloc, no_std, etc.).
     pub(super) fn phase_dependency_analysis(&self, module: &Module) -> Result<()> {
         use crate::phases::dependency_analysis::DependencyAnalyzer;
@@ -1553,7 +1548,6 @@ impl<'s> CompilationPipeline<'s> {
     /// Phase 4b: FFI Boundary Validation
     /// Phase 4c: Context System Validation
     ///
-
     /// Validates context usage: undeclared contexts, unprovided contexts,
     /// negative context violations (direct + transitive), and conflicts.
     /// Runs as warnings for now (errors would break existing code that
@@ -1617,7 +1611,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 4d: Send/Sync compile-time enforcement
     ///
-
     /// Validates that types crossing thread boundaries (spawn, Channel.send, Shared)
     /// satisfy Send/Sync bounds. Emits warnings (not errors) for now.
     pub(super) fn phase_send_sync_validation(&self, module: &Module) {
@@ -1634,7 +1627,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 4b: FFI Boundary Validation
     ///
-
     /// `extern {}` blocks: warn-only (stdlib compatibility).
     /// `ffi {}` blocks: strict errors (user-written contracts must be correct).
 

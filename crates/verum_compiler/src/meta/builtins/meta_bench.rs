@@ -57,7 +57,6 @@ use crate::meta::BenchResult;
 
 /// Monotonic reference point for bench_now_ns / bench_start
 ///
-
 /// Uses `std::time::Instant::now()` at first call to establish a baseline.
 /// All subsequent calls compute elapsed nanos from this point.
 fn monotonic_nanos() -> i128 {
@@ -254,7 +253,6 @@ fn meta_bench_report(
 
 /// Get current estimated memory usage in bytes
 ///
-
 /// This returns the tracked `memory_used` field from the meta context.
 /// For a more accurate measurement, the compiler pipeline should update
 /// this field periodically.

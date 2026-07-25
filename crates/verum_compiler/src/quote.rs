@@ -23,7 +23,6 @@ use verum_lexer::{FloatLiteral, IntegerLiteral, Token, TokenKind};
 
 /// A stream of tokens representing generated code
 ///
-
 /// TokenStream is the fundamental type for code generation in meta functions.
 /// It can be parsed back into AST nodes for insertion into the compilation.
 #[derive(Debug, Clone)]
@@ -87,23 +86,18 @@ impl TokenStream {
 
     /// Parse the token stream as an expression
     ///
-
     /// This method converts the token stream into an AST expression node.
     /// The parser is invoked directly on the tokens, enabling meta-functions
     /// to generate code at compile-time.
     ///
-
     /// # Errors
     ///
-
     /// Returns `ParseError::EmptyTokenStream` if the token stream is empty.
     /// Returns `ParseError::ParseFailed` if the tokens don't form a valid expression.
     /// Returns `ParseError::UnconsumedTokens` if tokens remain after parsing.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let ts = quote! { 1 + 2 };
     /// let expr = ts.parse_as_expr().unwrap();
@@ -126,21 +120,16 @@ impl TokenStream {
 
     /// Parse the token stream as a type
     ///
-
     /// This method converts the token stream into an AST type node.
     ///
-
     /// # Errors
     ///
-
     /// Returns `ParseError::EmptyTokenStream` if the token stream is empty.
     /// Returns `ParseError::ParseFailed` if the tokens don't form a valid type.
     /// Returns `ParseError::UnconsumedTokens` if tokens remain after parsing.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let ts = quote! { List<Int> };
     /// let ty = ts.parse_as_type().unwrap();
@@ -161,22 +150,17 @@ impl TokenStream {
 
     /// Parse the token stream as an item (function, type, etc.)
     ///
-
     /// This method converts the token stream into an AST item node (function declaration,
     /// type definition, protocol, etc.).
     ///
-
     /// # Errors
     ///
-
     /// Returns `ParseError::EmptyTokenStream` if the token stream is empty.
     /// Returns `ParseError::ParseFailed` if the tokens don't form a valid item.
     /// Returns `ParseError::UnconsumedTokens` if tokens remain after parsing.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let ts = quote! {
     ///  fn add(a: Int, b: Int) -> Int {
@@ -202,32 +186,24 @@ impl TokenStream {
 
     /// Parse the token stream as multiple items (for staged metaprogramming).
     ///
-
     /// This method parses all items in the token stream. It's used when a meta
     /// function generates multiple items (e.g., a type definition and several
     /// functions implementing it).
     ///
-
     /// # Returns
     ///
-
     /// An empty list if the token stream is empty, or a list of all parsed items.
     ///
-
     /// # Errors
     ///
-
     /// Returns `ParseError::ParseFailed` if the tokens don't form valid items.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let ts = quote! {
     ///  type Point is { x: Float, y: Float };
     ///
-
     ///  fn distance(a: Point, b: Point) -> Float {
     ///  let dx = b.x - a.x;
     ///  let dy = b.y - a.y;
@@ -261,7 +237,6 @@ impl TokenStream {
 
     /// Convert a string into a token stream
     ///
-
     /// This is useful for creating simple token streams from code strings.
     pub fn from_str(source: &str, file_id: verum_ast::FileId) -> Result<Self, ParseError> {
         use verum_lexer::Lexer;
@@ -3909,7 +3884,6 @@ impl ToTokens for verum_ast::ty::Path {
 
 /// Emit a mount tree as tokens.
 ///
-
 /// Handles all MountTreeKind variants:
 /// - Path: simple import like `std.io.File`
 /// - Glob: glob import like `std.io.*`
@@ -4224,14 +4198,11 @@ pub fn literal_string(value: &str, span: Span) -> TokenStream {
 
 /// Builder for constructing token streams programmatically
 ///
-
 /// This provides a fluent API for building token streams with proper
 /// hygiene and interpolation support, similar to quote! in Rust proc macros.
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let builder = QuoteBuilder::new();
 /// let stream = builder
@@ -4282,7 +4253,6 @@ impl QuoteBuilder {
 
     /// Add a hygienic identifier (prevents capture from outer scope)
     ///
-
     /// Generated identifiers have a unique suffix to prevent variable capture.
     pub fn hygienic_ident(mut self, name: &str) -> Self {
         self.hygiene_counter += 1;
@@ -4420,7 +4390,6 @@ impl QuoteBuilder {
 
     /// Interpolate another token stream (unquote)
     ///
-
     /// This is equivalent to #var in quote! syntax.
     pub fn interpolate(mut self, stream: TokenStream) -> Self {
         self.stream.extend(stream);
@@ -4441,7 +4410,6 @@ impl QuoteBuilder {
 
     /// Interpolate with repetition (equivalent to #(...)* )
     ///
-
     /// Generates tokens for each item in the iterator, optionally with a separator.
     pub fn repeat<I, F>(mut self, items: I, separator: Option<&str>, mut generator: F) -> Self
     where
@@ -4593,16 +4561,13 @@ pub fn concat(parts: &[&str], span: Span) -> TokenStream {
 
 /// Create an identifier with a formatted name
 ///
-
 /// Supports both positional and named placeholders:
 /// - `{}` - Positional placeholder, replaced with args in order
 /// - `{0}`, `{1}`, etc. - Indexed placeholder
 /// - `{name}` - Named placeholder (must provide name=value pairs via format_ident_named)
 ///
-
 /// # Examples
 ///
-
 /// ```ignore
 /// // Positional: "get_{}_{}" with ["user", "id"] -> "get_user_id"
 /// // Indexed: "{1}_{0}" with ["suffix", "prefix"] -> "prefix_suffix"
@@ -4669,14 +4634,11 @@ pub fn format_ident(format: &str, args: &[&str], span: Span) -> TokenStream {
 
 /// Create an identifier with named placeholders
 ///
-
 /// Supports named placeholders like `{name}` which are replaced with
 /// corresponding values from the args slice of (name, value) pairs.
 ///
-
 /// # Examples
 ///
-
 /// ```ignore
 /// // "{type}_{field}" with [("type", "User"), ("field", "name")] -> "User_name"
 /// ```
@@ -4809,15 +4771,12 @@ impl<T: ToTokens> ToTokens for Maybe<T> {
 
 /// A parsed quote! invocation with interpolation support
 ///
-
 /// This struct represents a quasi-quotation that can contain interpolated
 /// variables and repetition patterns. It parses the quote! syntax and can
 /// expand it with provided context.
 ///
-
 /// # Syntax
 ///
-
 /// - `#name` - Single interpolation (substitutes a variable)
 /// - `#(#name),*` - Repetition with comma separator
 /// - `#(#name)*` - Repetition without separator
@@ -4940,7 +4899,6 @@ impl InterpolationKind {
 
 /// Context for expanding quote! macros
 ///
-
 /// This holds the values to be interpolated into the quasi-quotation.
 #[derive(Debug, Clone, Default)]
 pub struct MetaContext {
@@ -5021,14 +4979,11 @@ impl std::error::Error for QuoteError {}
 impl Quote {
     /// Parse a quote! invocation from a string
     ///
-
     /// This parses the quasi-quotation syntax, identifying interpolation
     /// points and repetition patterns.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// let quote = Quote::parse("let #name = #value;")?;
     /// ```
@@ -5191,7 +5146,6 @@ impl Quote {
 
     /// Expand the quote with the given context
     ///
-
     /// This substitutes all interpolation variables with their values
     /// from the context and expands repetition patterns.
     pub fn expand(self, context: &MetaContext) -> Result<TokenStream, QuoteError> {
@@ -5354,7 +5308,6 @@ struct RepetitionPattern {
 
 /// Generate an implement block
 ///
-
 /// # Example
 /// ```ignore
 /// let impl_block = generate_impl(

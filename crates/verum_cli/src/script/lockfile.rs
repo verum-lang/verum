@@ -127,7 +127,6 @@ impl ScriptLockfile {
 
     /// Conventional sidecar path: `<script>.lock`.
     ///
-
     /// Note: when `script` is a relative path, the result is too — the
     /// caller is responsible for canonicalisation if reproducibility
     /// across CWDs matters.
@@ -162,7 +161,6 @@ impl ScriptLockfile {
     /// Atomically write the lockfile to disk. Uses a tempfile +
     /// rename so a crash mid-write never leaves a partial file.
     ///
-
     /// Refreshes `updated_at` to "now" before serialising.
     pub fn write_to(&mut self, path: &Path) -> io::Result<()> {
         self.updated_at = now_secs();
@@ -190,7 +188,6 @@ impl ScriptLockfile {
     /// Compare this lockfile against a candidate `(source_bytes,
     /// compiler_version)` and decide whether it is still fresh.
     ///
-
     /// The check is intentionally conservative: any mismatch — schema,
     /// source-hash, or compiler — yields a regenerate verdict. Callers
     /// downstream don't need to inspect the discriminant unless they

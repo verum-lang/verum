@@ -62,17 +62,14 @@ pub const DEFAULT_COMPRESSION_LEVEL: i32 = 3;
 
 /// Compresses data using zstd.
 ///
-
 /// The compressed format is:
 /// - 4 bytes: uncompressed size (u32, little-endian)
 /// - N bytes: zstd compressed data
 ///
-
 /// # Arguments
 /// * `data` - The data to compress
 /// * `level` - Compression level (1-22, higher = better compression, slower)
 ///
-
 /// # Returns
 /// Compressed data with size header, or original data if compression doesn't help
 #[cfg(feature = "compression")]
@@ -104,11 +101,9 @@ pub fn compress_data(data: &[u8], level: i32) -> io::Result<Vec<u8>> {
 
 /// Decompresses data that was compressed with `compress_data`.
 ///
-
 /// # Arguments
 /// * `data` - The compressed data (including 4-byte size header)
 ///
-
 /// # Returns
 /// The decompressed data
 #[cfg(feature = "compression")]
@@ -242,28 +237,22 @@ use crate::types::{FieldDescriptor, StringId, TypeDescriptor, VariantDescriptor}
 
 /// Strips metadata from a module based on archive flags.
 ///
-
 /// This reduces archive size by removing debug/reflection information
 /// that is not needed at runtime. The stripping is lossy - information
 /// cannot be recovered without re-compilation.
 ///
-
 /// # Stripping Levels
 ///
-
 /// - `STRIP_FIELD_NAMES`: Replace field names with empty StringId
 /// - `STRIP_VARIANT_NAMES`: Replace variant names with empty StringId
 /// - `STRIP_CONSTRAINTS`: Clear type parameter bounds (post-verification)
 /// - `STRIP_PROTOCOL_DETAILS`: Keep only protocol indices (clear extra metadata)
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// use verum_vbc::archive::{ArchiveFlags, strip_module_metadata};
 ///
-
 /// let mut module = compile_module(source)?;
 /// strip_module_metadata(&mut module, ArchiveFlags::RELEASE_STRIP);
 /// // Module now has ~30% smaller serialized size
@@ -337,7 +326,6 @@ fn strip_variant_name(variant: &mut VariantDescriptor, strip_field_names: bool) 
 
 /// Calculates approximate size savings from stripping.
 ///
-
 /// Returns (original_estimate, stripped_estimate) in bytes.
 /// This is an estimate based on typical string and metadata sizes.
 pub fn estimate_stripping_savings(module: &VbcModule, flags: ArchiveFlags) -> (usize, usize) {
@@ -489,7 +477,6 @@ impl VbcArchive {
 
     /// Deserializes and returns a module by name.
     ///
-
     /// If the archive is compressed, the module data is automatically decompressed.
     pub fn load_module(&self, name: &str) -> VbcResult<VbcModule> {
         let entry_idx = self
@@ -518,14 +505,12 @@ impl VbcArchive {
     /// Loads a module from the archive **and** validates the
     /// per-instruction bytecode cross-references before returning.
     ///
-
     /// Use this when the archive comes from any non-trusted source:
     /// a download, a shared cache, a file edited by hand. Catches
     /// hand-crafted-bytecode attacks (out-of-range FunctionId,
     /// register-bounds violations, branch offsets landing mid-
     /// instruction, etc.) at load time instead of execution-reach.
     ///
-
     /// See [`deserialize_module_validated`] for the full list of
     /// invariants checked. Cost is O(N) in total instruction count
     /// across all functions in the module.
@@ -629,13 +614,11 @@ impl ArchiveBuilder {
 
     /// Sets the compression level (1-22).
     ///
-
     /// Only takes effect when the `COMPRESSED` flag is also set.
     /// - Level 1-3: Fast compression, moderate ratio
     /// - Level 4-9: Balanced compression
     /// - Level 10-22: Maximum compression, slower
     ///
-
     /// Default is 3 (fast with good ratio).
     pub fn with_compression_level(mut self, level: i32) -> Self {
         self.compression_level = level.clamp(1, 22);
@@ -644,7 +627,6 @@ impl ArchiveBuilder {
 
     /// Enables compression with the default compression level.
     ///
-
     /// This is a convenience method that sets the `COMPRESSED` flag.
     pub fn with_compression(self) -> Self {
         self.with_flags(ArchiveFlags::COMPRESSED)
@@ -652,7 +634,6 @@ impl ArchiveBuilder {
 
     /// Adds a pre-serialized module to the archive.
     ///
-
     /// If the archive has the `COMPRESSED` flag set, the data will be compressed
     /// using zstd before being stored.
     pub fn add_module_data(
@@ -716,7 +697,6 @@ impl ArchiveBuilder {
 
     /// Adds a VbcModule to the archive.
     ///
-
     /// If the archive has metadata stripping flags set, the module will be
     /// stripped before serialization. Use `add_module_unstripped` to bypass
     /// stripping even when flags are set.
@@ -748,7 +728,6 @@ impl ArchiveBuilder {
 
     /// Adds a VbcModule to the archive without applying metadata stripping.
     ///
-
     /// Use this when you need to preserve full metadata even in a release
     /// archive (e.g., for modules that require runtime reflection).
     pub fn add_module_unstripped(
@@ -763,7 +742,6 @@ impl ArchiveBuilder {
 
     /// Adds a VbcModule with explicit stripping flags (overrides archive flags).
     ///
-
     /// Use this for fine-grained control over which modules get stripped.
     pub fn add_module_with_strip_flags(
         &mut self,
@@ -856,7 +834,6 @@ pub fn write_archive<W: Write>(archive: &VbcArchive, mut writer: W) -> io::Resul
 /// Reads a VBC archive from a reader
 /// Architectural upper bounds for archive index entries.
 ///
-
 /// Hostile archives can claim `module_count`, `name_len`,
 /// `dep_count`, and `data_size` values up to their full integer
 /// range (u32 = 4 billion, u64 = 18 EB). Allocating those sizes
@@ -864,7 +841,6 @@ pub fn write_archive<W: Write>(archive: &VbcArchive, mut writer: W) -> io::Resul
 /// amplification denial-of-service: a 32-byte header can request
 /// terabytes of allocations.
 ///
-
 /// These bounds reflect "no real-world Verum archive ever
 /// approaches this" — any input that exceeds them is rejected as
 /// malformed before any allocation is performed.

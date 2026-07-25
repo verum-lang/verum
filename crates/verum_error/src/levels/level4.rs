@@ -74,7 +74,6 @@ use verum_common::Text;
 
 /// Security error
 ///
-
 /// Indicates an authentication or authorization failure.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Security violation: {message}")]
@@ -113,7 +112,6 @@ impl From<SecurityError> for VerumError {
 
 /// Capability violation
 ///
-
 /// Indicates an operation was attempted without required capabilities.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Capability violation: {capability}")]
@@ -152,7 +150,6 @@ impl From<CapabilityError> for VerumError {
 
 /// Sandbox escape attempt
 ///
-
 /// Indicates code attempted to escape its sandbox.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Sandbox violation: {message}")]

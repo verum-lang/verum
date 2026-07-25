@@ -62,7 +62,6 @@ use verum_common::{Heap, List, Maybe, Text};
 
 /// Builder derive macro implementation
 ///
-
 /// Generates ergonomic type-safe builder pattern with:
 /// - Compile-time required field verification
 /// - Optional fields with defaults
@@ -176,7 +175,6 @@ impl DeriveMacro for DeriveBuilder {
 impl DeriveBuilder {
     /// Generate the builder type declaration
     ///
-
     /// For each field in the original type:
     /// - Required fields (no default) become Maybe<T>
     /// - Optional fields (has default) keep their original type T
@@ -261,7 +259,6 @@ impl DeriveBuilder {
 
     /// Generate a setter method for a field
     ///
-
     /// ```verum
     /// fn field_name(mut self, value: FieldType) -> Self {
     ///  self.field_name = Maybe.Some(value); // for required fields
@@ -385,7 +382,6 @@ impl DeriveBuilder {
 
     /// Generate the build() method
     ///
-
     /// ```verum
     /// fn build(self) -> Result<TypeName, BuilderError> {
     ///  let field1 = self.field1.ok_or(BuilderError.MissingField("field1"))?;
@@ -393,7 +389,6 @@ impl DeriveBuilder {
     ///  // Optional fields just use their value
     ///  let field3 = self.field3; // Has default
     ///
-
     ///  Result.Ok(TypeName { field1, field2, field3 })
     /// }
     /// ```
@@ -630,7 +625,6 @@ impl DeriveBuilder {
 
     /// Generate the builder() static method for the original type
     ///
-
     /// ```verum
     /// fn builder() -> TypeNameBuilder {
     ///  TypeNameBuilder {
@@ -749,11 +743,9 @@ impl DeriveBuilder {
 
     /// Generate a compound item containing the builder type, builder impl, and origin impl
     ///
-
     /// Since the derive system expects a single Item, we package everything into
     /// a synthetic module or use a special ItemKind for compound derives.
     ///
-
     /// For now, we return the impl on the original type with the builder() method.
     /// The builder type and its impl will need special handling in the compiler pipeline.
     fn generate_compound_item(

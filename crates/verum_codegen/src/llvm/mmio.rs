@@ -64,7 +64,6 @@ use super::types::TypeLowering;
 
 /// Memory ordering for volatile operations.
 ///
-
 /// Controls the level of synchronization for volatile memory access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VolatileOrdering {
@@ -262,7 +261,6 @@ impl MmioStats {
 
 /// MMIO code generation context.
 ///
-
 /// Holds state and statistics for MMIO operations in a function.
 pub struct MmioLowering<'ctx> {
     /// Reference to the builder for generating instructions.
@@ -290,20 +288,16 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate a volatile load instruction.
     ///
-
     /// # Parameters
     /// - `ptr`: Pointer to the register/memory location
     /// - `width`: Width of the register
     /// - `name`: Name for the result value
     ///
-
     /// # Returns
     /// The loaded value as an integer.
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// // Reading a 32-bit status register
     /// let status = volatile_read(*volatile UART_STATUS);
@@ -337,15 +331,12 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate a volatile store instruction.
     ///
-
     /// # Parameters
     /// - `ptr`: Pointer to the register/memory location
     /// - `value`: Value to store
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// // Writing to a control register
     /// volatile_write(*volatile mut GPIO_CTRL, 0x0F);
@@ -368,24 +359,19 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate an atomic read-modify-write operation.
     ///
-
     /// This is used for operations like setting/clearing specific bits in a register.
     ///
-
     /// # Parameters
     /// - `ptr`: Pointer to the register
     /// - `value`: Value to combine with the register
     /// - `op`: The RMW operation (OR for set_bits, AND for clear_bits, etc.)
     /// - `ordering`: Memory ordering
     ///
-
     /// # Returns
     /// The previous value of the register.
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// // Set bits 0-3 atomically
     /// let old = atomic_or(*volatile mut STATUS, 0x0F);
@@ -410,18 +396,14 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate a memory barrier (fence instruction).
     ///
-
     /// This ensures all memory operations before the fence complete
     /// before any operations after it begin.
     ///
-
     /// # Parameters
     /// - `ordering`: Memory ordering for the fence
     ///
-
     /// # Example
     ///
-
     /// ```verum
     /// // Ensure all prior writes are visible before continuing
     /// memory_barrier();
@@ -441,15 +423,12 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate a set_bits operation for a register.
     ///
-
     /// Atomically sets the specified bits in the register.
     ///
-
     /// # Parameters
     /// - `ptr`: Pointer to the register
     /// - `mask`: Bitmask of bits to set
     ///
-
     /// # Returns
     /// The previous value of the register.
     pub fn set_bits(
@@ -462,15 +441,12 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate a clear_bits operation for a register.
     ///
-
     /// Atomically clears the specified bits in the register.
     ///
-
     /// # Parameters
     /// - `ptr`: Pointer to the register
     /// - `mask`: Bitmask of bits to clear (bits set to 1 will be cleared)
     ///
-
     /// # Returns
     /// The previous value of the register.
     pub fn clear_bits(
@@ -489,15 +465,12 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate a toggle_bits operation for a register.
     ///
-
     /// Atomically toggles (XORs) the specified bits in the register.
     ///
-
     /// # Parameters
     /// - `ptr`: Pointer to the register
     /// - `mask`: Bitmask of bits to toggle
     ///
-
     /// # Returns
     /// The previous value of the register.
     pub fn toggle_bits(
@@ -510,25 +483,20 @@ impl<'ctx> MmioLowering<'ctx> {
 
     /// Generate a modify_bits operation for a register.
     ///
-
     /// Reads, modifies, and writes back a register with a mask.
     /// Equivalent to: `(reg & ~clear_mask) | set_mask`
     ///
-
     /// # Parameters
     /// - `ptr`: Pointer to the register
     /// - `clear_mask`: Bits to clear (1 = clear)
     /// - `set_mask`: Bits to set (1 = set)
     /// - `width`: Width of the register
     ///
-
     /// # Returns
     /// The previous value of the register.
     ///
-
     /// # Note
     ///
-
     /// This is NOT atomic as a single operation. If atomicity is required,
     /// use a critical section.
     pub fn modify_bits(

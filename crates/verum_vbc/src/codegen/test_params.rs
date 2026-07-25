@@ -262,7 +262,6 @@ fn main() {
 
 /// Helper to compile a stdlib file and report any errors.
 ///
-
 /// Compile a stdlib `.vr` file with mount resolution.
 ///
 /// Auto-derives `core_root` by walking up from `path` until a
@@ -375,7 +374,6 @@ fn test_compile_stdlib_iterator() {
 
 /// Tests compilation of core/collections/list.vr
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` because `list.vr` brings
 /// the typed-OOM allocator primitives (`try_alloc` / `try_realloc`)
 /// in via `mount core.base.memory.{ … }`. Without mount resolution
@@ -424,7 +422,6 @@ fn test_compile_stdlib_primitives() {
 
 /// Tests compilation of core/text/text.vr
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` (same rationale as
 /// `test_compile_stdlib_list`).
 #[test]
@@ -438,7 +435,6 @@ fn test_compile_stdlib_text() {
 
 /// Tests compilation of core/collections/map.vr
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` for the same reason as
 /// `test_compile_stdlib_list`: `map.vr` mounts `try_alloc` /
 /// `try_realloc` from `core.base.memory`.
@@ -453,7 +449,6 @@ fn test_compile_stdlib_map() {
 
 /// Tests compilation of core/collections/set.vr
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` (same rationale as
 /// `test_compile_stdlib_list`).
 #[test]
@@ -503,7 +498,6 @@ fn test_compile_stdlib_file() {
 
 /// Tests compilation of core/base/ops.vr.
 ///
-
 /// Exercises the bottom-type alias `public type Never is !;` end-to-end
 /// (parser → AST `TypeDeclBody::Alias(TypeKind::Never)` → codegen). Use
 /// `compile_stdlib_file` because `ops.vr` declares its operator-overloading
@@ -555,7 +549,6 @@ fn test_compile_stdlib_memory() {
 
 /// Tests compilation of core/collections/deque.vr
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` (same rationale as
 /// `test_compile_stdlib_list`).
 #[test]
@@ -935,7 +928,6 @@ fn test_compile_stdlib_io_engine() {
 
 /// Tests compilation of core/io/fs.vr
 ///
-
 /// `fs.vr` mounts cross-module symbols from `io.protocols` (most
 /// notably `io_error_kind_from_os_code`, the per-platform errno-to-
 /// `IoErrorKind` mapping populated via @cfg). The mount-aware test
@@ -1001,7 +993,6 @@ fn test_compile_stdlib_net_tcp() {
 
 /// Tests compilation of core/net/udp.vr
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` because `udp.vr` brings
 /// platform-specific safe socket wrappers (`safe_set_ip_tos`,
 /// `safe_join_multicast_v4`, etc.) in via `mount sys.<os>.net.{ … }`.
@@ -1045,7 +1036,6 @@ fn test_compile_stdlib_mem_epoch() {
 
 /// Tests compilation of core/mem/header.vr.
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` because `header.vr` mounts
 /// the `cap_audit` writer helpers (record_revoke / record_attenuate /
 /// record_ref_incr / record_ref_decr / record_gen_bump) so every
@@ -1062,7 +1052,6 @@ fn test_compile_stdlib_mem_header() {
 
 /// Tests compilation of core/mem/heap.vr.
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` because `heap.vr` brings
 /// `SEGMENT_HUGE`, `SEGMENT_NORMAL`, `MemSegment`, page-size constants and
 /// segment-allocator helpers in via `mount super.segment.{ … }`. Without
@@ -1080,7 +1069,6 @@ fn test_compile_stdlib_mem_heap() {
 
 /// Tests compilation of core/mem/thin_ref.vr.
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` for the same reason as
 /// `test_compile_stdlib_mem_heap`: pulls cross-module CBGR symbols via
 /// `mount`.
@@ -1096,7 +1084,6 @@ fn test_compile_stdlib_mem_thin_ref() {
 
 /// Tests compilation of core/mem/fat_ref.vr.
 ///
-
 /// Uses `compile_stdlib_file_with_mounts` for the same reason as
 /// `test_compile_stdlib_mem_heap`.
 #[test]
@@ -1446,7 +1433,6 @@ fn test_compile_stdlib_math_topology() {
 
 /// Tests compilation of core/math/autodiff.vr
 ///
-
 /// Tests compilation of core/math/autodiff.vr
 #[test]
 fn test_compile_stdlib_math_autodiff() {

@@ -35,23 +35,19 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 0: stdlib Compilation & Preparation
     ///
-
     /// This phase runs once per build and compiles the Verum standard library
     /// from Rust source to static library, generating FFI exports and symbol
     /// registries for consumption by all execution tiers.
     ///
-
     /// Outputs are cached and reused across compilations unless verum_std
     /// source files change.
     ///
-
     /// **Mode-specific behavior:**
     /// - `Interpret` mode: SKIPPED - interpreter uses Rust native execution
     /// - `Check` mode: SKIPPED - type checking uses built-in type definitions
     /// - `Aot` mode: REQUIRED - static library for native linking
     /// - `Jit` mode: REQUIRED - symbol registry for JIT compilation
     ///
-
     /// Phase 0: Compile verum_std to static lib, generate C-compatible FFI exports,
     /// build symbol registry, prepare LLVM bitcode for LTO, cache monomorphized generics.
     pub(super) fn phase0_stdlib_preparation(&mut self) -> Result<()> {
@@ -129,7 +125,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Add synthetic exports for stdlib modules when AST-extracted exports are insufficient.
     ///
-
     /// Exports should be derived from actually compiled modules (the .vr source files).
     /// This function is now a no-op: all stdlib exports come from the actual module AST
     /// via `extract_exports_from_module`. Hardcoded synthetic exports were removed because
@@ -149,14 +144,12 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Find the workspace root directory using multiple strategies.
     ///
-
     /// Strategies (in priority order):
     /// 1. `VERUM_WORKSPACE_ROOT` environment variable (set by CLI/tests)
     /// 2. Walk up from the verum binary location (reliable for installed binaries)
     /// 3. Walk up from input file directory (original behavior)
     /// 4. Walk up from current working directory
     ///
-
     /// This ensures reliable workspace detection regardless of where the
     /// compilation is invoked from (test directories, CI/CD, etc.).
     pub(super) fn find_workspace_root(&self) -> Result<PathBuf> {
@@ -206,7 +199,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Helper: Walk up the directory tree from a starting path to find workspace root.
     ///
-
     /// A valid workspace root is identified by one of (in priority order):
     /// 1. A directory containing `core/mod.vr` (stdlib source tree — most reliable)
     /// 2. A directory containing `Verum.toml` with a `core/` sibling

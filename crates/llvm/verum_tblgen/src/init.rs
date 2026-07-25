@@ -197,10 +197,8 @@ impl<'a> TypedInit<'a> {
 
     /// Creates a new init from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// The raw object must be valid.
     #[allow(non_upper_case_globals)]
     pub unsafe fn from_raw(init: TableGenTypedInitRef) -> Self {
@@ -231,10 +229,8 @@ macro_rules! init {
         impl<'a> $name<'a> {
             /// Creates a new init from a raw object.
             ///
-
             /// # Safety
             ///
-
             /// The raw object must be valid.
             pub unsafe fn from_raw(raw: TableGenTypedInitRef) -> Self {
                 Self {
@@ -350,10 +346,8 @@ impl<'a> TryFrom<StringInit<'a>> for &'a str {
 impl<'a> StringInit<'a> {
     /// Converts the string init to a [`&str`].
     ///
-
     /// # Errors
     ///
-
     /// Returns a [`Utf8Error`] if the string init does not contain valid UTF-8.
     pub fn to_str(self) -> Result<&'a str, Utf8Error> {
         unsafe { StringRef::from_raw(tableGenStringInitGetValue(self.raw)) }.try_into()
@@ -378,7 +372,6 @@ init!(DagInit);
 impl<'a> DagInit<'a> {
     /// Returns an iterator over the arguments of the dag.
     ///
-
     /// The iterator yields tuples `(&str, TypedInit)`.
     pub fn args(self) -> DagIter<'a> {
         DagIter {
@@ -440,7 +433,6 @@ init!(ListInit);
 impl<'a> ListInit<'a> {
     /// Returns an iterator over the elements of the list.
     ///
-
     /// The iterator yields values of type [`TypedInit`].
     pub fn iter(self) -> ListIter<'a> {
         ListIter {

@@ -46,32 +46,25 @@ use super::CompilationPipeline;
 impl<'s> CompilationPipeline<'s> {
     /// Compile the standard library to a VBC archive.
     ///
-
     /// This method is only available in `StdlibBootstrap` mode (created via `new_core()`).
     /// It uses global type registration across ALL modules before compiling any module,
     /// which eliminates cross-module dependency constraints.
     ///
-
     /// # Flow
     ///
-
     /// 1. Discover all stdlib modules via `StdlibModuleResolver`
     /// 2. Parse ALL modules to AST
     /// 3. Register ALL types globally (multi-pass across all modules)
     /// 4. Compile each module to VBC bytecode
     /// 5. Build and write `stdlib.vbca` archive
     ///
-
     /// # Returns
     ///
-
     /// Returns `StdlibCompilationResult` containing compilation statistics,
     /// or an error if compilation fails.
     ///
-
     /// # Errors
     ///
-
     /// Returns an error if:
     /// - The pipeline is not in `StdlibBootstrap` mode
     /// - Module discovery fails
@@ -80,22 +73,17 @@ impl<'s> CompilationPipeline<'s> {
     /// - VBC codegen fails
     /// - Archive writing fails
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_compiler::{Session, CompilationPipeline, CoreConfig};
     ///
-
     /// let config = CoreConfig::new("stdlib")
     ///  .with_output("target/stdlib.vbca");
     ///
-
     /// let mut session = Session::default();
     /// let mut pipeline = CompilationPipeline::new_core(&mut session, config);
     ///
-
     /// let result = pipeline.compile_core()?;
     /// println!("Compiled {} modules with {} functions",
     ///  result.modules_compiled, result.functions_compiled);
@@ -819,7 +807,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Global type registration across ALL stdlib modules.
     ///
-
     /// Multi-pass registration order:
     /// 1. Import aliases
     /// 2. Type names (forward declarations)
@@ -1833,7 +1820,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Compile a stdlib module from pre-parsed AST.
     ///
-
     /// # Arguments
     /// * `module` - The module to compile
     /// * `ast_modules` - Pre-parsed AST modules for this module
@@ -2209,13 +2195,11 @@ impl<'s> CompilationPipeline<'s> {
     /// Checks if an undefined function error is a forward reference to a module
     /// that will be compiled later in the compilation sequence.
     ///
-
     /// # Arguments
     /// * `func_path` - The function path from the error (e.g., "darwin::tls::init_main_thread_tls")
     /// * `current_module` - The module currently being compiled (e.g., "sys")
     /// * `later_modules` - Set of modules that will be compiled after the current one
     ///
-
     /// # Returns
     /// `true` if this appears to be a forward reference to a later module
     fn is_forward_reference_to_later_module(

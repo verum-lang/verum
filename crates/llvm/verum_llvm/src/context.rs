@@ -415,7 +415,6 @@ impl PartialEq<ContextRef<'_>> for Context {
 
 /// A `Context` is a container for all LLVM entities including `Module`s.
 ///
-
 /// A `Context` is not thread safe and cannot be shared across threads. Multiple `Context`s
 /// can, however, execute on different threads simultaneously according to the LLVM docs.
 #[derive(Debug, PartialEq, Eq)]
@@ -428,7 +427,6 @@ unsafe impl Send for Context {}
 impl Context {
     /// Get raw [`LLVMContextRef`].
     ///
-
     /// This function is exposed only for interoperability with other LLVM IR libraries.
     /// It's not intended to be used by most users.
     pub fn raw(&self) -> LLVMContextRef {
@@ -437,10 +435,8 @@ impl Context {
 
     /// Creates a new `Context` from [`LLVMContextRef`].
     ///
-
     /// # Safety
     ///
-
     /// This function is exposed only for interoperability with other LLVM IR libraries.
     /// It's not intended to be used by most users, hence marked as unsafe.
     /// Use [`Context::create`] instead.
@@ -452,14 +448,11 @@ impl Context {
 
     /// Creates a new `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// ```
     pub fn create() -> Self {
@@ -472,14 +465,11 @@ impl Context {
     /// our `Mutex`. Therefore, using `Context::create()` is the preferred context
     /// creation function when you do not specifically need the global context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = unsafe {
     ///  Context::get_global(|_global_context| {
     ///  // do stuff
@@ -495,14 +485,11 @@ impl Context {
 
     /// Creates a new `Builder` for a `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// ```
@@ -513,14 +500,11 @@ impl Context {
 
     /// Creates a new `Module` for a `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// ```
@@ -531,14 +515,11 @@ impl Context {
 
     /// Creates a new `Module` for the current `Context` from a `MemoryBuffer`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let builder = context.create_builder();
@@ -547,14 +528,11 @@ impl Context {
     /// let fn_val = module.add_function("my_fn", fn_type, None);
     /// let basic_block = context.append_basic_block(fn_val, "entry");
     ///
-
     /// builder.position_at_end(basic_block);
     /// builder.build_return(None).unwrap();
     ///
-
     /// let memory_buffer = module.write_bitcode_to_memory();
     ///
-
     /// let module2 = context.create_module_from_ir(memory_buffer).unwrap();
     /// ```
     // REVIEW: I haven't yet been able to find docs or other wrappers that confirm, but my suspicion
@@ -571,12 +549,10 @@ impl Context {
 
     /// Creates an inline asm function pointer.
     ///
-
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let builder = context.create_builder();
@@ -585,7 +561,6 @@ impl Context {
     /// let fn_val = module.add_function("my_fn", fn_type, None);
     /// let basic_block = context.append_basic_block(fn_val, "entry");
     ///
-
     /// builder.position_at_end(basic_block);
     /// let asm_fn = context.i64_type().fn_type(&[context.i64_type().into(), context.i64_type().into()], false);
     /// let asm = context.create_inline_asm(
@@ -599,7 +574,6 @@ impl Context {
     /// );
     /// let params = &[context.i64_type().const_int(60, false).into(), context.i64_type().const_int(1, false).into()];
     ///
-
     /// builder.build_indirect_call(asm_fn, asm, params, "exit").unwrap();
     /// builder.build_return(None).unwrap();
     /// ```
@@ -627,18 +601,14 @@ impl Context {
 
     /// Gets the `VoidType`. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let void_type = context.void_type();
     ///
-
     /// assert_eq!(void_type.get_context(), context);
     /// ```
     #[inline]
@@ -648,18 +618,14 @@ impl Context {
 
     /// Gets the `IntType` representing 1 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let bool_type = context.bool_type();
     ///
-
     /// assert_eq!(bool_type.get_bit_width(), 1);
     /// assert_eq!(bool_type.get_context(), context);
     /// ```
@@ -670,18 +636,14 @@ impl Context {
 
     /// Gets the `IntType` representing 8 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     ///
-
     /// assert_eq!(i8_type.get_bit_width(), 8);
     /// assert_eq!(i8_type.get_context(), context);
     /// ```
@@ -692,18 +654,14 @@ impl Context {
 
     /// Gets the `IntType` representing 16 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i16_type = context.i16_type();
     ///
-
     /// assert_eq!(i16_type.get_bit_width(), 16);
     /// assert_eq!(i16_type.get_context(), context);
     /// ```
@@ -714,18 +672,14 @@ impl Context {
 
     /// Gets the `IntType` representing 32 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
     ///
-
     /// assert_eq!(i32_type.get_bit_width(), 32);
     /// assert_eq!(i32_type.get_context(), context);
     /// ```
@@ -736,18 +690,14 @@ impl Context {
 
     /// Gets the `IntType` representing 64 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i64_type = context.i64_type();
     ///
-
     /// assert_eq!(i64_type.get_bit_width(), 64);
     /// assert_eq!(i64_type.get_context(), context);
     /// ```
@@ -758,18 +708,14 @@ impl Context {
 
     /// Gets the `IntType` representing 128 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i128_type = context.i128_type();
     ///
-
     /// assert_eq!(i128_type.get_bit_width(), 128);
     /// assert_eq!(i128_type.get_context(), context);
     /// ```
@@ -780,18 +726,14 @@ impl Context {
 
     /// Gets the `IntType` representing a custom bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i42_type = context.custom_width_int_type(42);
     ///
-
     /// assert_eq!(i42_type.get_bit_width(), 42);
     /// assert_eq!(i42_type.get_context(), context);
     /// ```
@@ -802,19 +744,15 @@ impl Context {
 
     /// Gets the `MetadataType` representing 128 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::IntValue;
     ///
-
     /// let context = Context::create();
     /// let md_type = context.metadata_type();
     ///
-
     /// assert_eq!(md_type.get_context(), context);
     /// ```
     #[inline]
@@ -824,19 +762,15 @@ impl Context {
 
     /// Gets the `IntType` representing a bit width of a pointer. It will be assigned the referenced context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
-
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
@@ -854,20 +788,15 @@ impl Context {
 
     /// Gets the `FloatType` representing a 16 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f16_type = context.f16_type();
     ///
-
     /// assert_eq!(f16_type.get_context(), context);
     /// ```
     #[inline]
@@ -878,20 +807,15 @@ impl Context {
     /// Gets the `FloatType` representing bfloat16 with a 16 bit width. It will be assigned the current context.
     /// This is only available with LLVM >= 11.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let bf16_type = context.bf16_type();
     ///
-
     /// assert_eq!(bf16_type.get_context(), context);
     /// ```
     #[inline]
@@ -901,20 +825,15 @@ impl Context {
 
     /// Gets the `FloatType` representing a 32 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f32_type = context.f32_type();
     ///
-
     /// assert_eq!(f32_type.get_context(), context);
     /// ```
     #[inline]
@@ -924,20 +843,15 @@ impl Context {
 
     /// Gets the `FloatType` representing a 64 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f64_type = context.f64_type();
     ///
-
     /// assert_eq!(f64_type.get_context(), context);
     /// ```
     #[inline]
@@ -947,20 +861,15 @@ impl Context {
 
     /// Gets the `FloatType` representing a 80 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let x86_f80_type = context.x86_f80_type();
     ///
-
     /// assert_eq!(x86_f80_type.get_context(), context);
     /// ```
     #[inline]
@@ -970,20 +879,15 @@ impl Context {
 
     /// Gets the `FloatType` representing a 128 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f128_type = context.f128_type();
     ///
-
     /// assert_eq!(f128_type.get_context(), context);
     /// ```
     // IEEE 754-2008’s binary128 floats according to https://internals.rust-lang.org/t/pre-rfc-introduction-of-half-and-quadruple-precision-floats-f16-and-f128/7521
@@ -994,23 +898,17 @@ impl Context {
 
     /// Gets the `FloatType` representing a 128 bit width. It will be assigned the current context.
     ///
-
     /// PPC is two 64 bits side by side rather than one single 128 bit float.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f128_type = context.ppc_f128_type();
     ///
-
     /// assert_eq!(f128_type.get_context(), context);
     /// ```
     // Two 64 bits according to https://internals.rust-lang.org/t/pre-rfc-introduction-of-half-and-quadruple-precision-floats-f16-and-f128/7521
@@ -1021,19 +919,15 @@ impl Context {
 
     /// Gets the `PointerType`. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
-
     /// let context = Context::create();
     /// let ptr_type = context.ptr_type(AddressSpace::default());
     ///
-
     /// assert_eq!(ptr_type.get_address_space(), AddressSpace::default());
     /// assert_eq!(ptr_type.get_context(), context);
     /// ```
@@ -1044,20 +938,16 @@ impl Context {
 
     /// Creates a `StructType` definition from heterogeneous types in the current `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i16_type = context.i16_type();
     /// let struct_type = context.struct_type(&[i16_type.into(), f32_type.into()], false);
     ///
-
     /// assert_eq!(struct_type.get_field_types(), &[i16_type.into(), f32_type.into()]);
     /// ```
     // REVIEW: AnyType but VoidType? FunctionType?
@@ -1072,20 +962,16 @@ impl Context {
 
     /// Creates an opaque `StructType` with no type definition yet defined.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i16_type = context.i16_type();
     /// let struct_type = context.opaque_struct_type("my_struct");
     ///
-
     /// assert_eq!(struct_type.get_field_types(), &[]);
     /// ```
     #[inline]
@@ -1095,23 +981,17 @@ impl Context {
 
     /// Gets a named [`StructType`] from this `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// assert!(context.get_struct_type("foo").is_none());
     ///
-
     /// let opaque = context.opaque_struct_type("foo");
     ///
-
     /// assert_eq!(context.get_struct_type("foo").unwrap(), opaque);
     /// ```
     #[inline]
@@ -1121,14 +1001,11 @@ impl Context {
 
     /// Creates a constant `StructValue` from constant values.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i16_type = context.i16_type();
@@ -1136,7 +1013,6 @@ impl Context {
     /// let i16_two = i16_type.const_int(2, false);
     /// let const_struct = context.const_struct(&[i16_two.into(), f32_one.into()], false);
     ///
-
     /// assert_eq!(const_struct.get_type().get_field_types(), &[i16_type.into(), f32_type.into()]);
     /// ```
     #[inline]
@@ -1150,14 +1026,11 @@ impl Context {
 
     /// Append a named `BasicBlock` at the end of the referenced `FunctionValue`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -1165,13 +1038,10 @@ impl Context {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_basic_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 1);
     ///
-
     /// let last_basic_block = context.append_basic_block(fn_value, "last");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 2);
     /// assert_eq!(fn_value.get_first_basic_block().unwrap(), entry_basic_block);
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), last_basic_block);
@@ -1187,14 +1057,11 @@ impl Context {
 
     /// Append a named `BasicBlock` after the referenced `BasicBlock`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -1202,13 +1069,10 @@ impl Context {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_basic_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 1);
     ///
-
     /// let last_basic_block = context.insert_basic_block_after(entry_basic_block, "last");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 2);
     /// assert_eq!(fn_value.get_first_basic_block().unwrap(), entry_basic_block);
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), last_basic_block);
@@ -1227,14 +1091,11 @@ impl Context {
 
     /// Prepend a named `BasicBlock` before the referenced `BasicBlock`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -1242,13 +1103,10 @@ impl Context {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_basic_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 1);
     ///
-
     /// let first_basic_block = context.prepend_basic_block(entry_basic_block, "first");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 2);
     /// assert_eq!(fn_value.get_first_basic_block().unwrap(), first_basic_block);
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), entry_basic_block);
@@ -1264,14 +1122,11 @@ impl Context {
 
     /// Creates a `MetadataValue` tuple of heterogeneous types (a "Node") for the current context. It can be assigned to a value.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_two = i8_type.const_int(2, false);
@@ -1281,23 +1136,18 @@ impl Context {
     /// let f32_one = f32_type.const_float(1.);
     /// let void_type = context.void_type();
     ///
-
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
     /// let fn_type = void_type.fn_type(&[f32_type.into()], false);
     /// let fn_value = module.add_function("my_func", fn_type, None);
     /// let entry_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry_block);
     ///
-
     /// let ret_instr = builder.build_return(None).unwrap();
     ///
-
     /// assert!(md_node.is_node());
     ///
-
     /// ret_instr.set_metadata(md_node, 0);
     /// ```
     // REVIEW: Maybe more helpful to beginners to call this metadata_tuple?
@@ -1312,37 +1162,29 @@ impl Context {
 
     /// Creates a `MetadataValue` string for the current context. It can be assigned to a value.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let md_string = context.metadata_string("Floats are awesome!");
     /// let f32_type = context.f32_type();
     /// let f32_one = f32_type.const_float(1.);
     /// let void_type = context.void_type();
     ///
-
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
     /// let fn_type = void_type.fn_type(&[f32_type.into()], false);
     /// let fn_value = module.add_function("my_func", fn_type, None);
     /// let entry_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry_block);
     ///
-
     /// let ret_instr = builder.build_return(None).unwrap();
     ///
-
     /// assert!(md_string.is_string());
     ///
-
     /// ret_instr.set_metadata(md_string, 0);
     /// ```
     // REVIEW: Seems to be unassigned to anything
@@ -1353,23 +1195,18 @@ impl Context {
 
     /// Obtains the index of a metadata kind id. If the string doesn't exist, LLVM will add it at index `FIRST_CUSTOM_METADATA_KIND_ID` onward.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::FIRST_CUSTOM_METADATA_KIND_ID;
     ///
-
     /// let context = Context::create();
     ///
-
     /// assert_eq!(context.get_kind_id("dbg"), 0);
     /// assert_eq!(context.get_kind_id("tbaa"), 1);
     /// assert_eq!(context.get_kind_id("prof"), 2);
     ///
-
     /// // Custom kind id doesn't exist in LLVM until now:
     /// assert_eq!(context.get_kind_id("foo"), FIRST_CUSTOM_METADATA_KIND_ID);
     /// ```
@@ -1391,18 +1228,14 @@ impl Context {
 
     /// Creates an enum `Attribute` in this `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let enum_attribute = context.create_enum_attribute(0, 10);
     ///
-
     /// assert!(enum_attribute.is_enum());
     /// ```
     #[inline]
@@ -1412,18 +1245,14 @@ impl Context {
 
     /// Creates a string `Attribute` in this `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let string_attribute = context.create_string_attribute("my_key_123", "my_val");
     ///
-
     /// assert!(string_attribute.is_string());
     /// ```
     #[inline]
@@ -1433,14 +1262,12 @@ impl Context {
 
     /// Create an enum `Attribute` with an `AnyTypeEnum` attached to it.
     ///
-
     /// # Example
     /// ```rust
     /// use verum_llvm::context::Context;
     /// use verum_llvm::attributes::Attribute;
     /// use verum_llvm::types::AnyType;
     ///
-
     /// let context = Context::create();
     /// let kind_id = Attribute::get_named_enum_kind_id("sret");
     /// let any_type = context.i32_type().as_any_type_enum();
@@ -1449,7 +1276,6 @@ impl Context {
     ///  any_type,
     /// );
     ///
-
     /// assert!(type_attribute.is_type());
     /// assert_eq!(type_attribute.get_type_value(), any_type);
     /// assert_ne!(type_attribute.get_type_value(), context.i64_type().as_any_type_enum());
@@ -1461,19 +1287,15 @@ impl Context {
 
     /// Creates a const string which may be null terminated.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
-
     /// let context = Context::create();
     /// let string = context.const_string(b"my_string", false);
     ///
-
     /// assert_eq!(string.print_to_string().to_string(), "[9 x i8] c\"my_string\"");
     /// ```
     // SubTypes: Should return ArrayValue<IntValue<i8>>
@@ -1515,7 +1337,6 @@ pub struct ContextRef<'ctx> {
 impl<'ctx> ContextRef<'ctx> {
     /// Get raw [`LLVMContextRef`].
     ///
-
     /// This function is exposed only for interoperability with other LLVM IR libraries.
     /// It's not intended to be used by most users.
     pub fn raw(&self) -> LLVMContextRef {
@@ -1524,10 +1345,8 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a new `ContextRef` from [`LLVMContextRef`].
     ///
-
     /// # Safety
     ///
-
     /// This function is exposed only for interoperability with other LLVM IR libraries.
     /// It's not intended to be used by most users, hence marked as unsafe.
     pub unsafe fn new(context: LLVMContextRef) -> Self {
@@ -1539,14 +1358,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a new `Builder` for a `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// ```
@@ -1557,14 +1373,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a new `Module` for a `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// ```
@@ -1575,14 +1388,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a new `Module` for the current `Context` from a `MemoryBuffer`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let builder = context.create_builder();
@@ -1591,14 +1401,11 @@ impl<'ctx> ContextRef<'ctx> {
     /// let fn_val = module.add_function("my_fn", fn_type, None);
     /// let basic_block = context.append_basic_block(fn_val, "entry");
     ///
-
     /// builder.position_at_end(basic_block);
     /// builder.build_return(None).unwrap();
     ///
-
     /// let memory_buffer = module.write_bitcode_to_memory();
     ///
-
     /// let module2 = context.create_module_from_ir(memory_buffer).unwrap();
     /// ```
     // REVIEW: I haven't yet been able to find docs or other wrappers that confirm, but my suspicion
@@ -1615,12 +1422,10 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates an inline asm function pointer.
     ///
-
     /// # Example
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     /// let builder = context.create_builder();
@@ -1629,7 +1434,6 @@ impl<'ctx> ContextRef<'ctx> {
     /// let fn_val = module.add_function("my_fn", fn_type, None);
     /// let basic_block = context.append_basic_block(fn_val, "entry");
     ///
-
     /// builder.position_at_end(basic_block);
     /// let asm_fn = context.i64_type().fn_type(&[context.i64_type().into(), context.i64_type().into()], false);
     /// let asm = context.create_inline_asm(
@@ -1643,7 +1447,6 @@ impl<'ctx> ContextRef<'ctx> {
     /// );
     /// let params = &[context.i64_type().const_int(60, false).into(), context.i64_type().const_int(1, false).into()];
     ///
-
     /// builder.build_indirect_call(asm_fn, asm, params, "exit").unwrap();
     /// builder.build_return(None).unwrap();
     /// ```
@@ -1671,18 +1474,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `VoidType`. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let void_type = context.void_type();
     ///
-
     /// assert_eq!(void_type.get_context(), context);
     /// ```
     #[inline]
@@ -1692,18 +1491,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing 1 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let bool_type = context.bool_type();
     ///
-
     /// assert_eq!(bool_type.get_bit_width(), 1);
     /// assert_eq!(bool_type.get_context(), context);
     /// ```
@@ -1714,18 +1509,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing 8 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     ///
-
     /// assert_eq!(i8_type.get_bit_width(), 8);
     /// assert_eq!(i8_type.get_context(), context);
     /// ```
@@ -1736,18 +1527,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing 16 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i16_type = context.i16_type();
     ///
-
     /// assert_eq!(i16_type.get_bit_width(), 16);
     /// assert_eq!(i16_type.get_context(), context);
     /// ```
@@ -1758,18 +1545,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing 32 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i32_type = context.i32_type();
     ///
-
     /// assert_eq!(i32_type.get_bit_width(), 32);
     /// assert_eq!(i32_type.get_context(), context);
     /// ```
@@ -1780,18 +1563,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing 64 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i64_type = context.i64_type();
     ///
-
     /// assert_eq!(i64_type.get_bit_width(), 64);
     /// assert_eq!(i64_type.get_context(), context);
     /// ```
@@ -1802,18 +1581,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing 128 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i128_type = context.i128_type();
     ///
-
     /// assert_eq!(i128_type.get_bit_width(), 128);
     /// assert_eq!(i128_type.get_context(), context);
     /// ```
@@ -1824,18 +1599,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing a custom bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i42_type = context.custom_width_int_type(42);
     ///
-
     /// assert_eq!(i42_type.get_bit_width(), 42);
     /// assert_eq!(i42_type.get_context(), context);
     /// ```
@@ -1846,19 +1617,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `MetadataType` representing 128 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::IntValue;
     ///
-
     /// let context = Context::create();
     /// let md_type = context.metadata_type();
     ///
-
     /// assert_eq!(md_type.get_context(), context);
     /// ```
     #[inline]
@@ -1868,19 +1635,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `IntType` representing a bit width of a pointer. It will be assigned the referenced context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::OptimizationLevel;
     /// use verum_llvm::context::Context;
     /// use verum_llvm::targets::{InitializationConfig, Target};
     ///
-
     /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
@@ -1898,20 +1661,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `FloatType` representing a 16 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f16_type = context.f16_type();
     ///
-
     /// assert_eq!(f16_type.get_context(), context);
     /// ```
     #[inline]
@@ -1922,20 +1680,15 @@ impl<'ctx> ContextRef<'ctx> {
     /// Gets the `FloatType` representing bfloat16 with a 16 bit width. It will be assigned the current context.
     /// This is only available with LLVM >= 11.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let bf16_type = context.bf16_type();
     ///
-
     /// assert_eq!(bf16_type.get_context(), context);
     /// ```
     #[inline]
@@ -1945,20 +1698,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `FloatType` representing a 32 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f32_type = context.f32_type();
     ///
-
     /// assert_eq!(f32_type.get_context(), context);
     /// ```
     #[inline]
@@ -1968,20 +1716,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `FloatType` representing a 64 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f64_type = context.f64_type();
     ///
-
     /// assert_eq!(f64_type.get_context(), context);
     /// ```
     #[inline]
@@ -1991,20 +1734,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `FloatType` representing a 80 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let x86_f80_type = context.x86_f80_type();
     ///
-
     /// assert_eq!(x86_f80_type.get_context(), context);
     /// ```
     #[inline]
@@ -2014,20 +1752,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `FloatType` representing a 128 bit width. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f128_type = context.f128_type();
     ///
-
     /// assert_eq!(f128_type.get_context(), context);
     /// ```
     // IEEE 754-2008’s binary128 floats according to https://internals.rust-lang.org/t/pre-rfc-introduction-of-half-and-quadruple-precision-floats-f16-and-f128/7521
@@ -2038,23 +1771,17 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `FloatType` representing a 128 bit width. It will be assigned the current context.
     ///
-
     /// PPC is two 64 bits side by side rather than one single 128 bit float.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// let f128_type = context.ppc_f128_type();
     ///
-
     /// assert_eq!(f128_type.get_context(), context);
     /// ```
     // Two 64 bits according to https://internals.rust-lang.org/t/pre-rfc-introduction-of-half-and-quadruple-precision-floats-f16-and-f128/7521
@@ -2065,19 +1792,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets the `PointerType`. It will be assigned the current context.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
-
     /// let context = Context::create();
     /// let ptr_type = context.ptr_type(AddressSpace::default());
     ///
-
     /// assert_eq!(ptr_type.get_address_space(), AddressSpace::default());
     /// assert_eq!(ptr_type.get_context(), context);
     /// ```
@@ -2088,20 +1811,16 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a `StructType` definition from heterogeneous types in the current `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i16_type = context.i16_type();
     /// let struct_type = context.struct_type(&[i16_type.into(), f32_type.into()], false);
     ///
-
     /// assert_eq!(struct_type.get_field_types(), &[i16_type.into(), f32_type.into()]);
     /// ```
     // REVIEW: AnyType but VoidType? FunctionType?
@@ -2116,20 +1835,16 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates an opaque `StructType` with no type definition yet defined.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i16_type = context.i16_type();
     /// let struct_type = context.opaque_struct_type("my_struct");
     ///
-
     /// assert_eq!(struct_type.get_field_types(), &[]);
     /// ```
     #[inline]
@@ -2139,23 +1854,17 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Gets a named [`StructType`] from this `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     ///
-
     /// assert!(context.get_struct_type("foo").is_none());
     ///
-
     /// let opaque = context.opaque_struct_type("foo");
     ///
-
     /// assert_eq!(context.get_struct_type("foo").unwrap(), opaque);
     /// ```
     #[inline]
@@ -2165,14 +1874,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a constant `StructValue` from constant values.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let f32_type = context.f32_type();
     /// let i16_type = context.i16_type();
@@ -2180,7 +1886,6 @@ impl<'ctx> ContextRef<'ctx> {
     /// let i16_two = i16_type.const_int(2, false);
     /// let const_struct = context.const_struct(&[i16_two.into(), f32_one.into()], false);
     ///
-
     /// assert_eq!(const_struct.get_type().get_field_types(), &[i16_type.into(), f32_type.into()]);
     /// ```
     #[inline]
@@ -2190,14 +1895,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Append a named `BasicBlock` at the end of the referenced `FunctionValue`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -2205,13 +1907,10 @@ impl<'ctx> ContextRef<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_basic_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 1);
     ///
-
     /// let last_basic_block = context.append_basic_block(fn_value, "last");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 2);
     /// assert_eq!(fn_value.get_first_basic_block().unwrap(), entry_basic_block);
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), last_basic_block);
@@ -2227,14 +1926,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Append a named `BasicBlock` after the referenced `BasicBlock`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -2242,13 +1938,10 @@ impl<'ctx> ContextRef<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_basic_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 1);
     ///
-
     /// let last_basic_block = context.insert_basic_block_after(entry_basic_block, "last");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 2);
     /// assert_eq!(fn_value.get_first_basic_block().unwrap(), entry_basic_block);
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), last_basic_block);
@@ -2267,14 +1960,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Prepend a named `BasicBlock` before the referenced `BasicBlock`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     /// let void_type = context.void_type();
@@ -2282,13 +1972,10 @@ impl<'ctx> ContextRef<'ctx> {
     /// let fn_value = module.add_function("my_fn", fn_type, None);
     /// let entry_basic_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 1);
     ///
-
     /// let first_basic_block = context.prepend_basic_block(entry_basic_block, "first");
     ///
-
     /// assert_eq!(fn_value.count_basic_blocks(), 2);
     /// assert_eq!(fn_value.get_first_basic_block().unwrap(), first_basic_block);
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), entry_basic_block);
@@ -2304,14 +1991,11 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a `MetadataValue` tuple of heterogeneous types (a "Node") for the current context. It can be assigned to a value.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_two = i8_type.const_int(2, false);
@@ -2321,23 +2005,18 @@ impl<'ctx> ContextRef<'ctx> {
     /// let f32_one = f32_type.const_float(1.);
     /// let void_type = context.void_type();
     ///
-
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
     /// let fn_type = void_type.fn_type(&[f32_type.into()], false);
     /// let fn_value = module.add_function("my_func", fn_type, None);
     /// let entry_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry_block);
     ///
-
     /// let ret_instr = builder.build_return(None).unwrap();
     ///
-
     /// assert!(md_node.is_node());
     ///
-
     /// ret_instr.set_metadata(md_node, 0);
     /// ```
     // REVIEW: Maybe more helpful to beginners to call this metadata_tuple?
@@ -2349,37 +2028,29 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a `MetadataValue` string for the current context. It can be assigned to a value.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let md_string = context.metadata_string("Floats are awesome!");
     /// let f32_type = context.f32_type();
     /// let f32_one = f32_type.const_float(1.);
     /// let void_type = context.void_type();
     ///
-
     /// let builder = context.create_builder();
     /// let module = context.create_module("my_mod");
     /// let fn_type = void_type.fn_type(&[f32_type.into()], false);
     /// let fn_value = module.add_function("my_func", fn_type, None);
     /// let entry_block = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry_block);
     ///
-
     /// let ret_instr = builder.build_return(None).unwrap();
     ///
-
     /// assert!(md_string.is_string());
     ///
-
     /// ret_instr.set_metadata(md_string, 0);
     /// ```
     // REVIEW: Seems to be unassigned to anything
@@ -2390,23 +2061,18 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Obtains the index of a metadata kind id. If the string doesn't exist, LLVM will add it at index `FIRST_CUSTOM_METADATA_KIND_ID` onward.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::FIRST_CUSTOM_METADATA_KIND_ID;
     ///
-
     /// let context = Context::create();
     ///
-
     /// assert_eq!(context.get_kind_id("dbg"), 0);
     /// assert_eq!(context.get_kind_id("tbaa"), 1);
     /// assert_eq!(context.get_kind_id("prof"), 2);
     ///
-
     /// // Custom kind id doesn't exist in LLVM until now:
     /// assert_eq!(context.get_kind_id("foo"), FIRST_CUSTOM_METADATA_KIND_ID);
     /// ```
@@ -2417,18 +2083,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates an enum `Attribute` in this `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let enum_attribute = context.create_enum_attribute(0, 10);
     ///
-
     /// assert!(enum_attribute.is_enum());
     /// ```
     #[inline]
@@ -2438,18 +2100,14 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a string `Attribute` in this `Context`.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let string_attribute = context.create_string_attribute("my_key_123", "my_val");
     ///
-
     /// assert!(string_attribute.is_string());
     /// ```
     #[inline]
@@ -2459,14 +2117,12 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Create an enum `Attribute` with an `AnyTypeEnum` attached to it.
     ///
-
     /// # Example
     /// ```rust
     /// use verum_llvm::context::Context;
     /// use verum_llvm::attributes::Attribute;
     /// use verum_llvm::types::AnyType;
     ///
-
     /// let context = Context::create();
     /// let kind_id = Attribute::get_named_enum_kind_id("sret");
     /// let any_type = context.i32_type().as_any_type_enum();
@@ -2475,7 +2131,6 @@ impl<'ctx> ContextRef<'ctx> {
     ///  any_type,
     /// );
     ///
-
     /// assert!(type_attribute.is_type());
     /// assert_eq!(type_attribute.get_type_value(), any_type);
     /// assert_ne!(type_attribute.get_type_value(), context.i64_type().as_any_type_enum());
@@ -2487,19 +2142,15 @@ impl<'ctx> ContextRef<'ctx> {
 
     /// Creates a const string which may be null terminated.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::AnyValue;
     ///
-
     /// let context = Context::create();
     /// let string = context.const_string(b"my_string", false);
     ///
-
     /// assert_eq!(string.print_to_string().to_string(), "[9 x i8] c\"my_string\"");
     /// ```
     // SubTypes: Should return ArrayValue<IntValue<i8>>

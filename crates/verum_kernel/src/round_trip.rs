@@ -93,10 +93,8 @@ use crate::support::definitional_eq;
 
 /// `K-Round-Trip` admission rule ().
 ///
-
 /// Accepts:
 ///
-
 ///  * **V0 — identity sub-case.** `lhs == rhs` structurally — the
 ///  trivial round-trip on a syntactic-self-enactment.
 ///  * **V0 — `EpsilonOf` symmetric pair.** `lhs = EpsilonOf(F)` and
@@ -107,13 +105,11 @@ use crate::support::definitional_eq;
 ///  * **V1 — definitional-equality round-trip.** `lhs` and `rhs`
 ///  reduce to the same β-/ι-/δ-normal form.
 ///
-
 /// Rejects everything else with [`KernelError::RoundTripFailed`]
 /// tagged with `context`. Preprint-blocked: will extend the
 /// admit-set with the full canonicalize algorithm; are
 /// strictly necessary conditions, never silent-accept.
 ///
-
 /// Context: typically a human-readable label describing the
 /// callsite (e.g. `"AC/OC duality at Theorem 10.4"`), surfaced in
 /// the rejection diagnostic.
@@ -189,12 +185,10 @@ const CANONICALIZE_ITERATION_BUDGET: u32 = 64;
 /// [`crate::support::normalize`], iterating until a fixed point or
 /// the iteration budget is exhausted.
 ///
-
 /// The audit trail is mutated when a rewrite class can't be applied
 /// without invoking a `BridgeId` admit. A decidable run leaves the
 /// audit trail empty.
 ///
-
 /// `context` is propagated into every bridge admit so external
 /// reporters can attribute admits back to a callsite.
 pub fn canonical_form(term: &CoreTerm, audit: &mut BridgeAudit, context: &str) -> CoreTerm {
@@ -365,7 +359,6 @@ fn rewrite_one_pass(term: &CoreTerm, audit: &mut BridgeAudit, context: &str) -> 
 /// populated by every bridge admit invoked; `Err(...)` when even
 /// the universal algorithm can't admit the pair.
 ///
-
 /// V2 is **strictly stronger** than [`check_round_trip`]: every pair
 /// the algorithm admits is also admitted by V2 with an empty
 /// audit trail. Pairs that admits but rejects produce a

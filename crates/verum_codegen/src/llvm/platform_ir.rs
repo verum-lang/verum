@@ -36,14 +36,12 @@ use verum_llvm::{AddressSpace, IntPredicate};
 /// `AsyncRuntimeConfig::default()` etc.) reads it via a
 /// `verum_get_runtime_*` getter function.
 ///
-
 /// Default 0 for numeric fields is the documented "auto / use
 /// platform default" value — keeps the historical behaviour
 /// when the manifest is untouched. Non-zero overrides cascade
 /// into every spawned runtime object (worker pool, task stacks)
 /// at construction time.
 ///
-
 /// **Architectural prerequisite (#261)**: this struct + the
 /// globals + getters it emits are the reusable bridge for any
 /// future manifest-driven runtime wire (GC thresholds, async
@@ -288,13 +286,11 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Direct Linux syscall — libc-free emission of the kernel trap.
     ///
-
     /// Identical contract to `RuntimeLowering::emit_linux_syscall`:
     /// inline-asm with target-triple-driven arch dispatch
     /// (`syscall` on x86_64, `svc #0` on aarch64). Always 6-arg
     /// shape — pads with i64 zeros for unused args.
     ///
-
     /// Coerce a syscall i64 result to the wrapper's declared return
     /// type.  POSIX FFI commonly declares `Int32` returns; the syscall
     /// instruction yields i64.  Truncate (i64 → smaller int), accept
@@ -784,7 +780,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_raw_open3(path: ptr, flags: i32, mode: i32) -> i64
     ///
-
     /// Wraps the POSIX `open(path, flags, mode)` call. The key issue is that `open`
     /// is variadic (`int open(const char*, int, ...)`), and on ARM64 the variadic
     /// calling convention puts extra args on the stack instead of registers.
@@ -995,7 +990,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit the full allocator as LLVM IR — no C code needed.
     ///
-
     /// Algorithm: size-class freelist allocator with mmap-backed arena
     /// fallback. 9 power-of-two size classes (16, 32, 64, 128, 256,
     /// 512, 1024, 2048, 4096). Each class has a Treiber-stack
@@ -1004,7 +998,6 @@ impl<'ctx> PlatformIR<'ctx> {
     /// 2 MB mmap arena. Allocations larger than 4 KB skip freelist
     /// entirely and go straight to the bump path.
     ///
-
     /// Global state (LLVM global variables):
     ///  @__verum_arena_base : ptr — base of current arena block
     ///  @__verum_arena_ptr : ptr — next free byte in arena
@@ -1012,7 +1005,6 @@ impl<'ctx> PlatformIR<'ctx> {
     ///  @__verum_alloc_lock : i32 — spinlock (0=free, 1=locked)
     ///  @__verum_freelist_heads : [9 x ptr] — per-class freelist heads
     ///
-
     /// Size class formula: class = max(0, 64 - ctlz(size-1) - 4)
     ///   size <= 16  → class 0 (alloc 16)
     ///   size 17–32  → class 1 (alloc 32)
@@ -1020,12 +1012,10 @@ impl<'ctx> PlatformIR<'ctx> {
     ///   size 2049–4096 → class 8 (alloc 4096)
     ///   size > 4096 → bump-only, no freelist
     ///
-
     /// All paths preserve the "verum_alloc returns zeroed memory"
     /// invariant — bump path memsets fresh bytes; freelist hits
     /// memset recycled blocks.
     ///
-
     /// Concurrency: the existing `__verum_alloc_lock` spinlock
     /// serialises bump-arena AND freelist push/pop. Per-class
     /// lock-free Treiber-stack would scale better but introduces
@@ -1577,7 +1567,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_alloc(size: i64) -> ptr
     ///
-
     /// Platform-specific memory allocation without libc:
     ///  Unix: mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0)
     ///  Windows: VirtualAlloc(NULL, size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
@@ -1717,7 +1706,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_free(ptr: ptr, size: i64) -> void
     ///
-
     /// Platform-specific memory deallocation without libc:
     ///  Unix: munmap(ptr, size)
     ///  Windows: VirtualFree(ptr, 0, MEM_RELEASE)
@@ -1815,7 +1803,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_write(fd: i64, buf: ptr, count: i64) -> i64
     ///
-
     /// Platform-specific write without libc:
     ///  Unix: write(fd, buf, count) syscall
     ///  Windows: WriteFile(GetStdHandle(fd_to_handle), buf, count, &written, NULL)
@@ -2036,7 +2023,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_os_exit(code: i32) -> noreturn
     ///
-
     /// Platform-specific process exit without libc:
     ///  Unix: _exit(code) syscall
     ///  Windows: ExitProcess(code) from kernel32.dll
@@ -2217,17 +2203,14 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// On Windows without CRT, emit `mainCRTStartup` as the PE entry point.
     ///
-
     /// Unlike Unix `_start`, Windows entry point receives no argc/argv on the
     /// stack. We call `GetCommandLineW` + `CommandLineToArgvW` to obtain them,
     /// then forward to `main(argc, argv)`.
     ///
-
     /// For the initial V-LLSI implementation we emit a minimal entry that
     /// passes argc=0, argv=NULL — command-line parsing is handled by the
     /// Verum runtime (`verum_store_args` reads `GetCommandLineW` directly).
     ///
-
     /// **Cross-compilation note**: this method is ALWAYS available
     /// regardless of host OS — the caller (`emit_main_entry`'s
     /// dispatch site) gates the call on `target_is_windows(module)`,
@@ -2376,7 +2359,6 @@ impl<'ctx> PlatformIR<'ctx> {
     /// every call site after global-DCE — zero runtime overhead vs
     /// hardcoded values.
     ///
-
     /// Adding a new manifest-driven runtime knob: emit the global
     /// in `emit_runtime_globals` + add a getter call here. The
     /// stdlib accesses the getter via @intrinsic registration in
@@ -3455,7 +3437,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// CBGR memory safety stubs — always return true (valid).
     ///
-
     /// ThinRef layout: { ptr: ptr, generation: u32, epoch_and_caps: u32 } = 16 bytes
     /// FatRef layout (per `core/mem/fat_ref.vr` `@repr(C, size(32), align(8))`):
     ///   { ptr: ptr, generation: u32, epoch_and_caps: u32,
@@ -3464,7 +3445,6 @@ impl<'ctx> PlatformIR<'ctx> {
     /// which are common to both shapes, so a single emit handles both.
     /// AllocationHeader: 8 bytes before pointer (generation u32 + caps u32 packed).
     ///
-
     /// These are performance stubs — real CBGR checks will be re-enabled when
     /// the full header layout is migrated.
     fn emit_cbgr_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -4252,7 +4232,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Ensure common I/O syscalls are declared with Verum ABI (all i64 types).
     ///
-
     /// IMPORTANT: All syscalls use i64 parameter/return types to match VBC's uniform
     /// type convention. VBC-compiled FFI declarations from core/sys/*.vr also use i64.
     /// Using i32 would cause LLVM type conflicts when both are in the same module.
@@ -5248,14 +5227,12 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Declare libc-free wrappers for the BSD socket family.
     ///
-
     /// **Libc-free**: each declared function is an internal-linkage
     /// wrapper named `socket`, `bind`, `listen`, etc. (Verum keeps
     /// these public-looking names so VBC-compiled FFI declarations
     /// in `core/sys/**.vr` resolve against them). The wrapper body
     /// dispatches per-target:
     ///
-
     ///  * **Linux**: direct syscall via `emit_linux_syscall` with
     ///  the arch-correct number (x86_64 / aarch64 differ).
     ///  * **macOS / other Unix**: libSystem call (acceptable per
@@ -5264,19 +5241,16 @@ impl<'ctx> PlatformIR<'ctx> {
     ///  We tag the indirection with a `verum.libsys` attribute
     ///  so the linker driver can route through `-lSystem`.
     ///
-
     /// All names use the i64 ABI shape to match VBC-compiled FFI
     /// declarations from `core/sys/*.vr` — narrowing/widening to
     /// kernel-shape happens inside the wrapper body.
     ///
-
     /// Pre-fix this method declared `extern "C"` libc symbols
     /// directly, forcing every Verum AOT binary to drag in
     /// `libc.so.6` for the socket family on Linux. Post-fix the
     /// produced binary references zero libc symbols on the
     /// networking path; `ldd <bin>` shows only the dynamic linker.
     ///
-
     /// See `docs/architecture/no-libc-architecture.md`.
     fn ensure_networking_syscalls(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         // Per-syscall configuration: name + signature + Linux syscall
@@ -5355,14 +5329,12 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit a libc-free wrapper for one BSD-socket family symbol.
     ///
-
     /// Dispatches on `target_is_linux(module)` to pick between the
     /// direct-syscall path (Linux) and a libSystem indirection
     /// (macOS / other-Unix). The wrapper retains the historical
     /// libc symbol name so VBC-compiled FFI callers don't need
     /// updating; the function body dispatches under the hood.
     ///
-
     /// All wrappers use the i64-everywhere Verum ABI shape — the
     /// kernel ABI (i32 for fd, sockaddr ptrs, etc.) is constructed
     /// inside the body via truncation / `ptr_to_int` as needed by
@@ -14511,7 +14483,6 @@ impl<'ctx> PlatformIR<'ctx> {
     ///  cap_stdout: i64, cap_stderr: i64,
     ///  out_stdout_fd: ptr, out_stderr_fd: ptr) -> i64 (pid or -1)
     ///
-
     /// Forks a child process. If cap_stdout/cap_stderr are non-zero, creates pipes
     /// and redirects child stdout/stderr. Stores read-end fds via out pointers.
     fn emit_verum_process_spawn(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -14915,7 +14886,6 @@ impl<'ctx> PlatformIR<'ctx> {
     /// verum_process_run(program: ptr, argv: ptr, argc: i64,
     ///  out_status: ptr, out_stdout: ptr, out_stderr: ptr) -> i64
     ///
-
     /// Spawns process with stdout+stderr capture, waits for it, reads output.
     /// Returns 0 on success, -1 on failure.
     fn emit_verum_process_run(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -15093,7 +15063,6 @@ impl<'ctx> PlatformIR<'ctx> {
     /// verum_process_spawn_cmd(program: ptr, args_list: i64,
     ///  cap_stdout: i64, cap_stderr: i64) -> i64 (pid or -1)
     ///
-
     /// Parses List<Text> header to build argv, then calls verum_process_spawn.
     /// List layout (NewG): header at i64* with [obj_hdr(3), ptr(3), len(4), cap(5)]
     /// Offsets: ptr at byte 24, len at byte 32.
@@ -15361,7 +15330,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// verum_process_exec(program: ptr, args_list: i64) -> i64 (exit status or -1)
     ///
-
     /// Spawns process, captures stdout+stderr, waits, returns WEXITSTATUS.
     fn emit_verum_process_exec(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
@@ -15633,11 +15601,9 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit verum_futex_wait and verum_futex_wake as LLVM IR.
     ///
-
     /// macOS uses __ulock_wait/__ulock_wake (private but stable API).
     /// UL_COMPARE_AND_WAIT = 1, ULF_WAKE_ALL = 0x100.
     ///
-
     /// verum_futex_wait(addr: i64, expected: i64, timeout_ns: i64) -> i64
     /// verum_futex_wake(addr: i64, count: i64) -> i64
     fn emit_futex_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -19583,7 +19549,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit WASI (WebAssembly System Interface) function declarations.
     ///
-
     /// These are imported from the host environment when running as a WASI module.
     /// Provides I/O, filesystem, clocks, and random number generation.
     pub fn emit_wasi_declarations(&self, module: &Module<'ctx>) -> super::error::Result<()> {
@@ -19704,7 +19669,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// Emit WASM memory.grow wrapper for the allocator.
     ///
-
     /// In WASM, memory can only grow via the `memory.grow` instruction.
     /// This function wraps it as a callable function for the bump allocator.
     /// Returns the old memory size in pages (64KB each), or -1 on failure.

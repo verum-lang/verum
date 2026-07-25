@@ -144,7 +144,6 @@ fn decision(holds: bool, reason: impl Into<String>) -> Option<IntrinsicValue> {
 /// the name is not in the dispatch table OR the argument shape
 /// doesn't match.
 ///
-
 /// **Naming convention**: every intrinsic is named `kernel_<verb>` —
 /// matches the `core/proof/kernel_bridge.vr` axiom names.
 pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<IntrinsicValue> {
@@ -919,7 +918,6 @@ pub fn available_intrinsics() -> &'static [&'static str] {
 
 /// Returns true iff the given name is an available kernel intrinsic.
 ///
-
 /// Recognises both the bare dispatcher name (e.g.
 /// `kernel_grothendieck_construction`) AND its `_strict` form
 /// (`kernel_grothendieck_construction_strict`); the strict form is the
@@ -1496,7 +1494,6 @@ mod tests {
 
  /// **THE NON-VACUITY INVARIANT.**
  ///
-
  /// For every strict (parameterised) dispatcher, there must exist a
  /// pathological input that defeats it. This is the hard test
  /// that distinguishes Verum from "any system that justifies":

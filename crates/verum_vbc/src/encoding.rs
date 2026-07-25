@@ -36,7 +36,6 @@ use crate::instruction::{Reg, RegRange};
 
 /// Encodes a u64 as a variable-length integer.
 ///
-
 /// Returns the number of bytes written.
 #[inline]
 pub fn encode_varint(value: u64, output: &mut Vec<u8>) -> usize {
@@ -71,7 +70,6 @@ pub fn write_varint<W: Write>(value: u64, writer: &mut W) -> std::io::Result<usi
 
 /// Decodes a variable-length integer from a byte slice.
 ///
-
 /// Returns the value and the number of bytes consumed.
 #[inline]
 pub fn decode_varint(data: &[u8], offset: &mut usize) -> VbcResult<u64> {
@@ -156,7 +154,6 @@ pub fn read_varint<R: Read>(reader: &mut R) -> std::io::Result<u64> {
 
 /// Encodes a signed i64 using ZigZag encoding + VarInt.
 ///
-
 /// ZigZag maps signed integers to unsigned:
 /// - 0 -> 0, -1 -> 1, 1 -> 2, -2 -> 3, 2 -> 4, ...
 #[inline]
@@ -301,7 +298,6 @@ pub fn decode_u8(data: &[u8], offset: &mut usize) -> VbcResult<u8> {
 
 /// Encodes a register reference.
 ///
-
 /// - r0-r127: Single byte (0x00-0x7F)
 /// - r128-r16383: Two bytes (0x80 | high7, low8)
 #[inline]

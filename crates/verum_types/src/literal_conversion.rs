@@ -140,7 +140,6 @@ impl LiteralConverter {
 
     /// Convert a literal to a target type using protocol-based conversion
     ///
-
     /// This performs compile-time evaluation of the conversion function.
     pub fn convert_literal(
         &mut self,
@@ -227,7 +226,6 @@ impl LiteralConverter {
 
     /// Validate that a literal conversion function is const_eval
     ///
-
     /// All literal conversion functions must be evaluable at compile time.
     pub fn validate_const_eval(&self, _function_name: &str, _span: Span) -> Result<(), TypeError> {
         // In a full implementation, this would check that the function

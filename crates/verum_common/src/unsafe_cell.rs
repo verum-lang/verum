@@ -30,36 +30,29 @@ use std::cell::UnsafeCell as StdUnsafeCell;
 
 /// The core primitive for interior mutability.
 ///
-
 /// `UnsafeCell<T>` opts-out of the immutability guarantee for `&T`: a shared
 /// reference `&UnsafeCell<T>` may point to data that is being mutated. This is
 /// the only legal way to obtain aliasable data that is considered mutable.
 ///
-
 /// # Memory Layout
 /// ```text
 /// UnsafeCell<T> has the same memory layout as T
 /// No overhead, #[repr(transparent)]
 /// ```
 ///
-
 /// # Examples
 ///
-
 /// ```
 /// use verum_common::UnsafeCell;
 ///
-
 /// let cell = UnsafeCell::new(5);
 ///
-
 /// unsafe {
 ///  *cell.get() = 10;
 ///  assert_eq!(*cell.get(), 10);
 /// }
 /// ```
 ///
-
 /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
 /// Provides raw pointer access to inner value for interior mutability patterns.
 #[repr(transparent)]
@@ -70,18 +63,14 @@ pub struct UnsafeCell<T: ?Sized> {
 impl<T> UnsafeCell<T> {
     /// Constructs a new instance of `UnsafeCell` which will wrap the specified value.
     ///
-
     /// # Examples
     ///
-
     /// ```
     /// use verum_common::UnsafeCell;
     ///
-
     /// let cell = UnsafeCell::new(42);
     /// ```
     ///
-
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
     /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
@@ -93,20 +82,16 @@ impl<T> UnsafeCell<T> {
 
     /// Unwraps the value.
     ///
-
     /// # Examples
     ///
-
     /// ```
     /// use verum_common::UnsafeCell;
     ///
-
     /// let cell = UnsafeCell::new(42);
     /// let value = cell.into_inner();
     /// assert_eq!(value, 42);
     /// ```
     ///
-
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
     /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
@@ -118,31 +103,24 @@ impl<T> UnsafeCell<T> {
 impl<T: ?Sized> UnsafeCell<T> {
     /// Gets a mutable pointer to the wrapped value.
     ///
-
     /// This can be cast to a pointer of any kind. Ensure that the access is
     /// unique (no active references, mutable or not) when calling this method,
     /// and that the access is not used to violate aliasing rules.
     ///
-
     /// # Safety
     ///
-
     /// The caller must ensure that:
     /// - No data races occur
     /// - Aliasing rules are manually upheld
     /// - Access is properly synchronized if used across threads
     ///
-
     /// # Examples
     ///
-
     /// ```
     /// use verum_common::UnsafeCell;
     ///
-
     /// let cell = UnsafeCell::new(5);
     ///
-
     /// unsafe {
     ///  let ptr = cell.get();
     ///  *ptr = 10;
@@ -150,7 +128,6 @@ impl<T: ?Sized> UnsafeCell<T> {
     /// }
     /// ```
     ///
-
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
     /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
@@ -160,24 +137,19 @@ impl<T: ?Sized> UnsafeCell<T> {
 
     /// Returns a mutable reference to the underlying data.
     ///
-
     /// This call borrows the `UnsafeCell` mutably (at compile-time) which
     /// guarantees that we possess the only reference.
     ///
-
     /// # Examples
     ///
-
     /// ```
     /// use verum_common::UnsafeCell;
     ///
-
     /// let mut cell = UnsafeCell::new(5);
     /// *cell.get_mut() = 10;
     /// assert_eq!(cell.into_inner(), 10);
     /// ```
     ///
-
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
     /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]
@@ -187,16 +159,12 @@ impl<T: ?Sized> UnsafeCell<T> {
 
     /// Gets a mutable pointer to the wrapped value.
     ///
-
     /// This is the same as `get`, but the returned pointer is covariant.
     ///
-
     /// # Safety
     ///
-
     /// See [`get`](UnsafeCell::get) for safety requirements.
     ///
-
     /// UnsafeCell<T> is #[repr(transparent)] over T — same memory layout, zero overhead.
     /// Provides raw pointer access to inner value for interior mutability patterns.
     #[inline]

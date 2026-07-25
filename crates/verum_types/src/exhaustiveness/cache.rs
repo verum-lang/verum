@@ -178,7 +178,6 @@ impl ExhaustivenessCache {
 
     /// Get a cached result if available and valid.
     ///
-
     /// Honours the `enable_structural_cache` config gate: when
     /// `false`, the cache behaves as a permanent miss-only
     /// surface — every `get` returns `None` and stats record the
@@ -188,7 +187,6 @@ impl ExhaustivenessCache {
     /// invariants). Before this wire-up the field was inert —
     /// disabling the cache had no effect on lookup behaviour.
     ///
-
     /// Performance: Uses read lock first to check existence, only upgrades to
     /// write lock when necessary for updates.
     pub fn get(&self, key: &CacheKey) -> Option<ExhaustivenessResult> {

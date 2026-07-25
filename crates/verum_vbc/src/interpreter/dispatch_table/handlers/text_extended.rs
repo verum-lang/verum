@@ -9,10 +9,8 @@ use crate::value::Value;
 
 /// TextExtended (0x79) - Text parsing and conversion operations.
 ///
-
 /// Format: `[0x79] [sub_opcode:u8] [operands...]`
 ///
-
 /// Sub-opcodes:
 /// - 0x00: FromStatic - Create Text from static string data
 /// - 0x10: ParseInt - Parse integer from Text
@@ -24,7 +22,6 @@ use crate::value::Value;
 /// - 0x32: IsEmpty - Check if Text is empty
 /// - 0x33: IsUtf8 - Check if Text is valid UTF-8
 ///
-
 /// Performance: ~2ns dispatch via Rust match (vs ~15ns for LibraryCall)
 pub(in super::super) fn handle_text_extended(
     state: &mut InterpreterState,

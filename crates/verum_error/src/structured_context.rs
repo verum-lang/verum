@@ -47,7 +47,6 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// A value that can be stored in structured context
 ///
-
 /// Supports common data types and nested structures for rich error diagnostics.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContextValue {
@@ -133,7 +132,6 @@ impl ContextValue {
 
     /// Convert the value to a JSON string
     ///
-
     /// # Arguments
     /// * `pretty` - If true, format with indentation and newlines
     pub fn to_json(&self, pretty: bool) -> Text {
@@ -251,7 +249,6 @@ impl ContextValue {
 
     /// Convert the value to a YAML string
     ///
-
     /// # Arguments
     /// * `indent` - Current indentation level (use 0 for top-level)
     pub fn to_yaml(&self, indent: usize) -> Text {
@@ -334,7 +331,6 @@ impl ContextValue {
 
     /// Convert the value to Logfmt format (key=value pairs)
     ///
-
     /// Logfmt is a format popularized by Heroku that's easy for both humans
     /// and machines to parse. Values with spaces are quoted.
     pub fn to_logfmt(&self) -> Text {
@@ -403,7 +399,6 @@ impl fmt::Display for ContextValue {
 
 /// Trait for types that can be converted to ContextValue
 ///
-
 /// Implement this trait for custom types that should be usable in
 /// structured error contexts.
 pub trait ToContextValue {

@@ -73,7 +73,6 @@ pub fn locate_vtest(root: &std::path::Path) -> PathBuf {
 /// code (or `None` if the process was signalled) plus the merged
 /// stderr/stdout content as one string per stream.
 ///
-
 /// vtest's tracing subscriber lands warn-level lines on stdout when
 /// stderr is a pipe (because the test executor relays subprocess
 /// output through stdout for per-test reporting), even though

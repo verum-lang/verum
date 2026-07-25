@@ -74,7 +74,6 @@ pub struct SemanticAnalysisPhase {
 impl SemanticAnalysisPhase {
     /// Create a new semantic analysis phase in StdlibBootstrap mode.
     ///
-
     /// Uses minimal context with builtins only (no external stdlib).
     pub fn new() -> Self {
         Self {
@@ -99,7 +98,6 @@ impl SemanticAnalysisPhase {
 
     /// Create a new semantic analysis phase in NormalBuild mode.
     ///
-
     /// Uses pre-compiled stdlib types from the provided metadata.
     pub fn with_core(stdlib: Arc<CoreMetadata>) -> Self {
         Self {

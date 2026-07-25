@@ -72,13 +72,11 @@ use verum_common::well_known_types::type_names as tn;
 
 /// Panic-handling strategy for the AOT runtime.
 ///
-
 /// Mirrors the `[runtime].panic` Verum.toml field. Threaded from
 /// `CompilerOptions` through `LoweringConfig` to `PlatformIR::
 /// emit_panic_ir`, which selects between two body shapes for the
 /// `verum_panic` runtime function:
 ///
-
 ///  - **Unwind** (default): route the panic through
 ///  `verum_exception_throw`, which longjmps to the topmost
 ///  installed exception handler if one exists, falling through
@@ -88,7 +86,6 @@ use verum_common::well_known_types::type_names as tn;
 ///  "panic = unwind" semantic where caller-side `try { … }
 ///  catch { … }` blocks intercept panics.
 ///
-
 ///  - **Abort**: skip the exception infrastructure entirely;
 ///  emit "PANIC: …" to stderr and call `_exit(1)`. Defers do
 ///  NOT run. Use when the binary doesn't carry exception
@@ -96,7 +93,6 @@ use verum_common::well_known_types::type_names as tn;
 ///  the deployment policy mandates immediate process death on
 ///  any panic.
 ///
-
 /// Pre-fix `[runtime].panic` was tracing-only at session.rs:390
 /// — manifest setting had zero effect on the emitted runtime
 /// function, which always took the abort path.
@@ -225,7 +221,6 @@ pub struct LoweringConfig {
     /// and SLP-vectorize passes for the function regardless of
     /// opt level.
     ///
-
     /// Matters for projects that want predictable codegen — a
     /// loop that LLVM autovectorises at -O2 produces different
     /// generated code than the same loop at -O0 / -Os, which
@@ -233,7 +228,6 @@ pub struct LoweringConfig {
     /// channel resistance, and complicate review of emitted
     /// assembly for security-sensitive paths.
     ///
-
     /// Threaded from `[codegen].vectorize` in Verum.toml.
     /// Default `true` (vectorization enabled — matches the
     /// documented manifest default + LLVM's own default at
@@ -246,7 +240,6 @@ pub struct LoweringConfig {
     /// `AsyncRuntime::with_config` / `thread::Builder::new()
     /// .stack_size(...)`.
     ///
-
     /// Default all-zero — the stdlib falls through to its
     /// historical defaults (`num_cpus::get()`, platform stack
     /// size). Threaded from `pipeline/native_codegen.rs`.
@@ -257,7 +250,6 @@ pub struct LoweringConfig {
     /// which overrides the inliner's default 225 cost-unit budget
     /// for callees considered when inlining INTO this function.
     ///
-
     /// Mapping: `threshold = inline_depth * 75`.
     ///  - 0 → 0 (effectively suppresses inlining)
     ///  - 1 → 75 (very conservative)
@@ -266,7 +258,6 @@ pub struct LoweringConfig {
     ///  bit-identical to pre-wire builds)
     ///  - 16 → 1200 (very aggressive)
     ///
-
     /// At the default `inline_depth = 3`, the attribute is
     /// suppressed so default builds produce identical IR to
     /// pre-wire output. Closes the inert-defense pattern at
@@ -613,7 +604,6 @@ pub struct VbcToLlvmLowering<'ctx> {
 /// Coerce any `BasicValueEnum` to an LLVM `i1` boolean suitable for
 /// conditional branches (`JmpNot`, `JmpIf`).
 ///
-
 /// The VBC compiler may place comparison results in registers that hold
 /// pointer values (e.g. from C runtime string-comparison calls) or float
 /// values. Calling `into_int_value()` on those panics, so we handle every
@@ -861,7 +851,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Set VBC-level CBGR escape analysis results.
     ///
-
     /// When set, tier decisions from the escape analysis are applied to each
     /// function during LLVM lowering. References that the escape analysis
     /// proves non-escaping are promoted from Tier 0 (~15ns) to Tier 1 (0ns).
@@ -913,7 +902,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Lower a complete VBC module to LLVM IR.
     ///
-
     /// This is the main entry point for lowering. It processes the module in phases:
     /// 1. Forward declare all functions
     /// 2. Lower function bodies
@@ -1741,7 +1729,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Lower a list of pre-decoded VBC functions.
     ///
-
     /// Use this when you have already decoded the VBC functions.
     pub fn lower_functions(
         &mut self,
@@ -2058,7 +2045,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Apply optimization hints as LLVM function attributes.
     ///
-
     /// Maps VBC OptimizationHints to LLVM IR attributes:
     /// - @inline(always) -> `alwaysinline`
     /// - @inline(never) -> `noinline`
@@ -4265,7 +4251,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Remove LLVM functions that fail per-function verification.
     ///
-
     /// When compiling stdlib modules leniently, some functions may produce
     /// invalid LLVM IR (block structure issues, type mismatches from complex
     /// control flow). This pass verifies each function individually and removes
@@ -4378,7 +4363,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Declare POSIX/libc functions used by compiled stdlib modules.
     ///
-
     /// Compiled .vr modules (Mutex.vr, Condvar.vr, Thread.vr, Once.vr) call
     /// pthread functions directly. These must be declared in the LLVM module
     /// before VBC lowering (Phase 2) so the calls resolve correctly.
@@ -4604,7 +4588,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Remove compiled stdlib functions that use @cfg(target_os=...) dispatch.
     ///
-
     /// When compiled .vr code uses @cfg to dispatch to platform-specific modules,
     /// the @cfg is not evaluated at compile time. This produces functions that call
     /// themselves (infinite recursion). Remove them so calls fall through to C runtime.
@@ -4717,7 +4700,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
     /// Emit global constructors and destructors from VBC module metadata.
     ///
-
     /// Static variable initializers are wrapped in a single `__verum_static_init` function
     /// that calls each init function in order. This function is registered as a global
     /// constructor so it runs before main().

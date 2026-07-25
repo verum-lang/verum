@@ -204,11 +204,9 @@ pub struct GpuPipelineResult {
 
 /// GPU pass pipeline for Verum MLIR.
 ///
-
 /// Orchestrates the full GPU compilation pass sequence:
 /// VBC MLIR → linalg → scf.parallel → gpu.launch → target binary.
 ///
-
 /// This pipeline uses MLIR's built-in GPU passes from LLVM 21.x
 /// to perform kernel outlining, target attachment, and binary generation.
 pub struct GpuPassPipeline<'c> {
@@ -227,7 +225,6 @@ impl<'c> GpuPassPipeline<'c> {
     /// Whether the configured policy enables NVIDIA tensor-core
     /// utilization (mma.* PTX instructions on Volta+).
     ///
-
     /// Surfaces `GpuPassConfig.enable_tensor_cores` as a public
     /// read so kernel-level codegen layers can branch on the
     /// stance without re-reading the pipeline config.
@@ -237,7 +234,6 @@ impl<'c> GpuPassPipeline<'c> {
 
     /// Run the complete GPU pass pipeline on a module.
     ///
-
     /// Executes all phases in order, verifying the module after each
     /// phase if verification is enabled. Returns statistics about
     /// each phase's timing.
@@ -449,7 +445,6 @@ impl<'c> GpuPassPipeline<'c> {
 
     /// Run a single phase of the pipeline.
     ///
-
     /// Creates a fresh PassManager, configures it with the provided closure,
     /// runs it, and records timing. If the phase fails, returns an error
     /// with the phase name for diagnostics.

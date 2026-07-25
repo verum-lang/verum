@@ -19,17 +19,13 @@ use verum_common::{List, Text};
 
 /// Check if a pattern row is useful (adds coverage not provided by earlier patterns)
 ///
-
 /// # Arguments
 ///
-
 /// * `earlier_rows` - Rows from patterns that come before
 /// * `row` - The row to check for usefulness
 ///
-
 /// # Returns
 ///
-
 /// `true` if the row covers at least one case not covered by earlier rows
 pub fn is_useful(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
     // Empty matrix - this pattern is useful
@@ -418,7 +414,6 @@ fn is_useful_active(
 
 /// Check usefulness when the first column is a wildcard
 ///
-
 /// Performance: Uses HashSet<Text> for O(1) constructor lookup instead of O(n) list search
 fn is_useful_wildcard(earlier_rows: &[PatternRow], row: &PatternRow) -> bool {
     // Check if any earlier row has a wildcard in the first column (without a guard)
@@ -797,7 +792,6 @@ fn expand_constructor(col: &PatternColumn, _ctor: &Constructor) -> List<PatternC
 
 /// Collect constructor names from a pattern column (optimized with HashSet)
 ///
-
 /// Performance: O(1) insertion vs O(n) for List-based version
 fn collect_constructors_fast(col: &PatternColumn, out: &mut HashSet<Text>) {
     match col {

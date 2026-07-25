@@ -44,28 +44,22 @@ pub const GEN_NO_CHECK: u32 = 0x7FFE;
 
 /// Register file - storage for all registers across frames.
 ///
-
 /// The register file is a contiguous array where each frame occupies
 /// a slice starting at `base`. Registers within a frame are accessed
 /// as `base + reg.0`.
 ///
-
 /// # CBGR Generation and Epoch Tracking
 ///
-
 /// Each register slot has associated generation and epoch counters used by
 /// the CBGR (Capability-Based Generational References) system:
 ///
-
 /// - **Generation (32-bit)**: Bumped when variable goes out of scope
 /// - **Epoch (16-bit)**: Incremented when generation overflows, prevents ABA problem
 ///
-
 /// When a variable goes out of scope, its slot's generation is bumped,
 /// invalidating any references that captured the old generation.
 /// If generation would overflow GEN_MAX, epoch is incremented instead.
 ///
-
 /// CBGR register-level tracking: each register slot has a generation counter. On reassignment,
 /// generation increments, invalidating references that captured the old generation. ThinRef<T>
 /// is 16 bytes (ptr + generation + epoch_caps); FatRef<T> is 24 bytes (adds len). Tier 0 checks
@@ -118,7 +112,6 @@ impl RegisterFile {
 
     /// Fallibly allocates registers for a new frame.
     ///
-
     /// Returns the base offset for the frame's registers, or the
     /// would-be register count when the request would exceed
     /// [`MAX_SIZE`]. Callers that have an error channel should prefer
@@ -157,13 +150,10 @@ impl RegisterFile {
 
     /// Allocates registers for a new frame.
     ///
-
     /// Returns the base offset for the frame's registers.
     ///
-
     /// # Panics
     ///
-
     /// Panics if the register file exceeds [`MAX_SIZE`]. Prefer
     /// [`try_push_frame`][Self::try_push_frame] when the caller has
     /// an error channel — the panic here signals a corrupted module
@@ -180,7 +170,6 @@ impl RegisterFile {
 
     /// Releases registers from the current frame.
     ///
-
     /// Bumps generations of all popped slots so that any CBGR register refs
     /// pointing to them become stale (generation mismatch). Then sets top back.
     pub fn pop_frame(&mut self, base: u32) {
@@ -199,7 +188,6 @@ impl RegisterFile {
 
     /// Gets a register value.
     ///
-
     /// The register is accessed as `base + reg.0`.
     #[inline(always)]
     pub fn get(&self, base: u32, reg: Reg) -> Value {
@@ -212,7 +200,6 @@ impl RegisterFile {
 
     /// Sets a register value.
     ///
-
     /// The register is accessed as `base + reg.0`.
     #[inline(always)]
     pub fn set(&mut self, base: u32, reg: Reg, value: Value) {
@@ -250,10 +237,8 @@ impl RegisterFile {
 
     /// Gets a register value without bounds checking.
     ///
-
     /// # Safety
     ///
-
     /// The caller must ensure `base + reg.0 < top`.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, base: u32, reg: Reg) -> Value {
@@ -279,10 +264,8 @@ impl RegisterFile {
 
     /// Sets a register value without bounds checking.
     ///
-
     /// # Safety
     ///
-
     /// The caller must ensure `base + reg.0 < top`.
     #[inline(always)]
     pub unsafe fn set_unchecked(&mut self, base: u32, reg: Reg, value: Value) {
@@ -309,7 +292,6 @@ impl RegisterFile {
 
     /// Gets a register value by absolute index (no base offset).
     ///
-
     /// Used for mutable reference dereferencing where the absolute register
     /// index is stored as the reference value.
     #[inline(always)]
@@ -325,7 +307,6 @@ impl RegisterFile {
 
     /// Sets a register value by absolute index (no base offset).
     ///
-
     /// Used for mutable reference write-through where the absolute register
     /// index is stored as the reference value.
     #[inline(always)]
@@ -341,7 +322,6 @@ impl RegisterFile {
 
     /// Gets the CBGR generation for a register slot by absolute index.
     ///
-
     /// Used when creating Tier 0 references: the generation at creation time
     /// is embedded in the reference value so it can be validated on dereference.
     #[inline(always)]
@@ -357,12 +337,10 @@ impl RegisterFile {
 
     /// Bumps the CBGR generation for a register slot by absolute index.
     ///
-
     /// Called when a variable goes out of scope. Incrementing the generation
     /// invalidates any references that captured the old generation value,
     /// enabling use-after-free detection on subsequent dereferences.
     ///
-
     /// If generation would exceed GEN_MAX, epoch is incremented instead to prevent
     /// the ABA problem where generation wraps to a previously-used value.
     #[inline(always)]
@@ -387,7 +365,6 @@ impl RegisterFile {
 
     /// Gets the CBGR epoch for a register slot by absolute index.
     ///
-
     /// Used when creating Tier 0 references: the epoch at creation time
     /// is embedded in the reference value for wraparound protection.
     #[inline(always)]
@@ -399,7 +376,6 @@ impl RegisterFile {
 
     /// Gets both generation and epoch for a register slot atomically.
     ///
-
     /// This is the preferred method for reference creation as it ensures
     /// consistent generation/epoch pairs.
     #[inline(always)]
@@ -415,7 +391,6 @@ impl RegisterFile {
 
     /// Validates a reference's generation and epoch against current values.
     ///
-
     /// Returns true if the reference is still valid (generation and epoch match).
     #[inline(always)]
     pub fn validate_ref(&self, abs_index: u32, ref_gen: u32, ref_epoch: u16) -> bool {
@@ -454,7 +429,6 @@ impl RegisterFile {
 
     /// Copies registers from one range to another.
     ///
-
     /// Used for argument passing during function calls.
     pub fn copy_range(
         &mut self,

@@ -24,13 +24,11 @@ use verum_common::{List, Map};
 
 /// Unifier performs type unification.
 ///
-
 /// CRITICAL: The Unifier now maintains an accumulated substitution that
 /// grows with each unification. This is essential for proper Hindley-Milner
 /// type inference - type variables resolved in earlier unifications must
 /// be reflected in later type comparisons.
 ///
-
 /// Hindley-Milner type inference: algorithm W with let-polymorphism, constraint collection, and unification
 pub struct Unifier {
     /// Count of unifications performed (for metrics)
@@ -136,7 +134,6 @@ pub struct Unifier {
     /// Whether cubical-type normalization is enabled (Path/Partial/Eq
     /// definitional equality uses the cubical `whnf` normalizer).
     ///
-
     /// When `false` (i.e. `[types] cubical = false` in `verum.toml`),
     /// the unifier falls back to strict syntactic equality on cubical
     /// terms. Users disabling cubical lose identities like
@@ -243,7 +240,6 @@ impl Unifier {
 
     /// Enable or disable cubical normalization during unification.
     ///
-
     /// Populated by the compilation session from `[types] cubical` in
     /// `verum.toml`. Disabling causes PathType/Partial/Eq arms to use
     /// strict syntactic equality instead of `CubicalTerm::whnf`-based
@@ -533,7 +529,6 @@ impl Unifier {
 
     /// Register a type alias mapping (e.g., "Byte" -> UInt8 Named type).
     ///
-
     /// Performs cycle detection: registering `type A is B` when a chain
     /// B -> ... -> A already exists is rejected so that `try_expand_alias`
     /// cannot produce infinite recursion or unreachable types.
@@ -914,7 +909,6 @@ impl Unifier {
 
     /// Generate a stable signature for a variant type (sorted variant names with payload types).
     ///
-
     /// IMPORTANT: Must produce identical signatures to `variant_type_signature()` in infer.rs
     /// and `variant_type_signature_static()` in protocol.rs.
     fn variant_type_signature(variants: &IndexMap<Text, Type>) -> Text {
@@ -1224,11 +1218,9 @@ impl Unifier {
 
     /// Check if a type contains any unresolved type variables.
     ///
-
     /// This is used during associated type projection unification to determine
     /// whether a projection can be resolved or must be deferred.
     ///
-
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Associated type resolution
     fn has_type_vars(ty: &Type) -> bool {
         use Type::*;
@@ -1262,21 +1254,17 @@ impl Unifier {
 
     /// Unify two context expressions directly (public API for context polymorphism).
     ///
-
     /// This is the entry point for callers (e.g., type inference) that need to unify
     /// context expressions from callback types without going through full function type
     /// unification. For example, when inferring `C` in:
     ///
-
     /// ```verum
     /// fn map<T, U, using C>(iter: I, f: fn(T) -> U using C) -> MapIter<T,U> using C
     /// ```
     ///
-
     /// The inference engine can call `unify_context_exprs(C_var, concrete_ctx)` to bind
     /// the context variable `C` to the concrete context requirement of the callback `f`.
     ///
-
     /// Context polymorphism rules:
     /// - Variable vs Concrete: binds variable to the concrete requirement
     /// - Variable vs Variable: binds one to the other (if distinct)
@@ -1333,10 +1321,8 @@ impl Unifier {
 
     /// Unify optional context expressions for context polymorphism (internal).
     ///
-
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.5 - Context Polymorphism
     ///
-
     /// Rules:
     /// - None/None: compatible (both pure)
     /// - Concrete/Concrete: must be equal
@@ -1402,17 +1388,14 @@ impl Unifier {
 
     /// Unify two types, returning a substitution that makes them equal.
     ///
-
     /// This is the core of Hindley-Milner type inference.
     /// The algorithm finds the most general unifier (MGU) if one exists.
     ///
-
     /// CRITICAL FIX: The unifier now:
     /// 1. Applies the accumulated substitution to both types before unifying
     /// 2. Composes the new substitution with the accumulated one
     /// 3. Stores the composed substitution for future unifications
     ///
-
     /// This ensures that type variables resolved in earlier unifications are
     /// properly reflected in later type comparisons.
     pub fn unify(&mut self, t1: &Type, t2: &Type, span: Span) -> Result<Substitution> {
@@ -4750,7 +4733,6 @@ impl Unifier {
 
     /// Bind a type variable to a type.
     ///
-
     /// Performs the occurs check to prevent infinite types.
     fn bind_var(&self, var: TypeVar, ty: &Type, span: Span) -> Result<Substitution> {
         // Don't bind to itself
@@ -4857,7 +4839,6 @@ impl Unifier {
 
     /// Rename bound variable in a type (for alpha-equivalence).
     ///
-
     /// Used when unifying Pi/Sigma types with different parameter names.
     /// Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Alpha-equivalence for dependent types
     fn rename_bound_var(ty: &Type, from: &Text, to: &Text) -> Type {
@@ -5208,7 +5189,6 @@ impl Unifier {
 
     /// Check if two equality type terms are definitionally equal.
     ///
-
     /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — Equality types
     fn eq_terms_equal(t1: &EqTerm, t2: &EqTerm) -> bool {
         match (t1, t2) {
@@ -5320,7 +5300,6 @@ impl Unifier {
 
     /// Check if two universe levels can unify.
     ///
-
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe hierarchy
     fn universe_levels_unify(l1: &UniverseLevel, l2: &UniverseLevel) -> bool {
         match (l1, l2) {
@@ -5342,7 +5321,6 @@ impl Unifier {
 
     /// Check if two quantities are compatible for unification.
     ///
-
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .4 - Quantitative Type Theory
     fn quantities_compatible(q1: &Quantity, q2: &Quantity) -> bool {
         match (q1, q2) {
@@ -5376,11 +5354,9 @@ impl Unifier {
 
     /// Check if a type contains a projection (associated type access)
     ///
-
     /// Projections are represented as `Type::Generic { name: "T.Item", ... }`
     /// or `Type::Generic { name: "T::Item", ... }`.
     ///
-
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     pub fn contains_projection(ty: &Type) -> bool {
         match ty {
@@ -5430,28 +5406,22 @@ impl Unifier {
 
     /// Unify with projection normalization
     ///
-
     /// This method attempts to normalize any projections in the types before
     /// unifying. If normalization fails (e.g., because a type variable is not
     /// yet resolved), it defers the projection and continues with regular unification.
     ///
-
     /// # Arguments
     ///
-
     /// * `t1` - First type to unify
     /// * `t2` - Second type to unify
     /// * `protocol_checker` - Protocol checker for resolving projections
     /// * `span` - Source span for error messages
     ///
-
     /// # Returns
     ///
-
     /// * `Ok((subst, deferred))` - Substitution and any deferred projections
     /// * `Err(TypeError)` - Unification failed
     ///
-
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     pub fn unify_with_projections(
         &mut self,
@@ -5513,21 +5483,16 @@ impl Unifier {
 
     /// Normalize a type by resolving all projections
     ///
-
     /// This is a convenience method that wraps the ProjectionResolver.
     ///
-
     /// # Arguments
     ///
-
     /// * `ty` - Type to normalize
     /// * `protocol_checker` - Protocol checker for resolving projections
     /// * `span` - Source span for error messages
     ///
-
     /// # Returns
     ///
-
     /// The normalized type, or the original type if normalization fails.
     pub fn normalize_projections(
         ty: &Type,
@@ -5567,11 +5532,9 @@ impl Unifier {
     /// Check if a type lives in the Prop universe (proof-irrelevant).
     /// Inductive types: recursive type definitions with structural recursion, termination checking — .1
     ///
-
     /// Returns true if the type's universe is Prop, meaning all inhabitants
     /// are definitionally equal (proof irrelevance).
     ///
-
     /// # Examples
     /// - Prop itself is in Prop (but we check the type-of)
     /// - Equality types Eq<A, x, y> can be in Prop

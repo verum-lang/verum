@@ -279,15 +279,12 @@ impl fmt::Display for FloatSuffix {
 
 /// A string literal with different representations.
 ///
-
 /// # Simplified Literal Architecture (v6.0)
 ///
-
 /// Verum uses a simplified approach to string literals:
 /// - `"..."` - Regular strings with escape processing (`\n`, `\t`, etc.)
 /// - `"""..."""` - Triple-quoted strings: raw AND multiline (no escape processing)
 ///
-
 /// The old `r#"..."#` syntax has been removed. Use `"""..."""` for raw strings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StringLit {
@@ -295,7 +292,6 @@ pub enum StringLit {
     Regular(Text),
     /// Multi-line raw string (triple-quoted): `"""raw content\n preserved"""`
     ///
-
     /// Triple-quoted strings are BOTH raw (no escape processing) AND multiline.
     /// This is the unified approach: `"""...""" = raw = multiline`.
     MultiLine(Text),
@@ -337,7 +333,6 @@ impl fmt::Display for StringLit {
 
 /// An interpolated string literal with a safe prefix.
 ///
-
 /// Examples:
 /// - `sql"SELECT * FROM users WHERE id = {user_id}"`
 /// - `html"<div>{content}</div>"`
@@ -388,7 +383,6 @@ impl fmt::Display for InterpolatedStringLit {
 
 /// Composite literal - domain-specific structured data with tagged delimiters.
 ///
-
 /// Examples:
 /// - `mat#"[[1, 2], [3, 4]]"` → Matrix<2, 2, i32>
 /// - `vec#"<1, 2, 3>"` → Vector3<f64>
@@ -638,7 +632,6 @@ fn validate_interval_content(content: &str) -> Result<(), Text> {
 
 /// Context-adaptive literal that changes interpretation based on expected type.
 ///
-
 /// Examples:
 /// - `#FF5733` as CssColor → CssColor::from_hex(0xFF5733)
 /// - `#FF5733` as RgbColor → RgbColor { r: 255, g: 87, b: 51 }

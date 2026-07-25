@@ -48,7 +48,6 @@ pub type ConstValue = MetaValue;
 
 /// Execution context for meta functions
 ///
-
 /// Maintains variable bindings and provides operations on constant values
 /// during compile-time execution.
 #[derive(Debug, Clone)]
@@ -187,12 +186,10 @@ pub struct MetaContext {
     // ======== Builtin Context Access Control ========
     /// Enabled contexts for builtin function access
     ///
-
     /// This tracks which contexts are available based on the meta function's
     /// `using [...]` declaration. Tier 0 builtins are always available,
     /// while Tier 1 builtins require explicit context declaration.
     ///
-
     /// Example:
     /// ```verum
     /// meta fn example() using [MetaTypes, CompileDiag] {
@@ -204,14 +201,12 @@ pub struct MetaContext {
     // ======== User Meta Function Support ========
     /// Registry for looking up user-defined meta functions
     ///
-
     /// When set, allows MetaExpr::Call to fall back to user-defined
     /// meta functions after checking builtins.
     pub registry: Option<std::sync::Arc<super::MetaRegistry>>,
 
     /// Current module path for resolving user meta function calls
     ///
-
     /// This is used to resolve unqualified function names to their
     /// full module path when looking up user-defined meta functions.
     pub current_module: Text,
@@ -219,7 +214,6 @@ pub struct MetaContext {
     // ======== Sandbox/Security ========
     /// Allowlist registry for checking forbidden operations
     ///
-
     /// This tracks which operations are allowed or forbidden in meta functions.
     /// Forbidden operations include file I/O, network, process spawning, etc.
     pub allowlist: AllowlistRegistry,
@@ -227,7 +221,6 @@ pub struct MetaContext {
     // ======== Hygiene Mode ========
     /// Whether the current meta function is marked @transparent
     ///
-
     /// When true, hygienic renaming is disabled and bare identifiers
     /// in quote blocks will capture from the expansion site. This enables
     /// intentional capture but also allows accidental capture (M402).
@@ -238,7 +231,6 @@ pub struct MetaContext {
     /// surface (`RequiredContext::MetaTypes`, `CompileDiag`)
     /// regardless of any function-level `using [...]` declaration.
     ///
-
     /// When `true`, `get_builtin` rejects calls to reflection-tagged
     /// builtins with `MetaError::MissingContext` even if the function
     /// declared `using [MetaTypes]` — the user-supplied capability
@@ -247,7 +239,6 @@ pub struct MetaContext {
     /// reflection cannot be circumvented by individual function
     /// declarations.
     ///
-
     /// Default `false` (reflection allowed). Wired through
     /// `MacroExpansionPhase::with_reflection_enabled(false)`.
     pub reflection_disabled: bool,
@@ -326,7 +317,6 @@ impl MetaContext {
 
     /// Create a context with all contexts enabled
     ///
-
     /// This is useful for testing or for backward compatibility during migration.
     /// In production code, prefer explicit context declaration.
     pub fn with_all_contexts() -> Self {
@@ -337,7 +327,6 @@ impl MetaContext {
 
     /// Create a context with specific contexts enabled
     ///
-
     /// This is typically used when executing a meta function with a
     /// `using [...]` clause.
     pub fn with_contexts(contexts: &[RequiredContext]) -> Self {
@@ -350,7 +339,6 @@ impl MetaContext {
 
     /// Create a context from a `using [...]` clause
     ///
-
     /// Parses context names from the using clause and enables them.
     pub fn with_using_clause(names: &[Text]) -> Self {
         let mut ctx = Self::new();
@@ -361,7 +349,6 @@ impl MetaContext {
     /// Mount the resource limits and enabled-contexts surface from a
     /// `SecurityContext` onto this `MetaContext`.
     ///
-
     /// `SecurityContext` is the user-facing API for capping meta
     /// execution (recursion depth, iteration count, memory ceiling,
     /// timeout). Until this method existed, `SecurityContext::set_limits`
@@ -371,7 +358,6 @@ impl MetaContext {
     /// by copying the four limits + the enabled-contexts mask onto the
     /// fields the evaluator actually checks:
     ///
-
     ///  * `recursion_limit` → `MetaContext::execute_user_meta_fn`
     ///  gate at `evaluator.rs:2237`
     ///  * `iteration_limit` → loop counters in the evaluator
@@ -379,11 +365,9 @@ impl MetaContext {
     ///  * `timeout_ms` → sandbox deadline
     ///  * `enabled_contexts` → required-context dispatch in builtins
     ///
-
     /// Embedders that build a meta context from a security policy
     /// should now write:
     ///
-
     /// ```ignore
     /// let mut sec = SecurityContext::new();
     /// sec.set_recursion_limit(256);
@@ -391,7 +375,6 @@ impl MetaContext {
     /// meta.apply_security_context(&sec);
     /// ```
     ///
-
     /// Or use the `from_security_context` builder for one-shot construction.
     pub fn apply_security_context(&mut self, sec: &crate::meta::contexts::SecurityContext) {
         let limits = sec.limits();
@@ -439,7 +422,6 @@ impl MetaContext {
 
     /// Set the meta registry for user function lookup
     ///
-
     /// When set, allows `MetaExpr::Call` to resolve user-defined meta functions
     /// after checking builtins.
     #[inline]
@@ -449,7 +431,6 @@ impl MetaContext {
 
     /// Set the current module path for user function resolution
     ///
-
     /// This determines which module's user functions are checked when
     /// resolving unqualified function calls.
     #[inline]
@@ -473,7 +454,6 @@ impl MetaContext {
 
     /// Builder: Replace the entire project info block.
     ///
-
     /// The pipeline driver typically constructs a `ProjectInfoData`
     /// with captured `git_revision` + `build_time_unix_ms`
     /// (`with_captured_version_stamp`) and attaches it via this
@@ -534,7 +514,6 @@ impl MetaContext {
 
     /// Check if a function is a forbidden I/O operation
     ///
-
     /// This checks the allowlist registry to determine if the function
     /// is a filesystem, network, process, or other forbidden operation.
     #[inline]
@@ -569,7 +548,6 @@ impl MetaContext {
 
     /// Account for a fresh allocation against the memory budget.
     ///
-
     /// Updates `memory_used` (running total) and `peak_memory`
     /// (high-water mark for telemetry). Trips with
     /// `MetaError::MemoryLimitExceeded` when `memory_used`
@@ -580,7 +558,6 @@ impl MetaContext {
     /// `iteration_limit = 0` patterns elsewhere in the meta
     /// system).
     ///
-
     /// Called from container-constructing arms in
     /// `eval_meta_expr` (ListComp result, Record→Tuple result,
     /// future builtins that materialise large structures).
@@ -726,7 +703,6 @@ impl MetaContext {
 
     /// Get type attributes
     ///
-
     /// Returns a list of attribute names for the given type.
     pub fn get_type_attributes(&self, type_name: &Text) -> List<Text> {
         if let Some(type_def) = self.type_definitions.get(type_name) {
@@ -751,7 +727,6 @@ impl MetaContext {
 
     /// Get type attribute value
     ///
-
     /// Returns the value associated with an attribute, if any.
     pub fn get_type_attribute(&self, type_name: &Text, attr_name: &Text) -> Option<ConstValue> {
         if let Some(type_def) = self.type_definitions.get(type_name) {
@@ -765,7 +740,6 @@ impl MetaContext {
 
     /// Get type documentation
     ///
-
     /// Returns the documentation string for the given type.
     pub fn get_type_doc(&self, type_name: &Text) -> Maybe<Text> {
         if let Some(type_def) = self.type_definitions.get(type_name) {
@@ -777,7 +751,6 @@ impl MetaContext {
 
     /// Get associated types
     ///
-
     /// Returns the associated types defined on the given type.
     pub fn get_associated_types(&self, type_name: &Text) -> List<(Text, verum_ast::ty::Type)> {
         if let Some(type_def) = self.type_definitions.get(type_name) {
@@ -789,7 +762,6 @@ impl MetaContext {
 
     /// Get super types (protocols this type implements)
     ///
-
     /// Returns the list of protocols/traits this type implements or extends.
     pub fn get_super_types(&self, type_name: &Text) -> List<Text> {
         if let Some(type_def) = self.type_definitions.get(type_name) {
@@ -801,7 +773,6 @@ impl MetaContext {
 
     /// Get methods defined on a type
     ///
-
     /// Returns the method signatures for the given type.
     pub fn get_type_methods(&self, type_name: &Text) -> List<Text> {
         if let Some(type_def) = self.type_definitions.get(type_name) {

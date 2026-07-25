@@ -116,10 +116,8 @@ impl ExportFormat {
 /// per-target emitters can lower without re-walking the full AST.
 /// Currently the M0.A pattern is the only shape recognised:
 ///
-
 ///  `proof { apply <name>(<args>); }`
 ///
-
 /// is captured as `SimpleApply { lemma, args }` with the args rendered
 /// to source-form text. Other tactic shapes (induction, cases, calc, …)
 /// are recorded as `Other` so the emitters keep falling through to
@@ -159,7 +157,6 @@ struct Declaration {
     /// target emitter then falls through to the V1 admitted
     /// scaffold so the export remains compilable.
     ///
-
     /// V4.2 lays the wiring; V4.3+ plumbs actual certificate
     /// loading from the kernel's certificate store. Until then
     /// this field is always `None` in production paths and the
@@ -180,7 +177,6 @@ struct Declaration {
     /// producing a real Lean / Coq / Agda / Dedukti / Metamath term
     /// instead of the static admitted scaffold.
     ///
-
     /// Populated whenever the proof body is `ProofBody::Term(expr)`
     /// or a structured proof with an extractable conclusion expression.
     /// `None` for axioms, for `ProofBody::Tactic(Apply{...})` (the
@@ -329,7 +325,6 @@ fn sidecar_path_for(main: &Path) -> PathBuf {
 /// versioned schema (`schema_version: 1`) with one entry per
 /// declaration carrying:
 ///
-
 ///  - `name` / `kind` / `source_file`
 ///  - `framework_name` + `framework_citation` when present
 ///  - `discharge_strategy` ∈ {`statement_only`, `smt_replay_pending`}:
@@ -341,7 +336,6 @@ fn sidecar_path_for(main: &Path) -> PathBuf {
 ///  SmtCertificate hashes through the export pipeline.
 ///  - `proof_term`: `null` — V2.1+ slot for the lowered proof term.
 ///
-
 /// Output is deterministic (declarations preserve emit order; field
 /// ordering is stable) so CI diffs stay clean across runs.
 fn emit_provenance_sidecar(decls: &[Declaration], format: ExportFormat) -> String {
@@ -516,7 +510,6 @@ fn collect_declaration(
 /// axioms / missing proof bodies, and falls through structured
 /// proofs that don't have an extractable conclusion expression.
 ///
-
 /// The lift is conservative: variants the lifter doesn't recognise
 /// surface as `CoreTerm::Var("<unsupported-expr>")`, which the
 /// proof_export lowerers in turn render as `sorry` / `Admitted` /
@@ -1289,20 +1282,17 @@ fn emit_coq(
 
 /// Emit a Metamath (.mm) certificate.
 ///
-
 /// Metamath is "axiom system + proof step language". Statements are
 /// declared with `$a` (axiom) / `$p ... $.` (provable), and every
 /// statement must name its free variables in a `$v` line and provide
 /// a constant-typing header. For a Verum export that carries only
 /// statements (proofs admitted), we emit:
 ///
-
 ///  $c wff |- $. — constant declarations
 ///  $v x y z $. — placeholder variables
 ///  ax-<name> $a wff <stmt> $. — for axioms
 ///  th-<name> $p wff <stmt> $= ? $. — for theorems (proof placeholder `?`)
 ///
-
 /// Framework citations ride along as `$( comment $)` blocks so the
 /// trusted boundary is visible. The `?` proof-step token is
 /// Metamath's own placeholder for "proof not yet supplied" — tools
@@ -1501,22 +1491,18 @@ fn agda_mangle(name: &Text) -> String {
 
 /// Emit an Agda (.agda) certificate.
 ///
-
 /// Each declaration becomes a single-entry `postulate` block:
 ///
-
 ///  -- theorem — lurie_htt — Lurie 2009 :: src/foo.vr
 ///  postulate
 ///  yoneda_full : Set
 ///
-
 /// The postulate-per-decl shape (rather than one big block) keeps each
 /// declaration's framework citation directly above its statement, which
 /// matches the per-decl comment placement of the Coq / Lean / Dedukti
 /// emitters and makes per-declaration grep / diff tractable. Agda
 /// accepts arbitrarily many `postulate` blocks per module.
 ///
-
 /// As with the other backends, statements are opaque (`: Set`) at the
 /// MVP level. Type-preserving export through verum_kernel lands when
 /// per-backend SMT proof-replay is wired in.

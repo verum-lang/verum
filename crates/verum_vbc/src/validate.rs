@@ -45,7 +45,6 @@ impl ValidationOptions {
 
     /// Creates fast validation options (skips expensive checks).
     ///
-
     /// Honored only by `deserialize_module_validated_with_options`
     /// (deserialize.rs) — the legacy `deserialize_module_validated`
     /// entry point ignores the options and always uses
@@ -378,11 +377,9 @@ impl<'a> Validator<'a> {
     /// Validates per-function bytecode by decoding each instruction in the
     /// function's bytecode region and verifying its cross-references.
     ///
-
     /// This is the load-time defense against hand-crafted bytecode that
     /// the type-checker / codegen pipeline would never produce. Catches:
     ///
-
     ///  * Out-of-range `FunctionId` in `Call` / `TailCall` / `CallG`
     ///  / `CallC` — would cause `FunctionNotFound` at execution time
     ///  in the well-defined case; here we catch it before any code
@@ -396,7 +393,6 @@ impl<'a> Validator<'a> {
     ///  * Out-of-range `ConstId` / `StringId` — would return None /
     ///  bogus interned strings at execution time.
     ///
-
     /// Performance: walks bytecode linearly once, so cost is O(N) in
     /// total instruction count. Skip via
     /// `ValidationOptions::skip_bytecode_validation = true` for
@@ -538,7 +534,6 @@ impl<'a> Validator<'a> {
 
     /// Validates a single decoded instruction's cross-references.
     ///
-
     /// Branch targets are deferred to a post-walk pass via
     /// `pending_jumps` so we can verify they land on a known
     /// instruction-start boundary.
@@ -818,7 +813,6 @@ impl<'a> Validator<'a> {
     /// Checks a `Call` / `TailCall` / `CallG` instruction's argument
     /// arity matches the target function's declared parameter count.
     ///
-
     /// Closes round-2 §3.2 (Mismatched arity calls) at the load-time
     /// gate. Pre-fix the interpreter trusted the bytecode and read
     /// `args.count` registers directly, copying them into the new
@@ -1421,7 +1415,6 @@ impl std::error::Error for VariantLayoutError {}
 
 /// Compute the expected field count for a variant descriptor.
 ///
-
 /// Mirrors `verum_vbc::interpreter::dispatch_table::handlers::extended::
 /// expected_field_count` (which is private to the interpreter).
 /// Kept in sync with that function — they MUST agree on every
@@ -1438,13 +1431,11 @@ fn variant_expected_field_count(variant: &crate::types::VariantDescriptor) -> u3
 
 /// Validate a `(type_id, tag, field_count)` tuple at codegen time.
 ///
-
 /// Returns `Ok(())` when the tuple is consistent with the module's
 /// type table. Returns `Err(VariantLayoutError)` on mismatch — the
 /// codegen path converts this to a hard `LlvmLoweringError` so the
 /// build fails loud rather than emitting IR with a layout bug.
 ///
-
 /// Builtin-range type ids (`is_builtin()`) bypass the check because
 /// they don't carry a `variants` list. This matches the Tier 0
 /// validator's behaviour at extended.rs:62.

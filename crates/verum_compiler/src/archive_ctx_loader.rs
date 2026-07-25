@@ -1107,7 +1107,6 @@ fn type_ref_full_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
 /// Exported so the pipeline can prime its codegen ctx in O(N_clone)
 /// rather than O(N_register) on the second + every later script run
 /// inside the same process (REPL, test runner, watch mode).
-
 /// Build the `wanted_module_prefixes` set used by every archive-walk
 /// path in this module.  Two contributions:
 ///

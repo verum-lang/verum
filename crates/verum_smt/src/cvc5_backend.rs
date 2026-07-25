@@ -403,7 +403,6 @@ pub enum Cvc5Error {
 
 /// CVC5 SMT Backend.
 ///
-
 /// When `--features cvc5-ffi` is enabled, holds real solver state linked
 /// against libcvc5. Without it, the struct is still defined with the
 /// same fields so the two impl blocks stay in lockstep — but no
@@ -450,7 +449,6 @@ impl std::fmt::Debug for Cvc5Backend {
 impl Cvc5Backend {
     /// Create new CVC5 backend with configuration
     ///
-
     /// Returns `Err(Cvc5Error::NotAvailable)` if CVC5 library is not installed.
     pub fn new(config: Cvc5Config) -> Result<Self, Cvc5Error> {
         // SAFETY: FFI calls to CVC5 C library functions.
@@ -667,7 +665,6 @@ impl Cvc5Backend {
     /// self-contained enough to re-verify through any
     /// SMT-LIB-compliant solver.
     ///
-
     /// Uses `cvc5_get_assertions` to read the assertion array
     /// and `cvc5_term_to_string` to serialise each one. The
     /// returned pointer is valid only until the next
@@ -1523,11 +1520,9 @@ impl Drop for Cvc5Backend {
 impl Cvc5Backend {
     /// Create new CVC5 backend
     ///
-
     /// When the `cvc5-ffi` feature is not enabled, this always returns
     /// `Err(Cvc5Error::NotAvailable)`. Use Z3 as the primary solver.
     ///
-
     /// To enable CVC5 support:
     /// 1. Install CVC5: <https://cvc5.github.io/downloads.html>
     /// 2. Enable the feature: `cargo build --features cvc5-ffi`
@@ -1763,7 +1758,6 @@ pub struct Cvc5Sort {
 impl Cvc5Sort {
     /// Returns the underlying cvc5 sort pointer.
     ///
-
     /// In stub-mode this is always null. Callers that need to pass the
     /// sort back to libcvc5 should do so only under
     /// `#[cfg(feature = "cvc5-ffi")]`.
@@ -2062,7 +2056,6 @@ pub struct Cvc5Stats {
 
 /// Create CVC5 backend with default configuration
 ///
-
 /// Returns `Err(Cvc5Error::NotAvailable)` if CVC5 is not installed or
 /// the `cvc5-ffi` feature is not enabled.
 pub fn create_cvc5_backend() -> Result<Cvc5Backend, Cvc5Error> {
@@ -2071,7 +2064,6 @@ pub fn create_cvc5_backend() -> Result<Cvc5Backend, Cvc5Error> {
 
 /// Create CVC5 backend for specific logic
 ///
-
 /// Returns `Err(Cvc5Error::NotAvailable)` if CVC5 is not installed or
 /// the `cvc5-ffi` feature is not enabled.
 pub fn create_cvc5_backend_for_logic(logic: SmtLogic) -> Result<Cvc5Backend, Cvc5Error> {
@@ -2084,7 +2076,6 @@ pub fn create_cvc5_backend_for_logic(logic: SmtLogic) -> Result<Cvc5Backend, Cvc
 
 /// Check if CVC5 backend is available
 ///
-
 /// Returns `true` if the `cvc5-ffi` feature is enabled, `false` otherwise.
 pub fn is_cvc5_available() -> bool {
     cfg!(feature = "cvc5-ffi")

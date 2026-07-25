@@ -96,14 +96,11 @@ pub struct Truncation {
 /// Apply `τ_{≤n}` to an object `x ∈ C`, producing the n-truncation
 /// `τ_{≤n}(x)`.
 ///
-
 /// **Algorithm (HTT 5.5.6.21 current surface)**:
 ///
-
 ///  1. Construct the apex name `τ_{≤n}(x)`.
 ///  2. Witness the universal property — always true by HTT 5.5.6.21.
 ///
-
 /// **Preconditions**: `level` must be at most `c.level` (truncation
 /// at level `n > c.level` is the identity; we still allow it but
 /// surface a diagnostic via the apex name).
@@ -170,7 +167,6 @@ pub fn n_truncated_objects_closed_under_limits(_level: &Ordinal) -> bool {
 /// Per HTT 5.5.6.21, truncation is *idempotent up to canonical iso*
 /// and the iterated truncation collapses to the smaller level.
 ///
-
 /// Returns the canonical equivalent truncation at `min(m, n)`.
 pub fn compose_truncations(outer: &Truncation, inner: &Truncation) -> Option<Truncation> {
     if outer.source_category != inner.source_category {

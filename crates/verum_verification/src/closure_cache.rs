@@ -483,7 +483,6 @@ impl RecheckReason {
 
 /// Decide whether the cache lets us skip the recheck.
 ///
-
 /// Pure function — no I/O. `current_fp.kernel_version` MUST be the
 /// running kernel's `VVA_VERSION`; any drift between that and the
 /// cached entry's kernel-version is treated as
@@ -584,21 +583,18 @@ impl CachedCheckOutcome {
 
 /// Cache-aware verification orchestration.
 ///
-
 /// Glues `decide` + the user's verify closure + `put` into a single
 /// call. The verify closure is invoked **only when the cache misses**
 /// (NoCacheEntry / FingerprintMismatch / KernelVersionChanged /
 /// PreviousVerdictFailed). On miss, the freshly-computed verdict is
 /// persisted to the store before returning.
 ///
-
 /// This is the pipeline-side entry point: production callers
 /// (`verum_compiler::pipeline::verify_theorem_proofs`) hand the cache
 /// + a closure that runs the actual kernel re-check, and get back a
 /// typed [`CachedCheckOutcome`]. Hit → skip the kernel call entirely;
 /// Miss → the kernel ran and the result is now cached for next time.
 ///
-
 /// **Persist failures do not poison the verdict**: a cache write
 /// error is recorded in `Miss::persist_error` but the verify-closure's
 /// verdict is still returned authoritatively. This matches the
@@ -653,10 +649,8 @@ fn now_secs() -> u64 {
 /// (test / playbook) or disk-backed (production), and may layer
 /// (in-memory L1 in front of disk L2).
 ///
-
 /// Contract:
 ///
-
 ///  * `get(name)` returns `Some(entry)` only for previously-`put`
 ///  names; never fabricates entries.
 ///  * `put(entry)` overwrites any existing entry for the same
@@ -664,7 +658,6 @@ fn now_secs() -> u64 {
 ///  * `clear()` removes every entry; returns the count cleared.
 ///  * `stats()` reflects the current state of the store.
 ///
-
 /// Errors are reported via [`CacheError`] — disk I/O failures
 /// surface here rather than panicking; callers can choose to
 /// degrade to "always recheck" when storage is unavailable.

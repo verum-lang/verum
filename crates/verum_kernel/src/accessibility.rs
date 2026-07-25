@@ -145,23 +145,18 @@ pub struct FilteredColimit {
 /// AR 1.26 V0 — compute the λ-filtered colimit of a diagram in a
 /// κ-accessible category, with κ-accessibility preservation.
 ///
-
 /// **Preconditions** (kernel-checked):
 ///
-
 ///  1. λ ≤ κ.
 ///  2. Both λ and κ are regular cardinals.
 ///  3. The diagram is genuinely λ-filtered (`is_lambda_filtered` flag).
 ///  4. The diagram has at least one object (non-empty colimit).
 ///
-
 /// **Produces**:
 ///
-
 ///  1. A `FilteredColimit` carrying the colimit-object name and
 ///  the inherited κ-accessibility witness.
 ///
-
 /// Returns `None` when preconditions fail. This is the algorithmic
 /// content of AR 1.26: every preconditioned input produces an output.
 pub fn build_filtered_colimit(

@@ -87,7 +87,6 @@ use verum_common::Maybe;
 
 /// Work items for iterative AST traversal.
 ///
-
 /// This enum represents all visitable AST node types. It enables stack-safe
 /// traversal by storing pending work on the heap instead of the call stack.
 #[derive(Clone, Debug)]
@@ -152,18 +151,14 @@ pub enum WorkItem<'a> {
 
 /// A visitor for traversing the AST.
 ///
-
 /// Implement this trait to walk the AST and perform custom operations
 /// on each node. The default implementations recursively visit child nodes.
 ///
-
 /// # Traversal Modes
 ///
-
 /// By default, visitors use recursive traversal. For very deep ASTs that
 /// might cause stack overflow, use [`IterativeVisitor`] wrapper:
 ///
-
 /// ```ignore
 /// let my_visitor = MyVisitor::new();
 /// let mut iter = IterativeVisitor::new(my_visitor);
@@ -172,11 +167,9 @@ pub enum WorkItem<'a> {
 pub trait Visitor: Sized {
     /// Returns a mutable reference to the work stack for iterative traversal.
     ///
-
     /// - Returns `None` (default): Use recursive traversal
     /// - Returns `Some(stack)`: Use iterative traversal, pushing work items to stack
     ///
-
     /// This method is automatically managed by [`IterativeVisitor`].
     /// You typically don't need to override this method.
     fn work_stack(&mut self) -> Option<&mut Vec<WorkItem<'_>>> {
@@ -325,7 +318,6 @@ pub trait Visitor: Sized {
 
 /// Internal macro for dual-mode child visitation.
 ///
-
 /// In recursive mode (work_stack returns None): calls visitor.visit_*() directly
 /// In iterative mode (work_stack returns Some): pushes WorkItem to the stack
 macro_rules! visit_child {
@@ -505,18 +497,14 @@ macro_rules! visit_child {
 
 /// Wrapper that enables iterative (stack-safe) mode for any visitor.
 ///
-
 /// Use this wrapper when traversing very deep ASTs that might cause
 /// stack overflow with recursive traversal.
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// struct MyAnalyzer { /* ... */ }
 ///
-
 /// impl Visitor for MyAnalyzer {
 ///  fn visit_expr(&mut self, expr: &Expr) {
 ///  // analyze expression...
@@ -524,7 +512,6 @@ macro_rules! visit_child {
 ///  }
 /// }
 ///
-
 /// // For deep ASTs, use IterativeVisitor wrapper
 /// let analyzer = MyAnalyzer::new();
 /// let mut iter_visitor = IterativeVisitor::new(analyzer);
@@ -532,10 +519,8 @@ macro_rules! visit_child {
 /// let result = iter_visitor.into_inner();
 /// ```
 ///
-
 /// # Implementation Notes
 ///
-
 /// The wrapper manages a work stack that stores pending nodes to visit.
 /// When `walk_*` functions detect the work stack (via `work_stack()` method),
 /// they push child nodes to the stack instead of making recursive calls.
@@ -574,7 +559,6 @@ impl<V: Visitor> IterativeVisitor<V> {
 
     /// Traverse an expression iteratively.
     ///
-
     /// This method is stack-safe and can handle ASTs with arbitrary depth.
     pub fn traverse_expr<'a>(&'a mut self, expr: &'a Expr) {
         // SAFETY: We use transmute to extend the lifetime to 'static.
@@ -1170,7 +1154,6 @@ pub fn walk_context_group<V: Visitor>(visitor: &mut V, context_group: &ContextGr
 
 /// Walk an expression, visiting all its children.
 ///
-
 /// This function supports both recursive and iterative traversal modes:
 /// - In recursive mode (default): child nodes are visited via direct function calls
 /// - In iterative mode: child nodes are pushed to the work stack
@@ -2135,7 +2118,6 @@ pub fn walk_where_clause<V: Visitor>(visitor: &mut V, where_clause: &WhereClause
 /// Walk a where predicate.
 /// Mount statement for importing names into scope.#where-clause-disambiguation
 ///
-
 /// Handles all four where clause forms in v6.0-BALANCED:
 /// 1. `where type T: Protocol` - Generic type constraints
 /// 2. `where meta N > 0` - Meta-parameter refinements
@@ -2170,7 +2152,6 @@ pub fn walk_where_predicate<V: Visitor>(visitor: &mut V, predicate: &WherePredic
 
 /// Walk an FFI boundary declaration.
 ///
-
 /// Visits all functions and their contract expressions within the boundary.
 /// Walk an FFI boundary declaration (compile-time specification for C ABI interop).
 pub fn walk_ffi_boundary<V: Visitor>(visitor: &mut V, ffi_boundary: &FFIBoundary) {
@@ -2217,7 +2198,6 @@ pub fn walk_ffi_boundary<V: Visitor>(visitor: &mut V, ffi_boundary: &FFIBoundary
 
 /// Walk a theorem declaration.
 ///
-
 /// Visits theorem parameters, proposition, where clauses, and proof body.
 /// Walk a theorem declaration including its proposition and proof body.
 pub fn walk_theorem<V: Visitor>(visitor: &mut V, theorem: &TheoremDecl) {
@@ -2247,7 +2227,6 @@ pub fn walk_theorem<V: Visitor>(visitor: &mut V, theorem: &TheoremDecl) {
 
 /// Walk an axiom declaration.
 ///
-
 /// Visits axiom parameters, proposition, and where clauses.
 pub fn walk_axiom<V: Visitor>(visitor: &mut V, axiom: &AxiomDecl) {
     visitor.visit_ident(&axiom.name);
@@ -2271,7 +2250,6 @@ pub fn walk_axiom<V: Visitor>(visitor: &mut V, axiom: &AxiomDecl) {
 
 /// Walk a tactic declaration.
 ///
-
 /// Visits tactic body.
 /// Walk a tactic declaration including parameters and tactic body.
 pub fn walk_tactic<V: Visitor>(visitor: &mut V, tactic: &TacticDecl) {
@@ -2294,7 +2272,6 @@ pub fn walk_tactic<V: Visitor>(visitor: &mut V, tactic: &TacticDecl) {
 
 /// Walk a tactic expression.
 ///
-
 /// Visits all sub-expressions within a tactic.
 /// Walk proof body structures including tactics, have/show steps, and case analysis.
 pub fn walk_tactic_expr<V: Visitor>(visitor: &mut V, tactic_expr: &TacticExpr) {
@@ -2449,7 +2426,6 @@ pub fn walk_tactic_expr<V: Visitor>(visitor: &mut V, tactic_expr: &TacticExpr) {
 
 /// Walk a proof body.
 ///
-
 /// Visits all expressions and tactics within a proof.
 /// Walk proof body structures including tactics, have/show steps, and case analysis.
 pub fn walk_proof_body<V: Visitor>(visitor: &mut V, proof_body: &ProofBody) {
@@ -2618,7 +2594,6 @@ fn walk_proof_method<V: Visitor>(visitor: &mut V, method: &crate::decl::ProofMet
 
 /// Walk a view declaration.
 ///
-
 /// Visits view name, parameter/return types, and constructors.
 /// Walk view declarations (alternative pattern interfaces, v2.0+ planned).
 pub fn walk_view<V: Visitor>(visitor: &mut V, view: &crate::decl::ViewDecl) {
@@ -2634,7 +2609,6 @@ pub fn walk_view<V: Visitor>(visitor: &mut V, view: &crate::decl::ViewDecl) {
 
 /// Walk a view constructor.
 ///
-
 /// Visits constructor name and result type.
 /// Walk view declarations (alternative pattern interfaces, v2.0+ planned).
 pub fn walk_view_constructor<V: Visitor>(
@@ -2679,14 +2653,11 @@ pub fn walk_function_param<V: Visitor>(visitor: &mut V, param: &FunctionParam) {
 
 /// Traverse an expression iteratively (stack-safe).
 ///
-
 /// This is a convenience function that wraps any visitor in [`IterativeVisitor`]
 /// and performs stack-safe traversal.
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// let mut counter = ExprCounter::new();
 /// traverse_expr_iteratively(&mut counter, &very_deep_ast);

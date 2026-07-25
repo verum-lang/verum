@@ -110,12 +110,10 @@ use verum_common::{List, Text};
 pub enum StageError {
     /// E1001: Quote generates code for wrong stage
     ///
-
     /// Occurs when a `quote { ... }` in a Stage N function generates code
     /// that is not Stage N-1. The Stage Coherence Rule requires that each
     /// quote lowers the stage by exactly 1.
     ///
-
     /// # Example
     /// ```verum
     /// // Error: meta(2) should generate meta(1), not stage 0
@@ -138,17 +136,14 @@ pub enum StageError {
 
     /// E1002: Cross-stage function call
     ///
-
     /// Occurs when a Stage N function tries to directly call a function
     /// from a different stage. Higher stages cannot call lower stage functions
     /// directly (they must generate code that calls them).
     ///
-
     /// # Example
     /// ```verum
     /// meta fn helper() -> TokenStream { ... }
     ///
-
     /// meta(2) fn caller() -> TokenStream {
     ///  helper() // E1002: cannot call stage 1 from stage 2
     /// }
@@ -168,11 +163,9 @@ pub enum StageError {
 
     /// E1003: Stage overflow
     ///
-
     /// Occurs when code uses a stage level higher than the configured
     /// `max_stage` in Verum.toml.
     ///
-
     /// # Configuration
     /// ```toml
     /// [meta]
@@ -191,11 +184,9 @@ pub enum StageError {
 
     /// E1004: Cyclic stage dependency
     ///
-
     /// Occurs when there is a circular dependency between staged functions
     /// that would create an infinite compilation loop.
     ///
-
     /// # Example
     /// ```verum
     /// // Hypothetical cyclic dependency
@@ -214,11 +205,9 @@ pub enum StageError {
 
     /// E1005: Invalid stage escape
     ///
-
     /// Occurs when `$(stage N) { ... }` escape syntax is used incorrectly.
     /// The escape stage must be between current_stage and 0.
     ///
-
     /// # Example
     /// ```verum
     /// meta(2) fn example() -> TokenStream {
@@ -244,7 +233,6 @@ pub enum StageError {
 pub enum StageWarning {
     /// W1001: Unused stage definition
     ///
-
     /// Warns when a `meta(N)` function is defined but never invoked
     /// during compilation. This may indicate dead code.
     UnusedStage {
@@ -258,7 +246,6 @@ pub enum StageWarning {
 
     /// W1002: Stage can be downgraded
     ///
-
     /// Warns when a `meta(N)` function could be lowered to `meta(N-1)`
     /// because it only generates code for stage N-2 or lower.
     /// Lower stages compile faster.
@@ -382,38 +369,30 @@ impl FunctionStageInfo {
 
 /// Stage checker for multi-stage metaprogramming
 ///
-
 /// The StageChecker validates stage-related constraints during type checking:
 /// - Stage coherence (quote generates correct stage)
 /// - Cross-stage call restrictions
 /// - Stage overflow detection
 /// - Cyclic dependency detection
 ///
-
 /// # Usage
 ///
-
 /// ```rust,ignore
 /// let config = StageConfig::default();
 /// let mut checker = StageChecker::new(config);
 ///
-
 /// // Enter a function context
 /// checker.enter_function("my_meta_fn", 2, span);
 ///
-
 /// // Check a quote expression
 /// checker.check_quote(target_stage, quote_span)?;
 ///
-
 /// // Check a function call
 /// checker.check_call("helper", callee_stage, call_span)?;
 ///
-
 /// // Exit function context
 /// checker.exit_function();
 ///
-
 /// // Collect warnings
 /// let warnings = checker.collect_warnings();
 /// ```
@@ -470,7 +449,6 @@ impl StageChecker {
 
     /// Register a function with its stage information
     ///
-
     /// Call this for each meta function before checking its body.
     pub fn register_function(
         &mut self,
@@ -495,7 +473,6 @@ impl StageChecker {
 
     /// Enter a function context for checking
     ///
-
     /// This sets the current stage and tracks nested function checking.
     pub fn enter_function(&mut self, name: &Text, stage: u32, _span: Span) {
         // Save current context
@@ -524,16 +501,13 @@ impl StageChecker {
 
     /// Check a quote expression for stage correctness
     ///
-
     /// Validates that the quote generates code for the correct stage
     /// according to the Stage Coherence Rule.
     ///
-
     /// # Arguments
     /// - `target_stage`: The stage of the code being generated (None = current - 1)
     /// - `span`: Source location of the quote expression
     ///
-
     /// # Returns
     /// - `Ok(())` if the quote is valid
     /// - `Err(StageError::StageMismatch)` if the stages don't align
@@ -583,16 +557,13 @@ impl StageChecker {
 
     /// Check a function call for stage correctness
     ///
-
     /// Validates that the callee can be called from the current stage.
     ///
-
     /// # Cross-Stage Call Rules
     /// - Same stage calls are always allowed
     /// - Higher stage cannot directly call lower stage (must generate code)
     /// - Lower stage cannot call higher stage (not yet compiled)
     ///
-
     /// # Arguments
     /// - `callee_name`: Name of the function being called
     /// - `callee_stage`: Stage of the callee function
@@ -660,7 +631,6 @@ impl StageChecker {
 
     /// Check a stage escape expression `$(stage N) { ... }`
     ///
-
     /// Validates that the escape stage is valid for the current context.
     pub fn check_stage_escape(&mut self, escape_stage: u32, span: Span) -> Result<(), StageError> {
         // Escape stage must be between 0 and current_stage (exclusive)
@@ -757,7 +727,6 @@ impl StageChecker {
 
     /// Check a variable reference for stage correctness.
     ///
-
     /// A variable at `var_stage` can only be referenced from the current stage
     /// if the stages match. Cross-stage variable references are errors.
     pub fn check_variable_reference(
@@ -786,7 +755,6 @@ impl StageChecker {
 
     /// Check that a type used in generated code is at the correct stage.
     ///
-
     /// A type at `type_stage` can be used in code generated at `target_stage`
     /// only if the type stage is at or below the target stage.
     pub fn check_quote_type(
@@ -814,7 +782,6 @@ impl StageChecker {
 
     /// Check a splice/unquote expression for stage correctness.
     ///
-
     /// A splice expression must reference the current stage.
     pub fn check_splice(&mut self, splice_stage: u32, span: Span) -> Result<(), StageError> {
         if splice_stage == self.current_stage {

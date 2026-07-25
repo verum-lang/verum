@@ -1273,7 +1273,6 @@ impl Phase0CoreCompiler {
 
     /// Infer type parameters for a given type name.
     ///
-
     /// Driven by `GENERIC_TYPE_PARAMS`: stdlib container types that need
     /// generic parameters to be materialized at FFI time.
     fn infer_type_params(&self, type_name: &str) -> List<Text> {
@@ -1288,7 +1287,6 @@ impl Phase0CoreCompiler {
 
     /// Detect whether a stdlib path corresponds to a compiler intrinsic.
     ///
-
     /// Driven by `INTRINSIC_PATTERNS`: matches `(type_segment, method_segment)`
     /// appearing in the path. Used by codegen to inline rather than FFI-call.
     fn detect_intrinsic(&self, path: &str) -> Option<IntrinsicId> {

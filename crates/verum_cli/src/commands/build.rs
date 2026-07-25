@@ -660,25 +660,21 @@ struct BuildMetrics {
 
 /// Scan the project's entry source for `@gui` / `@console` on `fn main`.
 ///
-
 /// Returns the literal `link.exe` `/SUBSYSTEM:` flag value
 /// (`"WINDOWS"` for `@gui`, `"CONSOLE"` for `@console`) when the
 /// attribute is found, or `None` when neither attribute is present
 /// or the entry file doesn't exist.
 ///
-
 /// The scan is textual — it strips line/block comments and looks for
 /// the attribute token immediately followed (modulo whitespace) by
 /// the `fn main` declaration. This avoids re-parsing the file via
 /// the full AST pipeline (which would happen during the actual
 /// compile anyway), keeping the resolution cheap.
 ///
-
 /// Searched files (in order):
 ///  1. `src/main.vr` — the conventional application entry.
 ///  2. `main.vr` at the manifest root — alternative project layout.
 ///
-
 /// Robust to:
 ///  * `// line comments` between the attribute and `fn main`
 ///  * `/* block comments */` between them
@@ -876,7 +872,6 @@ fn count_vr_files(dir: &PathBuf) -> Result<usize> {
 
 /// Outcome of evaluating the SMT-stats persistence policy (#301).
 ///
-
 /// Three CLI VerifyConfig fields are merged into a single typed
 /// decision so the build path branches once and the contract is
 /// pin-testable without driving the whole build pipeline.
@@ -899,11 +894,9 @@ pub(crate) enum SmtStatsDecision {
 /// extracted so the OR-then-AND lattice across CLI and manifest
 /// surfaces is regression-pinned.
 ///
-
 /// Truth table (`telemetry_enabled = true` reduces to `cli ||
 /// manifest_persist`; `telemetry_enabled = false` short-circuits):
 ///
-
 /// | cli_smt_stats | manifest.persist_stats | manifest.enable_telemetry | decision |
 /// |---------------|------------------------|---------------------------|---------------|
 /// | true | * | true | Persist |

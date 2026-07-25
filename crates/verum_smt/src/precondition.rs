@@ -40,17 +40,14 @@ pub enum PreconditionError {
 
 /// Assert a precondition in the SMT solver.
 ///
-
 /// Preconditions are assumed to hold - they constrain the input space
 /// but are not verified. It's the caller's responsibility to ensure them.
 ///
-
 /// # Arguments
 /// * `translator` - The SMT translator
 /// * `solver` - The Z3 solver
 /// * `clause` - The precondition clause to assert
 ///
-
 /// # Returns
 /// * `Ok(())` if the precondition was successfully asserted
 /// * `Err(PreconditionError)` if translation or assertion failed
@@ -75,7 +72,6 @@ pub fn assert_precondition(
 
 /// Assert multiple preconditions in the SMT solver.
 ///
-
 /// This is a convenience function for asserting all preconditions from a
 /// contract specification.
 pub fn assert_preconditions(
@@ -91,7 +87,6 @@ pub fn assert_preconditions(
 
 /// Validate that a precondition doesn't use forbidden constructs.
 ///
-
 /// Preconditions must not reference:
 /// - `result` (not available at function entry)
 /// - `old()` (meaningless for preconditions)
@@ -113,7 +108,6 @@ pub fn validate_precondition(expr: &Expr) -> PreconditionResult<()> {
 
 /// Check if an expression references 'result'.
 ///
-
 /// This is used to validate preconditions, which cannot reference `result`
 /// since it's not available at function entry.
 pub fn contains_result(expr: &Expr) -> bool {
@@ -150,7 +144,6 @@ pub fn contains_result(expr: &Expr) -> bool {
 
 /// Check if an expression uses 'old()'.
 ///
-
 /// This is used to validate preconditions, which cannot use `old()` since
 /// it's meaningless at function entry (there is no prior state).
 pub fn contains_old(expr: &Expr) -> bool {
@@ -186,7 +179,6 @@ pub fn contains_old(expr: &Expr) -> bool {
 
 /// Generate an informative error message for a violated precondition.
 ///
-
 /// This is used when a caller fails to satisfy a precondition.
 pub fn format_precondition_violation(clause: &RslClause, function_name: &str) -> Text {
     format!(

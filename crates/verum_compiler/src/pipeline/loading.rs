@@ -58,27 +58,22 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load and parse all stdlib modules into self.modules.
     ///
-
     /// This enables cross-file imports from std.* modules.
     /// Must be called before processing user modules.
     ///
-
     /// # Performance Optimization (Registry Caching)
     ///
-
     /// This function implements a two-level caching strategy:
     /// 1. **Registry cache (FAST PATH)**: If we have a fully-populated registry
     ///  cached, we deep_clone it (~1ms) instead of re-registering all modules
     /// 2. **Module cache (FALLBACK)**: If no registry cache, we use cached parsed
     ///  modules to avoid re-parsing, then populate and cache the registry
     ///
-
     /// The registry cache provides ~500ms speedup per compilation by avoiding:
     /// - Module registration in ModuleRegistry (~166 modules)
     /// - Export extraction from each module
     /// - Glob re-export resolution (iterative)
     ///
-
     /// Loads stdlib with two-tier caching: (1) registry cache from prior compilation,
     /// (2) parsed module cache to avoid re-parsing ~166 stdlib modules.
     pub(super) fn load_stdlib_modules(&mut self) -> Result<()> {
@@ -586,7 +581,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load project modules from the input file's directory.
     ///
-
     /// When the input file resides in a directory containing a `mod.vr` file,
     /// that directory is treated as a multi-file project. All sibling `.vr` files
     /// are discovered, parsed, and registered as modules, enabling cross-file
@@ -597,7 +591,6 @@ impl<'s> CompilationPipeline<'s> {
     /// (script-mode `dependencies = [...]`, `verum add`, etc.) instead
     /// of the manifest's project tree.
     ///
-
     /// Each cog's filesystem root is walked recursively; every `.vr`
     /// file is parsed in library mode and registered under the dotted
     /// path `<cog_name>.<relative_path>` (with `mod.vr` collapsing to
@@ -605,7 +598,6 @@ impl<'s> CompilationPipeline<'s> {
     /// entry source resolves through the same registry as workspace
     /// modules — the consumer can't tell the difference.
     ///
-
     /// No-op when no resolver is installed (project mode, plain
     /// scripts without `dependencies = [...]`).
     pub(super) fn load_external_cog_modules(&mut self) -> Result<()> {
@@ -1528,7 +1520,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Register inline modules (modules defined with `public module name { ... }`)
     ///
-
     /// This is needed for modules like `std.prelude` which are defined inline
     /// in `core/mod.vr` rather than in their own file.
     fn register_inline_modules(

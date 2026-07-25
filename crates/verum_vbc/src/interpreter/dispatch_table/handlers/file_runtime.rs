@@ -87,7 +87,6 @@ use crate::value::Value;
 /// when the interception fires, `None` otherwise (caller falls through
 /// to normal bytecode dispatch).
 ///
-
 /// Hot-path miss: one string-suffix compare + return None.
 pub(in super::super) fn try_intercept_file_runtime(
     state: &mut InterpreterState,
@@ -675,14 +674,12 @@ fn value_is_text(v: &Value) -> bool {
 
 /// Extract a path argument, transparently unwrapping THREE shapes:
 ///
-
 ///  1. Bare `&Text` (`extract_text_arg` handles small + heap strings).
 ///  2. `&Path` — Verum's `Path is { inner: Text }` record. We peek
 ///  the first field of the heap record and try Text extraction on
 ///  it; on success the path is the inner Text.
 ///  3. CBGR-encoded references on top of either of the above.
 ///
-
 /// Falls back to the empty string when the value is none of the
 /// above — the caller's `std::fs::*` invocation will then surface a
 /// `NotFound` error which the script can match on.

@@ -115,25 +115,21 @@ bitflags! {
 
         /// Module is NOT interpretable by VBC - AOT compilation required.
         ///
-
         /// This flag is set for modules compiled with the Systems profile.
         /// VBC serves only as an intermediate representation for these modules.
         ///
-
         /// Systems profile code is NOT interpretable because:
         /// - May use raw pointers and unsafe operations
         /// - May require direct hardware access
         /// - Intended for embedded/OS kernel development
         /// - VBC is portable IR only, not execution format
         ///
-
         /// V-LLSI flag: Module uses features incompatible with Tier 0 interpreter
         /// (inline assembly, direct syscalls, custom linker sections). Must be AOT compiled.
         const NOT_INTERPRETABLE = 0b10_0000_0000_0000;
 
         /// Module was compiled with Systems profile.
         ///
-
         /// Systems profile enables:
         /// - Raw pointers and unsafe code
         /// - Inline assembly
@@ -143,7 +139,6 @@ bitflags! {
 
         /// Module is for embedded/bare-metal targets.
         ///
-
         /// Embedded modules have additional restrictions:
         /// - No heap allocation
         /// - No OS dependencies
@@ -156,7 +151,6 @@ bitflags! {
 impl VbcFlags {
     /// Check if this module can be interpreted by VBC.
     ///
-
     /// Modules with `NOT_INTERPRETABLE` flag cannot be executed by the
     /// VBC interpreter. They must be compiled to native code via AOT.
     pub fn is_interpretable(&self) -> bool {
@@ -176,14 +170,11 @@ impl VbcFlags {
 
 /// VBC file header (64 bytes).
 ///
-
 /// The header contains all metadata needed to parse the VBC file,
 /// including section offsets, sizes, and validation hashes.
 ///
-
 /// # Layout
 ///
-
 /// | Offset | Size | Field |
 /// |--------|------|-------|
 /// | 0x00 | 4 | magic: "VBC1" |
@@ -302,7 +293,6 @@ impl VbcHeader {
 
     /// Checks if the version is compatible.
     ///
-
     /// A VBC file is compatible if it has the same major version and
     /// a minor version less than or equal to the current minor version.
     #[allow(clippy::absurd_extreme_comparisons)]

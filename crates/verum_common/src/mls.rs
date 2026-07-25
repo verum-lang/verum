@@ -59,7 +59,6 @@ use serde::{Deserialize, Serialize};
 
 /// MLS classification level.
 ///
-
 /// Total-ordered: `Public < Secret < TopSecret`. The `Ord` impl is
 /// the lattice's height ordering — directly usable for `cmp` and
 /// `min`/`max` (which compute meet/join).
@@ -84,7 +83,6 @@ impl MlsLevel {
     /// `Public` (the safe default — un-annotated values are
     /// unclassified).
     ///
-
     /// Accepts: `"public"`, `"secret"`, `"top_secret"`. The hyphen
     /// form `"top-secret"` is also accepted as an alias.
     pub fn from_manifest_str(s: &str) -> Self {
@@ -108,7 +106,6 @@ impl MlsLevel {
     /// Lattice join — least upper bound. The classification of a
     /// value derived from `self` AND `other` is `self.join(other)`.
     ///
-
     /// For the total order, this is `max(self, other)`.
     #[inline]
     pub fn join(self, other: Self) -> Self {
@@ -119,7 +116,6 @@ impl MlsLevel {
     /// classification a value can have and still flow into BOTH of
     /// the levels at `self` and `other`.
     ///
-
     /// For the total order, this is `min(self, other)`.
     #[inline]
     pub fn meet(self, other: Self) -> Self {

@@ -91,7 +91,6 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register collection builtins with context requirements
 ///
-
 /// All collection functions are Tier 0 (always available) since they
 /// perform pure computation without accessing external state.
 pub fn register_builtins(map: &mut BuiltinRegistry) {

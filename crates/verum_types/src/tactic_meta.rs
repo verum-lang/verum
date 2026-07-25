@@ -148,10 +148,8 @@ impl MetaContext {
 
     /// Evaluate a meta term to its normal form.
     ///
-
     /// Reduction rules:
     ///
-
     ///  * `splice(quote(e)) ↦ quote(e)` (β: cancellation)
     ///  * `custom(name, arg) ↦ F(arg)` if F is registered
     ///  * `reflect(g) ↦ cached(g)` if cached

@@ -43,7 +43,6 @@ use verum_common::{List, Maybe, Text};
 
 /// A registered tactic declaration.
 ///
-
 /// Carries enough metadata for diagnostics (`package`, `revision`,
 /// `source_span` once the parser patch lands) plus the opaque body
 /// the executor consumes.
@@ -69,7 +68,6 @@ pub struct TacticDecl {
 
 /// Scope disambiguator used by the lookup algorithm.
 ///
-
 /// The enum order determines search order: `Project` first,
 /// `ImportedCog` next (iterated in registration order), `Stdlib`
 /// last. A project-local tactic always shadows the stdlib or an
@@ -100,7 +98,6 @@ impl TacticPackageRegistry {
 
     /// Register a tactic declaration.
     ///
-
     /// Returns `Err(RegistryError::DuplicateRegistration)` if
     /// `(package, name)` is already bound. Callers that want to
     /// intentionally shadow must place the new entry in a
@@ -153,7 +150,6 @@ impl TacticPackageRegistry {
     /// declaration following the Project → ImportedCog → Stdlib
     /// search order.
     ///
-
     /// Returns `None` if no package contains the name.
     pub fn lookup(&self, name: &str) -> Maybe<&TacticDecl> {
         // Phase 1: search every Project-scoped package.

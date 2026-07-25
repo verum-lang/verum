@@ -80,7 +80,6 @@ impl ValueDisplayOptions {
 
 /// Formats a value for display.
 ///
-
 /// Returns the formatted string representation.
 pub fn format_value(value: &Value, options: &ValueDisplayOptions) -> Text {
     format_value_recursive(value, options, 0)
@@ -88,7 +87,6 @@ pub fn format_value(value: &Value, options: &ValueDisplayOptions) -> Text {
 
 /// Formats a value with its type information.
 ///
-
 /// Returns (display_string, type_string).
 pub fn format_value_with_type(
     value: &Value,

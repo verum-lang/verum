@@ -10,7 +10,6 @@ use super::generic_param::GenericParam;
 
 /// Associated type information
 ///
-
 /// Matches: core/meta/reflection.vr AssociatedTypeInfo
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssociatedTypeInfo {
@@ -52,7 +51,6 @@ impl AssociatedTypeInfo {
 
 /// Information about a protocol (trait)
 ///
-
 /// Matches: core/meta/reflection.vr ProtocolInfo
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolInfo {

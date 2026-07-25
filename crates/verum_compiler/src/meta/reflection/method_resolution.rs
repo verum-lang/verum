@@ -10,7 +10,6 @@ use super::function_info::FunctionInfo;
 
 /// Source of a resolved method
 ///
-
 /// Matches: core/meta/reflection.vr MethodSource
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -27,7 +26,6 @@ pub enum MethodSource {
 
 /// Result of method resolution for a type
 ///
-
 /// Matches: core/meta/reflection.vr MethodResolution
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodResolution {

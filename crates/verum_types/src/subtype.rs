@@ -77,7 +77,6 @@ pub fn is_global_array_coercible(name: &str) -> bool {
 
 /// Subtyping checker.
 ///
-
 /// Implements the complete subtyping algorithm per subtyping specification: structural subtyping for records, refinement subtyping, protocol-based nominal subtyping.
 /// The subtyping relation S <: T means "a value of type S can be used where T is expected".
 pub struct Subtyping {
@@ -196,10 +195,8 @@ impl Subtyping {
 
     /// Check if t1 is a subtype of t2: t1 <: t2
     ///
-
     /// This means a value of type t1 can be used where t2 is expected.
     ///
-
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 - Subtyping Algorithm
     pub fn is_subtype(&self, t1: &Type, t2: &Type) -> bool {
         // Depth guard to prevent stack overflow on deeply nested or cyclic types
@@ -1126,14 +1123,11 @@ impl Subtyping {
 
     /// Check record subtyping with width and depth subtyping.
     ///
-
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9607-9619
     ///
-
     /// Width subtyping: S can have MORE fields than T
     /// Depth subtyping: Matching fields must be subtypes
     ///
-
     /// Example:
     /// ```verum
     /// type Point2D is { x: Float, y: Float }
@@ -1168,12 +1162,10 @@ impl Subtyping {
 
     /// Check variant (sum type) subtyping.
     ///
-
     /// Variants are dual to records:
     /// - Contravariant in tags: fewer tags = subtype
     /// - Covariant in variant types
     ///
-
     /// Example:
     /// ```verum
     /// type Shape2D is Circle(Float) | Square(Float)
@@ -1182,7 +1174,6 @@ impl Subtyping {
     /// // For sum types: S <: T if S's tags ⊆ T's tags
     /// ```
     ///
-
     /// Actually, for safe variance:
     /// S <: T if for each tag in S, T also has that tag with a subtype
     fn check_variant_subtype(
@@ -1213,11 +1204,9 @@ impl Subtyping {
 
     /// Check array subtyping: covariant in element type, invariant in size.
     ///
-
     /// Arrays are fixed-size, so sizes must match exactly.
     /// Element types are covariant (read-only access).
     ///
-
     /// Example:
     /// ```verum
     /// type PositiveArray is [Int{> 0}; 10]
@@ -1243,21 +1232,17 @@ impl Subtyping {
 
     /// Check reference subtyping with variance rules.
     ///
-
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9593-9602
     ///
-
     /// Variance rules:
     /// - Shared references (&T): covariant in T
     /// - Mutable references (&mut T): invariant in T
     ///
-
     /// Example:
     /// ```verum
     /// let x: Int{> 0} = 10;
     /// let r: &Int = &x; // OK: &Int{> 0} <: &Int (shared refs covariant)
     ///
-
     /// let mut y: Int = 5;
     /// let r_mut: &mut Int{> 0} = &mut y; // ERROR: &mut refs invariant
     /// ```
@@ -1283,17 +1268,14 @@ impl Subtyping {
 
     /// Check function subtyping: contravariant in parameters, covariant in return.
     ///
-
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9621-9638
     /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context requirement subtyping
     ///
-
     /// Function subtyping rules:
     /// - Parameters: contravariant (accept more inputs)
     /// - Return type: covariant (produce more specific outputs)
     /// - Contexts: S can have FEWER contexts than T
     ///
-
     /// Example:
     /// ```verum
     /// type IntToBool is Int -> Bool
@@ -1335,20 +1317,16 @@ impl Subtyping {
 
     /// Check context subtyping: S can have FEWER contexts than T.
     ///
-
     /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 line 9663-9666
     /// Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context requirement subtyping
     ///
-
     /// This allows passing pure functions where effectful functions are expected.
     ///
-
     /// Rules:
     /// - None (no contexts) is a subtype of any context requirement (pure functions can be used anywhere)
     /// - Some(Concrete(req1)) <: Some(Concrete(req2)) if req1.is_subset_of(req2)
     /// - Variable contexts are handled conservatively (assume compatible during inference)
     ///
-
     /// Example:
     /// ```verum
     /// fn pure_fn(x: Int) -> Int { x + 1 }
@@ -1380,21 +1358,17 @@ impl Subtyping {
 
     /// Check universe subtyping (cumulativity).
     ///
-
     /// Universe hierarchy: Type : Type1 : Type2 : ... preventing paradoxes, universe polymorphism via Level parameter — Universe Hierarchy
     ///
-
     /// Universe cumulativity: Type_n <: Type_m if n <= m
     /// This allows types at lower levels to be used where higher levels are expected.
     ///
-
     /// # Rules:
     /// - Concrete(n) <: Concrete(m) if n <= m
     /// - Variable(i) <: Variable(j) is constraint-checked later
     /// - Succ(n) <: Succ(m) if n <= m
     /// - Max(a, b) <: Concrete(n) if max(a, b) <= n
     ///
-
     /// # Examples:
     /// ```verum
     /// // Type₀ <: Type₁ <: Type₂
@@ -1461,17 +1435,14 @@ impl Default for Subtyping {
 
 /// Check syntactic subsumption for common refinement patterns.
 ///
-
 /// This provides a fast path that resolves >80% of refinement subsumption checks
 /// in <1ms without invoking the SMT solver.
 ///
-
 /// Returns:
 /// - Some(true): Predicates syntactically subsume
 /// - Some(false): Predicates syntactically don't subsume
 /// - None: Cannot determine syntactically, need SMT solver
 ///
-
 /// Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3.1 lines 9696-9707
 /// Syntactic subsumption: fast-path type checking via pattern matching before full unification
 fn check_syntactic_subsumption(phi1: &verum_ast::Expr, phi2: &verum_ast::Expr) -> Option<bool> {

@@ -52,7 +52,6 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register type property builtins with context requirements
 ///
-
 /// All type property functions require MetaTypes context since they
 /// access type layout information from the type registry.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
@@ -224,7 +223,6 @@ fn meta_type_max(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 
 /// Try to fold a size-expression to a non-negative `u64`.
 ///
-
 /// Recognises bare integer literals and parenthesised wrappers around
 /// them — the two shapes a written-by-hand `[T; N]` size produces
 /// before const-evaluation runs. Anything else (named const, runtime

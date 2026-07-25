@@ -217,14 +217,12 @@ pub struct InfinityEquivalence {
 /// The fundamental kernel rule: identity morphisms are always
 /// (∞,n)-equivalences for any `n: Ordinal`.
 ///
-
 /// **Mathematical content.** Every identity functor `id_X : X → X`
 /// has trivial homotopy-coherent inverse (itself). Whitehead
 /// criterion: at every truncation level `k`, `τ_{≤k}(id_X)` is the
 /// identity functor `id_X` again, which is a `k`-equivalence
 /// trivially (every cell pairs with itself).
 ///
-
 /// **Why this matters for MSFS.** Theorem 5.1's `id_X violates
 /// (Π_4, S, n)` step rests precisely on this fact: `id_X` is an
 /// `(∞, n)`-equivalence onto its image for every `n`. Pre-this-
@@ -232,7 +230,6 @@ pub struct InfinityEquivalence {
 /// framework axiom; with this rule the step becomes derivable
 /// in-kernel.
 ///
-
 /// **Decidability.** Decidable for any `Ordinal` level (no
 /// preprint admits, no bridge invocation).
 pub fn identity_is_equivalence(
@@ -249,19 +246,16 @@ pub fn identity_is_equivalence(
 /// V0 equivalence-decision rule: decide whether the supplied
 /// morphism is an `(∞, n)`-equivalence at level `n`.
 ///
-
 /// **Decidable cases (no bridge admit):**
 ///  1. Identity morphisms (always equivalences at every level).
 ///  2. Composition of equivalences (preserved under composition).
 ///
-
 /// **Admit cases (bridge admit recorded):**
 ///  - Limit-level claims (`n = ω`, `n = κ_1`) require Theorem A.7
 ///  stabilisation; admitted via
 ///  [`BridgeId::CohesiveAdjunctionUnitCounit`] (the cohesive-
 ///  stabilisation bridge that gates A.7's three-source citation).
 ///
-
 /// Returns `true` (with optional bridge admit recorded in `audit`)
 /// when the morphism is an equivalence at level `n`; returns `false`
 /// when it provably isn't (the kernel surfaces a separating

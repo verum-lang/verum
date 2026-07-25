@@ -79,7 +79,6 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register stage info builtins with context requirements
 ///
-
 /// All stage info functions require StageInfo context since they access
 /// staged compilation state.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
@@ -333,7 +332,6 @@ fn meta_stage_is_valid(
 
 /// Check if a stage transition from->to is valid
 ///
-
 /// A transition is valid when to == from - 1 (quote lowers by exactly 1)
 /// and both stages are within valid range.
 fn meta_stage_is_valid_transition(
@@ -362,7 +360,6 @@ fn meta_stage_is_valid_transition(
 
 /// Get the target stage for a quote expression
 ///
-
 /// Returns current_stage - 1, or 0 if already at stage 0.
 fn meta_stage_quote_target(
     ctx: &mut MetaContext,
@@ -378,7 +375,6 @@ fn meta_stage_quote_target(
 
 /// Check if current stage can generate code for target stage
 ///
-
 /// Returns true if from_stage > to_stage and both are valid.
 fn meta_stage_can_generate(
     ctx: &mut MetaContext,
@@ -448,7 +444,6 @@ fn meta_stage_quote_depth(
 
 /// Get the declared stage of a function by name
 ///
-
 /// Returns the stage level, or -1 if the function is not found.
 fn meta_stage_function_stage(
     ctx: &mut MetaContext,
@@ -550,7 +545,6 @@ fn meta_stage_memory_limit(
 
 /// Get the generation chain leading to current execution
 ///
-
 /// Returns a list of maps, each with keys: "stage", "function", "span".
 fn meta_stage_generation_chain(
     ctx: &mut MetaContext,
@@ -575,7 +569,6 @@ fn meta_stage_generation_chain(
 
 /// Add a trace marker for debugging staged compilation
 ///
-
 /// Trace markers are collected by the compiler and can be displayed
 /// with the `--trace-stages` CLI flag.
 fn meta_stage_trace_marker(

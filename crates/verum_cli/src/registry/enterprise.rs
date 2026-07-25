@@ -113,7 +113,6 @@ impl AuditLevel {
     /// `SecurityScanner::log_action` — pre-fix the level was
     /// documented but `log_action` recorded every call regardless.
     ///
-
     ///  * `All` — every action is recorded.
     ///  * `Changes` — only state-changing package operations
     ///  (`Install`, `Update`, `Remove`, `Publish`,
@@ -293,7 +292,6 @@ impl EnterpriseClient {
     /// Whether the access-control policy requires every installed
     /// cog to ship a verified signature.
     ///
-
     /// Surfaces `EnterpriseConfig.access_control.require_signature`
     /// as a public read so callers driving install / publish flows
     /// can branch on the policy without re-reading the config.
@@ -305,7 +303,6 @@ impl EnterpriseClient {
     /// AND, when `require_signature = true`, the caller has confirmed
     /// the cog ships a verified signature.
     ///
-
     /// This is the load-bearing wiring for
     /// `AccessControl.require_signature`. Pre-fix the field was
     /// inert: enterprises that set the flag in `enterprise.toml`
@@ -313,7 +310,6 @@ impl EnterpriseClient {
     /// consulted the flag. Now the policy is enforced at every
     /// gate that calls this method.
     ///
-
     /// Callers that don't have signature info yet should call
     /// `is_cog_allowed` for the name-only check and
     /// `requires_signature` to decide whether to look up the
@@ -344,7 +340,6 @@ impl EnterpriseClient {
     /// reject cogs whose licenses happen to match a partial-string
     /// rule in `allowed_licenses`.
     ///
-
     /// Pre-fix this field was set in defaults / parsed from
     /// `enterprise.toml` but no consumer read it — the license check
     /// in `CogManager::install` always fired when `enterprise` was
@@ -358,18 +353,15 @@ impl EnterpriseClient {
     /// Whether a vulnerability of the given severity exceeds the
     /// `compliance.max_severity` policy.
     ///
-
     /// `max_severity` (default `"high"`) caps the SEVERITY allowed
     /// through the install gate when `require_vulnerability_scan`
     /// is also true. Returns `true` (= blocked) when:
     ///
-
     /// * the actual severity rank > the configured ceiling, or
     /// * the configured ceiling string is not a recognised severity
     ///  (fail-closed: an unrecognised policy value blocks everything
     ///  so a typo doesn't silently disable the gate).
     ///
-
     /// Pre-fix the install path treated `require_vulnerability_scan
     /// = true` as "block on ANY vulnerability". Now `max_severity =
     /// "high"` means Low/Medium/High vulnerabilities pass through

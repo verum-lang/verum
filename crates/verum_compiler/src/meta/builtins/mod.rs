@@ -104,11 +104,9 @@ pub use context_requirements::{
 
 /// Built-in meta function type signature
 ///
-
 /// Takes a mutable reference to MetaContext for type definition lookup
 /// and variable binding, and a list of constant value arguments.
 ///
-
 /// Returns a Result with either the computed ConstValue or a MetaError.
 pub type BuiltinMetaFn =
     fn(&mut MetaContext, verum_common::List<ConstValue>) -> Result<ConstValue, MetaError>;
@@ -116,11 +114,9 @@ pub type BuiltinMetaFn =
 impl MetaContext {
     /// Get all built-in meta functions with their context requirements
     ///
-
     /// Returns a registry mapping function names to their implementations
     /// and required contexts.
     ///
-
     /// Compile-time intrinsics available in meta context. Organized in tiers:
     /// - Tier 0: Always available (pure computation: arithmetic, collections, debugging, testing)
     /// - Tier 1: Requires meta context (type introspection, AST manipulation, code generation)
@@ -177,11 +173,9 @@ impl MetaContext {
 
     /// Get a builtin function by name, checking context requirements
     ///
-
     /// Returns an error if the function exists but the required context
     /// is not enabled. Returns the `BuiltinInfo` (cloned) if successful.
     ///
-
     /// Two gates apply, in order:
     ///  1. **Reflection sandbox** — `[meta] reflection = false`
     ///  sets `MetaContext.reflection_disabled = true`, which
@@ -221,7 +215,6 @@ impl MetaContext {
 
     /// Check if a builtin can be called with current enabled contexts.
     ///
-
     /// Honors both gates that `get_builtin` applies: the reflection
     /// sandbox (overrides reflection-tagged contexts) and the
     /// capability declaration. Symmetrical with `get_builtin` so

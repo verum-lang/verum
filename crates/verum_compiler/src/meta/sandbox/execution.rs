@@ -76,7 +76,6 @@ impl SandboxedExecutor {
 
     /// Estimate the memory cost of a ConstValue
     ///
-
     /// This is an approximation for memory limit enforcement.
     /// Returns size in bytes.
     fn estimate_value_memory(&self, value: &ConstValue) -> usize {
@@ -129,7 +128,6 @@ impl SandboxedExecutor {
 
     /// Execute an expression in the sandbox
     ///
-
     /// This is the main entry point for executing meta functions at compile-time.
     /// It recursively evaluates the expression AST while enforcing I/O restrictions.
     pub fn execute(&self, ctx: &MetaContext, expr: &Expr) -> Result<ConstValue, SandboxError> {

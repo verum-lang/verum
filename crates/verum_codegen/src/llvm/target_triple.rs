@@ -36,7 +36,6 @@ use verum_llvm::module::Module;
 
 /// Returns `true` when the LLVM module's target triple denotes Linux.
 ///
-
 /// Used to select the direct-syscall (libc-free) IR path versus the
 /// libSystem / kernel32 paths.
 pub fn target_is_linux(module: &Module<'_>) -> bool {
@@ -115,7 +114,6 @@ pub fn target_is_dragonfly(module: &Module<'_>) -> bool {
 /// Returns `true` when the LLVM module's target triple denotes
 /// aarch64 / arm64.
 ///
-
 /// Used at syscall-number selection time — most Linux syscall numbers
 /// differ between x86_64 and aarch64 (e.g. `SYS_clock_gettime` =
 /// 228 on x86_64, 113 on aarch64; `SYS_getpid` = 39 vs 172).

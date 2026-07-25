@@ -12,7 +12,6 @@ use crate::value::Value;
 
 /// ArithExtended (0xBD) - Extended arithmetic operations.
 ///
-
 /// Sub-opcodes:
 /// - 0x00-0x03: Checked arithmetic (returns Maybe<Int>)
 /// - 0x10-0x12: Overflowing arithmetic (returns (result, overflowed))

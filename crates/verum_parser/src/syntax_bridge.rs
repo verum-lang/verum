@@ -86,7 +86,6 @@ impl LosslessParser {
 
     /// Parse source code losslessly using single-pass architecture.
     ///
-
     /// Returns both a semantic AST and a lossless green tree.
     /// Uses EventBasedParser to build green tree, then AstSink to convert to AST.
     pub fn parse(&self, source: &str, file_id: FileId) -> LosslessParse {
@@ -118,7 +117,6 @@ impl LosslessParser {
 
     /// Parse source code using legacy dual-parsing approach.
     ///
-
     /// Kept for comparison and fallback if needed.
     #[deprecated(since = "0.5.0", note = "Use parse() for single-pass architecture")]
     pub fn parse_legacy(&self, source: &str, file_id: FileId) -> LosslessParse {
@@ -247,7 +245,6 @@ impl Default for LosslessParser {
 
 /// Incremental parser for IDE use cases.
 ///
-
 /// Supports partial re-parsing when source is edited.
 /// Uses the IncrementalEngine from verum_syntax for smart subtree replacement.
 pub struct IncrementalParser {
@@ -288,7 +285,6 @@ impl IncrementalParser {
 
     /// Parse or re-parse source code.
     ///
-
     /// If the change is small and a cached tree exists, attempts incremental re-parse.
     /// Otherwise falls back to full parse.
     pub fn parse(&mut self, source: &str, file_id: FileId) -> LosslessParse {
@@ -340,7 +336,6 @@ impl IncrementalParser {
 
     /// Apply an edit and re-parse incrementally.
     ///
-
     /// The edit is specified as a range in the old source and replacement text.
     pub fn apply_edit(
         &mut self,
@@ -432,32 +427,25 @@ impl Default for IncrementalParser {
 
 /// Event-based parser that uses verum_syntax's event infrastructure.
 ///
-
 /// This parser demonstrates the connection between the event system and the
 /// green tree building. It provides:
 ///
-
 /// 1. Event emission via `EventBuilder` with Marker/precede pattern
 /// 2. Event processing through `GreenTreeSink` to build green trees
 /// 3. Lossless round-trip via proper trivia attachment
 ///
-
 /// # Example
 ///
-
 /// ```rust,ignore
 /// use verum_parser::syntax_bridge::EventBasedParser;
 /// use verum_ast::FileId;
 ///
-
 /// let source = "fn foo() { let x = 1; }";
 /// let file_id = FileId::new(0);
 ///
-
 /// let parser = EventBasedParser::new();
 /// let result = parser.parse(source, file_id);
 ///
-
 /// // Events were emitted correctly
 /// assert!(result.event_count > 0);
 /// // Green tree was built from events
@@ -503,7 +491,6 @@ impl EventBasedParser {
 
     /// Parse source code using the event-based infrastructure.
     ///
-
     /// This method:
     /// 1. Tokenizes the source losslessly (preserving trivia)
     /// 2. Parses tokens emitting events via EventBuilder
@@ -542,7 +529,6 @@ impl EventBasedParser {
 
     /// Parse source using events, emitting to the EventBuilder.
     ///
-
     /// This is a simplified recursive descent parser that demonstrates
     /// the Marker/precede pattern for building syntax trees.
     fn parse_with_events(
@@ -1848,7 +1834,6 @@ impl EventBasedParser {
 
     /// Parse a type using events.
     ///
-
     /// Handles: path types, reference types, tuple types, etc.
     fn parse_type_events(
         &self,
@@ -2385,7 +2370,6 @@ impl Default for EventBasedParser {
 impl EventBasedParser {
     /// Parse source as a complete module (top-level items).
     ///
-
     /// This is the default parsing mode using a default file ID.
     pub fn parse_source(source: &str) -> EventBasedParse {
         let parser = Self::new();

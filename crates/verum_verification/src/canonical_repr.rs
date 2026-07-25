@@ -73,7 +73,6 @@ use verum_common::Text;
 
 /// Produce a deterministic byte-level representation for fingerprinting.
 ///
-
 /// Default impl: serialise via serde JSON, recursively sort object
 /// keys, emit UTF-8 bytes. Override only if the default would
 /// produce a non-canonical form (e.g. if `Serialize` for a node
@@ -157,7 +156,6 @@ fn canonicalise(v: Value) -> Value {
 /// theorems with the same signature bytes are interchangeable from
 /// the kernel's standpoint as far as obligation shape is concerned.
 ///
-
 /// Excludes proof body (separate payload), attributes (separate
 /// payload), and span (location is not part of meaning).
 pub fn theorem_signature_bytes(thm: &TheoremDecl) -> Vec<u8> {

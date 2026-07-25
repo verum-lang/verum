@@ -134,7 +134,6 @@ impl DeriveDebug {
 
     /// Generate fmt body for enum types
     ///
-
     /// Generates match expression:
     /// ```verum
     /// match self {

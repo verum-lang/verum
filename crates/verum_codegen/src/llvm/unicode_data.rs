@@ -1363,7 +1363,6 @@ fn get_or_create_case_convert_fn<'ctx>(
 
 /// Emit inline LLVM IR for UTF-8 decode at the current builder position.
 ///
-
 /// Takes `(ptr bytes, i64 idx)` and returns `i64` codepoint.
 /// Uses conditional branches for 1/2/3/4-byte sequences.
 /// Returns 0xFFFD for invalid lead bytes.

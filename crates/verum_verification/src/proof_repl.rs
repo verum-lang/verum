@@ -361,7 +361,6 @@ impl GoalStack {
 /// Snapshot of the open-goal stack + applied steps at a point in
 /// time.
 ///
-
 /// **Schema note.** Goals are typed (`Vec<Goal>`) so consumers can
 /// inspect hypotheses + propositions independently — replacing the
 /// V0 stringly-typed `Vec<Text>` view per the #91 hardening pass.
@@ -826,7 +825,6 @@ impl GoalRewriteOutcome {
 /// Single dispatch interface for surface-tactic → goal-stack
 /// rewriters.
 ///
-
 /// Implementations are display-side: they describe how the
 /// open-goal *display* mutates after a kernel-accepted tactic. The
 /// kernel checker (`llm_tactic::KernelChecker`) is the soundness
@@ -841,7 +839,6 @@ pub trait GoalRewriter: std::fmt::Debug + Send + Sync {
 /// V0 reference rewriter. Recognises the canonical surface-tactic
 /// shapes:
 ///
-
 ///  * `intro` / `intro h` / `intros h1 h2 …` — peel hypothesis off
 ///  an `H -> P` shape. When the focused proposition doesn't
 ///  textually parse as an implication, falls back to appending
@@ -859,7 +856,6 @@ pub trait GoalRewriter: std::fmt::Debug + Send + Sync {
 ///  `congruence` / `eauto` / `smt` — decision-procedure stand-
 ///  ins; close the focused goal.
 ///
-
 /// Anything else returns `NoMatch`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultGoalRewriter;
@@ -1183,17 +1179,14 @@ pub trait ReplSession: std::fmt::Debug + Send {
 
 /// V0 reference REPL session.
 ///
-
 /// Wires:
 ///
-
 ///  * A [`PatternKernelChecker`] for step verification (the
 ///  soundness gate).
 ///  * A [`DefaultGoalRewriter`] for typed goal-stack mutation
 ///  (the display-side state machine; #91 hardening).
 ///  * A [`DefaultSuggestionEngine`] for hints.
 ///
-
 /// Maintains an internal history stack for undo / redo. Each
 /// history entry snapshots the *full* `GoalStack` at the time of
 /// application, so undo restores the prior state byte-for-byte

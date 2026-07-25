@@ -16,7 +16,6 @@ use crate::types::{Event, Request, Response};
 
 /// Reads a single DAP message from a reader.
 ///
-
 /// DAP uses HTTP-like framing:
 /// ```text
 /// Content-Length: <length>\r\n
@@ -167,7 +166,6 @@ fn run_event_loop(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Res
 
 /// Runs the DAP server on stdio (stdin/stdout).
 ///
-
 /// This is the standard transport for VS Code debug adapters.
 pub fn run_stdio() -> io::Result<()> {
     tracing::info!("Starting Verum DAP server on stdio");
@@ -183,7 +181,6 @@ pub fn run_stdio() -> io::Result<()> {
 
 /// Runs the DAP server on a TCP socket.
 ///
-
 /// Accepts a single connection and runs the event loop on it.
 /// Useful for testing or when stdio is not available.
 pub fn run_tcp(port: u16) -> io::Result<()> {

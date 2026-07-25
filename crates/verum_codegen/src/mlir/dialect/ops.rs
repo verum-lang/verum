@@ -42,10 +42,8 @@ use verum_mlir::{
 
 /// CBGR allocation operation.
 ///
-
 /// Allocates memory with CBGR tracking (generation + epoch).
 ///
-
 /// ```mlir
 /// %ref = verum.cbgr_alloc %value : T -> !verum.ref<T, managed>
 /// ```
@@ -74,10 +72,8 @@ impl CbgrAllocOp {
 
 /// CBGR check operation.
 ///
-
 /// Validates a CBGR reference (checks generation matches).
 ///
-
 /// ```mlir
 /// %valid = verum.cbgr_check %ref, %expected_gen : i1
 /// ```
@@ -103,10 +99,8 @@ impl CbgrCheckOp {
 
 /// CBGR dereference operation.
 ///
-
 /// Dereferences a CBGR reference with validation.
 ///
-
 /// ```mlir
 /// %value = verum.cbgr_deref %ref : !verum.ref<T, managed> -> T
 /// ```
@@ -130,10 +124,8 @@ impl CbgrDerefOp {
 
 /// CBGR drop operation.
 ///
-
 /// Drops a CBGR-tracked allocation.
 ///
-
 /// ```mlir
 /// verum.cbgr_drop %ref : !verum.ref<T, managed>
 /// ```
@@ -155,10 +147,8 @@ impl CbgrDropOp {
 
 /// Context get operation.
 ///
-
 /// Gets a context value from the current environment.
 ///
-
 /// ```mlir
 /// %ctx = verum.context_get "Database" : !verum.context<Database>
 /// ```
@@ -185,10 +175,8 @@ impl ContextGetOp {
 
 /// Context provide operation.
 ///
-
 /// Provides a context value for nested operations.
 ///
-
 /// ```mlir
 /// verum.context_provide "Database" = %db : !verum.context<Database>
 /// ```
@@ -215,10 +203,8 @@ impl ContextProvideOp {
 
 /// Spawn operation.
 ///
-
 /// Spawns an async task.
 ///
-
 /// ```mlir
 /// %handle = verum.spawn %closure : () -> !verum.future<T>
 /// ```
@@ -242,10 +228,8 @@ impl SpawnOp {
 
 /// Await operation.
 ///
-
 /// Awaits a future's completion.
 ///
-
 /// ```mlir
 /// %result = verum.await %future : !verum.future<T> -> T
 /// ```
@@ -269,10 +253,8 @@ impl AwaitOp {
 
 /// Select operation.
 ///
-
 /// Selects on multiple futures (first to complete wins).
 ///
-
 /// ```mlir
 /// %result = verum.select %future1, %future2, ... : T
 /// ```
@@ -296,10 +278,8 @@ impl SelectOp {
 
 /// List new operation.
 ///
-
 /// Creates a new empty list.
 ///
-
 /// ```mlir
 /// %list = verum.list_new : !verum.list<T>
 /// ```
@@ -326,10 +306,8 @@ impl ListNewOp {
 
 /// List push operation.
 ///
-
 /// Pushes an element to a list.
 ///
-
 /// ```mlir
 /// %new_list = verum.list_push %list, %element : !verum.list<T>
 /// ```
@@ -354,10 +332,8 @@ impl ListPushOp {
 
 /// List get operation.
 ///
-
 /// Gets an element from a list by index.
 ///
-
 /// ```mlir
 /// %element = verum.list_get %list, %index : T
 /// ```
@@ -382,10 +358,8 @@ impl ListGetOp {
 
 /// Refinement check operation.
 ///
-
 /// Performs runtime refinement type check.
 ///
-
 /// ```mlir
 /// %valid = verum.refinement_check %value, "x > 0" : i1
 /// ```
@@ -415,10 +389,8 @@ impl RefinementCheckOp {
 
 /// Stdlib call operation.
 ///
-
 /// Calls a standard library function via FFI.
 ///
-
 /// ```mlir
 /// %result = verum.stdlib_call "verum_std_list_i64_push" (%list, %value) : (ptr, i64) -> i32
 /// ```
@@ -452,10 +424,8 @@ impl StdlibCallOp {
 
 /// Print operation.
 ///
-
 /// Prints a value to stdout.
 ///
-
 /// ```mlir
 /// verum.print %text : !verum.text
 /// ```
@@ -477,10 +447,8 @@ impl PrintOp {
 
 /// Panic operation.
 ///
-
 /// Panics with a message.
 ///
-
 /// ```mlir
 /// verum.panic %message : !verum.text
 /// ```
@@ -502,10 +470,8 @@ impl PanicOp {
 
 /// Assert operation.
 ///
-
 /// Asserts a condition.
 ///
-
 /// ```mlir
 /// verum.assert %condition : i1
 /// ```

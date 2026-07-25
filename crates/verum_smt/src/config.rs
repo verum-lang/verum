@@ -182,7 +182,6 @@ impl Z3Config {
     /// `crate::z3_backend::Z3Config` so `SmtBackendSwitcher::build_backends`
     /// can apply every field at backend construction.
     ///
-
     /// `global_timeout_ms` is left as `Maybe::None` here so that
     /// `build_backends` can fall back to the umbrella
     /// `SwitcherConfig.timeout_ms` when the manifest doesn't set a
@@ -267,7 +266,6 @@ impl Cvc5Config {
     /// Translate the TOML schema `[smt.cvc5]` config into the
     /// impl-side `crate::cvc5_backend::Cvc5Config`.
     ///
-
     /// String fields (`logic`, `quantifier_mode`) are parsed via the
     /// per-enum `from_str` helpers; unknown values fall back to the
     /// safe defaults (`SmtLogic::ALL`, `QuantifierMode::Auto`) with
@@ -331,7 +329,6 @@ fn default_num_workers() -> usize {
 impl SmtConfig {
     /// Create configuration from environment variables
     ///
-
     /// Environment variables (all optional):
     /// - `VERUM_SMT_BACKEND`: Backend choice (z3, cvc5, auto, portfolio)
     /// - `VERUM_SMT_TIMEOUT`: Timeout in milliseconds
@@ -459,7 +456,6 @@ impl SmtConfig {
 
     /// Convert to backend switcher configuration.
     ///
-
     /// Translates the TOML schema types (`SmtConfig.z3`,
     /// `SmtConfig.cvc5`) into the impl-side
     /// `crate::z3_backend::Z3Config` / `crate::cvc5_backend::Cvc5Config`

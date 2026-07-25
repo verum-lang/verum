@@ -33,10 +33,8 @@ use crate::z3_backend::{AdvancedResult, Z3Config, Z3ContextManager, Z3Solver};
 
 /// SMT Backend trait for refinement verification
 ///
-
 /// This trait allows multiple SMT solvers to be plugged in, though Z3 is the primary implementation.
 ///
-
 /// Note: Z3 Context uses Rc internally and is not Send/Sync, so backends may not be thread-safe.
 /// For parallel solving, create separate backend instances per thread.
 pub trait SmtBackend {
@@ -97,7 +95,6 @@ pub struct Model {
 
 /// SMT errors that can occur during verification.
 ///
-
 /// Covers solver failures, translation issues, timeouts, and unsupported features.
 #[derive(Debug, thiserror::Error)]
 pub enum SmtError {
@@ -414,7 +411,6 @@ impl Z3Backend {
 
     /// Translate a substitution expression to a Z3 Dynamic value
     ///
-
     /// This method translates an expression that will be substituted for a variable.
     /// It attempts to determine the appropriate Z3 sort (Int, Bool, etc.) based on
     /// the expression structure.
@@ -528,7 +524,6 @@ impl Z3Backend {
 
     /// Translate an IfCondition to Z3 Bool
     ///
-
     /// IfCondition can contain multiple ConditionKind items chained with &&.
     /// We translate each condition and combine with conjunction.
     fn translate_if_condition(
@@ -560,7 +555,6 @@ impl Z3Backend {
 
     /// Translate a Block to Z3 Bool by extracting its trailing expression
     ///
-
     /// In SMT context, we're interested in the final boolean value of the block.
     /// This is typically the last expression (without semicolon) in the block.
     fn translate_block(
@@ -810,7 +804,6 @@ impl SmtBackend for Z3Backend {
 
 /// Statistics tracking for SMT solver performance.
 ///
-
 /// Collects metrics on query outcomes, timing, and success rates
 /// to support performance tuning and debugging.
 #[derive(Debug, Default, Clone)]

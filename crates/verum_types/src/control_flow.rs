@@ -189,7 +189,6 @@ pub enum ResultState {
 impl ResultState {
     /// Join two states at a control flow merge point
     ///
-
     /// ```text
     /// Handled ∧ Handled = Handled
     /// Handled ∧ Checked = Handled

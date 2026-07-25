@@ -508,7 +508,6 @@ fn test_transitive_escape_info() {
 
 /// Helper to create a diamond CFG (if-then-else)
 ///
-
 /// ```text
 ///  entry (0)
 ///  / \
@@ -597,7 +596,6 @@ fn create_diamond_cfg() -> ControlFlowGraph {
 
 /// Helper to create a nested diamond CFG
 ///
-
 /// ```text
 ///  entry (0)
 ///  / \

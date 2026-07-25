@@ -61,7 +61,6 @@ impl DeriveMacro for DeriveSerialize {
 impl DeriveSerialize {
     /// Generate serialize body for struct types
     ///
-
     /// Generates:
     /// ```verum
     /// let mut state = serializer.serialize_struct("TypeName", field_count)?;
@@ -195,7 +194,6 @@ impl DeriveSerialize {
 
     /// Generate serialize body for enum types
     ///
-
     /// Generates match expression that serializes each variant appropriately:
     /// ```verum
     /// match self {

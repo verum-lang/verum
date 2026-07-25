@@ -69,10 +69,8 @@ use crate::tactic_elaborator::{ElabContext, ElabError, proposition_to_term};
 /// Verum produces a value of this type; every dispatcher (SMT,
 /// kernel, refinement-check) consumes one.
 ///
-
 /// **Logical reading**: `H_1 ∧ H_2 ∧ ... ∧ H_n ⇒ C`.
 ///
-
 /// **Kernel-Term reading**: as a closed Pi-chain
 /// `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))` (see [`VerificationGoal::to_term`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,7 +87,6 @@ pub struct VerificationGoal {
 
 /// The pipeline source that produced a [`VerificationGoal`].
 ///
-
 /// **Architectural significance**: this enum makes the verification
 /// surface explicit. An audit gate that sees only `Theorem` sources
 /// is reviewing the proof corpus; one that sees only `FnContract` is
@@ -180,12 +177,10 @@ impl VerificationGoal {
 
     /// **Encode the goal as a single closed kernel `Term`.**
     ///
-
     /// The result is `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))`. This is the
     /// type a proof certificate must inhabit — the de Bruijn criterion
     /// reads off this term.
     ///
-
     /// **Closure invariant**: caller must ensure all hypotheses and
     /// the conclusion are closed. No checking here; the kernel will
     /// reject if they aren't.
@@ -215,7 +210,6 @@ impl VerificationGoal {
 
     /// **Project metadata** for audit-gate JSON emission.
     ///
-
     /// Returns a `BTreeMap` with stable string keys: `kind`, `name`,
     /// `hypothesis_count`. Suitable for direct serde-JSON emission.
     pub fn audit_metadata(&self) -> BTreeMap<String, String> {
@@ -244,10 +238,8 @@ use verum_ast::ty::{Type, TypeKind};
 /// **Convert a theorem (or lemma / corollary) declaration to a
 /// VerificationGoal.**
 ///
-
 /// Hypotheses are constructed in two layers:
 ///
-
 ///  1. Generic-parameter binders, one per entry in `theorem.generics`
 ///  (e.g. `<A, B>`). Each gets `Universe(0)` as a placeholder
 ///  type — sufficient to thread the de Bruijn index through the
@@ -258,11 +250,9 @@ use verum_ast::ty::{Type, TypeKind};
 ///  3. `requires`-clause hypotheses, translated via
 ///  [`proposition_to_term`].
 ///
-
 /// The conclusion is the theorem's `proposition` (synthesised from
 /// `ensures` clauses), translated via [`proposition_to_term`].
 ///
-
 /// **Why parameters become hypotheses**: a theorem
 /// `theorem id<A>(x: A) ensures x` is logically `∀A. ∀x:A. x` — the
 /// generics + params are universal quantifiers. Pi-chain encoding
@@ -312,7 +302,6 @@ pub enum TheoremKind {
 
 /// **Convert a function declaration to a VerificationGoal.**
 ///
-
 /// - Hypotheses: the function's `requires` clauses translated via
 ///  [`proposition_to_term`].
 /// - Conclusion: synthesised from the function's `ensures` clauses
@@ -320,7 +309,6 @@ pub enum TheoremKind {
 ///  `Universe(0)` (vacuously true).
 /// - Source: `GoalSource::FnContract { fn_name }`.
 ///
-
 /// **Limitation**: the function body's verification (showing the
 /// implementation actually satisfies `ensures` under `requires`) is
 /// the SMT-layer's job. This converter produces the *contract*
@@ -369,13 +357,11 @@ pub fn from_fn_decl(
 
 /// **Convert a refinement-type obligation to a VerificationGoal.**
 ///
-
 /// `let x: Int{P(x)} = expr` generates the obligation `P(expr)`.
 /// The base type is encoded in `hypotheses` (a single hypothesis
 /// representing `x : T`); the predicate's translation is the
 /// conclusion.
 ///
-
 /// - `base_type_term`: the kernel-Term encoding of the refinement's
 ///  base type (e.g. `Universe(0)` for the simplest case).
 /// - `predicate`: the predicate Expr that must hold.
@@ -398,12 +384,10 @@ pub fn from_refinement(
 
 /// **High-level converter: `Type::Refined` + witness → VerificationGoal.**
 ///
-
 /// This is the load-bearing function for the
 /// "specification ≡ refinement type ≡ proof obligation" unification
 /// (#160). Given:
 ///
-
 ///  - `refined_ty`: a `Type` whose `kind` is `TypeKind::Refined { base,
 ///  predicate }`. Other type kinds return
 ///  [`ElabError::UnsupportedExpression`] — the caller is expected
@@ -411,14 +395,12 @@ pub fn from_refinement(
 ///  - `ty_name`: a human-readable name for the refinement (e.g.
 ///  `"NonNegInt"` or an auto-generated tag for an inline `T{...}`).
 ///
-
 /// Algorithm: extract the predicate expression from
 /// `refined_ty.kind = TypeKind::Refined { predicate, .. }`, hand it
 /// to [`from_refinement`] with `Universe(0)` as the base-type term
 /// (the placeholder encoding while a full Type-to-Term translator
 /// remains future work).
 ///
-
 /// **Why this matters for #160**: by routing every refinement-type
 /// application through [`VerificationGoal`], the type checker, the
 /// SMT dispatcher, and the audit gate see *the same shape* whether
@@ -443,13 +425,11 @@ pub fn from_refined_type(
 
 /// **The full spec-≡-refinement-≡-obligation unification handle.**
 ///
-
 /// Given any of the four sources of a verification obligation,
 /// produce a [`VerificationGoal`] of the same shape. This is the
 /// deep semantic unification driving #160: regardless of where the
 /// obligation arose, downstream consumers see ONE type.
 ///
-
 /// The dispatch is by the `source` discriminant; each branch routes
 /// through the existing `from_*` converter. Adding a new
 /// obligation source (e.g., a CBGR escape-analysis check) is one
@@ -570,14 +550,12 @@ impl VerificationSurface {
 /// surface** — one [`VerificationGoal`] per theorem / lemma /
 /// corollary / fn-with-contract.
 ///
-
 /// Refinement-type obligations are NOT collected here because they
 /// arise at type-application sites (let bindings, parameter
 /// applications), not at declaration sites; collecting them
 /// requires a type-checking pass over the module body, which is
 /// future integration work with the type checker.
 ///
-
 /// The walker is intentionally pure — no I/O, no audit-gate
 /// rendering. Callers wanting a CLI report wrap the output in
 /// JSON or pretty-printed form. The walker establishes the

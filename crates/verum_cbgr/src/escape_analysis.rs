@@ -79,7 +79,6 @@ use verum_common::{List, Map, Maybe, Set, Text};
 
 /// Escape state for a reference during analysis
 ///
-
 /// This enum represents the progressive understanding of whether a reference
 /// escapes, updated as we perform dataflow analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -236,7 +235,6 @@ impl fmt::Display for EscapeState {
 
 /// Escape point - location where a reference escapes
 ///
-
 /// Tracks the exact program point where escape occurs for diagnostics
 /// and optimization feedback.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -396,14 +394,11 @@ pub struct SourceLocation {
 
 /// Enhanced escape analyzer with forward dataflow analysis
 ///
-
 /// This is the main escape analysis engine that determines which references
 /// can be optimized to 0ns overhead by proving they don't escape.
 ///
-
 /// # Architecture
 ///
-
 /// ```text
 /// ┌─────────────────────────────────────┐
 /// │ Enhanced Escape Analyzer │
@@ -522,7 +517,6 @@ impl EscapeAnalysisStats {
 
     /// Get estimated CBGR overhead reduction
     ///
-
     /// Assumes each `NoEscape` reference saves ~150ns per function
     /// (10 derefs * 15ns each)
     #[must_use]
@@ -619,14 +613,11 @@ impl EnhancedEscapeAnalyzer {
 
     /// Run escape analysis on all references
     ///
-
     /// This is the main entry point. It performs complete escape analysis
     /// and returns results for all references.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Initialize all references to Unknown state
     /// 2. Perform forward dataflow analysis
     /// 3. Detect escape points
@@ -709,14 +700,11 @@ impl EnhancedEscapeAnalyzer {
 
     /// Perform forward dataflow analysis
     ///
-
     /// This is the core analysis engine. It iterates over the CFG in
     /// topological order, tracking escape states and detecting escape points.
     ///
-
     /// # Algorithm
     ///
-
     /// ```text
     /// WorkList = {entry block}
     /// while WorkList not empty:
@@ -874,7 +862,6 @@ impl EnhancedEscapeAnalyzer {
 
     /// Check if use is a heap store
     ///
-
     /// Uses SSA representation to precisely determine if a use site stores
     /// a reference to the heap. A heap store means the reference escapes
     /// and cannot be promoted to a stack-based lifetime.
@@ -929,7 +916,6 @@ impl EnhancedEscapeAnalyzer {
 
     /// Check if reference is passed to escaping function
     ///
-
     /// Uses the call graph to determine if a reference passed to a function
     /// at a call site may escape. A reference escapes if the called function:
     /// - Stores it to the heap
@@ -937,7 +923,6 @@ impl EnhancedEscapeAnalyzer {
     /// - Passes it to a thread spawn
     /// - Is not a known safe function
     ///
-
     /// Uses interprocedural call graph analysis: queries CallGraph::may_retain() to check
     /// if the callee may store, return, or thread-spawn the reference. Known-safe functions
     /// (pure stdlib functions that don't retain references) are excluded from escape.

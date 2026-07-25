@@ -808,7 +808,6 @@ fn extract_pattern_name(pattern: &verum_ast::pattern::Pattern) -> String {
 
 /// Format type for display
 ///
-
 /// Provides comprehensive formatting for all Verum type kinds, including:
 /// - Primitive types (Int, Float, Bool, Text, Char, Unit)
 /// - Reference types (&T, &mut T, &checked T, &unsafe T)
@@ -1121,7 +1120,6 @@ fn is_variable_mutated(code: &str, var_name: &str) -> bool {
 
 /// Infer expression type from code
 ///
-
 /// Performs heuristic type inference from expression text by analyzing:
 /// - Literal patterns (numbers, strings, booleans)
 /// - Constructor calls and known type constructors

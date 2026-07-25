@@ -678,10 +678,8 @@ impl OwnershipAnalyzer {
 
     /// Perform ownership analysis.
     ///
-
     /// Honours every `OwnershipAnalysisConfig` gate:
     ///
-
     /// * `track_stack` (default `false`) — already honoured at
     ///  site-extraction.
     /// * `track_temporaries` (default `false`) — same treatment as
@@ -702,7 +700,6 @@ impl OwnershipAnalyzer {
     ///  truncated tail. `0` preserves the prior unlimited
     ///  behaviour.
     ///
-
     /// Before this wire-up `track_temporaries`, `min_confidence`,
     /// and `max_blocks` were inert — set on the config but
     /// unread.
@@ -782,13 +779,11 @@ impl OwnershipAnalyzer {
 
     /// Extract allocation sites from CFG.
     ///
-
     /// Honours `config.max_blocks`: once that many blocks have
     /// been visited, the walk returns early. `0` preserves the
     /// prior unlimited behaviour. Trade-off documented on
     /// `analyze`.
     ///
-
     /// Honours `config.track_stack` (skip Stack-kind allocations
     /// when `false`) and `config.track_temporaries` (skip
     /// Temporary-kind allocations when `false`). Both default

@@ -292,7 +292,6 @@ impl LockfileV3 {
     ///  - The `self_integrity` digest doesn't match the recomputed
     ///  digest (tamper detection).
     ///
-
     /// Verify-on-every-load means the caller never has to remember to
     /// run a separate verify step for the lockfile itself. Cross-store
     /// verification is opt-in via [`verify_against_store`].
@@ -452,13 +451,11 @@ impl LockfileV3 {
 
     /// Cross-check every locked package against `store`:
     ///
-
     ///  - Every package's blake3 integrity must resolve to a present
     ///  blob in the store.
     ///  - Every present blob must pass [`ContentStore::lookup_by_digest`]'s
     ///  own re-hash check (catches local tampering).
     ///
-
     /// Non-blake3 integrity entries are skipped (nothing to compare
     /// against the blake3-keyed store). Returns `Ok(())` only if every
     /// blake3 entry is materialised and integrity-clean. A failure

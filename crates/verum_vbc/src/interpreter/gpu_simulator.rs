@@ -31,7 +31,6 @@ use std::collections::HashMap;
 
 /// GPU thread context providing identity and shared resources.
 ///
-
 /// This is set before each kernel thread execution and can be queried
 /// via GPU thread intrinsic sub-opcodes (0xA0-0xAF).
 #[derive(Debug, Clone)]
@@ -110,7 +109,6 @@ impl GpuThreadContext {
 
 /// Per-block shared memory allocation.
 ///
-
 /// Each block in the grid gets its own shared memory buffer that persists
 /// for the duration of the block's execution across all threads.
 #[derive(Debug)]
@@ -239,7 +237,6 @@ impl SharedMemoryBlock {
 
 /// Parameters for a GPU kernel launch.
 ///
-
 /// Saved from the Launch instruction bytecode encoding and used
 /// to drive the CPU-fallback grid/block iteration.
 #[derive(Debug, Clone)]
@@ -279,7 +276,6 @@ impl KernelLaunchParams {
 
 /// Iterator over all (block_id, thread_id) pairs in a kernel launch.
 ///
-
 /// Iterates blocks in x,y,z order (x varies fastest), and within each
 /// block iterates threads in x,y,z order (matching CUDA semantics).
 pub struct ThreadIterator {
@@ -333,7 +329,6 @@ impl Iterator for ThreadIterator {
 
 /// Tracks global memory for GPU atomics across the entire kernel execution.
 ///
-
 /// In CPU fallback mode, "global" memory is just regular host memory.
 /// Atomic operations on global memory addresses use this tracker to
 /// ensure correct sequential semantics.

@@ -98,10 +98,8 @@ impl DialectHandle {
 
     /// Creates a dialect handle from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub const unsafe fn from_raw(handle: MlirDialectHandle) -> Self {
         Self { raw: handle }

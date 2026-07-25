@@ -189,7 +189,6 @@ impl DependentVerdict {
 
 /// The dependent-type verification orchestrator.
 ///
-
 /// Accumulates goals during type checking, then discharges them
 /// in a single pass at module boundary.
 #[derive(Debug, Default)]
@@ -222,7 +221,6 @@ impl DependentVerifier {
     /// has already populated a `ProtocolChecker` during type checking
     /// and wants to route its coherence view through the orchestrator:
     ///
-
     /// ```ignore
     /// let registry = protocol_checker.export_instance_registry();
     /// verifier.set_instance_registry(registry);

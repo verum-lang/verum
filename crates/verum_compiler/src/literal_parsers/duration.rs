@@ -46,16 +46,13 @@ const NS_PER_W: u64 = 7 * NS_PER_D;
 
 /// Parse a duration string at compile-time
 ///
-
 /// # Arguments
 /// * `content` - The duration string to parse
 /// * `span` - Source location for error reporting
 ///
-
 /// # Returns
 /// The duration in nanoseconds
 ///
-
 /// # Errors
 /// Returns a diagnostic if the duration format is invalid
 pub fn parse_duration(

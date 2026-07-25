@@ -98,14 +98,12 @@ impl TypeChecker {
 
     /// Determine if an expression should use iterative inference.
     ///
-
     /// Returns true for expressions that are commonly deeply nested:
     /// - Binary operations (arithmetic chains)
     /// - Unary operations
     /// - Simple literals and paths
     /// - If expressions
     ///
-
     /// Returns false for complex expressions that need full recursive context:
     /// - Function calls (need argument type checking)
     /// - Method calls (need receiver type checking)
@@ -135,7 +133,6 @@ impl TypeChecker {
 
     /// Type check in checking mode.
     ///
-
     /// Uses a unified depth counter to prevent stack overflow from mutual
     /// recursion between check_expr and infer_expr.
     pub(super) fn check_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
@@ -1222,7 +1219,6 @@ impl TypeChecker {
 
     /// Synthesize then check subsumption.
     ///
-
     /// Includes auto-borrow coercion: T → &T when expected is immutable reference.
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 3 (Auto-Borrow в позиции вызова)
     /// Bidirectional type-check a closure expression.
@@ -2325,17 +2321,14 @@ impl TypeChecker {
 
     /// Compute binary operation result type.
     ///
-
     /// Extracted from infer_binop to support iterative inference.
     /// Takes the types of left and right operands and computes the result type.
     /// Compute the result type of a binary operation.
     ///
-
     /// ARCHITECTURAL RULE: This function MUST NOT contain hardcoded knowledge
     /// of stdlib types like Duration, Time, Text, etc. All operator behavior
     /// is discovered through protocol implementations.
     ///
-
     /// Extracted from infer_binop to support iterative inference.
     /// Takes the types of left and right operands and computes the result type.
     fn compute_binop_result(
@@ -2732,15 +2725,12 @@ impl TypeChecker {
 
     /// Try to resolve a binary operator using protocol-based lookup.
     ///
-
     /// This method attempts to resolve operators through protocol implementations
     /// rather than hardcoded type knowledge. This is key to the stdlib-agnostic
     /// type system architecture.
     ///
-
     /// # Resolution Process
     ///
-
     /// 1. Look up the protocol mapping for the operator (Add, Sub, Eq, etc.)
     /// 2. Check if the left operand type implements that protocol
     /// 3. Determine the output type based on OutputStrategy:
@@ -2748,11 +2738,9 @@ impl TypeChecker {
     ///  - Bool: Return Bool (for comparison operators)
     ///  - Associated: Look up associated Output type (future)
     ///
-
     /// Returns `Ok(Some(ty))` if resolution succeeds, `Ok(None)` if no protocol
     /// is defined for this operator, or `Err` if types are incompatible.
     ///
-
     /// Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
     fn try_resolve_binop_via_protocol(
         &mut self,
@@ -2837,7 +2825,6 @@ impl TypeChecker {
 
     /// Extract a type name suitable for protocol implementation lookup.
     ///
-
     /// This converts types like `List<Int>` to "List", `Text` to "Text", etc.
     fn extract_type_name_for_protocol(&self, ty: &Type) -> Text {
         match ty {
@@ -2876,7 +2863,6 @@ impl TypeChecker {
 
     /// Compute unary operation result type.
     ///
-
     /// Extracted to support iterative inference.
     /// Takes the type of the operand and computes the result type.
     fn compute_unop_result(&mut self, op: UnOp, inner_ty: &Type, span: Span) -> Result<Type> {
@@ -3315,26 +3301,21 @@ impl TypeChecker {
 
     /// Iterative type synthesis to avoid stack overflow.
     ///
-
     /// This method implements type inference using an explicit work stack instead
     /// of recursion. This prevents stack overflow for deeply nested expressions
     /// like ((((1 + 2) * 3) - 4) < 10) or chains with thousands of operations.
     ///
-
     /// # Algorithm
     ///
-
     /// Uses two stacks:
     /// - `work_stack`: Tasks to process (InferWork items)
     /// - `value_stack`: Intermediate type results
     ///
-
     /// Each expression is broken down into work items that push/pop from the value stack.
     /// Binary operations are handled in two phases:
     /// 1. BinaryOpRight: After left operand, process right operand
     /// 2. BinaryOpResult: After both operands, compute result type
     ///
-
     /// This maintains the same type checking semantics as recursive inference
     /// but with O(1) stack space instead of O(depth).
     fn synth_expr_iterative(&mut self, expr: &Expr) -> Result<InferResult> {
@@ -3867,7 +3848,6 @@ impl TypeChecker {
 
     /// Core type inference logic.
     ///
-
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     /// Tracks recursion depth to detect infinite recursion early.
     pub(super) fn infer_expr(&mut self, expr: &Expr, mode: InferMode) -> Result<InferResult> {
@@ -11458,13 +11438,11 @@ impl TypeChecker {
 
     /// Check quote hygiene for splice expressions.
     ///
-
     /// This method analyzes the tokens in a quote block to ensure:
     /// - All splice variables (`$var` or `${expr}`) reference bound variables
     /// - No accidental variable capture occurs
     /// - Stage escapes are at the correct level
     ///
-
     /// Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — Quote Hygiene
     fn check_quote_hygiene(
         &self,
@@ -12212,10 +12190,8 @@ impl TypeChecker {
 
     /// Check if a type cannot be lifted (converted to code at compile time).
     ///
-
     /// Returns (is_unliftable, reason) where reason explains why the type cannot be lifted.
     ///
-
     /// Unliftable types include:
     /// - Closure types (anonymous function types with captured environment)
     /// - Mutable references (&mut T)
@@ -12284,7 +12260,6 @@ impl TypeChecker {
 
     /// Infer type for a block.
     ///
-
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub(super) fn infer_block(&mut self, block: &Block) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("infer_block")?;

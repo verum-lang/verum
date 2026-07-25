@@ -64,7 +64,6 @@ use verum_common::{List, Text};
 pub enum EscapeCategory {
     /// Reference dies in scope
     ///
-
     /// - CBGR cost: 0ns (optimized via SBGL)
     /// - SBGL applicable: ✅ Yes
     /// - Example: Loop iteration variables
@@ -73,7 +72,6 @@ pub enum EscapeCategory {
 
     /// Reference returns to caller
     ///
-
     /// - CBGR cost: ~15ns (required for safety)
     /// - SBGL applicable: ❌ No (must return ThinRef/FatRef)
     /// - Example: Function return values
@@ -82,7 +80,6 @@ pub enum EscapeCategory {
 
     /// Reference stored in heap
     ///
-
     /// - CBGR cost: ~15ns (required for safety)
     /// - SBGL applicable: ❌ No (heap outlives stack)
     /// - Example: References stored in Box, Heap, Arc
@@ -91,7 +88,6 @@ pub enum EscapeCategory {
 
     /// Reference crosses thread boundaries
     ///
-
     /// - CBGR cost: ~15ns (required for safety)
     /// - SBGL applicable: ❌ No (thread safety required)
     /// - Example: References sent to other threads
@@ -100,7 +96,6 @@ pub enum EscapeCategory {
 
     /// Unknown escape behavior (conservative)
     ///
-
     /// - CBGR cost: ~15ns (conservative approach)
     /// - SBGL applicable: ❌ No (safety first)
     /// - Example: Opaque function calls, FFI
@@ -172,19 +167,15 @@ impl fmt::Display for EscapeCategory {
 
 /// Categorize escape result into optimization category
 ///
-
 /// This function maps the detailed `EscapeResult` analysis into one of
 /// the four escape categories for optimization decisions.
 ///
-
 /// # Example
 ///
-
 /// ```rust,ignore
 /// use verum_cbgr::escape_categories::categorize_escape;
 /// use verum_cbgr::analysis::EscapeResult;
 ///
-
 /// let result = EscapeResult::DoesNotEscape;
 /// let category = categorize_escape(result);
 /// assert_eq!(category, EscapeCategory::NoEscape);

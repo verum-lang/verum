@@ -1051,7 +1051,6 @@ impl<'a> QuickFixGenerator<'a> {
 
     /// Extract reference type from diagnostic using AST analysis
     ///
-
     /// Performs accurate extraction of reference types by:
     /// 1. First trying to get the code text at the diagnostic range
     /// 2. Analyzing the AST to find the exact type at that location

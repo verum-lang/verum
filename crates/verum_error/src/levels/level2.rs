@@ -130,7 +130,6 @@ use verum_common::Text;
 
 /// Extension trait for Result types
 ///
-
 /// Provides additional combinators for error handling.
 pub trait ResultExt<T, E> {
     /// Convert error using a closure
@@ -184,22 +183,18 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
 
 /// @must_handle annotation support (Phase 3)
 ///
-
 /// Placeholder for the `@must_handle` annotation on error types. When an error
 /// type is annotated with `@must_handle`, any `Result<T, ThatType>` must be
 /// explicitly handled before being dropped. The compiler tracks all such Result
 /// values through control flow analysis and rejects:
 ///
-
 /// - Wildcard binding: `let _ = fallible_call();`
 /// - Unexamined binding: `let result = fallible_call();` (bound but never checked)
 /// - Explicit drop without check: `drop(fallible_call());`
 ///
-
 /// Allowed operations: `?` propagation, `unwrap()`/`expect()`, pattern matching
 /// (`match`/`if let`), and error inspection before drop (`result.is_err()` + handle).
 ///
-
 /// The annotation applies to the error **type**, not individual functions. All
 /// functions returning `Result<T, MarkedType>` automatically inherit enforcement.
 /// Diagnostic error code: E0317.
@@ -208,7 +203,6 @@ pub struct MustHandle;
 
 /// Marker trait for error types that must be handled
 ///
-
 /// Error types implementing this trait will trigger compile-time errors if their
 /// Results are dropped without explicit handling. The `@must_handle` annotation
 /// on the type declaration causes the compiler to track all `Result` values with
@@ -216,10 +210,8 @@ pub struct MustHandle;
 /// bindings, and explicit drops without inspection. Propagation via `?`, `unwrap()`,
 /// `expect()`, `match`, and `if let` are all permitted.
 ///
-
 /// # Phase 3 Feature
 ///
-
 /// Specified for Phase 3 (v1.2) implementation.
 pub trait MustHandleError: std::error::Error {
     /// Error code for diagnostics (E0317: must_handle Result dropped without handling)

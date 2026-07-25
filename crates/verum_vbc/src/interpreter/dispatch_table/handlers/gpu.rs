@@ -16,7 +16,6 @@ use crate::value::Value;
 
 /// Handler for GpuExtended opcode (0xF8).
 ///
-
 /// This dispatches to GPU operations based on the GpuSubOpcode byte.
 /// Most operations return stubs since the interpreter uses CPU fallbacks.
 pub(in super::super) fn handle_gpu_extended(
@@ -1164,7 +1163,6 @@ fn gpu_extended_body(
 /// Handler for GpuSync opcode (0xF9).
 /// Synchronizes a GPU stream. No-op in interpreter (everything is synchronous).
 ///
-
 /// Format: `stream:reg`
 pub(in super::super) fn handle_gpu_sync(
     state: &mut InterpreterState,
@@ -1177,7 +1175,6 @@ pub(in super::super) fn handle_gpu_sync(
 /// Handler for GpuMemcpy opcode (0xFA).
 /// GPU memory copy with direction. Falls back to CPU memcpy in interpreter.
 ///
-
 /// Format: `dst:reg, src:reg, direction:u8`
 pub(in super::super) fn handle_gpu_memcpy(
     state: &mut InterpreterState,
@@ -1195,7 +1192,6 @@ pub(in super::super) fn handle_gpu_memcpy(
 /// Handler for GpuAlloc opcode (0xFB).
 /// GPU memory allocation. Falls back to CPU heap allocation in interpreter.
 ///
-
 /// Format: `dst:reg, size:reg, device:reg`
 pub(in super::super) fn handle_gpu_alloc(
     state: &mut InterpreterState,

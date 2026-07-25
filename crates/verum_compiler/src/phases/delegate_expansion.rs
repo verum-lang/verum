@@ -107,14 +107,12 @@ pub enum DelegateExpansion {
 /// and expand `@delegate(target)` attributes into synthesised proof
 /// bodies in place. Returns the per-theorem outcomes.
 ///
-
 /// Mutates `module` directly: each `Item::Theorem`/`Item::Lemma`/
 /// `Item::Corollary` whose attributes carry `@delegate(target)` and
 /// whose `proof` field is `Maybe::None` gets its `proof` populated
 /// with the synthesised body. Theorems without the attribute pass
 /// through unchanged.
 ///
-
 /// Idempotent: running the phase twice produces the same module.
 pub fn expand_delegates_in_module(module: &mut Module) -> Vec<DelegateExpansion> {
     let mut outcomes = Vec::new();

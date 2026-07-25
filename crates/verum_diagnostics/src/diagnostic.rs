@@ -248,7 +248,6 @@ pub struct Diagnostic {
     suggested_fixes: List<SuggestedFix>,
     /// Synthetic-expansion provenance chain (#284-Renderer, task #287).
     ///
-
     /// When the diagnostic's primary span lands in synthetic source
     /// (macro / @derive / monomorphization / @delegate output), the
     /// builder calls `with_expansion_chain` to attach the human-
@@ -258,7 +257,6 @@ pub struct Diagnostic {
     /// expansion → in macro expansion" instead of an opaque
     /// `<synthetic>:1:1` location.
     ///
-
     /// Empty for diagnostics whose span is already user-source —
     /// the most common case at the steady state.
     #[serde(default, skip_serializing_if = "List::is_empty")]
@@ -690,7 +688,6 @@ impl DiagnosticBuilder {
     /// surface "in @derive expansion → in macro expansion" labels
     /// after the location header.
     ///
-
     /// Empty chain (the default) is the user-source case — no
     /// rendering overhead, behaviour bit-identical to pre-#287.
     pub fn expansion_chain<I, S>(mut self, chain: I) -> Self

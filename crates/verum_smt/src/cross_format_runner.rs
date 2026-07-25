@@ -141,10 +141,8 @@ impl CheckResult {
 /// Single dispatch interface for checking certificate files in a
 /// foreign proof system.
 ///
-
 /// Implementations MUST:
 ///
-
 ///  * Be cheap to construct (`Default::default()`-friendly).
 ///  * Honour reasonable defaults for tool flags (no-libraries,
 ///  no-network, deterministic).

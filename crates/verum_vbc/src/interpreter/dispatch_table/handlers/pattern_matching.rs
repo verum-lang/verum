@@ -16,7 +16,6 @@ use crate::value::Value;
 
 /// AsVar (0x91) - Extract variant payload by field index.
 ///
-
 /// Similar to GetVariantData but uses u8 for field index instead of varint.
 pub(in super::super) fn handle_as_var(
     state: &mut InterpreterState,
@@ -138,7 +137,6 @@ pub(in super::super) fn handle_specialize(
 
 /// TypeOf - Return the runtime type tag of a value as an integer.
 ///
-
 /// Encoding: opcode + dst:reg + src:reg
 /// Effect: Inspects the NaN-boxed tag bits and stores a TypeId integer in `dst`.
 pub(in super::super) fn handle_type_of(
@@ -174,17 +172,14 @@ pub(in super::super) fn handle_type_of(
 
 /// SizeOfG (0x83) - Get the size of a type in bytes.
 ///
-
 /// Encoding: opcode + dst:reg + type_id:varint
 /// Effect: Stores the size of the type (in bytes) into `dst`.
 ///
-
 /// For builtin types, returns standard sizes:
 /// - Unit/Bool: 1 byte
 /// - Int/Float/Pointer: 8 bytes
 /// - Value (NaN-boxed): 8 bytes
 ///
-
 /// For user-defined types, looks up size from TypeDescriptor.
 pub(in super::super) fn handle_size_of(
     state: &mut InterpreterState,
@@ -221,16 +216,13 @@ pub(in super::super) fn handle_size_of(
 
 /// AlignOfG (0x84) - Get the alignment of a type in bytes.
 ///
-
 /// Encoding: opcode + dst:reg + type_id:varint
 /// Effect: Stores the alignment of the type (in bytes) into `dst`.
 ///
-
 /// For builtin types, returns standard alignments:
 /// - Unit/Bool: 1 byte
 /// - Int/Float/Pointer: 8 bytes
 ///
-
 /// For user-defined types, looks up alignment from TypeDescriptor.
 pub(in super::super) fn handle_align_of(
     state: &mut InterpreterState,
@@ -265,11 +257,9 @@ pub(in super::super) fn handle_align_of(
 
 /// MakeVariant (0x86) - Create a new variant with the specified tag.
 ///
-
 /// Encoding: opcode + dst:reg + tag:varint
 /// Effect: Allocates a new variant object with the given tag and stores pointer in `dst`.
 ///
-
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload space...]
 pub(in super::super) fn handle_make_variant(
     state: &mut InterpreterState,
@@ -289,7 +279,6 @@ pub(in super::super) fn handle_make_variant(
 /// store inside the closure (no per-instruction branching beyond
 /// what was already in `MakeVariant`).
 ///
-
 /// Centralising this in one helper guarantees that switching a
 /// variant-construction site from `MakeVariant` to `MakeVariantTyped`
 /// (Phase 3c) produces bit-equivalent runtime state — the
@@ -341,7 +330,6 @@ pub(in super::super) fn alloc_variant_into_with_type_id(
 
 /// SetVariantData (0x87) - Set a field in a variant's payload.
 ///
-
 /// Encoding: opcode + variant:reg + field:varint + value:reg
 /// Effect: Stores `value` at the specified `field` offset in the variant's payload.
 pub(in super::super) fn handle_set_variant_data(
@@ -375,7 +363,6 @@ pub(in super::super) fn handle_set_variant_data(
 
 /// GetVariantData (0x88) - Get a field from a variant's payload.
 ///
-
 /// Encoding: opcode + dst:reg + variant:reg + field:varint
 /// Effect: Reads the value at the specified `field` offset from the variant's payload into `dst`.
 pub(in super::super) fn handle_get_variant_data(
@@ -453,12 +440,10 @@ pub(in super::super) fn handle_get_variant_data(
 
 /// GetVariantDataRef (0x8B) - Get pointer to variant data field.
 ///
-
 /// Unlike GetVariantData which copies the field value, this returns a pointer
 /// to the field location within the variant. Used for `ref` and `ref mut`
 /// pattern bindings to enable mutation through references.
 ///
-
 /// Encoding: opcode + dst:reg + variant:reg + field:varint
 /// Effect: Sets `dst` to a pointer to the field at `field` offset in the variant's payload.
 pub(in super::super) fn handle_get_variant_data_ref(
@@ -534,11 +519,9 @@ pub(in super::super) fn handle_get_variant_data_ref(
 
 /// IsVar (0x90) - Check if variant has a specific tag.
 ///
-
 /// Encoding: opcode + dst:reg + value:reg + tag:varint
 /// Effect: Sets `dst` to `true` if `value` has the specified `tag`, `false` otherwise.
 ///
-
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload...]
 /// - Tag is stored as u32 at offset OBJECT_HEADER_SIZE
 pub(in super::super) fn handle_match_tag(
@@ -663,11 +646,9 @@ pub(in super::super) fn handle_match_tag(
 
 /// AsVar (0x91) - Extract variant payload into register.
 ///
-
 /// Encoding: opcode + dst:reg + value:reg + tag:varint
 /// Effect: Extracts the payload of `value` if it has the specified `tag`.
 ///
-
 /// Variant layout: ObjectHeader + [tag:u32][padding:u32][payload:Value]
 /// - Payload is stored at offset OBJECT_HEADER_SIZE + 8
 pub(in super::super) fn handle_get_tag(
@@ -740,11 +721,9 @@ pub(in super::super) fn handle_get_tag(
 
 /// Unpack (0x92) - Unpack tuple into consecutive registers.
 ///
-
 /// Encoding: opcode + dst_start + tuple + count
 /// Effect: Unpacks `count` elements from tuple into registers starting at `dst_start`.
 ///
-
 /// Tuple layout: ObjectHeader + [Value; count]
 /// - Object header size is OBJECT_HEADER_SIZE bytes
 /// - Each element is sizeof(Value) bytes
@@ -804,12 +783,10 @@ pub(in super::super) fn handle_unpack(
 
 /// Pack (0x93) - Pack consecutive registers into a tuple (heap-allocated object).
 ///
-
 /// Encoding: opcode + dst + src_start + count
 /// Effect: Allocates a tuple with `count` elements from registers starting at `src_start`,
 ///  stores the result pointer in `dst`.
 ///
-
 /// Tuple layout: ObjectHeader + [Value; count]
 pub(in super::super) fn handle_pack(
     state: &mut InterpreterState,
@@ -875,7 +852,6 @@ pub(in super::super) fn handle_pack(
 
 /// MakePi (0x8D) — pack a Π-value.
 ///
-
 /// Encoding: opcode + dst:reg + param:reg + return_type_id:varint.
 pub(in super::super) fn handle_make_pi(
     state: &mut InterpreterState,
@@ -919,7 +895,6 @@ pub(in super::super) fn handle_make_pi(
 
 /// MakeSigma (0x8E) — pack a Σ-pair.
 ///
-
 /// Encoding: opcode + dst:reg + witness:reg + payload:reg.
 pub(in super::super) fn handle_make_sigma(
     state: &mut InterpreterState,
@@ -955,7 +930,6 @@ pub(in super::super) fn handle_make_sigma(
 
 /// MakeWitness (0x8F) — pack a refined value together with its proof hash.
 ///
-
 /// Encoding: opcode + dst:reg + value:reg + proof_hash:varint.
 pub(in super::super) fn handle_make_witness(
     state: &mut InterpreterState,

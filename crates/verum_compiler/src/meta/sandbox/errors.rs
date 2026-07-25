@@ -363,7 +363,6 @@ impl std::error::Error for SandboxError {}
 impl SandboxError {
     /// Returns the error code for this sandbox error
     ///
-
     /// Error codes in the M3XX range:
     /// - M310-M319: I/O violations
     /// - M320-M329: Resource limits

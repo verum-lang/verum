@@ -129,33 +129,27 @@ pub fn tcp_listen(port: i64) -> i64 {
 /// Flags accepted by [`tcp_listen_v2`] (matches the `flags` argument
 /// of `__tcp_listen_v2_raw` declared in `core/sys/raw.vr`).
 ///
-
 /// Bit 0 (`TCP_LISTEN_FLAG_REUSEPORT`): set SO_REUSEPORT on the
 /// listener — multiple listeners on the same `host:port` load-balance
 /// in the kernel. Linux ≥3.9 / macOS ≥10.7. Best-effort: silently
 /// ignored if the platform lacks the option (Windows).
 ///
-
 /// Higher bits are reserved.
 pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
 
 /// Rich-signature TCP listen intrinsic.
 ///
-
 /// `host` parses as an IP literal (`"0.0.0.0"`, `"127.0.0.1"`,
 /// `"::"`, `"::1"`, …). DNS resolution is intentionally out of scope —
 /// the high-level `core.net.tcp.TcpListener.bind` already iterates a
 /// resolved address list and calls into us with one literal at a time.
 ///
-
 /// `port = 0` asks the kernel to choose. Use [`tcp_local_port`] to
 /// retrieve the actual port afterwards.
 ///
-
 /// `backlog` is forwarded to `listen(2)`. Kernels typically silently
 /// cap large values at `/proc/sys/net/core/somaxconn` (or similar).
 ///
-
 /// Returns:
 /// * `fd > 0` on success — the synthetic FD that other intrinsics
 ///  accept (NOT a kernel fd; see module-level docs).
@@ -164,7 +158,6 @@ pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
 /// * `-EINVAL` (`-22` Linux / `-22` macOS) for argument-validation
 ///  failures (bad host, port out of range, negative backlog).
 ///
-
 /// The errno-preservation contract is the architectural promise that
 /// distinguishes v2 from v1 (which collapses everything to `-1`).
 pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
@@ -283,7 +276,6 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// `tcp_listen_v2(_, 0, _, _)`. Returns `-1` on `getsockname(2)`
 /// failure (bad fd, unbound socket, …).
 ///
-
 /// **Real-fd path** (Unix): post-#25, `tcp_listen_v2` returns the raw
 /// kernel fd (no registry tracking). We call `getsockname(2)`
 /// directly on the fd — works for any bound socket regardless of
@@ -293,7 +285,6 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
 /// `verum_tcp_local_port` LLVM helper provides
 /// (`crates/verum_codegen/src/llvm/runtime.rs`).
 ///
-
 /// **Legacy registry fallback**: pre-#25 listeners that were
 /// `register()`-ed with a synthetic fd still hit the registry path.
 /// The registry tries first, then falls through to `getsockname` if

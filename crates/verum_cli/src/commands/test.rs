@@ -1411,10 +1411,8 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
 /// attached so a maintainer can pinpoint which tier produced the
 /// faulty result.
 ///
-
 /// Outcome lattice:
 ///
-
 /// | T0 outcome | T1 outcome | Differential outcome |
 /// |-------------|-------------|--------------------------------|
 /// | Pass | Pass | Pass (durations summed) |
@@ -1424,7 +1422,6 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
 /// | CompileErr | * | CompileErr (T0 short-circuits) |
 /// | Pass | CompileErr | Fail (T1 cannot lower) |
 ///
-
 /// The duration field aggregates both tiers so the test report
 /// reflects total cross-tier work.
 fn run_test_differential(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
@@ -1450,7 +1447,6 @@ fn run_test_differential(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> Te
 
 /// Pure-function outcome combiner for differential testing.
 ///
-
 /// Extracted from `run_test_differential` so the cross-tier
 /// agreement contract can be pinned by unit tests without
 /// driving the full compile/link/execute pipeline. The tier
@@ -1971,7 +1967,6 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
 /// crate root since the test file owns its own module identity),
 /// and write to `<target_dir>/test_<stem>.merged.vr`.
 ///
-
 /// T0.5.2 — when `test_fn_name` is provided, *also* append a
 /// synthesised `fn main() -> Int { <fn>(); 0 }` so the AOT
 /// binary's exit-code semantics match the test convention. The
@@ -3004,7 +2999,6 @@ fn format_duration(d: Duration) -> String {
 /// list of argument vectors ready for call_with_args. Returns empty
 /// vec if no @test_case attributes are present.
 ///
-
 /// Supported argument literals: Int, Bool, Text, Float. Anything else
 /// is silently dropped — keeps the attribute surface simple and avoids
 /// inventing type coercions at discover time.

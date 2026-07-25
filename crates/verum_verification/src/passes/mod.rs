@@ -187,7 +187,6 @@ impl VerificationResult {
 /// pass classification for the
 /// fail-fast / aggregate decision.
 ///
-
 /// The default classification is [`PassClassification::SoundnessCritical`]
 /// so unmodified passes preserve pre-V8 fail-fast semantics. Each
 /// pass implementer can opt into [`PassClassification::Informational`]

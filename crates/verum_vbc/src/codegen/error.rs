@@ -295,7 +295,6 @@ impl CodegenError {
 
     /// Returns the undefined function name if this is an UndefinedFunction error.
     ///
-
     /// This is used for forward reference detection during stdlib compilation.
     /// Returns `Some(function_path)` if the error is `UndefinedFunction`, `None` otherwise.
     pub fn undefined_function_name(&self) -> Option<&str> {
@@ -307,11 +306,9 @@ impl CodegenError {
 
     /// Classifies this error into a "lenient skip" category.
     ///
-
     /// Used by `compile_item_lenient` and the stdlib hygiene baseline tests
     /// to distinguish:
     ///
-
     ///  * `BugClass` — error indicates a real codebase defect (an import
     ///  gap, wrong arity, mismatched signature, missing trait impl).
     ///  Surfacing path: warn-level trace today, hard error eventually
@@ -321,7 +318,6 @@ impl CodegenError {
     ///  not-yet-implemented language feature). Surfacing path: debug
     ///  trace; baseline tests already exclude these by fixture choice.
     ///
-
     /// The split is conservative: errors that *might* be either category
     /// (notably `Internal`) classify as `BugClass` so they stay loud.
     pub fn skip_class(&self) -> SkipClass {

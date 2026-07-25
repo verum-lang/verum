@@ -38,7 +38,6 @@ use verum_common::{List, Text};
 
 /// Goal analyzer for fast path detection and tactic selection
 ///
-
 /// Analyzes formulas using Z3 Goal API to detect trivial contradictions
 /// and select optimal tactics based on formula complexity.
 pub struct GoalAnalyzer {
@@ -59,7 +58,6 @@ impl GoalAnalyzer {
 
     /// Create a new goal analyzer with custom thresholds.
     ///
-
     /// All three fields of `ComplexityThresholds` participate in the
     /// dispatch in `select_adaptive_tactic`: depths beyond
     /// `complex_depth` route through the heavy preprocessing chain
@@ -77,17 +75,14 @@ impl GoalAnalyzer {
 
     /// Quick contradiction detection using goal.is_inconsistent()
     ///
-
     /// This checks if the goal contains the formula `false` explicitly.
     /// Note: Z3's Goal API does NOT perform simplification automatically,
     /// so this only catches contradictions that are already simplified
     /// (e.g., explicit `false` in the goal).
     ///
-
     /// For more sophisticated contradiction detection, use apply_simplify_tactic()
     /// which runs a fast simplification pass before checking.
     ///
-
     /// Performance: <10μs for most formulas
     pub fn is_trivially_unsat(&mut self, goal: &Goal) -> bool {
         let start = Instant::now();
@@ -104,11 +99,9 @@ impl GoalAnalyzer {
 
     /// Apply simplify tactic and check for contradiction
     ///
-
     /// This is more expensive than is_trivially_unsat() but can detect
     /// contradictions like x=3 && x=5 after simplification.
     ///
-
     /// Performance: <1ms for simple formulas
     pub fn apply_simplify_tactic(&mut self, goal: &Goal) -> Maybe<SatResult> {
         let start = Instant::now();
@@ -149,11 +142,9 @@ impl GoalAnalyzer {
 
     /// Check if goal result is already predetermined
     ///
-
     /// Uses goal.is_decided_sat()/is_decided_unsat() to check if
     /// the result is already known without running the solver.
     ///
-
     /// Performance: <100μs
     pub fn is_decided(&mut self, goal: &Goal) -> Maybe<SatResult> {
         let start = Instant::now();
@@ -178,14 +169,12 @@ impl GoalAnalyzer {
 
     /// Get formula complexity metrics
     ///
-
     /// Analyzes the goal to extract complexity information:
     /// - Quantifier nesting depth
     /// - Formula precision
     /// - Number of formulas
     /// - Size estimate
     ///
-
     /// Performance: <100μs
     pub fn get_complexity(&mut self, goal: &Goal) -> ComplexityMetrics {
         let start = Instant::now();
@@ -210,7 +199,6 @@ impl GoalAnalyzer {
 
     /// Select adaptive tactic based on complexity
     ///
-
     /// Chooses the optimal tactic based on formula characteristics:
     /// - Simple formulas (depth 0..=simple_depth): "simplify"
     /// - Medium formulas (simple_depth+1..=medium_depth): "nnf"
@@ -222,7 +210,6 @@ impl GoalAnalyzer {
     ///  tier, used when quantifier nesting is past the cutoff
     ///  where single-pass tactics start to thrash.
     ///
-
     /// Performance: <50μs
     pub fn select_adaptive_tactic(&mut self, complexity: &ComplexityMetrics) -> Tactic {
         let start = Instant::now();
@@ -262,17 +249,14 @@ impl GoalAnalyzer {
 
     /// Fast path analysis: combines all fast checks
     ///
-
     /// This is the main entry point for fast path optimization.
     /// It attempts to determine the result without running the full solver:
     /// 1. Check for immediate contradictions (explicit false)
     /// 2. Check if result is already decided
     /// 3. Apply simplify tactic for more sophisticated checks
     ///
-
     /// Performance: <1ms for 90% of trivial cases
     ///
-
     /// Returns:
     /// - `Maybe::Some(result)` if fast path succeeded
     /// - `Maybe::None` if full solver is needed
@@ -315,7 +299,6 @@ impl GoalAnalyzer {
 
     /// Analyze and select tactic (combined operation)
     ///
-
     /// Convenience method that:
     /// 1. Analyzes formula complexity
     /// 2. Selects optimal tactic
@@ -575,7 +558,6 @@ impl AnalysisStats {
 
 /// Create a goal from a list of boolean formulas
 ///
-
 /// Convenience function for creating goals from formulas.
 pub fn create_goal_from_formulas(formulas: &[Bool]) -> Goal {
     let goal = Goal::new(false, false, false);
@@ -587,7 +569,6 @@ pub fn create_goal_from_formulas(formulas: &[Bool]) -> Goal {
 
 /// Quick check if formula is trivially UNSAT
 ///
-
 /// Standalone function for one-off checks without creating an analyzer.
 pub fn is_trivially_unsat(formulas: &[Bool]) -> bool {
     let goal = create_goal_from_formulas(formulas);
@@ -596,7 +577,6 @@ pub fn is_trivially_unsat(formulas: &[Bool]) -> bool {
 
 /// Quick check if formula result is decided
 ///
-
 /// Standalone function for one-off checks.
 pub fn is_decided(formulas: &[Bool]) -> Maybe<SatResult> {
     let goal = create_goal_from_formulas(formulas);
@@ -612,7 +592,6 @@ pub fn is_decided(formulas: &[Bool]) -> Maybe<SatResult> {
 
 /// Get complexity of formula list
 ///
-
 /// Standalone function for one-off complexity checks.
 pub fn get_complexity(formulas: &[Bool]) -> ComplexityMetrics {
     let goal = create_goal_from_formulas(formulas);

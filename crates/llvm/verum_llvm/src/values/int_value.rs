@@ -32,10 +32,8 @@ pub struct IntValue<'ctx> {
 impl<'ctx> IntValue<'ctx> {
     /// Get a value from an [LLVMValueRef].
     ///
-
     /// # Safety
     ///
-
     /// The ref must be valid and of type int.
     pub unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
@@ -176,23 +174,18 @@ impl<'ctx> IntValue<'ctx> {
 
     /// Determines whether or not an `IntValue` is an `llvm::Constant`.
     ///
-
     /// Constants includes values that are not known at compile time, for
     /// example the address of a function casted to an integer.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i64_type = context.i64_type();
     /// let i64_val = i64_type.const_int(12, false);
     ///
-
     /// assert!(i64_val.is_const());
     /// ```
     pub fn is_const(self) -> bool {
@@ -201,22 +194,17 @@ impl<'ctx> IntValue<'ctx> {
 
     /// Determines whether or not an `IntValue` is an `llvm::ConstantInt`.
     ///
-
     /// ConstantInt only includes values that are known at compile time.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i64_type = context.i64_type();
     /// let i64_val = i64_type.const_int(12, false);
     ///
-
     /// assert!(i64_val.is_constant_int());
     /// ```
     pub fn is_constant_int(self) -> bool {
@@ -225,19 +213,15 @@ impl<'ctx> IntValue<'ctx> {
 
     /// Obtains a constant `IntValue`'s zero extended value.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_all_ones = i8_type.const_all_ones();
     ///
-
     /// assert_eq!(i8_all_ones.get_zero_extended_constant(), Some(255));
     /// ```
     pub fn get_zero_extended_constant(self) -> Option<u64> {
@@ -254,19 +238,15 @@ impl<'ctx> IntValue<'ctx> {
 
     /// Obtains a constant `IntValue`'s sign extended value.
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let i8_type = context.i8_type();
     /// let i8_all_ones = i8_type.const_all_ones();
     ///
-
     /// assert_eq!(i8_all_ones.get_sign_extended_constant(), Some(-1));
     /// ```
     pub fn get_sign_extended_constant(self) -> Option<i64> {

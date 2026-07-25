@@ -17,17 +17,14 @@ use crate::literal_registry::ParsedLiteral;
 
 /// Parse JSON literal at compile-time
 ///
-
 /// Semantic literal: `json#"{...}"` is compile-time validated JSON (JSON5 relaxed:
 /// unquoted keys, trailing commas, single-quoted strings, comments allowed).
 /// Produces type JsonValue. Multiline form: `json#"""..."""`.
 ///
-
 /// # Arguments
 /// - `content`: The JSON string
 /// - `span`: Source location for error reporting
 ///
-
 /// # Returns
 /// Validated JSON on success
 pub fn parse_json(

@@ -92,7 +92,6 @@ const MAX_OBJECT_SIZE: usize = 100 * 1024 * 1024;
 
 /// Storage backend abstraction for content-addressed storage.
 ///
-
 /// This trait enables pluggable backends (local filesystem, S3, Redis, etc.)
 pub trait StorageBackend: Send + Sync {
     /// Check if an object exists by hash.

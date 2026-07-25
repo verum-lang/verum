@@ -311,17 +311,13 @@ use verum_common::{List, Maybe, Text};
 
 /// Trait for converting a generic `Attribute` to a typed attribute struct.
 ///
-
 /// This trait enables type-safe extraction of attribute data from the AST.
 ///
-
 /// # Examples
 ///
-
 /// ```rust
 /// use verum_ast::attr::{Attribute, InlineAttr, FromAttribute};
 ///
-
 /// fn process_inline(attr: &Attribute) {
 ///  if let Ok(inline) = InlineAttr::from_attribute(attr) {
 ///  println!("Inline mode: {:?}", inline.mode);
@@ -334,10 +330,8 @@ pub trait FromAttribute: Sized {
 
     /// Convert from a generic `Attribute` to this typed struct.
     ///
-
     /// # Errors
     ///
-
     /// Returns an error if the attribute name doesn't match or
     /// the arguments are invalid.
     fn from_attribute(attr: &Attribute) -> Result<Self, AttributeConversionError>;
@@ -462,7 +456,6 @@ impl AttributeListExt for List<Attribute> {
 
 /// Common imports for working with attributes.
 ///
-
 /// ```rust
 /// use verum_ast::attr::prelude::*;
 /// ```

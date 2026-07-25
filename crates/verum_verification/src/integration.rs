@@ -25,7 +25,6 @@ pub struct TypeSystemIntegration;
 impl TypeSystemIntegration {
     /// Check if a type requires verification
     ///
-
     /// Returns true if the type contains refinement predicates that need
     /// SMT verification. This recursively checks nested types.
     pub fn requires_verification(ty: &Type) -> bool {
@@ -230,7 +229,6 @@ use verum_smt::context::Context as SmtContext;
 
 /// Hoare logic verification using Z3 SMT solver
 ///
-
 /// Provides production-grade integration between Hoare logic verification
 /// and the Z3 SMT solver for automated theorem proving.
 #[derive(Debug)]
@@ -267,7 +265,6 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
 
     /// Verify a Hoare triple using Z3
     ///
-
     /// Returns Ok(true) if the triple is valid, Ok(false) if invalid with counterexample,
     /// or Err if verification fails or times out.
     pub fn verify_triple(&self, triple: &HoareTriple) -> Result<HoareVerificationResult, WPError> {
@@ -286,7 +283,6 @@ impl<'ctx> HoareZ3Verifier<'ctx> {
 
     /// Verify a formula using Z3
     ///
-
     /// The formula is valid if its negation is unsatisfiable.
     pub fn verify_formula(&self, formula: &Formula) -> Result<HoareVerificationResult, WPError> {
         let solver = self.context.solver();
@@ -894,7 +890,6 @@ use crate::separation_logic::{Address, Heap as SepHeap, HeapCommand, SepProp, Va
 
 /// Separation logic verification using Z3 with array theory
 ///
-
 /// Models heap as Z3 arrays for efficient verification of heap properties.
 #[derive(Debug)]
 pub struct SeparationLogicZ3Verifier<'ctx> {
@@ -921,7 +916,6 @@ impl<'ctx> SeparationLogicZ3Verifier<'ctx> {
 
     /// Verify a separation logic triple using Z3
     ///
-
     /// Uses array theory to model the heap and verifies:
     /// {pre} cmd {post}
     pub fn verify_triple(

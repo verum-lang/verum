@@ -198,7 +198,6 @@ enum Commands {
         refs: Option<Text>,
  /// Verification strategy controlling formal-verification behavior.
  ///
-
  /// Semantic strategies (backend-agnostic):
  /// runtime — runtime assertion only (no formal proof)
  /// static — type-level check only
@@ -208,7 +207,6 @@ enum Commands {
  /// certified — produce exportable proof certificate
  /// synthesize — synthesis problem (generate term from spec)
  ///
-
  /// Legacy values "none", "proof" are aliases for "runtime" and "formal".
         #[clap(
             long,
@@ -1584,7 +1582,6 @@ enum Commands {
  /// `--framework-axioms` and additionally annotates each
  /// framework with its Diakrisis ν-rank and intensional flag.
  ///
-
  /// the per-theorem coord audit is
  /// **default-on** per `verification-architecture.md` §A.Z.4.
  /// Bare `verum audit` runs dependency-audit + coord-audit
@@ -1649,7 +1646,6 @@ enum Commands {
  /// framework names, and detects cross-foundation conflicts
  /// (UIP ⊥ univalence). Exits non-zero on any conflict.
  ///
-
  /// Output: `target/audit-reports/foundation-profiles.json`.
         #[clap(long)]
         foundation_profiles: bool,
@@ -1706,7 +1702,6 @@ enum Commands {
  /// conjunction) as `sound` (has propositional content) or
  /// `trivial-placeholder` (just `true` literal).
  ///
-
  /// Mirrors the kernel-side K-FwAx
  /// `SubsingletonRegime::ClosedPropositionOnly` gate at
  /// corpus-audit time. Emits to
@@ -1791,7 +1786,6 @@ enum Commands {
  /// lineage totals (msfs / diakrisis subpath partition) to
  /// `audit-reports/proof-honesty.json` (schema_version=1).
  ///
-
  /// Mirrors the stand-alone Python walker
  /// `verum-msfs-corpus/tools/proof_honesty_audit.py` (M0.E),
  /// now first-class via the verum CLI.
@@ -1806,7 +1800,6 @@ enum Commands {
  /// admits the proof relies on (16.10 confluence, 16.7
  /// quotient canonical-rep, 14.3 cohesive-adjunction unit/counit).
  ///
-
  /// Empty footprint = decidable corpus. Non-empty = trusted-
  /// boundary surface: external reviewers see every reliance
  /// on a preprint-blocked result without re-walking the
@@ -1817,7 +1810,6 @@ enum Commands {
  /// Output format for the audit report: `plain` (default, human-
  /// readable) or `json` (machine-parseable, stable schema).
  ///
-
  /// The `json` format is suitable for CI dashboards and
  /// supply-chain enforcement — e.g. fail the build if a PR
  /// introduces a new framework-axiom dependency.
@@ -2238,7 +2230,6 @@ enum ProofReplSub {
  /// can come from a file (`--commands`) and / or repeated
  /// `--cmd` flags; both are concatenated in CLI order.
  ///
-
  /// Command-script syntax (one per line):
  /// - `apply <tactic>` — apply a tactic. Bare lines are
  /// also treated as `apply <line>`.
@@ -2886,7 +2877,6 @@ enum PathTarget {
 
 /// Resolve an optional path argument into either a project directory or a single file.
 ///
-
 /// For directories: validates that Verum.toml exists and changes the working directory.
 /// For files: returns the path for single-file commands.
 /// When no path is given, assumes the current directory is already a project.

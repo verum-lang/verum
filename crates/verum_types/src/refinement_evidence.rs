@@ -67,7 +67,6 @@ use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 /// A predicate known to be true on the current execution path.
 ///
-
 /// Path conditions are accumulated as we traverse control flow:
 /// - After `if cond { return }`, we add `!cond` as a path condition
 /// - In `if cond { ... }`, we add `cond` in the then-branch
@@ -289,7 +288,6 @@ impl PathCondition {
 
 /// Tracks learned refinement predicates for variables on the current path.
 ///
-
 /// This is the main data structure for flow-sensitive refinement tracking.
 /// It maintains a stack of evidence scopes that correspond to nested control flow.
 #[derive(Debug, Clone)]
@@ -438,7 +436,6 @@ impl RefinementEvidence {
 
     /// Convert all evidence to SMT assumptions
     ///
-
     /// Returns a list of expressions that can be added to SMT path conditions
     pub fn to_smt_assumptions(&self) -> List<Expr> {
         self.get_all_conditions()
@@ -469,7 +466,6 @@ impl RefinementEvidence {
 
 /// Logic for propagating refinement evidence through control flow.
 ///
-
 /// This struct contains the algorithms for determining what evidence
 /// to add based on control flow patterns.
 pub struct EvidencePropagator;
@@ -477,7 +473,6 @@ pub struct EvidencePropagator;
 impl EvidencePropagator {
     /// Analyze an if-condition and extract evidence for both branches.
     ///
-
     /// Returns:
     /// - `then_evidence`: Predicates known true in then-branch
     /// - `else_evidence`: Predicates known true in else-branch (or continuation)
@@ -493,7 +488,6 @@ impl EvidencePropagator {
 
     /// Check if a block unconditionally exits (return, break, continue, panic).
     ///
-
     /// If true, we can propagate negated evidence to the continuation.
     pub fn block_unconditionally_exits(block: &verum_ast::expr::Block) -> bool {
         use verum_ast::stmt::StmtKind;
@@ -562,7 +556,6 @@ impl EvidencePropagator {
 
     /// Analyze a method call condition (e.g., `data.is_empty()`)
     ///
-
     /// Returns the receiver variable name and method name if identifiable.
     pub fn analyze_method_condition(condition: &Expr) -> Maybe<(Text, Text, bool)> {
         match &condition.kind {

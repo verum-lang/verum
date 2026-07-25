@@ -144,7 +144,6 @@ impl DeriveError {
 
     /// Generate the description method body
     ///
-
     /// Generates match expression:
     /// ```verum
     /// match self {
@@ -288,7 +287,6 @@ impl DeriveError {
 
     /// Generate the source method body
     ///
-
     /// Generates match expression that returns the source error if @source is present:
     /// ```verum
     /// match self {
@@ -529,7 +527,6 @@ impl DeriveError {
     /// Generate a format string expression for a `@derive(Error)` Display
     /// arm body.
     ///
-
     /// The template comes from the `@error("file: {path}")` attribute.
     /// Parses `{ident}` placeholders into the AST's
     /// `ExprKind::InterpolatedString { handler: "f", parts, exprs }`
@@ -538,7 +535,6 @@ impl DeriveError {
     /// the surrounding variant pattern binds each field by shorthand
     /// at the same name, so the bindings resolve naturally.
     ///
-
     /// Pre-fix this function returned the template as a plain string
     /// literal — `Display` for `MyError::FileNotFound { path }` rendered
     /// the literal `"file: {path}"` instead of substituting the actual
@@ -578,7 +574,6 @@ impl DeriveError {
 /// Parse an `@error("...")` template into the `(parts, exprs)` shape
 /// that `ExprKind::InterpolatedString` expects.
 ///
-
 /// Recognises:
 ///  - `{ident}` → captures the ident as a `Path(ident)` Expr.
 ///  - `{{` and `}}` → literal `{` / `}` (Rust-format-string escape).
@@ -589,7 +584,6 @@ impl DeriveError {
 ///  surface panics at compile time, but here we're inside a derive
 ///  and want graceful degradation.)
 ///
-
 /// Invariant: when `exprs.len() == n`, `parts.len() == n + 1`.
 /// `exprs` is empty iff the template has no `{ident}` placeholders.
 fn parse_format_template(template: &str, span: Span) -> (List<Text>, List<Expr>) {
@@ -662,7 +656,6 @@ fn parse_format_template(template: &str, span: Span) -> (List<Text>, List<Expr>)
 
 /// Generate From implementations for wrapped error types
 ///
-
 /// For a variant like `IoError { @source inner: std.io.Error }`,
 /// generates: `implement From<std.io.Error> for MyError { ... }`
 pub fn generate_from_impls(ctx: &DeriveContext) -> DeriveResult<List<Item>> {

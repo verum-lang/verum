@@ -48,7 +48,6 @@ use super::error::{LlvmLoweringError, Result};
 
 /// Inline assembly code generator.
 ///
-
 /// Translates Verum @asm expressions to LLVM inline assembly calls.
 pub struct InlineAsmGenerator<'ctx> {
     context: &'ctx Context,
@@ -62,7 +61,6 @@ impl<'ctx> InlineAsmGenerator<'ctx> {
 
     /// Generate LLVM inline assembly from AST operands.
     ///
-
     /// Returns the PointerValue representing the inline assembly function,
     /// along with the input values that should be passed to it.
     pub fn generate(

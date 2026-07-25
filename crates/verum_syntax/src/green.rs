@@ -114,7 +114,6 @@ impl fmt::Display for TextRange {
 
 /// Immutable green node - the core of the syntax tree.
 ///
-
 /// Green nodes store relative widths, not absolute offsets. This allows
 /// efficient structural sharing when source is edited - only the path from
 /// the edit to the root needs to be recreated.
@@ -317,7 +316,6 @@ impl<'a> Iterator for GreenTokenIter<'a> {
 
 /// Immutable green token - a leaf in the syntax tree.
 ///
-
 /// Tokens store their actual text content along with their kind.
 #[derive(Clone)]
 pub struct GreenToken {
@@ -510,7 +508,6 @@ impl From<GreenToken> for GreenChild {
 
 /// Builder for green trees using stack-based construction.
 ///
-
 /// This builder efficiently constructs green trees without intermediate
 /// allocations for children lists.
 pub struct GreenBuilder {

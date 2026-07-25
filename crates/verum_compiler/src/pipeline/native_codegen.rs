@@ -654,11 +654,9 @@ impl<'s> CompilationPipeline<'s> {
     /// `phase_generate_native` so the whole leg can be SKIPPED on an
     /// AOT object-cache hit (AOT-STDLIB-NATIVE-CACHE-1).
     ///
-
     /// Returns the post-globaldce `needs_metal` probe result (#100),
     /// the only lowering-derived fact the link step still needs.
     ///
-
     /// `cpu_str` / `features_str` / `passes` are hoisted by the
     /// caller (they participate in the object-cache key) and used
     /// here unchanged.
@@ -1251,7 +1249,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Get the project root directory
     ///
-
     /// Searches for Verum.toml starting from the input file's directory
     /// and walking up the directory tree. Falls back to input file's parent
     /// or current working directory if no Verum.toml is found.
@@ -1531,7 +1528,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Load linker configuration from Verum.toml
     ///
-
     /// Reads the [linker] section from Verum.toml and merges with profile-specific
     /// settings. Falls back to defaults if no Verum.toml is found.
     pub(super) fn load_linker_config(
@@ -1557,13 +1553,11 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Link object files using configuration from Verum.toml
     ///
-
     /// This method supports two linking modes:
     /// - **LLD (LLVM Linker)**: When `use_lld = true` in Verum.toml, uses FinalLinker
     ///  for LTO support and faster linking on Linux
     /// - **System Linker**: Falls back to system compiler (clang/gcc) for compatibility
     ///
-
     /// Configuration options from Verum.toml:
     /// - `output`: executable, shared, static, object
     /// - `lto`: none, thin, full
@@ -1609,7 +1603,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Link object files using LLD via FinalLinker
     ///
-
     /// This method uses the FinalLinker from phases/linking.rs which provides:
     /// - LTO support (Thin/Full)
     /// - CBGR runtime integration

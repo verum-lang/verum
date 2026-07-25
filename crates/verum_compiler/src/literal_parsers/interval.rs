@@ -40,29 +40,24 @@ fn convert_span(ast_span: Span, source_file: Option<&SourceFile>) -> verum_diagn
 
 /// Parse interval literal at compile-time
 ///
-
 /// Composite literal: `interval#"[0, 100)"` is compile-time validated interval
 /// notation. Uses standard mathematical bracket notation: [ for inclusive, ( for
 /// exclusive. Produces type Interval<f64> or DateRange.
 ///
-
 /// # Arguments
 /// - `content`: The interval string (e.g., "[0, 100)")
 /// - `span`: Source location for error reporting
 /// - `source_file`: Optional source file for accurate span conversion
 ///
-
 /// # Returns
 /// Parsed interval with bounds and inclusivity flags
 ///
-
 /// # Examples
 /// ```ignore
 /// use verum_compiler::literal_parsers::parse_interval;
 /// use verum_ast::Span;
 /// use verum_common::Text;
 ///
-
 /// let span = Span::new(0, 10, verum_ast::FileId::new(0));
 /// let result = parse_interval(&Text::from("[0, 100)"), span, None);
 /// assert!(result.is_ok());

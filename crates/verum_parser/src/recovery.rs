@@ -62,7 +62,6 @@ pub use verum_fast_parser::{
 
 /// Recovery set for event-based parsing.
 ///
-
 /// A recovery set defines which tokens can start the next valid construct,
 /// allowing the parser to skip erroneous tokens and create ERROR nodes.
 #[derive(Clone, Debug)]
@@ -271,7 +270,6 @@ pub fn token_kind_to_syntax_kind(kind: &TokenKind) -> SyntaxKind {
 
 /// Pre-defined recovery sets for Verum grammar.
 ///
-
 /// These sets define the tokens that can start various language constructs,
 /// allowing the parser to recover from errors by skipping to these tokens.
 pub mod recovery_sets {
@@ -575,7 +573,6 @@ impl RecoveryResult {
 
 /// Event-based recovery context for structured error handling.
 ///
-
 /// This struct integrates with the event-based parser to create ERROR nodes
 /// for unparseable content while allowing parsing to continue.
 #[derive(Debug)]
@@ -673,7 +670,6 @@ impl Default for EventRecovery {
 
 /// Trait for parsers that support event-based error recovery.
 ///
-
 /// This trait defines the interface for integrating error recovery
 /// with event-based parsing, allowing parsers to:
 /// - Skip tokens until a recovery point
@@ -703,7 +699,6 @@ pub trait Recoverable {
 
     /// Recover from an error using the given recovery set.
     ///
-
     /// This method skips tokens until it finds one in the recovery set,
     /// wrapping skipped tokens in an ERROR node if configured.
     fn recover(&mut self, set: &RecoverySet, message: &str) -> RecoveryResult {
@@ -770,7 +765,6 @@ pub trait Recoverable {
 
     /// Try to parse with recovery on failure.
     ///
-
     /// Returns true if parsing succeeded, false if recovery was needed.
     fn try_parse_with_recovery<T>(
         &mut self,

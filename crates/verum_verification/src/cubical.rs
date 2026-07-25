@@ -265,10 +265,8 @@ pub struct CubicalRule {
 /// documented but their evaluators are V1 work (J-on-refl, ap-trans,
 /// equiv composition, ua-id / ua-trans / ua-sym, …).
 ///
-
 /// Used by:
 ///
-
 ///  * The `cubical rules --kernel` CLI subcommand to mark which
 ///  rules the kernel performs vs. which are documentation-only.
 ///  * The CI gate that verifies every kernel-side reduction has a
@@ -758,7 +756,6 @@ impl FaceFormula {
 
     /// Parse a face formula. Accepts:
     ///
-
     ///  * `0` / `⊥` / `bot` — bottom.
     ///  * `1` / `⊤` / `top` — top.
     ///  * `i = 0` / `i = 1` — endpoint.
@@ -766,7 +763,6 @@ impl FaceFormula {
     ///  * `φ ∨ ψ` / `φ \/ ψ` / `φ or ψ` — disjunction.
     ///  * Parens for grouping.
     ///
-
     /// `∨` binds looser than `∧` (standard mathematical convention).
     pub fn parse(input: &str) -> Result<Self, Text> {
         let tokens = tokenise(input)?;

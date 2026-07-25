@@ -69,7 +69,6 @@ use verum_common::{List, Text};
 
 /// SMT verification error
 ///
-
 /// Indicates the SMT solver could not verify a property.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Verification failed: {property}")]

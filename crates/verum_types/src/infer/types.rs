@@ -237,13 +237,11 @@ impl TypeChecker {
 
     /// Convert AST type to Type for protocol implementation registration.
     ///
-
     /// This variant creates Named types WITHOUT expanding type aliases.
     /// This is critical for protocol implementation lookup because `get_implementations`
     /// matches by type key. If `Result<T, E>` is expanded to `Ok(T) | Err(E)`,
     /// the lookup for "Result" won't find the implementation.
     ///
-
     /// Used specifically for the `for_type` field of ProtocolImpl.
     pub(super) fn ast_to_type_for_protocol_impl(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         use verum_ast::ty::TypeKind;
@@ -349,14 +347,12 @@ impl TypeChecker {
     /// Wrap a function's body-level return type with the externally-visible
     /// signature transformations that callers need to see:
     ///
-
     ///  1. `throws(E) -> T` → `Result<T, E>` (or the first error type
     ///  in a multi-throws union; multi-type unions are simplified per
     ///  the existing semantics at `register_function_signature`).
     ///  2. `async` → `Future<...>` wraps the throws-wrapped
     ///  result.
     ///
-
     /// Every site that builds a `Type::Function` from a `FunctionDecl`
     /// must apply both transformations in this order. Before this helper
     /// existed, the throws wrap was applied at some sites and omitted at
@@ -386,13 +382,11 @@ impl TypeChecker {
     /// Full version of `wrap_return_type_for_sig` that ALSO honours
     /// the generator flag. Order of wrapping (outermost last):
     ///
-
     ///  1. throws-clause → `Result<T, E>` (or pass-through if T
     ///  already implements Try)
     ///  2. generator → `Generator<T, Unit>`
     ///  3. async → `Future<T>`
     ///
-
     /// So an `async fn* foo() -> Y throws E` decl yields
     /// `Future<Generator<Result<Y, E>, Unit>>` — matches the
     /// declaration-time wrap at infer.rs:35117 (the function-decl
@@ -479,7 +473,6 @@ impl TypeChecker {
 
     /// Convert AST type to internal type representation.
     ///
-
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     /// Tracks recursion depth to detect infinite recursion early.
     pub fn ast_to_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
@@ -1151,36 +1144,28 @@ impl TypeChecker {
 
     /// Infer the type for the `?` operator (try operator).
     ///
-
     /// Try operator type checking: ? operator desugars to match with From conversion, requires Result/Maybe return type — Error propagation with ?
     ///
-
     /// The `?` operator has the following semantics:
     /// - `expr?: T` where `expr: Result<T, E1>` and function returns `Result<U, E2>`
     /// - Requires `From<E1> for E2` to be implemented
     /// - Extracts the success value or early-returns the error (converted to E2)
     ///
-
     /// # Type Checking Rules
     ///
-
     /// 1. The inner expression must have type `Result<T, E>` or `Maybe<T>`
     /// 2. The enclosing function must return `Result<U, E2>` or `Maybe<U>`
     /// 3. For Result types: `E` must be convertible to `E2` via `From<E> for E2`
     /// 4. For Maybe types: no conversion needed
     ///
-
     /// # Error Diagnostics
     ///
-
     /// - **E0203**: Result type mismatch - error types not compatible
     /// - **E0204**: Multiple conversion paths - ambiguous From implementations
     /// - **E0205**: Cannot use `?` in non-Result context
     ///
-
     /// # Returns
     ///
-
     /// Returns `Ok(InferResult<T>)` where `T` is the success type from the Result/Maybe.
     /// Convert a rank-2 polymorphic function type `fn<R>(...) -> ...`
     /// to an internal `Type::Forall { vars, body: Function }`.
@@ -2316,19 +2301,15 @@ impl TypeChecker {
 
     /// Infer type for a plain try block: try { expr } -> Result<T, E>
     ///
-
     /// A plain try block creates a Result from its body:
     /// - T is the type of the block's final expression
     /// - E is inferred from ? operators within the block
     /// - If no ? operators, E defaults to Never (infallible)
     ///
-
     /// The final expression is auto-wrapped in Ok().
     ///
-
     /// Error handling: Result<T, E> and Maybe<T> types, try (?) operator with automatic From conversion, error propagation — Section 6.3 - Try blocks
     ///
-
     /// STDLIB-AGNOSTIC: Uses protocol-based detection via Try protocol.
     /// Works with any type implementing Try, not just Result/Maybe.
     pub(super) fn infer_try_block(&mut self, inner_block: &Expr, try_span: Span) -> Result<InferResult> {
@@ -2404,14 +2385,11 @@ impl TypeChecker {
 
     /// Check if `From<source> for target` is implemented.
     ///
-
     /// This queries the protocol checker to see if the From protocol is satisfied.
     /// Returns true if the conversion is possible, false otherwise.
     ///
-
     /// # Type Variable Handling
     ///
-
     /// When either source or target is a type variable, we return true to allow
     /// type inference to proceed. The actual error type compatibility will be
     /// verified once the types are fully resolved. This is necessary because
@@ -2500,7 +2478,6 @@ impl TypeChecker {
 
     /// Check if two types match for From protocol lookup
     ///
-
     /// This handles:
     /// - Direct equality
     /// - Type variable matching
@@ -2547,7 +2524,6 @@ impl TypeChecker {
 
     /// Check for generic From implementations through type parameters
     ///
-
     /// Handles patterns like:
     /// ```verum
     /// implement<E: Error> From<E> for AppError { ... }
@@ -2614,7 +2590,6 @@ impl TypeChecker {
 
     /// Check for standard library automatic From conversions
     ///
-
     /// The standard library provides From implementations for common patterns:
     /// - From<&str> for Text
     /// - From<Int> for Float
@@ -2651,17 +2626,14 @@ impl TypeChecker {
 
     /// Instantiate a protocol method type for a specific receiver
     ///
-
     /// When looking up a method from a protocol, the method signature uses `Self`
     /// as a placeholder for the implementing type. This method substitutes the
     /// actual receiver type for `Self` in the method signature.
     ///
-
     /// # Parameters
     /// - `method_ty`: The method type from the protocol definition
     /// - `receiver_ty`: The actual receiver type to substitute for Self
     ///
-
     /// # Returns
     /// The method type with Self replaced by the receiver type
     pub(super) fn instantiate_method_for_receiver(&self, method_ty: &Type, receiver_ty: &Type) -> Type {
@@ -2671,7 +2643,6 @@ impl TypeChecker {
     /// Compute how many of the method scheme's `ordered_fresh_vars` should be bound
     /// positionally against the receiver's type arguments.
     ///
-
     /// `impl_var_count` is the number of impl-level type params in the scheme (set
     /// at registration time — all method-scheme sites in
     /// `register_impl_block_inner` do this). Method-level params (the method's own
@@ -2691,14 +2662,12 @@ impl TypeChecker {
 
     /// Instantiate a method's type parameters and optionally unify with explicit type arguments.
     ///
-
     /// For generic methods like `fn collect<U>(&self) -> List<U>`, when called as
     /// `items.collect<Int>()`, this:
     /// 1. Creates fresh TypeVars for the method's type_params (e.g., U -> TypeVar(123))
     /// 2. Substitutes them into params and return_type
     /// 3. If explicit type_args are provided, unifies them with the fresh vars
     ///
-
     /// Refinement types: predicates on base types verified at compile-time (proof mode) or runtime, with SMT solver integration — Generic Methods
     pub(super) fn instantiate_method_type_params(
         &mut self,
@@ -2821,13 +2790,11 @@ impl TypeChecker {
 
     /// Freshen method-level type parameters in a method type returned by lookup_protocol_method.
     ///
-
     /// Protocol method types store the original TypeVars created during protocol registration.
     /// These TypeVars are shared across ALL call sites, which causes incorrect unification
     /// when the same method is called multiple times. This function creates fresh TypeVars
     /// for each method-level type parameter and substitutes them in the method type.
     ///
-
     /// For `fn collect<C: FromIterator<Self.Item>>() -> C`:
     /// - `type_param_names` = ["C"]
     /// - The original TypeVar for C in the method type gets replaced with a fresh TypeVar
@@ -3042,11 +3009,9 @@ impl TypeChecker {
 
     /// Build a type parameter substitution map from impl's for_type and the concrete receiver type.
     ///
-
     /// For a generic impl like `implement<T> Iterator for MaybeIter<T>` called on `MaybeIter<&Int>`,
     /// this builds a map `{"T134": &Int}` where 134 is the TypeVar ID for T in the impl.
     ///
-
     /// This enables proper substitution of protocol method return types:
     /// - Iterator::next() returns `Maybe<T>` where T is TypeVar(134)
     /// - After substitution, it returns `Maybe<&Int>`
@@ -3300,7 +3265,6 @@ impl TypeChecker {
 
     /// Substitute Self type with a concrete type
     ///
-
     /// Recursively traverses the type structure and replaces any occurrence
     /// of Self (represented as Type::Named with path "Self") with the given type.
     pub(super) fn substitute_self_type(&self, ty: &Type, self_ty: &Type) -> Type {
@@ -3537,7 +3501,6 @@ impl TypeChecker {
     /// Resolve associated type projections like `::Item<SliceIter<Int>>` using an implementation's
     /// associated_types map.
     ///
-
     /// When a protocol method uses `Self.Item` (represented as `Generic { name: "::Item", args: [Self] }`),
     /// after Self substitution we get `::Item<SliceIter<Int>>`. This function resolves such projections
     /// to the concrete type defined in the implementation (e.g., `type Item = &T` -> `&Int`).
@@ -3758,24 +3721,19 @@ impl TypeChecker {
 
     /// Substitute Self.F<T> patterns with F<T> in HKT method return types
     ///
-
     /// When calling a method on an HKT type like `F<A>.map(f)`, the protocol method
     /// signature has return type `Self.F<B>`. This needs to be substituted with
     /// the concrete type constructor application `F<B>`.
     ///
-
     /// # Parameters
     ///
-
     /// - `ty`: The type to substitute in (e.g., the return type of the protocol method)
     /// - `hkt_name`: The name of the HKT parameter (e.g., "F")
     /// - `constructor`: The actual type constructor to substitute
     ///
-
     /// Find a method in a protocol hierarchy, searching the protocol itself and all super_protocols.
     /// Returns the ProtocolMethod if found in this protocol or any of its ancestors.
     ///
-
     /// This enables protocol inheritance: when M<_>: Monad, calling `.map()` should find the
     /// method in Functor (which Monad extends through Applicative).
     pub(super) fn find_method_in_protocol_hierarchy(
@@ -3811,7 +3769,6 @@ impl TypeChecker {
 
     /// # Examples
     ///
-
     /// ```ignore
     /// // For: fn map<A, B>(self: Self.F<A>, f: fn(A) -> B) -> Self.F<B>
     /// // With F = ListConstructor, this substitutes Self.F<B> -> List<B>
@@ -3967,38 +3924,28 @@ impl TypeChecker {
 
     /// Find all conversion paths from source to target type via From implementations.
     ///
-
     /// E0204 Multiple conversion paths: when try (?) operator finds multiple From implementations for error conversion, requiring explicit disambiguation — E0204 Multiple conversion paths
     ///
-
     /// Uses BFS to discover all possible conversion paths through From implementations.
     /// Returns a list of paths, where each path is a sequence of conversion steps.
     ///
-
     /// # Parameters
     ///
-
     /// - `from_type`: Source error type
     /// - `to_type`: Target error type
     ///
-
     /// # Returns
     ///
-
     /// List of all conversion paths found. Empty if no paths exist.
     ///
-
     /// # Performance
     ///
-
     /// - Maximum depth: 5 levels (prevents infinite recursion)
     /// - Cycle detection: Tracks visited types to avoid loops
     /// - Caching: Protocol checker results are cached
     ///
-
     /// # Visibility
     ///
-
     /// This method is `pub` to enable external testing but is not part of the stable API.
     pub fn find_all_conversion_paths(
         &self,
@@ -4073,10 +4020,8 @@ impl TypeChecker {
 
     /// Find all From<source> implementations in the protocol checker.
     ///
-
     /// Returns list of (target_type, impl_span) tuples where From<source> for target_type exists.
     ///
-
     /// This searches the protocol registry for all implementations of the From protocol
     /// where the source type parameter matches the given source type.
     fn find_from_implementations(&self, source: &Type) -> List<(Type, Span)> {
@@ -4132,7 +4077,6 @@ impl TypeChecker {
 
     /// Get candidate target types that might have From<source> implementations
     ///
-
     /// This returns types that commonly implement From for the given source type.
     fn get_candidate_from_targets(&self, source: &Type) -> List<Type> {
         use verum_ast::Path;
@@ -4192,7 +4136,6 @@ impl TypeChecker {
 
     /// Get standard library From implementations for a source type
     ///
-
     /// Returns predefined conversions from the standard library.
     fn get_standard_from_targets(&self, source: &Type) -> List<(Type, Span)> {
         use verum_ast::Path;
@@ -4233,13 +4176,10 @@ impl TypeChecker {
 
     /// Check if two types are equivalent for conversion path detection.
     ///
-
     /// This is used instead of direct equality to handle type aliases and normalization.
     ///
-
     /// # Visibility
     ///
-
     /// This method is `pub` to enable external testing but is not part of the stable API.
     pub fn types_equivalent(&self, ty1: &Type, ty2: &Type) -> bool {
         // Normalize both types and compare
@@ -4250,13 +4190,10 @@ impl TypeChecker {
 
     /// Convert a type to a unique key for cycle detection.
     ///
-
     /// This creates a stable hash key that can be used to track visited types.
     ///
-
     /// # Visibility
     ///
-
     /// This method is `pub` to enable external testing but is not part of the stable API.
     pub fn type_to_key(&self, ty: &Type) -> Text {
         // Use the type's textual representation as a key
@@ -4680,15 +4617,12 @@ impl TypeChecker {
 
     /// Type-level computation: Apply a dependent function type (Pi type) to a term argument.
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-Level Computation
     ///
-
     /// This implements beta reduction for Pi types:
     /// - Given `(x: A) -> B(x)` and a term `t: A`, produce `B(t)`
     /// - The return type may reference the parameter name, so we substitute it
     ///
-
     /// # Examples
     /// ```ignore
     /// // Type: (n: Nat) -> Vec n Int
@@ -4696,12 +4630,10 @@ impl TypeChecker {
     /// // Result: Vec 5 Int
     /// ```
     ///
-
     /// # Parameters
     /// - `pi_type`: The Pi type to apply
     /// - `arg_term`: The EqTerm representing the argument value
     ///
-
     /// # Returns
     /// The instantiated return type with the parameter substituted by the argument.
     /// Normalize a `Named { path, args }` type.
@@ -5116,25 +5048,20 @@ impl TypeChecker {
 
     /// Substitute a term for a variable in a dependent type.
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-Level Computation
     ///
-
     /// This is needed for dependent types where the type depends on a value.
     /// For example, in `(n: Nat) -> Vec n Int`, the return type `Vec n Int`
     /// references the parameter `n`.
     ///
-
     /// # Parameters
     /// - `ty`: The type containing references to the variable
     /// - `var_name`: Name of the variable to substitute
     /// - `term`: The term to substitute for the variable
     ///
-
     /// # Returns
     /// The type with all occurrences of `var_name` replaced by `term`.
     ///
-
     /// # Implementation Notes
     /// - Performs capture-avoiding substitution
     /// - Handles shadowing correctly in nested scopes
@@ -5633,7 +5560,6 @@ impl TypeChecker {
 
     /// Substitute a term for a variable in an EqTerm expression.
     ///
-
     /// This is needed for equality types where the lhs/rhs may reference
     /// dependent parameters.
     fn substitute_term_in_eq_term(
@@ -5712,21 +5638,17 @@ impl TypeChecker {
 
     /// Project a component from a Sigma type.
     ///
-
     /// Sigma types (dependent pairs): (x: A, B(x)) where second component type depends on first value, refinement types desugar to Sigma — Sigma Types (Dependent Pairs)
     ///
-
     /// Given a Sigma type `(x: A, B(x))`:
     /// - First projection returns type `A`
     /// - Second projection returns type `B(fst(pair))` (depends on first component)
     ///
-
     /// # Parameters
     /// - `sigma_type`: The Sigma type to project from
     /// - `component`: Which component to project (First or Second)
     /// - `pair_term`: The term representing the pair value
     ///
-
     /// # Returns
     /// The type of the projected component.
     fn project_sigma_type(
@@ -5761,27 +5683,22 @@ impl TypeChecker {
 
     /// Normalize a dependent type by reducing type-level computations.
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-Level Computation
     ///
-
     /// This extends the basic normalize_type to also perform:
     /// - Beta reduction for Pi type applications
     /// - Sigma type projections
     /// - Equality type simplifications
     ///
-
     /// # Examples
     /// ```ignore
     /// // Pi application: ((n: Nat) -> Vec n Int) 5 => Vec 5 Int
     /// // Sigma projection: (x: Int, Vec x Bool).fst => Int
     /// ```
     ///
-
     /// # Parameters
     /// - `ty`: The dependent type to normalize
     ///
-
     /// # Returns
     /// The normalized type with type-level computations reduced.
     pub fn normalize_dependent_type(&self, ty: &Type) -> Type {
@@ -5850,19 +5767,15 @@ impl TypeChecker {
 
     /// Evaluate a type-level expression to weak head normal form (WHNF).
     ///
-
     /// Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-Level Computation
     ///
-
     /// WHNF means we reduce until the head of the expression is a constructor
     /// or a stuck term (variable/unknown). This is sufficient for type checking
     /// and faster than full normalization.
     ///
-
     /// # Parameters
     /// - `ty`: The type expression to evaluate
     ///
-
     /// # Returns
     /// The type in weak head normal form.
     pub fn eval_type_to_whnf(&self, ty: &Type) -> Type {
@@ -5918,13 +5831,11 @@ impl TypeChecker {
 
     /// Check if a type expression is stuck (cannot be reduced further).
     ///
-
     /// A type is stuck if:
     /// - It's a type variable with no binding
     /// - It's an application of a stuck type
     /// - It's waiting for more information to reduce
     ///
-
     /// This is useful for determining when type checking needs to wait
     /// for more constraints to be solved.
     pub fn is_type_stuck(&self, ty: &Type) -> bool {
@@ -5952,28 +5863,21 @@ impl TypeChecker {
 
     /// Check for ambiguous conversions and emit E0204 if multiple paths exist.
     ///
-
     /// E0204 Multiple conversion paths: when try (?) operator finds multiple From implementations for error conversion, requiring explicit disambiguation — E0204 Multiple conversion paths
     ///
-
     /// # Parameters
     ///
-
     /// - `from_type`: Source error type
     /// - `to_type`: Target error type
     /// - `span`: Location of the ? operator for diagnostics
     ///
-
     /// # Returns
     ///
-
     /// - `Ok(())` if there is exactly one conversion path or no ambiguity
     /// - `Err(TypeError::MultipleConversionPaths)` if multiple paths exist
     ///
-
     /// # Visibility
     ///
-
     /// This method is `pub` to enable external testing but is not part of the stable API.
     pub fn check_for_ambiguous_conversions(
         &self,
@@ -6036,39 +5940,31 @@ impl TypeChecker {
 
     /// Check if a cast from `from_ty` to `to_ty` is safe.
     ///
-
     /// Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — (Integer Hierarchy), Section 6 (Reference Safety)
     ///
-
     /// # Cast Rules
     ///
-
     /// 1. **Subtype casts** (implicit, always safe):
     ///  - `T{p1} → T{p2}` if p1 => p2 (refinement strengthening)
     ///  - `&checked T → &T` (adds CBGR checks)
     ///  - `&unsafe T → &T` (adds CBGR checks)
     ///
-
     /// 2. **Numeric casts** (explicit, checked):
     ///  - Int → i8/i16/i32/i64/i128 (range check)
     ///  - i32 → i64 (widening, safe)
     ///  - i64 → i32 (narrowing, runtime check)
     ///  - Int → Float (precision loss warning)
     ///
-
     /// 3. **Protocol casts** (explicit):
     ///  - T → &dyn Protocol if T implements Protocol
     ///
-
     /// 4. **FORBIDDEN casts**:
     ///  - &T → &checked T (cannot invent proof)
     ///  - &T → &unsafe T (requires @unsafe context)
     ///  - Unrelated types (e.g., Int → Text)
     ///
-
     /// # Safety
     ///
-
     /// This function enforces Verum's zero-tolerance policy:
     /// - **NO undefined behavior** - all casts are checked
     /// - **NO false negatives** - invalid casts are rejected
@@ -7359,7 +7255,6 @@ impl TypeChecker {
 
     /// Check numeric cast safety using IntegerHierarchy.
     ///
-
     /// Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — Integer Type Hierarchy
     /// Verifies that numeric casts respect the integer hierarchy constraints.
     fn check_numeric_cast(&self, from_ty: &Type, to_ty: &Type, _span: Span) -> Result<()> {
@@ -7430,11 +7325,9 @@ impl TypeChecker {
 
     /// Check if an expression is an lvalue (assignable location).
     ///
-
     /// Inline assembly output operands must be lvalues - variables, field accesses,
     /// or index expressions that can be assigned to.
     ///
-
     /// Low-level type operations: raw pointer casting, transmute, memory layout control
     pub(super) fn check_place_is_lvalue(&self, expr: &Expr, _ty: &Type) -> Result<()> {
         use verum_ast::expr::ExprKind;
@@ -7457,11 +7350,9 @@ impl TypeChecker {
 
     /// Check if a type is compatible with inline assembly const operands.
     ///
-
     /// Const operands must be integer or pointer types - they represent
     /// compile-time constants embedded directly in the assembly.
     ///
-
     /// Low-level type operations: raw pointer casting, transmute, memory layout control
     pub(super) fn is_asm_const_compatible(&self, ty: &Type) -> bool {
         match ty {
@@ -7503,7 +7394,6 @@ impl TypeChecker {
 
     /// Check if two types are compatible for type annotation casts.
     ///
-
     /// This allows casts like `None as Maybe<Int>` where the source type
     /// has unresolved type variables that can match the target type's arguments.
     fn types_compatible_for_cast(&self, from_ty: &Type, to_ty: &Type) -> bool {
@@ -7547,20 +7437,16 @@ impl TypeChecker {
 
     /// Try to resolve a deferred associated type projection.
     ///
-
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Associated type resolution
     ///
-
     /// Deferred projections are created when an associated type cannot be resolved
     /// immediately because the self type contains unresolved type variables.
     /// This method attempts to resolve them once the type variables are known.
     ///
-
     /// # Arguments
     /// * `projection_name` - The projection name in format `<SelfType as Protocol>::AssocName`
     /// * `args` - The normalized type arguments (first arg is the self type)
     ///
-
     /// # Returns
     /// * `Some(Type)` - The resolved associated type
     /// * `None` - If resolution still cannot complete
@@ -7622,11 +7508,9 @@ impl TypeChecker {
 
     /// Try to resolve an associated type projection from base type.
     ///
-
     /// This handles the `::AssocName` format where base type is in args[0].
     /// Used for projections like T.Item, C.Iter.Item etc.
     ///
-
     /// The resolution process:
     /// 1. Check if base type is concrete (no unresolved type variables)
     /// 2. Find all protocols that base type implements

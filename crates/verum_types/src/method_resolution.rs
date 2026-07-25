@@ -517,25 +517,20 @@ impl MethodError {
 
 /// Trait for method resolution
 ///
-
 /// This trait abstracts away method resolution, allowing different implementations
 /// for different compilation contexts (stdlib bootstrap, normal build, etc.)
 pub trait MethodResolver {
     /// Resolve a method call
     ///
-
     /// # Arguments
     ///
-
     /// * `receiver_type` - The type of the receiver expression
     /// * `method_name` - The name of the method being called
     /// * `type_hints` - Optional type hints from the call site
     /// * `is_mut_receiver` - Whether the receiver is a mutable reference
     ///
-
     /// # Returns
     ///
-
     /// `Ok(resolution)` if the method was found, `Err(error)` otherwise
     fn resolve_method(
         &self,
@@ -602,7 +597,6 @@ struct StoredMethod {
 
 /// Default method resolver using the existing ProtocolChecker infrastructure
 ///
-
 /// This implementation wraps the current hardcoded approach but can be replaced
 /// with a stdlib-agnostic implementation during stdlib bootstrap.
 #[derive(Debug, Default)]
@@ -863,7 +857,6 @@ impl MethodResolver for DefaultMethodResolver {
 
 /// Determine the receiver kind and mutability from a function declaration's parameters.
 ///
-
 /// Inspects the first parameter to see if it's a self parameter and what kind.
 /// Returns `(ReceiverKind, requires_mut_receiver)`.
 fn receiver_info_from_decl(func: &verum_ast::decl::FunctionDecl) -> (ReceiverKind, bool) {

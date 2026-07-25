@@ -393,7 +393,6 @@ impl TypeChecker {
     /// `QttViolation` encountered (alphabetically first, for
     /// deterministic diagnostics).
     ///
-
     /// This is the integration entry point: callers (codegen,
     /// LSP, `@verify(formal)` boundary) supply the per-binding
     /// declared quantities (most often derived from explicit
@@ -442,13 +441,11 @@ impl TypeChecker {
 
     /// Create a TypeChecker with language primitives only.
     ///
-
     /// STDLIB-AGNOSTIC: This constructor does NOT include hardcoded stdlib types.
     /// Stdlib types (Maybe, Result, List, etc.) are loaded dynamically from:
     /// - core/*.vr source files (via pipeline.load_stdlib_modules())
     /// - Pre-compiled VBC archives (via CoreMetadata)
     ///
-
     /// Only language primitives (Bool, Unit) and compiler intrinsics are included.
     pub fn new() -> Self {
         Self {
@@ -569,7 +566,6 @@ impl TypeChecker {
 
     /// Create a new type checker with stdlib metadata loaded from stdlib.vbc.
     ///
-
     /// This is the PREFERRED constructor for compiling user code.
     /// Types and methods are loaded from stdlib.vbca metadata, enabling
     /// type checking of stdlib types without parsing .vr source files.
@@ -2298,16 +2294,13 @@ impl TypeChecker {
 
     /// Create a TypeChecker with minimal context (no stdlib types at all).
     ///
-
     /// STDLIB-AGNOSTIC: This is the most minimal constructor, used when:
     /// - Compiling stdlib itself - types are registered as .vr files are parsed
     /// - Testing type system in isolation
     ///
-
     /// Contains NO types - not even primitives. Caller must register
     /// all types and methods via the type checker APIs.
     ///
-
     /// For compiling user code, use `new_with_core()` instead.
     pub fn with_minimal_context() -> Self {
         Self {
@@ -2427,11 +2420,9 @@ impl TypeChecker {
 
     /// Load stdlib types from metadata into the type context.
     ///
-
     /// This registers all types, protocols, and implementations from
     /// the pre-loaded stdlib.vbca metadata.
     ///
-
     /// Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
     pub fn load_stdlib_from_metadata(&mut self, metadata: &crate::core_metadata::CoreMetadata) {
         use crate::core_metadata::TypeDescriptorKind;
@@ -2872,7 +2863,6 @@ impl TypeChecker {
 
     /// Walk metadata types in stdlib source declaration order.
     ///
-
     /// Returns `(name, descriptor)` pairs ordered first by `type_declaration_order`
     /// (which records insertion order: archive layer → .vr declaration order),
     /// then any orphan types not present in that list appended in alphabetical
@@ -2880,7 +2870,6 @@ impl TypeChecker {
     /// `core_loader::extract_module_metadata` or `pipeline::cached → metadata`
     /// is already pushed to `type_declaration_order`.
     ///
-
     /// First-registered-wins iteration is the architectural alternative to
     /// hardcoded priority lists like `["Result", "Maybe", "Ordering", "Bool"]`.
     /// Compiler stays stdlib-agnostic; correctness comes from source order.

@@ -24,7 +24,6 @@ use verum_llvm::{
 
 /// LLVM-based AOT backend.
 ///
-
 /// This backend provides superior optimization control compared to
 /// the default melior ExecutionEngine approach.
 pub struct LlvmBackend {
@@ -112,7 +111,6 @@ impl LlvmBackend {
 
     /// Compile MLIR module to LLVM IR text.
     ///
-
     /// This extracts the MLIR in LLVM dialect and converts it to a format
     /// that can be parsed by the LLVM IR parser.
     fn extract_llvm_ir(&self, module: &Module<'_>) -> Result<String> {

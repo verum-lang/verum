@@ -136,23 +136,18 @@ impl CacheStats {
 
 /// Z3-based feasibility checker with caching
 ///
-
 /// This checker translates path predicates to Z3 boolean expressions
 /// and uses the Z3 SMT solver to determine satisfiability.
 ///
-
 /// # Caching Strategy
 ///
-
 /// - **Key**: Hash of predicate structure
 /// - **Value**: SAT/UNSAT/Unknown result with timestamp
 /// - **Eviction**: LRU with configurable limit (default: 1000)
 /// - **Invalidation**: Never (predicates are immutable)
 ///
-
 /// # Performance Characteristics
 ///
-
 /// - Cache hit: O(1) - hash map lookup
 /// - Cache miss: O(SMT) - Z3 solver invocation
 /// - Memory: ~40 bytes per cache entry
@@ -177,10 +172,8 @@ impl Z3FeasibilityChecker {
 
     /// Create a new Z3 feasibility checker with default settings
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// let checker = Z3FeasibilityChecker::new();
     /// ```
@@ -191,17 +184,13 @@ impl Z3FeasibilityChecker {
 
     /// Create a new Z3 feasibility checker with custom configuration
     ///
-
     /// # Arguments
     ///
-
     /// - `max_cache_size`: Maximum number of cache entries before LRU eviction
     /// - `timeout_ms`: Z3 solver timeout in milliseconds
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// // Larger cache, longer timeout for complex analyses
     /// let checker = Z3FeasibilityChecker::with_config(5000, 500);
@@ -218,22 +207,17 @@ impl Z3FeasibilityChecker {
 
     /// Check if a predicate is feasible (satisfiable)
     ///
-
     /// Returns the detailed feasibility result. Use `is_feasible()` on the
     /// result to get a boolean.
     ///
-
     /// # Performance
     ///
-
     /// - Cache hit: ~100ns
     /// - Cache miss (simple): ~100μs
     /// - Cache miss (complex): ~1-10ms
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// let result = checker.check_feasible(&predicate);
     /// match result {
@@ -264,14 +248,11 @@ impl Z3FeasibilityChecker {
 
     /// Check if a path condition is feasible
     ///
-
     /// This is a convenience wrapper around `check_feasible()` that returns
     /// a boolean. Conservative: returns true if result is Unknown.
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// if checker.check_path_feasible(&path_condition.predicate) {
     ///  // Path is feasible, analyze it
@@ -284,7 +265,6 @@ impl Z3FeasibilityChecker {
 
     /// Check if a `PathCondition` is feasible
     ///
-
     /// Convenience method that extracts the predicate from the `PathCondition`.
     pub fn check_path_condition_feasible(&mut self, path: &PathCondition) -> bool {
         self.check_path_feasible(&path.predicate)
@@ -292,13 +272,10 @@ impl Z3FeasibilityChecker {
 
     /// Get cache statistics
     ///
-
     /// Useful for monitoring cache effectiveness and tuning cache size.
     ///
-
     /// # Example
     ///
-
     /// ```rust,ignore
     /// let stats = checker.stats();
     /// println!("Cache hit rate: {:.1}%", stats.hit_rate() * 100.0);
@@ -311,7 +288,6 @@ impl Z3FeasibilityChecker {
 
     /// Clear the cache
     ///
-
     /// Useful for testing or when starting a new analysis phase.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
@@ -320,17 +296,14 @@ impl Z3FeasibilityChecker {
 
     /// Perform feasibility check without caching
     ///
-
     /// This is the core SMT solving logic. It:
     /// 1. Translates the predicate to Z3 AST
     /// 2. Creates a solver instance
     /// 3. Asserts the predicate
     /// 4. Checks satisfiability
     ///
-
     /// # Timeout Handling
     ///
-
     /// If Z3 times out, returns `Unknown` (conservative).
     fn check_feasible_uncached(&self, predicate: &PathPredicate) -> FeasibilityResult {
         // Early simplification: handle trivial cases
@@ -365,10 +338,8 @@ impl Z3FeasibilityChecker {
 
     /// Translate a `PathPredicate` to Z3 boolean expression
     ///
-
     /// # Translation Rules
     ///
-
     /// - `True` → Z3 `true`
     /// - `False` → Z3 `false`
     /// - `BlockTrue(id)` → Z3 bool variable `block_N`
@@ -377,10 +348,8 @@ impl Z3FeasibilityChecker {
     /// - `Or(a, b)` → Z3 `or(a_z3, b_z3)`
     /// - `Not(p)` → Z3 `not(p_z3)`
     ///
-
     /// # Error Handling
     ///
-
     /// Returns `Maybe::None` if translation fails (should be rare).
     fn predicate_to_z3(&self, predicate: &PathPredicate) -> Maybe<Bool> {
         match predicate {
@@ -420,7 +389,6 @@ impl Z3FeasibilityChecker {
 
     /// Compute hash of a predicate for cache lookup
     ///
-
     /// Uses structural hashing - predicates with identical structure
     /// produce identical hashes.
     fn hash_predicate(&self, predicate: &PathPredicate) -> u64 {
@@ -510,10 +478,8 @@ impl Default for Z3FeasibilityChecker {
 
 /// Builder for configuring `Z3FeasibilityChecker`
 ///
-
 /// # Example
 ///
-
 /// ```rust,ignore
 /// let checker = Z3FeasibilityCheckerBuilder::new()
 ///  .with_cache_size(5000)

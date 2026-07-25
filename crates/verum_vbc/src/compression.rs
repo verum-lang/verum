@@ -72,7 +72,6 @@ impl CompressionOptions {
 
 /// Compress data using the specified algorithm.
 ///
-
 /// Returns `None` if compression is disabled or if the data is smaller than
 /// the minimum threshold. Returns `Some((compressed_data, algorithm))` on success.
 #[cfg(feature = "compression")]
@@ -111,7 +110,6 @@ pub fn compress(
 
 /// Decompress data using the specified algorithm.
 ///
-
 /// # Arguments
 /// * `data` - The compressed data
 /// * `algorithm` - The algorithm used for compression

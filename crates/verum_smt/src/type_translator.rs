@@ -101,10 +101,8 @@ pub enum TypeTranslationError {
 
 /// Translator for verum_types::Type to Z3
 ///
-
 /// Handles dependent types, inductive types, and formal proof terms.
 ///
-
 /// Z3 0.19+ stores Context in thread-local storage, so no explicit context
 /// reference is held — sorts are bound to the current thread's context at
 /// creation time.
@@ -806,7 +804,6 @@ impl TypeTranslator {
 
     /// Create destructor function declarations for coinductive types
     ///
-
     /// Each destructor becomes an uninterpreted function from the coinductive
     /// type to its result type. For example, for a Stream<A> with destructors
     /// `head: A` and `tail: Stream<A>`:

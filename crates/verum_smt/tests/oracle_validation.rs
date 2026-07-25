@@ -477,12 +477,10 @@ pub struct UnsatCoreValidator;
 impl UnsatCoreValidator {
     /// Verify that an unsat core is actually unsatisfiable.
     ///
-
     /// Uses Z3 to check that the conjunction of all constraints in the core
     /// is unsatisfiable. This validates that the core genuinely represents
     /// a contradiction.
     ///
-
     /// # Returns
     /// - `true` if the core is verified to be UNSAT
     /// - `false` if the core is SAT or Unknown (invalid core)
@@ -527,12 +525,10 @@ impl UnsatCoreValidator {
 
     /// Verify that an unsat core is minimal.
     ///
-
     /// A core is minimal if removing any single constraint makes the
     /// remaining constraints satisfiable. This is an expensive check
     /// requiring O(n) SMT solver calls for a core of size n.
     ///
-
     /// # Performance Note
     /// Only run this on small cores (< 10 constraints) in production.
     /// For larger cores, consider using the incremental minimization
@@ -589,14 +585,11 @@ impl UnsatCoreValidator {
 
     /// Find minimal unsat core (if given core is not minimal)
     ///
-
     /// Uses a greedy algorithm to iteratively remove constraints while preserving unsatisfiability.
     /// This is an approximation - it finds a locally minimal core, not necessarily globally minimal.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Start with the full core
     /// 2. For each constraint in the core:
     ///  - Try removing it
@@ -604,10 +597,8 @@ impl UnsatCoreValidator {
     ///  - Otherwise, keep the constraint
     /// 3. Return the minimal core
     ///
-
     /// # Performance
     ///
-
     /// - Best case: O(n) if already minimal
     /// - Worst case: O(n²) for n constraints
     /// - Each check requires an SMT solver call

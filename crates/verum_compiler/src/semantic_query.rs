@@ -72,7 +72,6 @@ use verum_common::{List, Map, Maybe, Text};
 
 /// A content-addressed key based on semantic hash.
 ///
-
 /// Unlike file-path keys, semantic keys are computed from the actual content's
 /// meaning, enabling deduplication across files and projects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -169,7 +168,6 @@ pub enum SemanticKind {
 
 /// A pattern for matching function signatures.
 ///
-
 /// Supports wildcards for flexible querying.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SignaturePattern {
@@ -273,7 +271,6 @@ impl Default for SignaturePattern {
 
 /// An index mapping semantic properties to cached items.
 ///
-
 /// Supports efficient queries by:
 /// - Function signature (exact or pattern)
 /// - Protocol implementation
@@ -594,14 +591,11 @@ impl SemanticCacheConfig {
 
 /// Thread-safe semantic query cache.
 ///
-
 /// Provides content-addressed caching with semantic indexing for efficient
 /// queries across the codebase.
 ///
-
 /// ## Persistence Integration
 ///
-
 /// When configured with persistence, the cache automatically loads from and saves
 /// to a content-addressed store (CAS). This enables:
 /// - Cross-session caching: Restart compilation without losing cache
@@ -1167,7 +1161,6 @@ impl SemanticQueryCache {
 
     /// Save all cached entries to persistent storage.
     ///
-
     /// Returns the number of entries saved.
     pub fn save_to_persistent(&self) -> std::io::Result<PersistenceResult> {
         let store = match &self.persistent_store {
@@ -1227,7 +1220,6 @@ impl SemanticQueryCache {
 
     /// Load type from persistent storage by name.
     ///
-
     /// Falls back to persistent storage if not in memory cache.
     pub fn get_type_with_fallback(&self, key: &SemanticKey, name: &str) -> Maybe<CachedTypeInfo> {
         // First check memory cache
@@ -1271,7 +1263,6 @@ impl SemanticQueryCache {
 
     /// Load function from persistent storage by name.
     ///
-
     /// Falls back to persistent storage if not in memory cache.
     pub fn get_function_with_fallback(
         &self,
@@ -1318,7 +1309,6 @@ impl SemanticQueryCache {
 
     /// Load verification result from persistent storage.
     ///
-
     /// Falls back to persistent storage if not in memory cache.
     pub fn get_verification_with_fallback(&self, key: &SemanticKey) -> Maybe<VerificationResult> {
         // First check memory cache

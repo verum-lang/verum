@@ -197,7 +197,6 @@ impl<'ctx> TensorIR<'ctx> {
     /// header load / store helpers below (#310 consolidation —
     /// previously each helper duplicated the same unsafe GEP).
     ///
-
     /// SAFETY of the underlying `build_in_bounds_gep`:
     ///  1. `base_ptr` is a tensor-header allocation produced by
     ///  `emit_alloca_tensor_header` (or equivalent), which

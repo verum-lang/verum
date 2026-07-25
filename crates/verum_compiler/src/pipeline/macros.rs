@@ -355,7 +355,6 @@ impl<'a> verum_ast::visitor::Visitor for MacroExpander<'a> {
 
 /// Reset all mutable global state between test executions.
 ///
-
 /// Called by the test executor before each test to prevent state leakage
 /// between tests in batch runs. Clears VBC value side-tables, exhaustiveness
 /// cache, and other per-compilation global state, while preserving expensive

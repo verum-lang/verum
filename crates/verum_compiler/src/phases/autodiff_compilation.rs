@@ -706,11 +706,9 @@ impl DerivativeGenerator {
     /// Generate VJP (Vector-Jacobian Product) function
     /// Reverse-mode automatic differentiation
     ///
-
     /// For `fn f(x, y) -> z`:
     /// Generates `fn f_vjp(x, y, grad_z) -> (z, (grad_x, grad_y))`
     ///
-
     /// CBGR Note: Generated code includes ~15ns overhead per reference check
     pub fn generate_vjp(&self) -> Result<Item, String> {
         let vjp_name: verum_common::Text = format!("{}_vjp", self.func.name.as_str()).into();
@@ -765,7 +763,6 @@ impl DerivativeGenerator {
     /// Generate JVP (Jacobian-Vector Product) function
     /// Forward-mode automatic differentiation
     ///
-
     /// For `fn f(x, y) -> z`:
     /// Generates `fn f_jvp(x, y, tangent_x, tangent_y) -> (z, tangent_z)`
     pub fn generate_jvp(&self) -> Result<Item, String> {
@@ -821,7 +818,6 @@ impl DerivativeGenerator {
 
     /// Generate gradient function (for scalar outputs)
     ///
-
     /// For `fn f(x, y) -> Float`:
     /// Generates `fn f_grad(x, y) -> (grad_x, grad_y)`
     pub fn generate_grad(&self) -> Result<Item, String> {

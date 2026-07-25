@@ -24,7 +24,6 @@ use crate::value::Value;
 
 /// MetaEval (0xB8) - Evaluate compile-time expression at runtime.
 ///
-
 /// At runtime, the expression was already evaluated at compile time.
 /// Just copy the value through.
 pub(in super::super) fn handle_meta_eval(
@@ -76,7 +75,6 @@ pub(in super::super) fn handle_meta_quote(
 
 /// MetaSplice (0xBA) - Splice tokenstream into code.
 ///
-
 /// Compile-time only -- at runtime, spliced code is already in the bytecode.
 pub(in super::super) fn handle_meta_splice(
     state: &mut InterpreterState,

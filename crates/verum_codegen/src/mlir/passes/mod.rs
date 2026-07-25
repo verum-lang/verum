@@ -187,7 +187,6 @@ impl PassStats {
 
 /// Trait for Verum optimization passes.
 ///
-
 /// All custom optimization passes should implement this trait.
 /// The trait provides a standard interface for pass execution
 /// with proper error handling and statistics collection.
@@ -197,7 +196,6 @@ pub trait VerumPass {
 
     /// Run the pass on a module.
     ///
-
     /// Returns a result indicating whether the IR was modified
     /// and statistics about the pass execution.
     fn run(&self, module: &mut Module<'_>) -> Result<PassResult>;
@@ -229,7 +227,6 @@ pub trait VerumPass {
 
 /// Wrapper for MLIR's Canonicalization pass.
 ///
-
 /// This pass applies canonicalization patterns to simplify the IR.
 /// It's typically run early in the pipeline to normalize the IR.
 pub struct CanonicalizationPass;

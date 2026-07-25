@@ -819,14 +819,12 @@ impl HygieneChecker {
 
     /// Check the tokens of a quote expression.
     ///
-
     /// Walks the token tree and looks for **identifier tokens that
     /// shadow bindings from outside the quote scope**. Any such match
     /// is recorded as a `PotentialCapture` violation so the embedder
     /// can decide between warning and hard-fail per
     /// `CheckerConfig::warn_on_potential_capture`.
     ///
-
     /// The walk is intentionally textual — Verum's `TokenTreeToken` does
     /// not yet carry per-token scope sets (the parser drops them at
     /// macro-input time). Until the tokeniser is upgraded to thread
@@ -857,7 +855,6 @@ impl HygieneChecker {
 
     /// Re-check tokens that have already been spliced into a quote.
     ///
-
     /// After `MetaContext::expand_quote_splices` substitutes `${expr}`
     /// and `$ident` placeholders, the tokens that landed in the
     /// substitution slots may bring in identifiers from the splice
@@ -866,7 +863,6 @@ impl HygieneChecker {
     /// capture-detection walk on the post-splice token tree, closing
     /// the audit-F P0 finding "splice hygiene re-check missing".
     ///
-
     /// The caller passes the tokens *after* expansion. Violations are
     /// accumulated on the checker; consumers that want hard-fail
     /// behaviour should drain `take_violations()` after the call.
@@ -877,7 +873,6 @@ impl HygieneChecker {
     /// Pre-populate the binding table with an outer-scope identifier
     /// that the quote-site author should NOT shadow.
     ///
-
     /// Closes the production-empty-binding-table gap (#237): pre-fix
     /// `recheck_post_splice_hygiene` constructed a fresh checker with
     /// no bindings registered, so `walk_quote_tokens` produced no
@@ -888,7 +883,6 @@ impl HygieneChecker {
     /// running `check_post_splice_tokens`, so `flag_capture_if_shadowing`
     /// has real outer-scope names to compare against.
     ///
-
     /// Symmetric with `add_binding` (the private internal-scope
     /// variant) but parameterised on the raw name + span so the
     /// caller doesn't need to mint a fresh `ScopeKind`.
@@ -1014,13 +1008,11 @@ impl HygieneChecker {
 
     /// Get accumulated violations filtered per `config.include_warnings`.
     ///
-
     /// When `include_warnings = false`, recoverable (warning-class)
     /// violations are dropped from the returned collection — only
     /// fatal violations remain. When `true` (the default), every
     /// violation passes through unchanged.
     ///
-
     /// Pre-fix `include_warnings` was an inert config field — the
     /// CheckerConfig declared it and presets toggled it, but no
     /// production code path consulted it, leaving the documented
@@ -1029,7 +1021,6 @@ impl HygieneChecker {
     /// giving callers an explicit, contractually-honest filtered
     /// view.
     ///
-
     /// "Recoverable" is defined by `HygieneViolation::is_recoverable()`
     /// — currently `ShadowConflict` is recoverable; everything else
     /// is fatal. The recovery classification matches the existing

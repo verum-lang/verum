@@ -55,22 +55,17 @@ use std::fmt;
 
 /// A compile-time constant value (base type)
 ///
-
 /// This is the unified representation of constant values used throughout
 /// the Verum compiler and type system. All compile-time evaluation,
 /// constant expression handling, and basic meta-programming use this type.
 ///
-
 /// # Precision
 ///
-
 /// Integer variants use `i128`/`u128` for maximum precision. This ensures
 /// that compile-time arithmetic doesn't lose precision compared to runtime.
 ///
-
 /// # AST Variants
 ///
-
 /// AST-related variants (`Expr`, `Type`, `Pattern`, `Item`) are provided
 /// by `verum_compiler::ConstValue` which extends this base type for
 /// meta-programming use cases. This separation respects the layer architecture
@@ -86,14 +81,12 @@ pub enum ConstValue {
 
     /// Signed integer with maximum precision (i128)
     ///
-
     /// This can represent any integer from -2^127 to 2^127-1.
     /// Narrowing conversions should be explicit.
     Int(i128),
 
     /// Unsigned integer with maximum precision (u128)
     ///
-
     /// This can represent any integer from 0 to 2^128-1.
     UInt(u128),
 
@@ -120,14 +113,12 @@ pub enum ConstValue {
 
     /// Key-value map (Map<Text, T> in Verum)
     ///
-
     /// Uses Text as keys since this is the most common case in meta-programming.
     /// For more complex key types, use Array of tuples.
     Map(crate::OrderedMap<Text, ConstValue>),
 
     /// Set of text values (Set<Text> in Verum)
     ///
-
     /// Uses Text for element type since this is the most common case in meta-programming.
     /// For sets of other types, use Array with deduplication.
     Set(crate::OrderedSet<Text>),
@@ -498,7 +489,6 @@ impl ConstValue {
 impl ConstValue {
     /// Convert to boolean for conditional evaluation
     ///
-
     /// This follows Verum's truthiness rules:
     /// - `Unit` is false
     /// - `Bool(false)` is false

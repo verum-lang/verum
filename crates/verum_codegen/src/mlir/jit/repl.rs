@@ -255,7 +255,6 @@ impl EvalResult {
 
     /// Format result for display.
     ///
-
     /// Honours `ReplConfig.max_display_size`: the value text is
     /// truncated to that many *characters* (not bytes — Unicode-
     /// safe via `chars().take()`) with a "...(truncated, N total
@@ -558,7 +557,6 @@ impl ReplSession {
 
     /// Evaluate source code.
     ///
-
     /// This is a placeholder that would integrate with the parser and codegen.
     /// In a full implementation, this would:
     /// 1. Parse the input

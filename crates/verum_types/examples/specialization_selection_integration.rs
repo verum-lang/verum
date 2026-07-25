@@ -60,17 +60,14 @@ fn main() {
 
 /// Example 1: Basic specialization selection
 ///
-
 /// Demonstrates selecting between a default implementation and a specialized one.
 ///
-
 /// ```verum
 /// // Default implementation
 /// implement<T> Display for T {
 ///  fn display(self) -> Text { "default" }
 /// }
 ///
-
 /// // Specialized for Int
 /// @specialize
 /// implement Display for Int {
@@ -117,10 +114,8 @@ fn example_basic_specialization() {
 
 /// Example 2: Specialization chain
 ///
-
 /// Demonstrates a chain of specializations.
 ///
-
 /// ```verum
 /// implement<T> Protocol for T { } // Rank 0 (most general)
 /// @specialize implement<T: Clone> Protocol for T { } // Rank 1
@@ -166,11 +161,9 @@ fn example_specialization_chain() {
 
 /// Example 3: Ambiguity detection
 ///
-
 /// Demonstrates error handling when multiple implementations apply without
 /// a clear specialization ordering.
 ///
-
 /// ```verum
 /// implement<T: Send> Protocol for T { }
 /// implement<T: Sync> Protocol for T { }
@@ -210,7 +203,6 @@ fn example_ambiguity_detection() {
 
 /// Example 4: Performance metrics
 ///
-
 /// Demonstrates performance tracking and caching.
 fn example_performance_metrics() {
     let mut selector = SpecializationSelector::new();
@@ -245,7 +237,6 @@ fn example_performance_metrics() {
 
 /// Example 5: Integration with TypeChecker (conceptual)
 ///
-
 /// This demonstrates how the SpecializationSelector would be used within
 /// the TypeChecker during method resolution.
 fn example_type_checker_integration() {

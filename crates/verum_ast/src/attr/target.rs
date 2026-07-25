@@ -57,12 +57,10 @@ use verum_common::Text;
 bitflags! {
     /// Bitflags representing valid attribute targets.
     ///
-
     /// Multiple targets can be combined using bitwise OR:
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
-
     /// let targets = AttributeTarget::Function | AttributeTarget::Type;
     /// assert!(targets.contains(AttributeTarget::Function));
     /// ```
@@ -179,18 +177,14 @@ impl<'de> Deserialize<'de> for AttributeTarget {
 impl AttributeTarget {
     /// Get a human-readable name for this target.
     ///
-
     /// For single targets, returns the specific name.
     /// For combinations, returns a generic description.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
-
     /// assert_eq!(AttributeTarget::Function.display_name(), "function");
     /// assert_eq!(AttributeTarget::Field.display_name(), "field");
     /// ```
@@ -218,17 +212,13 @@ impl AttributeTarget {
 
     /// Format as a human-readable list for error messages.
     ///
-
     /// Produces output like "function, type, or field" for use in diagnostics.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
-
     /// let targets = AttributeTarget::Function | AttributeTarget::Type | AttributeTarget::Field;
     /// assert_eq!(targets.format_list(), "function, type, or field");
     /// ```
@@ -288,7 +278,6 @@ impl AttributeTarget {
 
     /// Check if this target represents exactly one syntactic position.
     ///
-
     /// Returns `true` if exactly one bit is set.
     #[must_use]
     pub const fn is_single(&self) -> bool {
@@ -297,7 +286,6 @@ impl AttributeTarget {
 
     /// Check if this target represents multiple syntactic positions.
     ///
-
     /// Returns `true` if more than one bit is set.
     #[must_use]
     pub const fn is_multiple(&self) -> bool {
@@ -312,14 +300,11 @@ impl AttributeTarget {
 
     /// Iterate over individual targets in this combination.
     ///
-
     /// # Examples
     ///
-
     /// ```rust
     /// use verum_ast::attr::AttributeTarget;
     ///
-
     /// let targets = AttributeTarget::Function | AttributeTarget::Type;
     /// let individual: Vec<_> = targets.iter_individual().collect();
     /// assert_eq!(individual.len(), 2);
@@ -369,7 +354,6 @@ impl Iterator for AttributeTargetIter {
 
 /// Format a list of items with proper English grammar.
 ///
-
 /// - Empty: ""
 /// - One: "item"
 /// - Two: "item1 or item2"

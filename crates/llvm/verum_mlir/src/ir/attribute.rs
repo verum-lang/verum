@@ -64,10 +64,8 @@ impl<'c> Attribute<'c> {
 
     /// Creates an attribute from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_raw(raw: MlirAttribute) -> Self {
         Self {
@@ -78,10 +76,8 @@ impl<'c> Attribute<'c> {
 
     /// Creates an optional attribute from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// A raw object must be valid.
     pub unsafe fn from_option_raw(raw: MlirAttribute) -> Option<Self> {
         if raw.ptr.is_null() {

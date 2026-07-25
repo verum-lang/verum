@@ -48,7 +48,6 @@ impl MeshDim {
 
 /// N-dimensional mesh topology.
 ///
-
 /// Defines the shape of the device mesh for distributed execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeshTopology {
@@ -113,7 +112,6 @@ impl Default for MeshTopology {
 
 /// Sharding specification for a tensor.
 ///
-
 /// Maps tensor dimensions to mesh dimensions for distribution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardingSpec {

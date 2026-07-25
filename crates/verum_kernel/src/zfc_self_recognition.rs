@@ -163,7 +163,6 @@ impl InaccessibleLevel {
 /// The seven kernel rules whose ZFC-decomposition we expose. Per
 /// VVA §11.3 the rule list is:
 ///
-
 ///  K-Refine — depth-strict comprehension (Diakrisis T-2f*).
 ///  K-Univ — universe-consistency (predicative hierarchy).
 ///  K-Pos — strict positivity (Berardi 1998).
@@ -263,7 +262,6 @@ pub struct MetaTheoryRequirements {
 /// Decompose a kernel rule into its meta-theoretic requirements.
 /// Per Kunen 2011 + Lurie HTT App. A:
 ///
-
 /// * `K-Refine`: needs Separation (the comprehension `{x:A | P(x)}`
 ///  IS Separation) + Replacement (depth-stratification across types).
 /// * `K-Univ`: needs Replacement (universe successor) + 2 inaccessibles
@@ -352,7 +350,6 @@ pub fn required_meta_theory(rule: KernelRuleId) -> MetaTheoryRequirements {
 /// Returns true iff the rule's meta-theoretic requirements are a
 /// subset of `(ZFC, [κ_1, κ_2])`.
 ///
-
 /// **All seven rules** are provable in ZFC + 2 inaccessibles (this is
 /// the design invariant of the Verum kernel). current surface reads off
 /// the requirement record and confirms set inclusion.

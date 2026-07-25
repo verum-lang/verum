@@ -1556,7 +1556,6 @@ impl VbcCodegen {
 
     /// Compiles a provide statement.
     ///
-
     /// Handles two cases:
     /// 1. Normal provide: `provide Ctx = expr;` — emits a single CtxProvide
     /// 2. Layer expansion: `provide LayerName;` — expands the layer into individual provides

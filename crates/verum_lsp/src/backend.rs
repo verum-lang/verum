@@ -81,7 +81,6 @@ impl Backend {
     /// Run an async block wrapped in `$/progress` begin/report/end
     /// notifications so the client can show a spinner.
     ///
-
     /// The `token` must be unique per concurrent operation. If the client
     /// hasn't negotiated `window.workDoneProgress` the notifications are
     /// silently dropped by tower-lsp.
@@ -125,7 +124,6 @@ impl Backend {
     /// Publish diagnostics for a document. Two streams converge
     /// here:
     ///
-
     /// 1. **Compiler diagnostics** — type-checker, parser, SMT
     ///  refinement violations. These are computed per-edit
     ///  incrementally inside `DocumentStore`.
@@ -134,7 +132,6 @@ impl Backend {
     ///  project's `verum.toml` so the same config and output
     ///  schema as CI / pre-commit drives the editor experience.
     ///
-
     /// Both streams are merged into one `publish_diagnostics`
     /// notification so the editor sees them as a unified
     /// problems-pane entry per file. Lint failures never block the
@@ -1984,7 +1981,6 @@ fn collect_called_functions(expr: &verum_ast::Expr, result: &mut Vec<String>) {
 
 /// Extract the base type name from a resolved verum_types::Type.
 ///
-
 /// Properly handles Named { path, .. }, Generic { name, .. }, and primitive types
 /// without relying on Debug formatting.
 fn extract_type_name(ty: &verum_types::Type) -> Option<String> {
@@ -2010,7 +2006,6 @@ fn extract_type_name(ty: &verum_types::Type) -> Option<String> {
 
 /// Extract the type name from an AST TypeKind.
 ///
-
 /// Used for impl block matching where we have AST types, not resolved types.
 fn extract_ast_type_name(kind: &verum_ast::TypeKind) -> Option<String> {
     match kind {
@@ -2059,7 +2054,6 @@ fn impl_matches_type(kind: &verum_ast::decl::ImplKind, type_name: &str) -> bool 
 
 /// Count references to a symbol, excluding its definition.
 ///
-
 /// Used by code lens to show "N references" above declarations.
 fn count_references_excluding_def(
     doc: &crate::document::DocumentState,
@@ -2229,7 +2223,6 @@ impl Backend {
     /// Handle `verum/getEscapeAnalysis` — detailed CBGR escape-analysis report
     /// for the reference sigil at a given position.
     ///
-
     /// Request shape: `{ textDocument: { uri }, position: { line, character } }`.
     /// Response: `{ markdown, range, sigil, tier, escape, promotable }` or
     /// `{ markdown: "(no reference at this position)" }` if the cursor is

@@ -91,7 +91,6 @@ impl PayloadType {
 pub enum Protocol {
     /// Send a value of `payload` type, then continue as `rest`.
     ///
-
     /// Written `!T. S` in standard session-calculus notation.
     Send {
         payload: PayloadType,
@@ -100,7 +99,6 @@ pub enum Protocol {
 
     /// Receive a value of `payload` type, then continue as `rest`.
     ///
-
     /// Written `?T. S`.
     Recv {
         payload: PayloadType,
@@ -110,7 +108,6 @@ pub enum Protocol {
     /// Offer the other party a choice between `left` and `right`.
     /// We wait for their selection before continuing.
     ///
-
     /// Written `S₁ ⊕ S₂` (plus).
     Offer {
         left: Box<Protocol>,
@@ -120,7 +117,6 @@ pub enum Protocol {
     /// Select between `left` and `right` ourselves. The other party
     /// offers (dual action).
     ///
-
     /// Written `S₁ & S₂` (with).
     Select {
         left: Box<Protocol>,

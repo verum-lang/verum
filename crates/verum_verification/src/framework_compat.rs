@@ -60,7 +60,6 @@ pub struct IncompatiblePair {
 /// non-controversial entries only — entries that have a clear
 /// literature citation.
 ///
-
 /// Adding to this table is a *trust-boundary action*: every entry
 /// should reference a peer-reviewed result (either directly or via
 /// a textbook reproduction). Stdlib authors can extend this set
@@ -114,12 +113,10 @@ pub const KNOWN_INCOMPATIBLE_PAIRS: &[IncompatiblePair] = &[
 /// annotations) against [`KNOWN_INCOMPATIBLE_PAIRS`]. Returns one
 /// `HygieneDiagnostic` per incompatible pair found.
 ///
-
 /// Severity is always `Error` — a pair listed in the matrix has a
 /// formal proof of inconsistency; admitting both packages derives
 /// `False` and breaks every theorem in the module.
 ///
-
 /// O(n × m) where n = corpus count and m = matrix size. Matrix is
 /// O(10) entries today, so the audit is effectively O(n).
 pub fn audit_framework_set(corpora: &[Text]) -> Vec<HygieneDiagnostic> {

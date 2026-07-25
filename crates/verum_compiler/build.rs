@@ -685,7 +685,6 @@ struct Edges {
 
 /// Walk `mount … ;` statements in a single source.
 ///
-
 /// Only `mount` statements are recorded as edges. `module X;` submodule
 /// declarations are deliberately NOT recorded: they declare that a
 /// child `X.vr` exists, but importing the parent should NOT pull in
@@ -695,7 +694,6 @@ struct Edges {
 /// parent's `public mount .child.{Item}` re-exports, which DO appear
 /// as edges.
 ///
-
 /// `current_module` is the module path of the file being scanned. It
 /// is currently unused but reserved for future relative-path edges
 /// (e.g. resolving a stray `super` reference inside a stdlib module).
@@ -733,7 +731,6 @@ fn extract_mounts(src: &str, current_module: &str) -> Edges {
 /// Parse the body of a `mount` statement: everything between `mount`
 /// and `;`, with leading/trailing whitespace already stripped.
 ///
-
 /// `current_module` is used to resolve relative-leading-dot imports
 /// (`public mount .submodule.{Item}` inside `core/foo/mod.vr` resolves
 /// to `core.foo.submodule.Item`). Without this, the relative form
@@ -809,14 +806,12 @@ fn parse_mount_body(body: &str, current_module: &str, edges: &mut Edges) {
 
 /// Resolve a possibly-relative mount path to its absolute module path.
 ///
-
 /// `public mount .list.List` inside `core/collections/mod.vr` (current
 /// module = `core.collections`) resolves to `core.collections.list.List`.
 /// `public mount super.base.X` inside `core/mod.vr` (current = `core`)
 /// resolves to `core.base.X` (the `super` form is rewritten the same
 /// way; pragma-level `super` refers to the same crate root).
 ///
-
 /// Absolute paths (no leading `.` and no `super.`) pass through
 /// unchanged.
 fn resolve_path(raw: &str, current_module: &str) -> String {
@@ -871,7 +866,6 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 /// Whether a glob path should be treated as the implicit prelude (and
 /// therefore NOT emitted as a graph edge — see `parse_mount_body`).
 ///
-
 /// Three forms are recognised:
 ///  * `core` — `mount core.*` from user code
 ///  * `super` — `mount super.*` from inside a stdlib module
@@ -1340,13 +1334,11 @@ struct Symbol {
 
 /// Scan a stdlib source for top-level declarations.
 ///
-
 /// Recognises the seven canonical declaration shapes in the Verum
 /// grammar: `type X is`, `fn Y`, `const Z`, `theorem W`, `axiom A`,
 /// `lemma L`, `protocol P` (the last via `type X is protocol`).
 /// Visibility is taken from the leading `public ` modifier.
 ///
-
 /// Comment-aware (line + block comments stripped). String-literal-aware
 /// (skips `"..."` content). Multi-line declarations handled by reading
 /// only the first line of each declaration — sufficient because the
@@ -1665,7 +1657,6 @@ fn is_target_triple_dir(name: &str) -> bool {
 /// `runtime.core_metadata` artefact pair — when this digest matches
 /// the stored value beside the archive, the artefacts are reused
 /// without invoking `verum_stdlib_precompiler`.
-
 /// T0219 — a FAILED rebake may only fall back to the last-good
 /// archive when that archive was produced under the CURRENT wire
 /// schema. Falling back across a schema change embeds bytecode the

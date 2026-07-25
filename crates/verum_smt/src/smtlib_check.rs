@@ -42,7 +42,6 @@ pub enum CheckError {
 
 /// Dispatch a raw SMT-LIB 2 string to the configured solver.
 ///
-
 /// * `content` — the SMT-LIB source (must include
 ///  `(check-sat)`).
 /// * `solver` — `z3` | `auto` | `portfolio` | `capability`
@@ -52,7 +51,6 @@ pub enum CheckError {
 /// * `timeout_s` — per-query timeout in seconds. Forwarded to
 ///  Z3 via `set_timeout`.
 ///
-
 /// Returns the solver verdict on success.
 pub fn check_smtlib_string(
     content: &str,

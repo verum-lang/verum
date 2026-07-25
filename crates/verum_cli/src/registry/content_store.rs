@@ -294,7 +294,6 @@ impl ContentStore {
     /// blob's actual digest is verified against it (catching mid-flight
     /// corruption). On success returns the canonical digest.
     ///
-
     /// Concurrent inserts of the same blob are safe — both writers
     /// produce byte-identical content; the loser's tempdir is reaped.
     pub fn insert(

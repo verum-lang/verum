@@ -275,7 +275,6 @@ impl SymbolResolverStats {
 
 /// Industrial-grade symbol resolver for JIT.
 ///
-
 /// Provides comprehensive symbol resolution with:
 /// - Dynamic library loading
 /// - Lazy binding and caching
@@ -616,10 +615,8 @@ impl SymbolResolver {
 
     /// Register a symbol manually.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must be valid for the lifetime of the resolver.
     pub unsafe fn register(&self, name: impl Into<Text>, ptr: *mut ()) {
         self.registered.insert(name.into(), ptr);
@@ -627,10 +624,8 @@ impl SymbolResolver {
 
     /// Register a symbol with metadata.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must be valid for the lifetime of the resolver.
     pub unsafe fn register_with_metadata(
         &self,

@@ -19,7 +19,6 @@ use super::{VerificationError, VerificationPass, VerificationResult};
 
 /// Transition recommendation pass.
 ///
-
 /// Analyses functions for transition opportunities between
 /// verification levels using real code metrics collection.
 #[derive(Debug)]

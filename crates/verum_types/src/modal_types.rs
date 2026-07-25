@@ -90,7 +90,6 @@ impl Label {
 
 /// A lattice of labels, keyed by name, with explicit parent links.
 ///
-
 /// `parent_of[L]` names a label that `L` flows into (i.e., `L ⊑
 /// parent_of[L]`). Labels without a parent entry are maximal.
 /// Reflexivity (`L ⊑ L`) and transitivity (`L ⊑ M ⊑ N ⇒ L ⊑ N`)

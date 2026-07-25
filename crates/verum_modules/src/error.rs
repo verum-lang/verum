@@ -178,7 +178,6 @@ pub enum ModuleError {
     /// the loser — the user sees `unbound variable` errors at use-sites
     /// that look like the module wasn't loaded at all.
     ///
-
     /// Inline-module-block collisions (a file with `module foo { ... }`
     /// inside it AND a sibling file `src/foo.vr` for the same path)
     /// surface through the same variant; the message lists every
@@ -245,7 +244,6 @@ impl ModuleError {
     /// supply-chain auditors, IDE plugins) match on these codes
     /// rather than parsing the human message.
     ///
-
     /// Codes are stable across minor versions per the kernel-receipt
     /// invariant: when a code is renamed, an alias is added so
     /// existing CI rules keep passing.
@@ -926,14 +924,12 @@ impl From<std::io::Error> for ModuleError {
 
 /// Generate suggestions for breaking a circular dependency.
 ///
-
 /// Analyzes the module paths in the cycle and generates intelligent suggestions
 /// based on common patterns like:
 /// - Shared parent modules (extract interface)
 /// - Module name patterns (e.g., "model" + "service" suggests interface extraction)
 /// - Small cycles (merge suggestion for 2-module cycles)
 ///
-
 /// Suggestions are sorted by complexity (easiest first).
 pub fn generate_cycle_break_suggestions(
     cycle_paths: &List<ModulePath>,

@@ -45,7 +45,6 @@ use super::{CompilationPhase, ExecutionTier, PhaseData, PhaseInput, PhaseMetrics
 
 /// Phase 7: Code Generation with Three-Tier Execution Model
 ///
-
 /// Implements complete code generation pipeline with graceful fallback
 /// between tiers and comprehensive statistics tracking.
 pub struct CodegenTiersPhase {
@@ -247,11 +246,9 @@ impl CodegenTiersPhase {
 
     /// Generate code for Tier 0: Interpreter
     ///
-
     /// Prepares AST for tree-walking interpretation.
     /// No actual code generation needed - interpreter works directly on AST.
     ///
-
     /// ## Performance Characteristics
     /// - CBGR overhead: ~100ns per check
     /// - Bounds checking: 3-5% overhead
@@ -290,10 +287,8 @@ impl CodegenTiersPhase {
 
     /// Generate code for Tier 3: AOT LLVM
     ///
-
     /// Full ahead-of-time compilation with LLVM backend.
     ///
-
     /// ## Features
     /// - Complete LLVM IR generation
     /// - Full optimization pipeline (O0-O3, Os, Oz)
@@ -302,13 +297,11 @@ impl CodegenTiersPhase {
     /// - Cross-compilation support
     /// - Object file and executable generation
     ///
-
     /// ## Performance Characteristics
     /// - CBGR overhead: 0ns for proven-safe refs
     /// - Check elimination: 50-90% typical
     /// - Performance: 0.85-0.95x Rust native
     ///
-
     /// PERF: Takes llvm_ctx by reference to avoid creating new Context per call.
     #[cfg(feature = "llvm")]
     fn codegen_aot_llvm(
@@ -540,11 +533,9 @@ impl CodegenTiersPhase {
 
     /// Analyze reference usage in a function for CBGR check estimation
     ///
-
     /// Performs full AST traversal to count reference operations and estimate
     /// the number of CBGR checks needed.
     ///
-
     /// Returns (total_references, cbgr_checks_needed)
     fn analyze_reference_usage(&self, func: &verum_ast::decl::FunctionDecl) -> (usize, usize) {
         let mut total_refs = 0;

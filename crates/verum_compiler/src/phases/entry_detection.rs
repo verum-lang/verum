@@ -240,7 +240,6 @@ impl EntryDetectionPhase {
 
     /// Validate that all used contexts are declared with 'using' and provided with 'provide'
     ///
-
     /// Context system validation rules:
     /// - ALL contexts must be explicitly declared with `using [Context1, Context2]`
     ///  after the function return type
@@ -925,10 +924,8 @@ impl EntryContextValidation {
 
 /// Main function configuration
 ///
-
 /// Main function configuration for context system integration.
 ///
-
 /// Context system rules for main():
 /// - NO automatic provision of contexts (auto-provide feature removed)
 /// - ALL contexts must be explicitly declared with `using [...]`

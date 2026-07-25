@@ -7,7 +7,6 @@ use crate::types::{TypeParamDescriptor, TypeParamId, TypeRef};
 
 /// Type substitution environment for monomorphization.
 ///
-
 /// Maps type parameters to concrete types.
 pub struct TypeSubstitution {
     /// Type parameter bindings: TypeParamId -> concrete TypeRef.
@@ -63,7 +62,6 @@ impl TypeSubstitution {
 
     /// Applies the substitution to a type reference.
     ///
-
     /// Recursively substitutes type parameters with their bindings.
     pub fn apply(&self, type_ref: &TypeRef) -> TypeRef {
         match type_ref {

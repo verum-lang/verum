@@ -44,7 +44,6 @@ use crate::{CheckMode, SolverStats, SubsumptionChecker, SubsumptionResult};
 
 /// Z3-based SMT backend for refinement verification
 ///
-
 /// This implementation delegates all SMT operations to verum_smt::SubsumptionChecker,
 /// which provides:
 /// - Proper Z3 Context management (thread-local)
@@ -200,16 +199,12 @@ impl SmtBackend for RefinementZ3Backend {
 
 /// Helper to check refinement subsumption using SMT
 ///
-
 /// This is the key function for subtyping: T{φ1} <: T{φ2} iff φ1 => φ2
 ///
-
 /// Delegates to verum_smt::SubsumptionChecker which handles all Z3 complexity.
 ///
-
 /// # Algorithm
 ///
-
 /// To check φ1 ⇒ φ2, SubsumptionChecker:
 /// 1. First tries syntactic subsumption (cheap, no SMT)
 /// 2. If inconclusive, uses Z3 to check ¬(φ1 ⇒ φ2) is UNSAT

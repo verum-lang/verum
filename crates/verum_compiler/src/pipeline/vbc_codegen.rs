@@ -618,14 +618,12 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Retain stdlib modules that contain compilable function bodies.
     ///
-
     /// After type-checking, we clear modules whose ASTs are no longer needed.
     /// Modules with function implementations (function bodies with statements)
     /// are retained so their bodies can be compiled to VBC → LLVM.
     /// Modules containing only type/protocol declarations are cleared — their
     /// type information was already extracted during type-checking.
     ///
-
     /// `user_module`, when provided, is scanned for `mount` statements and any
     /// stdlib modules matching the mount target (plus their submodules) are
     /// retained. Without this, user code that mounts a stdlib module outside

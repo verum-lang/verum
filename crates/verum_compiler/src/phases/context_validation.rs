@@ -147,7 +147,6 @@ use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 
 /// Context validation phase
 ///
-
 /// This phase validates that all context system usage is correct:
 /// - Declared contexts in `using` clauses
 /// - Provided contexts in `provide` statements
@@ -175,7 +174,6 @@ impl ContextValidationPhase {
 
     /// Build a context group registry from a module
     ///
-
     /// Collects all context group declarations in the module and builds
     /// a registry for resolving group names to their constituent contexts.
     fn build_context_group_registry(&self, module: &Module) -> ContextGroupRegistry {
@@ -566,7 +564,6 @@ impl ContextValidationPhase {
 
     /// Build a map of context declarations for type checking
     ///
-
     /// Maps context names to their declarations to enable validation
     /// of provided values against context interfaces.
     fn build_context_declaration_map(&self, module: &Module) -> HashMap<String, ContextDecl> {
@@ -1080,7 +1077,6 @@ enum ContextErrorKind {
 impl ContextUsageValidator {
     /// Create a new context usage validator
     ///
-
     /// # Arguments
     /// * `function_name` - Function name for error messages
     /// * `declared_contexts` - Positive context requirements from `using` clause
@@ -1519,10 +1515,8 @@ impl Visitor for ContextUsageFinder<'_> {
 
 /// Evaluate a compile-time condition for conditional contexts.
 ///
-
 /// Grammar: `compile_time_condition = config_condition | const_condition | ...`
 ///
-
 /// Supported conditions:
 /// - `cfg.identifier` → platform-specific (cfg.debug, cfg.release, cfg.unix)
 /// - `platform.identifier` → platform detection (platform.macos, platform.linux)
@@ -1530,7 +1524,6 @@ impl Visitor for ContextUsageFinder<'_> {
 /// - `!condition` → negation
 /// - `a && b`, `a || b` → logical operators
 ///
-
 /// Unknown conditions evaluate to `false` (conservative — context skipped).
 fn evaluate_compile_time_condition(expr: &verum_ast::expr::Expr) -> bool {
     use verum_ast::expr::ExprKind;
@@ -1656,11 +1649,9 @@ use verum_types::computational_properties::{ComputationalProperty, PropertySet};
 
 /// Inferred computational properties for all functions in a module.
 ///
-
 /// Bottom-up inference: leaf functions get properties from their body,
 /// callers inherit the union of all callees' properties.
 ///
-
 /// Properties: Pure, IO, Async, Fallible, Mutates, Spawns, FFI, etc.
 pub struct InferredProperties {
     /// function_name → inferred PropertySet

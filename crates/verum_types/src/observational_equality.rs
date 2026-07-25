@@ -163,7 +163,6 @@ impl EqGoal {
 /// The central type-directed equality reducer. Applies the OTT
 /// rules:
 ///
-
 /// * `Bool / Nat / Unit` decide directly.
 /// * `Product` decomposes into pair-of-equalities.
 /// * `Function` decomposes into pointwise equalities at the
@@ -249,7 +248,6 @@ pub fn equal_at(ty: &OttType, lhs: &OttValue, rhs: &OttValue) -> EqResult {
 /// Recursive evaluation: keep reducing until all subgoals are True
 /// or any subgoal becomes False/Stuck. Returns:
 ///
-
 /// * `EqResult::True` iff every subgoal eventually decides true
 /// * `EqResult::False` iff any subgoal decides false
 /// * `EqResult::Stuck` iff any subgoal stays stuck

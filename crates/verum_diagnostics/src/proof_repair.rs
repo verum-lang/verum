@@ -224,7 +224,6 @@ impl RepairSuggestion {
 /// [`ProofFailureKind`] and receive a ranked, deduplicated list of
 /// [`RepairSuggestion`]s.
 ///
-
 /// **Purity contract:** implementations MUST be pure — no I/O.
 /// Side-effecting adapters (lemma-registry fuzzy-search, LLM repair
 /// proposals) compose via [`CompositeRepairEngine`].

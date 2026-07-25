@@ -42,7 +42,6 @@ use verum_common::{Map, Maybe, Text};
 
 /// Escape-aware codegen optimizer
 ///
-
 /// This component consults escape analysis results during code generation
 /// to eliminate unnecessary CBGR checks.
 #[derive(Debug)]
@@ -164,13 +163,10 @@ impl EscapeAwareCodegen {
 
     /// Check if CBGR checks can be skipped for a reference
     ///
-
     /// This is the main decision point during code generation.
     ///
-
     /// # Returns
     ///
-
     /// - `true`: Skip CBGR checks (0ns overhead)
     /// - `false`: Keep CBGR checks (~15ns overhead)
     pub fn can_skip_cbgr_check(&mut self, reference: RefId) -> bool {
@@ -180,7 +176,6 @@ impl EscapeAwareCodegen {
 
     /// Get optimization decision for a reference
     ///
-
     /// Uses cached result if available, otherwise consults escape analyzer.
     pub fn get_optimization_decision(&mut self, reference: RefId) -> OptimizationDecision {
         // Check cache first
@@ -226,7 +221,6 @@ impl EscapeAwareCodegen {
 
     /// Get IDE hint for reference dereference
     ///
-
     /// Provides user-facing cost transparency in IDE
     pub fn get_ide_hint(&mut self, reference: RefId) -> Text {
         let decision = self.get_optimization_decision(reference);
@@ -306,7 +300,6 @@ impl Default for EscapeAwareCodegen {
 
 /// LLVM IR generation helpers for escape-aware codegen
 ///
-
 /// These functions integrate with the LLVM codegen pipeline to emit
 /// optimized code based on escape analysis.
 pub mod llvm_helpers {
@@ -314,10 +307,8 @@ pub mod llvm_helpers {
 
     /// Generate CBGR check or skip based on escape analysis
     ///
-
     /// # Pseudocode
     ///
-
     /// ```text
     /// fn generate_reference_deref(ref_id, codegen):
     ///  if codegen.can_skip_cbgr_check(ref_id):
@@ -333,7 +324,6 @@ pub mod llvm_helpers {
 
     /// Get optimization annotation for LLVM metadata
     ///
-
     /// This can be used to add optimization metadata to LLVM IR for
     /// better debugging and profiling.
     pub fn get_llvm_annotation(codegen: &mut EscapeAwareCodegen, reference: RefId) -> Text {

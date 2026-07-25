@@ -50,13 +50,11 @@ use super::{
 
 /// Contract verification phase
 ///
-
 /// This phase performs SMT-based verification of:
 /// - Function contracts (pre/postconditions)
 /// - Type invariants
 /// - Protocol contracts
 ///
-
 /// Uses the verum_smt crate for Z3 integration.
 pub struct ContractVerificationPhase {
     /// Z3 context for SMT solving
@@ -65,7 +63,6 @@ pub struct ContractVerificationPhase {
     config: VerificationConfig,
     /// Shared SMT routing statistics collector.
     ///
-
     /// When `Some`, every invocation of the underlying Z3 solver
     /// records a routing decision (`Z3Only`) plus its outcome and
     /// elapsed time. The session's `Arc<RoutingStats>` is threaded in
@@ -213,7 +210,6 @@ impl ContractVerificationPhase {
 
     /// Install a shared routing-stats collector.
     ///
-
     /// Stored on the phase and forwarded to the underlying `Context`
     /// so every Z3 `check()` during verification is visible to
     /// `verum smt-stats`. Idempotent and thread-safe.
@@ -333,14 +329,12 @@ impl ContractVerificationPhase {
 
     /// Verify function contracts (pre/post conditions)
     ///
-
     /// Honors `@verify(strategy)` attributes:
     /// - `runtime` / `static`: skip SMT entirely (runtime checks only).
     /// - `formal` / `fast` / `thorough` / `certified` / `synthesize`:
     ///  proceed with SMT verification, using a timeout scaled by
     ///  `strategy.timeout_multiplier()`.
     ///
-
     /// The strategy is recorded in `stats` for observability and appears
     /// in the verification report emitted at the end of the phase.
     fn verify_function_contract(

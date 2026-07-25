@@ -73,7 +73,6 @@ const FAILURE_HINT: &str = "Each SKIP is a stdlib body that VBC codegen could no
 
 /// Vcs-presence policy. Two modes:
 ///
-
 ///  * Workspace has `vcs/specs/` — every fixture this test points at
 ///  MUST exist; a missing one panics with a clear message so the
 ///  spec moving / being deleted doesn't silently delete coverage.
@@ -82,7 +81,6 @@ const FAILURE_HINT: &str = "Each SKIP is a stdlib body that VBC codegen could no
 ///  `eprintln!` notice; CI logs make the whole-suite skip explicit
 ///  instead of test-by-test silence.
 ///
-
 /// The decision is per-call (no module-level statics) so the tests
 /// stay parallel-safe.
 fn vcs_specs_present() -> bool {
@@ -93,10 +91,8 @@ fn vcs_specs_present() -> bool {
 /// warnings during stdlib loading. `scenario` names the fixture in
 /// the failure message so a CI diff identifies which spec regressed.
 ///
-
 /// Behaviour on missing fixtures:
 ///
-
 ///  * If `vcs/specs/` is absent altogether — emit a one-line notice
 ///  and skip silently (legitimate environment lacks the corpus).
 ///  * If `vcs/specs/` is present but the specific fixture isn't —
@@ -223,7 +219,6 @@ fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
 /// the foundational base/result and core.* infrastructure that
 /// async-related modules transitively need.
 ///
-
 /// Specifically guards against any regression that re-introduces a
 /// stdlib-loading SKIP in `core/runtime/recovery.vr`,
 /// `core/async/spawn_config.vr`, or any of the runtime/* siblings
@@ -258,7 +253,6 @@ fn stdlib_loading_emits_no_lenient_skips_text_format() {
 /// after net/quic/path → QuicPath rename and math/hott → HottPath
 /// rename), and the ByteRepeat / Sink utility readers/writers.
 ///
-
 /// Sits alongside the runtime/retry and text/format fixtures as
 /// independent non-SQLite stdlib subgraph coverage — a regression
 /// in any io.* module that affects type-table population fails

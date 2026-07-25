@@ -113,11 +113,9 @@ impl MemorySpace {
 
 /// GPU Memory Model
 ///
-
 /// Encodes the hierarchical memory system of GPUs using Z3 arrays.
 /// Each memory space is modeled as a separate array theory.
 ///
-
 /// Note: Z3 arrays are returned directly from `create_*_memory` and are owned
 /// by the caller; this struct only retains dimensional + access-tracking state.
 pub struct GpuMemoryModel {
@@ -137,7 +135,6 @@ pub struct GpuMemoryModel {
 impl GpuMemoryModel {
     /// Create a new GPU memory model
     ///
-
     /// # Arguments
     /// - `grid_dim`: (x, y, z) dimensions of the grid (number of blocks)
     /// - `block_dim`: (x, y, z) dimensions of each block (threads per block)
@@ -152,7 +149,6 @@ impl GpuMemoryModel {
 
     /// Create global memory array
     ///
-
     /// Returns a Z3 array: (ThreadID × Address) → Value
     pub fn create_global_memory(&self, name: &str) -> Array {
         // Array from Int (flattened thread ID + address) to Int (value)
@@ -162,7 +158,6 @@ impl GpuMemoryModel {
 
     /// Create shared memory array
     ///
-
     /// Returns a Z3 array: (BlockID × Address) → Value
     pub fn create_shared_memory(&self, name: &str, _block_size: u32) -> Array {
         // Array from Int (block ID + address) to Int (value)
@@ -172,7 +167,6 @@ impl GpuMemoryModel {
 
     /// Create local memory array
     ///
-
     /// Returns a Z3 array: (ThreadID × Address) → Value
     pub fn create_local_memory(&self, name: &str) -> Array {
         let int_sort = z3::Sort::int();
@@ -181,7 +175,6 @@ impl GpuMemoryModel {
 
     /// Encode a load operation
     ///
-
     /// Returns the value loaded from memory
     pub fn encode_load(
         &mut self,
@@ -213,7 +206,6 @@ impl GpuMemoryModel {
 
     /// Encode a store operation
     ///
-
     /// Adds constraints for the memory write
     pub fn encode_store(
         &mut self,
@@ -269,7 +261,6 @@ impl GpuMemoryModel {
 
     /// Generate disjoint address space constraints
     ///
-
     /// Ensures that global, shared, and local memory are disjoint
     pub fn generate_address_space_constraints(&mut self, solver: &Solver) {
         // For each memory access, assert that it belongs to exactly one space
@@ -344,7 +335,6 @@ pub fn create_symbolic_value(name: &str) -> Int {
 
 /// Encode memory aliasing constraints
 ///
-
 /// Two addresses may alias if they could be equal
 pub fn encode_may_alias(addr1: &Int, addr2: &Int) -> Bool {
     addr1
@@ -354,7 +344,6 @@ pub fn encode_may_alias(addr1: &Int, addr2: &Int) -> Bool {
 
 /// Encode memory non-aliasing constraints
 ///
-
 /// Two addresses do not alias if they are guaranteed different
 pub fn encode_no_alias(addr1: &Int, addr2: &Int) -> Bool {
     let eq = addr1

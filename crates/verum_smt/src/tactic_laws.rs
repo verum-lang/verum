@@ -322,7 +322,6 @@ pub fn law_by_name(name: &str) -> Option<&'static LawSpec> {
 /// `solve-of-skip-fails-when-open` has no `Solve` constructor in
 /// the Z3-side `TacticCombinator` enum yet).
 ///
-
 /// Used by the catalogue's CI gate to verify that every law the
 /// simplifier rewrites by is in the canonical inventory.
 pub const SIMPLIFIER_APPLIES: &[LawId] = &[
@@ -343,7 +342,6 @@ pub const SIMPLIFIER_APPLIES: &[LawId] = &[
 /// Normalise a combinator to its canonical form by applying every
 /// simplification law to fixpoint.
 ///
-
 /// Complexity: O(n) passes where n is the depth of the tree; each
 /// pass is O(tree size). Bounded by the tree size → overall
 /// O(tree^2) worst-case. Callers with very deep user-written

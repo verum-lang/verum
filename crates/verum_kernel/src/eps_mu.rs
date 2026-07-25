@@ -27,26 +27,21 @@ use crate::{CoreTerm, KernelError};
 
 /// Naturality witness V0 → — `K-Eps-Mu` kernel rule.
 ///
-
 /// V0 shipped a permissive skeleton accepting any
 /// `(EpsilonOf(_), AlphaOf(_))`. tightened the shape check. V2
 /// added modal-depth preservation. (this revision)
 /// adds two further necessary conditions, narrowing the gap to the
 /// full σ_α/π_α witness construction:
 ///
-
 ///  • `(EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))` is the canonical
 ///  naturality-square shape per Proposition 5.1 / Corollary 5.10.
 ///
-
 ///  • `(t, t)` (structurally equal) is the degenerate identity
 ///  square — always accepted.
 ///
-
 ///  • Identity-functor sub-case (`m_alpha == α_rhs` structurally)
 ///  accepts directly: identity naturality commutes trivially.
 ///
-
 ///  • For the non-identity-M case, V3 fires three gates, all
 ///  **necessary** for the τ-witness to exist; if any fails we
 ///  know no witness can exist and reject. Gate (a) — modal-depth
@@ -71,12 +66,10 @@ use crate::{CoreTerm, KernelError};
 ///  V2 reject stays rejected, plus terms clearing the depth
 ///  gate but failing (b) or (c)).
 ///
-
 ///  • Any other pair (including `(EpsilonOf(_), AlphaOf(t))`
 ///  where `t` is not an `EpsilonOf`) is rejected with
 ///  `EpsMuNaturalityFailed`.
 ///
-
 /// **Soundness**: each V3 gate is a logical consequence of the
 /// τ-witness existence; rejecting on any failure rejects no term
 /// that *could* have a witness — the rejection is one-sided. The
@@ -84,7 +77,6 @@ use crate::{CoreTerm, KernelError};
 /// accept set; it will only *prove* sufficiency for the
 /// accept set.
 ///
-
 /// **Completeness gap to V3-final**: still
 /// over-accepts on terms passing all three gates without admitting
 /// a Code_S/Perform_{ε_math} witness. The over-acceptance is
@@ -93,7 +85,6 @@ use crate::{CoreTerm, KernelError};
 /// type-theoretic reasons (e.g. positivity violations in the
 /// witness elaboration). will plug this remaining gap.
 ///
-
 /// Decidability: is decidable in time linear in
 /// the term sizes plus the cost of `definitional_eq` (β-normal
 /// form computation, which is normalising-cache-backed —
@@ -207,7 +198,6 @@ pub fn check_eps_mu_coherence(
 /// naturality witness — the audit-trail-aware promotion of
 /// [`check_eps_mu_coherence`].
 ///
-
 /// decides necessary conditions structurally
 /// (depth preservation, free-variable preservation, β-normalisation
 /// invariance). additionally surfaces the σ_α / π_α
@@ -217,21 +207,18 @@ pub fn check_eps_mu_coherence(
 /// pair clears all gates but isn't structurally /
 /// β-equivalently the identity case.
 ///
-
 /// **Strictly stronger than V3-incremental**: every pair the V3-
 /// incremental algorithm admits is also admitted by with
 /// either an empty audit (identity / β-equivalent cases) or with a
 /// single `EpsMuTauWitness` admit recorded (non-identity cases that
 /// rely on Diakrisis A-3).
 ///
-
 /// **Soundness invariant**: never widens V3-incremental's
 /// accept set — the bridge admit only documents WHICH witness
 /// construction is being relied on, not whether the rule fires. A
 /// pair that rejects (depth / free-var / β-norm
 /// gate failure) is rejected by too.
 ///
-
 /// **V3 promotion path**: when Diakrisis A-3 lands as a structural
 /// algorithm (Code_S morphism + Perform_{ε_math} naturality),
 /// `admit_eps_mu_tau_witness`'s body is replaced with the actual

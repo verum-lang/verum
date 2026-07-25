@@ -120,7 +120,6 @@ impl FfiValidationResult {
 
 /// Validate all FFI declarations in a module.
 ///
-
 /// `extern {}` blocks always use warn-only mode (stdlib compat).
 /// `ffi {}` blocks use strict mode (errors) — these are user-written contracts.
 pub fn validate_module_ffi(module: &Module, _warn_only: bool) -> FfiValidationResult {
@@ -319,7 +318,6 @@ impl FfiBoundaryPhase {
 
     /// Evaluate cfg attributes to determine if boundary should be included
     ///
-
     /// Supports:
     /// - #[cfg(target_os = "windows")]
     /// - #[cfg(target_os = "linux")]
@@ -330,7 +328,6 @@ impl FfiBoundaryPhase {
     /// - #[cfg(windows)]
     /// - #[cfg(feature = "feature_name")]
     ///
-
     /// Note: The cfg expressions are parsed from the AST arguments.
     /// This implementation evaluates conditions at compile time based on
     /// the Verum compiler's build target and enabled language features.
@@ -362,7 +359,6 @@ impl FfiBoundaryPhase {
 
     /// Evaluate a cfg expression from AST
     ///
-
     /// Handles common cfg patterns by examining the expression structure.
     fn evaluate_cfg_expr(&self, expr: &verum_ast::expr::Expr, profile: Profile) -> bool {
         use verum_ast::expr::ExprKind;

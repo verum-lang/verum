@@ -28,7 +28,6 @@ use crate::meta::{
 
 /// Build configuration context
 ///
-
 /// Manages build-time configuration including platform info, assets,
 /// project metadata, and staged metaprogramming state.
 #[derive(Debug, Clone)]

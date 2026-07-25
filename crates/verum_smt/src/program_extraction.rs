@@ -170,7 +170,6 @@ impl Default for ExtractionConfig {
 
 /// Extracted program from a proof
 ///
-
 /// Represents executable code extracted from a constructive proof.
 /// The program may contain contracts derived from proof obligations.
 #[derive(Debug, Clone)]
@@ -403,7 +402,6 @@ pub enum ContractKind {
 
 /// Witness extracted from an existential proof
 ///
-
 /// Represents a concrete value that satisfies an existential property.
 /// Used for @extract_witness directive.
 #[derive(Debug, Clone)]
@@ -453,7 +451,6 @@ impl ExtractedWitness {
 
 /// Program extractor from proofs
 ///
-
 /// Extracts executable programs from constructive proofs.
 /// Implements the Curry-Howard correspondence between proofs and programs.
 pub struct ProgramExtractor {
@@ -483,7 +480,6 @@ impl ProgramExtractor {
     /// Create a new program extractor honouring the supplied
     /// extraction configuration.
     ///
-
     /// `ExtractionConfig` is documented and populated by callers
     /// (test suites + future @extract pipeline integration). The
     /// `generate_docs` field is consumed directly here:
@@ -530,11 +526,9 @@ impl ProgramExtractor {
 
     /// Extract program from a proof term
     ///
-
     /// Returns Some(program) if the proof is constructive and can be extracted,
     /// None otherwise.
     ///
-
     /// Extract executable function from constructive existence proof via `@extract`.
     pub fn extract_program(&mut self, proof: &ProofTerm) -> Maybe<ExtractedProgram> {
         self.stats.attempts += 1;
@@ -595,11 +589,9 @@ impl ProgramExtractor {
 
     /// Extract witness from an existential proof
     ///
-
     /// Extracts the witness term from a proof of ∃x. P(x).
     /// Used for @extract_witness directive.
     ///
-
     /// Extract witness term from existential proof via `@extract_witness`.
     pub fn extract_witness(&mut self, proof: &ProofTerm) -> Maybe<ExtractedWitness> {
         self.stats.witness_extractions += 1;
@@ -891,7 +883,6 @@ impl ProgramExtractor {
 
     /// Convert expression to pattern
     ///
-
     /// Handles all pattern types according to Verum's pattern grammar:
     /// - Wildcards: `_`
     /// - Identifiers: `x`, `mut x`
@@ -904,7 +895,6 @@ impl ProgramExtractor {
     /// - References: `&x`, `&mut x`
     /// - Ranges: `1..10`, `1..=10`
     ///
-
     /// Pattern extraction: literal, wildcard, binding, variant, or, reference, range patterns.
     fn expr_to_pattern(&self, expr: &Expr) -> Maybe<Pattern> {
         match &expr.kind {
@@ -1162,13 +1152,11 @@ impl ProgramExtractor {
 
     /// Infer parameter type from proof context
     ///
-
     /// This function infers types for parameters based on:
     /// 1. Naming conventions (common mathematical patterns)
     /// 2. Context from proof structure
     /// 3. Default to inferred type when uncertain
     ///
-
     /// Base types: Bool, Int (arbitrary precision), Float (IEEE 754), Text (UTF-8), Unit.
     fn infer_param_type(&self, param: &Text) -> Maybe<Type> {
         let name = param.as_str();
@@ -1233,12 +1221,10 @@ impl ProgramExtractor {
 
     /// Infer expression type based on expression structure
     ///
-
     /// This performs bottom-up type inference by analyzing the expression structure.
     /// For fully accurate inference, this should integrate with the type checker,
     /// but for proof extraction we can derive many types directly from expression forms.
     ///
-
     /// Core type system: HM inference + refinement types + semantic types (List, Text, Map, etc.).
     fn infer_type(&self, expr: &Expr) -> Maybe<Type> {
         match &expr.kind {
@@ -1582,18 +1568,15 @@ impl ProgramExtractor {
 
     /// Build recursive function from induction proof
     ///
-
     /// This implements the Curry-Howard correspondence between:
     /// - Natural number induction: forall n. P(0) -> (forall k. P(k) -> P(k+1)) -> P(n)
     /// - Recursive functions: rec f(n) = if n == 0 then base else step(n, f(n-1))
     ///
-
     /// The transformation:
     /// 1. Base case proof P(0) becomes the base case return value
     /// 2. Inductive case proof P(k) -> P(k+1) becomes the recursive step
     /// 3. The induction variable becomes the function parameter
     ///
-
     /// For structural induction on natural numbers, we generate:
     /// ```verum
     /// fn extracted_recursive(n: Int) -> T {
@@ -1689,7 +1672,6 @@ impl ProgramExtractor {
 
     /// Build the inductive body that binds the induction hypothesis
     ///
-
     /// Creates a block like:
     /// ```verum
     /// {
@@ -1698,7 +1680,6 @@ impl ProgramExtractor {
     /// }
     /// ```
     ///
-
     /// The inductive expression from the proof is transformed to use
     /// the bound 'ih' variable for the induction hypothesis.
     fn build_inductive_body(
@@ -1743,7 +1724,6 @@ impl ProgramExtractor {
 
     /// Transform inductive expression to use proper variable references
     ///
-
     /// In the induction proof, the inductive hypothesis is typically referenced
     /// as a proof term. In the extracted program, we need to transform these
     /// references to use the 'ih' variable that holds the recursive result.
@@ -1834,11 +1814,9 @@ impl Default for ProgramExtractor {
 
 /// Proof irrelevance analyzer
 ///
-
 /// Identifies and erases proof-irrelevant parts of terms.
 /// Implements proof erasure for runtime efficiency.
 ///
-
 /// Proof-irrelevant extraction: erase Prop-typed components, keeping only computational content.
 pub struct ProofEraser {
     /// Statistics
@@ -1855,7 +1833,6 @@ impl ProofEraser {
 
     /// Erase proof-irrelevant parts from program
     ///
-
     /// Returns a new program with proofs erased, suitable for runtime execution.
     pub fn erase_proofs(&mut self, program: &ExtractedProgram) -> ExtractedProgram {
         self.stats.programs_processed += 1;
@@ -1912,7 +1889,6 @@ impl Default for ProofEraser {
 
 /// Code generator for extraction targets
 ///
-
 /// Generates code in target language from extracted programs.
 pub struct CodeGenerator {
     /// Target language
@@ -2068,10 +2044,8 @@ impl CodeGenerator {
 
     /// Format type as Verum source code
     ///
-
     /// Handles all TypeKind variants to produce valid Verum type syntax.
     ///
-
     /// Type formatting: named types, generics, function types, tuples, refinement types.
     fn format_type(&self, ty: &Type) -> String {
         match &ty.kind {
@@ -2477,10 +2451,8 @@ impl CodeGenerator {
 
     /// Format expression as Verum source code
     ///
-
     /// Handles all ExprKind variants to produce valid Verum expression syntax.
     ///
-
     /// Expression formatting: literals, operators, calls, match, if-else, closures.
     fn format_expr(&self, expr: &Expr) -> String {
         match &expr.kind {

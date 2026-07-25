@@ -83,7 +83,6 @@ unsafe extern "C" {
 
     /// Create a new set of options for an llvm::TargetMachine.
     ///
-
     /// The returned option structure must be released with
     /// LLVMDisposeTargetMachineOptions() after the call to
     /// LLVMCreateTargetMachineWithOptions().
@@ -96,7 +95,6 @@ unsafe extern "C" {
     );
     /// Set the list of features for the target machine.
     ///
-
     /// `Features` is a comma-separated list of features.
     pub fn LLVMTargetMachineOptionsSetFeatures(
         Options: LLVMTargetMachineOptionsRef,

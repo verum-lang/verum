@@ -535,7 +535,6 @@ impl RefinementValidator {
 
     /// Production validation implementation with full SMT integration
     ///
-
     /// This implementation provides:
     /// - Full span-based position lookup to find refinement at cursor
     /// - Proper AST traversal to collect context for verification
@@ -1084,7 +1083,6 @@ impl RefinementValidator {
 
     /// Find all refinement types in module
     ///
-
     /// Searches through the entire module AST to find refinement types in:
     /// - Function parameters
     /// - Function return types
@@ -1477,7 +1475,6 @@ impl RefinementValidator {
 
     /// Promote &T to &checked T with escape analysis proof
     ///
-
     /// This performs full escape analysis to determine if a reference can be
     /// safely promoted to a checked reference (zero-cost, compiler-verified).
     pub async fn promote_to_checked(
@@ -1960,7 +1957,6 @@ impl RefinementValidator {
 
     /// Infer tightest refinement from usage
     ///
-
     /// This analyzes all usages of a symbol to infer the tightest possible
     /// refinement type that would satisfy all constraints at usage sites.
     pub async fn infer_refinement(
@@ -2425,7 +2421,6 @@ impl Default for RefinementValidator {
 
 /// SMT-based refinement checking
 ///
-
 /// Integrates with verum_smt to verify refinement types using Z3 solver.
 pub struct SmtRefinementChecker {
     verifier: SmtRefinementVerifier,
@@ -2496,7 +2491,6 @@ pub fn position_to_string(pos: Position) -> String {
 
 /// Parse refinement type from text
 ///
-
 /// Uses the verum_parser to properly parse refinement type syntax like:
 /// - `Int{> 0}` - integer greater than zero
 /// - `Text{len(it) > 0}` - non-empty text

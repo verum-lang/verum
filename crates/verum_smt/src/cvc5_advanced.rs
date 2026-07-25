@@ -119,23 +119,18 @@ fn require_cvc5() -> Cvc5AdvancedResult<()> {
 
 /// A SyGuS synthesis specification.
 ///
-
 /// The user provides:
 /// - A logic (e.g., `"LIA"`, `"BV"`).
 /// - A grammar describing the shape of candidate solutions.
 /// - A set of constraints the synthesized function must satisfy.
 ///
-
 /// CVC5 returns either a synthesized function body or declares the problem
 /// unsolvable within the grammar.
 ///
-
 /// ## Example
 ///
-
 /// Synthesize a function `max(x, y)` that returns the maximum of two integers:
 ///
-
 /// ```text
 /// (set-logic LIA)
 /// (synth-fun max ((x Int) (y Int)) Int
@@ -155,7 +150,6 @@ pub struct SyGuSProblem {
     pub logic: String,
     /// SyGuS specification in SMT-LIB 2 format.
     ///
-
     /// The string must include:
     /// - `set-logic`
     /// - `synth-fun` (or multiple) declarations
@@ -180,15 +174,12 @@ pub struct SyGuSResult {
 
 /// Solve a SyGuS synthesis problem.
 ///
-
 /// Returns the synthesized function body on success. The solution is a
 /// string in SMT-LIB 2 syntax that can be substituted into the original
 /// specification to produce a closed-form function definition.
 ///
-
 /// ## Current Status
 ///
-
 /// The full SyGuS pipeline requires CVC5's parser to consume the SMT-LIB
 /// specification directly. In the current implementation (CVC5 1.3.3+),
 /// this is achieved via `cvc5_solver_check_synth()` after parsing the
@@ -239,21 +230,17 @@ pub fn synthesize(problem: &SyGuSProblem) -> Cvc5AdvancedResult<SyGuSResult> {
 
 /// A formula abduction query.
 ///
-
 /// Given axioms `Γ` and a conjecture `ψ` that is NOT provable from `Γ` alone,
 /// find the weakest formula `A` (over a permitted vocabulary) such that:
 ///
-
 /// ```text
 /// Γ ∪ {A} ⊨ ψ
 /// ```
 ///
-
 /// This is the dual of unsat-core extraction: instead of finding which
 /// assertions are responsible for UNSAT, we find what additional assumption
 /// would make the conjecture provable.
 ///
-
 /// Use cases:
 /// - Loop invariant discovery: abduce `A` from loop body + postcondition.
 /// - Debugging failed proofs: what's the missing lemma?
@@ -284,7 +271,6 @@ pub struct AbductionResult {
 
 /// Compute an abduct for the given query.
 ///
-
 /// Uses CVC5's `cvc5_solver_get_abduct()` FFI.
 pub fn abduce(query: &AbductionQuery) -> Cvc5AdvancedResult<AbductionResult> {
     require_cvc5()?;
@@ -314,18 +300,15 @@ pub fn abduce(query: &AbductionQuery) -> Cvc5AdvancedResult<AbductionResult> {
 
 /// A quantifier elimination query.
 ///
-
 /// Given a formula `Q̄x. φ(x̄, ȳ)` (where `Q̄` is a quantifier prefix and
 /// `x̄` are the quantified variables, `ȳ` are free), compute a
 /// quantifier-free formula `ψ(ȳ)` equivalent to the original.
 ///
-
 /// This is decidable for:
 /// - Presburger arithmetic (LIA)
 /// - Real closed fields (NRA — via CAD in CVC5)
 /// - Boolean combinations of LIA/LRA/BV atoms
 ///
-
 /// Use cases:
 /// - Program semantics: compute strongest postconditions.
 /// - Parametric formula simplification.
@@ -367,12 +350,10 @@ pub fn eliminate_quantifiers(query: &QeQuery) -> Cvc5AdvancedResult<QeResult> {
 
 /// A finite model finding query.
 ///
-
 /// Attempts to find a finite interpretation satisfying the assertions, with
 /// all uninterpreted sorts bounded. Returns a model if one exists within
 /// the size bound, or declares UNSAT if no such model exists.
 ///
-
 /// This is particularly useful for:
 /// - Detecting counterexamples in quantified formulas.
 /// - Enumerating domain elements for testing.
@@ -406,7 +387,6 @@ pub enum FmfResult {
 
 /// Run finite model finding.
 ///
-
 /// Sets CVC5 options:
 /// - `finite-model-find=true`
 /// - `mbqi-mode=fmc`
@@ -433,7 +413,6 @@ pub fn find_finite_model(query: &FmfQuery) -> Cvc5AdvancedResult<FmfResult> {
 
 /// A snapshot of which CVC5 advanced features are currently available.
 ///
-
 /// Call `detect_capabilities()` to query the linked CVC5 library for
 /// supported features. This is useful for feature-gating UI or tooling
 /// based on the actual solver build.
@@ -511,7 +490,6 @@ impl Cvc5Capabilities {
 
 /// Detect the capabilities of the currently-linked CVC5.
 ///
-
 /// In stub mode, returns `Cvc5Capabilities::not_available()`. In linked
 /// mode, queries CVC5 via the `get-option` API for individual features.
 pub fn detect_capabilities() -> Cvc5Capabilities {

@@ -27,7 +27,6 @@ use verum_compiler::{
 
 /// Parse verify mode from string.
 ///
-
 /// Accepts the three core verify modes (`auto`, `runtime`, `proof`) plus
 /// the focused tactic-family aliases `cubical` and `dependent`. The
 /// tactic-family aliases route through the proof pipeline at the
@@ -276,7 +275,6 @@ pub fn run(file: &str, args: List<Text>, skip_verify: bool) -> Result<(), CliErr
 
 /// Run single file with tier selection
 ///
-
 /// Tier selection:
 /// - Tier 0 (interpreter): Direct interpretation, instant start
 /// - Tier 1 (aot): AOT compilation via LLVM, production quality
@@ -299,7 +297,6 @@ pub fn run_with_tier(
 
 /// Run single file with tier selection AND CLI permission overrides.
 ///
-
 /// Permission flags (`--allow`, `--allow-all`, `--deny-all`) merge
 /// with the script's frontmatter `permissions = [...]` declaration
 /// per the Deno-style precedence in [`build_permission_set`]:
@@ -578,7 +575,6 @@ impl Drop for ScriptTempFile {
 /// byte 0 so the script-mode parser engages — callers don't need
 /// to hand-shebang their inline expressions or stdin payloads.
 ///
-
 /// `kind` is a short descriptor (`"eval"` / `"stdin"`) embedded in
 /// the filename for diagnostic clarity. PID + nanosecond suffix
 /// disambiguates concurrent invocations.
@@ -675,19 +671,16 @@ fn check_frontmatter_version(fm: &crate::script::frontmatter::Frontmatter) -> Re
 /// frontmatter version validation, CLI permission flag merge,
 /// persistent VBC cache lookup-and-store, and lockfile capture.
 ///
-
 /// **Cache hit path** — deserialise the stored VBC and execute via
 /// `CompilationPipeline::run_compiled_vbc`, skipping every front-end
 /// phase (parse, typecheck, verify, codegen). Cold-start drops to
 /// roughly the cost of zstd decompression + interpreter setup.
 ///
-
 /// **Cache miss path** — run the full pipeline, capture the produced
 /// `VbcModule` from the session, serialise to the on-disk cache
 /// directory keyed by `(source_hash, compiler_version, extra_flags)`,
 /// then continue executing the same in-memory module.
 ///
-
 /// Cache failures are non-fatal: a corrupt entry, locked directory,
 /// or schema mismatch downgrades to the cache-miss path with a
 /// warning. Script execution is the primary contract; caching is an
@@ -888,11 +881,9 @@ fn execute_cached_vbc(
 /// Resolve a script's frontmatter dependencies into a populated
 /// `CogResolver` ready to be installed on the run-time `Session`.
 ///
-
 /// Three resolution kinds, all uniform from the resolver's POV
 /// (`register_cog(name, version, root_path)`):
 ///
-
 ///  1. **Path-form** (`{ name = "foo", path = "./local-cogs/foo" }`):
 ///  resolved relative to the script's directory, canonicalised
 ///  so the script remains runnable from any cwd. No I/O beyond
@@ -912,12 +903,10 @@ fn execute_cached_vbc(
 ///  to the requested rev/branch/tag, registered with the
 ///  resolver. Cache hits skip the clone.
 ///
-
 /// All three kinds emit a `LockedDep` for the script's lockfile
 /// (`path+<dir>` / `registry+<url>` / `git+<url>#<sha>`) so a
 /// `verum lockfile verify` can fail-closed on supply-chain drift.
 ///
-
 /// Network errors during registry/git resolution surface as
 /// `CliError` (the script run aborts) rather than warn-and-continue —
 /// silently dropping a declared dependency would let
@@ -1335,18 +1324,15 @@ fn sanitize_git_pin(pin: &str) -> String {
 /// Persist (or verify+refresh) a script's resolved dependencies as
 /// a sidecar `<script>.lock` next to the source.
 ///
-
 /// **First run** (no lockfile present) → write a fresh lockfile
 /// from `locked_deps`.
 ///
-
 /// **Subsequent run** (lockfile exists) → call `verify_against` to
 /// detect drift in `(source_hash, compiler_version)`. On stale,
 /// rewrite. Always re-hash on every run so a deps swap (path
 /// repointed, integrity changed) is reflected in the lockfile —
 /// drift must be observable, not silent.
 ///
-
 /// I/O failures are non-fatal: the script run is the contract;
 /// the lockfile is reproducibility metadata. A read-only mount or
 /// a permission glitch warns and continues.
@@ -1418,7 +1404,6 @@ const WILDCARD_TARGET_ID: u64 = 0;
 /// Allow HashMap; the runtime gate hashes the same string at the
 /// call site and looks up the result.
 ///
-
 /// blake3-32-bit truncated. Collisions over the script's grant
 /// set are vanishingly improbable (≈2⁻³² for unrelated strings)
 /// and would only over-grant — never under-grant — because the
@@ -1462,14 +1447,12 @@ fn cli_kind_to_router_scope(
 /// router's default), preserving the legacy behaviour for the wide
 /// existing surface that hasn't opted into sandboxing.
 ///
-
 /// When the frontmatter DOES declare permissions, the returned
 /// policy enforces deny-by-default coarse-grained gating: each
 /// runtime check against a `PermissionScope` is granted iff the
 /// script's `PermissionSet` carries at least one grant of the
 /// matching `PermissionKind`. The mapping:
 ///
-
 /// | Scope | Granted iff PermissionSet has any of |
 /// |----------------|---------------------------------------------------------|
 /// | `Syscall` | `ffi` |
@@ -1480,7 +1463,6 @@ fn cli_kind_to_router_scope(
 /// | `Cryptography` | (always allowed — covered by language-level audits) |
 /// | `Time` | `time`, `random` |
 ///
-
 /// **Coarse-by-construction.** The current `PermissionAssert`
 /// dispatch carries a u64 `target_id` that, for raw syscalls, is
 /// the syscall NUMBER — not the path / host / etc. that a
@@ -1496,18 +1478,15 @@ fn cli_kind_to_router_scope(
 /// lowerer can bake into the generated binary at every
 /// `PermissionAssert` site.
 ///
-
 /// `None` is returned for scripts whose `ctx.permissions` is empty —
 /// the trusted-application path. The lowerer treats `None` as
 /// allow-all (no-op every gate), matching the interpreter's default
 /// when no script policy is wired.
 ///
-
 /// The mapping mirrors `build_script_permission_policy` exactly so
 /// the two execution tiers agree on which scope/target combinations
 /// are allowed:
 ///
-
 /// * `Memory` and `Cryptography` go into `always_allow` (no script
 ///  permission kind maps to them today).
 /// * Wildcard CLI-scope grants populate the `wildcards` set.

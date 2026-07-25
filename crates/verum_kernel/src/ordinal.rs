@@ -139,7 +139,6 @@ impl Ordinal {
     /// form fragment + inaccessibles; for `Sup` operands the comparison
     /// reduces to all-pairs comparison on the family.
     ///
-
     /// **Normalisation contract.** `lt` first canonicalises both
     /// operands via [`Ordinal::normalize`] so that semantic-equivalents
     /// like `OmegaPow(2)` and `OmegaSquared` are correctly handled
@@ -256,7 +255,6 @@ impl Ordinal {
     /// > 0 is regular trivially, ω is regular, every successor cardinal
     /// > is regular; singular limit cardinals are not.
     ///
-
     /// In our normalised form: ω is regular, every κ_n is regular
     /// (inaccessibles are by construction regular limit cardinals),
     /// `Sup` is conservatively NOT regular (a sup-of-smaller construction).
@@ -288,7 +286,6 @@ impl Ordinal {
     /// dependent universe hierarchies, and Grothendieck-universe
     /// stratification.
     ///
-
     /// Distinguished from [`Ordinal::succ`] which returns the
     /// *successor ordinal* `α + 1` (a small step within the same
     /// universe). `next_inaccessible` performs a *universe* step:
@@ -296,7 +293,6 @@ impl Ordinal {
     /// which is the smallest cardinal that bounds *all* small
     /// constructions on the source universe.
     ///
-
     /// Behaviour:
     ///  * `Finite(_)` / `Omega` / sub-ω² ordinals → `Kappa(0)`
     ///  (the first inaccessible, sometimes denoted `U`).
@@ -307,7 +303,6 @@ impl Ordinal {
     ///  * `Sup(_)` → `Kappa(0)` if the supremum is below κ-tower,
     ///  otherwise the next κ above the largest part.
     ///
-
     /// This is the operation invoked by `presheaf_category` to
     /// realise the HTT 5.5 universe ascent in the kernel surface.
     pub fn next_inaccessible(&self) -> Self {
@@ -379,10 +374,8 @@ impl Ordinal {
     /// representation. Resolves the OmegaPow(2) ≡ OmegaSquared and
     /// degenerate Sup cases.
     ///
-
     /// # Normalisation rules
     ///
-
     ///  * `OmegaPow(0)` → `Finite(1)` (ω^0 = 1)
     ///  * `OmegaPow(1)` → `Omega` (ω^1 = ω)
     ///  * `OmegaPow(2)` → `OmegaSquared` (ω^2 = ω²)
@@ -395,7 +388,6 @@ impl Ordinal {
     ///  directly when the rest are strictly less; otherwise leave
     ///  as Sup. Empty Sup → `Finite(0)`.
     ///
-
     /// Idempotent: `α.normalize().normalize() == α.normalize()`.
     pub fn normalize(&self) -> Self {
         match self {

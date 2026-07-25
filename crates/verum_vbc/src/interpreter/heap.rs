@@ -78,7 +78,6 @@ pub const MIN_ALIGNMENT: usize = verum_common::layout::MIN_HEAP_ALIGNMENT;
 
 /// Maximum single allocation size (1 GB).
 ///
-
 /// Prevents DoS attacks via requesting extremely large allocations
 /// (e.g., 2^63 element arrays). Any single allocation request exceeding
 /// this limit is rejected with OutOfMemory.
@@ -735,7 +734,6 @@ impl ObjectHeader {
 
     /// Validates a CBGR reference against this header.
     ///
-
     /// Returns Ok(()) if valid, or an error describing the violation.
     pub fn validate(&self, expected_gen: u32, expected_epoch: u16) -> InterpreterResult<()> {
         if !self.is_valid() {
@@ -918,7 +916,6 @@ impl ObjectHeader {
 
 /// Heap-allocated object (type-erased).
 ///
-
 /// An `Object` is a pointer to memory that starts with an `ObjectHeader`
 /// followed by type-specific data.
 #[repr(transparent)]
@@ -931,10 +928,8 @@ pub struct Object {
 impl Object {
     /// Creates a new object from a raw pointer.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must point to valid ObjectHeader followed by data.
     pub unsafe fn from_raw(ptr: *mut ObjectHeader) -> Option<Self> {
         NonNull::new(ptr).map(|ptr| Self { ptr })
@@ -992,7 +987,6 @@ impl Object {
 
     /// Returns a safe slice over the data portion of this object.
     ///
-
     /// This bounds-checks the size field against a maximum to prevent
     /// reading uninitialized memory if the header is corrupted.
     pub fn data_slice(&self) -> &[u8] {
@@ -1022,7 +1016,6 @@ impl Object {
 
 /// Heap allocator for interpreter objects.
 ///
-
 /// Uses simple bump allocation for fast allocation.
 /// Collection is mark-sweep when threshold is reached.
 pub struct Heap {
@@ -1296,10 +1289,8 @@ impl Heap {
 
     /// Frees an object.
     ///
-
     /// # Safety
     ///
-
     /// The object must have been allocated by this heap and must not be
     /// accessed after freeing.
     pub unsafe fn free(&mut self, obj: Object) {
@@ -1328,7 +1319,6 @@ impl Heap {
 
     /// Returns the next generation number.
     ///
-
     /// When generation reaches GEN_MAX, advances the global epoch and
     /// resets to GEN_INITIAL to prevent generation counter reuse within
     /// the same epoch (ABA prevention).
@@ -1371,7 +1361,6 @@ impl Heap {
     /// Returns true iff `ptr` was produced by this heap's allocator (i.e. is a
     /// tracked object whose first 24 bytes are a real `ObjectHeader`).
     ///
-
     /// Pointers that satisfy `Value::is_ptr` may originate from either this
     /// heap or from the system allocator (via `MemExtended::Alloc`). The
     /// latter are opaque byte buffers with no header; code that needs to
@@ -1386,7 +1375,6 @@ impl Heap {
 
     /// Validates a CBGR reference against an object.
     ///
-
     /// This performs full CBGR validation including generation and epoch checks.
     /// Stats are updated for monitoring.
     pub fn validate_reference(
@@ -1426,10 +1414,8 @@ impl Heap {
 
     /// Clears all objects (for reset).
     ///
-
     /// # Safety
     ///
-
     /// All references to heap objects become invalid.
     pub unsafe fn clear(&mut self) {
         for obj_ptr in self.objects.drain(..) {
@@ -1461,14 +1447,11 @@ impl Heap {
 
     /// Gets an Object from a data pointer.
     ///
-
     /// Given a pointer to the data portion of an object (after the header),
     /// this reconstructs the Object wrapper for CBGR operations.
     ///
-
     /// # Safety
     ///
-
     /// The pointer must have been returned by `Object::data_ptr()` for
     /// an object allocated from this heap.
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -1518,26 +1501,19 @@ impl Heap {
 
     /// Creates a TokenStream heap object from serialized bytes.
     ///
-
     /// This is used by the MetaQuote instruction handler to create TokenStream
     /// objects directly from pre-serialized bytes stored in the constant pool.
     ///
-
     /// # Arguments
     ///
-
     /// * `serialized_data` - Pre-serialized TokenStream bytes
     ///
-
     /// # Returns
     ///
-
     /// A heap-allocated Object containing the serialized TokenStream data.
     ///
-
     /// # Performance
     ///
-
     /// O(n) where n = serialized data size. Just a single memcpy.
     pub fn alloc_token_stream(&mut self, serialized_data: &[u8]) -> InterpreterResult<Object> {
         self.alloc_with_init(

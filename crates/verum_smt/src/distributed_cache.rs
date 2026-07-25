@@ -478,7 +478,6 @@ impl DistributedCache {
 
     /// Look up verification result
     ///
-
     /// First checks local cache, then falls back to remote storage.
     pub async fn get(&self, key: &str) -> Maybe<CacheEntry> {
         // 1. Check local cache first
@@ -622,7 +621,6 @@ impl DistributedCache {
 
     /// Fetch from S3-compatible storage
     ///
-
     /// Falls back to filesystem cache if S3 credentials are not available.
     #[cfg(feature = "distributed-cache")]
     async fn fetch_remote(&self, key: &str) -> Result<CacheEntry, DistributedCacheError> {
@@ -707,12 +705,10 @@ impl DistributedCache {
 
     /// Fetch from remote storage (filesystem fallback when S3 feature disabled)
     ///
-
     /// When the `distributed-cache` feature is disabled, this falls back to:
     /// 1. Redis (if `redis-cache` feature enabled and configured)
     /// 2. Filesystem cache (if `filesystem_fallback` configured)
     ///
-
     /// # Enabling S3 Support
     /// ```toml
     /// verum_smt = { version = "*", features = ["distributed-cache"] }
@@ -739,7 +735,6 @@ impl DistributedCache {
 
     /// Upload to S3-compatible storage
     ///
-
     /// If credentials are not available (neither in config nor environment),
     /// this method falls back to filesystem cache. This is useful for development
     /// and testing without S3 access.
@@ -834,12 +829,10 @@ impl DistributedCache {
 
     /// Upload to remote storage (filesystem fallback when S3 feature disabled)
     ///
-
     /// When the `distributed-cache` feature is disabled, this stores to:
     /// 1. Redis (if `redis-cache` feature enabled and configured)
     /// 2. Filesystem cache (if `filesystem_fallback` configured)
     ///
-
     /// # Enabling S3 Support
     /// ```toml
     /// verum_smt = { version = "*", features = ["distributed-cache"] }
@@ -1258,7 +1251,6 @@ pub fn generate_cache_key(file_hash: &str, func_sig: &str, mode: &str) -> Text {
 
 /// Verify cryptographic signature using Ed25519
 ///
-
 /// SECURITY: This performs actual Ed25519 signature verification.
 /// Signatures are created using the signing key and verified using the
 /// corresponding verifying key. Invalid or tampered signatures will fail.
@@ -1340,7 +1332,6 @@ fn get_session_verifying_key() -> Option<VerifyingKey> {
 
 /// Parse S3 URL into (bucket, prefix, endpoint)
 ///
-
 /// Supports:
 /// - `s3://bucket/prefix` → (bucket, prefix, https://s3.amazonaws.com)
 /// - `s3://bucket/prefix?endpoint=https://custom.endpoint` → with custom endpoint
@@ -1522,7 +1513,6 @@ pub enum DistributedCacheError {
 
     /// Not yet implemented
     ///
-
     /// This error is returned when a feature is not available.
     /// Enable the corresponding feature flag to use this functionality:
     /// - `distributed-cache`: S3-compatible storage backend

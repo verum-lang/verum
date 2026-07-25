@@ -450,7 +450,6 @@ impl BorrowTracker {
 
     /// Create an *immutable* borrow for a function call argument (NLL behavior).
     ///
-
     /// Analogue of `borrow_mut_for_call` for the common `call(&value)` pattern.
     /// The returned borrow is NOT persisted in the tracker — a function call
     /// argument is live only for the duration of the call itself, and the
@@ -458,18 +457,15 @@ impl BorrowTracker {
     /// the return type explicitly contains a reference (that case is handled
     /// elsewhere by `link_holder_to_last_borrow`).
     ///
-
     /// Root fix for Issue #4 (NLL liveness over-retain): before this
     /// existed, `borrow_immut` was the only entry point and it always
     /// created a tracked, scope-lifetime borrow. A sequence like
     ///
-
     /// ```verum
     /// let sz = call(&value); // `&value` tracked past the call return
     /// mutate(&mut value); // ERROR: "previous immutable borrow"
     /// ```
     ///
-
     /// reported a false conflict because the immutable borrow was still
     /// "active" at the `&mut value` site even though it had no live holder.
     /// This function fixes the asymmetry with `borrow_mut_for_call`.
@@ -744,7 +740,6 @@ impl BorrowTracker {
     /// This is the core NLL mechanism - borrows end at their last use point,
     /// not at the end of their lexical scope.
     ///
-
     /// Example:
     /// ```verum
     /// let mut data = 42;

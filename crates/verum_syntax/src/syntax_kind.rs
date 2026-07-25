@@ -17,7 +17,6 @@ use core::fmt;
 
 /// All syntax node and token kinds in Verum.
 ///
-
 /// This enum is the backbone of the lossless syntax tree. Every node and token
 /// in the tree has an associated SyntaxKind.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

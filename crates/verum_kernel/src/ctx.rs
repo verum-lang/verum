@@ -23,7 +23,6 @@ use crate::CoreTerm;
 /// A stable identifier for an external mathematical framework whose
 /// theorems Verum postulates as axioms.
 ///
-
 /// Every registered axiom carries one of these so `verum audit
 /// --framework-axioms` can enumerate the exact set of external results
 /// (Lurie HTT, Schreiber DCCT, Connes reconstruction, Petz
@@ -45,18 +44,15 @@ pub struct FrameworkId {
 /// pair (theorem_coord, axiom_coord) and rejects when an axiom at
 /// a strictly higher ν is cited by a theorem at lower ν.
 ///
-
 /// `nu` reuses the kernel's [`crate::OrdinalDepth`] type so the
 /// finite/ω/ω·n arithmetic is shared with `m_depth_omega`. This
 /// keeps the kernel single-sourced for ordinal arithmetic.
 ///
-
 /// `tau` is the trust tier:
 ///  * `true` — canonical (well-validated, peer-reviewed, in the
 ///  Standard catalogue per §6.2).
 ///  * `false` — under construction or not-yet-validated.
 ///
-
 /// The kernel does NOT enforce τ-discipline at the typing-rule
 /// layer; τ is for tooling (`verum audit --coord` surfaces it).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -83,7 +79,6 @@ impl KernelCoord {
 
 /// `K-Coord-Cite` kernel rule.
 ///
-
 /// Per spec §A.Z.5 item 2: when a theorem at coordinate
 /// `theorem_coord` cites an axiom at coordinate `axiom_coord`,
 /// the rule requires `axiom_coord.nu ≤ theorem_coord.nu`
@@ -92,7 +87,6 @@ impl KernelCoord {
 /// reference a theorem in a "higher" depth tier (e.g., HoTT
 /// ω-level) without explicit universe-ascent governance.
 ///
-
 /// `allow_tier_jump = true` — Categorical coherence K-Universe-Ascent escape:
 /// when the calling module imports `core.math.frameworks.diakrisis_stack_model`
 /// (or sets `@require_extension(vfe_3)`), the rule admits a
@@ -100,7 +94,6 @@ impl KernelCoord {
 /// itself cannot detect the import; the caller signals via this
 /// flag.
 ///
-
 /// On rejection, [`crate::KernelError::CoordViolation`] is
 /// returned with both coordinates surfaced for diagnostic.
 pub fn check_coord_cite(
@@ -130,7 +123,6 @@ pub fn check_coord_cite(
 
 /// The typing context maintained during checking.
 ///
-
 /// Each binding maps a name to its declared type. The kernel never
 /// performs inference — it only checks.
 #[derive(Debug, Clone, Default)]

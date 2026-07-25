@@ -101,7 +101,6 @@ impl ContractStats {
 
 /// Postcondition validator for function contracts
 ///
-
 /// Validates that function implementations satisfy their postconditions
 /// by checking all return paths against the `ensures` clauses.
 pub struct PostconditionValidator {
@@ -129,23 +128,18 @@ impl PostconditionValidator {
 
     /// Validate all postconditions for a function
     ///
-
     /// This is the main entry point for postcondition validation.
     /// It extracts all return expressions and verifies each against
     /// all postconditions.
     ///
-
     /// # Arguments
     ///
-
     /// * `func` - The function declaration to validate
     /// * `_return_type` - The inferred return type of the function
     /// * `_ctx` - Type context for verification
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(())` if all postconditions are satisfied
     /// * `Err(TypeError)` with detailed diagnostic if validation fails
     pub fn validate_postconditions(
@@ -183,7 +177,6 @@ impl Default for PostconditionValidator {
 
 /// Precondition validator for function contracts
 ///
-
 /// Validates that preconditions are satisfied at call sites.
 pub struct PreconditionValidator {
     /// Statistics
@@ -205,19 +198,15 @@ impl PreconditionValidator {
 
     /// Validate preconditions at a call site
     ///
-
     /// # Arguments
     ///
-
     /// * `func` - The function being called
     /// * `_args` - The argument expressions at the call site
     /// * `call_span` - The span of the call expression
     /// * `_ctx` - Type context for verification
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(())` if all preconditions are satisfied
     /// * `Err(TypeError)` if any precondition fails
     pub fn validate_preconditions(

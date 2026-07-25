@@ -77,12 +77,10 @@ use std::collections::BTreeSet;
 
 /// Compile-time-known permission policy baked into an AOT binary.
 ///
-
 /// Constructed by the CLI from the resolved `PermissionSet` that
 /// frontmatter + `--allow*` flags produce. Passed to the LLVM
 /// lowerer through `LoweringConfig::permission_policy`.
 ///
-
 /// `None` (the absence of this whole policy at the lowering site)
 /// is the trusted-application path — no script-mode enforcement is
 /// needed because the source has neither frontmatter nor CLI

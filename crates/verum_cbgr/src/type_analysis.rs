@@ -64,7 +64,6 @@ use crate::analysis::{EscapeAnalyzer, FieldComponent, FieldPath, RefId};
 
 /// Cached type information for a reference
 ///
-
 /// Stores the resolved type along with extracted field structure
 /// to avoid repeated type queries.
 #[derive(Debug, Clone, PartialEq)]
@@ -141,7 +140,6 @@ impl TypeInfo {
 
 /// Field layout extracted from type information
 ///
-
 /// Represents the structure of a type's fields, which can be:
 /// - Struct fields (named)
 /// - Tuple fields (indexed)
@@ -335,7 +333,6 @@ impl FieldInfo {
 
 /// Type-based alias analyzer
 ///
-
 /// Uses type information to refine alias analysis:
 /// - Different types → `NoAlias`
 /// - Same type but different fields → `NoAlias`
@@ -362,7 +359,6 @@ impl TypeAliasAnalyzer {
 
     /// Check if two references may alias based on types
     ///
-
     /// Returns:
     /// - `NoAlias` if types are disjoint
     /// - `MayAlias` if types are compatible
@@ -402,7 +398,6 @@ impl TypeAliasAnalyzer {
 
     /// Refine alias relationship using field paths
     ///
-
     /// If two references have the same base type but different field paths,
     /// they may still not alias if fields are disjoint.
     #[must_use]
@@ -471,7 +466,6 @@ impl TypeAliasResult {
 
 /// Type information cache
 ///
-
 /// Caches resolved type information to avoid repeated type system queries.
 /// Thread-safe with Arc for shared access across analyzers.
 pub struct TypeCache {
@@ -600,16 +594,13 @@ impl TypeCacheStats {
 impl EscapeAnalyzer {
     /// Extract field structure from actual type information
     ///
-
     /// Instead of using heuristics to guess field layout, this method
     /// queries the type system to get the exact field structure.
     ///
-
     /// # Arguments
     /// - `reference`: Reference to analyze
     /// - `type_analyzer`: Type alias analyzer with type cache
     ///
-
     /// # Returns
     /// Field layout extracted from type information, or Unknown if unavailable
     #[must_use]
@@ -633,18 +624,15 @@ impl EscapeAnalyzer {
 
     /// Refine alias analysis using type information
     ///
-
     /// Uses type disjointness to prove no-alias relationships:
     /// - Different types cannot alias
     /// - Different generic parameters cannot alias
     /// - Different fields cannot alias
     ///
-
     /// # Arguments
     /// - `ref1`, `ref2`: References to check for aliasing
     /// - `type_analyzer`: Type alias analyzer
     ///
-
     /// # Returns
     /// Refined alias result based on type information
     #[must_use]
@@ -659,33 +647,27 @@ impl EscapeAnalyzer {
 
     /// Check if two types may alias (type compatibility check)
     ///
-
     /// This is the primary method for type-based alias refinement.
     ///
-
     /// # Example
     /// ```rust,ignore
     /// let analyzer = EscapeAnalyzer::new(cfg);
     /// let type_analyzer = TypeAliasAnalyzer::new();
     ///
-
     /// // Register types
     /// let point_type = TypeInfo::new(RefId(1), "Point".into())
     ///  .with_layout(FieldLayout::Struct { ... });
     /// let color_type = TypeInfo::new(RefId(2), "Color".into())
     ///  .with_layout(FieldLayout::Struct { ... });
     ///
-
     /// type_analyzer.type_cache().insert(RefId(1), point_type);
     /// type_analyzer.type_cache().insert(RefId(2), color_type);
     ///
-
     /// // Check compatibility
     /// let result = analyzer.check_type_compatibility(
     ///  RefId(1), RefId(2), &type_analyzer
     /// );
     ///
-
     /// assert_eq!(result, TypeAliasResult::NoAlias); // Different types!
     /// ```
     #[must_use]

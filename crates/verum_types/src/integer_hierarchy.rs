@@ -99,7 +99,6 @@ pub enum OverflowMode {
 
 /// Integer type variant
 ///
-
 /// Primary names follow Verum's Semantic Honesty principle (Int8, UInt64, etc.)
 /// Compatibility aliases (i8, u64) are also supported for FFI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -367,7 +366,6 @@ pub struct IntegerHierarchy {
 impl IntegerHierarchy {
     /// Create a new integer hierarchy with all predefined types
     ///
-
     /// Integer types are represented as `Type::Named` with their semantic names.
     /// For example, `Int32` becomes `Type::Named { path: "Int32", args: [] }`.
     /// Refinement checking (bounds validation) happens later in the type checker.
@@ -424,7 +422,6 @@ impl IntegerHierarchy {
 
     /// Infer integer type from literal suffix
     ///
-
     /// Examples:
     /// - `42` → None (context-dependent)
     /// - `42_i32` → Some(I32)
@@ -435,7 +432,6 @@ impl IntegerHierarchy {
 
     /// Get default integer type for unsuffixed literals
     ///
-
     /// Spec: Default is Int32 for signed, UInt32 for unsigned
     pub fn default_signed() -> IntegerKind {
         IntegerKind::Int32
@@ -447,7 +443,6 @@ impl IntegerHierarchy {
 
     /// Check if type1 is a subtype of type2 in the integer hierarchy
     ///
-
     /// Examples:
     /// - i8 <: i16 (smaller range is subtype of larger)
     /// - u8 <: u16 (smaller range is subtype of larger)
@@ -507,21 +502,17 @@ impl Default for IntegerHierarchy {
 
 /// Trait for checked arithmetic operations (returns Maybe<T>)
 ///
-
 /// Checked operations detect overflow/underflow and return None on failure.
 /// This is the default behavior for arithmetic operators in Verum.
 ///
-
 /// # Examples
 /// ```
 /// use verum_types::CheckedOps;
 /// use verum_common::Maybe;
 ///
-
 /// let x: i32 = i32::MAX;
 /// assert_eq!(x.checked_add(1), None); // Overflow detected
 ///
-
 /// let y: i32 = 100;
 /// assert_eq!(y.checked_add(50), Some(150));
 /// ```
@@ -539,20 +530,16 @@ pub trait CheckedOps: Sized {
 
 /// Trait for wrapping arithmetic operations (two's complement)
 ///
-
 /// Wrapping operations perform modular arithmetic, wrapping around on overflow.
 /// Useful for bit manipulation, cryptography, and hash functions.
 ///
-
 /// # Examples
 /// ```
 /// use verum_types::WrappingOps;
 ///
-
 /// let x: i32 = i32::MAX;
 /// assert_eq!(x.wrapping_add(1), i32::MIN); // Wraps to minimum
 ///
-
 /// let y: u8 = 255;
 /// assert_eq!(y.wrapping_add(1), 0); // Wraps to 0
 /// ```
@@ -570,20 +557,16 @@ pub trait WrappingOps: Sized {
 
 /// Trait for saturating arithmetic operations (clamp to bounds)
 ///
-
 /// Saturating operations clamp results to min/max values on overflow.
 /// Useful for graphics, audio, signal processing, and embedded systems.
 ///
-
 /// # Examples
 /// ```
 /// use verum_types::SaturatingOps;
 ///
-
 /// let x: i32 = i32::MAX;
 /// assert_eq!(x.saturating_add(1), i32::MAX); // Clamps to max
 ///
-
 /// let y: u8 = 10;
 /// assert_eq!(y.saturating_sub(20), 0); // Clamps to 0
 /// ```

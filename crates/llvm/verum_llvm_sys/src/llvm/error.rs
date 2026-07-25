@@ -12,7 +12,6 @@ unsafe extern "C" {
     pub fn LLVMConsumeError(Err: LLVMErrorRef);
     ///  Report a fatal error if Err is a failure value.
     ///
-
     /// This function can be used to wrap calls to fallible functions ONLY when it is
     /// known that the Error will always be a success value.
     pub fn LLVMCantFail(Err: LLVMErrorRef);

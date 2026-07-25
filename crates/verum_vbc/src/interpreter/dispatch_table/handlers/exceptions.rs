@@ -12,7 +12,6 @@ use super::bytecode_io::*;
 
 /// Throw (0xD0) - Throw an exception.
 ///
-
 /// Format: `Throw error_reg`
 /// Throws an exception with the value from error_reg.
 /// Unwinds the stack to the nearest exception handler or errors if none.
@@ -64,7 +63,6 @@ pub(in super::super) fn handle_throw(
 
 /// TryBegin (0xD1) - Begin a try block.
 ///
-
 /// Format: `TryBegin handler_offset:i32`
 /// Sets up an exception handler at the given offset from current PC.
 pub(in super::super) fn handle_try_begin(
@@ -109,7 +107,6 @@ pub(in super::super) fn handle_try_begin(
 
 /// TryEnd (0xD2) - End a try block.
 ///
-
 /// Format: `TryEnd`
 /// Pops the current exception handler (normal exit from try block).
 pub(in super::super) fn handle_try_end(
@@ -122,7 +119,6 @@ pub(in super::super) fn handle_try_end(
 
 /// GetException (0xD3) - Get the current exception value.
 ///
-
 /// Format: `GetException dst`
 /// Gets the current exception value (set by Throw) into dst register.
 pub(in super::super) fn handle_get_exception(

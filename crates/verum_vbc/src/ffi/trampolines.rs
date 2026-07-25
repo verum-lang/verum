@@ -77,18 +77,15 @@ static NEXT_TRAMPOLINE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Type alias for the callback handler function.
 ///
-
 /// The handler receives:
 /// - `function_id`: The VBC function to invoke
 /// - `args`: Marshalled arguments as Verum values
 ///
-
 /// Returns the result value, or None if the function doesn't return.
 pub type CallbackHandler = Box<dyn Fn(u32, &[Value]) -> Option<Value> + Send + Sync>;
 
 /// Context stored with each callback closure.
 ///
-
 /// This is passed through libffi's userdata mechanism and contains
 /// all information needed to handle the callback.
 pub struct CallbackContext {
@@ -108,7 +105,6 @@ unsafe impl Sync for CallbackContext {}
 
 /// A live callback with its closure and context.
 ///
-
 /// SAFETY: All heap-allocated fields use `Pin<Box<>>` to guarantee stable
 /// addresses. The libffi closure holds raw pointers to `context` and `cif`,
 /// so these must never be moved. `Pin` enforces this at the type level,
@@ -163,7 +159,6 @@ thread_local! {
 
 /// Registry for callback trampolines.
 ///
-
 /// Manages the lifecycle of callbacks, including:
 /// - Creating closures with libffi
 /// - Storing context data
@@ -187,7 +182,6 @@ impl TrampolineRegistry {
 
     /// Sets the callback handler for the current thread.
     ///
-
     /// This must be called before any callbacks are invoked.
     /// The handler is responsible for invoking VBC functions.
     pub fn set_handler(handler: CallbackHandler) {
@@ -205,18 +199,14 @@ impl TrampolineRegistry {
 
     /// Creates a new callback trampoline.
     ///
-
     /// # Arguments
     ///
-
     /// * `return_type` - The C return type
     /// * `arg_types` - The C argument types
     /// * `function_id` - The VBC function ID to invoke
     ///
-
     /// # Returns
     ///
-
     /// The trampoline ID on success.
     pub fn create_callback(
         &mut self,
@@ -338,11 +328,9 @@ impl TrampolineRegistry {
 
     /// Gets the code pointer for a callback.
     ///
-
     /// This pointer can be passed to C code as a function pointer.
     /// Resolve the VBC function id behind a trampoline CODE POINTER.
     ///
-
     /// THREAD-EAGER-TIER0-1 consumer: a baked `pthread_create(...,
     /// thread_entry, ...)` reaches the Tier-0 intercept carrying the
     /// libffi trampoline pointer produced by `CreateCallback` — not a
@@ -399,7 +387,6 @@ impl TrampolineRegistry {
 
     /// Looks up a TrampolineId by its code pointer.
     ///
-
     /// This is useful when you need to free a callback and only have
     /// the code pointer (e.g., stored in a Value).
     pub fn lookup_by_code_ptr(&self, code_ptr: *const ()) -> Option<TrampolineId> {
@@ -434,17 +421,14 @@ unsafe impl Sync for CallbackInfo {}
 
 /// The trampoline handler called by libffi when C code invokes a callback.
 ///
-
 /// This function:
 /// 1. Extracts callback context from userdata
 /// 2. Marshals C arguments to Verum values
 /// 3. Invokes the registered handler
 /// 4. Marshals the result back to C
 ///
-
 /// # Safety
 ///
-
 /// This is called by libffi's closure mechanism. The userdata pointer
 /// must be a valid pointer to a CallbackContext.
 unsafe extern "C" fn trampoline_handler(
@@ -489,10 +473,8 @@ unsafe extern "C" fn trampoline_handler(
 
 /// Marshal a C value to a Verum value.
 ///
-
 /// # Safety
 ///
-
 /// The `ptr` must point to valid data of the specified `ctype`.
 unsafe fn marshal_c_to_value(ptr: *mut c_void, ctype: CTypeRuntime) -> Value {
     // SAFETY: All operations below are covered by the function's safety contract
@@ -528,10 +510,8 @@ unsafe fn marshal_c_to_value(ptr: *mut c_void, ctype: CTypeRuntime) -> Value {
 
 /// Marshal a Verum value to a C result buffer.
 ///
-
 /// # Safety
 ///
-
 /// The `result_ptr` must have enough space for the C type.
 unsafe fn marshal_value_to_c(value: Value, ctype: CTypeRuntime, result_ptr: *mut c_void) {
     // SAFETY: All operations below are covered by the function's safety contract

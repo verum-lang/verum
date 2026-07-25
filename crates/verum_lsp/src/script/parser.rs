@@ -71,7 +71,6 @@ impl ScriptParser {
 
     /// Parse a single line of script input
     ///
-
     /// This method tries to parse the input in the most appropriate way:
     /// 1. If the input is incomplete (open braces/brackets), return Incomplete
     /// 2. Try parsing as an expression (most common in REPL)
@@ -131,7 +130,6 @@ impl ScriptParser {
 
     /// Try parsing in auto mode.
     ///
-
     /// Order: module (for multi-statement) → expression → statement → item.
     /// Module mode is tried FIRST when input contains `;` (a strong signal for
     /// multi-statement blocks like `println("ok"); let a = 1; println(a);`).
@@ -319,7 +317,6 @@ impl ScriptParser {
 
     /// Parse and check if input needs more lines
     ///
-
     /// Returns (is_complete, error_message_if_any)
     pub fn check_completeness(&self, input: &str) -> (bool, Maybe<Text>) {
         if input.trim().is_empty() {

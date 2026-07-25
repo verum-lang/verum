@@ -114,7 +114,6 @@ impl std::error::Error for BuildError {}
 /// Compose the final [`PermissionSet`] for a script run from the three
 /// declared sources. Stops at the first parse error.
 ///
-
 /// `frontmatter == None` means the script had no inline metadata —
 /// equivalent to a frontmatter with empty `permissions` and no `[run]`.
 pub fn build_permission_set(

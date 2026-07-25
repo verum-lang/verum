@@ -29,7 +29,6 @@ use super::builtins::RequiredContext;
 
 /// Meta execution error
 ///
-
 /// Error codes follow the M-prefix pattern:
 /// - M0XX: Core meta errors (function not found, argument mismatch, type errors)
 /// - M1XX: Sandbox violations (forbidden I/O, iteration limits, recursion depth)
@@ -251,7 +250,6 @@ pub enum MetaError {
 impl MetaError {
     /// Returns the error code for this error type
     ///
-
     /// Error code pattern (M-prefix):
     /// - M0XX: Core meta errors (8 codes)
     /// - M1XX: Builtin errors (5 codes)
@@ -337,7 +335,6 @@ impl MetaError {
     /// Returns the equivalent E-code for this meta error, for compatibility
     /// with the standard compiler error code namespace.
     ///
-
     /// Meta errors have their own M-prefixed codes, but some consumers expect
     /// the standard E-prefixed codes. This mapping provides the equivalent:
     /// - M003 (TypeMismatch) → E101
@@ -855,7 +852,6 @@ impl std::error::Error for MetaError {}
 impl MetaError {
     /// Convert a HygieneViolation to a MetaError
     ///
-
     /// This method provides explicit conversion from hygiene violations to
     /// meta errors without implementing From (which can cause type inference issues).
     pub fn from_hygiene_violation(v: crate::hygiene::HygieneViolation) -> Self {

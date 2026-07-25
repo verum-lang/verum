@@ -1660,7 +1660,6 @@ fn cross_validate_expr(expr: &Expr, logic: Cvc5SmtLogic) -> CrossValidationResul
 
 /// Try solving with Z3
 ///
-
 /// Uses the production Z3 backend via the solver module.
 /// This provides full SMT solving capabilities with:
 /// - Incremental solving via push/pop
@@ -1720,7 +1719,6 @@ fn try_z3(expr: &Expr, logic: Cvc5SmtLogic) -> Result<String, String> {
 
 /// Try solving with CVC5
 ///
-
 /// Uses the production CVC5 backend for cross-validation.
 /// CVC5 provides an independent SMT solver with different heuristics
 /// and solving strategies, making it ideal for detecting potential

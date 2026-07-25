@@ -687,7 +687,6 @@ pub(in super::super) fn handle_set_field(
 /// `ITER_TYPE_FATREF_SLICE` arm — index and iteration paths share this
 /// single dispatch so they CANNOT drift.
 ///
-
 /// SAFETY contract: `idx` must be `< fat_ref.len()` (both callers
 /// bounds-check) and `fat_ref.ptr()` non-null (checked by callers).
 pub(in super::super) fn fat_ref_read_element(
@@ -2026,7 +2025,6 @@ fn text_value_bytes_and_len(v: &Value) -> (*const u8, usize) {
 
 /// NewMap (0x6B) - Create new map with default capacity.
 ///
-
 /// Format: `NewMap dst`
 /// Creates an empty map and stores pointer in dst.
 pub(in super::super) fn handle_new_map(
@@ -2072,7 +2070,6 @@ pub(in super::super) fn handle_new_map(
 
 /// MapGet (0x6C) - Get value from map.
 ///
-
 /// Format: `MapGet dst, map, key`
 /// Looks up key in map, stores value in dst (or unit if not found).
 pub(in super::super) fn handle_map_get(
@@ -2130,7 +2127,6 @@ pub(in super::super) fn handle_map_get(
 
 /// MapSet (0x6D) - Set value in map.
 ///
-
 /// Format: `MapSet map, key, val`
 /// Sets map[key] = val, growing the map if necessary.
 pub(in super::super) fn handle_map_set(
@@ -2237,7 +2233,6 @@ pub(in super::super) fn handle_map_set(
 
 /// MapContains (0x6E) - Check if key exists in map.
 ///
-
 /// Format: `MapContains dst, map, key`
 /// Sets dst to true if key exists, false otherwise.
 pub(in super::super) fn handle_map_contains(
@@ -2293,7 +2288,6 @@ pub(in super::super) fn handle_map_contains(
 
 /// Clone (0x78) - Clone a value (deep copy for heap objects).
 ///
-
 /// For primitives and for pointers that do NOT point at a tracked heap
 /// object (e.g. raw buffers returned by the `alloc` intrinsic), this is a
 /// straight Value copy. Attempting to deep-copy a raw byte buffer would
@@ -2373,7 +2367,6 @@ pub(in super::super) fn handle_clone(
 
 /// NewSet (0xC7) - Create new empty set.
 ///
-
 /// Format: `NewSet dst`
 /// Creates an empty set and stores pointer in dst.
 pub(in super::super) fn handle_new_set(
@@ -2421,7 +2414,6 @@ pub(in super::super) fn handle_new_set(
 
 /// SetInsert (0xC8) - Insert element into set.
 ///
-
 /// Format: `SetInsert set, elem`
 /// Inserts elem into set if not already present.
 pub(in super::super) fn handle_set_insert(
@@ -2527,7 +2519,6 @@ pub(in super::super) fn handle_set_insert(
 
 /// SetContains (0xC9) - Check if set contains element.
 ///
-
 /// Format: `SetContains dst, set, elem`
 /// Sets dst to true if elem is in set, false otherwise.
 pub(in super::super) fn handle_set_contains(
@@ -2583,7 +2574,6 @@ pub(in super::super) fn handle_set_contains(
 
 /// SetRemove (0xCA) - Remove element from set.
 ///
-
 /// Format: `SetRemove set, elem`
 /// Removes elem from set if present.
 pub(in super::super) fn handle_set_remove(
@@ -2670,7 +2660,6 @@ pub(in super::super) fn handle_set_remove(
 
 /// NewDeque (0xCD) - Create new empty deque with default capacity.
 ///
-
 /// Format: `NewDeque dst`
 pub(in super::super) fn handle_new_deque(
     state: &mut InterpreterState,
@@ -2714,7 +2703,6 @@ pub(in super::super) fn handle_new_deque(
 
 /// NewChannel (0xDD) - Create new bounded channel.
 ///
-
 /// Format: `NewChannel dst, capacity`
 pub(in super::super) fn handle_new_channel(
     state: &mut InterpreterState,
@@ -2757,7 +2745,6 @@ pub(in super::super) fn handle_new_channel(
 
 /// Push (0xCE) - Push value to argument stack.
 ///
-
 /// Format: `Push src`
 /// Pushes the value from src register onto the argument stack.
 pub(in super::super) fn handle_push(
@@ -2771,7 +2758,6 @@ pub(in super::super) fn handle_push(
 
 /// Pop (0xCF) - Pop value from argument stack.
 ///
-
 /// Format: `Pop dst`
 /// Pops a value from the argument stack into dst register.
 pub(in super::super) fn handle_pop(

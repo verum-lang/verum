@@ -39,11 +39,9 @@ use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 /// Unified proof term representation
 ///
-
 /// This enum combines all proof term variants from proof_extraction.rs,
 /// proof_search.rs, and dependent.rs into a single coherent type.
 ///
-
 /// The variants are organized by category:
 /// - Base cases: Axiom, Assumption, Hypothesis
 /// - Classical logic: ModusPonens, Rewrite, Symmetry, Transitivity, Reflexivity
@@ -57,7 +55,6 @@ pub enum ProofTerm {
     // ==================== Base Cases ====================
     /// Axiom or given fact
     ///
-
     /// From: proof_extraction.rs
     /// Represents a fundamental truth or assumption in the logical system.
     Axiom {
@@ -69,7 +66,6 @@ pub enum ProofTerm {
 
     /// Assumption (hypothesis at a specific position)
     ///
-
     /// From: proof_extraction.rs
     /// Represents a temporary assumption with an identifier.
     Assumption {
@@ -81,7 +77,6 @@ pub enum ProofTerm {
 
     /// Hypothesis (local assumption)
     ///
-
     /// From: proof_extraction.rs
     /// Similar to Assumption but used in different proof contexts.
     Hypothesis {
@@ -94,7 +89,6 @@ pub enum ProofTerm {
     // ==================== Classical Logic Rules ====================
     /// Modus ponens: from A and A => B, derive B
     ///
-
     /// From: proof_extraction.rs
     /// Classical inference rule for implication elimination.
     ModusPonens {
@@ -106,7 +100,6 @@ pub enum ProofTerm {
 
     /// Rewrite rule application
     ///
-
     /// From: proof_extraction.rs
     /// Represents applying a rewrite rule to transform an expression.
     Rewrite {
@@ -120,7 +113,6 @@ pub enum ProofTerm {
 
     /// Symmetry: from A = B, derive B = A
     ///
-
     /// From: proof_extraction.rs
     /// Equality symmetry rule.
     Symmetry {
@@ -130,7 +122,6 @@ pub enum ProofTerm {
 
     /// Transitivity: from A = B and B = C, derive A = C
     ///
-
     /// From: proof_extraction.rs
     /// Equality transitivity rule.
     Transitivity {
@@ -142,7 +133,6 @@ pub enum ProofTerm {
 
     /// Reflexivity: derive A = A
     ///
-
     /// From: proof_extraction.rs, dependent.rs
     /// Reflexive equality axiom.
     Reflexivity {
@@ -153,7 +143,6 @@ pub enum ProofTerm {
     // ==================== Theory Reasoning ====================
     /// Theory lemma (SMT theory axiom)
     ///
-
     /// From: proof_extraction.rs
     /// Represents a lemma from an SMT theory (e.g., arithmetic, arrays).
     TheoryLemma {
@@ -165,7 +154,6 @@ pub enum ProofTerm {
 
     /// Unit resolution (SAT reasoning)
     ///
-
     /// From: proof_extraction.rs
     /// Represents resolution-based reasoning from SAT solving.
     UnitResolution {
@@ -175,7 +163,6 @@ pub enum ProofTerm {
 
     /// Quantifier instantiation
     ///
-
     /// From: proof_extraction.rs
     /// Represents instantiating a quantified formula with concrete values.
     QuantifierInstantiation {
@@ -188,7 +175,6 @@ pub enum ProofTerm {
     // ==================== Constructive Proofs ====================
     /// Lambda abstraction (function construction)
     ///
-
     /// From: proof_search.rs
     /// Constructive proof by introducing a function.
     Lambda {
@@ -200,7 +186,6 @@ pub enum ProofTerm {
 
     /// Proof by cases (case analysis)
     ///
-
     /// From: proof_search.rs
     /// Constructive proof by examining all cases of a value.
     Cases {
@@ -212,7 +197,6 @@ pub enum ProofTerm {
 
     /// Induction proof
     ///
-
     /// From: proof_search.rs
     /// Proof by mathematical induction.
     Induction {
@@ -226,7 +210,6 @@ pub enum ProofTerm {
 
     /// Application of inference rule
     ///
-
     /// From: proof_search.rs
     /// General application of a named rule with premises.
     Apply {
@@ -239,7 +222,6 @@ pub enum ProofTerm {
     // ==================== SMT Integration ====================
     /// SMT solver proof
     ///
-
     /// From: proof_search.rs, dependent.rs
     /// Represents a proof discharged by an SMT solver.
     SmtProof {
@@ -254,7 +236,6 @@ pub enum ProofTerm {
     // ==================== Dependent Types ====================
     /// Proof by substitution
     ///
-
     /// From: dependent.rs
     /// Substitutes equals for equals in a property.
     Subst {
@@ -267,7 +248,6 @@ pub enum ProofTerm {
     // ==================== Meta-level ====================
     /// Lemma (derived fact with proof)
     ///
-
     /// From: proof_extraction.rs
     /// Represents a proven lemma that can be reused.
     Lemma {
@@ -391,7 +371,6 @@ pub enum ProofTerm {
 impl ProofTerm {
     /// Get the conclusion (formula proven) of this proof term
     ///
-
     /// This method extracts the logical formula that this proof establishes.
     /// For compound proofs, it recursively computes the conclusion.
     pub fn conclusion(&self) -> Expr {
@@ -566,7 +545,6 @@ impl ProofTerm {
 
     /// Get all axioms used in this proof
     ///
-
     /// Returns the set of axiom names that this proof depends on.
     /// This is crucial for understanding proof dependencies.
     pub fn used_axioms(&self) -> Set<Text> {
@@ -636,7 +614,6 @@ impl ProofTerm {
 
     /// Count proof depth (maximum nesting level)
     ///
-
     /// Returns the maximum depth of the proof tree.
     /// Useful for complexity analysis.
     pub fn proof_depth(&self) -> usize {
@@ -745,7 +722,6 @@ impl ProofTerm {
 
     /// Count total proof nodes
     ///
-
     /// Returns the total number of nodes in the proof tree.
     /// Useful for size analysis and optimization.
     pub fn node_count(&self) -> usize {
@@ -850,11 +826,9 @@ impl ProofTerm {
 
     /// Convert proof term to executable expression (program extraction)
     ///
-
     /// Extracts the computational content from constructive proofs.
     /// Classical proofs have no computational content and return unit/true.
     ///
-
     /// From: proof_search.rs
     pub fn to_expr(&self) -> Result<Expr, ProofError> {
         match self {
@@ -904,11 +878,9 @@ impl ProofTerm {
 
     /// Extract witness from existence proof
     ///
-
     /// Given a proof of ∃x. P(x), extract the witness x.
     /// Only works for constructive proofs.
     ///
-
     /// From: proof_search.rs
     pub fn extract_witness(&self) -> Result<Expr, ProofError> {
         match self {
@@ -931,11 +903,9 @@ impl ProofTerm {
 
     /// Check if proof term is well-formed
     ///
-
     /// Performs structural validation of the proof.
     /// Returns Ok(()) if well-formed, Err if malformed.
     ///
-
     /// From: dependent.rs
     pub fn check_well_formed(&self) -> Result<(), ProofError> {
         match self {
@@ -1016,12 +986,10 @@ impl ProofTerm {
 
     /// Add a dependency (axiom or lemma) to this proof
     ///
-
     /// This is used for tracking proof dependencies.
     /// Note: The unified ProofTerm doesn't store dependencies directly,
     /// but this method exists for API compatibility with dependent.rs.
     ///
-
     /// From: dependent.rs
     pub fn add_dependency(&mut self, dep: Text) {
         // In dependent.rs, ProofTerm is a struct with a dependencies field.

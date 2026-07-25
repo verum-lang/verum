@@ -40,7 +40,6 @@ use crate::{
 
 /// SMT-based dependent type checker
 ///
-
 /// Delegates to verum_smt::DependentTypeBackend for all verification.
 /// Maintains a Z3 context and translator for AST to SMT conversion.
 pub struct SmtDependentTypeChecker {

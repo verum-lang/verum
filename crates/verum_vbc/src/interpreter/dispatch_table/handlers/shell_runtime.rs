@@ -72,7 +72,6 @@ use crate::value::Value;
 /// destination register and short-circuit normal call dispatch);
 /// returns `None` for any function name that doesn't match.
 ///
-
 /// Hot-path invariant: this function does ONE string equality check
 /// (`func_name == "sh_check"`) and returns `None` for every other
 /// function call in the program. No allocation on the miss path.
@@ -648,7 +647,6 @@ fn build_err_spawn_failed(
 // ============================================================================
 
 /// Allocate a `List<Byte>` Verum value with the given content.
-
 /// Allocate a record type with exactly one field.
 fn alloc_record_one_field(
     state: &mut InterpreterState,

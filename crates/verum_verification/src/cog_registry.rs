@@ -142,7 +142,6 @@ impl std::fmt::Display for CogVersion {
 
 /// Per-cog reproducibility chain. Three blake3 hashes:
 ///
-
 ///  * `input_hash` — blake3 over (sorted source-file hashes +
 ///  lockfile + audit-report hashes).
 ///  * `build_env_hash` — blake3 over the pinned toolchain
@@ -151,7 +150,6 @@ impl std::fmt::Display for CogVersion {
 ///  * `output_hash` — blake3 over the compiled artefacts (.vbc
 ///  archives + cert files).
 ///
-
 /// A consumer fetches the cog, recomputes each hash from the
 /// downloaded payload, and compares against the envelope. Any
 /// mismatch ⇒ tampering or build-env drift.
@@ -729,7 +727,6 @@ use ed25519_dalek::{
 /// Canonical message bytes Ed25519 signs over for a given
 /// (name, version, envelope-chain-hash, attestation-kind) tuple.
 ///
-
 /// The four components are joined by `'\n'` separators — newline
 /// is forbidden in any of them (the four are all kebab-/lowercase-
 /// identifier-shaped or hex-encoded), so the join is unambiguously
@@ -910,7 +907,6 @@ impl CogVersion {
 /// Sign one attestation with an Ed25519 key. Returns the hex-
 /// encoded 128-character signature.
 ///
-
 /// `secret_key_hex` is a 64-character (32 byte) hex-encoded secret
 /// scalar — the same encoding `ed25519-dalek::SigningKey::from_bytes`
 /// expects after hex decoding.
@@ -931,7 +927,6 @@ pub fn sign_attestation(
 
 /// Verify one attestation against a publisher public key.
 ///
-
 /// `public_key_hex` is 64 hex chars (32 bytes); the attestation's
 /// `signature` field is 128 hex chars (64 bytes).
 pub fn verify_attestation(
@@ -1342,7 +1337,6 @@ impl MultiMirrorClient {
     /// `NotFound` and `Error` outcomes do NOT break consensus —
     /// only conflicting `Found` results do.
     ///
-
     /// **V0 / back-compat behaviour.** Use [`lookup_with_consensus_policy`]
     /// for the production gates (minimum quorum, identity match,
     /// signature verification under publisher pubkeys).
@@ -1358,7 +1352,6 @@ impl MultiMirrorClient {
     /// of the V0 chain-hash agreement. Returns `consensus = true`
     /// only when every gate passes:
     ///
-
     ///  1. Every `Found` verdict's manifest `chain_hash` is identical.
     ///  2. The `Found` count is ≥ `policy.min_quorum`.
     ///  3. When `policy.require_identity_match`, every `Found`'s

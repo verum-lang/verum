@@ -49,7 +49,6 @@ use crate::Text;
 
 /// A unique identifier for a source file.
 ///
-
 /// File IDs are assigned sequentially during compilation and used to
 /// distinguish spans from different files efficiently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -89,23 +88,18 @@ impl fmt::Display for FileId {
 
 /// A byte-offset based source span (primary representation).
 ///
-
 /// This is the canonical span representation used throughout the compiler.
 /// It's efficient (12 bytes), copyable, and suitable for AST nodes.
 ///
-
 /// # Performance Characteristics
 ///
-
 /// - Size: 12 bytes (3 × u32)
 /// - Copy: Yes (no heap allocation)
 /// - Comparison: O(1)
 /// - Merge: O(1)
 ///
-
 /// # Specification
 ///
-
 /// Performance: Spans are 12 bytes (3 x u32), Copy, and require < 5% memory
 /// overhead vs unsafe code. Comparison and merge are O(1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -149,10 +143,8 @@ impl Span {
 
     /// Merge two spans into one that covers both.
     ///
-
     /// # Panics
     ///
-
     /// Panics if spans are from different files.
     pub fn merge(self, other: Span) -> Span {
         assert_eq!(
@@ -185,7 +177,6 @@ impl Span {
     /// ancestor (#274). `resolver` looks up `SyntheticOrigin`
     /// entries by FileId — typically the session's source registry.
     ///
-
     /// Returns the topmost user-visible span (one whose FileId has
     /// no synthetic origin) plus the chain of synthetic kinds that
     /// were traversed, ordered from leaf (this span's file) to
@@ -193,7 +184,6 @@ impl Span {
     /// returns `(self, [])` — the empty chain signals "already
     /// resolved".
     ///
-
     /// Cycle defence: bails after `max_depth` iterations and
     /// returns the deepest reached span. Synthetic chains
     /// shouldn't loop in well-formed compiler output, but
@@ -229,7 +219,6 @@ impl Span {
 
 /// Result of `Span::resolve_to_user_source` (#274).
 ///
-
 /// Pairs the user-visible span with the chain of synthetic
 /// expansions that were traversed to reach it. The renderer uses
 /// the chain to construct labels like
@@ -259,22 +248,17 @@ impl fmt::Display for Span {
 
 /// A line/column based span for human-readable diagnostics.
 ///
-
 /// This representation is more expensive (heap allocation for file name)
 /// but provides better error messages. Use only for diagnostic output.
 ///
-
 /// # Design Notes
 ///
-
 /// - Lines and columns are 1-indexed (human-friendly)
 /// - Supports both single-line and multi-line spans
 /// - Lazy conversion from `Span` using source file information
 ///
-
 /// # Performance
 ///
-
 /// This type allocates a String for the file path, so avoid using it
 /// in hot paths. Convert from `Span` only when displaying errors.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,7 +311,6 @@ impl LineColSpan {
 
     /// Get the length of the span on a single line.
     ///
-
     /// Returns 0 for multi-line spans.
     pub fn length(&self) -> usize {
         if self.is_multiline() {
@@ -363,7 +346,6 @@ impl fmt::Display for LineColSpan {
 
 /// What kind of expansion produced a synthetic source file.
 ///
-
 /// Recorded on `SourceFile.synthetic_origin` so the diagnostic
 /// renderer can produce labels like "in macro expansion of @derive"
 /// vs "in monomorphization of `List<T>`".
@@ -396,7 +378,6 @@ impl SyntheticKind {
 
 /// Provenance record for a synthetic source file (#274).
 ///
-
 /// When a macro / derive / monomorphization / @delegate produces a
 /// new source artefact, the resulting `SourceFile` carries this
 /// origin pointing back at the user-source span that triggered the
@@ -404,7 +385,6 @@ impl SyntheticKind {
 /// transitively (via `Span::resolve_to_user_source`) to find the
 /// deepest user-visible location.
 ///
-
 /// Without this, errors in generated code surface with synthetic
 /// `FileId` locations like `<macro:Eq>:1:1` — opaque to users
 /// debugging their own program.
@@ -424,7 +404,6 @@ pub struct SyntheticOrigin {
 
 /// Information about a source file for span conversion.
 ///
-
 /// This type maintains the mapping between byte offsets and line/column
 /// positions, enabling efficient conversion from `Span` to `LineColSpan`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -501,7 +480,6 @@ impl SourceFile {
 
     /// Compute line start positions from source text.
     ///
-
     /// Supports all three line ending conventions:
     /// - LF (\n) - Unix/Linux
     /// - CRLF (\r\n) - Windows
@@ -539,7 +517,6 @@ impl SourceFile {
 
     /// Get the line and column for a byte offset.
     ///
-
     /// Returns (line, column) both 0-indexed for internal use.
     /// Add 1 to each for human-readable 1-indexed positions.
     pub fn line_col(&self, offset: u32) -> (u32, u32) {
@@ -556,7 +533,6 @@ impl SourceFile {
 
     /// Convert a byte-offset Span to a LineColSpan.
     ///
-
     /// Lines and columns in the result are 1-indexed.
     pub fn span_to_line_col(&self, span: Span) -> Option<LineColSpan> {
         if span.file_id != self.id {
@@ -643,7 +619,6 @@ use std::sync::RwLock;
 
 /// Global source file registry for span-to-location conversion.
 ///
-
 /// This registry allows the parser and other components to convert
 /// byte-offset Spans to human-readable file:line:column format.
 static GLOBAL_SOURCE_FILES: std::sync::OnceLock<RwLock<HashMap<u32, SourceFile>>> =
@@ -655,7 +630,6 @@ fn global_registry() -> &'static RwLock<HashMap<u32, SourceFile>> {
 
 /// Register a source file in the global registry.
 ///
-
 /// Call this when loading/parsing a source file to enable proper
 /// error message formatting.
 pub fn register_source_file(id: FileId, name: impl Into<String>, source: impl Into<String>) {
@@ -668,7 +642,6 @@ pub fn register_source_file(id: FileId, name: impl Into<String>, source: impl In
 
 /// Convert a Span to a LineColSpan using the global registry.
 ///
-
 /// Returns a human-readable location like "file.vr:42:15" if the
 /// source file is registered, or a fallback format otherwise.
 pub fn global_span_to_line_col(span: Span) -> LineColSpan {

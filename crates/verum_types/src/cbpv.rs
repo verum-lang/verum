@@ -228,11 +228,9 @@ impl CbpvComp {
 
 /// Single-step reduction. Implements the two CBPV β rules:
 ///
-
 /// * `force (thunk C) ↦ C`
 /// * `return V to x. C ↦ C[x := V]`
 ///
-
 /// Plus the standard left-to-right congruence on `App` (when the
 /// function position is a variable that hasn't been resolved, we
 /// can't reduce — the rule fires only when the function position

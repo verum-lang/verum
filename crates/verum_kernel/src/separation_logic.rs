@@ -74,11 +74,9 @@ use crate::proof_checker::Term;
 /// here as a kernel `Term` whose outermost binder is the implicit
 /// heap variable.
 ///
-
 /// Standard combinators are surfaced explicitly so the verification
 /// dispatcher can pattern-match on them:
 ///
-
 ///  - `emp` — the empty-heap predicate, true exactly when the
 ///  heap is empty.
 ///  - `points_to(addr, value)` — the singleton predicate, true when
@@ -191,7 +189,6 @@ impl HeapPredicate {
 /// obligation declares which capability the command needs over the
 /// touched region.
 ///
-
 /// **Soundness invariant**: a `Hoare`-triple-style obligation can
 /// only mutate regions whose capability is `Write` or `Own`.
 /// `Read` obligations cannot mutate; `None` obligations are pure.
@@ -236,7 +233,6 @@ impl Capability {
 
 /// A Hoare triple `{ pre } command { post }` with footprint metadata.
 ///
-
 /// `command_term` is a kernel `Term` representing the command being
 /// verified — function call, assignment, sequence, conditional, etc.
 /// The pre/post conditions are heap predicates; the
@@ -288,7 +284,6 @@ impl HoareTriple {
 /// of [`crate::verification_goal::VerificationGoal`]: every source
 /// of a stateful proof obligation produces this shape.
 ///
-
 /// **Frame rule**: when the verifier discharges a goal, the
 /// `frame_invariant` is preserved across the command — the
 /// separation-logic dispatcher checks `pre ∗ frame_invariant`
@@ -406,7 +401,6 @@ impl SeparationGoal {
 /// stateful goals (those need the separation-logic dispatcher; the
 /// pure-verification surface can't represent them).
 ///
-
 /// This is the bridge between the two verification surfaces: pure
 /// and stateful goals coexist; pure separation goals fall back to
 /// the unified dispatcher.
@@ -476,14 +470,12 @@ fn pure_predicate_to_term(p: &HeapPredicate) -> Option<Term> {
 /// carries enough metadata for audit-gate emission without re-running
 /// the dispatcher.
 ///
-
 /// **Soundness invariant**: only [`SeparationVerdict::Discharged`]
 /// commits to "the goal holds in the kernel". Every other variant
 /// either explicitly admits an IOU, rejects the goal as ill-formed,
 /// or routes to a downstream verification strategy that produces its
 /// own follow-up verdict.
 ///
-
 /// **Audit-gate use**: the verdict's variant tag feeds
 /// [`SeparationDispatcherStats`] so `verum audit
 /// --separation-dispatch` can enumerate the per-strategy load
@@ -558,11 +550,9 @@ impl SeparationVerdict {
 /// verification strategy and returns the resulting
 /// [`SeparationVerdict`].
 ///
-
 /// **V1 routing rules** (in priority order — the first matching rule
 /// wins):
 ///
-
 /// 1. **Capability mismatch** — the goal carries an IO capability
 ///  (`Read` / `Write` / `Own`) but the triple is pure (both pre
 ///  and post are heap-irrelevant). A pure command cannot need
@@ -579,13 +569,11 @@ impl SeparationVerdict {
 /// 6. **Default** — admit with IOU "no rule matches — frame
 ///  inference V1".
 ///
-
 /// **What this dispatcher deliberately does NOT do (yet)**: it does
 /// not run any strategy. It only RECOGNISES the shape of a goal and
 /// tags it for the strategy that should consume it. The strategies
 /// themselves land in the next slice (#161 follow-up).
 ///
-
 /// **Soundness invariant**: the dispatcher never returns
 /// [`SeparationVerdict::Discharged`] except for the one trivial case
 /// above. Adding a new closed-form discharge requires a kernel-rule
@@ -637,7 +625,6 @@ pub fn dispatch_separation_goal(goal: &SeparationGoal) -> SeparationVerdict {
 /// [`SeparationDispatcherStats`] through their corpus walk and
 /// invoke [`SeparationDispatcherStats::record`] on each verdict.
 ///
-
 /// Used by `verum audit --separation-dispatch` (next slice) to emit
 /// a structured per-verdict load distribution.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

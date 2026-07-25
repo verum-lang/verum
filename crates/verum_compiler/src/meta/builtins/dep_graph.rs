@@ -646,7 +646,6 @@ fn meta_dep_topological_order(
 
 /// Get optimized compilation order
 ///
-
 /// Same as topological order but with additional heuristics:
 /// - Leaf modules first (they have no dependencies)
 /// - Within the same depth level, sort alphabetically for determinism

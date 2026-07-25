@@ -15,23 +15,19 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// Infer the type of a [`CoreTerm`], returning the full type as a
 /// [`CoreTerm`] on success.
 ///
-
 /// This is the core LCF-style judgment `Γ ⊢ t : T` of the kernel.
 /// Every proof term that reaches the kernel is either accepted with a
 /// concrete inferred type, or rejected with a [`KernelError`]. There
 /// is no third option — no "unknown", no "probably", no fallback.
 ///
-
 /// The returned [`CoreTerm`] is the actual dependent type, **not** a
 /// shape abstraction: applying `infer` to a lambda yields the Π-type
 /// with the exact domain and codomain terms, so downstream App checks
 /// can destructure it. Use [`shape_of`] when only the head is needed
 /// (e.g. for error messages).
 ///
-
 /// ## Implemented rules
 ///
-
 /// * `Var x` — lookup in `ctx`; error if unbound.
 /// * `Universe l` — `Type(l+1)` (predicative hierarchy; Prop lives
 ///  at level 0 for the current bring-up).
@@ -62,7 +58,6 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// * `Glue` — lives in carrier's universe.
 /// * `Elim` — shape-level; returns `motive(scrutinee)`.
 ///
-
 /// The **only** constructor that still returns
 /// [`KernelError::NotImplemented`] is `SmtProof` — its dedicated
 /// replay path lives in [`replay_smt_cert`] and lands per-backend
@@ -75,7 +70,6 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// universe level for the named inductive instead of the
 /// pre-V8 hardcoded `Universe(Concrete(0))` fallback.
 ///
-
 /// The original [`infer`] is preserved as a backwards-compat
 /// shim that delegates here with an empty registry — pre-V8
 /// callers see exactly the same behaviour because empty-registry
@@ -107,7 +101,6 @@ pub fn infer(
 /// a [`CoreTerm::Axiom`] reference, the K-Coord-Cite rule
 ///  automatically fires:
 ///
-
 ///  * If the axiom has a registered coord and the calling
 ///  theorem has a coord, [`crate::check_coord_cite`] is
 ///  invoked. On rejection,
@@ -117,7 +110,6 @@ pub fn infer(
 ///  context disabled — graceful degradation, preserves
 ///  pre-V8 behaviour for legacy callers).
 ///
-
 /// `allow_tier_jump` corresponds to the
 /// `@require_extension(vfe_3)` (Categorical coherence K-Universe-Ascent)
 /// escape: when the calling module imports the κ-tier-jump
@@ -125,7 +117,6 @@ pub fn infer(
 /// admitted. The kernel itself cannot detect the import; the
 /// caller signals via this flag.
 ///
-
 /// This is the production-path entry: gradual-verification
 /// drivers + audit walkers should call this when they have
 /// the calling theorem's coord in hand. Backwards-compat
@@ -845,7 +836,6 @@ pub fn check(
 /// definitional comparison of the two types (not shape-head). This is
 /// the LCF-style verification gate that downstream crates call.
 ///
-
 /// **M-VVA Sub-2.3 (2026-04-28):** uses `definitional_eq_with_axioms`
 /// instead of `structural_eq`. Lifting is monotone — every pair
 /// admitted by `structural_eq` is admitted by `definitional_eq` per

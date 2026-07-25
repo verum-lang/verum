@@ -57,11 +57,9 @@ use verum_common::Map;
 
 /// CBGR reference tier for memory safety validation.
 ///
-
 /// This is the canonical definition used throughout the compiler.
 /// VBC codegen should convert this to its internal tier representation.
 ///
-
 /// | Tier | Overhead | Description |
 /// |------|----------|-------------|
 /// | Tier0 | ~15ns | Runtime CBGR validation |
@@ -85,15 +83,12 @@ pub enum CbgrTier {
 
 /// Unified reference tier with detailed reason tracking.
 ///
-
 /// This is the canonical tier representation used throughout the compiler.
 /// It combines the simplicity of `CbgrTier` (Tier0/Tier1/Tier2) with
 /// detailed reason tracking for Tier0 decisions.
 ///
-
 /// # Performance Impact
 ///
-
 /// | Tier | Overhead | Description |
 /// |------|----------|-------------|
 /// | Tier0 | ~15ns | Runtime CBGR validation |
@@ -103,7 +98,6 @@ pub enum CbgrTier {
 pub enum ReferenceTier {
     /// Tier 0: CBGR-managed reference with runtime validation (~15ns overhead).
     ///
-
     /// This is the conservative default. References are kept at Tier 0 when:
     /// - Escape analysis cannot prove safety
     /// - Reference crosses async boundaries
@@ -116,14 +110,12 @@ pub enum ReferenceTier {
 
     /// Tier 1: Compiler-proven safe reference (0ns overhead).
     ///
-
     /// References are promoted to Tier 1 when escape analysis proves
     /// they don't escape the current scope and dominance is satisfied.
     Tier1,
 
     /// Tier 2: Unsafe reference with manual safety proof (0ns overhead).
     ///
-
     /// Only used when explicitly marked as `&unsafe T` in source code.
     /// The programmer takes responsibility for memory safety.
     Tier2,
@@ -217,7 +209,6 @@ impl fmt::Display for ReferenceTier {
 
 /// Reason why a reference is kept at Tier 0.
 ///
-
 /// This provides detailed diagnostics for understanding why a reference
 /// couldn't be promoted to Tier 1 (zero-overhead).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -317,7 +308,6 @@ impl fmt::Display for Tier0Reason {
 
 /// Unified statistics for tier analysis.
 ///
-
 /// This replaces both `PluginStatistics` (old API) and `TierAnalysisStats` (new API)
 /// with a single, comprehensive statistics structure.
 #[derive(Debug, Clone, Default)]
@@ -442,7 +432,6 @@ impl fmt::Display for TierStatistics {
 
 /// Reference identifier for tier tracking.
 ///
-
 /// This is a unified ID that can represent references from different
 /// analysis stages (AST span, MIR local, VBC register).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

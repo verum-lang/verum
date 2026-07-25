@@ -54,7 +54,6 @@ pub type ContentHash = u64;
 
 /// Registry for compile-time asset loading
 ///
-
 /// Manages:
 /// - Loading assets from the project directory
 /// - Caching loaded assets by content hash
@@ -284,14 +283,12 @@ impl AssetRegistry {
 
     /// Load an asset at compile-time
     ///
-
     /// # Security
     /// - Validates path is relative
     /// - Checks for path traversal
     /// - Validates against allowed/denied paths
     /// - Checks size limits
     ///
-
     /// # Caching
     /// Uses content-hash based caching for efficiency
     pub fn load_asset(&self, path: &str) -> Result<Vec<u8>, Diagnostic> {
@@ -360,7 +357,6 @@ impl AssetRegistry {
 
     /// Add content to cache with eviction if limits are exceeded.
     ///
-
     /// MEMORY SAFETY: This method ensures the cache never exceeds configured
     /// limits by evicting oldest entries when necessary. This prevents
     /// unbounded memory growth in long-running compilation sessions or LSP.
@@ -523,7 +519,6 @@ impl AssetRegistry {
 
     /// Compute content hash using Blake3 (truncated to u64 for cache keys)
     ///
-
     /// Blake3 provides:
     /// - Cryptographic security guarantees
     /// - 3-10x faster than SHA-256

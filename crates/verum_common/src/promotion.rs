@@ -108,7 +108,6 @@ impl fmt::Display for RefId {
 
 /// Promotion strategy - determines when to promote references
 ///
-
 /// Determines when to promote references between CBGR tiers. Each strategy
 /// evaluates a PromotionContext to decide if a reference should be upgraded
 /// from &T (runtime-checked) to &checked T (compile-time proven safe).
@@ -116,7 +115,6 @@ impl fmt::Display for RefId {
 pub enum PromotionStrategy {
     /// Promote after N reference accesses
     ///
-
     /// # Example
     /// ```
     /// use verum_common::promotion::PromotionStrategy;
@@ -127,7 +125,6 @@ pub enum PromotionStrategy {
 
     /// Promote if static analysis confidence ≥ threshold
     ///
-
     /// # Example
     /// ```
     /// use verum_common::promotion::PromotionStrategy;
@@ -138,10 +135,8 @@ pub enum PromotionStrategy {
 
     /// Promote if hotness score ≥ threshold
     ///
-
     /// Hotness combines call frequency and execution time.
     ///
-
     /// # Example
     /// ```
     /// use verum_common::promotion::PromotionStrategy;
@@ -152,7 +147,6 @@ pub enum PromotionStrategy {
 
     /// Promote based on escape analysis result
     ///
-
     /// # Example
     /// ```
     /// use verum_common::promotion::{PromotionStrategy, EscapeAnalysisResult};
@@ -163,7 +157,6 @@ pub enum PromotionStrategy {
 
     /// Promote based on runtime profile data
     ///
-
     /// # Example
     /// ```
     /// use verum_common::promotion::{PromotionStrategy, ProfileData};
@@ -180,16 +173,12 @@ pub enum PromotionStrategy {
 impl PromotionStrategy {
     /// Check if promotion should occur given the context
     ///
-
     /// # Arguments
     ///
-
     /// * `context` - Promotion context with all decision parameters
     ///
-
     /// # Returns
     ///
-
     /// `true` if promotion should occur, `false` otherwise
     pub fn should_promote(&self, context: &PromotionContext) -> bool {
         match self {
@@ -416,21 +405,16 @@ impl Default for PromotionContext {
 
 /// Promotion policy trait - unified interface for promotion decisions
 ///
-
 /// Implement this trait to create custom promotion policies.
 pub trait PromotionPolicy {
     /// Check if promotion should occur
     ///
-
     /// # Arguments
     ///
-
     /// * `context` - Promotion context with all decision parameters
     ///
-
     /// # Returns
     ///
-
     /// `true` if promotion should occur, `false` otherwise
     fn should_promote(&self, context: &PromotionContext) -> bool;
 
@@ -500,7 +484,6 @@ impl PromotionPolicy for StandardPromotionPolicy {
 
 /// Composite promotion policy - combines multiple strategies
 ///
-
 /// Promotes if ANY of the strategies recommend promotion.
 #[derive(Debug, Clone)]
 pub struct CompositePromotionPolicy {

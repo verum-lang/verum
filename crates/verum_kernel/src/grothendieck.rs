@@ -147,7 +147,6 @@ impl GrothendieckConstruction {
     /// `cartesian_lift_count` matches the expected lift cardinality
     /// (= number of base 1-cells × number of fibre objects).
     ///
-
     /// HTT 5.1.4 proves this property holds for any
     /// `SIndexedDiagram` whose fibres are uniformly accessible.
     pub fn is_cartesian_fibration(&self) -> bool {
@@ -164,10 +163,8 @@ impl GrothendieckConstruction {
 
 /// Build the Grothendieck construction `∫D` from an S-indexed diagram.
 ///
-
 /// **Algorithm (HTT 5.1.4 V0 finitary surface):**
 ///
-
 ///  1. **Preconditions check**: diagram has uniformly accessible fibres.
 ///  2. **Total objects**: enumerate `(b, x)` pairs by walking the
 ///  diagram's `(b, fibre)` data and treating each fibre as a
@@ -179,11 +176,9 @@ impl GrothendieckConstruction {
 ///  5. **Accessibility preservation**: the result inherits
 ///  `D.accessibility_level` per AR 1.26.
 ///
-
 /// Returns `None` if the diagram fails preconditions (empty fibres
 /// or non-uniform accessibility).
 ///
-
 /// **Soundness**: matches HTT 5.1.4's structural construction
 /// modulo V1's ∞-categorical higher-cell content.
 pub fn build_grothendieck(diagram: &SIndexedDiagram) -> Option<GrothendieckConstruction> {
@@ -216,7 +211,6 @@ pub fn build_grothendieck(diagram: &SIndexedDiagram) -> Option<GrothendieckConst
 /// Verify that a Grothendieck construction preserves accessibility
 /// from its input diagram (HTT 5.1.4 + AR 1.26).
 ///
-
 /// Returns `true` iff the construction's `accessibility_level`
 /// matches the input diagram's. Used by Lemma 3.4 to discharge the
 /// "S_S^global ⊇ ∫D when D is S-indexed" claim.

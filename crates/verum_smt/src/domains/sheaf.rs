@@ -67,7 +67,6 @@ pub enum DescentResult {
 
 /// Verify the descent condition for a given problem.
 ///
-
 /// This is a lightweight syntactic check at the SMT-encoding level;
 /// the actual descent-preservation proof requires the concrete
 /// ∞-sheaf implementation to discharge its `@verify(formal) descent`

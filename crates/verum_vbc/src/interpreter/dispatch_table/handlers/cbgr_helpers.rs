@@ -356,11 +356,9 @@ pub(super) fn regref_generation_matches(ref_generation: u32, current_generation:
 
 /// Validates CBGR generation and epoch for a register-based reference.
 ///
-
 /// Returns `Ok(())` if the reference is valid, or `Err(Panic)` if
 /// use-after-free is detected (generation or epoch mismatch).
 ///
-
 /// The epoch check prevents the ABA problem where generation wraps around
 /// to a previously-used value after 2^32 allocations.
 #[inline(always)]
@@ -406,18 +404,15 @@ pub(super) fn validate_cbgr_generation(
 
 /// Validates epoch using window comparison to handle 16-bit truncation.
 ///
-
 /// The 64-bit global epoch is truncated to 16-bit when stored in references
 /// (ThinRef, FatRef). This creates a potential ABA problem where the epoch
 /// wraps every 65536 operations.
 ///
-
 /// Window validation solves this by checking if the reference epoch is within
 /// a valid window of the current epoch. References are considered valid if:
 /// 1. The truncated epochs match exactly, OR
 /// 2. The reference epoch is within the valid window (accounting for wraparound)
 ///
-
 /// The window size is configurable but defaults to 32768 (half of 16-bit range),
 /// allowing references to remain valid for ~32K epoch advances.
 #[inline(always)]

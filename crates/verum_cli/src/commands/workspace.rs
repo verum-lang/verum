@@ -970,7 +970,6 @@ fn extract_function_name(line: &str) -> Option<Text> {
 
 /// Run a single test
 ///
-
 /// Note: Test execution is being migrated to VBC-first architecture.
 /// Currently returns success for discovered tests (parse validation only).
 fn run_test(test: &Test, _nocapture: bool) -> Result<()> {

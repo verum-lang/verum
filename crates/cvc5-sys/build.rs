@@ -122,7 +122,6 @@ fn main() {
 
 /// Link against a pre-built CVC5 installation at `root`.
 ///
-
 /// Expects the standard layout:
 /// ```text
 /// <root>/
@@ -210,7 +209,6 @@ fn link_system() -> Result<(), String> {
 
 /// Build CVC5 from vendored source and statically link it.
 ///
-
 /// This is the preferred mode for distribution: it produces a self-contained
 /// binary with zero runtime dependencies on external SMT solvers.
 #[cfg(any(feature = "vendored", feature = "static"))]
@@ -416,7 +414,6 @@ fn build_vendored() {
 
 /// Link CVC5's statically-bundled dependencies.
 ///
-
 /// CVC5 ships with several dependencies that must be linked in the correct order:
 /// - `cadical`: SAT solver (BSD)
 /// - `antlr4-runtime`: Parser runtime (BSD)
@@ -443,7 +440,6 @@ fn link_static_deps() {
 
 /// Link the C++ standard library required by CVC5.
 ///
-
 /// Platform-specific:
 /// - macOS: `libc++` (Clang)
 /// - Linux: `libstdc++` (GCC) or `libc++` (Clang via CXX=clang++)
@@ -495,7 +491,6 @@ fn lib_name(base: &str, static_lib: bool) -> String {
 
 /// Return `on` if feature `gpl` is enabled, else `off`.
 ///
-
 /// Used to toggle GPL-licensed dependencies (CLN, CryptoMiniSat).
 /// The Verum project is Apache-2.0 licensed, so GPL components are off by default.
 #[cfg(any(feature = "vendored", feature = "static"))]
@@ -514,14 +509,12 @@ fn bool_define(b: bool) -> &'static str {
 
 /// Detect the GMP installation prefix.
 ///
-
 /// Checks (in order):
 /// 1. `GMP_PREFIX` environment variable
 /// 2. Homebrew on Apple Silicon (`/opt/homebrew`)
 /// 3. Homebrew on Intel Mac / MacPorts (`/usr/local`)
 /// 4. Linux system (`/usr`)
 ///
-
 /// Returns `None` if GMP headers/lib are not found — the CMake build will
 /// then fall back to its own detection (which may fail and produce a
 /// clearer error for the user).
@@ -559,7 +552,6 @@ fn detect_gmp_prefix() -> Option<String> {
 
 /// Return the number of logical CPU cores on the build machine.
 ///
-
 /// Falls back to 4 if detection fails (reasonable default for CI).
 fn num_logical_cpus() -> u32 {
     std::thread::available_parallelism()

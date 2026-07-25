@@ -94,7 +94,6 @@ impl MetaLinter {
 
     /// Lint a meta function declaration
     ///
-
     /// Returns a LintResult indicating whether the function is safe
     /// and any detected issues.
     pub fn lint_function(&self, func: &FunctionDecl) -> LintResult {

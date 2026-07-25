@@ -190,7 +190,6 @@ impl MetricsError {
 
 /// Enhanced code metrics for transition analysis
 ///
-
 /// Comprehensive code characteristics for automated transition recommendations
 /// between verification levels. Includes cyclomatic complexity, dependency count,
 /// change frequency, test coverage, and assertion density.
@@ -315,7 +314,6 @@ impl EnhancedCodeMetrics {
 
     /// Calculate maintainability index (0-100)
     ///
-
     /// Based on Halstead and McCabe metrics.
     pub fn maintainability_index(&self) -> f64 {
         let loc = self.lines_of_code.max(1) as f64;
@@ -335,7 +333,6 @@ impl EnhancedCodeMetrics {
 
     /// Calculate risk score for verification transition (0-10)
     ///
-
     /// Higher scores indicate more risk in transitioning.
     pub fn transition_risk_score(&self) -> f64 {
         let mut risk = 0.0;
@@ -437,23 +434,18 @@ impl GitHistory {
 
     /// Load git history from repository
     ///
-
     /// Uses git commands to extract commit history, author information,
     /// and change frequency for verification metrics.
     ///
-
     /// # Algorithm
     ///
-
     /// 1. Verify git repository exists at path
     /// 2. Run `git log` to extract commits for each file
     /// 3. Parse commit timestamps and authors
     /// 4. Build per-file commit and author maps
     ///
-
     /// # Performance
     ///
-
     /// - Initial load: O(n * log(commits)) where n = files
     /// - Uses batch git commands to minimize process spawning
     /// - Caches results for subsequent queries
@@ -541,7 +533,6 @@ impl GitHistory {
 
     /// Load git history for a specific set of files
     ///
-
     /// More efficient when only analyzing a subset of files.
     pub fn load_for_files(repo_path: &Path, files: &[PathBuf]) -> MetricsResult<Self> {
         use std::process::Command;
@@ -619,13 +610,11 @@ impl GitHistory {
 
     /// Calculate a "hotness" score for a file based on recent activity
     ///
-
     /// Score considers:
     /// - Number of recent commits (last 30 days weighted higher)
     /// - Number of unique authors
     /// - Change frequency
     ///
-
     /// Returns a score from 0.0 (cold) to 1.0 (hot)
     pub fn hotness_score(&self, file: &Path) -> f64 {
         let now = std::time::SystemTime::now()
@@ -729,7 +718,6 @@ impl CoverageData {
 
     /// Load coverage from lcov format file
     ///
-
     /// LCOV format:
     /// ```text
     /// SF:<file path>
@@ -857,7 +845,6 @@ impl ProfilingData {
 
     /// Load profiling data from callgrind format
     ///
-
     /// Callgrind format:
     /// ```text
     /// fn=<function name>
@@ -1340,7 +1327,6 @@ impl MetricsVisitor {
 
 /// Calculate cyclomatic complexity from a control flow graph
 ///
-
 /// McCabe's cyclomatic complexity: M = E - N + 2P
 /// Where:
 /// - E = number of edges
@@ -1391,7 +1377,6 @@ pub fn analyze_loop_nesting(cfg: &EscapeCFG) -> u32 {
 
 /// Main metrics collector for transition analysis
 ///
-
 /// Collects comprehensive code metrics from multiple sources:
 /// - Static analysis of AST/CFG
 /// - Git history for change frequency
@@ -1586,7 +1571,6 @@ impl Default for CodeMetricsCollector {
 
 /// Analyze a function and return enhanced metrics
 ///
-
 /// Convenience function for quick analysis without collector setup.
 pub fn analyze_function(func: &FunctionDecl) -> EnhancedCodeMetrics {
     let mut collector = CodeMetricsCollector::new();

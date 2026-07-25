@@ -32,7 +32,6 @@ use super::{DeclKind, DeclarationHeader, ProofReplayBackend, ReplayError, Target
 
 /// Coq proof-replay backend.
 ///
-
 /// The struct is stateless; per-target customisation goes through
 /// the `lower` method. Construct via [`Self::new`] or use the
 /// `default_registry` convenience that pre-registers it.

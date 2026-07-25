@@ -219,7 +219,6 @@ impl BridgeAudit {
 /// Bridge invocation: confluence of modal rewrites. Admits without
 /// re-deriving — V3 will replace this with a structural algorithm.
 ///
-
 /// Returns the LHS unchanged (the bridge does not perform any
 /// reduction; it is purely an audit-recording hook). Callers that
 /// need the modal subterm normalized should still apply the
@@ -271,7 +270,6 @@ pub fn admit_eps_mu_tau_witness(
 /// Bridge invocation: extended Drake reflection beyond the κ_2
 /// tight-bound terminus (Diakrisis Lemma 131.L4).
 ///
-
 /// K-Universe-Ascent invokes this when verifying ascents that
 /// reach an inaccessible κ_n with n ≥ 3, or that span more than
 /// one tier in a single step (κ_s → κ_t with t > s+1).

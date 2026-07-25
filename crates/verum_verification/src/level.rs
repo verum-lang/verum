@@ -23,11 +23,9 @@ use verum_common::Text;
 
 /// Verification level for gradual verification
 ///
-
 /// This represents the three-tier verification system in Verum, providing
 /// a smooth spectrum from runtime checking to formal verification.
 ///
-
 /// - Runtime: all safety checks executed at runtime
 /// - Static: conservative static analysis proves safety, checks eliminated in AOT
 /// - Proof: SMT solver proves correctness, mathematical guarantee
@@ -35,7 +33,6 @@ use verum_common::Text;
 pub enum VerificationLevel {
     /// Runtime validation (default)
     ///
-
     /// - All safety checks executed at runtime
     /// - CBGR overhead: ~100ns (Tier 0), ~15ns (Tier 1-3)
     /// - Refinement validation: ~5ns per check
@@ -45,7 +42,6 @@ pub enum VerificationLevel {
 
     /// Static verification (AOT optimization)
     ///
-
     /// - Conservative static analysis proves safety
     /// - Checks eliminated when proven safe (0ns)
     /// - Fallback to runtime checks if proof fails
@@ -54,7 +50,6 @@ pub enum VerificationLevel {
 
     /// Proof verification (formal)
     ///
-
     /// - Full SMT-based formal verification
     /// - Mathematical guarantees of correctness
     /// - Compile error if proof fails (no fallback)
@@ -99,10 +94,8 @@ impl VerificationLevel {
 
     /// Parse from `@verify(...)` annotation.
     ///
-
     /// Verum has **two layers** of verification intent:
     ///
-
     /// 1. `VerificationLevel` (this enum) — the coarse compile-time
     ///  gradient: Runtime / Static / Proof. Drives pipeline-level
     ///  decisions (SMT on? runtime checks emitted? proof-cert required?).
@@ -111,7 +104,6 @@ impl VerificationLevel {
     ///  Synthesize. Drives per-obligation solver routing, cross-validation,
     ///  timeout scaling, synthesis dispatch.
     ///
-
     /// `from_annotation` accepts every grammar-legal `verify_strategy` name
     /// (grammar/verum.ebnf §2 `verify_strategy`) and projects it onto the
     /// 3-level gradient. The finer strategy nuances (`fast`/`thorough`/
@@ -119,7 +111,6 @@ impl VerificationLevel {
     /// via `VerifyStrategy::from_attribute_value` — callers that need the
     /// full operational strategy should use that directly.
     ///
-
     /// Returns `None` only for unknown names, so tooling can emit a
     /// diagnostic on truly invalid annotations (never on valid grammar).
     pub fn from_annotation(annotation: &str) -> Option<Self> {
@@ -170,29 +161,23 @@ impl VerificationLevel {
 
     /// Evaluate the outcome of a proof-attempt at this level.
     ///
-
     /// This encodes the single policy decision that distinguishes the
     /// three levels at the compile-time / runtime boundary:
     ///
-
     /// | Level | Proof succeeds | Proof fails |
     /// |----------|----------------|---------------------|
     /// | Runtime | no SMT call | no SMT call |
     /// | Static | check elided | fall back → runtime |
     /// | Proof | check elided | **hard compile fail** |
     ///
-
     /// ### Runtime level
     ///
-
     /// Runtime never attempts a proof — we pre-short-circuit here and
     /// always return `EmitRuntimeCheck`. The compiler consumer should
     /// honor this without ever invoking the SMT backend.
     ///
-
     /// ### Static level
     ///
-
     /// Static is the "best-effort optimisation" level. If the backend
     /// proves the obligation, the check is elided. If the backend
     /// times out or returns *Unknown* / *Sat*, the compiler emits the
@@ -201,14 +186,11 @@ impl VerificationLevel {
     /// succeeds. This matches the docs at
     /// `docs/verification/levels.md §2`.
     ///
-
     /// ### Proof level
     ///
-
     /// Proof is the "no fallback" contract. A failed proof is a hard
     /// compile error (`E502`), never silently demoted to runtime.
     ///
-
     /// The `ProofAttempt::Unattempted` variant is for call sites that
     /// want to short-circuit (e.g. when SMT is globally disabled via
     /// `--no-smt`): Runtime / Static fall back, Proof hard-fails.
@@ -442,7 +424,6 @@ impl fmt::Display for VerificationLevel {
 
 /// Verification mode combining level with configuration
 ///
-
 /// This extends the basic verification level with configuration options
 /// like timeout, solver choice, and proof certificate generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -499,7 +480,6 @@ impl Default for VerificationMode {
 
 /// Configuration for verification
 ///
-
 /// Provides fine-grained control over verification behavior including
 /// timeouts, solver selection, and certificate generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -680,7 +660,6 @@ impl fmt::Display for SolverChoice {
 
 /// Runtime verification level (trait-based approach)
 ///
-
 /// Marker trait for runtime verification - all checks at runtime
 pub trait RuntimeLevel {
     /// Get runtime overhead in nanoseconds
@@ -696,7 +675,6 @@ pub trait RuntimeLevel {
 
 /// Static verification level (trait-based approach)
 ///
-
 /// Marker trait for static verification - SMT-based proof at compile time
 pub trait StaticLevel {
     /// Returns true (static level uses SMT)
@@ -717,7 +695,6 @@ pub trait StaticLevel {
 
 /// Proof verification level (trait-based approach)
 ///
-
 /// Marker trait for proof verification - formal proofs required
 pub trait ProofLevel {
     /// Returns true (proof level uses SMT)

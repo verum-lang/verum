@@ -64,7 +64,6 @@ pub enum CogArtifactKind {
 
 /// Resolves external cog names to their filesystem locations.
 ///
-
 /// Built from Verum.lock (resolved dependencies) or Verum.toml (path dependencies).
 /// Used by ModuleLoader to dispatch cross-cog mount statements.
 #[derive(Debug, Clone)]
@@ -159,7 +158,6 @@ impl CogResolver {
 
     /// Build a CogResolver from a list of locked cog entries.
     ///
-
     /// For each locked cog:
     /// - Registry source: maps to ~/.verum/cache/{name}-{version}/src/
     /// - Path source: uses the path directly

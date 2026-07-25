@@ -161,7 +161,6 @@ impl SerializedSpan {
 
 /// Serializable token kind discriminant.
 ///
-
 /// This maps to verum_lexer::TokenKind variants. We use a compact u16 discriminant
 /// followed by variant-specific payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -971,7 +970,6 @@ impl SerializedToken {
 
 /// Serialize a list of tokens to binary format.
 ///
-
 /// This is the primary serialization entry point for the codegen phase.
 pub fn serialize_tokens(
     tokens: &[verum_lexer::Token],
@@ -998,7 +996,6 @@ pub fn serialize_tokens(
 
 /// Deserialize tokens from binary format.
 ///
-
 /// This is the primary deserialization entry point for the extraction phase.
 pub fn deserialize_tokens(
     data: &[u8],
@@ -1043,7 +1040,6 @@ pub fn deserialize_tokens(
 
 /// Estimate the serialized size for pre-allocation.
 ///
-
 /// Returns an upper bound on the serialized size for a given number of tokens.
 pub fn estimate_serialized_size(token_count: usize) -> usize {
     // Header (16) + optional span (12) + tokens (avg ~32 bytes each)
@@ -1056,7 +1052,6 @@ pub fn estimate_serialized_size(token_count: usize) -> usize {
 
 /// Create a TokenStream heap object from tokens.
 ///
-
 /// This allocates a heap object containing the serialized TokenStream data.
 /// The object has TypeId::TOKEN_STREAM and can be passed as a Value.
 pub fn create_token_stream_object(
@@ -1079,22 +1074,17 @@ pub fn create_token_stream_object(
 
 /// Create a TokenStream heap object directly from serialized bytes.
 ///
-
 /// This is the optimal path for the MetaQuote instruction, where the
 /// serialized TokenStream bytes are already stored in the constant pool.
 /// Unlike `create_token_stream_object`, this avoids redundant re-serialization.
 ///
-
 /// # Arguments
 ///
-
 /// * `heap` - The interpreter heap for allocation
 /// * `serialized_data` - Pre-serialized TokenStream bytes (from constant pool)
 ///
-
 /// # Performance
 ///
-
 /// This is O(n) where n = serialized data size, just for the copy.
 /// No parsing or re-serialization occurs.
 pub fn create_token_stream_object_from_bytes(
@@ -1109,7 +1099,6 @@ pub fn create_token_stream_object_from_bytes(
 
 /// Extract TokenStream from a heap object.
 ///
-
 /// This reads the serialized data from a heap object and deserializes it
 /// back into a list of tokens.
 pub fn extract_token_stream_from_object(

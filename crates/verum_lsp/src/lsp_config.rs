@@ -160,7 +160,6 @@ impl SmtSolverChoice {
 
 /// All LSP-side knobs exposed by the client.
 ///
-
 /// Field names mirror the `initializationOptions` keys the VS Code extension
 /// sends in `extension.ts::startLanguageClient`. Unknown / missing keys fall
 /// back to `Default` values, so older clients remain forward-compatible.
@@ -356,7 +355,6 @@ impl LspConfig {
 
 /// Thread-safe shared view for components that read the config.
 ///
-
 /// Uses `RwLock` so concurrent reads (every hover / validate call) are
 /// lock-free after initialization; writes happen only from `initialize` and
 /// `workspace/didChangeConfiguration`.

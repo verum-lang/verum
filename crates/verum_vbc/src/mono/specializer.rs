@@ -236,7 +236,6 @@ pub struct SpecializerStats {
 
 /// Industrial-grade bytecode specializer for generic functions.
 ///
-
 /// Transforms generic VBC bytecode to specialized bytecode by:
 /// - Substituting type parameters with concrete types
 /// - Rewriting generic calls to direct calls
@@ -308,7 +307,6 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes a function's bytecode.
     ///
-
     /// Returns the specialized function or an error.
     pub fn specialize(
         &mut self,
@@ -431,13 +429,10 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes a CALL_G instruction.
     ///
-
     /// Specializes a CALL_V instruction.
     ///
-
     /// CALL_V format: dst:reg receiver:reg protocol:varint method_idx:u8 arg_count:u8 [args:reg...]
     ///
-
     /// Resolve a `dyn:Protocol.method` method-id string to the concrete
     /// `ConcreteType.method` string id via the substitution's primary type
     /// parameter.  Returns None if the token is not a dyn-dispatch, the primary
@@ -847,7 +842,6 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Looks up a protocol implementation for a concrete type.
     ///
-
     /// Returns the function ID for the method if the type implements the protocol.
     fn lookup_protocol_impl(
         &self,
@@ -879,13 +873,10 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Specializes a NEW_G instruction.
     ///
-
     /// Specializes generic arithmetic operations.
     ///
-
     /// Specializes generic comparison operations.
     ///
-
     /// Specializes SIZE_OF_G instruction.
     ///
 
@@ -947,7 +938,6 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Gets or creates an instantiated type.
     ///
-
     /// This is a CRITICAL operation for monomorphization correctness.
     /// Creates a new concrete type for a generic type instantiated with specific type arguments.
     fn get_or_create_instantiated_type(&mut self, base: TypeId, args: &[TypeRef]) -> TypeId {
@@ -1075,7 +1065,6 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Infers operand type from substitution context.
     ///
-
     /// Checks all type parameters in the substitution to find a concrete numeric type
     /// that can be used for arithmetic specialization.
     fn infer_operand_type_from_context(&self) -> Option<TypeRef> {
@@ -1106,7 +1095,6 @@ impl<'a> BytecodeSpecializer<'a> {
 
     /// Updates register type tracking after an instruction.
     ///
-
     /// This is used for devirtualization - knowing the concrete type of a register
     /// allows us to resolve virtual calls statically.
     fn _track_register_type(&mut self, dst: u16, type_ref: TypeRef) {

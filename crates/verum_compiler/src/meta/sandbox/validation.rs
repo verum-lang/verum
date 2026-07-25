@@ -225,7 +225,6 @@ impl ExpressionValidator {
 
     /// Validate an async meta function for I/O operations
     ///
-
     /// CRITICAL: meta async fn is allowed for parallelism but FORBIDS all I/O
     pub fn validate_async_meta_fn(&self, func: &FunctionDecl) -> Result<(), SandboxError> {
         if !func.is_async || !func.is_meta {

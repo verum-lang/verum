@@ -115,7 +115,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower memcpy to LLVM intrinsic.
     ///
-
     /// Generates: `llvm.memcpy.p0.p0.i64(dst, src, size, isvolatile=false)`
     pub fn lower_memcpy(
         &mut self,
@@ -145,7 +144,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower memmove to LLVM intrinsic.
     ///
-
     /// Generates: `llvm.memmove.p0.p0.i64(dst, src, size, isvolatile=false)`
     pub fn lower_memmove(
         &mut self,
@@ -173,7 +171,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower memset to LLVM intrinsic.
     ///
-
     /// Generates: `llvm.memset.p0.i64(dst, val, size, isvolatile=false)`
     pub fn lower_memset(
         &mut self,
@@ -211,10 +208,8 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower secure-zero to a *volatile* `llvm.memset` intrinsic.
     ///
-
     /// Generates: `llvm.memset.p0.i64(dst, 0, size, isvolatile=true)`
     ///
-
     /// The `i1 true` volatile flag is the load-bearing security
     /// property: LLVM's optimiser proves the buffer is dead
     /// immediately after the memset (we always call this just before
@@ -224,7 +219,6 @@ impl<'ctx> FfiLowering<'ctx> {
     /// observable side-effects and survive every optimisation pass —
     /// including `-O3` with full LTO.
     ///
-
     /// Security requirement (TLS/QUIC audit, zeroise-on-drop): key
     /// material MUST be zeroised before release, and the zeroise MUST
     /// survive every optimisation level. The regression harness in
@@ -260,7 +254,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower memcmp to libc call.
     ///
-
     /// Returns: negative if ptr1 < ptr2, 0 if equal, positive otherwise
     pub fn lower_memcmp(
         &mut self,
@@ -392,7 +385,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower raw pointer dereference (load).
     ///
-
     /// Generates LLVM load instruction bypassing CBGR checks.
     pub fn lower_deref_raw(
         &mut self,
@@ -589,7 +581,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower a direct FFI call with the specified calling convention.
     ///
-
     /// # Arguments
     /// * `builder` - LLVM builder
     /// * `module` - LLVM module (for declaring external functions)
@@ -597,7 +588,6 @@ impl<'ctx> FfiLowering<'ctx> {
     /// * `args` - Arguments to pass
     /// * `calling_convention` - The calling convention to use
     ///
-
     /// # Returns
     /// The return value (or unit if void)
     pub fn lower_ffi_call(
@@ -656,7 +646,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Declare an external FFI function in the module.
     ///
-
     /// This is used to resolve symbols at link time rather than runtime.
     pub fn declare_external_function(
         &mut self,
@@ -685,7 +674,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Lower errno get operation.
     ///
-
     /// On most platforms, this accesses `__errno_location()` or `_errno()`.
     pub fn lower_get_errno(
         &mut self,
@@ -834,13 +822,11 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Libc-free `malloc(size) -> ptr`.
     ///
-
     /// Routes through `verum_os_alloc` (mmap on Linux/macOS,
     /// VirtualAlloc on Windows) so the produced binary doesn't link
     /// libc malloc. Pre-fix this declared the libc symbol, forcing
     /// every Verum binary to drag in libc.so.6.
     ///
-
     /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_malloc(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         let name = "verum_os_alloc";
@@ -858,21 +844,18 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Libc-free `free(ptr)`.
     ///
-
     /// Routes through a `verum_internal_free(ptr)` wrapper that
     /// reads the size from the allocation header (CBGR layout) and
     /// dispatches to `verum_os_free(ptr, size)` (munmap on Linux,
     /// VirtualFree on Windows). Pre-fix this declared the libc
     /// symbol.
     ///
-
     /// **Caveat**: callers that previously relied on libc free's
     /// "size-tracking" must ensure the pointer was allocated via
     /// `verum_os_alloc` / `verum_checked_malloc` — those carry the
     /// CBGR header. Foreign pointers (passed in from FFI) MUST NOT
     /// be passed here.
     ///
-
     /// For now this is a stub declaration — the free path is rarely
     /// taken in the AOT runtime (CBGR's epoch model handles bulk
     /// invalidation via generation bumps, not per-pointer free).
@@ -910,7 +893,6 @@ impl<'ctx> FfiLowering<'ctx> {
 
     /// Libc-free `realloc(ptr, size) -> ptr`.
     ///
-
     /// Wrapper that allocates a new buffer via `verum_os_alloc`,
     /// copies the old data (caller-provided size — we don't have
     /// the old size in the libc realloc API, which is the

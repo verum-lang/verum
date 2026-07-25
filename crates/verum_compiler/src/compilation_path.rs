@@ -28,13 +28,11 @@ use verum_vbc::module::{FunctionDescriptor, VbcModule};
 
 /// Compilation path for a function or region.
 ///
-
 /// Determines whether code should be lowered via LLVM IR (CPU) or MLIR (GPU).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CompilationPath {
     /// CPU compilation path: VBC → LLVM IR → Native Code
     ///
-
     /// Used for:
     /// - Scalar operations
     /// - Control flow
@@ -44,7 +42,6 @@ pub enum CompilationPath {
 
     /// GPU compilation path: VBC → MLIR → GPU Binaries
     ///
-
     /// Used for:
     /// - @device(GPU) annotated functions
     /// - Tensor operations above threshold
@@ -53,7 +50,6 @@ pub enum CompilationPath {
 
     /// Hybrid path: function contains both CPU and GPU regions
     ///
-
     /// Used for:
     /// - Functions mixing CPU control flow with GPU kernels
     /// - Requires splitting into CPU host code + GPU kernels
@@ -172,7 +168,6 @@ impl TargetConfig {
 
     /// Preferred GPU target for code emission.
     ///
-
     /// Returns the first entry in `gpu_targets` when GPU
     /// compilation is available, `None` otherwise. Downstream
     /// codegen layers (kernel compiler, MLIR GPU pipeline) call
@@ -182,7 +177,6 @@ impl TargetConfig {
     /// had to re-derive the preferred target from environment
     /// variables or hardcode CUDA.
     ///
-
     /// Selection policy: first-declared. The manifest order is
     /// authoritative — embedders that need a different priority
     /// reorder the list at construction time.
@@ -196,7 +190,6 @@ impl TargetConfig {
     /// Whether the configured target list includes a specific
     /// GPU target.
     ///
-
     /// Surfaces a query API for downstream layers that need to
     /// branch on target availability without iterating the
     /// `gpu_targets` list themselves. Discriminator-only match
@@ -271,27 +264,21 @@ impl FunctionAnalysis {
 
 /// Determines the compilation path for a function or region.
 ///
-
 /// # Decision Algorithm
 ///
-
 /// 1. Check for forced path in target config
 /// 2. Check for explicit @device annotation
 /// 3. Check for GPU-requiring operations
 /// 4. Check tensor operations above threshold
 /// 5. Default to CPU
 ///
-
 /// # Arguments
 ///
-
 /// * `analysis` - Analysis results for the function
 /// * `target_config` - Target configuration
 ///
-
 /// # Returns
 ///
-
 /// The determined compilation path.
 pub fn determine_compilation_path(
     analysis: &FunctionAnalysis,
@@ -367,7 +354,6 @@ fn infer_best_path(analysis: &FunctionAnalysis, target_config: &TargetConfig) ->
 
 /// Analyzes a VBC function to determine its characteristics.
 ///
-
 /// This function decodes the bytecode and counts various operation types
 /// to inform compilation path decisions.
 pub fn analyze_function(
@@ -584,7 +570,6 @@ impl std::error::Error for AnalysisError {}
 
 /// Batch analysis for an entire VBC module.
 ///
-
 /// Returns analysis results for all functions in the module.
 pub fn analyze_module(module: &VbcModule) -> Vec<(u32, FunctionAnalysis, CompilationPath)> {
     let target_config = TargetConfig::default();

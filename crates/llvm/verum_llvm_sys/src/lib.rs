@@ -78,10 +78,8 @@ unsafe extern "C" {
 
 /// Initialize all LLVM targets (convenience function)
 ///
-
 /// # Safety
 ///
-
 /// This function is safe to call multiple times, but should typically
 /// be called once at program startup.
 pub fn initialize_targets() {
@@ -96,10 +94,8 @@ pub fn initialize_targets() {
 
 /// Initialize only the native target (convenience function)
 ///
-
 /// # Safety
 ///
-
 /// This function is safe to call multiple times.
 pub fn initialize_native_target() {
     unsafe {

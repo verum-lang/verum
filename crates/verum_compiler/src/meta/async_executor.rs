@@ -264,7 +264,6 @@ impl std::error::Error for MetaAsyncError {}
 
 /// Executor for meta async functions using Rayon
 ///
-
 /// # Thread Safety
 /// Uses work-stealing parallelism via Rayon thread pool. The pool's
 /// worker count is bounded by [`Self::max_parallelism`]; wall-clock
@@ -356,7 +355,6 @@ impl MetaAsyncExecutor {
 
     /// Execute a meta async function
     ///
-
     /// 1. Validate no I/O operations
     /// 2. Extract parallel tasks
     /// 3. Build dependency graph

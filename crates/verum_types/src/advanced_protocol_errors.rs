@@ -45,17 +45,14 @@ use crate::ty::{Type, TypeVar};
 
 /// GAT arity mismatch error with rich diagnostics
 ///
-
 /// Spec: Section 9.1.1
 ///
-
 /// Example:
 /// ```verum
 /// protocol Iterator {
 ///  type Item<T> // Expects 1 type parameter
 /// }
 ///
-
 /// fn foo() -> Maybe<Item> { ... } // ERROR: Missing type argument
 /// ```
 #[derive(Debug, Clone)]
@@ -207,16 +204,13 @@ pub type ImplementId = usize;
 
 /// Specialization ambiguity error
 ///
-
 /// Spec: Section 9.1.2
 ///
-
 /// Example:
 /// ```verum
 /// implement<T: Clone> Display for List<T> { ... }
 /// implement<T: Send> Display for List<T> { ... }
 ///
-
 /// // ERROR: Both implementations are equally specific for List<SomeType>
 /// ```
 #[derive(Debug, Clone)]
@@ -340,10 +334,8 @@ impl SpecializationAmbiguityError {
 
 /// GenRef generation mismatch error (use-after-free detection)
 ///
-
 /// Spec: Section 9.1.3
 ///
-
 /// Example:
 /// ```verum
 /// let genref = GenRef::new(value);
@@ -421,17 +413,14 @@ impl GenerationMismatchError {
 
 /// GAT where clause violation error
 ///
-
 /// Spec: Section 9.1.4
 ///
-
 /// Example:
 /// ```verum
 /// protocol Collection {
 ///  type Item<K, V> where K: Hash
 /// }
 ///
-
 /// let x: Collection::Item<Text, Int> = ...; // ERROR: Text doesn't implement Hash
 /// ```
 #[derive(Debug, Clone)]
@@ -529,7 +518,6 @@ impl GATWhereClauseError {
 
     /// Try to extract the missing protocol implementation from the where clause
     ///
-
     /// Production implementation that analyzes the where clause structure to provide
     /// actionable suggestions for fixing GAT constraint violations.
     fn get_missing_implementation(&self) -> Option<Text> {
@@ -621,16 +609,13 @@ impl GATWhereClauseError {
 
 /// Negative specialization error
 ///
-
 /// Spec: Section 9.1.5
 ///
-
 /// Example:
 /// ```verum
 /// @specialize(negative)
 /// implement<T: !Clone> Default for Wrapper<T> { ... }
 ///
-
 /// // ERROR: T implements Clone, violating the negative bound
 /// ```
 #[derive(Debug, Clone)]

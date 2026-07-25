@@ -44,7 +44,6 @@ use verum_common::{List, Map, Maybe, Result, Text};
 
 /// Unified SMT Backend trait providing isomorphic API across all solvers
 ///
-
 /// This trait defines the complete interface that all SMT backends must implement.
 /// It includes:
 /// - Term and sort construction

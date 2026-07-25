@@ -36,7 +36,6 @@ use z3::{SatResult, Solver, ast::Bool};
 
 /// Result of subsumption checking.
 ///
-
 /// Indicates whether a refinement type subsumes another, and how the
 /// result was determined (syntactically or via SMT solving).
 #[derive(Debug, Clone, PartialEq)]
@@ -114,7 +113,6 @@ impl SubsumptionChecker {
 
     /// Update the per-query SMT timeout (milliseconds).
     ///
-
     /// Used by `RefinementZ3Backend::set_timeout_ms` to forward
     /// the `RefinementConfig.timeout_ms` value through to Z3 for
     /// every subsequent `check_smt` invocation. Without this
@@ -134,10 +132,8 @@ impl SubsumptionChecker {
 
     /// Check if phi1 => phi2 (phi1 is stronger, thus a subtype)
     ///
-
     /// # Performance
     ///
-
     /// - Syntactic: <1ms
     /// - SMT: 10-500ms (with timeout)
     /// - Cached: ~0ms
@@ -183,11 +179,9 @@ impl SubsumptionChecker {
 
     /// Syntactic subsumption checking (fast path)
     ///
-
     /// Fast syntactic check for refinement subtyping without invoking SMT.
     /// Rule: `T{P} <: T{Q}` holds syntactically when P structurally implies Q.
     ///
-
     /// Handles common patterns:
     /// - Comparison strengthening: `> 10 => > 0`, `>= 10 => > 0`
     /// - Numeric constant analysis: `x > 10 => x > 5` (larger bound implies smaller)
@@ -197,7 +191,6 @@ impl SubsumptionChecker {
     /// - Text/List length: `len(s) > 5 => len(s) > 0`
     /// - Range containment: `10 <= x <= 20 => 0 <= x <= 100`
     ///
-
     /// ## Performance Target
     /// < 1ms for all patterns (typically < 100μs)
     fn check_syntactic(&self, phi1: &Expr, phi2: &Expr) -> Option<bool> {
@@ -324,11 +317,9 @@ impl SubsumptionChecker {
 
     /// Check numeric comparison subsumption: x op1 val1 => x op2 val2
     ///
-
     /// Numeric comparison subsumption: if `x op1 val1` is a stronger bound than
     /// `x op2 val2`, then the first refines the second. Monotonicity of comparisons.
     ///
-
     /// Examples:
     /// - x > 10 => x > 0 (10 > 0, so stronger bound)
     /// - x > 10 => x >= 0 (10 > 0)
@@ -417,7 +408,6 @@ impl SubsumptionChecker {
 
     /// Check if op1 is a stronger constraint than op2
     ///
-
     /// Examples:
     /// - `>` is stronger than `>=`
     /// - `<` is stronger than `<=`
@@ -447,10 +437,8 @@ impl SubsumptionChecker {
 
     /// SMT-based subsumption checking
     ///
-
     /// Queries Z3 to check if (phi1 => phi2) is valid.
     ///
-
     /// Query: `(assert (not (=> phi1 phi2)))`
     /// - If UNSAT: Valid subsumption (no counterexample exists)
     /// - If SAT: Invalid subsumption (counterexample found)
@@ -656,7 +644,6 @@ struct CachedEntry {
 
 /// Performance statistics for subsumption checking.
 ///
-
 /// Tracks the distribution of checks between syntactic and SMT paths,
 /// along with timing and cache effectiveness metrics.
 #[derive(Debug, Clone, Default)]
@@ -722,7 +709,6 @@ impl SubsumptionStats {
 
     /// Syntactic hit rate: proportion of checks resolved syntactically
     ///
-
     /// Target: >80% for common code patterns (Spec: Section 4.3.1)
     pub fn syntactic_hit_rate(&self) -> f64 {
         let total_non_cached = self.syntactic_checks + self.smt_checks;
@@ -762,7 +748,6 @@ impl SubsumptionStats {
 
 /// Cache statistics for subsumption result caching.
 ///
-
 /// Provides insight into cache utilization and effectiveness.
 #[derive(Debug, Clone)]
 pub struct CacheStats {
@@ -1020,7 +1005,6 @@ fn get_method_receiver(expr: &Expr) -> Option<&Expr> {
 
 /// Translate Verum expression to Z3 Bool
 ///
-
 /// Handles both boolean and integer comparison expressions
 fn translate_to_z3(expr: &Expr) -> Result<Bool, String> {
     match &expr.kind {

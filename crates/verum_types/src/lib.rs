@@ -777,10 +777,8 @@ pub enum TypeError {
     /// Direct negative context violation (E3050)
     /// Function body directly accesses a context that is excluded in the signature.
     ///
-
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
     ///
-
     /// Example:
     /// ```verum
     /// fn pure_compute() using [!Database] {
@@ -804,10 +802,8 @@ pub enum TypeError {
     /// Context alias conflict within a module (E3060)
     /// Two functions in the same module use the same alias for different contexts.
     ///
-
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
     ///
-
     /// Example:
     /// ```verum
     /// fn migrate() using [Database as primary] { ... }
@@ -849,10 +845,8 @@ pub enum TypeError {
 
     /// Capability violation - method requires a capability not available in the restricted type.
     ///
-
     /// Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 12 - Capability Attenuation as Types
     ///
-
     /// Example:
     /// ```verum
     /// fn analyze(db: Database with [Read]) -> Stats {
@@ -977,7 +971,6 @@ pub enum TypeError {
     /// Error: a `mount` / glob / re-export expansion re-entered a module
     /// that was already being expanded on the same call stack.
     ///
-
     /// The canonical triggers are:
     ///  * `module core.X; mount core.*;` combined with a sibling
     ///  `public mount core.X.sub;` — the glob pulls `core.X` back
@@ -985,7 +978,6 @@ pub enum TypeError {
     ///  * `public mount .foo;` / `public mount .bar;` chains that
     ///  re-export an item through a ring of siblings.
     ///
-
     /// Without this guard the expansion recursed unbounded and blew
     /// the stack as a SIGBUS. Cycles are almost always programmer
     /// error, so we surface them as a hard diagnostic (`E0811`) rather
@@ -1013,19 +1005,16 @@ pub enum TypeError {
 
     /// Error: Protocol used in `using [...]` clause is not a context protocol.
     ///
-
     /// Verum distinguishes between:
     /// - **Constraint protocols**: Used in `where T: Protocol` bounds
     /// - **Context protocols**: Used in `using [Protocol]` dependency injection clauses
     ///
-
     /// A context protocol must be declared with the `context` modifier:
     /// ```verum
     /// context protocol Database { ... } // Can be used in `using [Database]`
     /// protocol Comparable { ... } // Can only be used in `where T: Comparable`
     /// ```
     ///
-
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Context Protocol Validation
     #[error("protocol '{name}' cannot be used as a context")]
     NonContextProtocolInUsing {
@@ -1038,10 +1027,8 @@ pub enum TypeError {
     // ========== Advanced type syntax errors: malformed HKTs, invalid associated type projections, existential type misuse ==========
     /// Existential type escapes its scope
     ///
-
     /// Existential types: hiding concrete types behind protocol bounds (impl Protocol return types) — Existential Types
     ///
-
     /// Existential types are opaque - their concrete type cannot escape
     /// the scope where they are unpacked.
     #[error("existential type escapes its scope: {skolem_name} cannot be used outside")]
@@ -1056,7 +1043,6 @@ pub enum TypeError {
 
     /// Existential bound not satisfied
     ///
-
     /// When packing an existential type, the witness must satisfy all bounds.
     #[error("existential bound not satisfied: {witness_type} does not implement {protocol}")]
     ExistentialBoundNotSatisfied {
@@ -1067,7 +1053,6 @@ pub enum TypeError {
 
     /// Kind mismatch in higher-kinded type application
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-Kinded Types
     #[error("kind mismatch: expected {expected_kind}, found {actual_kind}")]
     KindMismatch {
@@ -1079,7 +1064,6 @@ pub enum TypeError {
 
     /// Wrong arity for type constructor
     ///
-
     /// E.g., using `List` where `Map` (2 args) is expected
     #[error("type constructor '{name}' has arity {actual_arity}, expected {expected_arity}")]
     TypeConstructorArityMismatch {
@@ -1091,7 +1075,6 @@ pub enum TypeError {
 
     /// Cannot resolve associated type projection
     ///
-
     /// Associated type bounds: constraining associated types in where clauses (where T.Item: Display) — Associated Type Bounds
     #[error("cannot resolve associated type '{assoc_name}' for type '{base_type}'")]
     CannotResolveAssociatedType {
@@ -1112,7 +1095,6 @@ pub enum TypeError {
 
     /// Negative bound violated - type implements a forbidden protocol
     ///
-
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     #[error("negative bound violated: {ty} implements {protocol}, but {protocol} is forbidden")]
     NegativeBoundViolated {
@@ -1142,10 +1124,8 @@ pub enum TypeError {
     // Spec: L0-critical/memory-safety/uninitialized - Compile-time detection of partial initialization
     /// Use of completely uninitialized variable
     ///
-
     /// Detected when a variable declared without initializer is used before any assignment.
     ///
-
     /// Example:
     /// ```verum
     /// let x: Int;
@@ -1161,10 +1141,8 @@ pub enum TypeError {
 
     /// Use of partially initialized compound variable
     ///
-
     /// Detected when a tuple, array, or struct has some but not all elements/fields initialized.
     ///
-
     /// Example:
     /// ```verum
     /// let tuple: (Int, Int, Int);
@@ -1185,7 +1163,6 @@ pub enum TypeError {
 
     /// Access to uninitialized struct field
     ///
-
     /// Example:
     /// ```verum
     /// let mut person: Person;
@@ -1205,7 +1182,6 @@ pub enum TypeError {
 
     /// Access to uninitialized array element
     ///
-
     /// Example:
     /// ```verum
     /// let mut arr: [Int; 5];
@@ -1225,7 +1201,6 @@ pub enum TypeError {
 
     /// Access to uninitialized tuple element
     ///
-
     /// Example:
     /// ```verum
     /// let mut tuple: (Int, Int, Int);
@@ -1245,7 +1220,6 @@ pub enum TypeError {
 
     /// Iteration over partially initialized array
     ///
-
     /// Example:
     /// ```verum
     /// let mut arr: [Int; 5];
@@ -1266,7 +1240,6 @@ pub enum TypeError {
     // Reference safety invariants: managed refs validated at dereference, checked refs proven safe at compile time, unsafe refs unchecked — Borrow Rules
     /// Borrow conflict: attempting to create conflicting borrows
     ///
-
     /// Example:
     /// ```verum
     /// let mut x = 42;
@@ -1289,7 +1262,6 @@ pub enum TypeError {
 
     /// Field-level borrow conflict: attempting to borrow a field while another borrow conflicts
     ///
-
     /// Example:
     /// ```verum
     /// let mut point = Point { x: 1, y: 2 };
@@ -1310,7 +1282,6 @@ pub enum TypeError {
 
     /// Dangling reference: reference outlives its referent
     ///
-
     /// Example:
     /// ```verum
     /// fn get_ref() -> &Int {
@@ -1330,7 +1301,6 @@ pub enum TypeError {
 
     /// &checked reference may escape through function call
     ///
-
     /// Example:
     /// ```verum
     /// fn capture(r: &Int) -> &Int { r }
@@ -1350,7 +1320,6 @@ pub enum TypeError {
 
     /// Cannot move while borrowed
     ///
-
     /// Example:
     /// ```verum
     /// let x = vec![1, 2, 3];
@@ -1370,7 +1339,6 @@ pub enum TypeError {
 
     /// Cannot assign while borrowed
     ///
-
     /// Example:
     /// ```verum
     /// let mut x = 42;
@@ -1394,11 +1362,9 @@ pub enum TypeError {
     // =====================================================================
     /// Stack allocation exceeds safe limit (E320)
     ///
-
     /// Verum prevents stack overflow by enforcing limits on stack-allocated data.
     /// Arrays and large structs should use heap allocation (Heap<T> or List<T>).
     ///
-
     /// Example:
     /// ```verum
     /// fn bad() {
@@ -1417,11 +1383,9 @@ pub enum TypeError {
 
     /// Potential stack overflow from unbounded recursion (E321)
     ///
-
     /// Verum detects functions that may recurse infinitely without a base case.
     /// Use @allow(unbounded_recursion) for intentionally unbounded recursion.
     ///
-
     /// Example:
     /// ```verum
     /// fn infinite(n: Int) -> Int {
@@ -1444,11 +1408,9 @@ pub enum TypeError {
     // =====================================================================
     /// Imported item not found in module (E401)
     ///
-
     /// The specified item does not exist in the target module's exports.
     /// This is a compile-time error that prevents building incorrect code.
     ///
-
     /// Example:
     /// ```verum
     /// import core.{size_of}; // E401: `size_of` not found in module `core`
@@ -1467,10 +1429,8 @@ pub enum TypeError {
 
     /// Module not found during import resolution (E402)
     ///
-
     /// The specified module path does not correspond to any known module.
     ///
-
     /// Example:
     /// ```verum
     /// import nonexistent.module.{Item}; // E402: module `nonexistent.module` not found
@@ -1487,11 +1447,9 @@ pub enum TypeError {
 
     /// Undefined function call (E403)
     ///
-
     /// A function is called but not defined or imported in the current scope.
     /// This ensures all function calls can be resolved at compile time.
     ///
-
     /// Example:
     /// ```verum
     /// fn main() {
@@ -1510,15 +1468,12 @@ pub enum TypeError {
 
     /// Impure meta function (E501)
     ///
-
     /// Meta functions (`meta fn`) must be pure - they run at compile-time and
     /// cannot have side effects. This error is raised when a meta function's
     /// body contains impure operations.
     ///
-
     /// Meta function purity: meta functions are implicitly pure (no IO, no mutation of non-meta state) — Meta functions are implicitly pure
     ///
-
     /// Example:
     /// ```verum
     /// meta fn bad_meta() {
@@ -1537,14 +1492,11 @@ pub enum TypeError {
 
     /// Invalid meta context usage error.
     ///
-
     /// Meta functions (`meta fn`) can only use compiler-provided meta contexts,
     /// not runtime contexts like Database, Logger, etc.
     ///
-
     /// Meta contexts: meta functions have restricted context access (only compile-time-safe contexts) — Meta contexts
     ///
-
     /// Example:
     /// ```verum
     /// // Invalid: Database is a runtime context
@@ -1552,7 +1504,6 @@ pub enum TypeError {
     ///  ...
     /// }
     ///
-
     /// // Valid: TypeInfo is a meta context
     /// meta fn good<T>() using TypeInfo {
     ///  TypeInfo.fields_of::<T>()
@@ -1572,11 +1523,9 @@ pub enum TypeError {
 
     /// Pure function purity violation (E503).
     ///
-
     /// A function declared with the `pure` modifier has side effects
     /// in its body that violate purity guarantees.
     ///
-
     /// Pure functions must not:
     /// - Perform IO operations
     /// - Mutate external state
@@ -1585,7 +1534,6 @@ pub enum TypeError {
     /// - Call FFI functions
     /// - Spawn concurrent tasks
     ///
-
     /// Example:
     /// ```verum
     /// pure fn bad(x: Int) -> Int {
@@ -1605,12 +1553,10 @@ pub enum TypeError {
 
     /// Async property enforcement (E504).
     ///
-
     /// An async function's body uses `.await` or other async constructs
     /// but the function is not declared `async`, or vice versa:
     /// a function declared `async` has no async operations in its body (warning).
     ///
-
     /// Example:
     /// ```verum
     /// fn bad() -> Int {
@@ -1630,17 +1576,14 @@ pub enum TypeError {
     // =========================================================================
     /// Non-productive corecursive function (E505).
     ///
-
     /// A function declared with the `cofix` modifier has at least one
     /// recursive self-call that is NOT guarded by a coinductive constructor.
     /// Unguarded corecursion diverges at runtime (the function never produces
     /// an observable output step), so it is rejected at compile time.
     ///
-
     /// Every self-recursive call in a `cofix` function must occur under at
     /// least one constructor of the coinductive return type (guard depth ≥ 1).
     ///
-
     /// Example:
     /// ```verum
     /// // WRONG: recursive call is unguarded — no constructor wraps it.
@@ -1648,7 +1591,6 @@ pub enum TypeError {
     ///  bad_stream() // E505: unguarded corecursion
     /// }
     ///
-
     /// // Correct: recursive call is wrapped by the Stream constructor.
     /// cofix fn ones() -> Stream<Int> {
     ///  Stream.cons(1, ones())
@@ -1672,11 +1614,9 @@ pub enum TypeError {
     // =========================================================================
     /// Unbound splice variable (M400)
     ///
-
     /// A variable used in a splice (`$var` or `${expr}`) is not in scope
     /// at the point of quote evaluation.
     ///
-
     /// Example:
     /// ```verum
     /// meta fn bad() -> TokenStream {
@@ -1695,10 +1635,8 @@ pub enum TypeError {
 
     /// Unquote outside quote (M401)
     ///
-
     /// A splice/unquote expression (`$` or `${...}`) appears outside of a quote block.
     ///
-
     /// Example:
     /// ```verum
     /// fn bad() {
@@ -1715,11 +1653,9 @@ pub enum TypeError {
 
     /// Accidental variable capture (M402)
     ///
-
     /// A quote block introduces a binding that shadows a variable from the
     /// surrounding scope, which could lead to unexpected behavior.
     ///
-
     /// Example:
     /// ```verum
     /// meta fn bad(x: Int) -> TokenStream {
@@ -1741,10 +1677,8 @@ pub enum TypeError {
 
     /// Gensym collision (M403)
     ///
-
     /// A generated symbol collides with a user-defined name.
     ///
-
     /// Example:
     /// ```verum
     /// meta fn bad() -> TokenStream {
@@ -1764,10 +1698,8 @@ pub enum TypeError {
 
     /// Scope resolution failure (M404)
     ///
-
     /// A name in a quote block cannot be resolved to a unique binding.
     ///
-
     /// Example:
     /// ```verum
     /// meta fn bad() -> TokenStream {
@@ -1786,10 +1718,8 @@ pub enum TypeError {
 
     /// Stage mismatch (M405)
     ///
-
     /// An expression is evaluated at the wrong compilation stage.
     ///
-
     /// Example:
     /// ```verum
     /// meta fn bad() -> TokenStream {
@@ -1810,11 +1740,9 @@ pub enum TypeError {
 
     /// Lift type mismatch (M406)
     ///
-
     /// A value cannot be lifted because its type is not representable as code.
     /// Closures, mutable references, and opaque types cannot be lifted.
     ///
-
     /// Example:
     /// ```verum
     /// meta fn bad() -> TokenStream {
@@ -1836,11 +1764,9 @@ pub enum TypeError {
 
     /// Invalid stage escape (M407)
     ///
-
     /// An invalid stage escape attempt was detected, such as escaping
     /// to a stage that doesn't exist or escaping in an invalid context.
     ///
-
     /// # Example
     /// ```verum
     /// meta fn bad_escape() -> TokenStream {
@@ -1859,11 +1785,9 @@ pub enum TypeError {
 
     /// Undeclared capture (M408)
     ///
-
     /// A bare identifier in a quote refers to a meta-level binding without
     /// using proper capture syntax (`$var` or `lift(var)`).
     ///
-
     /// # Example
     /// ```verum
     /// meta fn bad_capture() -> TokenStream {
@@ -1883,10 +1807,8 @@ pub enum TypeError {
 
     /// Repetition mismatch (M409)
     ///
-
     /// Repetition variables in a quote have mismatched lengths.
     ///
-
     /// # Example
     /// ```verum
     /// meta fn bad_repeat(xs: List<Int>, ys: List<Int>) -> TokenStream {
@@ -1925,7 +1847,6 @@ pub enum TypeError {
 
     /// E370: Strict-positivity violation (K-Pos kernel rule).
     ///
-
     /// The named inductive type's constructor mentions itself in a
     /// negative position (e.g. `fn(Self) -> _` domain). Such a
     /// declaration would let the user encode Berardi-shaped paradoxes
@@ -2132,7 +2053,6 @@ impl TypeError {
 
     /// Convert to diagnostic for error reporting with span information
     ///
-
     /// Note: This method creates diagnostics without file path/line information.
     /// For proper diagnostics with source locations, use the compiler's helper
     /// that converts AST spans to diagnostic spans via the session.
@@ -2142,7 +2062,6 @@ impl TypeError {
 
     /// Convert to diagnostic with optional span converter
     ///
-
     /// When span_converter is provided, it will be used to add proper source
     /// location information to the diagnostic.
     pub fn to_diagnostic_with_span<F>(&self, span_converter: Option<F>) -> Diagnostic

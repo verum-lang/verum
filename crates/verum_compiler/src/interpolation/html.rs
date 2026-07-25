@@ -22,7 +22,6 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// HTML interpolation handler
 ///
-
 /// # Security
 /// This handler PREVENTS XSS attacks by:
 /// 1. Auto-escaping all HTML special characters in interpolated values
@@ -64,22 +63,18 @@ const HTML_ESCAPE_CHARS: &[(char, &str)] = &[
 impl HtmlInterpolationHandler {
     /// Handle HTML interpolation at compile-time
     ///
-
     /// Safe interpolation: `html"<h1>{title}</h1>"` auto-escapes all interpolated
     /// values to prevent XSS. Desugars to HtmlTemplate.new(template).with_escaped(args).render().
     /// All interpolation handlers must use parameterization, not string concatenation.
     ///
-
     /// # Arguments
     /// - `template`: The HTML template string with {expr} placeholders
     /// - `interpolations`: The expressions to interpolate
     /// - `span`: Source location for error reporting
     ///
-
     /// # Returns
     /// An HtmlFragment with escaped content
     ///
-
     /// # Safety
     /// This function generates SAFE HTML that prevents XSS attacks.
     /// All interpolated values are HTML-escaped before insertion.
@@ -280,7 +275,6 @@ impl HtmlInterpolationHandler {
 
     /// Escape a string for safe HTML insertion
     ///
-
     /// # Security
     /// This function escapes all HTML special characters to prevent XSS attacks.
     pub fn escape(input: &str) -> Text {
@@ -302,7 +296,6 @@ impl HtmlInterpolationHandler {
 
     /// Validate that interpolations don't occur in dangerous contexts
     ///
-
     /// # Security
     /// Prevents interpolation in script tags, event handlers, etc.
     pub fn validate_interpolation_context(template: &Text, _span: Span) -> Result<(), Diagnostic> {

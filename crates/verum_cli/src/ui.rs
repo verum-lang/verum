@@ -157,7 +157,6 @@ fn shown_verbose() -> bool {
 
 /// Cargo-style status line, shown by default.
 ///
-
 /// ```text
 ///  Compiling main.vr (AOT, release)
 ///  Checking 42 contracts...
@@ -165,10 +164,8 @@ fn shown_verbose() -> bool {
 ///  Finished release in 1.32s (CBGR: 87% checks eliminated)
 /// ```
 ///
-
 /// The verb is right-aligned to 12 characters, green bold. Message in default color.
 ///
-
 /// Tooling output (status/success/warn/step/info) always goes to stderr, matching
 /// Cargo. This keeps the program's stdout clean for `verum run` so downstream
 /// consumers (test runners, shell pipes, etc.) get only what the program actually
@@ -237,7 +234,6 @@ pub fn note(msg: &str) {
 
 /// Detail — key-value output shown by default.
 ///
-
 /// ```text
 ///  Binary target/debug/main (4.2 MB)
 ///  CBGR 87% checks eliminated (234/269)
@@ -261,7 +257,6 @@ pub fn output(msg: &str) {
 
 /// Print a branded build header in a Unicode box (verbose only).
 ///
-
 /// ```text
 ///  ╔══════════════════════════════════════╗
 ///  ║ verum build · AOT (LLVM 21) ║
@@ -337,7 +332,6 @@ impl CbgrStats {
 
 /// Print a compilation summary block.
 ///
-
 /// ```text
 ///  Finished release [optimized] target(s) in 1.32s
 ///  Binary target/debug/my_project (4.2 MB)
@@ -404,13 +398,11 @@ pub fn print_build_summary(
 
 /// Print a diagnostic summary line.
 ///
-
 /// On failure:
 /// ```text
 /// error: could not compile `my_project` due to 3 previous errors; 2 warnings emitted
 /// ```
 ///
-
 /// On success with warnings:
 /// ```text
 /// warning: 2 warnings emitted
@@ -526,7 +518,6 @@ pub enum TreeColor {
 
 /// Print a tree with colored branches.
 ///
-
 /// Each item is `(depth, text)`. Root nodes (depth 0) are bold white,
 /// branch glyphs are dim gray.
 pub fn print_tree(items: &[(usize, Text)]) {

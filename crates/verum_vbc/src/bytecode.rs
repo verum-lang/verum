@@ -83,7 +83,6 @@ use crate::types::{CbgrTier, ContextRef, Mutability, TypeId, TypeParamId, TypeRe
 
 /// Encodes an instruction to bytecode.
 ///
-
 /// Appends the encoded bytes to `output` and returns the number of bytes written.
 pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
     let start_len = output.len();
@@ -2977,7 +2976,6 @@ fn encode_optional_reg(reg: Option<Reg>, output: &mut Vec<u8>) {
 
 /// Encodes a TypeRef.
 ///
-
 /// Encoding format matches the actual TypeRef enum variants:
 /// - 0x00: Concrete(TypeId)
 /// - 0x01: Generic(TypeParamId)
@@ -3260,7 +3258,6 @@ fn registry_driven_tensor_arity(sub_op: u8) -> Option<usize> {
 
 /// Decodes an instruction from bytecode.
 ///
-
 /// Updates `offset` to point past the decoded instruction.
 pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruction> {
     let opcode_byte = decode_u8(data, offset)?;
@@ -5844,7 +5841,6 @@ fn decode_extended_reg_operands(
 
 /// Decodes a TypeRef.
 ///
-
 /// Matches the encoding in encode_type_ref:
 /// - 0x00: Concrete(TypeId)
 /// - 0x01: Generic(TypeParamId)
@@ -6287,12 +6283,10 @@ pub fn jump_offsets_to_instr_indices(instructions: &mut [Instruction]) {
 
 /// Converts instruction-level jump offsets to byte-level offsets.
 ///
-
 /// The codegen produces instructions with jump offsets in terms of instruction
 /// indices, but the interpreter expects byte offsets. This function converts
 /// all jump offsets to byte offsets.
 ///
-
 /// This uses an iterative approach because changing jump offsets can change
 /// instruction sizes (varints), which in turn affects other offsets.
 pub fn fixup_jump_offsets(instructions: &mut [Instruction]) {
@@ -6423,7 +6417,6 @@ pub fn fixup_jump_offsets(instructions: &mut [Instruction]) {
 
 /// Encodes instructions with proper jump offset fixup.
 ///
-
 /// This is the preferred way to encode instructions as it handles
 /// the conversion from instruction-level to byte-level jump offsets.
 pub fn encode_instructions_with_fixup(instructions: &[Instruction], output: &mut Vec<u8>) -> usize {

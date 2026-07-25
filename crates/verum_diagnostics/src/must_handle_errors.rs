@@ -180,7 +180,6 @@ fn span_to_linecol(span: Span) -> LineColSpan {
 
 /// E0317: Unused Result that must be used
 ///
-
 /// This error is emitted when a Result<T, E> with a @must_handle error type
 /// is dropped without being explicitly handled.
 #[derive(Debug, Clone)]
@@ -332,7 +331,6 @@ impl BranchInfo {
 
 /// Tracker for @must_handle Results throughout compilation.
 ///
-
 /// This tracker maintains state about which Result values have @must_handle
 /// error types and whether they have been properly handled. It is used during
 /// type checking and code generation to ensure compliance with the @must_handle

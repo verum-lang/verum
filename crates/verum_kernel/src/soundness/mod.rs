@@ -66,7 +66,6 @@ mod tests;
 
 /// Canonical lemma-status as seen by the cross-export pipeline.
 ///
-
 /// Mirrors `core::verify::kernel_soundness::theorems::LemmaStatus`.
 /// The Verum corpus is the source of truth; this enum is the Rust-
 /// side carrier so [`SoundnessBackend`] implementations can render
@@ -99,7 +98,6 @@ pub enum LemmaStatus {
     /// `Admitted` in foreign-tool output but carries structured
     /// citation metadata for the audit gate.
     ///
-
     /// Lifecycle (per IOU): `Admitted { reason } → DischargedByFramework
     /// → Proved { coq_tactics, lean_tactics }` once full proof-term
     /// replay lands (#162).
@@ -201,7 +199,6 @@ pub struct RuleSpec {
 /// `verum_kernel::proof_tree::KernelRule`. Drift between the three
 /// is checked at audit time.
 ///
-
 /// **Why hand-written?** The Verum-side definitions live in `.vr`
 /// files that are loaded as bytecode at compile time of the
 /// compiler — they cannot be parsed inside this crate without
@@ -820,7 +817,6 @@ pub fn canonical_rules() -> Vec<RuleSpec> {
 /// many variants, the `.vr` corpus's `KERNEL_RULE_COUNT` constant
 /// must equal this, and `canonical_rules().len()` must equal this.
 ///
-
 /// **Distribution (verified by `rule_categories_partition_the_corpus`
 /// test):** Structural 9 + Cubical 6 + Refinement 4 + Quotient 3 +
 /// Inductive 3 + SmtAxiom 2 + Diakrisis 11 = **38**.
@@ -1060,7 +1056,6 @@ pub fn iou_axiom_rule_names() -> Vec<&'static str> {
 /// The protocol every cross-export backend implements. See module
 /// docs for the architectural rationale (one trait, multiple instances).
 ///
-
 /// The trait is split by *concern* — preamble, inductive types,
 /// per-rule lemmas, top-level theorem, postscript — rather than by
 /// rule. This means a new backend's implementation is small and
@@ -1115,7 +1110,6 @@ pub trait SoundnessBackend {
 /// The shared corpus walker. Drives any [`SoundnessBackend`] over
 /// the canonical rule set and assembles the output file as text.
 ///
-
 /// The shape of every emitted file is identical:
 /// preamble · core-term-inductive · core-type-inductive ·
 /// kernel-rule-inductive · per-rule-lemmas (× 35) ·

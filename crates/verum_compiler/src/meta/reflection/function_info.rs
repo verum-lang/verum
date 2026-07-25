@@ -12,7 +12,6 @@ use super::type_kind::{TypeKind, Visibility};
 
 /// Information about a function signature
 ///
-
 /// Matches: core/meta/reflection.vr FunctionInfo
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionInfo {

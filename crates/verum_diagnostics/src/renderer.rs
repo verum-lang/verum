@@ -474,7 +474,6 @@ impl Renderer {
 
     /// Render the gutter (line numbers and decorations).
     ///
-
     /// Honours `config.show_line_numbers`: when `false`, the
     /// line-number column is replaced with a single space so the
     /// pipe alignment stays consistent. Useful for terminals

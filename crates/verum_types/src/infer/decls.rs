@@ -66,7 +66,6 @@ impl TypeChecker {
     /// Register a type declaration (type alias, ADT, etc.)
     /// This should be called before other passes to make types available.
     ///
-
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested types.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
         // #124 — primitive type names are reserved.
@@ -1998,18 +1997,15 @@ impl TypeChecker {
 
     /// Pass 1: Register type name only (creates placeholder).
     ///
-
     /// This is the first pass of two-pass type resolution. It registers
     /// the type name as a placeholder, allowing forward references to work.
     ///
-
     /// # Example
     /// ```verum
     /// type SearchRequest is { sort_by: SortOrder };
     /// type SortOrder is Relevance | Downloads;
     /// ```
     ///
-
     /// After calling `register_type_name_only` for both types, `SearchRequest`
     /// can reference `SortOrder` even though it's defined later.
     pub fn register_type_name_only(&mut self, type_decl: &verum_ast::TypeDecl) {
@@ -2098,15 +2094,12 @@ impl TypeChecker {
 
     /// Process import aliases to register type aliases.
     ///
-
     /// This handles imports like `import module.{IoError as EngineIoError}` by
     /// registering `EngineIoError` as a type alias that resolves to `IoError`.
     ///
-
     /// This is called in Pass 0 of stdlib compilation to ensure import aliases
     /// are available before type registration passes reference them.
     ///
-
     /// Constant initialization ordering: topological sort of dependencies, cycle detection for const declarations — Import Aliases
     pub fn process_import_aliases(&mut self, import: &verum_ast::MountDecl) {
         use verum_ast::MountTreeKind;
@@ -2229,22 +2222,18 @@ impl TypeChecker {
 
     /// Pass 2: Resolve full type definition.
     ///
-
     /// This is the second pass of two-pass type resolution. All type names
     /// are now registered as placeholders, so we can resolve the full
     /// type definitions including forward references.
     ///
-
     /// # Cycle Detection
     ///
-
     /// Detects and reports cyclic type definitions that would cause infinite size:
     /// ```verum
     /// type A is { b: B }; // ERROR: A -> B -> A cycle without indirection
     /// type B is { a: A };
     /// ```
     ///
-
     /// Allowed with indirection:
     /// ```verum
     /// type A is { b: Box<B> }; // OK: Box provides indirection
@@ -2394,7 +2383,6 @@ impl TypeChecker {
 
     /// Helper: Resolve the body of a type declaration.
     ///
-
     /// Called by `resolve_type_definition` after cycle detection and
     /// type parameter setup.
     fn resolve_type_body(
@@ -2704,7 +2692,6 @@ impl TypeChecker {
 
     /// Batch register all type names (Pass 1).
     ///
-
     /// Convenience method that calls `register_type_name_only` for all type
     /// declarations in a list. Should be called before `resolve_all_type_definitions`.
     /// Resolve a sum (variant/enum) type declaration body during two-pass resolution.
@@ -3634,11 +3621,9 @@ impl TypeChecker {
 
     /// Batch resolve all type definitions (Pass 2).
     ///
-
     /// Convenience method that calls `resolve_type_definition` for all type
     /// declarations in a list. Should be called after `register_all_type_names`.
     ///
-
     /// Returns errors for any type that cannot be resolved (cycles, undefined types, etc.)
     pub fn resolve_all_type_definitions(&mut self, items: &[verum_ast::Item]) -> List<Result<()>> {
         let mut results = List::new();
@@ -3653,11 +3638,9 @@ impl TypeChecker {
 
     /// Verify that no placeholder types remain after two-pass resolution.
     ///
-
     /// Call this after `resolve_all_type_definitions` to ensure all forward
     /// references were successfully resolved.
     ///
-
     /// This performs a deep traversal of all type structures to find any remaining
     /// placeholders, including those nested in records, variants, functions, etc.
     pub fn verify_no_placeholders(&self) -> List<crate::TypeError> {
@@ -3678,7 +3661,6 @@ impl TypeChecker {
 
     /// Recursively collect placeholder errors from a type and all its nested types.
     ///
-
     /// This performs a deep traversal to find placeholders nested in:
     /// - Record fields
     /// - Variant payloads
@@ -3840,22 +3822,17 @@ impl TypeChecker {
 
     /// Resolve all placeholders in registered types iteratively until a fixed point is reached.
     ///
-
     /// This is called after `resolve_all_type_definitions` to ensure that any remaining
     /// placeholders in nested structures are resolved. The algorithm:
     ///
-
     /// 1. Iterate over all registered types
     /// 2. For each type containing placeholders, substitute them with resolved types
     /// 3. Repeat until no changes are made (fixed point)
     ///
-
     /// Returns the number of iterations performed.
     ///
-
     /// # Fixed Point Algorithm
     ///
-
     /// The algorithm terminates when one of these conditions is met:
     /// - No placeholders were resolved in an iteration (fixed point)
     /// - Maximum iteration count is reached (prevents infinite loops)
@@ -3908,7 +3885,6 @@ impl TypeChecker {
 
     /// Check if a type contains any placeholder types.
     ///
-
     /// This performs a deep traversal to detect placeholders anywhere in the type structure.
     pub fn contains_placeholder(&self, ty: &Type) -> bool {
         self.contains_placeholder_impl(ty, 0)
@@ -4022,11 +3998,9 @@ impl TypeChecker {
 
     /// Substitute all placeholder types with their resolved types.
     ///
-
     /// This performs a deep traversal and replaces any Placeholder types
     /// with their corresponding resolved types from the type context.
     ///
-
     /// If a placeholder cannot be resolved (type not found), it is left as-is.
     pub fn substitute_placeholders(&self, ty: &Type) -> Type {
         self.substitute_placeholders_impl(ty, 0, &mut std::collections::HashSet::new())
@@ -4353,14 +4327,12 @@ impl TypeChecker {
 
     /// Detect circular type references that would cause infinite type size.
     ///
-
     /// This detects direct cycles like:
     /// ```verum
     /// type A is { b: B };
     /// type B is { a: A }; // ERROR: A -> B -> A cycle without indirection
     /// ```
     ///
-
     /// Returns a list of detected cycles, where each cycle is represented
     /// as a list of type names in the cycle (e.g., ["A", "B", "A"]).
     pub fn detect_circular_types(&self) -> List<List<verum_common::Text>> {
@@ -4443,7 +4415,6 @@ impl TypeChecker {
 
     /// Get direct type references from a type (non-recursive).
     ///
-
     /// This returns the type names that are directly referenced by this type,
     /// excluding indirect references through box/reference types (which provide indirection).
     fn get_direct_type_references(&self, ty: &Type) -> List<verum_common::Text> {
@@ -4490,7 +4461,6 @@ impl TypeChecker {
 
     /// Check if a type provides indirection (breaking potential cycles).
     ///
-
     /// These types store their inner type behind a pointer, allowing
     /// recursive type definitions:
     /// - Box<T>
@@ -4886,16 +4856,13 @@ impl TypeChecker {
 
     /// Register method signatures from an implement block (Pass 1)
     ///
-
     /// This registers all method signatures (both static and instance) WITHOUT type-checking
     /// their bodies. This allows methods in different implement blocks for the same type
     /// to call each other, and enables forward references within the same block.
     ///
-
     /// This should be called before `check_impl_block` (which type-checks method bodies).
     /// Register method signatures from an implementation block.
     ///
-
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub fn register_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
         self.register_impl_block_inner(impl_decl)
@@ -5035,28 +5002,23 @@ impl TypeChecker {
 
     /// Register a function signature without type-checking the body
     ///
-
     /// This enables forward references by registering all function signatures
     /// before any function bodies are checked. For example:
     ///
-
     /// ```verum
     /// fn main() -> Int {
     ///  fib(10) // fib is defined below, but this works due to forward ref support
     /// }
     ///
-
     /// fn fib(n: Int) -> Int {
     ///  if n <= 1 { n } else { fib(n - 1) + fib(n - 2) }
     /// }
     /// ```
     ///
-
     /// This should be called in a pass before `check_item` to ensure all
     /// functions are available in the environment.
     /// Pre-register a constant declaration's type for forward reference support.
     ///
-
     /// This is called before Phase 2 (type checking) so that constants defined
     /// after functions in source order are still visible within function bodies.
     /// Reject duplicate item names within a single `impl` / `implement` block.
@@ -6767,28 +6729,23 @@ impl TypeChecker {
 
     /// Register an intrinsic function using the intrinsic name (from @intrinsic("name") attribute)
     ///
-
     /// This is similar to `register_function_signature` but uses the intrinsic name
     /// for registration instead of the function name. This enables the type checker
     /// to automatically extract intrinsic signatures from stdlib rather than requiring
     /// hardcoded registrations in `register_builtins`.
     ///
-
     /// # Arguments
     /// * `func` - The function declaration with @intrinsic attribute
     /// * `intrinsic_name` - The intrinsic name extracted from @intrinsic("name")
     ///
-
     /// # Example
     ///
-
     /// For the stdlib declaration:
     /// ```verum
     /// @intrinsic("memcpy")
     /// public unsafe fn memcpy(dst: *mut Byte, src: *const Byte, len: Int);
     /// ```
     ///
-
     /// This method will register a TypeScheme for "memcpy" with the proper signature.
     pub fn register_intrinsic_function(
         &mut self,
@@ -6960,7 +6917,6 @@ impl TypeChecker {
     /// Check an implementation block and register methods
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .6 - Protocol implementations
     ///
-
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested impl blocks.
     pub(super) fn check_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
         self.check_impl_block_inner(impl_decl)
@@ -7558,12 +7514,10 @@ impl TypeChecker {
 
     /// Check if a type represents the Never (bottom) type.
     ///
-
     /// The Never type can be represented in two ways:
     /// 1. Type::Never - the primitive never type
     /// 2. Type::Named { path: "Never", ... } - a named reference to Never
     ///
-
     /// This function handles both cases for proper subtyping behavior.
     /// Type lattice: Never is bottom (subtype of all), Unknown is top (supertype of all)
     pub(super) fn is_never_type(&self, ty: &Type) -> bool {
@@ -7584,13 +7538,11 @@ impl TypeChecker {
 
     /// Check if a type is a dependent type (has type indices).
     ///
-
     /// Dependent types include:
     /// - Inductive types with indices (e.g., Vec n T)
     /// - Pi types (dependent functions)
     /// - Sigma types (dependent pairs)
     ///
-
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing
     pub(super) fn is_dependent_type(&self, ty: &Type) -> bool {
         match ty {
@@ -7620,11 +7572,9 @@ impl TypeChecker {
 
     /// Type check a match expression with dependent pattern matching.
     ///
-
     /// This implements the dependent pattern matching algorithm from
     /// Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing
     ///
-
     /// Key steps:
     /// 1. Infer the motive (how result type depends on scrutinee)
     /// 2. For each branch, refine types based on constructor
@@ -7734,11 +7684,9 @@ impl TypeChecker {
 
     /// Check if a return type depends on a parameter.
     ///
-
     /// This is used to detect when we need to create a Pi type instead of a
     /// regular function type.
     ///
-
     /// A return type depends on a parameter if it contains a reference to the
     /// parameter's name in type indices or refinement predicates.
     pub(super) fn return_type_depends_on_param(
@@ -7758,7 +7706,6 @@ impl TypeChecker {
 
     /// Check if a type contains a reference to a given variable name.
     ///
-
     /// This recursively searches the type structure for any Named or Generic
     /// types whose arguments might reference the variable.
     fn type_contains_reference(&self, ty: &Type, var_name: &Text) -> bool {
@@ -7820,7 +7767,6 @@ impl TypeChecker {
     /// Check if a refinement predicate references a variable.
     /// Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Section 2.5 - Refinement Type Integration
     ///
-
     /// This traverses the expression AST to find occurrences of the given variable.
     /// It's essential for determining if a refinement type is dependent on a value.
     fn predicate_references_var(&self, predicate: &Expr, var_name: &Text) -> bool {
@@ -8445,7 +8391,6 @@ impl TypeChecker {
 
     /// Consume affine values that were passed by value (not by reference) to a function call.
     ///
-
     /// During argument checking, `in_call_arg_context=true` causes all identifier lookups
     /// to use `borrow_value()` instead of `use_value()`. This is correct for reference
     /// parameters, but for by-value parameters of affine types, we need to explicitly
@@ -8493,7 +8438,6 @@ impl TypeChecker {
     /// Check for aliasing conflicts between function arguments.
     /// Detects when multiple arguments reference the same data with conflicting access modes.
     ///
-
     /// Examples of conflicts:
     /// - `foo(&mut x, &mut x)` - two mutable references to same variable
     /// - `bar(&mut x, &x)` - mutable and immutable reference to same variable
@@ -8774,7 +8718,6 @@ impl TypeChecker {
     /// Returns a list of (variable_name, field_path, capture_mode, span) tuples.
     /// field_path is Some("field.subfield") for field access captures like `x.field.subfield`.
     ///
-
     /// This is essential for:
     /// 1. Detecting aliasing conflicts between captures and existing borrows
     /// 2. Determining whether the closure implements Fn, FnMut, or FnOnce
@@ -9334,10 +9277,8 @@ impl TypeChecker {
 
     /// Convert an expression to an EqTerm for type-level substitution.
     ///
-
     /// Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — Equality types and terms
     ///
-
     /// This is used for beta reduction in Pi types, where we need to substitute
     /// an argument value into the return type.
     pub(super) fn expr_to_eq_term(&self, expr: &Expr) -> Result<crate::ty::EqTerm> {
@@ -9438,10 +9379,8 @@ impl TypeChecker {
 
     /// Synthesize type for a dependent pair (Sigma type constructor).
     ///
-
     /// Sigma types (dependent pairs): (x: A, B(x)) where second component type depends on first value, refinement types desugar to Sigma — Sigma types
     ///
-
     /// Given a tuple (a, b) where the type of b depends on the value of a,
     /// we create a Sigma type: (x: A, B(x))
     fn synth_dependent_pair(
@@ -9490,10 +9429,8 @@ impl TypeChecker {
 
     /// Project a component from a Sigma type.
     ///
-
     /// Sigma types (dependent pairs): (x: A, B(x)) where second component type depends on first value, refinement types desugar to Sigma — Sigma type elimination
     ///
-
     /// Given a value of type (x: A, B(x)):
     /// - fst : A
     /// - snd : B(fst)

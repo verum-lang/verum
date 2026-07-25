@@ -24,12 +24,10 @@ use crate::protocol_base::{ProtocolBound, Type};
 
 /// Type parameter for a Generic Associated Type
 ///
-
 /// Type parameter for a GAT, e.g., `T` in `type Wrapped<T>` within a Monad protocol.
 /// Each parameter has optional bounds (e.g., `T: Clone + Debug`), optional default
 /// type, and variance annotation (covariant, contravariant, or invariant).
 ///
-
 /// Example:
 /// ```verum
 /// protocol Monad {
@@ -54,40 +52,33 @@ pub struct GATTypeParam {
 
 /// Type variance for GAT parameters
 ///
-
 /// Determines how type parameters can be substituted while maintaining subtyping.
 ///
-
 /// Determines how type parameters can be substituted while maintaining subtyping.
 /// Used for GAT constraints on associated types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Variance {
     /// Covariant: If A <: B, then F<A> <: F<B>
     ///
-
     /// Example: Return types, immutable references
     Covariant,
 
     /// Contravariant: If A <: B, then F<B> <: F<A>
     ///
-
     /// Example: Function parameters
     Contravariant,
 
     /// Invariant: No subtyping allowed
     ///
-
     /// Example: Mutable references
     Invariant,
 }
 
 /// Where clause specific to a GAT (not the protocol itself)
 ///
-
 /// Where clause that constrains a GAT's own type parameters (separate from
 /// the protocol-level where clause). E.g., `type Item<T> where T: Clone + Debug`.
 ///
-
 /// Example:
 /// ```verum
 /// protocol Container {
@@ -108,7 +99,6 @@ pub struct GATWhereClause {
 
 /// Kind of associated type
 ///
-
 /// Classification of associated types by their kind (type-level arity).
 /// Regular: plain `type Item`, Generic: `type Item<T>` (GAT with parameters),
 /// HigherKinded: `type F<_>` (type constructor, enables Functor/Monad patterns).
@@ -119,7 +109,6 @@ pub enum AssociatedTypeKind {
 
     /// Generic associated type: `type Item<T>`
     ///
-
     /// Contains the number of type parameters
     Generic {
         /// Number of type parameters
@@ -128,7 +117,6 @@ pub enum AssociatedTypeKind {
 
     /// Higher-kinded type: `type F<_>`
     ///
-
     /// Arity indicates number of type constructor parameters
     HigherKinded {
         /// Number of type constructor parameters
@@ -138,7 +126,6 @@ pub enum AssociatedTypeKind {
 
 /// Kind for higher-kinded types
 ///
-
 /// Kind system for higher-kinded types. Star (*) is a concrete type,
 /// Arrow (* -> *) is a type constructor (e.g., List, Maybe).
 /// Kind::constructor(n) creates an n-arity type constructor kind.
@@ -159,15 +146,12 @@ pub enum Kind {
 impl Kind {
     /// Create a type constructor kind with given arity
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// // List<_> has kind * -> *
     /// let list_kind = Kind::constructor(1);
     ///
-
     /// // Map<_, _> has kind * -> * -> *
     /// let map_kind = Kind::constructor(2);
     /// ```
@@ -197,13 +181,11 @@ impl Kind {
 
 /// Extended AssociatedType with GAT support
 ///
-
 /// This extends the basic AssociatedType with:
 /// - Type parameters for GATs
 /// - Per-GAT where clauses
 /// - Kind tracking (regular, generic, higher-kinded)
 ///
-
 /// Extended associated type with full GAT support: type parameters, per-GAT
 /// where clauses, and kind tracking. Enables patterns like lending iterators,
 /// Monad/Functor abstractions, and zero-copy streaming iteration.
@@ -284,7 +266,6 @@ impl AssociatedTypeGAT {
 
 /// Error in GAT verification
 ///
-
 /// These errors are detected during GAT well-formedness checking.
 #[derive(Debug, Clone)]
 pub enum GATError {

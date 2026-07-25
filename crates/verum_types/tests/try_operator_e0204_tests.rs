@@ -63,14 +63,11 @@ fn named_type(name: &str) -> Type {
 
 /// Helper to create a From<source_type> protocol implementation for a target type.
 ///
-
 /// This properly registers the implementation with the protocol checker,
 /// enabling the `find_all_conversion_paths` algorithm to discover it.
 ///
-
 /// # Arguments
 ///
-
 /// * `protocol_checker` - The protocol checker to register with
 /// * `source_type` - The type being converted from (the T in From<T>)
 /// * `target_type` - The type implementing From<T>

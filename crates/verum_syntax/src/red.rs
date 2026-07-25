@@ -26,7 +26,6 @@ use crate::green::{GreenChild, GreenNode, GreenToken, TextRange, TextSize};
 
 /// Red node - provides parent pointers and absolute positions.
 ///
-
 /// Built on-demand from green nodes, discarded on edits.
 /// Uses reference counting for efficient cloning.
 #[derive(Clone)]

@@ -4384,15 +4384,12 @@ impl IntrinsicLowering {
 
     /// Lower MathExtended opcode (0x29) to MLIR/LLVM intrinsics.
     ///
-
     /// This provides zero-cost lowering for transcendental and special math functions.
     /// Each MathSubOpcode maps directly to an LLVM intrinsic, which LLVM can inline,
     /// vectorize, or lower to hardware instructions as appropriate.
     ///
-
     /// # LLVM Intrinsic Mapping
     ///
-
     /// | Category | LLVM Intrinsic | MathSubOpcode |
     /// |----------|----------------|---------------|
     /// | Trig F64 | llvm.sin.f64, llvm.cos.f64, etc. | SinF64, CosF64, etc. |
@@ -4403,10 +4400,8 @@ impl IntrinsicLowering {
     /// | Round | llvm.floor.f64, llvm.ceil.f64 | FloorF64, CeilF64 |
     /// | Special | llvm.fma.f64, llvm.copysign.f64 | FmaF64, CopysignF64 |
     ///
-
     /// # GPU Path
     ///
-
     /// For GPU lowering (future), the mlir_op hint from intrinsic definition
     /// will be used to emit MLIR math dialect ops (math.sin, math.cos, etc.).
     fn lower_math_extended_opcode(

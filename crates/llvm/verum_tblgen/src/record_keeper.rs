@@ -45,7 +45,6 @@ impl<'s> RecordKeeper<'s> {
 
     /// Returns an iterator over all classes.
     ///
-
     /// The iterator yields tuples of type `(String, Record)`.
     pub fn classes(&self) -> NamedRecordIter<'_, IsClass> {
         unsafe { NamedRecordIter::from_raw(tableGenRecordKeeperGetFirstClass(self.raw)) }
@@ -53,7 +52,6 @@ impl<'s> RecordKeeper<'s> {
 
     /// Returns an iterator over all definitions.
     ///
-
     /// The iterator yields tuples of type `(String, Record)`.
     pub fn defs(&self) -> NamedRecordIter<'_, IsDef> {
         unsafe { NamedRecordIter::from_raw(tableGenRecordKeeperGetFirstDef(self.raw)) }

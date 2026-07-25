@@ -39,7 +39,6 @@ use serde::{Deserialize, Serialize};
 
 /// External proof system Verum interacts with.
 ///
-
 /// Variants are arranged by family: traditional CIC-family
 /// assistants (Coq / Lean) first, then non-CIC systems (Mizar,
 /// Isabelle), then minimal verifiers (Agda, Dedukti, Metamath).
@@ -195,7 +194,6 @@ impl ForeignSystem {
 /// the canonical [`ForeignSystem`] tag without reaching for the
 /// per-capacity trait it specialises in.
 ///
-
 /// The full collapse of the 5 capacity traits into one is a
 /// downstream refactor; this trait provides the unified handle so
 /// the migration can land incrementally.

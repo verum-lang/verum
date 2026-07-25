@@ -138,14 +138,11 @@ impl<'ctx> Builder<'ctx> {
     /// Builds a function return instruction. It should be provided with `None` if the return type
     /// is void otherwise `Some(&value)` should be provided.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
-
     /// // A simple function which returns its argument:
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -157,7 +154,6 @@ impl<'ctx> Builder<'ctx> {
     /// let entry = context.append_basic_block(fn_value, "entry");
     /// let i32_arg = fn_value.get_first_param().unwrap();
     ///
-
     /// builder.position_at_end(entry);
     /// builder.build_return(Some(&i32_arg)).unwrap();
     /// ```
@@ -181,14 +177,11 @@ impl<'ctx> Builder<'ctx> {
     /// Builds a function return instruction for a return type which is an aggregate type (ie structs and arrays).
     /// It is not necessary to use this over `build_return` but may be more convenient to use.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
-
     /// // This builds a simple function which returns a struct (tuple) of two ints.
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -201,7 +194,6 @@ impl<'ctx> Builder<'ctx> {
     /// let fn_value = module.add_function("ret", fn_type, None);
     /// let entry = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry);
     /// builder.build_aggregate_return(&[i32_three.into(), i32_seven.into()]).unwrap();
     /// ```
@@ -223,17 +215,13 @@ impl<'ctx> Builder<'ctx> {
     /// [`FunctionValue`]s can be implicitly converted into a [`CallableValue`].
     /// See [`CallableValue`] for details on calling a [`PointerValue`] that points to a function.
     ///
-
     /// [`FunctionValue`]: crate::values::FunctionValue
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
-
     /// // A simple function which calls itself:
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -245,19 +233,15 @@ impl<'ctx> Builder<'ctx> {
     /// let i32_arg = fn_value.get_first_param().unwrap();
     /// let md_string = context.metadata_string("a metadata");
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let ret_val = builder.build_call(fn_value, &[i32_arg.into(), md_string.into()], "call").unwrap()
     ///  .try_as_basic_value()
     ///  .unwrap_basic();
     ///
-
     /// builder.build_return(Some(&ret_val)).unwrap();
     /// ```
     ///
-
     /// Note: The old CallableValue-based build_call was removed because LLVMBuildCall
     /// was deprecated in LLVM 17+ in favor of LLVMBuildCall2 with explicit function types.
     /// Use build_direct_call for function values or build_indirect_call for function pointers.
@@ -276,14 +260,11 @@ impl<'ctx> Builder<'ctx> {
     /// Builds a function call instruction. The function being called is known at compile time. If
     /// you want to call a function pointer, see [Builder::build_indirect_call].
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
-
     /// // A simple function which calls itself:
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -295,15 +276,12 @@ impl<'ctx> Builder<'ctx> {
     /// let i32_arg = fn_value.get_first_param().unwrap();
     /// let md_string = context.metadata_string("a metadata");
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let ret_val = builder.build_call(fn_value, &[i32_arg.into(), md_string.into()], "call").unwrap()
     ///  .try_as_basic_value()
     ///  .unwrap_basic();
     ///
-
     /// builder.build_return(Some(&ret_val)).unwrap();
     /// ```
     pub fn build_direct_call(
@@ -320,30 +298,24 @@ impl<'ctx> Builder<'ctx> {
 
     /// Build a function call instruction, with attached operand bundles.
     ///
-
     /// # Example
     ///
-
     /// ```
     /// use verum_llvm::context::Context;
     /// use verum_llvm::values::OperandBundle;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("call_with_op_bundles");
     /// let builder = context.create_builder();
     /// let i32_type = context.i32_type();
     ///
-
     /// // declare i32 @func(i32)
     /// let fn_type = i32_type.fn_type(&[i32_type.into()], false);
     /// let fn_value = module.add_function("func", fn_type, None);
     ///
-
     /// let basic_block = context.append_basic_block(fn_value, "entry");
     /// builder.position_at_end(basic_block);
     ///
-
     /// // %func_ret = call i32 @func(i32 0) [ "tag"(i32 0) ]
     /// let ret_val = builder.build_direct_call_with_operand_bundles(
     ///  fn_value,
@@ -356,7 +328,6 @@ impl<'ctx> Builder<'ctx> {
     ///  .unwrap_basic();
     /// builder.build_return(Some(&ret_val)).unwrap();
     ///
-
     /// # module.verify().unwrap();
     /// ```
     pub fn build_direct_call_with_operand_bundles(
@@ -378,14 +349,11 @@ impl<'ctx> Builder<'ctx> {
     /// Call a function pointer. Because a pointer does not carry a type, the type of the function
     /// must be specified explicitly.
     ///
-
     /// See [Context::create_inline_asm] for a practical example. Basic usage looks like this:
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
-
     /// // A simple function which calls itself:
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -397,16 +365,13 @@ impl<'ctx> Builder<'ctx> {
     /// let i32_arg = fn_value.get_first_param().unwrap();
     /// let md_string = context.metadata_string("a metadata");
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let function_pointer = fn_value.as_global_value().as_pointer_value();
     /// let ret_val = builder.build_indirect_call(fn_value.get_type(), function_pointer, &[i32_arg.into(), md_string.into()], "call").unwrap()
     ///  .try_as_basic_value()
     ///  .unwrap_basic();
     ///
-
     /// builder.build_return(Some(&ret_val)).unwrap();
     /// ```
     ///
@@ -426,7 +391,6 @@ impl<'ctx> Builder<'ctx> {
 
     /// Build a call instruction to a function pointer, with attached operand bundles.
     ///
-
     /// See [Builder::build_direct_call_with_operand_bundles] for a usage example
     /// with operand bundles.
     pub fn build_indirect_call_with_operand_bundles(
@@ -526,20 +490,16 @@ impl<'ctx> Builder<'ctx> {
     /// An invoke is similar to a normal function call, but used to
     /// call functions that may throw an exception, and then respond to the exception.
     ///
-
     /// When the called function returns normally, the `then` block is evaluated next. If instead
     /// the function threw an exception, the `catch` block is entered. The first non-phi
     /// instruction of the catch block must be a `landingpad` instruction. See also
     /// [`Builder::build_landing_pad`].
     ///
-
     /// The [`add_prune_eh_pass`] turns an invoke into a call when the called function is
     /// guaranteed to never throw an exception.
     ///
-
     /// [`add_prune_eh_pass`]: crate::passes::PassManager::add_prune_eh_pass
     ///
-
     /// This example catches C++ exceptions of type `int`, and returns `0` if an exceptions is thrown.
     /// For usage of a cleanup landing pad and the `resume` instruction, see [`Builder::build_resume`]
     /// ```ignore
@@ -547,109 +507,84 @@ impl<'ctx> Builder<'ctx> {
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::module::Linkage;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let builder = context.create_builder();
     ///
-
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], false);
     ///
-
     /// // we will pretend this function can throw an exception
     /// let function = module.add_function("bomb", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
-
     /// builder.position_at_end(basic_block);
     ///
-
     /// let pi = f32_type.const_float(std::f64::consts::PI);
     ///
-
     /// builder.build_return(Some(&pi)).unwrap();
     ///
-
     /// let function2 = module.add_function("wrapper", fn_type, None);
     /// let basic_block2 = context.append_basic_block(function2, "entry");
     ///
-
     /// builder.position_at_end(basic_block2);
     ///
-
     /// let then_block = context.append_basic_block(function2, "then_block");
     /// let catch_block = context.append_basic_block(function2, "catch_block");
     ///
-
     /// let call_site = builder.build_invoke(function, &[], then_block, catch_block, "get_pi").unwrap();
     ///
-
     /// {
     ///  builder.position_at_end(then_block);
     ///
-
     ///  // in the then_block, the `call_site` value is defined and can be used
     ///  let result = call_site.try_as_basic_value().unwrap_basic();
     ///
-
     ///  builder.build_return(Some(&result)).unwrap();
     /// }
     ///
-
     /// {
     ///  builder.position_at_end(catch_block);
     ///
-
     ///  // the personality function used by C++
     ///  let personality_function = {
     ///  let name = "__gxx_personality_v0";
     ///  let linkage = Some(Linkage::External);
     ///
-
     ///  module.add_function(name, context.i64_type().fn_type(&[], false), linkage)
     ///  };
     ///
-
     ///  // type of an exception in C++
     ///  /// let i8_ptr_type = context.i32_type().ptr_type(AddressSpace::default());
     ///  /// let i32_ptr_ty = context.ptr_type(AddressSpace::default());
     ///  let i32_type = context.i32_type();
     ///  let exception_type = context.struct_type(&[i8_ptr_type.into(), i32_type.into()], false);
     ///
-
     ///  let null = i8_ptr_type.const_zero();
     ///  let res = builder.build_landing_pad(exception_type, personality_function, &[null.into()], false, "res").unwrap();
     ///
-
     ///  // we handle the exception by returning a default value
     ///  builder.build_return(Some(&f32_type.const_zero())).unwrap();
     /// }
     /// ```
     ///
-
     /// Note: The old CallableValue-based build_invoke was removed because LLVMBuildInvoke
     /// was deprecated in LLVM 17+ in favor of LLVMBuildInvoke2 with explicit function types.
     /// Use build_direct_invoke for function values or build_indirect_invoke for function pointers.
     ///
-
     /// An invoke is similar to a normal function call, but used to
     /// call functions that may throw an exception, and then respond to the exception.
     ///
-
     /// When the called function returns normally, the `then` block is evaluated next. If instead
     /// the function threw an exception, the `catch` block is entered. The first non-phi
     /// instruction of the catch block must be a `landingpad` instruction. See also
     /// [`Builder::build_landing_pad`].
     ///
-
     /// The [`add_prune_eh_pass`] turns an invoke into a call when the called function is
     /// guaranteed to never throw an exception.
     ///
-
     /// [`add_prune_eh_pass`]: crate::passes::PassManager::add_prune_eh_pass
     ///
-
     /// This example catches C++ exceptions of type `int`, and returns `0` if an exceptions is thrown.
     /// For usage of a cleanup landing pad and the `resume` instruction, see [`Builder::build_resume`]
     /// ```ignore
@@ -657,81 +592,62 @@ impl<'ctx> Builder<'ctx> {
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::module::Linkage;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let builder = context.create_builder();
     ///
-
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], false);
     ///
-
     /// // we will pretend this function can throw an exception
     /// let function = module.add_function("bomb", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
-
     /// builder.position_at_end(basic_block);
     ///
-
     /// let pi = f32_type.const_float(std::f64::consts::PI);
     ///
-
     /// builder.build_return(Some(&pi)).unwrap();
     ///
-
     /// let function2 = module.add_function("wrapper", fn_type, None);
     /// let basic_block2 = context.append_basic_block(function2, "entry");
     ///
-
     /// builder.position_at_end(basic_block2);
     ///
-
     /// let then_block = context.append_basic_block(function2, "then_block");
     /// let catch_block = context.append_basic_block(function2, "catch_block");
     ///
-
     /// let call_site = builder.build_invoke(function, &[], then_block, catch_block, "get_pi").unwrap();
     ///
-
     /// {
     ///  builder.position_at_end(then_block);
     ///
-
     ///  // in the then_block, the `call_site` value is defined and can be used
     ///  let result = call_site.try_as_basic_value().unwrap_basic();
     ///
-
     ///  builder.build_return(Some(&result)).unwrap();
     /// }
     ///
-
     /// {
     ///  builder.position_at_end(catch_block);
     ///
-
     ///  // the personality function used by C++
     ///  let personality_function = {
     ///  let name = "__gxx_personality_v0";
     ///  let linkage = Some(Linkage::External);
     ///
-
     ///  module.add_function(name, context.i64_type().fn_type(&[], false), linkage)
     ///  };
     ///
-
     ///  // type of an exception in C++
     ///  /// let ptr_type = context.i8_type().ptr_type(AddressSpace::default());
     ///  /// let ptr_type = context.ptr_type(AddressSpace::default());
     ///  let i32_type = context.i32_type();
     ///  let exception_type = context.struct_type(&[ptr_type.into(), i32_type.into()], false);
     ///
-
     ///  let null = ptr_type.const_zero();
     ///  let res = builder.build_landing_pad(exception_type, personality_function, &[null.into()], false, "res").unwrap();
     ///
-
     ///  // we handle the exception by returning a default value
     ///  builder.build_return(Some(&f32_type.const_zero())).unwrap();
     /// }
@@ -838,172 +754,140 @@ impl<'ctx> Builder<'ctx> {
     /// that is matched, the exception can then be handled, or resumed after some optional cleanup,
     /// causing the exception to bubble up.
     ///
-
     /// Exceptions in LLVM are designed based on the needs of a C++ compiler, but can be used more generally.
     /// Here are some specific examples of landing pads. For a full example of handling an exception, see [`Builder::build_invoke`].
     ///
-
     /// * **cleanup**: a cleanup landing pad is always visited when unwinding the stack.
     ///  A cleanup is extra code that needs to be run when unwinding a scope. C++ destructors are a typical example.
     ///  In a language with reference counting, the cleanup block can decrement the refcount of values in scope.
     ///  The [`Builder::build_resume`] function has a full example using a cleanup lading pad.
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::module::Linkage;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let builder = context.create_builder();
     ///
-
     /// // type of an exception in C++
     /// /// let i8_ptr_type = context.i8_type().ptr_type(AddressSpace::default());
     /// /// let i8_ptr_type = context.ptr_type(AddressSpace::default());
     /// let i32_type = context.i32_type();
     /// let exception_type = context.struct_type(&[i8_ptr_type.into(), i32_type.into()], false);
     ///
-
     /// // the personality function used by C++
     /// let personality_function = {
     ///  let name = "__gxx_personality_v0";
     ///  let linkage = Some(Linkage::External);
     ///
-
     ///  module.add_function(name, context.i64_type().fn_type(&[], false), linkage)
     /// };
     ///
-
     /// // make the cleanup landing pad
     /// let res = builder.build_landing_pad( exception_type, personality_function, &[], true, "res").unwrap();
     /// ```
     ///
-
     /// * **catch all**: An implementation of the C++ `catch(...)`, which catches all exceptions.
     ///  A catch clause with a NULL pointer value will match anything.
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::module::Linkage;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let builder = context.create_builder();
     ///
-
     /// // type of an exception in C++
     /// /// let i8_ptr_type = context.i8_type().ptr_type(AddressSpace::default());
     /// /// let i8_ptr_type = context.ptr_type(AddressSpace::default());
     /// let i32_type = context.i32_type();
     /// let exception_type = context.struct_type(&[i8_ptr_type.into(), i32_type.into()], false);
     ///
-
     /// // the personality function used by C++
     /// let personality_function = {
     ///  let name = "__gxx_personality_v0";
     ///  let linkage = Some(Linkage::External);
     ///
-
     ///  module.add_function(name, context.i64_type().fn_type(&[], false), linkage)
     /// };
     ///
-
     /// // make a null pointer of type i8
     /// let null = i8_ptr_type.const_zero();
     ///
-
     /// // make the catch all landing pad
     /// let res = builder.build_landing_pad(exception_type, personality_function, &[null.into()], false, "res").unwrap();
     /// ```
     ///
-
     /// * **catch a type of exception**: Catch a specific type of exception. The example uses C++'s type info.
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Linkage;
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::values::BasicValue;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let builder = context.create_builder();
     ///
-
     /// // type of an exception in C++
     /// /// let i8_ptr_type = context.i8_type().ptr_type(AddressSpace::default());
     /// /// let i8_ptr_type = context.ptr_type(AddressSpace::default());
     /// let i32_type = context.i32_type();
     /// let exception_type = context.struct_type(&[i8_ptr_type.into(), i32_type.into()], false);
     ///
-
     /// // the personality function used by C++
     /// let personality_function = {
     ///  let name = "__gxx_personality_v0";
     ///  let linkage = Some(Linkage::External);
     ///
-
     ///  module.add_function(name, context.i64_type().fn_type(&[], false), linkage)
     /// };
     ///
-
     /// // link in the C++ type info for the `int` type
     /// let type_info_int = module.add_global(i8_ptr_type, Some(AddressSpace::default()), "_ZTIi");
     /// type_info_int.set_linkage(Linkage::External);
     ///
-
     /// // make the catch landing pad
     /// let clause = type_info_int.as_basic_value_enum();
     /// let res = builder.build_landing_pad(exception_type, personality_function, &[clause], false, "res").unwrap();
     /// ```
     ///
-
     /// * **filter**: A filter clause encodes that only some types of exceptions are valid at this
     ///  point. A filter clause is made by constructing a clause from a constant array.
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::module::Linkage;
     /// use verum_llvm::values::AnyValue;
     /// use verum_llvm::AddressSpace;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let builder = context.create_builder();
     ///
-
     /// // type of an exception in C++
     /// /// let i8_ptr_type = context.i8_type().ptr_type(AddressSpace::default());
     /// /// let i8_ptr_type = context.ptr_type(AddressSpace::default());
     /// let i32_type = context.i32_type();
     /// let exception_type = context.struct_type(&[i8_ptr_type.into(), i32_type.into()], false);
     ///
-
     /// // the personality function used by C++
     /// let personality_function = {
     ///  let name = "__gxx_personality_v0";
     ///  let linkage = Some(Linkage::External);
     ///
-
     ///  module.add_function(name, context.i64_type().fn_type(&[], false), linkage)
     /// };
     ///
-
     /// // link in the C++ type info for the `int` type
     /// let type_info_int = module.add_global(i8_ptr_type, Some(AddressSpace::default()), "_ZTIi");
     /// type_info_int.set_linkage(Linkage::External);
     ///
-
     /// // make the filter landing pad
     /// let filter_pattern = i8_ptr_type.const_array(&[type_info_int.as_any_value_enum().into_pointer_value()]);
     /// let res = builder.build_landing_pad(exception_type, personality_function, &[filter_pattern.into()], false, "res").unwrap();
@@ -1050,95 +934,73 @@ impl<'ctx> Builder<'ctx> {
 
     /// Resume propagation of an existing (in-flight) exception whose unwinding was interrupted with a landingpad instruction.
     ///
-
     /// This example uses a cleanup landing pad. A cleanup is extra code that needs to be run when
     /// unwinding a scope. C++ destructors are a typical example. In a language with reference counting,
     /// the cleanup block can decrement the refcount of values in scope.
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::module::Linkage;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("sum");
     /// let builder = context.create_builder();
     ///
-
     /// let f32_type = context.f32_type();
     /// let fn_type = f32_type.fn_type(&[], false);
     ///
-
     /// // we will pretend this function can throw an exception
     /// let function = module.add_function("bomb", fn_type, None);
     /// let basic_block = context.append_basic_block(function, "entry");
     ///
-
     /// builder.position_at_end(basic_block);
     ///
-
     /// let pi = f32_type.const_float(std::f64::consts::PI);
     ///
-
     /// builder.build_return(Some(&pi)).unwrap();
     ///
-
     /// let function2 = module.add_function("wrapper", fn_type, None);
     /// let basic_block2 = context.append_basic_block(function2, "entry");
     ///
-
     /// builder.position_at_end(basic_block2);
     ///
-
     /// let then_block = context.append_basic_block(function2, "then_block");
     /// let catch_block = context.append_basic_block(function2, "catch_block");
     ///
-
     /// let call_site = builder.build_invoke(function, &[], then_block, catch_block, "get_pi").unwrap();
     ///
-
     /// {
     ///  builder.position_at_end(then_block);
     ///
-
     ///  // in the then_block, the `call_site` value is defined and can be used
     ///  let result = call_site.try_as_basic_value().unwrap_basic();
     ///
-
     ///  builder.build_return(Some(&result)).unwrap();
     /// }
     ///
-
     /// {
     ///  builder.position_at_end(catch_block);
     ///
-
     ///  // the personality function used by C++
     ///  let personality_function = {
     ///  let name = "__gxx_personality_v0";
     ///  let linkage = Some(Linkage::External);
     ///
-
     ///  module.add_function(name, context.i64_type().fn_type(&[], false), linkage)
     ///  };
     ///
-
     ///  // type of an exception in C++
     ///  /// let i8_ptr_type = context.i8_type().ptr_type(AddressSpace::default());
     ///  /// let i8_ptr_type = context.ptr_type(AddressSpace::default());
     ///  let i32_type = context.i32_type();
     ///  let exception_type = context.struct_type(&[i8_ptr_type.into(), i32_type.into()], false);
     ///
-
     ///  // make the landing pad; must give a concrete type to the slice
     ///  let res = builder.build_landing_pad( exception_type, personality_function, &[], true, "res").unwrap();
     ///
-
     ///  // do cleanup ...
     ///
-
     ///  builder.build_resume(res).unwrap();
     /// }
     /// ```
@@ -1220,15 +1082,12 @@ impl<'ctx> Builder<'ctx> {
     /// Builds a GEP instruction on a struct pointer. Returns `Err` `BuilderError::GEPPointee` or `BuilderError::GEPIndex` if input `PointerValue` doesn't
     /// point to a struct or if index is out of bounds.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let builder = context.create_builder();
     /// let module = context.create_module("struct_gep");
@@ -1243,14 +1102,11 @@ impl<'ctx> Builder<'ctx> {
     /// let fn_value = module.add_function("", fn_type, None);
     /// let entry = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let i32_ptr = fn_value.get_first_param().unwrap().into_pointer_value();
     /// let struct_ptr = fn_value.get_last_param().unwrap().into_pointer_value();
     ///
-
     /// assert!(builder.build_struct_gep(i32_ty, i32_ptr, 0, "struct_gep").is_err());
     /// assert!(builder.build_struct_gep(i32_ty, i32_ptr, 10, "struct_gep").is_err());
     /// assert!(builder.build_struct_gep(struct_ty, struct_ptr, 0, "struct_gep").is_ok());
@@ -1296,15 +1152,12 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds an instruction which calculates the difference of two pointers.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
-
     /// // Builds a function which diffs two pointers
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -1319,7 +1172,6 @@ impl<'ctx> Builder<'ctx> {
     /// let i32_ptr_param1 = fn_value.get_first_param().unwrap().into_pointer_value();
     /// let i32_ptr_param2 = fn_value.get_nth_param(1).unwrap().into_pointer_value();
     ///
-
     /// builder.position_at_end(entry);
     /// builder.build_ptr_diff(i32_ptr_type, i32_ptr_param1, i32_ptr_param2, "diff").unwrap();
     /// builder.build_return(None).unwrap();
@@ -1367,15 +1219,12 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds a store instruction. It allows you to store a value of type `T` in a pointer to a type `T`.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
-
     /// // Builds a function which takes an i32 pointer and stores a 7 in it.
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -1390,7 +1239,6 @@ impl<'ctx> Builder<'ctx> {
     /// let entry = context.append_basic_block(fn_value, "entry");
     /// let i32_ptr_param = fn_value.get_first_param().unwrap().into_pointer_value();
     ///
-
     /// builder.position_at_end(entry);
     /// builder.build_store(i32_ptr_param, i32_seven).unwrap();
     /// builder.build_return(None).unwrap();
@@ -1411,15 +1259,12 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds a load instruction. It allows you to retrieve a value of type `T` from a pointer to a type `T`.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::AddressSpace;
     ///
-
     /// // Builds a function which takes an i32 pointer and returns the pointed at i32.
     /// let context = Context::create();
     /// let module = context.create_module("ret");
@@ -1432,13 +1277,10 @@ impl<'ctx> Builder<'ctx> {
     /// let entry = context.append_basic_block(fn_value, "entry");
     /// let i32_ptr_param = fn_value.get_first_param().unwrap().into_pointer_value();
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let pointee = builder.build_load(i32_type, i32_ptr_param, "load2").unwrap();
     ///
-
     /// builder.build_return(Some(&pointee)).unwrap();
     /// ```
     pub fn build_load<T: BasicType<'ctx>>(
@@ -1504,17 +1346,13 @@ impl<'ctx> Builder<'ctx> {
 
     /// Build a [memcpy](https://llvm.org/docs/LangRef.html#llvm-memcpy-intrinsic) instruction.
     ///
-
     /// Alignment arguments are specified in bytes, and should always be
     /// both a power of 2 and under 2^64.
     ///
-
     /// The final argument should be a pointer-sized integer.
     ///
-
     /// Returns an `Err(BuilderError::AlignmentError)` if the source or destination alignments are not a power of 2.
     ///
-
     /// [`TargetData::ptr_sized_int_type_in_context`](https://thedan64.github.io/inkwell/inkwell/targets/struct.TargetData.html#method.ptr_sized_int_type_in_context) will get you one of those.
     pub fn build_memcpy(
         &self,
@@ -1555,17 +1393,13 @@ impl<'ctx> Builder<'ctx> {
 
     /// Build a [memmove](http://llvm.org/docs/LangRef.html#llvm-memmove-intrinsic) instruction.
     ///
-
     /// Alignment arguments are specified in bytes, and should always be
     /// both a power of 2 and under 2^64.
     ///
-
     /// The final argument should be a pointer-sized integer.
     ///
-
     /// Returns an `Err(BuilderError::AlignmentError)` if the source or destination alignments are not a power of 2 under 2^64.
     ///
-
     /// [`TargetData::ptr_sized_int_type_in_context`](https://thedan64.github.io/inkwell/inkwell/targets/struct.TargetData.html#method.ptr_sized_int_type_in_context) will get you one of those.
     pub fn build_memmove(
         &self,
@@ -1606,17 +1440,13 @@ impl<'ctx> Builder<'ctx> {
 
     /// Build a [memset](http://llvm.org/docs/LangRef.html#llvm-memset-intrinsics) instruction.
     ///
-
     /// Alignment arguments are specified in bytes, and should always be
     /// both a power of 2 and under 2^64.
     ///
-
     /// The final argument should be a pointer-sized integer.
     ///
-
     /// Returns an `Err(BuilderError::AlignmentError)` if the source alignment is not a power of 2 under 2^64.
     ///
-
     /// [`TargetData::ptr_sized_int_type_in_context`](https://thedan64.github.io/inkwell/inkwell/targets/struct.TargetData.html#method.ptr_sized_int_type_in_context) will get you one of those.
     pub fn build_memset(
         &self,
@@ -1907,15 +1737,12 @@ impl<'ctx> Builder<'ctx> {
     /// Builds a bitcast instruction. A bitcast reinterprets the bits of one value
     /// into a value of another type which has the same bit width.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::AddressSpace;
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("bc");
     /// let void_type = context.void_type();
@@ -1928,14 +1755,11 @@ impl<'ctx> Builder<'ctx> {
     /// let entry = context.append_basic_block(fn_value, "entry");
     /// let i32_arg = fn_value.get_first_param().unwrap();
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// builder.build_bit_cast(i32_arg, f32_type, "i32tof32").unwrap();
     /// builder.build_return(None).unwrap();
     ///
-
     /// assert!(module.verify().is_ok());
     /// ```
     pub fn build_bit_cast<T, V>(
@@ -2522,35 +2346,28 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds an `IntValue` containing the result of a logical left shift instruction.
     ///
-
     /// # Example
     /// A logical left shift is an operation in which an integer value's bits are shifted left by N number of positions.
     ///
-
     /// ```rust,no_run
     /// assert_eq!(0b0000_0001 << 0, 0b0000_0001);
     /// assert_eq!(0b0000_0001 << 1, 0b0000_0010);
     /// assert_eq!(0b0000_0011 << 2, 0b0000_1100);
     /// ```
     ///
-
     /// In Rust, a function that could do this for 8bit values looks like:
     ///
-
     /// ```rust,no_run
     /// fn left_shift(value: u8, n: u8) -> u8 {
     ///  value << n
     /// }
     /// ```
     ///
-
     /// And in Inkwell, the corresponding function would look roughly like:
     ///
-
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// // Setup
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
@@ -2558,20 +2375,16 @@ impl<'ctx> Builder<'ctx> {
     /// let i8_type = context.i8_type();
     /// let fn_type = i8_type.fn_type(&[i8_type.into(), i8_type.into()], false);
     ///
-
     /// // Function Definition
     /// let function = module.add_function("left_shift", fn_type, None);
     /// let value = function.get_first_param().unwrap().into_int_value();
     /// let n = function.get_nth_param(1).unwrap().into_int_value();
     /// let entry_block = context.append_basic_block(function, "entry");
     ///
-
     /// builder.position_at_end(entry_block);
     ///
-
     /// let shift = builder.build_left_shift(value, n, "left_shift").unwrap(); // value << n
     ///
-
     /// builder.build_return(Some(&shift)).unwrap();
     /// ```
     pub fn build_left_shift<T: IntMathValue<'ctx>>(
@@ -2598,42 +2411,35 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds an `IntValue` containing the result of a right shift instruction.
     ///
-
     /// # Example
     /// A right shift is an operation in which an integer value's bits are shifted right by N number of positions.
     /// It may either be logical and have its leftmost N bit(s) filled with zeros or sign extended and filled with ones
     /// if the leftmost bit was one.
     ///
-
     /// ```rust,no_run
     /// //fix doc error about overflowing_literals
     /// //rendered rfc: https://github.com/rust-lang/rfcs/blob/master/text/2438-deny-integer-literal-overflow-lint.md
     /// //tracking issue: https://github.com/rust-lang/rust/issues/54502
     /// #![allow(overflowing_literals)]
     ///
-
     /// // Logical Right Shift
     /// assert_eq!(0b1100_0000u8 >> 2, 0b0011_0000);
     /// assert_eq!(0b0000_0010u8 >> 1, 0b0000_0001);
     /// assert_eq!(0b0000_1100u8 >> 2, 0b0000_0011);
     ///
-
     /// // Sign Extended Right Shift
     /// assert_eq!(0b0100_0000i8 >> 2, 0b0001_0000);
     /// assert_eq!(0b1110_0000u8 as i8 >> 1, 0b1111_0000u8 as i8);
     /// assert_eq!(0b1100_0000u8 as i8 >> 2, 0b1111_0000u8 as i8);
     /// ```
     ///
-
     /// In Rust, functions that could do this for 8bit values look like:
     ///
-
     /// ```rust,no_run
     /// fn logical_right_shift(value: u8, n: u8) -> u8 {
     ///  value >> n
     /// }
     ///
-
     /// fn sign_extended_right_shift(value: i8, n: u8) -> i8 {
     ///  value >> n
     /// }
@@ -2641,14 +2447,11 @@ impl<'ctx> Builder<'ctx> {
     /// Notice that, in Rust (and most other languages), whether or not a value is sign extended depends wholly on whether
     /// or not the type is signed (ie an i8 is a signed 8 bit value). LLVM does not make this distinction for you.
     ///
-
     /// In Inkwell, the corresponding functions would look roughly like:
     ///
-
     /// ```rust,no_run
     /// use verum_llvm::context::Context;
     ///
-
     /// // Setup
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
@@ -2656,22 +2459,18 @@ impl<'ctx> Builder<'ctx> {
     /// let i8_type = context.i8_type();
     /// let fn_type = i8_type.fn_type(&[i8_type.into(), i8_type.into()], false);
     ///
-
     /// // Function Definition
     /// let function = module.add_function("right_shift", fn_type, None);
     /// let value = function.get_first_param().unwrap().into_int_value();
     /// let n = function.get_nth_param(1).unwrap().into_int_value();
     /// let entry_block = context.append_basic_block(function, "entry");
     ///
-
     /// builder.position_at_end(entry_block);
     ///
-
     /// // Whether or not your right shift is sign extended (true) or logical (false) depends
     /// // on the boolean input parameter:
     /// let shift = builder.build_right_shift(value, n, false, "right_shift").unwrap(); // value >> n
     ///
-
     /// builder.build_return(Some(&shift)).unwrap();
     /// ```
     pub fn build_right_shift<T: IntMathValue<'ctx>>(
@@ -3169,7 +2968,6 @@ impl<'ctx> Builder<'ctx> {
     // It'd be great if we could get the BB from the instruction behind the scenes
     /// Set the position of the builder to after an instruction.
     ///
-
     /// Be sure to call one of the `position_*` methods or all `build_*` methods will return `Err(BuilderError::UnsetPosition)`.
     pub fn position_at(&self, basic_block: BasicBlock<'ctx>, instruction: &InstructionValue<'ctx>) {
         self.positioned.set(PositionState::Set);
@@ -3185,7 +2983,6 @@ impl<'ctx> Builder<'ctx> {
 
     /// Set the position of the builder to before an instruction.
     ///
-
     /// Be sure to call one of the `position_*` methods or all `build_*` methods will return `Err(BuilderError::UnsetPosition)`.
     pub fn position_before(&self, instruction: &InstructionValue<'ctx>) {
         self.positioned.set(PositionState::Set);
@@ -3195,7 +2992,6 @@ impl<'ctx> Builder<'ctx> {
 
     /// Set the position of the builder to the end of a basic block.
     ///
-
     /// Be sure to call one of the `position_*` methods or all `build_*` methods will return `Err(BuilderError::UnsetPosition)`.
     pub fn position_at_end(&self, basic_block: BasicBlock<'ctx>) {
         self.positioned.set(PositionState::Set);
@@ -3208,18 +3004,14 @@ impl<'ctx> Builder<'ctx> {
     /// Builds an extract value instruction which extracts a `BasicValueEnum`
     /// from a struct or array.
     ///
-
     /// Returns `Err(BuilderError::ExtractOutOfRange)` if the provided index is out of bounds of the aggregate value length.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::builder::BuilderError;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("av");
     /// let void_type = context.void_type();
@@ -3232,28 +3024,22 @@ impl<'ctx> Builder<'ctx> {
     /// let builder = context.create_builder();
     /// let entry = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let array_alloca = builder.build_alloca(array_type, "array_alloca").unwrap();
     ///
-
     /// /// let array = builder.build_load(array_alloca, "array_load").unwrap().into_array_value();
     /// /// let array = builder.build_load(i32_type, array_alloca, "array_load").unwrap().into_array_value();
     ///
-
     /// let const_int1 = i32_type.const_int(2, false);
     /// let const_int2 = i32_type.const_int(5, false);
     /// let const_int3 = i32_type.const_int(6, false);
     ///
-
     /// assert!(builder.build_insert_value(array, const_int1, 0, "insert").is_ok());
     /// assert!(builder.build_insert_value(array, const_int2, 1, "insert").is_ok());
     /// assert!(builder.build_insert_value(array, const_int3, 2, "insert").is_ok());
     /// assert!(builder.build_insert_value(array, const_int3, 3, "insert").is_err_and(|e| e == BuilderError::ExtractOutOfRange));
     ///
-
     /// assert!(builder.build_extract_value(array, 0, "extract").unwrap().is_int_value());
     /// assert!(builder.build_extract_value(array, 1, "extract").unwrap().is_int_value());
     /// assert!(builder.build_extract_value(array, 2, "extract").unwrap().is_int_value());
@@ -3289,18 +3075,14 @@ impl<'ctx> Builder<'ctx> {
     /// Builds an insert value instruction which inserts a `BasicValue` into a struct
     /// or array and returns the resulting aggregate value.
     ///
-
     /// Returns `Err(BuilderError::ExtractOutOfRange)` if the provided index is out of bounds of the aggregate value length.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     /// use verum_llvm::builder::BuilderError;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("av");
     /// let void_type = context.void_type();
@@ -3313,22 +3095,17 @@ impl<'ctx> Builder<'ctx> {
     /// let builder = context.create_builder();
     /// let entry = context.append_basic_block(fn_value, "entry");
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let array_alloca = builder.build_alloca(array_type, "array_alloca").unwrap();
     ///
-
     /// /// let array = builder.build_load(array_alloca, "array_load").unwrap().into_array_value();
     /// /// let array = builder.build_load(i32_type, array_alloca, "array_load").unwrap().into_array_value();
     ///
-
     /// let const_int1 = i32_type.const_int(2, false);
     /// let const_int2 = i32_type.const_int(5, false);
     /// let const_int3 = i32_type.const_int(6, false);
     ///
-
     /// assert!(builder.build_insert_value(array, const_int1, 0, "insert").is_ok());
     /// assert!(builder.build_insert_value(array, const_int2, 1, "insert").is_ok());
     /// assert!(builder.build_insert_value(array, const_int3, 2, "insert").is_ok());
@@ -3376,11 +3153,9 @@ impl<'ctx> Builder<'ctx> {
     /// from a vector.
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("av");
     /// let i32_type = context.i32_type();
@@ -3392,13 +3167,10 @@ impl<'ctx> Builder<'ctx> {
     /// let entry = context.append_basic_block(fn_value, "entry");
     /// let vector_param = fn_value.get_first_param().unwrap().into_vector_value();
     ///
-
     /// builder.position_at_end(entry);
     ///
-
     /// let extracted = builder.build_extract_element(vector_param, i32_zero, "insert").unwrap();
     ///
-
     /// builder.build_return(Some(&extracted)).unwrap();
     /// ```
     pub fn build_extract_element<V: VectorBaseValue<'ctx>>(
@@ -3427,14 +3199,11 @@ impl<'ctx> Builder<'ctx> {
     /// Builds an insert element instruction which inserts a `BasicValue` into a vector
     /// and returns the resulting vector.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_llvm::context::Context;
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("av");
     /// let void_type = context.void_type();
@@ -3448,7 +3217,6 @@ impl<'ctx> Builder<'ctx> {
     /// let entry = context.append_basic_block(fn_value, "entry");
     /// let vector_param = fn_value.get_first_param().unwrap().into_vector_value();
     ///
-
     /// builder.position_at_end(entry);
     /// builder.build_insert_element(vector_param, i32_seven, i32_zero, "insert").unwrap();
     /// builder.build_return(None).unwrap();
@@ -3785,20 +3553,16 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds an atomicrmw instruction. It allows you to atomically modify memory.
     ///
-
     /// May return of the following errors:
     /// - `Err(BuilderError::BitwidthError)` if the bitwidth of the value is not a power of 2 and less than 8
     /// - `Err(BuilderError:PointeeTypeMismatch)` if the pointee type does not match the value's type
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::{AddressSpace, AtomicOrdering, AtomicRMWBinOp};
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("rmw");
     /// let void_type = context.void_type();
@@ -3863,10 +3627,8 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds a [`cmpxchg`](https://llvm.org/docs/LangRef.html#cmpxchg-instruction) instruction.
     ///
-
     /// This instruction allows to atomically compare and replace memory.
     ///
-
     /// May return one of the following errors:
     /// - `Err(BuilderError::PointeeTypeMismatch)` if the pointer does not point to an element of the value type
     /// - `Err(BuilderError::ValueTypeMismatch)` if the value to compare and the new values are not of the same type, or if
@@ -3876,15 +3638,12 @@ impl<'ctx> Builder<'ctx> {
     ///  - The failure ordering is stronger than the success ordering
     ///  - The failure ordering is release or acquire release
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_llvm::context::Context;
     /// use verum_llvm::{AddressSpace, AtomicOrdering};
     ///
-
     /// let context = Context::create();
     /// let module = context.create_module("cmpxchg");
     /// let void_type = context.void_type();

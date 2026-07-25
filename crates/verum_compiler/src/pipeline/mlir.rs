@@ -34,20 +34,17 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run MLIR-based JIT compilation (experimental)
     ///
-
     /// This compilation path uses:
     /// 1. AST → Verum MLIR dialect lowering
     /// 2. CBGR elimination and context monomorphization passes
     /// 3. Progressive lowering to LLVM dialect
     /// 4. JIT compilation via ExecutionEngine
     ///
-
     /// Benefits over direct LLVM:
     /// - Domain-specific optimizations via custom MLIR passes
     /// - Better debugging via MLIR's verifier
     /// - Reusable transformations for different backends
     ///
-
     /// MLIR is used for GPU targets only; CPU code uses LLVM IR directly.
     pub fn run_mlir_jit(&mut self, args: List<Text>) -> Result<()> {
         use verum_codegen::mlir::MlirContext;
@@ -201,7 +198,6 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Run MLIR-based AOT compilation (experimental)
     ///
-
     /// Similar to run_mlir_jit but produces an executable instead of running directly.
     /// Uses VBC → MLIR path for GPU tensor operations.
     pub fn run_mlir_aot(&mut self) -> Result<PathBuf> {

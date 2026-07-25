@@ -102,13 +102,11 @@ use crate::proof_checker::{Level, Term};
 
 /// Serializable mirror of `proof_checker::Term`.
 ///
-
 /// Variants are 1:1 with `Term`; the payloads are recursively
 /// reflected. This indirection lets non-trusted callers (audit
 /// gates, future meta-tactics) consume the kernel's term grammar as
 /// data — *without* importing `proof_checker.rs` directly.
 ///
-
 /// The lossless round-trip `Term` ↔ [`ReflectedTerm`] is pinned by
 /// the test suite below.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,7 +214,6 @@ pub enum ReflectedTerm {
 
 /// Errors reported when reflecting (or de-reflecting) kernel data.
 ///
-
 /// current surface is intentionally narrow: the only failure mode today
 /// is a reflected term whose internal structure is malformed. The
 /// `From<&Term>` direction is total and never errors; the
@@ -358,7 +355,6 @@ impl TryFrom<&ReflectedTerm> for Term {
 
 /// Reflected typing judgment `Γ ⊢ t : T`.
 ///
-
 /// The context `Γ` is summarised by its **depth** rather than its
 /// full reified contents — for V0 meta-tactics, the depth is what
 /// matters for de Bruijn validity (rule sketches don't yet need to
@@ -404,14 +400,12 @@ impl ReflectedJudgment {
 
 /// Reflected kernel inference rule.
 ///
-
 /// Carries the rule's stable name + a structural sketch of its
 /// premises and conclusion as [`ReflectedJudgment`] values. This is
 /// the data a Verum-side meta-tactic enumerates when asking "what
 /// rules does the kernel know about?" — without ever touching
 /// `proof_checker.rs`.
 ///
-
 /// V0 sketches use stand-in `Var(0)` / `Universe(0)` placeholders
 /// where a fully-quantified schema would carry meta-variables; see
 /// the module-level docs for the Future-work promotion path.
@@ -437,7 +431,6 @@ pub struct ReflectedKernelRule {
 /// recognises. Mirrors the six rules implemented in
 /// [`crate::proof_checker`].
 ///
-
 /// Adding a rule to `proof_checker.rs` requires extending this
 /// constant + adding a new branch in [`reflect_kernel_rule`].
 pub const KERNEL_RULE_NAMES: &[&str] = &[
@@ -452,10 +445,8 @@ pub const KERNEL_RULE_NAMES: &[&str] = &[
 /// Reflect one of the six kernel rules into its abstract structural
 /// sketch. Returns `None` for any name not in [`KERNEL_RULE_NAMES`].
 ///
-
 /// ## V0 sketch shapes
 ///
-
 /// | Rule | Premise count | Sketch |
 /// |---------------|---------------|--------------------------------------------------------|
 /// | `T-Var` | 0 | `Γ ⊢ Var(0) : Var(0)` (axiomatic — context lookup) |
@@ -465,7 +456,6 @@ pub const KERNEL_RULE_NAMES: &[&str] = &[
 /// | `T-App-Elim` | 1 | `Γ ⊢ f : Π(A).B` ⇒ `Γ ⊢ App(f, Var(0)) : B` |
 /// | `T-Conv` | 1 | `Γ ⊢ t : A`, `A ≡_β B` ⇒ `Γ ⊢ t : B` |
 ///
-
 /// The placeholders use de Bruijn `Var(0)` to mean "the freshest
 /// binder in scope"; `Universe(0)` is `Type` and `Universe(1)` is
 /// `Type+1`. The full quantified schemata land in V1.
@@ -615,20 +605,16 @@ fn reflect_t_conv() -> ReflectedKernelRule {
 
 /// Surface-level sanity check on a [`ReflectedJudgment`].
 ///
-
 /// Verifies:
 ///
-
 ///  * Every de Bruijn `Var(i)` inside `term` and `expected_type`
 ///  satisfies `i < context_depth + d`, where `d` is the number of
 ///  binders crossed when descending into the term.
 ///
-
 /// Returns `true` if the reflected judgment is syntactically
 /// well-formed under its declared context depth. Returns `false`
 /// if any sub-term references an out-of-range de Bruijn index.
 ///
-
 /// **Not a type check.** This routine doesn't run the kernel — it
 /// only catches the cheapest class of malformed reflected data.
 /// A well-formed reflected judgment may still be ill-typed; conversely

@@ -71,7 +71,6 @@ use super::{ConstValue, MetaContext, MetaError};
 
 /// Register runtime builtins with context requirements
 ///
-
 /// All runtime functions require MetaRuntime context since they access
 /// build configuration and environment information.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
@@ -413,7 +412,6 @@ fn meta_target_has_feature(
 /// honest for the listed features and conservatively `false`
 /// for everything else (unknown name → unknown answer → false).
 ///
-
 /// Coverage mirrors what stdlib detection macros expose for the
 /// two architectures we ship for:
 ///  - x86_64 / x86: SSE family, AVX family, FMA, BMI, LZCNT,

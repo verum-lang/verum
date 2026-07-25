@@ -54,7 +54,6 @@ const WKT_MAP: &str = wkt_names::MAP;
 
 /// Variance of a type parameter
 ///
-
 /// Determines how subtyping works for generic types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Variance {
@@ -272,11 +271,9 @@ impl VarianceChecker {
 
     /// Infer the variance of a type parameter in a type body
     ///
-
     /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant///
     /// # Algorithm
     ///
-
     /// 1. Find all occurrences of the parameter in the type body
     /// 2. Compute variance at each occurrence position
     /// 3. Combine all variances (must be compatible)
@@ -297,7 +294,6 @@ impl VarianceChecker {
 
     /// Check that declared variance matches inferred variance
     ///
-
     /// Variance compatibility: checking that type parameter usage is consistent with declared variance
     pub fn check_variance(
         &mut self,
@@ -323,7 +319,6 @@ impl VarianceChecker {
 
     /// Compute variance at a specific position in the type
     ///
-
     /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
     fn variance_at_position(
         &mut self,
@@ -581,7 +576,6 @@ impl VarianceChecker {
 
     /// Check if declared variance is compatible with inferred variance
     ///
-
     /// Variance compatibility: checking that type parameter usage is consistent with declared variance
     fn compatible_variance(&self, declared: Variance, inferred: Variance) -> bool {
         match (declared, inferred) {
@@ -732,7 +726,6 @@ impl Default for VarianceChecker {
 
 /// Flip variance: Covariant ↔ Contravariant, Invariant stays Invariant
 ///
-
 /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
 pub fn flip_variance(v: Variance) -> Variance {
     match v {
@@ -744,13 +737,10 @@ pub fn flip_variance(v: Variance) -> Variance {
 
 /// Compose variances: outer variance ∘ inner variance
 ///
-
 /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
 ///
-
 /// # Examples
 ///
-
 /// ```text
 /// Covariant ∘ Covariant = Covariant
 /// Covariant ∘ Contravariant = Contravariant
@@ -771,13 +761,10 @@ pub fn compose_variance(outer: Variance, inner: Variance) -> Variance {
 
 /// Combine multiple variances into a single variance
 ///
-
 /// Variance composition: covariant*covariant=covariant, covariant*contravariant=contravariant, any*invariant=invariant. Flip reverses covariant<->contravariant
 ///
-
 /// # Rules
 ///
-
 /// - If any is Invariant, result is Invariant
 /// - If both Covariant and Contravariant present, result is Invariant
 /// - If all Covariant, result is Covariant

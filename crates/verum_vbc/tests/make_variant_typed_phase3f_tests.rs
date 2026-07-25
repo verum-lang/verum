@@ -107,7 +107,6 @@ fn make_variant_typed_roundtrip_preserves_all_operands() {
 /// instructions produce DIFFERENT wire-format bytes — the wire
 /// prefix is the discriminator (0x86 vs 0x1F+0x01).
 ///
-
 /// A regression that aliased the two opcodes (e.g. accidentally
 /// re-using `MakeVariant`'s primary opcode for the typed path)
 /// would silently turn typed-variant emissions into the legacy

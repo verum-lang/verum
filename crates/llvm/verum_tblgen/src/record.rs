@@ -30,7 +30,6 @@ use std::fmt::{self, Debug, Display, Formatter};
 
 /// An immutable reference to a TableGen record.
 ///
-
 /// This reference cannot outlive the
 /// [`RecordKeeper`](crate::record_keeper::RecordKeeper) from which it is
 /// borrowed.
@@ -78,10 +77,8 @@ macro_rules! record_value {
 impl<'a> Record<'a> {
     /// Creates a record from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// The raw object must be valid.
     pub unsafe fn from_raw(ptr: TableGenRecordRef) -> Record<'a> {
         Record {
@@ -92,10 +89,8 @@ impl<'a> Record<'a> {
 
     /// Returns the name of the record.
     ///
-
     /// # Errors
     ///
-
     /// Returns an error if the name is not a valid UTF-8 string.
     pub fn name(self) -> Result<&'a str, Error> {
         unsafe { StringRef::from_raw(tableGenRecordGetName(self.raw)) }
@@ -126,7 +121,6 @@ impl<'a> Record<'a> {
         /// Returns the field with the given name converted to a [`String`]
         /// if this field is of type [`StringInit`](crate::init::StringInit).
         ///
-
         /// Note that this copies the string into a new string.
         code,
         String
@@ -141,7 +135,6 @@ impl<'a> Record<'a> {
         /// Returns the field with the given name converted to a [`String`]
         /// if this field is of type [`StringInit`](crate::init::StringInit).
         ///
-
         /// Note that this copies the string into a new string.
         string,
         String
@@ -194,7 +187,6 @@ impl<'a> Record<'a> {
 
     /// Returns an iterator over the fields of the record.
     ///
-
     /// The iterator yields [`RecordValue`] structs
     pub fn values(self) -> RecordValueIter<'a> {
         RecordValueIter::new(self)
@@ -237,7 +229,6 @@ impl<'a> From<RecordValue<'a>> for TypedInit<'a> {
 
 /// Struct that represents a field of a [`Record`].
 ///
-
 /// Can be converted into a Rust type using the [`TryInto`] trait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordValue<'a> {
@@ -266,10 +257,8 @@ impl Display for RecordValue<'_> {
 impl RecordValue<'_> {
     /// Creates a record from a raw object.
     ///
-
     /// # Safety
     ///
-
     /// The raw object must be valid.
     pub unsafe fn from_raw(ptr: TableGenRecordValRef) -> Self {
         let name = unsafe { StringInit::from_raw(tableGenRecordValGetNameInit(ptr)) };

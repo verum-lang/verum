@@ -74,15 +74,12 @@ pub fn path_from_str(s: &str, span: Span) -> Path {
 
 /// Information about a field in a struct/record
 ///
-
 /// # Builder Pattern Support
 ///
-
 /// Fields with `has_default = true` are optional in @builder:
 /// - Required fields (no default): `Maybe<T>` in builder type
 /// - Optional fields (has default): `T` in builder type, uses default if not set
 ///
-
 /// Builder pattern derive: generates .with_field() methods for record types.
 #[derive(Debug, Clone)]
 pub struct FieldInfo {

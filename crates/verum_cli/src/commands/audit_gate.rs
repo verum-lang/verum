@@ -63,7 +63,6 @@ pub use super::audit::AuditFormat;
 /// **One audit gate** — checks a single L4-relevant invariant of
 /// the Verum corpus / kernel / project state and emits a report.
 ///
-
 /// Implementations are typically zero-sized unit structs; the
 /// gate's logic is deterministic from the project state on disk
 /// (no per-instance state).

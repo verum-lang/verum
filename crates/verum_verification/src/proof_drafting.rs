@@ -226,7 +226,6 @@ impl SuggestionCategory {
 /// Single dispatch interface for ranked tactic suggestions. Every
 /// IDE / REPL / CLI consumer routes through this one trait.
 ///
-
 /// **Purity contract:** implementations MUST be pure — no I/O, no
 /// network, no time-of-day dependence. Side-effecting adapters
 /// (LLM, registry-fetch) wrap a pure inner engine via composition.
@@ -234,7 +233,6 @@ pub trait SuggestionEngine {
     /// Return ranked tactic suggestions for the focused goal. May
     /// return an empty list if no suggestions match.
     ///
-
     /// Caller-provided `max_results` bounds the response size; the
     /// engine MUST return at most that many entries.
     fn suggest(&self, view: &ProofStateView, max_results: usize) -> Vec<TacticSuggestion>;
@@ -246,18 +244,15 @@ pub trait SuggestionEngine {
 
 /// V0 reference implementation:
 ///
-
 ///  1. **Lemma fuzzy-match.** For each lemma in `available_lemmas`,
 ///  compute a similarity score between the lemma's signature and
 ///  the focused goal's proposition (case-insensitive substring +
 ///  shared-token count). Top-k get LemmaApplication suggestions.
 ///
-
 ///  2. **Default tactics.** Always offers `apply auto`, `apply lia`,
 ///  `apply decide` as fallback TacticInvocation suggestions
 ///  (lower score).
 ///
-
 ///  3. **State navigation.** When the goal is a Π-type (universal
 ///  quantifier), offers `intro` / `intros` as StateNavigation
 ///  suggestions.

@@ -338,26 +338,22 @@ pub trait CertReplayEngine: std::fmt::Debug + Send + Sync {
 /// Verum's kernel-only re-check. Validates the cert's structural
 /// invariants without trusting any external solver:
 ///
-
 ///  1. `body_hash` matches blake3 of the body (integrity).
 ///  2. `format` is recognised.
 ///  3. `body` is non-empty.
 ///  4. `conclusion` is non-empty.
 ///  5. `theory` is one of the supported logical theories.
 ///
-
 /// Rejection ⇒ the cert is malformed; the solver that produced it
 /// gave us a corrupted artefact. Acceptance ⇒ the cert is
 /// well-formed; further replay against an actual solver may still
 /// reject if the cert is unsound, but at the structural layer the
 /// kernel has done its part.
 ///
-
 /// This is what makes SMT solvers external to the TCB: even if Z3
 /// produces a fake cert, the kernel-only check catches it before
 /// the proof is committed.
 ///
-
 /// **Hardening note (#95).** This engine no longer treats the
 /// cert body as opaque text. It runs the format-appropriate
 /// decomposer ([`decompose_cert`]) which parses the body into a
@@ -439,7 +435,6 @@ impl std::error::Error for DecomposeError {}
 
 /// Canonical kernel-rule registry.
 ///
-
 /// **Each entry is a tuple `(cert_rule_name, kernel_rule_tag)`.**
 /// `cert_rule_name` is what the SMT solver writes in its proof
 /// trace; `kernel_rule_tag` is the canonical Verum-kernel rule it
@@ -448,7 +443,6 @@ impl std::error::Error for DecomposeError {}
 /// same kernel rule (e.g. Z3 `mp` and ALETHE `mp` both map to
 /// `modus_ponens`).
 ///
-
 /// Unknown rule names are rejected. Adding a new rule is a one-
 /// place edit here; downstream tooling automatically picks it up.
 pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[

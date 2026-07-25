@@ -92,17 +92,14 @@ pub struct CBGRStats {
 
 /// CBGR predicate for generation tracking
 ///
-
 /// These predicates are used in refinement types to reason about
 /// generation counters and reference validity.
 ///
-
 /// Example:
 /// ```verum
 /// // Refinement type ensuring reference is valid
 /// type ValidRef<T> = &T where valid(it)
 ///
-
 /// // Refinement ensuring same allocation
 /// fn compare_refs<T>(a: &T, b: &T) -> Bool
 ///  where same_allocation(a, b)
@@ -168,7 +165,6 @@ pub enum ComparisonOp {
 
 /// Generation predicate for use in refinement types
 ///
-
 /// This is a simplified version of CBGRPredicate that's easier to
 /// construct and use in the type checker.
 #[derive(Debug, Clone)]

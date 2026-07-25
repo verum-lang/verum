@@ -51,11 +51,9 @@ impl TargetSpec {
 
     /// Parse a Rust-style target triple into its semantic components.
     ///
-
     /// Supported triple shapes (the four that cover ~99 % of real
     /// cross-compile targets):
     ///
-
     ///  * `<arch>-<vendor>-<os>` — three components, e.g.
     ///  `"aarch64-unknown-linux"`.
     ///  * `<arch>-<vendor>-<os>-<env>` — four components, e.g.
@@ -64,7 +62,6 @@ impl TargetSpec {
     ///  "unknown" os is normalised to `"wasi"` when the arch
     ///  starts with `wasm`, so cfg gates targeting WASI work.
     ///
-
     /// Unknown components fall back to the host equivalents — a
     /// best-effort default so a partially-spelled triple still
     /// produces a usable spec.

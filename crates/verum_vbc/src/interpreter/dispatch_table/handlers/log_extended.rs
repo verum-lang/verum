@@ -14,20 +14,16 @@ use crate::types::TypeId;
 
 /// LogExtended (0xBE) - Structured logging operations.
 ///
-
 /// Sub-opcodes organized by category:
 /// - 0x00-0x04: Log levels (Info, Warning, Error, Debug, Trace)
 /// - 0x10: Structured logging with key-value pairs
 /// - 0x20-0x22: Control operations (Flush, SetLevel, GetLevel)
 ///
-
 /// # Performance
 ///
-
 /// Logging is inherently I/O-bound, so the runtime overhead (~50ns)
 /// is negligible compared to actual I/O operations.
 ///
-
 /// Extended logging opcode (0xCB + sub-opcode): structured logging with levels (Debug, Info,
 /// Warn, Error, Fatal), structured fields, and context integration. ~50ns runtime overhead
 /// is negligible vs I/O cost.
@@ -158,7 +154,6 @@ fn log_extended_body(
 
 /// MemExtended (0xBF) - Memory allocation operations.
 ///
-
 /// Sub-opcodes:
 /// - 0x00: Alloc - allocate heap memory
 /// - 0x01: AllocZeroed - allocate zeroed heap memory

@@ -28,7 +28,6 @@ use verum_common::{List, Maybe, Text};
 
 /// Attribute definition with optional value
 ///
-
 /// Represents a compile-time attribute like `@derive(Debug)` or `@deprecated("use X instead")`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAttribute {
@@ -79,14 +78,11 @@ pub struct MethodSignature {
 
 /// Type definition for struct/enum field and variant lookup
 ///
-
 /// This enables `fields_of` and `variants_of` to work with named types
 /// by storing their definitions at compile time.
 ///
-
 /// ## Industrial-Grade Features
 ///
-
 /// Each type definition now includes:
 /// - Attributes (`@derive`, `@repr`, etc.)
 /// - Documentation strings
@@ -323,7 +319,6 @@ impl TypeDefinition {
 
 /// Protocol implementation record
 ///
-
 /// Tracks which types implement which protocols and with what methods.
 #[derive(Debug, Clone)]
 pub struct ProtocolImplementation {

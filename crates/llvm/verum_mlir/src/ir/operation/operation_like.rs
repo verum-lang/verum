@@ -278,7 +278,6 @@ pub trait OperationLike<'c: 'a, 'a>: Display + 'a {
     /// Walks this operation (and all nested operations) in either pre- or
     /// post-order.
     ///
-
     /// The closure is called once per operation; by returning
     /// `WalkResult::Advance`/`Skip`/`Interrupt` you control the traversal.
     fn walk<F>(&self, order: WalkOrder, mut callback: F)
@@ -334,7 +333,6 @@ pub trait OperationMutLike<'c: 'a, 'a>: OperationLike<'c, 'a> {
     /// Walks this operation (and all nested operations) in either pre- or
     /// post-order.
     ///
-
     /// The closure is called once per operation; by returning
     /// `WalkResult::Advance`/`Skip`/`Interrupt` you control the traversal.
     fn walk_mut<F>(&mut self, order: WalkOrder, mut callback: F)

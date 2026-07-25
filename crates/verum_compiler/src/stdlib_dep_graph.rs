@@ -159,7 +159,6 @@ impl DepGraph {
     /// set via mount edges. Conservative — includes every endpoint of
     /// every edge kind.
     ///
-
     /// `glob_expander` is invoked for every glob edge `prefix.*`; it
     /// should return all stdlib modules whose path starts with `prefix.`
     /// (typically backed by `StdlibModuleIndex::all_modules()`).

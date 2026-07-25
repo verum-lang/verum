@@ -58,7 +58,6 @@ use verum_kernel::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic};
 
 /// A single kernel-bridge discharge that the dispatcher rejected.
 ///
-
 /// Used to thread compile-time rejection diagnostics back to the
 /// caller, which folds them into the verification phase's error
 /// surface.
@@ -91,13 +90,11 @@ pub struct BridgeDischargeError {
 /// Walk a theorem's proof body and accumulate any kernel-bridge
 /// discharges that the dispatcher rejects.
 ///
-
 /// Returns an empty `Vec` when every bridge invocation either:
 ///  * has all-literal args AND the dispatcher returned `holds: true`
 ///  * has non-literal args (deferred to downstream layers)
 ///  * does not target a `kernel_*_strict` bridge at all
 ///
-
 /// Returns `Vec<BridgeDischargeError>` when one or more invocations
 /// failed the dispatcher's structural check.
 pub fn validate_proof_body_bridges(

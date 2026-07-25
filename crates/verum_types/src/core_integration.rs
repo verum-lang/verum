@@ -42,11 +42,9 @@ use crate::ty::Type;
 
 /// A stdlib-agnostic wrapper around ProtocolChecker
 ///
-
 /// This wrapper enables dynamic method registration from parsed stdlib files
 /// or preloaded metadata, removing the need for hardcoded method definitions.
 ///
-
 /// Note: Protocol resolution is fully protocol-based. All special operators
 /// (IntoIterator, Future, Try, Index, Maybe) resolve via registered implementations
 /// rather than hardcoded type name matching.
@@ -68,7 +66,6 @@ impl std::fmt::Debug for StdlibAgnosticChecker {
 impl StdlibAgnosticChecker {
     /// Create a new empty checker (methods registered dynamically)
     ///
-
     /// In this mode:
     /// - Standard protocols are registered (Eq, Ord, etc.) as they're fundamental
     /// - Methods must be registered via `register_inherent_method()` etc.
@@ -81,7 +78,6 @@ impl StdlibAgnosticChecker {
 
     /// Create a checker with preloaded metadata
     ///
-
     /// In this mode:
     /// - All types, protocols, and methods come from CoreMetadata
     /// - No hardcoded methods are used
@@ -93,7 +89,6 @@ impl StdlibAgnosticChecker {
 
     /// Create a checker with standard protocols and method registry
     ///
-
     /// This mode uses the standard method registry from ProtocolChecker::new().
     /// Use this for existing tests and gradual migration.
     pub fn legacy() -> Self {
@@ -105,10 +100,8 @@ impl StdlibAgnosticChecker {
 
     /// Register an inherent method for a type
     ///
-
     /// # Arguments
     ///
-
     /// * `type_name` - The type name (e.g., "List", "Map", "Text")
     /// * `method_name` - The method name (e.g., "len", "get", "push")
     /// * `signature` - The method signature
@@ -124,10 +117,8 @@ impl StdlibAgnosticChecker {
 
     /// Register a protocol method for a type
     ///
-
     /// # Arguments
     ///
-
     /// * `protocol_name` - The protocol name (e.g., "Eq", "Iterator")
     /// * `type_name` - The implementing type (e.g., "Int", "List")
     /// * `method_name` - The method name (e.g., "eq", "next")

@@ -106,7 +106,6 @@ impl LoweringSeverity {
 
 /// A structured diagnostic emitted during LLVM lowering.
 ///
-
 /// Replaces raw `eprintln!` warnings with a collected, structured format
 /// that can be filtered, counted, and displayed consistently.
 #[derive(Debug, Clone)]
@@ -185,13 +184,11 @@ impl LoweringDiagnostic {
 /// Extension trait for converting any `Result<T, E: Display>` into
 /// `Result<T, LlvmLoweringError>` via `.or_llvm_err()`.
 ///
-
 /// This replaces `.unwrap()` calls on LLVM builder operations with proper
 /// error propagation through the lowering pipeline.
 pub trait BuildExt<T> {
     /// Convert a builder Result into a lowering Result.
     ///
-
     /// Equivalent to `.map_err(|e| LlvmLoweringError::BuilderError(e.to_string().into()))`.
     fn or_llvm_err(self) -> Result<T>;
 }
@@ -279,7 +276,6 @@ impl<'ctx> CallSiteExt<'ctx> for verum_llvm::values::CallSiteValue<'ctx> {
 
 /// Extension trait for converting `Option<T>` into `Result<T, LlvmLoweringError>`.
 ///
-
 /// Usage:
 ///  let block = builder.get_insert_block().or_internal("no current basic block")?;
 ///  let param = func.get_nth_param(0).or_internal("missing param 0")?;

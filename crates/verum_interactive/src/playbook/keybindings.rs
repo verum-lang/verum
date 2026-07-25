@@ -106,7 +106,6 @@ impl Keybindings {
 
     /// Resolve a key event in edit mode.
     ///
-
     /// Execute-cell bindings that work across all terminals:
     /// - F5 (universal)
     /// - Ctrl+R (run — reliable on macOS)

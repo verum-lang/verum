@@ -29,7 +29,6 @@ fn fold_int_binop(op: BinaryIntOp, a: i64, b: i64) -> Option<i64> {
 
 /// Post-specialization bytecode optimizer.
 ///
-
 /// Applies optimization passes to specialized bytecode:
 /// 1. Constant folding - evaluate compile-time constants
 /// 2. Dead code elimination - remove unreachable code
@@ -93,7 +92,6 @@ impl SpecializationOptimizer {
 
     /// Optimizes specialized bytecode.
     ///
-
     /// Runs optimization passes iteratively until no more changes occur
     /// or max_iterations is reached.
     pub fn optimize(&mut self, bytecode: Vec<u8>) -> Vec<u8> {
@@ -259,7 +257,6 @@ impl SpecializationOptimizer {
 
     /// Constant folding pass.
     ///
-
     /// Writes a signed varint (ZigZag encoded) to output.
     fn write_signed_varint(&self, output: &mut Vec<u8>, value: i64) {
         let encoded = ((value << 1) ^ (value >> 63)) as u64;
@@ -278,10 +275,8 @@ impl SpecializationOptimizer {
 
     /// Dead code elimination pass.
     ///
-
     /// Peephole optimization pass.
     ///
-
     /// Returns the optimization statistics.
     pub fn stats(&self) -> &OptimizationStats {
         &self.stats

@@ -8,10 +8,8 @@ use verum_llvm_sys::prelude::LLVMDiagnosticInfoRef;
 
 /// Installs a fatal error handler that LLVM calls before `exit()`.
 ///
-
 /// # Example
 ///
-
 /// ```no_run
 /// use verum_llvm::support::error_handling::install_fatal_error_handler;
 /// extern "C" fn print_before_exit(msg: *const i8) {

@@ -534,7 +534,6 @@ impl<'a> TypeExporter<'a> {
 
     /// Extract documentation text from a list of attributes.
     ///
-
     /// Looks for `@doc("...")` attributes and concatenates their string arguments
     /// into a single doc string. Multiple `@doc` attributes are joined with newlines.
     fn extract_doc_from_attributes(attrs: &[verum_ast::decl::Attribute]) -> Maybe<Text> {

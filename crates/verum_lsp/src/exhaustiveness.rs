@@ -57,7 +57,6 @@ impl ExhaustivenessDiagnostic {
     /// Convert to LSP diagnostics, honouring every gate on the
     /// supplied config:
     ///
-
     /// * `report_errors` — toggles the non-exhaustive ERROR.
     /// * `report_all_guarded` — toggles the all-guarded WARNING.
     /// * `report_redundant` — toggles a summary "match has
@@ -69,7 +68,6 @@ impl ExhaustivenessDiagnostic {
     ///  cases enumerated in the error message before collapsing
     ///  to "and N other(s) not covered".
     ///
-
     /// Before the config-aware variant landed, every gate was inert:
     /// the ERROR + WARNING were emitted unconditionally and the
     /// witness truncation was hardcoded to 3, regardless of what

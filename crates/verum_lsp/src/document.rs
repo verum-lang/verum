@@ -588,7 +588,6 @@ impl DocumentState {
 
     /// Extract documentation from item attributes
     ///
-
     /// Searches for doc comment attributes (/// or //!) and combines them into
     /// a single documentation string.
     fn extract_doc_from_attributes(&self, attributes: &[Attribute]) -> Option<String> {
@@ -670,7 +669,6 @@ impl DocumentState {
 
     /// Get the word at a given position.
     ///
-
     /// Uses `verum_common::text_utf8::find_word_bounds` for the
     /// UTF-8-safe walk. `position_to_offset` returns a byte offset;
     /// the helper handles multi-byte clamping and identifier
@@ -790,7 +788,6 @@ impl DocumentStore {
 
     /// Iterate over all documents in the store.
     ///
-
     /// This method enables workspace-wide operations like symbol search.
     /// The callback receives each document's URI and state for processing.
     pub fn for_each_document<F>(&self, mut f: F)
@@ -804,7 +801,6 @@ impl DocumentStore {
 
     /// Collect results from all documents.
     ///
-
     /// Maps a function over all documents and collects non-None results.
     pub fn collect_from_documents<F, R>(&self, mut f: F) -> Vec<R>
     where
@@ -821,7 +817,6 @@ impl DocumentStore {
 
     /// Flat-map results from all documents.
     ///
-
     /// Maps a function over all documents and flattens the results.
     pub fn flat_collect_from_documents<F, R>(&self, mut f: F) -> Vec<R>
     where
@@ -849,7 +844,6 @@ impl DocumentStore {
 
     /// Get a reference to a document's RwLock for advanced access patterns
     ///
-
     /// Returns an owned reference that can be stored/passed around.
     /// For most cases, prefer `with_document` or `with_document_mut`.
     pub fn get_document(

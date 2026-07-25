@@ -132,7 +132,6 @@ fn hash_args(args: &[MetaValue]) -> u64 {
 
 /// Hash a MetaValue for cache key generation using Blake3.
 ///
-
 /// MetaValue variants (from verum_ast/src/meta_value.rs):
 /// - Primitives: Unit, Bool, Int, UInt, Float, Char, Text, Bytes
 /// - Collections: Array, Tuple, Maybe
@@ -533,7 +532,6 @@ impl Default for MetaCacheConfig {
 
 /// Thread-safe incremental meta evaluation cache.
 ///
-
 /// Caches results of pure meta function calls and deterministic builtin
 /// function calls to speed up incremental compilation.
 ///
@@ -691,7 +689,6 @@ impl MetaEvalCache {
 
     /// Cache a builtin function call result.
     ///
-
     /// Only deterministic builtins should be cached. Non-deterministic
     /// builtins (e.g., current_time, random) should NOT be cached.
     pub fn insert_builtin_call(&self, builtin_name: &Text, args: &[MetaValue], result: MetaValue) {
@@ -748,7 +745,6 @@ impl MetaEvalCache {
 
     /// Check if a builtin is deterministic and should be cached.
     ///
-
     /// Non-deterministic builtins are NOT cached:
     /// - Time-related: current_time, timestamp, etc.
     /// - Random: random_int, random_float, etc.

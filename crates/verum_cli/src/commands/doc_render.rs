@@ -46,7 +46,6 @@ use super::audit::{discover_vr_files, parse_file_for_audit};
 /// Walk every `.vr` file under the manifest dir and project each
 /// declaration to a typed `DocItem`.
 ///
-
 /// Citation resolution is two-pass: pass 1 builds the corpus's
 /// name allowlist (every Theorem / Lemma / Corollary / Axiom);
 /// pass 2 walks each proof body's AST via

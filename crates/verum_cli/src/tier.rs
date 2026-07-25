@@ -48,14 +48,12 @@ pub struct ResolvedTier {
 
 /// Resolve execution tier from CLI inputs.
 ///
-
 /// Precedence (highest → lowest):
 ///  1. `explicit_interp` / `explicit_aot` shortcut flags
 ///  2. `--tier <NAME>` long form (accepted values: `interpret`,
 ///  `interpreter`, `aot`)
 ///  3. `default`
 ///
-
 /// Returns an error for unknown values or `"check"` (which is a build
 /// mode, not an execution tier).
 pub fn resolve(

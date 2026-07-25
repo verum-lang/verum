@@ -27,7 +27,6 @@ use verum_common::{List, Set, Text};
 
 /// A computational property in the Verum type system.
 ///
-
 /// Computational properties track side effects and runtime behavior of functions.
 /// The property system enables:
 /// - Safe optimization (pure functions can be memoized/reordered)
@@ -113,7 +112,6 @@ pub enum ComputationalProperty {
 
 /// Kinds of resource a `Reads` / `Writes` property can refer to.
 ///
-
 /// Each variant carries enough detail for capability-audit to match against
 /// a frontmatter `@permission(...)` allow-list. Glob patterns are kept as
 /// plain `Text` — the matcher in `core.shell.permissions` handles glob
@@ -176,7 +174,6 @@ impl fmt::Display for SpawnKind {
 
 /// Property set - collection of computational properties for a function or expression.
 ///
-
 /// Property sets combine multiple properties and provide lattice operations:
 /// - Union: Combining properties from multiple operations
 /// - Subsumption: Checking if one property set is a subset of another
@@ -216,7 +213,6 @@ impl<'de> serde::Deserialize<'de> for PropertySet {
 /// property-inference engine propagates its safety surface to every
 /// caller.
 ///
-
 /// Without this lift the FFI registration in `infer.rs` set
 /// `properties: None`, dropping the four declared safety facts
 /// (`memory_effects`, `thread_safe`, `error_protocol`, plus the
@@ -224,10 +220,8 @@ impl<'de> serde::Deserialize<'de> for PropertySet {
 /// A `pure fn` could then call an `Allocates` extern with no
 /// diagnostic — the master-audit ranked this E-3 / S7 SOUNDNESS.
 ///
-
 /// Mapping (each FFI declaration → one or more `ComputationalProperty`):
 ///
-
 /// | FFI declaration | Properties added |
 /// |---------------------------------|------------------------------|
 /// | every FFI function | `FFI` |
@@ -241,7 +235,6 @@ impl<'de> serde::Deserialize<'de> for PropertySet {
 /// | `memory_effects = Combined(xs)` | union of mapped(xs) |
 /// | `error_protocol != None` | `Fallible` |
 ///
-
 /// The result is `Some(PropertySet)` whenever ANY non-trivial
 /// property would be set. A truly pure thread-safe FFI with
 /// `error_protocol = None` still returns `Some({FFI})` — the FFI
@@ -640,24 +633,20 @@ impl PropertySet {
 
     /// Check if this property set is valid for a meta function.
     ///
-
     /// Meta functions must be pure - they run at compile-time and cannot have
     /// side effects. This method returns the impure properties if any exist.
     ///
-
     /// Note: `Fallible` is allowed in meta functions because:
     /// - Meta system purity rules: arithmetic operations (including %) are classified as pure
     /// - Fallible at compile-time means compile-time error, not runtime side effect
     /// - The operation is still deterministic (same inputs -> same result/error)
     ///
-
     /// Note: `Divergent` is allowed in meta functions because:
     /// - Meta system control flow: loops are allowed in meta functions (with iteration limits)
     /// - Meta system safety: iteration limits (default 1M) prevent infinite loops in compile-time evaluation
     /// - Meta evaluation has a step limit, so potential non-termination is bounded
     /// - Loops like while/for are common in meta functions for code generation
     ///
-
     /// Meta function purity: meta functions are implicitly pure (no IO, no mutation of non-meta state) — Meta functions are implicitly pure
     pub fn validate_for_meta_fn(&self) -> Result<(), List<ComputationalProperty>> {
         if self.is_pure() {
@@ -691,7 +680,6 @@ impl PropertySet {
 
     /// Check if this property set is valid for a pure function.
     ///
-
     /// Pure functions (`pure fn`) must have no side effects:
     /// - No IO operations
     /// - No mutation (Mutates)
@@ -701,14 +689,12 @@ impl PropertySet {
     /// - No spawning concurrent tasks
     /// - No allocation (debatable, but allowed for now)
     ///
-
     /// Allowed in pure functions:
     /// - Pure (obviously)
     /// - Fallible (returning errors is deterministic, no side effect)
     /// - Divergent (panic/unreachable are allowed per spec)
     /// - Allocates (heap allocation is allowed in pure functions)
     ///
-
     /// Returns Ok(()) if valid, Err(impure_properties) if violated.
     pub fn validate_for_pure_fn(&self) -> Result<(), List<ComputationalProperty>> {
         if self.is_pure() {
@@ -790,7 +776,6 @@ impl fmt::Display for PropertySet {
 
 /// Property inference context
 ///
-
 /// Tracks computational properties during type checking and inference.
 /// Properties are inferred bottom-up from expressions and combined.
 pub struct PropertyInferenceContext {
@@ -882,7 +867,6 @@ impl Default for PropertyInferenceContext {
 
 /// Expression-based property inference.
 ///
-
 /// Analyzes expressions to infer their computational properties bottom-up.
 /// This is used during type inference to automatically determine:
 /// - Whether a function is pure or has side effects
@@ -904,14 +888,11 @@ impl PropertyInferrer {
 
     /// Infer properties from an expression.
     ///
-
     /// This recursively traverses the expression and combines properties
     /// from sub-expressions using the union operation.
     ///
-
     /// # Property Inference Rules
     ///
-
     /// - **Literals**: Pure
     /// - **Variables**: Pure (unless externally mutable)
     /// - **Binary/Unary ops**: Union of operand properties
@@ -1310,21 +1291,17 @@ impl PropertyInferrer {
 
     /// Infer properties from a function declaration.
     ///
-
     /// This analyzes the function signature and body to determine its computational properties:
     /// - If `is_async` is true, adds `Async` property
     /// - If `throws_clause` is present, adds `Fallible` property
     /// - If body is present, infers properties from the body expressions
     ///
-
     /// # Property Inference Rules for Functions
     ///
-
     /// - **Async functions**: `is_async: true` implies `Async` property
     /// - **Throws clause**: `throws_clause: Some(_)` implies `Fallible` property
     /// - **Body expressions**: Properties are inferred recursively from the function body
     ///
-
     /// # Example
     /// ```text
     /// async fn fetch(url: Text) throws(NetworkError) -> Data { ... }
@@ -1389,28 +1366,23 @@ impl Default for PropertyInferrer {
 /// computational shape: which contexts it depends on (DI) PLUS which
 /// computational properties it has.
 ///
-
 /// Verum's CLAUDE.md establishes a **clear architectural distinction**
 /// between these two concepts:
 ///
-
 ///  - **Contexts** (DI): runtime dependency injection via
 ///  `using [Database, Logger]`. Resolved at call time; ~5–30ns.
 ///  - **Properties**: compile-time computational classification
 ///  (`Pure`, `IO`, `Async`, `Fallible`, `Mutates`, etc.).
 ///  Zero runtime cost.
 ///
-
 /// The two are SEPARATE concepts ("Verum has no algebraic effects")
 /// but consumers that need a function's full computational shape —
 /// purity audits, capability checks, optimization decisions, FFI
 /// boundary analysis — typically need BOTH. `ComputationalSignature`
 /// is the unified handle.
 ///
-
 /// **Architectural notes** (per CLAUDE.md):
 ///
-
 ///  - Properties MUST NOT be called "Effects". Verum doesn't have
 ///  algebraic effects; the property system is a compile-time
 ///  classification, not a runtime dispatch mechanism.
@@ -1562,7 +1534,6 @@ impl ComputationalSignature {
 
     /// Diagnostic-friendly classification tag.
     ///
-
     ///  - `"pure"` if `is_pure()`
     ///  - `"async"` if `is_async()`
     ///  - `"io"` if `is_io()`

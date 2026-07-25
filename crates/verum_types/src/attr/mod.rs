@@ -88,13 +88,10 @@ pub use verum_ast::attr::{
 
 /// Validate attributes on an AST item.
 ///
-
 /// Convenience function that uses the global registry.
 ///
-
 /// # Errors
 ///
-
 /// Returns a list of errors if validation fails.
 pub fn validate_attributes(
     attrs: &[Attribute],
@@ -105,7 +102,6 @@ pub fn validate_attributes(
 
 /// Check if an attribute name is known.
 ///
-
 /// Convenience function that uses the global registry.
 #[must_use]
 pub fn is_known_attribute(name: &str) -> bool {
@@ -114,7 +110,6 @@ pub fn is_known_attribute(name: &str) -> bool {
 
 /// Get metadata for an attribute.
 ///
-
 /// Convenience function that uses the global registry.
 #[must_use]
 pub fn get_attribute_metadata(name: &str) -> Option<AttributeMetadata> {

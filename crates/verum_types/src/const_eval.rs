@@ -77,7 +77,6 @@ pub enum ConstEvalError {
 
     /// Undefined function call
     ///
-
     /// Raised when calling a function that is not registered in the meta interpreter.
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.1 - Meta function calls
     #[error("undefined function: {name}")]
@@ -85,7 +84,6 @@ pub enum ConstEvalError {
 
     /// Arity mismatch in function call
     ///
-
     /// Raised when a function is called with wrong number of arguments.
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.2 - Function call validation
     #[error("function `{name}` expects {expected} arguments, but {actual} were provided")]
@@ -97,7 +95,6 @@ pub enum ConstEvalError {
 
     /// Non-meta function call at compile time
     ///
-
     /// Raised when trying to call a non-meta function during compile-time evaluation.
     /// Only `meta fn` can be called at compile-time.
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 2.1 - Meta function restrictions
@@ -106,7 +103,6 @@ pub enum ConstEvalError {
 
     /// Recursion depth exceeded
     ///
-
     /// Raised when meta function evaluation exceeds the recursion limit.
     /// This prevents infinite recursion at compile time.
     /// Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — .1 - Evaluation limits
@@ -115,7 +111,6 @@ pub enum ConstEvalError {
 
     /// Pattern binding failed
     ///
-
     /// Raised when a pattern match fails during const evaluation.
     #[error("pattern match failed for value {value}")]
     PatternMatchFailed { value: Text },
@@ -128,17 +123,14 @@ pub type Result<T> = std::result::Result<T, ConstEvalError>;
 
 /// Maximum recursion depth for meta function evaluation
 ///
-
 /// Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — .1 - Evaluation limits
 pub const MAX_RECURSION_DEPTH: usize = 256;
 
 /// A registered meta function for compile-time evaluation
 ///
-
 /// Stores the function definition needed to interpret function calls at compile time.
 /// Only `meta fn` functions can be registered and called during const evaluation.
 ///
-
 /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 2.1 - Meta function definitions
 #[derive(Debug, Clone)]
 pub struct MetaFunction {
@@ -155,7 +147,6 @@ pub struct MetaFunction {
 impl MetaFunction {
     /// Create a MetaFunction from a FunctionDecl AST node
     ///
-
     /// Extracts the parameter names and body from the function declaration.
     /// Returns None if the function has no body (extern function).
     pub fn from_decl(decl: &FunctionDecl) -> Option<Self> {
@@ -213,19 +204,15 @@ impl MetaFunction {
 
 /// Compile-time constant evaluator
 ///
-
 /// # Example
 ///
-
 /// ```ignore
 /// use verum_types::const_eval::ConstEvaluator;
 /// use verum_common::ConstValue;
 /// use verum_ast::{expr::{Expr, ExprKind, BinOp}, literal::Literal, span::Span};
 ///
-
 /// let mut eval = ConstEvaluator::new();
 ///
-
 /// // Evaluate: 2 + 3
 /// let left = Expr::new(ExprKind::Literal(Literal::int(2, Span::dummy())), Span::dummy());
 /// let right = Expr::new(ExprKind::Literal(Literal::int(3, Span::dummy())), Span::dummy());
@@ -303,22 +290,17 @@ impl ConstEvaluator {
 
     /// Register a meta function for compile-time evaluation
     ///
-
     /// Only `meta fn` functions can be registered. Non-meta functions will
     /// be registered but will fail at call time with `NonMetaFunction` error.
     ///
-
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.1 - Meta function registry
     ///
-
     /// # Example
     ///
-
     /// ```no_run
     /// use verum_types::const_eval::ConstEvaluator;
     /// use verum_ast::decl::FunctionDecl;
     ///
-
     /// let mut eval = ConstEvaluator::new();
     /// // Register a parsed function declaration
     /// // eval.register_function(&my_meta_fn_decl);
@@ -346,10 +328,8 @@ impl ConstEvaluator {
 
     /// Evaluate an expression to a const value
     ///
-
     /// # Errors
     ///
-
     /// Returns an error if:
     /// - The expression is not a compile-time constant
     /// - Type mismatch in operations
@@ -497,11 +477,9 @@ impl ConstEvaluator {
 
     /// Evaluate a function call at compile time
     ///
-
     /// Only meta functions can be called at compile time. The function must be
     /// registered in the evaluator's function registry.
     ///
-
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.1 - Meta function calls
     fn eval_call(&mut self, func: &Expr, args: &[Expr]) -> Result<ConstValue> {
         // Extract function name from path expression
@@ -592,11 +570,9 @@ impl ConstEvaluator {
 
     /// Evaluate a block expression
     ///
-
     /// Executes statements in order and returns the value of the final expression.
     /// Let bindings create local variables that shadow outer bindings.
     ///
-
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.2 - Block evaluation in meta context
     fn eval_block(&mut self, block: &Block) -> Result<ConstValue> {
         // Save environment for restoration after block
@@ -623,7 +599,6 @@ impl ConstEvaluator {
 
     /// Evaluate a statement
     ///
-
     /// Handles let bindings and expression statements.
     fn eval_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match &stmt.kind {
@@ -713,7 +688,6 @@ impl ConstEvaluator {
 
     /// Bind a pattern to a value
     ///
-
     /// Creates variable bindings for identifiers in the pattern.
     fn bind_pattern(&mut self, pattern: &Pattern, value: ConstValue) -> Result<()> {
         match &pattern.kind {
@@ -810,10 +784,8 @@ impl ConstEvaluator {
 
     /// Evaluate an if expression
     ///
-
     /// Evaluates the condition and then either the then-branch or else-branch.
     ///
-
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.3 - Conditional evaluation
     fn eval_if(
         &mut self,
@@ -1312,7 +1284,6 @@ impl ConstEvaluator {
 
     /// Evaluate a meta type, substituting computed values
     ///
-
     /// This resolves meta parameters in types by evaluating their expressions
     /// and substituting the results.
     pub fn eval_meta_type(&mut self, ty: &Type) -> Result<Type> {
@@ -1372,23 +1343,18 @@ impl ConstEvaluator {
 
     /// Compute tensor shape dimensions from a meta array expression
     ///
-
     /// This evaluates an array expression to extract shape dimensions for tensor types.
     /// For example, `[2, 3, 4]` evaluates to dimensions `[2, 3, 4]` for a 3D tensor.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_types::const_eval::ConstEvaluator;
     /// use verum_ast::{expr::{Expr, ExprKind, ArrayExpr}, span::Span, literal::Literal};
     /// use verum_common::List;
     ///
-
     /// let mut eval = ConstEvaluator::new();
     ///
-
     /// // Shape: [2, 3, 4]
     /// let elements: List<_> = vec![
     ///  Expr::new(ExprKind::Literal(Literal::int(2, Span::dummy())), Span::dummy()),
@@ -1426,23 +1392,18 @@ impl ConstEvaluator {
 
     /// Compute total number of elements from tensor shape
     ///
-
     /// Given a shape array like `[2, 3, 4]`, computes the product `2 * 3 * 4 = 24`.
     /// This is useful for validating tensor data sizes.
     ///
-
     /// # Example
     ///
-
     /// ```ignore
     /// use verum_types::const_eval::ConstEvaluator;
     /// use verum_ast::{expr::{Expr, ExprKind, ArrayExpr}, span::Span, literal::Literal};
     /// use verum_common::List;
     ///
-
     /// let mut eval = ConstEvaluator::new();
     ///
-
     /// // Shape: [2, 3, 4]
     /// let elements: List<_> = vec![
     ///  Expr::new(ExprKind::Literal(Literal::int(2, Span::dummy())), Span::dummy()),
@@ -1485,7 +1446,6 @@ impl ConstEvaluator {
 
     /// Validate that two tensor shapes are compatible for operations
     ///
-
     /// This checks if two shapes can be used together in tensor operations.
     /// For now, it requires exact shape matches. Future enhancements will support
     /// broadcasting rules.

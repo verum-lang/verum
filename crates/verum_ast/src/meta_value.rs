@@ -67,15 +67,12 @@ use crate::ty::Type;
 
 /// Compile-time value for meta-programming, extending ConstValue with AST nodes.
 ///
-
 /// This is the primary value type during meta-function execution. Unlike
 /// `ConstValue` which only holds primitives, `MetaValue` can also hold
 /// AST nodes for code generation.
 ///
-
 /// # Performance
 ///
-
 /// Flat enum layout ensures single-level matching with no indirection.
 /// All primitive operations are O(1).
 #[derive(Debug, Clone, PartialEq)]
@@ -139,7 +136,6 @@ pub enum MetaValue {
 
     /// List of items (for generating multiple declarations)
     ///
-
     /// Meta-functions that generate multiple declarations return this variant.
     Items(List<MetaValue>),
 }
@@ -678,7 +674,6 @@ impl MetaValue {
 impl MetaValue {
     /// Create a MetaValue from an AST literal.
     ///
-
     /// This converts AST literals to their corresponding MetaValue representation.
     /// Used during constant folding and meta-function evaluation.
     pub fn from_literal(lit: &Literal) -> Self {
@@ -734,7 +729,6 @@ impl MetaValue {
 
     /// Convert to boolean for conditionals (non-Option version).
     ///
-
     /// This is equivalent to `is_truthy().unwrap_or(false)` but more convenient
     /// for use in conditional contexts.
     #[inline]
@@ -762,7 +756,6 @@ impl MetaValue {
 impl MetaValue {
     /// Evaluate truthiness.
     ///
-
     /// - `Bool(b)` → `b`
     /// - `Int(0)` / `UInt(0)` → `false`
     /// - `Int(_)` / `UInt(_)` → `true`

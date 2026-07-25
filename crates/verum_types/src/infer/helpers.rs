@@ -62,7 +62,6 @@ impl ConditionExt for verum_ast::expr::ConditionKind {
 
 /// Helper to check a condition and optionally bind patterns to scope
 ///
-
 /// Map `@builtin_*` meta-type markers that appear on the RHS of stdlib
 /// type aliases (e.g. `type I is @builtin_interval;`) to the internal
 /// `Type` primitive they stand for. Returns `None` for names that are
@@ -137,7 +136,6 @@ pub(crate) fn resolve_builtin_meta_type(name: &str) -> Option<Type> {
 /// - `if x > 0` - Expression condition (must evaluate to Bool)
 /// - `if let Some(v) = opt` - Let condition (pattern must match value)
 ///
-
 /// Returns the type of bindings introduced (empty for expression conditions)
 pub(crate) fn check_condition(
     checker: &mut TypeChecker,
@@ -172,7 +170,6 @@ pub(crate) fn check_condition(
 
 /// Check all conditions in an if-condition chain
 ///
-
 /// Handles both simple conditions and let-chains like:
 /// `if let Some(x) = opt && x > 0`
 pub(crate) fn check_all_conditions(
@@ -191,7 +188,6 @@ pub(crate) fn check_all_conditions(
 
 /// Compute Levenshtein distance between two strings for suggestions
 ///
-
 /// Used to provide "did you mean?" suggestions in error messages.
 pub(crate) fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let len1 = s1.len();
@@ -371,34 +367,26 @@ pub(crate) fn type_kind_description(kind: &verum_ast::ty::TypeKind) -> String {
 impl TypeChecker {
     /// Check kind compatibility when applying a type constructor to arguments.
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
     ///
-
     /// When applying `F<Int>` where `F: * -> *`, this verifies:
     /// 1. F has the expected constructor kind (* -> *)
     /// 2. Int has kind * (the expected argument kind)
     /// 3. The resulting application F<Int> has kind *
     ///
-
     /// # Arguments
     ///
-
     /// * `constructor` - The type constructor being applied (e.g., F, List, Map)
     /// * `args` - The type arguments being applied
     /// * `span` - Source location for error reporting
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(Kind)` - The resulting kind after application
     /// * `Err(TypeError)` - If kind mismatch or arity error
     ///
-
     /// # Examples
     ///
-
     /// ```ignore
     /// // F<Int> where F: * -> *
     /// let result_kind = checker.check_type_application_kind(
@@ -424,36 +412,28 @@ impl TypeChecker {
 
     /// Instantiate an HKT parameter with a concrete type constructor.
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — HKT parameter instantiation
     ///
-
     /// When calling `fn foo<F<_>: Functor>(x: F<Int>)` with `foo::<List>(...)`,
     /// this verifies:
     /// 1. `List` has kind `* -> *` (matches F's expected kind)
     /// 2. `List` implements `Functor` (satisfies protocol bound)
     ///
-
     /// # Arguments
     ///
-
     /// * `hkt_param_name` - Name of the HKT parameter (e.g., "F")
     /// * `expected_kind` - The expected kind for the parameter (e.g., * -> *)
     /// * `concrete_constructor` - The concrete type constructor being substituted (e.g., List)
     /// * `protocol_bounds` - Protocol bounds that must be satisfied (e.g., Functor)
     /// * `span` - Source location for error reporting
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(HKTInstantiationResult)` - Successful instantiation with result info
     /// * `Err(TypeError)` - If kind mismatch or protocol not implemented
     ///
-
     /// # Examples
     ///
-
     /// ```ignore
     /// // Instantiate F<_> with List where F<_>: Functor
     /// let result = checker.instantiate_hkt_param(
@@ -522,31 +502,23 @@ impl TypeChecker {
 
     /// Check if a type constructor implements a protocol.
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Protocol checking for type constructors
     ///
-
     /// For HKT bounds like `F<_>: Functor + Monad`, this checks if the type
     /// constructor (e.g., List, Maybe) implements the required protocol.
     ///
-
     /// # Arguments
     ///
-
     /// * `constructor` - The type constructor to check
     /// * `bound` - The protocol bound that must be satisfied
     ///
-
     /// # Returns
     ///
-
     /// * `true` if the constructor implements the protocol
     /// * `false` otherwise
     ///
-
     /// # Examples
     ///
-
     /// ```ignore
     /// let list_ctor = Type::TypeConstructor { name: "List".into(), arity: 1, kind: Kind::unary_constructor() };
     /// let functor_bound = ProtocolBound::simple("Functor".into());
@@ -592,26 +564,20 @@ impl TypeChecker {
 
     /// Verify HKT bounds for a function call with type constructor arguments.
     ///
-
     /// Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — HKT verification during type checking
     ///
-
     /// When calling a function like `fn traverse<F<_>: Applicative, A, B>(...)`
     /// with concrete type constructor arguments, this method verifies all HKT
     /// constraints are satisfied.
     ///
-
     /// # Arguments
     ///
-
     /// * `hkt_params` - List of (param_name, expected_kind, protocol_bounds)
     /// * `concrete_args` - The concrete type constructors being substituted
     /// * `span` - Source location for error reporting
     ///
-
     /// # Returns
     ///
-
     /// * `Ok(List<HKTInstantiationResult>)` - All instantiations succeeded
     /// * `Err(TypeError)` - First failing constraint
     pub fn verify_hkt_bounds(
@@ -736,7 +702,6 @@ impl TypeChecker {
     /// Convert an AST `KindAnnotation` (from `verum_ast`) to the type-checker's
     /// `kind_inference::Kind`, which is used internally for kind constraint solving.
     ///
-
     /// Both types represent the same algebra (`Type | K1 -> K2`) but live in
     /// different crates to avoid a circular dependency.
     pub(crate) fn ast_kind_to_infer_kind(
@@ -777,7 +742,6 @@ impl crate::kind_inference::KindInference for TypeChecker {
 /// extract the declared QTT [`crate::ty::Quantity`]
 /// from a parameter's attribute list.
 ///
-
 /// Reads the first `@quantity(...)` attribute via
 /// [`verum_ast::attr::QuantityAttr::from_attribute`] and maps the
 /// AST-side enum (`Zero / One / Many`) to the verum_types-side
@@ -806,7 +770,6 @@ pub(crate) fn extract_quantity_from_attrs(
 /// statements compose sequentially — each contributes
 /// `merge_sequential` to the running tally.
 ///
-
 /// Recognised statement shapes:
 ///  * `Stmt::Expr { expr, .. }` — recurse into expr.
 ///  * `Stmt::Let { value, .. }` — recurse into the initialiser.
@@ -868,7 +831,6 @@ pub(crate) fn walk_stmt_for_qtt_usage(
 impl TypeChecker {
     /// Calculate the size of a type in bytes for stack allocation checking.
     ///
-
     /// Returns None if the size cannot be determined at compile time
     /// (e.g., for dynamically-sized types or circular types).
     pub fn calculate_type_size(&self, ty: &Type) -> Option<u64> {
@@ -1006,7 +968,6 @@ impl TypeChecker {
 
     /// Check if a stack allocation exceeds the safe limit.
     ///
-
     /// Returns an error if the type's size exceeds MAX_STACK_ALLOCATION_BYTES.
     /// Spec: L0-critical/memory-safety/buffer_overflow/no_stack_overflow
     pub fn check_stack_allocation_size(&self, ty: &Type, span: Span) -> Result<()> {
@@ -1042,18 +1003,15 @@ pub(crate) fn make_maybe_type(inner: Type) -> Type {
 /// These are language built-in types with inherent methods, not stdlib types.
 /// HARDCODED FALLBACK for primitive type method return types.
 ///
-
 /// This function maps (primitive_type, method_name, arg_count) -> return_type for
 /// Int, Float, Bool, Char, and Byte methods. It serves as a safety net when the
 /// stdlib .vr implement blocks are not loaded into inherent_methods.
 ///
-
 /// In normal compilation (stdlib loaded via pipeline Pass 5), all these methods
 /// should be resolved from inherent_methods BEFORE reaching this fallback.
 /// The checked/saturating/wrapping arithmetic methods intentionally return None
 /// here to force resolution through stdlib (for correct unsigned type handling).
 ///
-
 /// HARDCODE(#7): Once confirmed that inherent_methods always has these
 /// signatures, this function can be removed entirely.
 pub(crate) fn resolve_primitive_method(recv_ty: &Type, method: &str, arg_count: usize) -> Option<Type> {
@@ -1217,7 +1175,6 @@ pub(crate) fn resolve_primitive_method(recv_ty: &Type, method: &str, arg_count: 
 /// an AST `Literal` so a refinement predicate's `Path(N)` can be rewritten
 /// to a literal at substitution time.
 ///
-
 /// Returns `None` for `MetaValue` shapes that have no direct literal
 /// representation (compound types, AST values). The caller leaves the path
 /// unchanged in that case so SMT continues to see a symbolic reference.

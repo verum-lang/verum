@@ -12,7 +12,6 @@ use verum_diagnostics::Diagnostic;
 
 /// Convert AST Span to diagnostic LineColSpan.
 ///
-
 /// Uses file_id and byte offsets since we don't have full source info here.
 fn span_to_linecol(span: Span) -> LineColSpan {
     LineColSpan::new(

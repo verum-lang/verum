@@ -224,7 +224,6 @@ pub type ShapeResult<T> = Result<T, ShapeError>;
 
 /// A constraint on dimension variables
 ///
-
 /// Constraints are used to track relationships between dynamic dimensions
 /// and validate that they are compatible for tensor operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -472,27 +471,21 @@ impl ConstraintCheckResult {
 
 /// System for tracking and validating dimension constraints
 ///
-
 /// This system uses Z3 SMT solver to verify that dimension constraints
 /// are satisfiable and to detect incompatible dimension combinations.
 ///
-
 /// # Example
 ///
-
 /// ```no_run
 /// use verum_verification::tensor_shapes::*;
 ///
-
 /// let mut system = DimensionConstraintSystem::new();
 ///
-
 /// // Add constraints
 /// system.add_equality("n_batch", "m_batch");
 /// system.add_range("n_batch", 1, 1024);
 /// system.add_positive("hidden_dim");
 ///
-
 /// // Check if constraints are satisfiable
 /// match system.check_satisfiable() {
 ///  Ok(ConstraintCheckResult::Satisfiable { model }) => {
@@ -684,7 +677,6 @@ impl DimensionConstraintSystem {
 
     /// Check if the constraints are satisfiable using SMT solver
     ///
-
     /// Returns detailed information about the result, including:
     /// - A satisfying model if constraints are satisfiable
     /// - Conflicting constraints if unsatisfiable
@@ -750,7 +742,6 @@ impl DimensionConstraintSystem {
 
     /// Verify that two dimensions can be equal given the constraints
     ///
-
     /// This is the key method that replaces the placeholder implementation.
     /// It uses SMT solving to determine if `dim1 = dim2` is consistent
     /// with all existing constraints.
@@ -1315,7 +1306,6 @@ impl DimensionEqualityResult {
 
 /// A dimension in a tensor shape
 ///
-
 /// Dimensions can be:
 /// - **Static**: Known at compile time (e.g., `128`)
 /// - **Dynamic**: Meta parameter, resolved at compile time (e.g., `M`, `N`)
@@ -1421,23 +1411,18 @@ impl MetaParam {
 
 /// Tensor shape with compile-time tracking
 ///
-
 /// A tensor shape consists of:
 /// - **Dimensions**: List of dimension specifications
 /// - **Meta parameters**: Compile-time parameters for dynamic dimensions
 ///
-
 /// # Example
 ///
-
 /// ```no_run
 /// use verum_verification::tensor_shapes::*;
 ///
-
 /// // Static shape: [128, 256]
 /// let shape = TensorShape::from_dims(vec![128, 256]);
 ///
-
 /// // Dynamic shape: [M, N] with meta parameters
 /// let mut dynamic_shape = TensorShape::new();
 /// dynamic_shape.add_dynamic_dim("M");
@@ -1629,31 +1614,24 @@ impl fmt::Display for TensorShape {
 
 /// Tensor shape verifier
 ///
-
 /// This verifier implements compile-time shape inference, broadcasting rules,
 /// and dimension compatibility checking per Section 2.3 of the specification.
 ///
-
 /// # Features
 ///
-
 /// - **Shape inference**: Infer result shapes from operations
 /// - **Broadcasting**: NumPy-style broadcasting with compile-time verification
 /// - **Compatibility**: Check dimension compatibility constraints
 /// - **SMT-backed constraint solving**: Validate dimension relationships using Z3
 /// - **Error reporting**: Detailed error messages with shape information
 ///
-
 /// # Example with Constraint System
 ///
-
 /// ```no_run
 /// use verum_verification::tensor_shapes::*;
 ///
-
 /// let mut verifier = ShapeVerifier::new();
 ///
-
 /// // Add known constraints about dimension relationships
 /// verifier.add_constraint(DimensionConstraint::Equality {
 ///  dim1: "n_batch".into(),
@@ -1665,7 +1643,6 @@ impl fmt::Display for TensorShape {
 ///  max: 2048,
 /// });
 ///
-
 /// // Now verify_broadcast will use SMT to check compatibility
 /// ```
 #[derive(Debug, Clone)]
@@ -1730,7 +1707,6 @@ impl ShapeVerifier {
 
     /// Add a dimension constraint to the verifier
     ///
-
     /// These constraints are used during verification to detect
     /// incompatible dimension combinations.
     pub fn add_constraint(&mut self, constraint: DimensionConstraint) {
@@ -1793,7 +1769,6 @@ impl ShapeVerifier {
 
     /// Add a linear relationship constraint: `result = multiplier * source + offset`
     ///
-
     /// This is useful for expressing relationships like `n_out = n_in + 1`
     /// (which would detect `[n]` vs `[n+1]` incompatibility).
     pub fn add_linear_constraint(
@@ -1809,7 +1784,6 @@ impl ShapeVerifier {
 
     /// Add a positivity constraint: `dim > 0`
     ///
-
     /// This is important for dimension variables that must be positive
     /// (most tensor dimensions should be positive).
     pub fn add_positive(&mut self, dim: impl Into<Text>) {
@@ -1856,7 +1830,6 @@ impl ShapeVerifier {
 
     /// Verify matrix multiplication: [M, K] × [K, N] → [M, N]
     ///
-
     /// Ensures that the inner dimensions match (K = K).
     pub fn verify_matmul(&self, a: &TensorShape, b: &TensorShape) -> ShapeResult<TensorShape> {
         self.check_rank_bound("matmul", a)?;
@@ -1929,7 +1902,6 @@ impl ShapeVerifier {
 
     /// Verify broadcasting compatibility and compute result shape
     ///
-
     /// Implements NumPy-style broadcasting rules:
     /// - Dimensions are compared element-wise from right to left
     /// - Dimensions are compatible if:
@@ -2219,7 +2191,6 @@ impl ShapeVerifier {
 
     /// Verify that two dimensions match
     ///
-
     /// Uses SMT-based constraint solving to verify that two dynamic dimensions
     /// can be equal given the current constraint system.
     fn verify_dimensions_match(
@@ -2300,23 +2271,18 @@ impl ShapeVerifier {
 
     /// Compute broadcast dimension from two dimensions
     ///
-
     /// Uses SMT-based constraint solving to verify that two dynamic dimensions
     /// are compatible for broadcasting. This replaces the previous placeholder
     /// implementation that silently assumed all dynamic dimensions are compatible.
     ///
-
     /// # Broadcasting Rules
     ///
-
     /// 1. If one dimension is 1, use the other dimension
     /// 2. If dimensions are equal, use that value
     /// 3. If dimensions are dynamic, use SMT to verify compatibility
     ///
-
     /// # Errors
     ///
-
     /// Returns `IncompatibleDynamicDimensions` if SMT proves the dimensions
     /// cannot be equal (e.g., `[n]` vs `[n+1]` where `n_plus_one = n + 1`).
     fn compute_broadcast_dimension(

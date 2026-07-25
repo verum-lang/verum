@@ -141,7 +141,6 @@ fn global_type_table_clean_for_maybe() {
 /// As of #170/#187 close-out this fixture exposes ZERO cross-module
 /// hygiene findings (down from 14 across multiple follow-ups):
 ///
-
 ///  1. Added `Channel`/`Deque`/`Tuple`/`Array` to the well-known
 ///  type-name map (14 → 15, briefly worse — exposed a separate
 ///  collision class).
@@ -167,7 +166,6 @@ fn global_type_table_clean_for_maybe() {
 ///  `CancellationCallback` in `core/async/cancellation.vr`
 ///  (3 → 1).
 ///
-
 /// The previously-remaining `Heap` / `Shared` pair both pointing at
 /// `TypeId::PTR (14)` is now eliminated by `push_type_dedupe`:
 /// the second descriptor pushed at the same id is dropped (first-
@@ -176,7 +174,6 @@ fn global_type_table_clean_for_maybe() {
 /// so callers of either name resolve correctly through the same
 /// underlying TypeId.
 ///
-
 /// This test is a *ratchet*: the count must not rise, and must
 /// match exactly when it falls (so any improvement gets pinned).
 /// When a finding is fixed, lower `RESULT_ISSUE_BASELINE` to lock
@@ -273,7 +270,6 @@ fn orphan_make_variants_dump_for_result() {
 /// symbol — the lenient path warns and continues, the strict path
 /// returns `Err(CodegenError)` from the call.
 ///
-
 /// This pins the contract that `with_strict_codegen()` isn't just
 /// a config flag with no observable effect.
 #[test]
@@ -385,7 +381,6 @@ fn global_type_table_clean_for_fresh_codegen() {
 
 /// Ratchet test for `find_orphan_make_variants`.
 ///
-
 /// At a single-module-with-mounts granularity most "orphans" are
 /// legitimate — they reference variants whose declaring module
 /// wasn't fully transitively loaded by the test harness. But the
@@ -393,7 +388,6 @@ fn global_type_table_clean_for_fresh_codegen() {
 /// introduces NEW orphans (instructions that the runtime can't
 /// resolve), the count rises and this ratchet trips.
 ///
-
 /// When a fix lands that resolves orphans (better mount transitive
 /// closure, MakeVariantTyped from #167 Phase 3, etc.), lower
 /// `RESULT_ORPHAN_BASELINE` to lock the gain.

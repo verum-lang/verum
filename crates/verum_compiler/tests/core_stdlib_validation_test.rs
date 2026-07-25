@@ -28,7 +28,6 @@ use verum_compiler::{CompilationPipeline, CompilerOptions, Session};
 
 /// Verify that the stdlib loads without parse errors.
 ///
-
 /// This test compiles a minimal program, which triggers stdlib loading.
 /// Any parse failures in core/ .vr files will surface as compilation errors.
 #[test]
@@ -73,7 +72,6 @@ fn test_core_stdlib_loads_without_errors() {
 
 /// Count internal stdlib type registration errors.
 ///
-
 /// These errors are suppressed during normal compilation but indicate
 /// quality issues in the stdlib .vr files or type system coverage.
 /// Requires a large stack due to deep type resolution of 280+ stdlib modules.
@@ -168,7 +166,6 @@ fn test_count_stdlib_internal_type_errors() {
 
 /// Count all stdlib body type-checking errors.
 ///
-
 /// This runs the FULL type checker (including function bodies) on all core/ modules
 /// to identify all type errors. This is the comprehensive test that exposes the
 /// ~950 errors that were previously hidden by skipping stdlib body checking.
@@ -218,7 +215,6 @@ fn test_count_stdlib_body_errors() {
 
 /// Verify that basic programs with core types compile through VBC.
 ///
-
 /// Uses simple types (Int, Text, Bool) that are always available
 /// without generic resolution. Generic collections (List, Map, Set)
 /// require the full AOT pipeline to resolve.
@@ -260,7 +256,6 @@ fn test_core_basic_types_available() {
 
 /// Verify that CBGR reference types parse and compile.
 ///
-
 /// Tests that the three-tier reference system (&T, &checked T, &unsafe T)
 /// is properly wired through the compilation pipeline.
 #[test]
@@ -314,7 +309,6 @@ fn test_cbgr_reference_types_compile() {
 
 /// Verify that functions with &mut self compile through VBC.
 ///
-
 /// This exercises the CBGR RefMut instruction path in the VBC codegen.
 #[test]
 fn test_mut_ref_compiles() {

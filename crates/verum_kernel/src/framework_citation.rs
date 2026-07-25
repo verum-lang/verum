@@ -107,21 +107,18 @@ impl FrameworkCitationManifest {
 /// **Walk a Verum module's items and collect every
 /// `@framework(<system>, "<citation>")` attribute.**
 ///
-
 /// Inspects:
 ///  - Theorem / Lemma / Corollary attributes (declaration-level).
 ///  - Axiom attributes.
 ///  - Item-level attributes (which the AST also surfaces as
 ///  `Item.attributes`).
 ///
-
 /// The collector handles both:
 ///  - 2-arg form: `@framework(<framework>, "<citation>")`
 ///  (the canonical shape).
 ///  - 1-arg form: `@framework("<citation>")` (legacy / shorthand —
 ///  framework defaults to `"unknown"`).
 ///
-
 /// Citations whose framework or path can't be parsed (malformed
 /// attributes) are silently skipped; the audit gate's separate
 /// validation pass flags malformed attributes via

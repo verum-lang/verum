@@ -75,7 +75,6 @@ impl TestProject {
 
 /// Test basic type reference across two modules.
 ///
-
 /// Cross-module type resolution: resolving type names across module boundaries via import paths
 #[test]
 fn test_basic_cross_module_type_reference() {
@@ -116,7 +115,6 @@ public fn create_user() -> User {
 
 /// Test type references in function parameters.
 ///
-
 /// Cross-module type resolution: resolving type names across module boundaries via import paths#[test]
 fn test_cross_module_type_in_parameters() {
     let project = TestProject::new();
@@ -154,7 +152,6 @@ public fn handle(req: Request) -> Response {
 
 /// Test type references in struct fields.
 ///
-
 /// Cross-module type resolution: resolving type names across module boundaries via import paths#[test]
 fn test_cross_module_type_in_struct_fields() {
     let project = TestProject::new();
@@ -194,7 +191,6 @@ public type Event is {
 
 /// Test type references in return types.
 ///
-
 /// Cross-module type resolution: resolving type names across module boundaries via import paths#[test]
 fn test_cross_module_type_in_return_types() {
     let project = TestProject::new();
@@ -240,7 +236,6 @@ public fn try_acquire() -> Maybe<Connection> {
 
 /// Test type alias resolution across modules.
 ///
-
 /// Cross-module type aliases: type aliases resolved transitively across module boundaries
 #[test]
 fn test_cross_module_type_alias() {
@@ -279,7 +274,6 @@ public fn send_email(user: UserId, email: Email) -> Bool {
 
 /// Test nested type alias resolution.
 ///
-
 /// Cross-module type aliases: type aliases resolved transitively across module boundaries#[test]
 fn test_nested_type_alias_resolution() {
     let project = TestProject::new();
@@ -329,7 +323,6 @@ public fn process(id: DerivedId) -> DerivedId {
 
 /// Test generic type alias resolution.
 ///
-
 /// Cross-module type aliases: type aliases resolved transitively across module boundaries#[test]
 fn test_generic_type_alias_resolution() {
     let project = TestProject::new();
@@ -371,7 +364,6 @@ public fn generic_pair<T>(a: T, b: T) -> Pair<T, T> {
 
 /// Test type alias with refinements.
 ///
-
 /// Cross-module type aliases: type aliases resolved transitively across module boundaries, with protocol implementations checked for coherence
 #[test]
 fn test_type_alias_with_refinements() {
@@ -419,7 +411,6 @@ public fn reciprocal(n: Positive) -> Int {
 
 /// Test generic type with cross-module type parameters.
 ///
-
 /// Cross-module generic types: generic type resolution and coherence checking across modules
 #[test]
 fn test_generic_with_cross_module_parameters() {
@@ -474,7 +465,6 @@ public fn create() -> Container<Item> {
 
 /// Test nested generic types across modules.
 ///
-
 /// Cross-module generic types: generic type resolution and coherence checking across modules#[test]
 fn test_nested_generic_types() {
     let project = TestProject::new();
@@ -528,7 +518,6 @@ public fn complex() -> Map<ItemB, ContainerA<ValueC>> {
 
 /// Test generic constraints with cross-module protocols.
 ///
-
 /// Cross-module generic types: generic type resolution and coherence checking across modules
 #[test]
 fn test_generic_constraints_cross_module() {
@@ -577,7 +566,6 @@ public fn save<T: Display + Serialize>(item: T) -> Text {
 
 /// Test where clauses with cross-module types.
 ///
-
 /// Cross-module generic types: generic type resolution and coherence checking across modules#[test]
 fn test_where_clause_cross_module() {
     let project = TestProject::new();
@@ -635,7 +623,6 @@ where
 
 /// Test associated type resolution across modules.
 ///
-
 /// Cross-module associated types: resolving protocol associated types across module boundaries
 #[test]
 fn test_associated_type_resolution() {
@@ -683,7 +670,6 @@ implement Container for MyContainer {
 
 /// Test nested associated types.
 ///
-
 /// Cross-module associated types: resolving protocol associated types across module boundaries#[test]
 fn test_nested_associated_types() {
     let project = TestProject::new();
@@ -746,7 +732,6 @@ implement Weighted for MyEdge {
 
 /// Test associated types in function signatures.
 ///
-
 /// Cross-module associated types: resolving protocol associated types across module boundaries#[test]
 fn test_associated_types_in_signatures() {
     let project = TestProject::new();
@@ -791,7 +776,6 @@ public fn find<I: Iterator>(iter: &mut I, predicate: fn(I.Item) -> Bool) -> Mayb
 
 /// Test qualified associated type paths.
 ///
-
 /// Cross-module associated types: resolving protocol associated types across module boundaries#[test]
 fn test_qualified_associated_type_paths() {
     let project = TestProject::new();
@@ -849,7 +833,6 @@ public fn use_output(p: Processor) -> <Processor as Base>.Output {
 
 /// Test simple qualified path resolution.
 ///
-
 /// Module paths: dot-separated hierarchical paths (cog.module.item) for name resolution
 #[test]
 fn test_simple_qualified_path() {
@@ -887,7 +870,6 @@ public fn use_type() -> MyType {
 
 /// Test deep qualified path resolution.
 ///
-
 /// Module paths: dot-separated hierarchical paths (cog.module.item) for name resolution#[test]
 fn test_deep_qualified_path() {
     let project = TestProject::new();
@@ -931,7 +913,6 @@ public fn create_map() -> HashMap<Text, Int> {
 
 /// Test qualified method call resolution.
 ///
-
 /// Cross-module name resolution: qualified name lookup across module hierarchy
 #[test]
 fn test_qualified_method_call() {
@@ -980,7 +961,6 @@ public fn test() {
 
 /// Test qualified static method call.
 ///
-
 /// Cross-module name resolution: qualified name lookup across module hierarchy
 #[test]
 fn test_qualified_static_method() {
@@ -1032,7 +1012,6 @@ public fn compute() -> Int {
 
 /// Test type forwarding through re-export.
 ///
-
 /// Module re-exports: "pub use" for exposing items from sub-modules through parent module
 #[test]
 fn test_type_forwarding_reexport() {
@@ -1079,7 +1058,6 @@ public fn use_reexported() -> InternalType {
 
 /// Test chained type re-exports.
 ///
-
 /// Module re-exports: "pub use" for exposing items from sub-modules through parent module#[test]
 fn test_chained_type_reexports() {
     let project = TestProject::new();
@@ -1130,7 +1108,6 @@ public fn use_chained() -> CoreType {
 
 /// Test re-export with renaming.
 ///
-
 /// Module re-exports: "pub use" for exposing items from sub-modules through parent module#[test]
 fn test_reexport_with_rename() {
     let project = TestProject::new();
@@ -1174,7 +1151,6 @@ public fn use_renamed() -> NewName {
 
 /// Test circular type references through modules.
 ///
-
 /// Circular reference detection: detecting and reporting cycles in cross-module type definitions
 #[test]
 fn test_circular_type_references() {
@@ -1218,7 +1194,6 @@ public type TypeB is {
 
 /// Test protocol implementation across modules.
 ///
-
 /// Protocol implementation coherence: at most one impl per concrete type, orphan rules across modules
 #[test]
 fn test_cross_module_protocol_implementation() {
@@ -1281,7 +1256,6 @@ implement Display for MyType {
 
 /// Test performance of 1000 type resolutions.
 ///
-
 /// Module resolution performance: efficient name lookup with caching and lazy resolution
 #[test]
 fn test_performance_1000_resolutions() {
@@ -1323,7 +1297,6 @@ fn test_performance_1000_resolutions() {
 
 /// Test that type resolution caching improves performance.
 ///
-
 /// Module resolution performance: efficient name lookup with caching and lazy resolution#[test]
 fn test_type_resolution_caching() {
     let mut resolver = NameResolver::new();
@@ -1382,7 +1355,6 @@ fn test_type_resolution_caching() {
 
 /// Test memory usage with large number of types.
 ///
-
 /// Module resolution performance: efficient name lookup with caching and lazy resolution#[test]
 fn test_memory_usage_many_types() {
     let mut resolver = NameResolver::new();

@@ -429,13 +429,11 @@ fn is_simple_ident(s: &str) -> bool {
 /// Returns `None` if the input doesn't START with `let` or doesn't
 /// have a top-level `;` terminating the binding.
 ///
-
 /// "Top-level `;`" means a semicolon outside any matched `()`,
 /// `[]`, `{}`, or string literal — so `let m = Map { a: 1, b: 2 };`
 /// (containing `;`-bearing nested blocks) splits at the OUTER
 /// terminator. Leading whitespace is allowed before `let`.
 ///
-
 /// Used by the REPL's script-mode wrapper to lift a leading
 /// binding into a session-level const before executing the
 /// residual, so subsequent prompts see the binding.

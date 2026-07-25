@@ -565,7 +565,6 @@ impl Default for DebugAdapter {
 
 /// Compiles a `.vr` file to a VBC module.
 ///
-
 /// Uses the verum_compiler pipeline (parse, type check, VBC codegen).
 fn compile_program(path: &str) -> Result<VbcModule, String> {
     use std::path::Path;

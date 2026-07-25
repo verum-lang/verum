@@ -150,7 +150,6 @@ impl std::fmt::Display for CacheKey {
 
 /// Compute the cache key for a source + compiler + flag set.
 ///
-
 /// The digest order is `wire_schema ++ b"\x00" ++ compiler_identity ++
 /// b"\x00" ++ source ++ b"\x00" ++ compiler ++ b"\x00" ++ flag1 ++ b"\x00"
 /// ++ flag2 ++ ...` — null bytes between fields prevent length-extension
@@ -367,7 +366,6 @@ pub type CacheResult<T> = Result<T, CacheError>;
 
 /// Content-addressed cache rooted at a directory.
 ///
-
 /// Cheap to clone — internally just a `PathBuf`.
 #[derive(Debug, Clone)]
 pub struct ScriptCache {
@@ -388,7 +386,6 @@ pub struct ScriptCache {
 impl ScriptCache {
     /// Default cache location: `$HOME/.verum/script-cache/`.
     ///
-
     /// The directory is created if missing.
     pub fn at_default() -> CacheResult<Self> {
         let home = dirs::home_dir().ok_or_else(|| CacheError::Io {

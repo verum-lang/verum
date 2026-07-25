@@ -282,7 +282,6 @@ pub fn evaluate_gate(report: &CrossFormatReport) -> bool {
 /// Emit the deterministic shell command that re-checks a given
 /// format's output for an artefact. Used by reproducibility audits.
 ///
-
 /// Returns a string of the form `coqc <path>.v` (etc.). V1
 /// promotion: thread sandbox flags + version-pin metadata.
 pub fn format_replay_command(fmt: ExportFormat, artefact_stem: &str) -> String {

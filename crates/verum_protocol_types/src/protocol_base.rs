@@ -37,7 +37,6 @@ pub type Type = AstType;
 
 /// Object safety error
 ///
-
 /// Object safety errors that prevent a protocol from being used as `dyn Protocol`.
 /// A protocol is object-safe when all methods can be dispatched through a vtable:
 /// - Methods must not return Self (unknown size through vtable)
@@ -129,11 +128,9 @@ impl std::fmt::Display for ObjectSafetyError {
 
 /// A protocol declaration (like a trait/type class)
 ///
-
 /// Protocols define required methods, associated types, and constants
 /// that implementing types must provide.
 ///
-
 /// Example:
 /// ```verum
 /// protocol Eq<T> {
@@ -189,15 +186,12 @@ pub struct ProtocolMethod {
 
 /// Associated type in a protocol
 ///
-
 /// Associated type in a protocol. Implementations must provide a concrete type.
 /// Example: `type Item` in Iterator protocol, implemented as `type Item is Int`.
 ///
-
 /// This is the base version without GAT support.
 /// For GAT support, see gat_types::AssociatedTypeGAT.
 ///
-
 /// Example:
 /// ```verum
 /// protocol Container {
@@ -246,7 +240,6 @@ pub struct AssociatedConst {
 
 /// A protocol bound (constraint)
 ///
-
 /// Example: `T: Eq + Ord`
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolBound {
@@ -256,7 +249,6 @@ pub struct ProtocolBound {
     pub args: List<Type>,
     /// Whether this is a negative bound (!Protocol syntax)
     ///
-
     /// When true, this bound requires the type to NOT implement the protocol.
     /// This is used for specialization coherence and mutual exclusion patterns.
     pub is_negative: bool,
@@ -296,7 +288,6 @@ impl ProtocolBound {
 
 /// An implementation of a protocol for a specific type
 ///
-
 /// Example:
 /// ```verum
 /// impl Eq for Int {
