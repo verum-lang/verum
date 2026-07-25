@@ -31,9 +31,24 @@ fn parse_module(source: &str) -> Result<Vec<verum_ast::Item>, String> {
     let tokens: Vec<_> = lexer.filter_map(|r| r.ok()).collect();
     let mut parser = RecursiveParser::new(&tokens, file_id);
 
-    parser
+    let items = parser
         .parse_module()
-        .map_err(|e| format!("Parse error: {:?}", e))
+        .map_err(|e| format!("Parse error: {:?}", e))?;
+
+    // `RecursiveParser::parse_module` returns Ok(items) even when it recorded
+    // errors — recovery is deliberate, and the low-level API leaves the
+    // verdict to the caller. `VerumParser` performs exactly this check before
+    // handing back a Module (verum_fast_parser/src/lib.rs:234).
+    //
+    // Omitting it made every "should fail to parse" assertion in this file
+    // vacuous for anything the parser can recover from. `context { .. }`
+    // without a name really is rejected — the parser raises E058 — but the
+    // error lived in `parser.errors` while the Result stayed Ok.
+    if !parser.errors.is_empty() {
+        return Err(format!("Parse errors: {:?}", parser.errors));
+    }
+
+    Ok(items)
 }
 
 #[test]
