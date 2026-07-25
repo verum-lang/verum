@@ -66,19 +66,15 @@ COVERAGE = {
         "GAP",
         "T0362/T0640: the bake never runs this, so forward-declared record "
         "types in extern signatures do not resolve to StructPtr in the "
-        "archive. Live case: core/sys/darwin/libsystem.vr declares the pthread "
-        "externs above `type PthreadMutex`.",
+        "archive. A naive fix (calling it from the bootstrap) BAKES CLEAN but "
+        "changes Display dispatch — see T0640.",
     ),
     "claim_user_type_name": (
         "GAP",
-        "T0640, audited 2026-07-25: identical call-site pattern to "
-        "pregenerate_ffi_struct_layouts (compile_module / _with_mounts / "
-        "_additional_module / collect_all_declarations, none reached by the "
-        "bootstrap), and user_claimed_type_names has exactly one writer — "
-        "inside this function. So the OWN-DECL-LAYOUT-EVICT-1 fix (T0125) is "
-        "inert for the bake, even though its own comment describes a "
-        "bake-time simple-key layout squat as the scenario it exists to fix. "
-        "Candidate cause of T0408.",
+        "T0640: same unreachable call-site pattern; OWN-DECL-LAYOUT-EVICT-1 "
+        "(T0125) is therefore inert for the bake. Candidate cause of T0408. "
+        "A naive bootstrap-side call bakes clean but shifts Ordering Display "
+        "dispatch inconsistently — see T0640.",
     ),
 }
 
