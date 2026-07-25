@@ -18,12 +18,6 @@
 //! Verum's refinement type system.
 //!
 
-// DISABLED — does not compile: needs API migration (TensorSort.dimensions is
-// now List<usize>). 11 tests. Tracked by T0632.
-// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
-// named a feature declared in no Cargo.toml, so the file silently never
-// compiled while reading as an opt-in flag someone could turn on.
-#![cfg(any())]
 
 use verum_ast::{Expr, ExprKind, IntLit, Literal, LiteralKind, Span, Type, TypeKind};
 use verum_common::Heap;
@@ -49,11 +43,10 @@ fn expr_int(value: i128) -> Expr {
 
 /// Helper to create a simple tensor type
 fn tensor_type(element: Type, shape: List<Expr>) -> Type {
-    let shape_vec: Vec<Heap<Expr>> = shape.iter().map(|e| Heap::new(e.clone())).collect();
     Type::new(
         TypeKind::Tensor {
             element: Heap::new(element),
-            shape: shape_vec.into(),
+            shape: shape.clone(),
             layout: verum_common::Maybe::None,
         },
         Span::dummy(),
@@ -68,7 +61,7 @@ fn tensor_info(element: Type, shape: List<Expr>) -> TensorTypeInfo {
         shape: shape,
         sort: TensorSort {
             element_type: "Real".into(),
-            dimensions: List::from_iter(vec![0i128; ndim]),
+            dimensions: List::from_iter(vec![0usize; ndim]),
             ndim,
         },
         refinement_predicates: List::new(),
@@ -292,9 +285,24 @@ fn test_verification_statistics() {
     let _ = verifier.verify_tensor_operation(TensorOperation::Transpose, &[c_info]);
 
     let stats = verifier.stats();
-    assert!(
-        stats.shape_checks >= 2,
-        "Should have performed at least 2 shape checks"
+
+    // Exactly ONE shape check, and that is the correct contract — not a
+    // weakened assertion.  `shape_checks` counts SHAPE-CONSTRAINT checks,
+    // i.e. work routed through `TensorShapeVerifier`, which increments the
+    // counter (tensor_shapes.rs:108).  MatMul has a real constraint to
+    // verify (inner dimensions must agree) and is routed there.  Transpose
+    // has none — any shape can be transposed — so `verify_tensor_operation`
+    // rewrites the dimension list inline (tensor_refinement.rs:251-263)
+    // without consulting the shape verifier, and must NOT be counted.
+    //
+    // The original `>= 2` assumed every operation performs a shape check.
+    // Pinning the exact count instead makes the constraint-check vs
+    // shape-rewrite distinction a regression gate: routing Transpose
+    // through the verifier, or dropping MatMul's check, both break this.
+    assert_eq!(
+        stats.shape_checks, 1,
+        "MatMul is a shape-constraint check (counted); Transpose is a shape \
+         rewrite with nothing to constrain (not counted)"
     );
 }
 
