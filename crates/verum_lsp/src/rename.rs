@@ -1,6 +1,5 @@
 //! Rename symbol support
 //!
-
 //! Provides comprehensive symbol renaming across documents with:
 //! - Cross-file rename support
 //! - Symbol kind detection (function, type, variable, parameter, field)
@@ -8,7 +7,6 @@
 //! - AST-based semantic rename (not just text matching)
 //! - Syntax tree-based rename for accurate source location
 //!
-
 //! Uses the lossless red-green syntax tree for accurate source location mapping,
 //! enabling AST-based semantic rename rather than text-based search/replace.
 

@@ -1,6 +1,5 @@
 //! Find references support
 //!
-
 //! Finds all references to a symbol in the document using both text-based
 //! and AST-based search for accurate results.
 

@@ -14,7 +14,6 @@
 )]
 //! Property-based tests for verum_common semantic types
 //!
-
 //! Uses proptest to verify invariants hold for arbitrary inputs
 
 use proptest::prelude::*;

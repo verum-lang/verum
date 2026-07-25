@@ -1,7 +1,6 @@
 //! Kernel-rule recheck pass — naturality / categorical-coherence /
 //! modal-depth wiring.
 //!
-
 //! This module bridges `verum_kernel`'s trusted-base K-rules
 //! (`check_eps_mu_coherence`, `check_universe_ascent`,
 //! `check_refine_omega`) into the gradual-verification pipeline so
@@ -9,10 +8,8 @@
 //! (`@verify(certified)` and the three `@verify(coherent*)`
 //! variants) can honour their certificate-recheck semantics.
 //!
-
 //! # The structural problem this module solves
 //!
-
 //! Before this module landed, `verum_kernel` had **zero** downstream
 //! Rust dependents — the K-rules were tested in isolation but never
 //! invoked from any compiler phase. Per the VVA architecture
@@ -22,13 +19,10 @@
 //! `@verify(reliable)` semantics — emitting certificates that no
 //! re-check actually validated.
 //!
-
 //! #
 //!
-
 //! ships a **kernel-recheck façade** in pure Rust:
 //!
-
 //!  * [`KernelRecheck`] — a thin handle around the K-rule entry
 //!  points.
 //!  * [`refine_omega`] — call-site for `K-Refine-omega`. Given a
@@ -38,7 +32,6 @@
 //!  * [`universe_ascent`] — call-site for `K-Universe-Ascent`.
 //!  * [`eps_mu_coherence`] — call-site for `K-Eps-Mu`.
 //!
-
 //! Future work will add the AST-to-CoreTerm lifting helpers so the
 //! verification pipeline can call these directly on the typed AST
 //! without the caller pre-lifting.

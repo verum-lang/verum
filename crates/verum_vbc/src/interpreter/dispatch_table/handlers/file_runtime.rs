@@ -1,20 +1,16 @@
 //! High-level Rust intercepts for `core.io.file` and `core.io.fs`
 //! operations.
 //!
-
 //! Mirrors the architecture of `shell_runtime.rs` (VBC-1): bypass the
 //! libSystem FFI chain for open(2)/read(2)/write(2)/stat(2)/mkdir(2)/
 //! unlink(2)/rename(2) syscalls and dispatch directly to `std::fs`
 //! from the interpreter host process. See `shell_runtime.rs`
 //! docstring for the full Tier-0 architectural rationale.
 //!
-
 //! # Functions intercepted
 //!
-
 //! ## `core.io.file.*` (Text paths)
 //!
-
 //!  * `read_to_string(path: &Text) -> IoResult<Text>` —
 //!  `std::fs::read_to_string`.
 //!  * `read(path: &Text) -> IoResult<List<Byte>>` —
@@ -25,10 +21,8 @@
 //!  `std::fs::write` with byte slice.
 //!  * `exists(path: &Text) -> Bool` — `std::path::Path::exists`.
 //!
-
 //! ## `core.io.fs.*` (Path-typed paths — `Path` is `{ inner: Text }`)
 //!
-
 //!  * `exists(path: &Path) -> Bool`
 //!  * `is_file(path: &Path) -> Bool`
 //!  * `is_dir(path: &Path) -> Bool`
@@ -45,7 +39,6 @@
 //!  * `write(path: &Path, contents: &[Byte]) -> IoResult<()>`
 //!  * `write_str(path: &Path, contents: &Text) -> IoResult<()>`
 //!
-
 //! Path-typed args (`&Path`) are unwrapped via [`extract_path_or_text_arg`]
 //! which transparently handles BOTH bare `&Text` and `&Path` (the
 //! one-field `{ inner: Text }` record produced by `Path.new(s)`).
@@ -53,10 +46,8 @@
 //! triggered an out-of-bounds register dereference inside the
 //! libSystem FFI dispatch chain.
 //!
-
 //! # Marshaling
 //!
-
 //! `IoResult<T>` = `Result<T, StreamError>` where
 //! `StreamError { kind: IoErrorKind, message: Maybe<Text> }`.
 //! On Rust-side `std::io::Error`, the kind is mapped from
@@ -64,10 +55,8 @@
 //! corresponding `IoErrorKind` variant; an OS-error message goes
 //! into `message` (`Maybe.Some(text)`).
 //!
-
 //! # Permission gate
 //!
-
 //! Consults `PermissionScope::FileSystem` — a script declaring
 //! `permissions = ["time"]` (no `fs`) is denied uniformly with the
 //! libSystem open/read FFI gate.

@@ -1,22 +1,17 @@
 //! Exhaustiveness Checking Integration for LSP
 //!
-
 //! This module provides real-time exhaustiveness feedback in the IDE through
 //! integration with the exhaustiveness checking system in verum_types.
 //!
-
 //! ## Features
 //!
-
 //! - Non-exhaustive match warnings with witness examples
 //! - Redundant pattern detection (unreachable patterns)
 //! - Quick fixes for adding missing patterns
 //! - Hover information for pattern coverage
 //!
-
 //! ## Integration
 //!
-
 //! The module integrates with:
 //! - verum_types::exhaustiveness for the core algorithm
 //! - tower_lsp for diagnostic publishing

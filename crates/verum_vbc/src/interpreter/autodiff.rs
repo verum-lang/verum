@@ -1,23 +1,18 @@
 //! Autodiff runtime support for VBC interpreter.
 //!
-
 //! This module provides runtime gradient computation infrastructure for
 //! interpreting VBC autodiff opcodes (0xA8-0xAF).
 //!
-
 //! # Architecture
 //!
-
 //! While Verum's production autodiff is compile-time source transformation,
 //! the interpreter requires runtime gradient tape support for:
 //! - Testing compiled autodiff code
 //! - Dynamic computation graphs
 //! - Debugging and development
 //!
-
 //! # Design
 //!
-
 //! The gradient tape records operations during forward pass and replays
 //! them in reverse during backward pass. Each operation records:
 //! - Operation type (add, mul, matmul, etc.)
@@ -25,26 +20,21 @@
 //! - Output tensor ID
 //! - Saved values needed for backward
 //!
-
 //! # Example
 //!
-
 //! ```ignore
 //! let mut tape = GradientTape::new();
 //! tape.begin_scope(GradMode::Reverse);
 //!
-
 //! // Forward pass - operations are recorded
 //! let x = tape.track_tensor(tensor_x);
 //! let y = tape.track_tensor(tensor_y);
 //! let z = tape.record_op(TapeOp::Add, &[x, y])?;
 //!
-
 //! // Backward pass
 //! tape.set_grad(z, ones_like(z));
 //! tape.backward()?;
 //!
-
 //! let dx = tape.get_grad(x);
 //! let dy = tape.get_grad(y);
 //! ```

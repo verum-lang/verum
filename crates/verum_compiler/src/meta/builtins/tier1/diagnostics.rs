@@ -1,24 +1,18 @@
 //! Compiler Diagnostics (Tier 1 - Requires CompileDiag)
 //!
-
 //! Functions for emitting compile-time errors and warnings.
 //!
-
 //! ## Functions
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `compile_error(msg)` | `(Text) -> !` | Emit compile-time error |
 //! | `compile_warning(msg)` | `(Text) -> ()` | Emit compile-time warning |
 //!
-
 //! ## Context Requirements
 //!
-
 //! **Tier 1**: Requires `using [CompileDiag]` context.
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

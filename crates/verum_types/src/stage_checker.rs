@@ -1,27 +1,21 @@
 //! Stage Checker for Multi-Stage Metaprogramming
 //!
-
 //! This module implements stage-level type checking for Verum's N-level staged
 //! metaprogramming system. It enforces the **Stage Coherence Rule**: a Stage N
 //! function can only directly generate Stage N-1 code.
 //!
-
 //! # Staged Metaprogramming Model
 //!
-
 //! Verum supports N-level staged metaprogramming where functions execute at
 //! different compilation stages:
 //!
-
 //! ```text
 //! Stage N ──► generates ──► Stage N-1 ──► ... ──► Stage 0 (runtime)
 //! (meta(N)) (meta(N-1)) (normal code)
 //! ```
 //!
-
 //! ## Stage Semantics
 //!
-
 //! | Stage | Syntax | Execution | Description |
 //! |-------|--------|-----------|-------------|
 //! | 0 | `fn f()` | Runtime | Normal runtime functions |
@@ -29,26 +23,20 @@
 //! | 2 | `meta(2) fn f()` | Pre-compile | Generates meta functions |
 //! | N | `meta(N) fn f()` | Stage N | Generates Stage N-1 code |
 //!
-
 //! ## Stage Coherence Rule
 //!
-
 //! The fundamental rule of staged metaprogramming:
 //!
-
 //! > **A Stage N function can only DIRECTLY generate Stage N-1 code.**
 //!
-
 //! This means:
 //! - `meta(2)` can only directly generate `meta` (stage 1) code
 //! - To generate runtime (stage 0) code from `meta(2)`, the output must contain
 //!  a `meta` function that performs the final generation
 //! - Each `quote { ... }` lowers the stage by 1
 //!
-
 //! ## Examples
 //!
-
 //! ```verum
 //! // VALID: meta(2) generates meta(1) code
 //! meta(2) fn derive_factory() -> TokenStream {
@@ -59,7 +47,6 @@
 //!  }
 //! }
 //!
-
 //! // INVALID: meta(2) cannot directly generate stage 0
 //! meta(2) fn bad_factory() -> TokenStream {
 //!  quote {
@@ -67,20 +54,16 @@
 //!  }
 //! }
 //!
-
 //! // INVALID: cross-stage call from higher to lower
 //! meta fn helper() -> TokenStream { ... }
 //!
-
 //! meta(2) fn caller() -> TokenStream {
 //!  helper() // Error E1002: cross-stage call
 //! }
 //! ```
 //!
-
 //! # Diagnostic Codes
 //!
-
 //! | Code | Name | Description |
 //! |------|------|-------------|
 //! | E1001 | `stage_mismatch` | Quote generates wrong stage code |
@@ -91,10 +74,8 @@
 //! | W1001 | `unused_stage` | Defined meta(N) but never invoked |
 //! | W1002 | `stage_downgrade` | Function can use lower stage |
 //!
-
 //! # Integration
 //!
-
 //! The StageChecker integrates with:
 //! - **verum_parser**: Receives `FunctionDecl.stage_level` from parsing
 //! - **verum_types/infer**: Called during type inference for stage validation

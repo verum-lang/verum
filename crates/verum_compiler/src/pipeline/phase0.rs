@@ -1,16 +1,13 @@
 //! Phase 0: stdlib AOT-prep + workspace-root discovery.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 17). Houses the
 //! one-shot "compile verum_std → static library + FFI exports +
 //! symbol registry" preparation step that runs once per build,
 //! plus the workspace-root finder that locates `Verum.toml` /
 //! `Cargo.toml`-rooted projects.
 //!
-
 //! Methods:
 //!
-
 //!  * `phase0_stdlib_preparation` — primary entry; required for
 //!  AOT/JIT modes, skipped for Interpret/Check.
 //!  * `add_stdlib_builtin_exports` — registers core verum-std

@@ -14,7 +14,6 @@
 )]
 //! Test for pipeline operator with qualified path expressions bug
 //!
-
 //! Issue: Parser incorrectly expects array indexing `[` after identifier in pipeline,
 //! instead of allowing `::` for qualified paths like `stream::map`.
 

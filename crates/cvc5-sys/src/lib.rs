@@ -1,19 +1,15 @@
 //! # cvc5-sys — Low-Level FFI Bindings for CVC5
 //!
-
 //! This crate provides raw, unsafe FFI bindings to the [CVC5 SMT solver's
 //! C API](https://cvc5.github.io/doc/cvc5-main/c/). It is intended to be used
 //! by higher-level safe wrappers (like `verum_smt::cvc5_backend`) rather than
 //! directly by end-user code.
 //!
-
 //! ## Build Modes
 //!
-
 //! The crate supports three distinct linking strategies, controlled by feature
 //! flags (see `Cargo.toml`):
 //!
-
 //! | Feature | Behavior |
 //! |----------------|-------------------------------------------------------|
 //! | `vendored` | Build CVC5 from source (static lib in binary) |
@@ -21,14 +17,11 @@
 //! | `system` | Link against system-installed `libcvc5` |
 //! | *(none)* | Provide stub bindings only — `init()` returns `false` |
 //!
-
 //! For the Verum project, the recommended configuration is `vendored`, which
 //! produces a self-contained binary with no external runtime dependencies.
 //!
-
 //! ## Safety
 //!
-
 //! All functions in this crate are `unsafe`. Callers must uphold:
 //! - Pointers returned from CVC5 are valid only until the owning solver/term
 //!  manager is destroyed.
@@ -39,22 +32,17 @@
 //!  a single thread; separate solvers on separate term managers may run in
 //!  parallel (this is what the portfolio executor does).
 //!
-
 //! ## Versioning
 //!
-
 //! This crate targets CVC5 version **1.3.3+**. ABI stability is not guaranteed
 //! across CVC5 releases, so this crate's major version tracks CVC5 compatibility.
 //!
-
 //! ## Example (via safe wrapper)
 //!
-
 //! ```rust,ignore
 //! // Do NOT use these bindings directly. Use `verum_smt::Cvc5Backend` instead.
 //! use verum_smt::Cvc5Backend;
 //!
-
 //! let mut backend = Cvc5Backend::new()?;
 //! backend.set_logic("QF_LIA")?;
 //! backend.assert("(> x 0)")?;

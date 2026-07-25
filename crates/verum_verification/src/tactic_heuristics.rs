@@ -1,35 +1,28 @@
 //! Heuristic "suggested next tactics" for failed proof goals.
 //!
-
 //! When a tactic script exhausts its options without closing a goal,
 //! the user sees a diagnostic with the residual goal and the exhausted
 //! tactic stack. A well-chosen "try this next" list turns that
 //! diagnostic from a dead-end into a starting point.
 //!
-
 //! The heuristics here are **deliberately simple structural rules**
 //! over the goal's proposition shape — they do NOT run the solver,
 //! do NOT mutate state, and do NOT guarantee that the suggested
 //! tactic will close the goal. They are hints, not proofs.
 //!
-
 //! Each suggestion carries a confidence level (high / medium / low)
 //! and a one-line rationale, so the user can see WHY a tactic is
 //! suggested.
 //!
-
 //! # Integration point
 //!
-
 //! The proof-search orchestrator in `verum_smt::proof_search` calls
 //! [`suggest_next_tactics`] after a user tactic script fails to
 //! close a goal. The result flows into the `E501 tactic failed`
 //! diagnostic (see `docs/verification/tactic-dsl.md §6.1`).
 //!
-
 //! # Extending
 //!
-
 //! Add a new rule to [`suggest_next_tactics`] inline or, for rules
 //! requiring state, implement [`HeuristicRule`] and register via
 //! [`HeuristicRegistry::register`]. The registry is keyed by

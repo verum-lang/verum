@@ -1,30 +1,24 @@
 //! Bridge between verum_parser and verum_syntax for lossless parsing.
 //!
-
 //! This module provides:
 //! - Conversion from token stream to green tree
 //! - Lossless parsing that preserves all trivia
 //! - Event-based parsing using verum_syntax's event infrastructure
 //! - Incremental parsing support
 //!
-
 //! # Event-Based Architecture
 //!
-
 //! The event-based parsing uses the Marker/precede pattern for retroactive tree building:
 //!
-
 //! 1. Parser emits events (Start, Token, Finish, Error) via EventBuilder
 //! 2. Events support forward_parent for retroactive wrapping (e.g., binary expressions)
 //! 3. Events are processed by GreenTreeSink to build the green tree
 //!
-
 //! This enables:
 //! - Lossless parsing (all trivia preserved)
 //! - Structured error nodes for recovery
 //! - Different tree representations from the same parse
 //!
-
 //! Uses the red-green tree pattern for lossless parsing infrastructure with incremental
 //! re-parsing support. The bridge converts between concrete syntax tree (CST) and abstract
 //! syntax tree (AST) representations while preserving all source information.

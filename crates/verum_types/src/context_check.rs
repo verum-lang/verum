@@ -1,30 +1,22 @@
 //! Context requirement type checking for Verum's Two-Level Context System.
 //!
-
 //! This module implements compile-time validation of context requirements,
 //! ensuring that functions declare all contexts they use and that context
 //! providers are correctly installed.
 //!
-
 //! # Specification
 //!
-
 //! Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
 //!
-
 //! # Two-Level Model
 //!
-
 //! - **Level 1 (Static DI)**: @injectable/@inject - 0ns overhead, compile-time resolution
 //! - **Level 2 (Dynamic Contexts)**: provide/using - ~5ns overhead, runtime resolution
 //!
-
 //! This module focuses on **Level 2 type checking** - validating `using [Context]` clauses.
 //!
-
 //! # Context Requirement Rules
 //!
-
 //! 1. **Declaration**: Functions must declare contexts in `using` clause
 //! 2. **Propagation**: If function F calls G requiring contexts, F must also require them
 //! 3. **Scope Closure (β-reduction)**: Context availability is lexically scoped by `provide`

@@ -14,10 +14,8 @@
 )]
 //! Comprehensive GAT (Generic Associated Type) syntax parser tests
 //!
-
 //! Tests for advanced protocol features: GATs, higher-rank bounds, specialization Section 1.1-1.4
 //!
-
 //! Tests cover:
 //! - Simple associated types (baseline)
 //! - GAT with single type parameter

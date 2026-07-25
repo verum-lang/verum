@@ -1,9 +1,7 @@
 //! Debug derive macro implementation
 //!
-
 //! Generates `implement Debug for Type { fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> }`
 //!
-
 //! For record types: generates "TypeName { field1: {val1}, field2: {val2} }" format.
 //! For sum types: matches each variant and formats with variant name and payload.
 //! Output is for development/testing use, not end-user display (use Display for that).

@@ -1,6 +1,5 @@
 //! PubGrub-based dependency resolver (P4.1).
 //!
-
 //! Wraps the [`pubgrub`](https://docs.rs/pubgrub) crate's
 //! conflict-driven clause-learning solver in an adapter that takes
 //! the existing Verum cog registry's data model (cog name +
@@ -8,14 +7,11 @@
 //! resolved dependency graph or a structured [`ResolverError`]
 //! (cf. `super::resolver_errors`, P4.3).
 //!
-
 //! # Why PubGrub
 //!
-
 //! PubGrub's strengths over the existing `sat_resolver` (DPLL-based,
 //! Verum's first-pass implementation):
 //!
-
 //! 1. **Linear-time best-case** — DPLL's worst case is exponential
 //!  in the number of variables; PubGrub's incompatibility-driven
 //!  backtracking with conflict-clause learning visits each
@@ -30,21 +26,16 @@
 //!  and Dart's `pub` resolver. Vetted constraint semantics, bug
 //!  fixes upstreamed.
 //!
-
 //! # Surface
 //!
-
 //! Two entry points:
 //!
-
 //!  [`PubGrubBuilder`] — collect the dependency database in-memory,
 //!  then resolve.
 //!
-
 //!  [`resolve`] — given a builder, run PubGrub and return the
 //!  selected versions or a [`ResolverError`].
 //!
-
 //! The existing legacy `DependencyResolver` (graph-walking SAT) is
 //! preserved alongside; this module is a parallel, opt-in path.
 

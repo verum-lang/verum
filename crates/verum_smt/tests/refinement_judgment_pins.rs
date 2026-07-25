@@ -1,13 +1,11 @@
 //! T0457 — pins for the two refinement judgments.
 //!
-
 //! The false positive these pin: a declaration-site refinement check
 //! (`fn f(max_level: Int{>= 0 && <= 5})`, no value in hand) used to ask
 //! "does *every* Int satisfy the predicate?" and report the inevitable
 //! `Sat` as "unsatisfiable refinement constraint". Every non-tautological
 //! refinement was rejected.
 //!
-
 //! Both directions are pinned deliberately. Fixing a false positive by
 //! weakening the check into unsoundness would pass the "valid programs
 //! accepted" half and fail the "invalid programs rejected" half, so the

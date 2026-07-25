@@ -1,6 +1,5 @@
 //! Bindings to LLVM's C API.
 //!
-
 //! Refer to the [LLVM documentation](http://llvm.org/docs/) for more
 //! information.
 

@@ -6,12 +6,10 @@
 //! verifier toolchains against lowerer-emitted text — closing the
 //! "we lowered to syntax X but never re-checked X" loophole.
 //!
-
 //! Fixture: identity-on-Nat — type `(x : Nat) → Nat`, body `λ x => x`.
 //! Five files emitted per run; the CI workflow consumes them as the
 //! input to lake / coqc / agda / dkcheck / metamath.
 //!
-
 //! Re-running the test is idempotent — files are overwritten, never
 //! appended, so a stale emit can't poison a downstream re-check.
 

@@ -1,18 +1,14 @@
 //! Semantic Query Layer for Content-Addressed Caching
 //!
-
 //! This module provides a content-addressed caching layer that uses semantic
 //! hashes instead of file paths. This enables:
 //!
-
 //! - **Deduplication**: Semantically identical items are cached once
 //! - **Cross-project reuse**: Share cached artifacts across projects
 //! - **Smart invalidation**: Only invalidate when semantic meaning changes
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! ┌──────────────────────────────────────────────────────────────────────────┐
 //! │ Semantic Query Layer │
@@ -33,28 +29,22 @@
 //!  └─────────────┘ └──────────────┘ └──────────────┘
 //! ```
 //!
-
 //! ## Content-Addressed Keys
 //!
-
 //! Unlike file-path based caching, semantic keys are computed from:
 //! - Type definition structure (fields, variants, constraints)
 //! - Function signature (params, return type, contexts, properties)
 //! - Protocol requirements (associated types, methods)
 //!
-
 //! This means identical definitions in different files share the same cache entry.
 //!
-
 //! ## Semantic Queries
 //!
-
 //! The index supports queries like:
 //! - Find functions by signature pattern: `fn(Int, _) -> Text`
 //! - Find types implementing a protocol: `Iterator<Item = T>`
 //! - Find items by name across all modules
 //!
-
 //! Multi-pass compilation pipeline: Parse → Meta Registry → Macro Expansion →
 //! Contract Verification → Semantic Analysis → HIR → MIR → Optimization → Codegen.
 

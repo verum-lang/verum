@@ -1,19 +1,14 @@
 //! Integer Type Hierarchy
 //!
-
 //! Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates
 //!
-
 //! Verum provides a comprehensive integer type hierarchy with explicit bounds
 //! and overflow semantics. All integer types are refinements of the base `Int` type.
 //!
-
 //! # Semantic Type Names (Primary)
 //!
-
 //! Following Verum's **Semantic Honesty** principle, numeric types use descriptive names:
 //!
-
 //! ```text
 //! Int (arbitrary precision, default for integer literals)
 //! ├── Signed Fixed-Width
@@ -33,47 +28,38 @@
 //!  └── USize = platform-dependent (UInt32 or UInt64)
 //! ```
 //!
-
 //! # Compatibility Aliases (FFI)
 //!
-
 //! For interoperability with Rust/C, aliases are provided:
 //! - i8, i16, i32, i64, i128, isize → Int8, Int16, Int32, Int64, Int128, ISize
 //! - u8, u16, u32, u64, u128, usize → UInt8, UInt16, UInt32, UInt64, UInt128, USize
 //!
-
 //! # Overflow Semantics
 //!
-
 //! Three overflow modes (controlled by annotations):
 //! - **checked** (default): Runtime overflow detection, panic on overflow
 //! - **wrapping**: Two's complement wraparound
 //! - **saturating**: Clamp to min/max bounds
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! // Type inference from literals
 //! let a: i32 = 42; // Inferred as i32
 //! let b = 42_i64; // Explicit i64 suffix
 //! let c: u8 = 255; // Maximum u8 value
 //!
-
 //! // Overflow modes
 //! @overflow(checked)
 //! fn safe_add(x: i32, y: i32) -> i32 {
 //!  x + y // Panics on overflow
 //! }
 //!
-
 //! @overflow(wrapping)
 //! fn wrapping_add(x: u8, y: u8) -> u8 {
 //!  x + y // Wraps: 255 + 1 = 0
 //! }
 //!
-
 //! @overflow(saturating)
 //! fn saturating_add(x: u8, y: u8) -> u8 {
 //!  x + y // Saturates: 255 + 1 = 255

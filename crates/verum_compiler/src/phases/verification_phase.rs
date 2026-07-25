@@ -1,10 +1,8 @@
 //! Verification Pipeline Integration Phase (MIR-Based)
 //!
-
 //! This phase integrates verum_verification into the compilation pipeline,
 //! providing full verification capabilities including:
 //!
-
 //! - Level inference (Runtime/Static/Proof)
 //! - Boundary detection and proof obligation generation
 //! - SMT-based verification of contracts and refinements
@@ -12,11 +10,9 @@
 //! - CBGR escape analysis for reference optimization on MIR CFG
 //! - Transition recommendations for verification level upgrades
 //!
-
 //! **Critical**: This phase works at the MIR level (Phase 6) where we have
 //! full CFG information with explicit BoundsCheck/GenerationCheck statements.
 //!
-
 //! Verification system: three levels — runtime (CBGR checks), static (dataflow
 //! analysis), proof (SMT solver Z3/CVC5). Safety checks either proven
 //! unnecessary or executed at runtime. Never speculates on safety.

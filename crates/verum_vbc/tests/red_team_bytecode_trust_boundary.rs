@@ -1,23 +1,19 @@
 //! Red-team Round 2 §3.3 + §2.2 — VBC bytecode trust-boundary invariants.
 //!
-
 //! Pins the interpreter's defenses on hand-crafted module input:
 //!
-
 //!  * §3.3 (PENDING → DEFENSE) — `FunctionId(N)` out of range must
 //!  surface as `InterpreterError::FunctionNotFound`, never panic /
 //!  segfault. The defense lives in `mod.rs:136` / `mod.rs:407` /
 //!  `mod.rs:516` where `state.module.get_function(func_id).ok_or(
 //!  FunctionNotFound)?` is the canonical lookup pattern.
 //!
-
 //!  * §2.2 (PENDING → DEFENSE) — branch-target offsets are encoded as
 //!  `i32` in `Instruction::{Jmp, JmpIf, JmpNot, JmpCmp}` (see
 //!  `instruction.rs:8455`). Functions with 2^16+ instructions are
 //!  not a cliff; the encoding has ~2.1 billion offsets of headroom.
 //!  Pin this by exercising a Jmp with offset >= 65,536.
 //!
-
 //! **Audit reference:** vcs/red-team/round-2-implementation.md §2.2 + §3.3.
 
 use std::sync::Arc;

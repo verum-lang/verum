@@ -1,36 +1,28 @@
 //! Send and Sync Thread-Safety Marker Protocol Implementation
 //!
-
 //! Basic protocols with simple associated types (initial release) — 4 - Thread-Safety Protocols
 //!
-
 //! This module implements the Send and Sync marker protocols that enable
 //! thread-safe programming in Verum. These protocols have no methods but
 //! encode critical semantic contracts enforced at thread boundaries.
 //!
-
 //! # Key Concepts
 //!
-
 //! - **Send**: Type can be safely transferred between threads
 //! - **Sync**: Type can be safely shared between threads via &T
 //! - **Duality**: T: Sync ⟺ &T: Send
 //! - **Composability**: Automatic derivation for compound types
 //!
-
 //! # Automatic Derivation Rules
 //!
-
 //! 1. **Primitives**: All primitives are Send + Sync
 //! 2. **Tuples/Records**: Send/Sync if all fields are
 //! 3. **References**: &T is Send if T: Sync
 //! 4. **Functions**: !Send + !Sync (default)
 //! 5. **Generic types**: Conditional on type parameters
 //!
-
 //! # Thread Boundaries
 //!
-
 //! - `spawn()` requires captured types to be Send
 //! - `Shared<T>` requires T: Send + Sync
 //! - `Mutex<T>` requires T: Send (provides Sync)

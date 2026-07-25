@@ -1,14 +1,11 @@
 //! Proof Search and Automation
 //!
-
 //! Implements proof search strategies and automation for the formal proof system.
 //!
-
 //! Proof Search: Automated strategies that try sequences of tactics (assumption,
 //! reflexivity, intro, split, apply_hypothesis, unfold_definition) with backtracking.
 //! A hints database stores lemmas with priorities and patterns for guided instantiation.
 //!
-
 //! Proof Tactics: Composable goal transformers including:
 //! - `simp`: simplify using lemma database
 //! - `ring`: normalize ring expressions (commutative ring axioms)
@@ -17,19 +14,15 @@
 //! - `blast`: tableau prover for propositional/first-order logic
 //! - Forward reasoning (`have`), backward reasoning (`suffices`), case analysis
 //!
-
 //! ## Features
 //!
-
 //! - **Hints Database**: Store and retrieve proof hints for automation
 //! - **Pattern Matching**: Match proof goals against known patterns
 //! - **Decision Procedures**: Automatic proof generation for decidable fragments
 //! - **Tactic Engine**: Composable proof tactics (future)
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Hint lookup: < 1ms
 //! - Pattern matching: < 10ms
 //! - Decision procedure: < 100ms (spec default timeout)

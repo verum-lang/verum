@@ -1,12 +1,9 @@
 //! AOT (Ahead-of-Time) compilation.
 //!
-
 //! Compiles MLIR to object files and executables for production deployment.
 //!
-
 //! # Pipeline
 //!
-
 //! ```text
 //! MLIR Module (Verum + LLVM dialects)
 //!  │

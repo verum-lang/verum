@@ -1,6 +1,5 @@
 //! Verum AST → Lean 4 lowerer.
 //!
-
 //! Mirrors `ocaml_lower` shape but emits Lean 4 syntax. Lean 4's
 //! term language is close to OCaml for the pure-functional core
 //! (let-in, if-then-else, applications, infix operators), so the
@@ -8,7 +7,6 @@
 //! subset, return `None` for anything else, caller falls back to
 //! V12.1 metadata comment.
 //!
-
 //! Lean 4 differences from OCaml that drive translation choices:
 //!  * `=` is propositional equality at the term level; we use
 //!  `==` (Decidable) for runtime equality which matches Verum's

@@ -4,16 +4,13 @@
 //! suggestions for a typed [`ProofFailureKind`] without depending on
 //! the Rust API.
 //!
-
 //! ## Why this is the integration that #74 was missing
 //!
-
 //! Prior to this command the `RepairEngine` trait surface was
 //! unit-tested but had no production CLI consumer. The diagnostic
 //! emission flow surfaced `KernelError` / `CheckerError` variants
 //! directly, with no path to ranked structured repair suggestions.
 //!
-
 //! This command provides the **transport-layer integration**: given
 //! a typed failure description (kind + structured fields) it emits
 //! the ranked V0 catalogue from
@@ -21,16 +18,13 @@
 //! The verify-pipeline → ProofFailureKind projection (the V1 step)
 //! can then call into this same engine without re-plumbing.
 //!
-
 //! Same architectural pattern as proof-draft and verify-ladder:
 //! single trait boundary, reference V0 impl, future adapters
 //! (LLM-repair, MSFS-corpus-aware) plug in via `CompositeRepairEngine`
 //! without touching the command handler.
 //!
-
 //! ## Usage
 //!
-
 //! ```text
 //! verum proof-repair --kind unbound-name --field name=foo_lemma
 //! verum proof-repair --kind refine-depth \
@@ -39,10 +33,8 @@
 //!  --max 3 --format json
 //! ```
 //!
-
 //! ## Output formats
 //!
-
 //!  * `plain` — human-readable ranked list with rationale + doc-link.
 //!  * `json` — LSP-friendly structured payload.
 

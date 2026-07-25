@@ -1,6 +1,5 @@
 //! Type representation for the Verum type system.
 //!
-
 //! This module defines the internal representation of types used during
 //! type checking and inference, including:
 //! - Primitive types (Int, Float, Bool, Text, Unit)

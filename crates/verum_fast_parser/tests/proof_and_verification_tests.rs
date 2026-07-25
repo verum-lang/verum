@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for the Verum proof and verification system.
 //!
-
 //! Tests cover grammar sections 2.19.1-2.19.9:
 //! - Theorem declarations (basic, generic, with requires/ensures)
 //! - Lemma declarations

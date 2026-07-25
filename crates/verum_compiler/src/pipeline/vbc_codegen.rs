@@ -1,11 +1,9 @@
 //! AST → VBC codegen orchestration + import resolution.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 10). Houses the core
 //! "build the runtime VBC module from a typed AST" pipeline step,
 //! plus the module-graph helpers it depends on:
 //!
-
 //!  * `compile_ast_to_vbc` — primary orchestrator: runs
 //!  dependent-type verification, proof erasure, CBGR tier
 //!  analysis, VBC codegen + monomorphisation, retains

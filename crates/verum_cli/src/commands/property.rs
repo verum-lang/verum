@@ -1,6 +1,5 @@
 //! Property-based testing runner.
 //!
-
 //! A `@property` function differs from `@test` in that the runner calls
 //! it N times with randomly-generated inputs rather than once with no
 //! arguments. On failure the harness performs Hedgehog-style integrated
@@ -8,11 +7,9 @@
 //! seed in `target/test/pbt-regressions.json`, and replays stored seeds
 //! first on subsequent runs (Hypothesis convention).
 //!
-
 //! Design rationale lives in `docs/testing/reference-quality-roadmap.md`;
 //! the TL;DR is:
 //!
-
 //!  * Runner is Rust-side (owns the VBC interpreter, AST, RNG).
 //!  * Each generator produces a lazy rose-tree `Tree<T>` — integrated
 //!  shrinking means `.value` and `.shrinks` can never disagree, and

@@ -1,39 +1,29 @@
 //! Unified source location tracking for the Verum compiler.
 //!
-
 //! This module provides two span representations:
 //!
-
 //! - [`Span`]: Efficient byte-offset based spans (12 bytes, Copy)
 //! - [`LineColSpan`]: Human-readable line/column spans for diagnostics
 //!
-
 //! # Design Principles
 //!
-
 //! 1. **Efficiency First**: Use `Span` for AST nodes and internal processing
 //! 2. **Display Quality**: Convert to `LineColSpan` only for error messages
 //! 3. **Lazy Conversion**: Defer expensive line/column calculations
 //! 4. **Zero Copy**: `Span` is Copy, no heap allocations
 //!
-
 //! # Specification
 //!
-
 //! Unified span handling used across all compiler crates for source location tracking.
 //!
-
 //! # Examples
 //!
-
 //! ```rust
 //! use verum_common::span::{Span, FileId};
 //!
-
 //! let span = Span::new(0, 10, FileId::new(0));
 //! assert_eq!(span.len(), 10);
 //!
-
 //! let merged = span.merge(Span::new(5, 15, FileId::new(0)));
 //! assert_eq!(merged.start, 0);
 //! assert_eq!(merged.end, 15);

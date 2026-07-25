@@ -14,7 +14,6 @@
 )]
 //! Tests for Bounds Check Elimination
 //!
-
 //! Bounds Check Elimination via Refinement Types:
 //! Bounds checks are eliminated in AOT code when refinement types and meta
 //! parameters prove safety at compile time. The analysis checks:

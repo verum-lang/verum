@@ -1,16 +1,13 @@
 //! Typing context + framework-axiom attribution. Split per #198 V7.
 //!
-
 //! Two related types:
 //!
-
 //!  • [`FrameworkId`] — stable identifier for an external mathematical
 //!  framework whose theorems Verum postulates as axioms. Every
 //!  registered axiom carries one of these so `verum audit
 //!  --framework-axioms` can enumerate the exact set of external
 //!  results on which any given proof relies.
 //!
-
 //!  • [`Context`] — the typing context maintained during checking.
 //!  Each binding maps a name to its declared type. The kernel never
 //!  performs inference — it only checks.

@@ -1,39 +1,30 @@
 //! # Hoare Logic Implementation for Verum
 //!
-
 //! This module implements Hoare Logic for formal verification of Verum programs.
 //! It provides {P} c {Q} verification through weakest precondition (WP) calculus,
 //! verification condition generation, and SMT integration.
 //!
-
 //! # Specification
 //!
-
 //! Hoare triples {P} c {Q} mean: if P holds before executing c, then Q holds after.
 //! The weakest precondition wp(c, Q) gives the most liberal precondition guaranteeing Q.
 //! WP rules: wp(skip, Q) = Q; wp(x:=e, Q) = Q[e/x]; wp(S1;S2, Q) = wp(S1, wp(S2, Q));
 //! wp(if b then S1 else S2, Q) = (b => wp(S1,Q)) /\ (!b => wp(S2,Q));
 //! wp(while b inv I, Q) = I /\ (I /\ b => wp(S, I)) /\ (I /\ !b => Q).
 //!
-
 //! # Theory
 //!
-
 //! Hoare triples `{P} c {Q}` consist of:
 //! - P: Precondition (assertion before command execution)
 //! - c: Command/Statement
 //! - Q: Postcondition (assertion after command execution)
 //!
-
 //! The triple is valid if: whenever P holds before executing c, Q holds after.
 //!
-
 //! ## Weakest Precondition (WP) Calculus
 //!
-
 //! The WP calculus computes the weakest precondition that guarantees Q holds after c:
 //!
-
 //! ```text
 //! wp(skip, Q) = Q
 //! wp(x := e, Q) = Q[x := eval(e)]
@@ -42,15 +33,12 @@
 //! wp(while b inv I, Q) = I ∧ ∀v. (I ∧ b => wp(c, I)) ∧ (I ∧ ¬b => Q)
 //! ```
 //!
-
 //! # Examples
 //!
-
 //! ```no_run
 //! use verum_verification::hoare_logic::{HoareTriple, HoareLogic, Command};
 //! use verum_verification::vcgen::{Formula, SmtExpr, Variable};
 //!
-
 //! // Create a Hoare triple: {x >= 0} x := x + 1 {x > 0}
 //! let pre = Formula::ge(SmtExpr::var("x"), SmtExpr::int(0));
 //! let post = Formula::gt(SmtExpr::var("x"), SmtExpr::int(0));
@@ -59,15 +47,12 @@
 //!  expr: SmtExpr::add(SmtExpr::var("x"), SmtExpr::int(1)),
 //! };
 //!
-
 //! let triple = HoareTriple::new(pre, cmd, post);
 //!
-
 //! // Verify the triple using WP calculus
 //! let logic = HoareLogic::new();
 //! let vc = logic.generate_vc(&triple).unwrap();
 //!
-
 //! // Check VC with SMT solver
 //! // let valid = logic.verify(&vc).unwrap();
 //! ```

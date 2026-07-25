@@ -1,16 +1,13 @@
 //! Integration tests for the complete VBC pipeline.
 //!
-
 //! These tests verify the full path:
 //! 1. Parse Verum source → AST
 //! 2. Compile AST → VBC bytecode
 //! 3. Execute VBC in interpreter
 //! 4. Verify results
 //!
-
 //! This validates that all components work together correctly.
 //!
-
 //! Some tests destructure `let (module, _func) = create_test_module(...)`
 //! with the `_` prefix because they only exercise `module.*`. Tests that
 //! actually inspect the function (e.g. `instr_count(&func)`) leave the

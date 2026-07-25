@@ -1,6 +1,5 @@
 //! # Minimal proof-term checker (#157 — the trusted base)
 //!
-
 //! The smallest possible kernel that re-verifies a Verum proof from
 //! a serialised proof-term certificate. This module is the explicit
 //! trusted base for Verum's reference-standard kernel claim:
@@ -9,10 +8,8 @@
 //! proof-term checker here is the *verdict authority* that an
 //! independent reviewer can read top-to-bottom in one sitting.
 //!
-
 //! ## Design discipline — < 1000 LOC, hand-auditable
 //!
-
 //! The checker implements a minimal Calculus of Constructions
 //! fragment with bidirectional type-checking. Six inference rules
 //! are exhaustive: T-Var, T-Univ, T-Pi-Form, T-Lam-Intro, T-App-Elim,
@@ -21,17 +18,14 @@
 //! set, and their soundness theorems are tracked separately by
 //! `core/verify/kernel_soundness/`.
 //!
-
 //! The trade-off is deliberate: the checker rejects MOST Verum
 //! programs (since most use refinement / cubical / modal / SMT-axiom
 //! features), but the programs it accepts have an iron-clad
 //! independent verdict. The full Verum kernel handles the broader
 //! surface; the proof-term checker handles the irreducible core.
 //!
-
 //! ## What this DOES NOT do
 //!
-
 //! - Does NOT type-check refinement types (those need SMT).
 //! - Does NOT decide propositional equality up to η-conversion
 //!  beyond α + β (η is a separable extension).
@@ -41,14 +35,11 @@
 //!  aspires to feature parity with HOL Light's kernel: minimal,
 //!  exhaustive, hand-readable.
 //!
-
 //! ## Trust delegation
 //!
-
 //! After this checker accepts a `(term, expected_type)` pair, the
 //! ONLY things a reviewer needs to trust are:
 //!
-
 //!  1. This file (~600 LOC, exhaustive pattern-matching, no `unsafe`).
 //!  2. The Rust compiler's correctness (or, after Phase 3 / #154,
 //!  the Verum self-hosted kernel that consumes this checker's
@@ -56,7 +47,6 @@
 //!  3. The serialisation format of `.vproof` files (simple JSON or
 //!  s-expression — separately auditable).
 //!
-
 //! Compare: HOL Light kernel ~5K LOC SML; Coq kernel ~10K LOC OCaml;
 //! Lean kernel ~5K LOC C++. Verum proof-term checker target: < 1000
 //! LOC Rust. Order-of-magnitude smaller trusted base than any

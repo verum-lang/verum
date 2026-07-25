@@ -1,6 +1,5 @@
 //! Comprehensive tests for separation logic verification
 //!
-
 //! Tests cover:
 //! - Separating conjunction encoding
 //! - Magic wand operator

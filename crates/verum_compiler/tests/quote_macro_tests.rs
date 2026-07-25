@@ -14,7 +14,6 @@
 )]
 //! Integration tests for the quote! and unquote! macro system
 //!
-
 //! These tests verify that the quote/unquote system works correctly
 //! for meta-programming in Verum.
 

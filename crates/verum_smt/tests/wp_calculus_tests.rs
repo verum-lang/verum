@@ -2,7 +2,6 @@
 
 //! Comprehensive tests for WP (Weakest Precondition) calculus
 //!
-
 //! Tests verify that the WP calculus correctly computes preconditions for:
 //! - Assignments (simple and compound)
 //! - Conditionals (if-else)

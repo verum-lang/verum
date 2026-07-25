@@ -1,6 +1,5 @@
 //! Verification Compiler Passes
 //!
-
 //! Implements compiler passes for gradual verification:
 //! - Verification level inference (`level_inference.rs`)
 //! - Kernel-rule re-checking (`kernel_recheck.rs`)
@@ -9,16 +8,13 @@
 //! - SMT-based contract verification (`smt.rs`)
 //! - Verification pipeline composition (`pipeline.rs`)
 //!
-
 //! These passes run during compilation to: (1) infer verification levels from
 //! annotations and code context, (2) detect boundaries between verification
 //! levels, (3) generate proof obligations at boundaries, and (4) recommend
 //! transitions to higher verification levels based on code metrics.
 //!
-
 //! # Module structure (#199 split — pass-per-module)
 //!
-
 //! Pre-split, all six pass implementations + pipeline + result/error types
 //! lived in a single `passes.rs` (1130 LOC). The split establishes one file
 //! per pass for auditability + reduces per-file complexity for maintainers.

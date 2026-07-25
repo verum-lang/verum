@@ -1,18 +1,15 @@
 //! Benchmarks for Type-aware Field Analysis and Type-based Alias Refinement
 //!
-
 //! Benchmarks for CBGR type-aware field analysis and type-based alias refinement.
 //! Type information enables more precise alias analysis (different concrete types
 //! cannot alias) and field extraction, improving CBGR promotion rates.
 //!
-
 //! Performance targets:
 //! - Type cache lookup: < 50ns
 //! - Type compatibility check: < 100ns
 //! - Field extraction: < 200ns
 //! - Cache hit rate: > 90%
 //!
-
 //! Benchmark suites:
 //! 1. Type cache performance (lookup, insert, clear)
 //! 2. Type compatibility checking (same type, different types, generics)

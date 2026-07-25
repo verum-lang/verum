@@ -1,9 +1,7 @@
 //! Kernel intrinsic dispatch — string-name → kernel-function bridge.
 //!
-
 //! ## What this delivers
 //!
-
 //! The 15 ∞-cat + foundation kernel modules
 //! (yoneda, cartesian_fibration, adjoint_functor, whitehead,
 //! reflective_subcategory, limits_colimits, truncation,
@@ -15,10 +13,8 @@
 //! dispatch** so a `.vr` `apply kernel_grothendieck_construction(...)`
 //! can be translated into a kernel function call.
 //!
-
 //! This module ships:
 //!
-
 //! 1. [`IntrinsicValue`] — a small typed enum carrying the
 //! argument and result shapes the kernel intrinsics consume
 //! (`Bool`, `Int`, `Text`, `OrdinalLevel`, `WitnessFlag`).
@@ -28,17 +24,14 @@
 //! 3. [`available_intrinsics`] — enumeration of dispatchable names
 //! for diagnostics + `verum audit --kernel-intrinsics`.
 //!
-
 //! current surface ships the **decision-predicate intrinsics** — the
 //! Boolean witness flags that `core/proof/kernel_bridge.vr`'s
 //! `kernel_*() -> Bool` axioms ultimately resolve to. V1 promotion
 //! will surface the typed-record intrinsics (returning
 //! `GrothendieckConstruction` etc. as opaque handle IDs).
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //! - `core/proof/kernel_bridge.vr` axioms become **functional**
 //! instead of tautological — their `ensures` clauses bind to
 //! [`dispatch_intrinsic`] outputs at proof-check time.

@@ -1,13 +1,11 @@
 //! Regression: `try_rewrite` must use the user-named hypothesis, not
 //! the first equality it finds.
 //!
-
 //! Pre-fix the function ignored its `hypothesis: &Text` parameter and
 //! scanned `goal.hypotheses` for the FIRST equality, then rewrote
 //! using that. Result: `rewrite h2` on a goal where `h0` is also an
 //! equality silently used `h0` and produced wrong substitutions.
 //!
-
 //! Post-fix the function resolves the hypothesis name through
 //! `find_hypothesis_index` (already used by `cases_on` and `destruct`),
 //! requires the resolved hypothesis to actually be an equality, and

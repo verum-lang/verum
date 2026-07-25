@@ -1,6 +1,5 @@
 //! macOS (Darwin) FFI platform implementation.
 //!
-
 //! Uses the following system APIs:
 //! - `dlopen`/`dlsym`/`dlclose` for library loading
 //! - `__error()` for errno access

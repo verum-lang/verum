@@ -1,7 +1,6 @@
 #![cfg(feature = "cvc5")]
 //! CVC5 vs Z3 Performance Benchmarks
 //!
-
 //! Comprehensive benchmark suite comparing CVC5 and Z3 performance across:
 //! - Linear integer arithmetic (QF_LIA)
 //! - Linear real arithmetic (QF_LRA)

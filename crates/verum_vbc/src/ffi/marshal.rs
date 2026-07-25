@@ -1,13 +1,10 @@
 //! Type marshalling between Verum values and C types.
 //!
-
 //! This module handles the conversion of VBC `Value` types to/from
 //! raw C types for FFI calls.
 //!
-
 //! # Marshalling Rules
 //!
-
 //! | Verum Type | C Type | Notes |
 //! |------------|--------|-------|
 //! | Int | i8/i16/i32/i64 | Sign extension for smaller types |

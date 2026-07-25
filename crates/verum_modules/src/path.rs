@@ -1,10 +1,8 @@
 //! Module path handling and resolution.
 //!
-
 //! This module defines the structure and manipulation of module paths in Verum.
 //! Module paths follow a hierarchical structure (e.g., `std.collections.List`).
 //!
-
 //! Module paths follow hierarchical structure (e.g., `std.collections.List`).
 //! Absolute paths start from crate root (`crate.*`), relative paths use
 //! `self`, `super`, or direct names. Segments are dot-separated identifiers.

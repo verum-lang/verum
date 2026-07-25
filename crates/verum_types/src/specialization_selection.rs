@@ -1,55 +1,44 @@
 //! Specialization Selection for Type Inference
 //!
-
 //! Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 9.1 - Automatic Specialization Selection
 //!
-
 //! Implements automatic selection of the most specific protocol implementation during
 //! type inference. When multiple implementations exist for a protocol, this module
 //! uses the specialization lattice to select the most appropriate one.
 //!
-
 //! # Core Algorithm
 //!
-
 //! 1. **Find Candidates**: Identify all implementations that could apply to the type
 //! 2. **Check Constraints**: Verify where clauses and protocol bounds are satisfied
 //! 3. **Rank by Lattice**: Order candidates by specialization specificity
 //! 4. **Check Ambiguity**: Ensure exactly one maximal element exists
 //! 5. **Cache Result**: Store decision for fast subsequent lookups
 //!
-
 //! # Performance
 //!
-
 //! - Selection (uncached): <5ms
 //! - Selection (cached): <1ms
 //! - Lattice construction: <50ms (one-time per protocol)
 //! - Coherence checking: <100ms (compile-time only)
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! // Default implementation
 //! implement<T> Display for T {
 //!  fn display(self) -> Text { "..." }
 //! }
 //!
-
 //! // Specialized for Int
 //! @specialize
 //! implement Display for Int {
 //!  fn display(self) -> Text { format!("{}", self) }
 //! }
 //!
-
 //! fn show<T: Display>(x: T) {
 //!  x.display() // Select appropriate impl based on T
 //! }
 //!
-
 //! show(42); // Uses Int specialization
 //! show("hello"); // Uses default implementation
 //! ```

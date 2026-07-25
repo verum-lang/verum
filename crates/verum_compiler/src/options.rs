@@ -1,6 +1,5 @@
 //! Compiler Options and Configuration
 //!
-
 //! This module defines all compiler options including verification modes,
 //! profiling settings, and output formats.
 

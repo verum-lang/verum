@@ -1,11 +1,9 @@
 //! Lean 4 proof-replay backend.
 //!
-
 //! Lowers an [`SmtCertificate`] into a Lean 4 tactic block. Z3-shape
 //! and CVC5-shape proof traces are recognised; unsupported shapes
 //! and empty traces fall back to `sorry`.
 //!
-
 //! Tactic vocabulary (V7.0 baseline):
 //!  * `intros` / `intro` for quantifier introduction.
 //!  * `rfl` / `Eq.refl` for reflexivity close-out.

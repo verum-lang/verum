@@ -1,34 +1,25 @@
 //! Visitor pattern for traversing the AST.
 //!
-
 //! This module provides a visitor trait that can be implemented to walk
 //! the AST and perform transformations, analysis, or code generation.
 //!
-
 //! # Architecture
 //!
-
 //! The visitor system supports two traversal modes:
 //!
-
 //! 1. **Recursive Mode** (default): Simple, correct traversal using the call stack.
 //!  Suitable for most ASTs with depth < 1000.
 //!
-
 //! 2. **Iterative Mode**: Stack-safe traversal using a heap-allocated work stack.
 //!  Required for very deep ASTs (depth > 1000) to avoid stack overflow.
 //!
-
 //! ## Usage
 //!
-
 //! ### Simple Visitor (Recursive Mode)
 //!
-
 //! ```ignore
 //! struct ExprCounter { count: usize }
 //!
-
 //! impl Visitor for ExprCounter {
 //!  fn visit_expr(&mut self, expr: &Expr) {
 //!  self.count += 1;
@@ -36,32 +27,26 @@
 //!  }
 //! }
 //!
-
 //! let mut counter = ExprCounter { count: 0 };
 //! counter.visit_expr(&root_expr);
 //! ```
 //!
-
 //! ### Deep AST Visitor (Iterative Mode)
 //!
-
 //! ```ignore
 //! let analyzer = MyAnalyzer::new();
 //! let mut iter_visitor = IterativeVisitor::new(analyzer);
 //! iter_visitor.traverse(&very_deep_ast);
 //! ```
 //!
-
 //! # Design Notes
 //!
-
 //! The dual-mode design ensures:
 //! - **Correctness**: `visitor.visit_*` is called for EVERY node
 //! - **Stack Safety**: Iterative mode prevents stack overflow
 //! - **API Stability**: Existing code using recursive mode continues to work
 //! - **No Unsafe**: Implementation uses safe Rust only
 //!
-
 //! Implements the visitor pattern for traversing all AST node types.
 
 use crate::decl::{

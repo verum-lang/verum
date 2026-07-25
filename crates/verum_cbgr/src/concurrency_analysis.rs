@@ -1,19 +1,15 @@
 //! Concurrency Analysis for Compile-Time Data Race Detection
 //!
-
 //! This module implements compile-time concurrency analysis to detect potential
 //! data races and synchronization issues, including:
 //!
-
 //! - **Data Race Detection**: Finds unsynchronized shared memory access
 //! - **Happens-Before Analysis**: Tracks synchronization ordering
 //! - **Lock Ordering Analysis**: Detects potential deadlocks
 //! - **Thread Safety Verification**: Validates Send/Sync bounds
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! CFG → ConcurrencyAnalyzer → ConcurrencyAnalysisResult
 //!  │
@@ -26,13 +22,10 @@
 //!  └───────────────────────────────┘
 //! ```
 //!
-
 //! # Data Race Detection Algorithm
 //!
-
 //! Uses a variant of the Eraser algorithm combined with happens-before analysis:
 //!
-
 //! 1. Track all memory accesses with their thread context
 //! 2. Build happens-before graph from synchronization operations
 //! 3. For each pair of accesses to same location:
@@ -41,25 +34,20 @@
 //!  - They are not protected by the same lock
 //!  → Report potential data race
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::concurrency_analysis::ConcurrencyAnalyzer;
 //!
-
 //! let analyzer = ConcurrencyAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
-
 //! for race in &result.data_race_warnings {
 //!  println!("Potential data race: {:?} vs {:?}",
 //!  race.access1, race.access2);
 //! }
 //! ```
 //!
-
 //! Phase 6 of the CBGR analysis pipeline: enhanced compile-time detection of
 //! concurrency issues. Uses Eraser algorithm + happens-before analysis to find
 //! unsynchronized shared memory accesses. Feeds into tier decisions: references

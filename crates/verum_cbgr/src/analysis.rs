@@ -1,6 +1,5 @@
 //! Static Escape Analysis for Automatic Promotion
 //!
-
 //! Automatic zero-cost optimization: the compiler performs escape analysis to
 //! automatically promote `&T` (managed, ~15ns CBGR overhead) to `&checked T`
 //! (zero-cost, 0ns) when ALL four criteria are met: (1) reference doesn't escape
@@ -9,10 +8,8 @@
 //! (4) lifetime is stack-bounded. This achieves zero-allocation hot paths without
 //! requiring lifetime annotations, arena syntax, or manual memory management.
 //!
-
 //! # Core Algorithm
 //!
-
 //! For `&T` → `&checked T` promotion, ALL of these must be proven:
 //! 1. **Reference doesn't escape function scope**
 //!  - Not returned from the function
@@ -27,18 +24,14 @@
 //!  - Reference lifetime bounded by stack frame
 //!  - Deallocation occurs before function return
 //!
-
 //! # Performance Impact
 //!
-
 //! - Automatic optimization: 15ns → 0ns per dereference
 //! - Zero developer effort (completely automatic)
 //! - Falls back to CBGR if cannot prove safety
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! // Compiler automatically optimizes this:
 //! fn process_data(input: &[u8]) -> i32 {

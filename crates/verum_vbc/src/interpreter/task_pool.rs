@@ -1,6 +1,5 @@
 //! Interpreter-side ThreadPool result table (POOL-INTERP-STUB-1).
 //!
-
 //! The Tier-0 interpreter is single-threaded by design (see
 //! GENERATE-NATIVE-WORKER-RACE: even AOT test harnesses run
 //! `threads=1`), so `core.runtime.pool.ThreadPool` semantics are
@@ -12,7 +11,6 @@
 //! returns its result — only the interleaving differs, which the
 //! language does not promise.
 //!
-
 //! Handles are 1-based; slot 0 is never handed out so a zeroed
 //! register can't alias a live task.  Slots are freed on `take` and
 //! reused via free-list, keeping the table bounded under

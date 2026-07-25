@@ -1,64 +1,51 @@
 //! Field-Sensitive Heap Tracking for CBGR Escape Analysis
 //!
-
 //! Enables per-field promotion decisions: if struct field A escapes to heap but
 //! field B stays local, field B can still be promoted to &checked T (0ns) while
 //! field A keeps full CBGR tracking (~15ns). This is critical for structs where
 //! only some fields are stored in heap-allocated containers.
 //!
-
 //! This module implements production-grade field-sensitive heap tracking that
 //! enables independent escape analysis for struct fields with respect to heap
 //! allocations. This allows promotion of field references even when other fields
 //! of the same struct escape to the heap.
 //!
-
 //! # Key Innovation
 //!
-
 //! Traditional heap escape analysis treats entire structs atomically. If any
 //! field escapes to heap, the whole struct is marked as escaping. Field-sensitive
 //! heap tracking analyzes each field independently, significantly improving
 //! promotion opportunities.
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! struct Data {
 //!  cache: Vec<u8>, // Stored in heap container → escapes to heap
 //!  count: i32, // Only accessed locally → does NOT escape
 //! }
 //!
-
 //! fn process(d: &Data) -> i32 {
 //!  // Without field-sensitive heap tracking:
 //!  // - Entire &Data cannot be promoted (conservative)
 //!
-
 //!  // With field-sensitive heap tracking:
 //!  // - d.cache: escapes to heap (CBGR required)
 //!  // - d.count: does NOT escape (can promote to &checked i32)
 //!
-
 //!  d.count // 0ns access with promotion!
 //! }
 //! ```
 //!
-
 //! # Core Components
 //!
-
 //! - [`FieldHeapInfo`]: Per-field heap escape information
 //! - [`HeapStore`]: Tracks heap store operations
 //! - [`FieldHeapTracker`]: Main tracking engine
 //! - [`FieldHeapResult`]: Complete analysis results
 //!
-
 //! # Performance
 //!
-
 //! - **Complexity**: O(fields × `heap_stores`)
 //! - **Typical overhead**: 2-5x base heap escape analysis
 //! - **Memory**: ~120 bytes per field + heap store tracking

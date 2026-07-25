@@ -1,23 +1,18 @@
 //! Static Verification Engine for AOT Tier
 //!
-
 //! This module provides Z3-based static verification for the AOT compilation tier,
 //! enabling CBGR check elimination through SMT proofs.
 //!
-
 //! # Features
 //!
-
 //! - **Static Safety Proofs**: Prove memory safety at compile time using Z3
 //! - **CBGR Check Elimination**: Remove runtime checks when Z3 proves safety
 //! - **Counterexample Extraction**: Detailed failure diagnostics with variable bindings
 //! - **Unsat Core Extraction**: Minimal counterexamples for debugging
 //! - **Timeout-Based Graceful Degradation**: Fallback to runtime checks on timeout
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! AST with CBGR Annotations
 //!  |
@@ -37,15 +32,12 @@
 //! (Eliminate) (Keep Check)
 //! ```
 //!
-
 //! # Performance Targets
 //!
-
 //! - SMT queries: < 10ms average for CBGR constraints
 //! - CBGR elimination rate: > 80% in typical code
 //! - Timeout handling: graceful degradation within 100ms
 //!
-
 //! In AOT compilation (Tier 2-3), static verification proves CBGR checks unnecessary
 //! via escape analysis and dataflow, enabling `&T` to `&checked T` promotion (0ns overhead).
 //! Three reference tiers: `&T` (~15ns CBGR check), `&checked T` (0ns, compiler-proven safe),

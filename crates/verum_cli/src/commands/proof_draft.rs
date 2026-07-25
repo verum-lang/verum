@@ -2,12 +2,10 @@
 //! `verum_verification::proof_drafting::SuggestionEngine` for IDE /
 //! REPL / CLI use.
 //!
-
 //! Given a theorem name + a focused-goal description + an
 //! `--lemma name:::signature` list, the command returns ranked
 //! next-step tactic suggestions.
 //!
-
 //! Output formats:
 //!  * `plain` — human-readable with rationales.
 //!  * `json` — LSP-friendly structured payload.

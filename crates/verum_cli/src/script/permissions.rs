@@ -1,15 +1,12 @@
 //! Permission-scope parser and runtime guard (P3.1).
 //!
-
 //! Verum scripts declare what they're allowed to do via Deno-style
 //! permission scopes:
 //!
-
 //! ```text
 //! permissions = ["net=api.example.com:443", "fs:read=./data", "time"]
 //! ```
 //!
-
 //! This module turns those strings into a typed [`Permission`] and a
 //! [`PermissionSet`] that can be queried at runtime by intrinsic
 //! handlers ("am I allowed to open this socket?"). Parse failures
@@ -17,10 +14,8 @@
 //! [`DeniedReason`] with the granted-set context attached so the user
 //! can see *why* the check failed.
 //!
-
 //! # Grammar
 //!
-
 //! ```text
 //! scope = scope_kind , [ "=" , scope_targets ]
 //! scope_kind = "fs:read" | "fs:write" | "net" | "env" | "run" | "ffi"
@@ -29,16 +24,12 @@
 //! target = any non-comma, non-whitespace UTF-8 sequence
 //! ```
 //!
-
 //! `time` and `random` accept blanket form only.
 //!
-
 //! # Matching
 //!
-
 //! Per kind:
 //!
-
 //! | kind | target form | match rule |
 //! |-------------|--------------------------------|-------------------------------------------------|
 //! | `fs:read` | path prefix | request path starts with target path |
@@ -50,7 +41,6 @@
 //! | `time` | (no targets) | always granted if scope present |
 //! | `random` | (no targets) | always granted if scope present |
 //!
-
 //! Multiple grants of the same kind are unioned: a request matches if
 //! *any* grant for that kind allows it.
 

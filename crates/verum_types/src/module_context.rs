@@ -1,6 +1,5 @@
 //! Module-Level Type Inference Context
 //!
-
 //! This module implements COMPLETE module-level type inference infrastructure
 //! supporting:
 //! - Cross-function type inference and propagation
@@ -10,10 +9,8 @@
 //! - Incremental inference
 //! - Module-scoped type variable tracking
 //!
-
 //! Performance target: < 100ms for 10K LOC
 //!
-
 //! Module-level type inference: inferring types for top-level declarations across a module
 
 use crate::context::{ModuleId, TypeContext, TypeEnv, TypeScheme};

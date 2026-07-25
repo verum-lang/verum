@@ -1,10 +1,8 @@
 //! Error types for the module system.
 //!
-
 //! Comprehensive error handling for module loading, resolution, and validation.
 //! Includes smart suggestions for typos and similar names using Levenshtein distance.
 //!
-
 //! Covers module not found, item not found, ambiguous imports, circular
 //! dependencies, visibility violations, profile incompatibilities, and more.
 //! Includes smart suggestions for typos and similar names using Levenshtein distance.

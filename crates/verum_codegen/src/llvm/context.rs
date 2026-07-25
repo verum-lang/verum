@@ -1,6 +1,5 @@
 //! Per-function lowering context for VBC → LLVM IR.
 //!
-
 //! This module manages the state needed during the lowering of a single
 //! VBC function to LLVM IR.
 

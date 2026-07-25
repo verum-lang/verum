@@ -1,38 +1,29 @@
 //! Phase 4b: Context System Validation
 //!
-
 //! Validates the context system usage across the codebase:
 //! - All contexts used in function bodies are declared in `using [...]` clause
 //! - All required contexts are provided before use in scope
 //! - Context types match declarations
 //! - No uninstantiated contexts accessed
 //!
-
 //! ## Validation Rules
 //!
-
 //! 1. **Explicit Declaration Rule**: Every context used in a function body must be
 //!  declared in the function's `using` clause.
 //!
-
 //! 2. **Provision Rule**: All contexts must be provided via `provide` statements
 //!  before they can be accessed in the function body.
 //!
-
 //! 3. **Type Matching Rule**: The type of the provided value must match the
 //!  context declaration's expected type.
 //!
-
 //! 4. **No Auto-Provision Rule**: Contexts are NEVER automatically provided.
 //!  The `@std` attribute only enables context groups, not auto-provision.
 //!
-
 //! ## Implementation Features
 //!
-
 //! This phase implements complete validation with the following capabilities:
 //!
-
 //! ### 1. ContextUsageChecker (Enhanced)
 //! - Walks function body AST to find all context method calls
 //! - Verifies each context is declared in function's `using` clause
@@ -40,7 +31,6 @@
 //! - Supports block-scoped context tracking with scope stack
 //! - Reports precise errors with span information
 //!
-
 //! ### 2. ContextProvisionChecker (Integrated)
 //! - Tracks `provide` statements in scope with stack-based scoping
 //! - Verifies contexts are provided before any method call
@@ -48,14 +38,12 @@
 //! - Detects duplicate provision in same scope
 //! - Supports lexical scoping where inner scopes inherit outer provisions
 //!
-
 //! ### 3. ContextTypeChecker (Framework)
 //! - Builds registry of context declarations for type validation
 //! - Framework in place for verifying provided values implement context interfaces
 //! - Validates async/sync context compatibility
 //! - Extensible for future type system integration
 //!
-
 //! ### 4. Error Diagnostics (Complete)
 //! - Clear error messages with precise span information
 //! - Context-specific suggestions based on error kind:
@@ -67,7 +55,6 @@
 //! - Warnings for unused declared contexts
 //! - Warnings for provided but undeclared contexts
 //!
-
 //! ### 5. Block-Scoped Tracking
 //! - Stack-based scope management for nested blocks
 //! - Automatic scope entry/exit for:
@@ -78,10 +65,8 @@
 //! - Provisions in inner scopes don't leak to outer scopes
 //! - Outer provisions remain available in inner scopes
 //!
-
 //! ## Example Valid Code
 //!
-
 //! ```verum
 //! fn process_data(id: Int)
 //!  using [Database, Logger]
@@ -89,17 +74,14 @@
 //!  provide Database = PostgresDb::new("localhost")
 //!  provide Logger = ConsoleLogger::new()
 //!
-
 //!  // Now can use Database and Logger
 //!  let user = Database.find_user(id)
 //!  Logger.info("User loaded")
 //! }
 //! ```
 //!
-
 //! ## Example Invalid Code
 //!
-
 //! ```verum
 //! fn process_data(id: Int)
 //!  // ERROR: Database used but not declared
@@ -108,26 +90,21 @@
 //! }
 //! ```
 //!
-
 //! ## Example Block Scoping
 //!
-
 //! ```verum
 //! fn example() using [Logger, Database] {
 //!  provide Logger = ConsoleLogger::new()
 //!
-
 //!  if condition {
 //!  provide Database = PgDb::new() // Scoped to this block
 //!  Database.query("...") // OK - provided in this scope
 //!  }
 //!
-
 //!  // Database.query("...") // ERROR: not provided in this scope
 //! }
 //! ```
 //!
-
 //! Context system validation: verifies `using [Context]` declarations,
 //! `provide` statements, and context group resolution. Ensures all required
 //! contexts are provided at call sites (~5-30ns runtime overhead per access).

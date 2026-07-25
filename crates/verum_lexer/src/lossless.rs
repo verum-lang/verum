@@ -1,10 +1,8 @@
 //! Lossless lexer that preserves trivia (whitespace, comments).
 //!
-
 //! This module provides a lexer that tracks all source text, including
 //! whitespace and comments, enabling lossless source reconstruction.
 //!
-
 //! Trivia preservation enables lossless source reconstruction: every whitespace
 //! character, newline, line comment (`// ...`), block comment (`/* ... */`),
 //! doc comment (`/// ...`), and inner doc comment (`//! ...`) is captured as

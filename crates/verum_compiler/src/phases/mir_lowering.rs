@@ -1,27 +1,21 @@
 //! MIR (Mid-level IR) Infrastructure for Verification and Analysis
 //!
-
 //! **IMPORTANT: This module is NOT part of the main compilation pipeline.**
 //!
-
 //! The actual Verum compilation uses a VBC-first architecture (v2.1):
 //! ```text
 //! Source → TypedAST → VBC Bytecode → { Interpreter (Tier 0) | AOT (Tier 1) }
 //! ```
 //!
-
 //! MIR exists for specialized analysis and verification purposes only:
 //! - SMT-based contract verification (`phases::verification_phase`)
 //! - Advanced optimization analysis (`phases::optimization`)
 //! - CBGR bounds elimination (`passes::cbgr_integration`)
 //!
-
 //! For the main compilation path, see `phases::vbc_codegen`.
 //!
-
 //! ## MIR Properties
 //!
-
 //! - Control Flow Graph (CFG) representation
 //! - Static Single Assignment (SSA) form
 //! - Explicit CBGR checks inserted
@@ -31,38 +25,30 @@
 //! - Pattern matching lowered to decisions
 //! - **ThinRef vs FatRef selection** (two-tier reference system)
 //!
-
 //! ## Two-Tier Reference System
 //!
-
 //! Memory model and CBGR: three-tier references (&T ~15ns, &checked T 0ns, &unsafe T 0ns).
 //!
-
 //! **ThinRef (`&T`)**: 16-byte pointer (8-byte ptr + CBGR metadata)
 //! - Used for: Most references, default choice
 //! - Overhead: ~15ns per access (CBGR check)
 //! - Size: 16 bytes (pointer + generation + epoch/caps)
 //!
-
 //! **FatRef (`&checked T`)**: 24-byte fat pointer
 //! - Used for: Array slices, dynamic bounds checking, trait objects
 //! - Overhead: ~2-3ns per access (inline bounds check)
 //! - Size: 24 bytes (pointer + metadata + length/vtable)
 //!
-
 //! Selection happens during MIR lowering based on:
 //! 1. Type of reference (array slice -> FatRef, other -> ThinRef)
 //! 2. Escape analysis results (NoEscape -> can eliminate checks)
 //! 3. Optimization level
 //!
-
 //! ## Future Integration
 //!
-
 //! MIR may be integrated into the verification pipeline as an optional
 //! analysis pass for functions with contracts (`requires`/`ensures`).
 //!
-
 //! Phase 5: HIR to MIR lowering. Creates control flow graph (CFG), inserts
 //! safety checks (CBGR, bounds, overflow), tracks unsafe regions.
 

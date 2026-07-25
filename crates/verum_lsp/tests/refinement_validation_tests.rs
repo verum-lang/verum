@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for refinement_validation module
 //!
-
 //! Tests the LSP refinement validation extensions including:
 //! - Refinement type parsing
 //! - Diagnostic generation

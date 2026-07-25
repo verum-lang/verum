@@ -1,12 +1,9 @@
 //! Industrial-grade crash reporter for the Verum toolchain.
 //!
-
 //! # What this provides
 //!
-
 //! A single `install()` call at the start of `main` wires up:
 //!
-
 //! 1. **Panic hook** — wraps [`std::panic::set_hook`] so every Rust panic
 //!  (including ones on rayon workers, with `panic = "abort"` set) is
 //!  captured, written to a structured report on disk, and surfaces to
@@ -29,14 +26,11 @@
 //!  bounded retention (default: last 50). The JSON is stable, schema-
 //!  versioned; the `.log` is a human-friendly render.
 //!
-
 //! # Signal-safety caveats
 //!
-
 //! A hard fault may leave the process in an inconsistent state. We do
 //! our best:
 //!
-
 //! - Use `sigaltstack` so a stack overflow still lands the handler.
 //! - Pre-allocate the crash-report directory at install time so we
 //!  don't need to create dirs on the signal path.
@@ -45,7 +39,6 @@
 //! - Chain to the original handler so `ulimit -c`-configured core
 //!  dumps keep working.
 //!
-
 //! The fuller JSON report attempted in the signal path may fail if
 //! global allocator state is poisoned. This is acceptable: you still
 //! get the minimal `.log` plus (optionally) the OS core dump.

@@ -1,6 +1,5 @@
 //! Variable inspection for the DAP server.
 //!
-
 //! Reads VBC registers and formats values for display in the IDE debugger.
 
 use verum_vbc::interpreter::{CallFrame, InterpreterState};

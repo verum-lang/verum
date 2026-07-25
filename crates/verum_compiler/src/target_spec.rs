@@ -1,12 +1,10 @@
 //! Target specification: decomposed view of a Rust-style target triple.
 //!
-
 //! The `target_triple` field on `CompilerOptions` is the canonical
 //! source of cross-compilation intent — but a triple alone (e.g.
 //! `"aarch64-unknown-linux-gnu"`) is opaque. Every `@cfg(...)`
 //! evaluation site needs the FOUR semantic axes:
 //!
-
 //!  * `target_os` — `"linux"`, `"macos"`, `"windows"`, `"wasi"`
 //!  * `target_arch` — `"x86_64"`, `"aarch64"`, `"riscv64"`,
 //!  `"wasm32"`, …
@@ -14,7 +12,6 @@
 //!  cfg vocabulary)
 //!  * `target_endian` — `"little"` / `"big"`
 //!
-
 //! Pre-A4 the compiler hardcoded `cfg!(target_os = "...")` —
 //! evaluating the COMPILER's host, not the target. Cross-compiling
 //! from macOS to Linux silently dropped Linux modules. This module

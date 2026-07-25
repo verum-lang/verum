@@ -1,6 +1,5 @@
 //! Escape Analysis Categories for CBGR Optimization
 //!
-
 //! SBGL (Scope-Bound Generation-Less) optimization is ONLY applicable to NoEscape
 //! references. A NoEscape reference dies in scope, so CBGR can use raw pointers
 //! internally (0ns). LocalEscape references must return ThinRef/FatRef to satisfy
@@ -8,22 +7,18 @@
 //! heap lifetime management. ThreadEscape references require atomic CBGR checks
 //! for cross-thread safety. Unknown defaults to conservative CBGR (~15ns).
 //!
-
 //! This module defines the four escape categories used for CBGR optimization:
 //! - **`NoEscape`**: Reference dies in scope (SBGL applicable)
 //! - **`LocalEscape`**: Reference returns to caller (CBGR required)
 //! - **`HeapEscape`**: Reference stored in heap (CBGR required)
 //! - **`ThreadEscape`**: Reference crosses thread boundaries (CBGR required)
 //!
-
 //! # SBGL Applicability
 //!
-
 //! **CRITICAL**: SBGL (Stack-Based Generation Lifting) is **ONLY** applicable
 //! to `NoEscape` references. This is a fundamental limitation based on semantic
 //! honesty.
 //!
-
 //! | Category | CBGR Cost | SBGL Applicable | Reason |
 //! |----------|-----------|-----------------|--------|
 //! | `NoEscape` | 0ns (optimized) | ✅ Yes | Reference dies in scope |
@@ -31,14 +26,11 @@
 //! | `HeapEscape` | ~15ns | ❌ No | Stored in heap |
 //! | `ThreadEscape` | ~15ns | ❌ No | Crosses threads |
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::escape_categories::{EscapeCategory, categorize_escape};
 //!
-
 //! // NoEscape: Reference dies in scope
 //! fn sum_list(data: &List<Int>) -> Int {
 //!  let mut total = 0;
@@ -48,7 +40,6 @@
 //!  total // Returns Int, not a reference
 //! }
 //!
-
 //! // LocalEscape: Reference returns to caller
 //! fn first_element(data: &List<Int>) -> &Int {
 //!  &data[0] // Returns reference (SBGL NOT applicable)

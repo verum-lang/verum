@@ -1,6 +1,5 @@
 //! Primitive type information for compile-time reflection
 //!
-
 //! Provides primitive type metadata matching core/meta/reflection.vr PrimitiveType.
 
 /// Primitive type information

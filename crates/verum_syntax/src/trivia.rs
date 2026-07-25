@@ -1,10 +1,8 @@
 //! Trivia types for non-semantic source elements.
 //!
-
 //! Trivia represents whitespace, comments, and other elements that don't affect
 //! program semantics but are essential for lossless source reconstruction.
 //!
-
 //! Trivia Preservation Rules:
 //! Trivia is attached to tokens (not stored as separate tree nodes):
 //! - Leading trivia: all whitespace/comments from start of line up to the token

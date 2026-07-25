@@ -1,9 +1,7 @@
 //! Interactive REPL for Verum (deprecated)
 //!
-
 //! This module is deprecated. Use `commands::repl` instead.
 //!
-
 //! The REPL is being migrated to VBC-first architecture.
 //! See `crates/verum_cli/src/commands/repl.rs` for the active implementation.
 

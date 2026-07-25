@@ -1,23 +1,18 @@
 //! Incremental Exhaustiveness Checking
 //!
-
 //! This module provides caching for exhaustiveness results to enable
 //! incremental checking. When patterns haven't changed, we can reuse
 //! previous results instead of re-analyzing.
 //!
-
 //! ## Cache Keys
 //!
-
 //! Cache entries are keyed by:
 //! 1. Pattern structure hash (structural equality)
 //! 2. Scrutinee type hash
 //! 3. Type environment hash (relevant type definitions)
 //!
-
 //! ## Invalidation
 //!
-
 //! Cache entries are invalidated when:
 //! - Pattern structure changes
 //! - Scrutinee type changes

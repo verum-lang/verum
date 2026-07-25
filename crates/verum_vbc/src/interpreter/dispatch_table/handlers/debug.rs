@@ -1,6 +1,5 @@
 //! Debug, assertion, and verification/contract handlers for VBC interpreter dispatch.
 //!
-
 //! Handles: Assert (0xD6), Panic (0xD7), Unreachable (0xD8), DebugPrint (0xD9),
 //! Spec (0xD4), Guard (0xD5), Requires (0xDA), Ensures (0xDB), Invariant (0xDC)
 

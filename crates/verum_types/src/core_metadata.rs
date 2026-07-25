@@ -1,10 +1,8 @@
 //! Stdlib type metadata definitions
 //!
-
 //! This module defines data structures for representing stdlib type information
 //! that can be loaded from pre-compiled stdlib.vbc archives.
 //!
-
 //! Stdlib type metadata definitions extracted from core .vr files during compilation pipeline.
 
 use serde::{Deserialize, Serialize};

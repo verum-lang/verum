@@ -14,7 +14,6 @@
 )]
 //! Tests for documentation extraction from attributes
 //!
-
 //! Per CLAUDE.md standards: Tests in tests/ directory, not inline
 
 use verum_ast::FileId;

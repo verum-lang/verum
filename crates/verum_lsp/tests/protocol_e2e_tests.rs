@@ -1,6 +1,5 @@
 //! End-to-end integration tests for LSP protocol handlers
 //!
-
 //! Tests the full LSP protocol flow through the Backend using tower_lsp::LspService.
 
 use tower_lsp::lsp_types::*;

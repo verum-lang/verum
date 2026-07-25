@@ -1,42 +1,32 @@
 //! Implicit argument resolution.
 //!
-
 //! This module implements implicit argument inference for dependent types.
 //! Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
 //!
-
 //! # Overview
 //!
-
 //! Implicit arguments are function parameters that can be automatically inferred
 //! by the compiler, reducing boilerplate while maintaining type safety.
 //!
-
 //! Syntax:
 //! - `{T}` for implicit type arguments
 //! - `[n]` for implicit value arguments (compile-time constants)
 //!
-
 //! # Implementation Strategy
 //!
-
 //! 1. **Metavariable Generation**: Create fresh type variables for implicit arguments
 //! 2. **Constraint Collection**: Gather constraints from usage sites
 //! 3. **Unification**: Solve constraints using the unification algorithm
 //! 4. **Elaboration**: Fill in inferred implicit arguments in the typed AST
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! fn id{T}(x: T) -> T = x
 //!
-
 //! let y = id(42) // T inferred as Int
 //! ```
 //!
-
 //! During type checking:
 //! 1. Generate metavariable ?T for the implicit type parameter
 //! 2. Check argument: 42 : ?T

@@ -1,14 +1,11 @@
 //! CFG Constructor for CBGR Tier Analysis.
 //!
-
 //! This module converts AST functions to Control Flow Graphs (CFGs) for escape analysis.
 //! The resulting CFGs are used by `verum_cbgr::tier_analysis::TierAnalyzer` to determine
 //! optimal reference tiers (0, 1, or 2) for each reference operation.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! AST Module
 //!  │
@@ -35,31 +32,24 @@
 //! VBC Codegen with tier-aware instructions
 //! ```
 //!
-
 //! # Reference Tracking
 //!
-
 //! The constructor tracks two types of sites:
 //!
-
 //! 1. **DefSites**: Where references are created
 //!  - `&expr` → DefSite(ref_id, span, is_stack_allocated=true)
 //!  - `&mut expr` → DefSite(ref_id, span, is_stack_allocated=true)
 //!
-
 //! 2. **UseeSites**: Where references are dereferenced
 //!  - `*expr` → UseeSite(ref_id, span, is_mutable=false)
 //!  - `*expr = value` → UseeSite(ref_id, span, is_mutable=true)
 //!
-
 //! # Span-based RefId Mapping
 //!
-
 //! The constructor maintains span→RefId mappings that are passed to TierAnalysisResult.
 //! This allows VBC codegen to look up tier decisions using expression spans, which
 //! matches how ExprId is computed during code generation.
 //!
-
 //! CFG construction: ExprId and RefId unified into single node identifiers
 //! for consistent dataflow analysis across expression and reference tracking.
 

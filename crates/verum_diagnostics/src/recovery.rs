@@ -1,13 +1,10 @@
 //! Compiler error recovery with intelligent suggestions.
 //!
-
 //! This module implements advanced error recovery strategies for the Verum compiler,
 //! enabling partial compilation and intelligent fix suggestions for IDE support.
 //!
-
 //! # Features
 //!
-
 //! - **Type error recovery**: Continue type checking with placeholder types
 //! - **Name resolution recovery**: Suggest similar names on lookup failure
 //! - **Partial compilation**: Generate partial IR for incremental compilation
@@ -16,14 +13,11 @@
 //! - **Syntax error recovery**: Smart insertion/deletion for common syntax errors
 //! - **Semantic error recovery**: Type coercion and implicit conversion suggestions
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_diagnostics::recovery::{ErrorRecovery, RecoveryAction};
 //!
-
 //! let recovery = ErrorRecovery::new();
 //! let actions = recovery.suggest_fixes_for_type_mismatch(
 //!  "Int",
@@ -31,7 +25,6 @@
 //!  "assignment"
 //! );
 //!
-
 //! for action in actions {
 //!  println!("Suggestion: {}", action.description);
 //!  println!("Confidence: {}%", action.confidence);

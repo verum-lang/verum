@@ -1,10 +1,8 @@
 //! Proof-failure repair-suggestion catalogue — the structured-error
 //! frontier for kernel / type / verification failures.
 //!
-
 //! ## What this module is
 //!
-
 //! When the kernel rejects a term or the type-checker fails on an
 //! obligation, downstream tooling (LSP / REPL / CLI) needs more than
 //! just an error message — it needs **actionable repair suggestions**
@@ -12,10 +10,8 @@
 //! documentation, and structured fields suitable for LSP code-action
 //! emission.
 //!
-
 //! This module ships:
 //!
-
 //!  * [`ProofFailureKind`] — typed classification of every kernel /
 //!  type-checker failure mode (mirrors `verum_kernel::KernelError`
 //!  variants + verification-time obligation failures).
@@ -26,44 +22,35 @@
 //!  * [`DefaultRepairEngine`] — reference V0 implementation with a
 //!  hand-curated rule-set per failure kind.
 //!
-
 //! ## Design principles
 //!
-
 //!  1. **Every suggestion is concrete.** The `snippet` field is a
 //!  drop-in code fragment, not advice prose. IDE consumers can
 //!  apply it as a code-action.
 //!
-
 //!  2. **Repair suggestions come ranked.** Score in `[0, 1]`
 //!  reflects estimated likelihood the suggestion fixes the
 //!  reported failure. Top-3 are surfaced by IDE hover; full set
 //!  via "see all alternatives".
 //!
-
 //!  3. **Doc-links to a stable URL.** Each suggestion carries an
 //!  optional `doc_link` (e.g. `docs.verum.lang/kernel/k-refine`)
 //!  that opens in-browser from the IDE.
 //!
-
 //!  4. **Related theorems come from kernel introspection.**
 //!  For an unresolved-name failure, the engine queries the
 //!  lemma registry for near-miss matches; for a positivity
 //!  violation, it suggests known-positive alternatives.
 //!
-
 //! ## Integration with existing infrastructure
 //!
-
 //! Builds on `crates/verum_diagnostics/src/suggestion.rs`'s
 //! `Suggestion` / `Applicability` / `CodeSnippet` types — this
 //! module adds the proof-failure-specific catalogue + ranking
 //! logic on top of that base.
 //!
-
 //! ## Foundation-neutral
 //!
-
 //! The catalogue is foundation-neutral: kernel-rule failures are
 //! universal (Refine / Positivity / Universe / Adjunction-Unit /
 //! …), while corpus-specific repair hints (e.g. MSFS-specific

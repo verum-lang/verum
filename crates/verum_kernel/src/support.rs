@@ -1,7 +1,6 @@
 //! Supporting kernel operations — shape projection, substitution,
 //! structural equality, SMT-certificate replay. Split .
 //!
-
 //! These four operations are the kernel's "infrastructure layer":
 //! they don't implement a typing rule themselves, but every rule in
 //! `infer` / `check` calls one or more of them.

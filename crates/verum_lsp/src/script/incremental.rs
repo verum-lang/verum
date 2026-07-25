@@ -1,23 +1,18 @@
 //! Incremental script parsing for high-performance REPL and LSP integration
 //!
-
 //! This module extends the script parser with incremental parsing capabilities,
 //! enabling efficient re-parsing of script sessions where only changed portions
 //! need to be re-evaluated.
 //!
-
 //! # Features
 //!
-
 //! - **Partial reparsing**: Only re-parse changed regions
 //! - **AST caching**: Reuse unchanged expression trees
 //! - **Session persistence**: Maintain parse state across multiple edits
 //! - **Type-aware caching**: Cache type inference results with AST
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────┐
 //! │ IncrementalScriptParser │
@@ -36,7 +31,6 @@
 //! └─────────────────────────────────────────┘
 //! ```
 //!
-
 //! Moved from verum_parser::incremental_script
 
 use std::collections::HashMap;

@@ -1,15 +1,12 @@
 //! GPU binary extraction and embedding for AOT compilation.
 //!
-
 //! After the MLIR GPU pass pipeline completes (including
 //! `GpuModuleToBinaryPass`), this module:
 //!
-
 //! 1. Translates the host-side MLIR (LLVM dialect) to LLVM IR
 //! 2. Embeds GPU kernel binaries as global constant data
 //! 3. Generates runtime loader stubs (cuModuleLoad / MTLLibrary)
 //!
-
 //! The result is a self-contained LLVM module that can be compiled to
 //! a native executable with embedded GPU kernels.
 

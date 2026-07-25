@@ -1,13 +1,10 @@
 //! Verum Playbook - Jupyter-like TUI notebook interface
 //!
-
 //! The Playbook provides an interactive notebook experience in the terminal,
 //! similar to Jupyter notebooks but optimized for Verum development.
 //!
-
 //! # Features
 //!
-
 //! - **Cell-based editing**: Code and Markdown cells
 //! - **Incremental execution**: Smart re-run of dependent cells
 //! - **Type inference display**: Shows inferred types for bindings
@@ -15,10 +12,8 @@
 //! - **Vim keybindings**: Optional vim-like navigation
 //! - **File format**: `.vrbook` JSON format
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────┐
 //! │ Verum Playbook: project.vrbook [Run All] [Save] │

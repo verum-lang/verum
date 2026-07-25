@@ -1,59 +1,46 @@
 //! Attribute Registry for Verum.
 //!
-
 //! This module provides a centralized registry for all known attributes,
 //! enabling compile-time validation, IDE support, and documentation generation.
 //!
-
 //! # Overview
 //!
-
 //! The [`AttributeRegistry`] is the single source of truth for attribute metadata.
 //! It provides:
 //!
-
 //! - Validation of attribute names and targets
 //! - Argument specification checking
 //! - Conflict and requirement detection
 //! - IDE completion support
 //! - Documentation generation
 //!
-
 //! # Usage
 //!
-
 //! ```rust
 //! use verum_types::attr::{registry, AttributeRegistry};
 //! use verum_ast::attr::{Attribute, AttributeTarget};
 //!
-
 //! // Get read access to global registry
 //! let reg = registry();
 //!
-
 //! // Check if an attribute exists
 //! assert!(reg.exists("inline"));
 //! assert!(reg.exists("cold"));
 //!
-
 //! // Validate an attribute
 //! let attr = Attribute::simple("inline".into(), Default::default());
 //! let result = reg.validate(&attr, AttributeTarget::Function);
 //! assert!(result.is_ok());
 //! ```
 //!
-
 //! # Thread Safety
 //!
-
 //! The registry is thread-safe and can be accessed from multiple threads
 //! concurrently. Use [`registry()`] for read access and [`registry_mut()`]
 //! for write access (rare, typically only during initialization).
 //!
-
 //! # Specification
 //!
-
 //! Attribute registry: validation rules for @derive, @verify, @cfg, @repr and other compile-time attributes
 
 use std::sync::RwLock;

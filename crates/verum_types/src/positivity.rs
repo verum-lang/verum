@@ -1,6 +1,5 @@
 //! Strict-positivity check for user-declared inductive types.
 //!
-
 //! K-Pos / Coquand & Paulin 1990: an inductive type `T` is
 //! well-formed only when every recursive occurrence of `T` in any
 //! constructor's argument types appears strictly positively. Berardi
@@ -9,7 +8,6 @@
 //! the kernel therefore must reject every constructor whose argument
 //! type contains `T` to the LEFT of an arrow.
 //!
-
 //! Audit-derived task: C2 V1 shipped the kernel-side
 //! `verum_kernel::InductiveRegistry::register` + `check_strict_
 //! positivity` walker, but they had ZERO call sites in the type-
@@ -19,7 +17,6 @@
 //! type-decl registration time, parallel to the kernel's CoreTerm-
 //! level walker. Both are needed because:
 //!
-
 //! - The AST walker runs BEFORE elaboration (so an ill-formed
 //!  declaration is rejected with a useful span pointing at the
 //!  offending constructor argument).
@@ -27,7 +24,6 @@
 //!  bypasses the AST walker — direct CoreTerm construction by
 //!  tactics, derive macros, etc. — still gets the same guarantee).
 //!
-
 //! Discipline mirrors `verum_kernel::check_strict_positivity`: walk
 //! every type-tree position, forbid `target` in any Function/Pi
 //! domain, descend into return-types, sub-tuples, sub-records,

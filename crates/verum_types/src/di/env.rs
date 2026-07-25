@@ -1,10 +1,8 @@
 //! Context Environment (θ) - Runtime task-local storage for DI
 //!
-
 //! Context runtime: task-local storage (theta) for context lookup, ~5-30ns overhead per access — Contexts + Async Integration
 //! Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Section 6 - Performance Characteristics
 //!
-
 //! This module implements the context environment (θ, theta), which provides
 //! task-local storage for context providers. The environment supports:
 //! - Fast context lookup (<50ns target, ~5-30ns typical)
@@ -12,27 +10,21 @@
 //! - Thread-safe access via Arc/Mutex when needed
 //! - Integration with async runtime
 //!
-
 //! # Performance Target
 //!
-
 //! Context lookup: **< 50ns** (typically ~5-30ns with optimizations)
 //!
-
 //! # Examples
 //!
-
 //! ```ignore
 //! use verum_types::di::env::ContextEnv;
 //! # struct Logger;
 //! # impl Logger { fn log(&self, _: &str) {} }
 //! # let logger = Logger;
 //!
-
 //! let mut env = ContextEnv::new();
 //! env.insert(logger);
 //!
-
 //! if let Some(logger) = env.get::<Logger>() {
 //!  logger.log("Hello");
 //! }

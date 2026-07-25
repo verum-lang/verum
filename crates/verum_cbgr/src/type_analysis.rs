@@ -1,52 +1,40 @@
 //! Type-aware Field Analysis and Type-based Alias Refinement
 //!
-
 //! Integrates CBGR escape analysis with the Verum type system for type-aware
 //! field extraction (struct/tuple/enum layouts from type info, not heuristics)
 //! and type-based alias refinement (different types cannot alias in safe code).
 //!
-
 //! This module integrates the CBGR escape analysis with the Verum type system
 //! to provide production-grade type-aware analysis capabilities:
 //!
-
 //! 1. **Type-aware Field Extraction**: Extract actual struct/tuple/enum field
 //!  layouts from type information instead of using heuristics
 //!
-
 //! 2. **Type-based Alias Refinement**: Use type disjointness to prove no-alias
 //!  relationships (different types = no alias)
 //!
-
 //! 3. **Generic Type Support**: Handle generic types and type parameters
 //!
-
 //! 4. **Field-sensitive Analysis**: Track escape per field using real type info
 //!
-
 //! # Example: Type-based No-Alias
 //!
-
 //! ```rust,ignore
 //! struct Point { x: i32, y: i32 }
 //! struct Color { r: u8, g: u8, b: u8 }
 //!
-
 //! fn example() {
 //!  let p = &Point { x: 1, y: 2 };
 //!  let c = &Color { r: 255, g: 0, b: 0 };
 //!
-
 //!  // Type analysis proves: Point and Color are disjoint types
 //!  // Therefore: p and c CANNOT alias (NoAlias)
 //!  // Result: More precise escape analysis
 //! }
 //! ```
 //!
-
 //! # Performance Impact
 //!
-
 //! - **Precision**: +30-50% more references promoted due to type-based no-alias
 //! - **Field extraction**: Exact field structure instead of heuristics
 //! - **Generic support**: Works with parameterized types

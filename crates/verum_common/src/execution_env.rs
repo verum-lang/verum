@@ -1,38 +1,28 @@
 //! Unified Execution Environment (θ+) - Foundation Layer
 //!
-
 //! This module provides the foundation-layer `ExecutionEnv` type used across crates.
 //!
-
 //! # Thread Safety
 //!
-
 //! This foundation layer is Send + Sync.
 //!
-
 //! # Performance Characteristics
 //!
-
 //! - Creation: <100ns
 //! - Fork: <50ns (shallow clone)
 //! - Thread-local access: <10ns
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_common::ExecutionEnv;
 //!
-
 //! // Create environment
 //! let env = ExecutionEnv::new();
 //!
-
 //! // Fork for child tasks
 //! let child_env = env.fork();
 //!
-
 //! // Thread-local access (requires "std" feature)
 //! #[cfg(feature = "std")]
 //! {

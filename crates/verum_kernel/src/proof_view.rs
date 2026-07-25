@@ -1,9 +1,7 @@
 //! # Interactive proof-state explorer — current surface (#319 / #189)
 //!
-
 //! ## Why this module exists
 //!
-
 //! Coq has `Show.` and `--coq-proofview`; Lean 4 has VS Code's
 //! "View Goal". Verum has neither — a `proof { … }` block is opaque
 //! until the kernel verdict comes back, which makes scaling to large
@@ -11,27 +9,22 @@
 //! using Verum can't see the intermediate state of a proof, so they
 //! can't tell *what step is wrong* when something fails.
 //!
-
 //! This module ships the current surface: a **static, heuristic snapshot**
 //! of a theorem's proof state. No kernel invocation; no live tactic
 //! evaluation; no goal-state simulation. The snapshot answers two
 //! concrete questions:
 //!
-
 //!  1. *What tactics did I write?* ([`ProofState::applied_steps`])
 //!  2. *How many steps does this proof claim to make?*
 //!  ([`ProofState::applied_steps`].len())
 //!
-
 //! That's it. The user gets a structured, serializable view of their
 //! proof body that they can pretty-print (`verum proofview <file>:<thm>`),
 //! emit as JSON (`verum proofview --format json`), or feed into a
 //! tutorial-style onboarding aid.
 //!
-
 //! ## scope (this slice)
 //!
-
 //! 1. Data types — [`ProofGoal`], [`NamedHypothesis`], [`ProofState`],
 //!  [`ProofStepSnapshot`], [`ContextSnapshot`]. Every type derives
 //!  `Debug + Clone + PartialEq + Eq + Serialize + Deserialize` so
@@ -45,10 +38,8 @@
 //!  (which is the heuristic the current surface ships — no goal
 //!  simulation).
 //!
-
 //! ## non-goals (deferred to V1+)
 //!
-
 //! - **Live proof state.** V0 doesn't run the elaborator or the
 //!  kernel. Hypotheses introduced by `intro` aren't tracked; the
 //!  `current_context` field stays at depth zero. Future work will plug
@@ -63,10 +54,8 @@
 //!  snapshot exposed via `verum proofview`. An interactive
 //!  experience composes with V1's live proof state.
 //!
-
 //! ## Architectural significance
 //!
-
 //! Even the current surface is a load-bearing onboarding aid. A new
 //! mathematician using Verum can run `verum proofview my_file.vr:my_thm`
 //! and see "your proof has 5 steps; step 3 applies `commutativity`;
@@ -75,7 +64,6 @@
 //! Verum proof is opaque; with it, the user has a literal map of
 //! what they wrote.
 //!
-
 //! See `docs/architecture/verum-verification-architecture.md` for the
 //! V1 / V2 promotion path (live state + LSP integration).
 

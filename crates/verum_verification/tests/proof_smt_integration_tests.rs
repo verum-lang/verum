@@ -14,7 +14,6 @@
 )]
 //! Proof Verification with SMT (Z3) Integration Tests
 //!
-
 //! Tests that exercise the full proof checking pipeline:
 //! - ProofValidator with Z3 backend for proposition proving
 //! - TacticEvaluator with Z3 for automated tactic discharge

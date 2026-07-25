@@ -14,7 +14,6 @@
 )]
 //! Comprehensive FFI Marshalling Tests
 //!
-
 //! Tests per CLAUDE.md standards:
 //! - All tests in tests/ directory
 //! - No #[cfg(test)] in src/

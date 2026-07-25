@@ -1,25 +1,20 @@
 //! SMT Backend Switcher - Transparent Backend Selection and Portfolio Solving
 //!
-
 //! This module implements intelligent backend switching with multiple strategies:
 //! - **Manual Selection**: Explicitly choose Z3 or CVC5
 //! - **Auto Selection**: Automatically pick best solver based on problem characteristics
 //! - **Fallback**: Try Z3 first, fall back to CVC5 on timeout/failure
 //! - **Portfolio**: Run both solvers in parallel, return first result
 //!
-
 //! ## Performance Characteristics
 //!
-
 //! - Manual: Zero overhead (direct backend call)
 //! - Auto: <1ms problem analysis overhead
 //! - Fallback: 2x worst-case time (sequential)
 //! - Portfolio: 0.5-0.7x average time (parallel)
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! ┌───────────────────────────────────┐
 //! │ SmtBackendSwitcher │
@@ -36,7 +31,6 @@
 //! └───────────────────────────────────┘
 //! ```
 //!
-
 //! Refinement types (`Int{> 0}`, `Text{len(it) > 5}`, sigma-type `n: Int where n > 0`)
 //! generate SMT constraints verified by Z3 or CVC5. The switcher selects the optimal
 //! solver: Z3 excels at bitvectors and arrays, CVC5 at strings and nonlinear arithmetic.

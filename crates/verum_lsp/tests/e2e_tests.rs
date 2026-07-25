@@ -14,11 +14,9 @@
 )]
 //! End-to-End LSP Tests
 //!
-
 //! Comprehensive E2E testing for Language Server Protocol implementation.
 //! Coverage target: 40% → 95%
 //!
-
 //! Test categories:
 //! - Full LSP workflow (initialize -> edit -> complete -> diagnostics -> shutdown)
 //! - Concurrent client requests
@@ -27,7 +25,6 @@
 //! - Code actions and refactoring
 //! - Workspace management
 //!
-
 //! The tests use a MockClient infrastructure that captures published diagnostics
 //! and other LSP notifications via channels, enabling proper verification of the
 //! full LSP protocol flow.

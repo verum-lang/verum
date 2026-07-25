@@ -1,10 +1,8 @@
 //! Semantic tokens from syntax tree
 //!
-
 //! Provides semantic highlighting by traversing the lossless syntax tree.
 //! Maps SyntaxKind to LSP SemanticTokenType for rich syntax highlighting.
 //!
-
 //! Features:
 //! - Full document semantic tokens (textDocument/semanticTokens/full)
 //! - Range-based semantic tokens (textDocument/semanticTokens/range)

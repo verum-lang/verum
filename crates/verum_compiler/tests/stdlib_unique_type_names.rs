@@ -1,7 +1,6 @@
 //! Guardrail: every public stdlib type must have a unique simple name
 //! across all of `core/`.
 //!
-
 //! Background. The VBC codegen indexes the variant-constructor table by
 //! simple type name (`Type.Variant`). Two stdlib `public type Foo is …`
 //! declarations with the same simple name in different modules collide:
@@ -10,17 +9,14 @@
 //! wins gate on the second module, and silently skips the second type's
 //! variant registration entirely.
 //!
-
 //! Symptom: bodies that write `MyType { lock_state: Unlocked, … }`
 //! compile to `[lenient] SKIP <fn>: undefined variable: Unlocked` and
 //! disappear from the runtime function table. Callers later panic with
 //! `method 'X.Y' not found on value`, far from the source.
 //!
-
 //! Concrete past incident (task #160): three stdlib modules each defined
 //! `public type LockKind`:
 //!
-
 //!  * `core/database/sqlite/native/l0_vfs/vfs_protocol.vr` —
 //!  5-state SQLite VFS protocol (Unlocked | Shared | Reserved |
 //!  Pending | Exclusive)
@@ -29,12 +25,10 @@
 //!  * `core/sys/locking/mod.vr` — high-level file lock
 //!  (Shared | Exclusive)
 //!
-
 //! The first to register won the simple-name slot. Whichever module
 //! lost had its variants invisible to every body that referenced them
 //! by simple name, including bodies inside its own module.
 //!
-
 //! History. This test was originally a *ratchet* — it carried a
 //! `BASELINE_DUPLICATES` array of known-bad type names from before the
 //! invariant was enforced and only flagged NEW duplicates while letting
@@ -44,11 +38,9 @@
 //! ratchet plumbing is dead weight; this test is now a plain hard
 //! invariant: any duplicate, old or new, fails.
 //!
-
 //! When this test fails. Pick a domain-prefixed disambiguated name
 //! following the existing stdlib convention:
 //!
-
 //!  * Catalogue scope: `<CatalogueName><Type>` —
 //!  `BtreeBalanceStrategy`, `JournalTransitionMode`, `SqlOnConflict`.
 //!  * Layer pair (FFI vs runtime): `Raw<Type>` for the FFI-side —
@@ -61,7 +53,6 @@
 //!  (e.g. `core.metrics.instrument::Counter` > sqlite-internal
 //!  observability counter).
 //!
-
 //! Update every importer along with the rename — vcs/ smokes that
 //! mounted from the renamed site need their import path adjusted too.
 

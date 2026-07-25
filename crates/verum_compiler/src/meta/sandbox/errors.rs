@@ -1,18 +1,14 @@
 //! Sandbox Error Types
 //!
-
 //! Defines errors and operations for the meta sandbox system.
 //!
-
 //! ## Error Codes
 //!
-
 //! Sandbox errors use the M3XX range:
 //! - M310-M319: I/O violations (file, network, process)
 //! - M320-M329: Resource limits (memory, time, iterations)
 //! - M330-M339: Forbidden operations (FFI, unsafe, env)
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

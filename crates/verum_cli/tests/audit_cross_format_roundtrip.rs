@@ -1,7 +1,6 @@
 //! Integration tests for `verum audit --cross-format-roundtrip`
 //! (#138 / MSFS-L4.5).
 //!
-
 //! Pin coverage:
 //!  - Empty project (no `@theorem` / `@lemma` / `@corollary`) →
 //!  0 theorems walked, exit 0, no files emitted.

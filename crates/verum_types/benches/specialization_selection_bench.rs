@@ -1,9 +1,7 @@
 //! Performance Benchmarks for Specialization Selection
 //!
-
 //! Measures the performance of specialization selection under various scenarios.
 //!
-
 //! Run with: cargo bench --bench specialization_selection_bench
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

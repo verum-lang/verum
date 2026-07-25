@@ -1,60 +1,47 @@
 //! Z3 SMT Solver Integration for Path Feasibility Checking
 //!
-
 //! This module provides production-grade integration with the Z3 SMT solver
 //! for precise path feasibility checking in CBGR escape analysis. It eliminates
 //! false positives from infeasible paths by performing satisfiability checking
 //! on path predicates.
 //!
-
 //! # Overview
 //!
-
 //! The path-sensitive escape analysis generates path conditions as boolean
 //! predicates. Simple boolean simplification can miss infeasible paths like:
 //! - `(x > 0) AND (x < 0)` - mathematically impossible
 //! - `(branch_taken AND !branch_taken)` - logical contradiction
 //!
-
 //! Z3 integration provides PRECISE satisfiability checking to eliminate these
 //! infeasible paths, improving analysis precision.
 //!
-
 //! # Performance
 //!
-
 //! - Simple predicates: ~100μs (with caching: <1μs)
 //! - Complex predicates: ~1-10ms (with caching: <1μs)
 //! - Cache hit rate: >90% in typical workloads
 //! - Timeout protection: 100ms default
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! PathPredicate → predicate_to_z3() → Z3 AST → Solver.check() → SAT/UNSAT
 //!  ↓
 //!  Cache (LRU 1000)
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::z3_feasibility::Z3FeasibilityChecker;
 //! use verum_cbgr::analysis::PathPredicate;
 //!
-
 //! let mut checker = Z3FeasibilityChecker::new();
 //!
-
 //! // Check simple predicate
 //! let pred = PathPredicate::True;
 //! assert!(checker.check_path_feasible(&pred));
 //!
-
 //! // Check contradiction
 //! let contradiction = PathPredicate::And(
 //!  Box::new(PathPredicate::BlockTrue(BlockId(42))),

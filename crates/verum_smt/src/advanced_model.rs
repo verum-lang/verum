@@ -1,6 +1,5 @@
 //! Advanced Model Extraction - Complete Function Interpretations & Sort Universes
 //!
-
 //! This module provides rich model extraction capabilities beyond basic `model.eval()`:
 //! - **Complete Function Models**: Extract full function interpretations with all cases
 //! - **Constant Interpretation**: Get constant values from models
@@ -8,14 +7,12 @@
 //! - **Model Translation**: Move models between Z3 contexts
 //! - **Function Iteration**: Iterate over all functions in a model
 //!
-
 //! Based on Z3's advanced model APIs:
 //! - `Model::get_func_interp()` - Complete function interpretation
 //! - `Model::get_const_interp()` - Constant values
 //! - `FuncInterp` methods - Function cases and else values
 //! - Model iteration - Enumerate all functions
 //!
-
 //! When SMT verification fails (postcondition not provable), counterexample generation
 //! extracts a concrete model showing variable assignments that violate the property.
 //! This enables meaningful error messages showing why a refinement type constraint

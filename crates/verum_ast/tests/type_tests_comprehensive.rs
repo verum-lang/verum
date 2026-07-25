@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for type AST nodes including refinement types
 //!
-
 //! Tests cover:
 //! - Primitive types
 //! - Compound types (tuples, arrays, functions)
@@ -24,7 +23,6 @@
 //! - Type bounds and where clauses
 //! - Sigma types and dependent refinements
 //!
-
 //! Comprehensive tests for Verum type AST nodes.
 
 use verum_ast::ty::*;

@@ -1,7 +1,6 @@
 //! `K-Round-Trip` kernel rule — OC/DC translation round-trip
 //! admission (Theorem 108.T / Theorem 16.10).
 //!
-
 //! Pre-this-module the rule existed only as a `KernelRule::KRoundTrip`
 //! taxonomy entry (`proof_tree.rs:771`) at current stage with no actual
 //! rule logic. This module ships the admission gate for the
@@ -9,56 +8,43 @@
 //! load-bearing instances for the AC/OC duality (MSFS Theorem 10.4)
 //! flagship reasoning.
 //!
-
 //! ## What the rule certifies
 //!
-
 //! Given an articulation `α : Articulation` (carried as a `CoreTerm`),
 //! `K-Round-Trip` certifies that
 //!
-
 //! ```text
 //!  canonicalise(inverse(translate(α))) ≡ canonicalise(α)
 //! ```
 //!
-
 //! holds — i.e. translating to the dual side and back, then
 //! canonicalising, recovers the same canonical class.
 //!
-
 //! ## — identity-functor case
 //!
-
 //! When the articulation is a syntactic-self-enactment
 //! `epsilon(F)` (carried as `CoreTerm::EpsilonOf(F)`), the round-trip
 //! is literally identity:
 //!
-
 //! ```text
 //!  canonicalise(alpha(epsilon(epsilon(F))))
 //!  ≡ canonicalise(epsilon(F)) [K-Adj-Unit: α∘ε = id]
 //! ```
 //!
-
 //! admits this case via structural equality on the term shape.
 //!
-
 //! ## V1 (this version) — definitional-equality round-trip
 //!
-
 //! Extends V0 to admit any pair `(α, α')` whose β-/ι-/δ-normal forms
 //! coincide, using [`crate::support::definitional_eq`]. This catches
 //! M-actions that are β-redexes normalising back to the same
 //! articulation under the K-Adj-Unit/Counit definitional rules.
 //!
-
 //! ## Universal canonicalize — universal canonicalize with Diakrisis bridge admits
 //!
-
 //! ships [`canonical_form`], a normalize-to-fixed-point algorithm
 //! that walks every CoreTerm constructor applying:
 //!
-
 //!  * **K-Adj-Unit** — `AlphaOf(EpsilonOf(x)) → x`.
 //!  * **K-Adj-Counit** — `EpsilonOf(AlphaOf(x)) → x` (where
 //!  applicable on syntactic-self-enactments).
@@ -70,7 +56,6 @@
 //!  `Flat(Flat(x)) → Flat(x)`, `Sharp(Sharp(x)) → Sharp(x)`.
 //!  * **K-β/η/ι/δ** — delegated to [`crate::support::normalize`].
 //!
-
 //! The full Diakrisis Theorem 16.10 confluence claim is preprint-
 //! blocked; V2 surfaces it as an explicit
 //! [`crate::diakrisis_bridge::BridgeId::ConfluenceOfModalRewrite`]
@@ -78,7 +63,6 @@
 //! [`check_round_trip_v2`]. Future work will discharge the bridge once the
 //! preprint result lands as a structural algorithm.
 //!
-
 //! Callers that need legacy -only behaviour keep using
 //! [`check_round_trip`]; callers that opt into V2's wider admit set
 //! pay the audit-trail introspection cost in exchange for accepting

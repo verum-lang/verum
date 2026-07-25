@@ -1,6 +1,5 @@
 //! Declaration nodes in the AST.
 //!
-
 //! This module defines top-level declarations including:
 //! - Functions
 //! - Types (records, variants, newtypes, aliases)

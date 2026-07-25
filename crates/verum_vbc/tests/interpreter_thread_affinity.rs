@@ -1,7 +1,6 @@
 //! Red-team Round 2 §7.3 — VBC interpreter LocalHeap thread-affinity
 //! invariant.
 //!
-
 //! Adversarial scenario: a malicious / pathological caller tries
 //! to share an `InterpreterState` (or its owned `Heap`) across
 //! threads. If this succeeded, the bump-allocator / object-table
@@ -10,7 +9,6 @@
 //! `CURRENT_INTERPRETER` thread-local pointer in
 //! `interpreter::state` would alias inconsistent state.
 //!
-
 //! Defense (structural):
 //!  1. `Heap` owns `Vec<NonNull<ObjectHeader>>`. `NonNull<T>` is
 //!  `!Send + !Sync` by default. Rust's type system therefore
@@ -21,7 +19,6 @@
 //!  InterpreterState> }` binds the active state pointer
 //!  per-thread; spawning a new thread starts with `None`.
 //!
-
 //! Defense (behavioural):
 //!  Each thread that wants its own interpreter constructs a
 //!  fresh `InterpreterState` from a shared `Arc<VbcModule>`.
@@ -30,7 +27,6 @@
 //!  the *state*. Per-thread heap isolation falls out
 //!  automatically.
 //!
-
 //! These tests pin the behavioural side programmatically:
 //!  - 8 threads can each construct + drop their own
 //!  `InterpreterState` from a shared `Arc<VbcModule>` without

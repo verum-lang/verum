@@ -15,7 +15,6 @@
 //! Tests for context system: ContextExpr, ContextRequirement, ContextRef,
 //! and context unification through the type system.
 //!
-
 //! These tests verify the real API of the context system as exposed by
 //! verum_types::di::requirement and verum_types::unify.
 

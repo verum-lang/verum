@@ -1,11 +1,9 @@
 //! Well-known Verum stdlib type names.
 //!
-
 //! Centralizes the string constants used throughout the compiler to identify
 //! stdlib types (List, Map, Text, Channel, etc.), replacing hundreds of scattered
 //! string literals with a single enum.
 //!
-
 //! This module lives in `verum_common` so all compiler crates can use it without
 //! cross-crate dependency issues.
 

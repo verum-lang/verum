@@ -1,14 +1,11 @@
 //! FFI Boundary Declarations for the Verum language.
 //!
-
 //! This module defines the AST nodes for FFI boundary declarations, which are
 //! **compile-time specifications**, not runtime types. FFI boundaries formalize
 //! expectations at the boundary between provable Verum code and unprovable external code.
 //!
-
 //! # FFI Design Principles
 //!
-
 //! - FFI boundaries are NOT types (values cannot have FFI boundary "types")
 //! - FFI boundaries ARE formal specifications of expectations at the boundary
 //!  between provable Verum code and unprovable external code
@@ -17,16 +14,13 @@
 //!  preconditions (requires), postconditions (ensures), memory effects,
 //!  thread safety, error protocol, and ownership semantics
 //!
-
 //! # Syntax
 //!
-
 //! ```verum
 //! ffi LibMath {
 //!  @extern("C")
 //!  fn sqrt(x: f64) -> f64;
 //!
-
 //!  requires x >= 0.0;
 //!  ensures result >= 0.0;
 //!  memory_effects = Reads(x);

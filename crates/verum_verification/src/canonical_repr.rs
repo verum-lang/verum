@@ -2,10 +2,8 @@
 //! in the closure-hash incremental verification cache (#79 / #88 /
 //! #89 hardening pass).
 //!
-
 //! ## The problem this module solves
 //!
-
 //! [`closure_cache::ClosureFingerprint`] is hashed from
 //! `signature_payload`, `body_payload`, and `citations` byte slices.
 //! Before this module those payloads were produced via
@@ -16,11 +14,9 @@
 //! invalidate the entire on-disk cache, defeating the purpose of
 //! `KERNEL_VERSION`-based invalidation.
 //!
-
 //! [`CanonicalRepr`] replaces that with an explicitly-stable
 //! representation:
 //!
-
 //!  * Serialise via `serde_json` (which is API-stable).
 //!  * Recursively sort every JSON object's keys (so AST struct field
 //!  order at the source level is irrelevant — only field *names*
@@ -28,13 +24,10 @@
 //!  * Emit canonical bytes (UTF-8 JSON with sorted keys) suitable
 //!  for blake3 hashing.
 //!
-
 //! ## Schema-stability contract
 //!
-
 //! These canonical bytes are stable so long as:
 //!
-
 //!  1. The set of fields on each AST node is unchanged.
 //!  2. Field *names* are unchanged (renaming a field is a schema
 //!  break — bump `KERNEL_VERSION` or run `verum cache-closure
@@ -44,16 +37,13 @@
 //!  4. The mapping from Rust `Vec<T>` → JSON array preserves order
 //!  (this is intrinsic to serde_json).
 //!
-
 //! Adding a new optional field with a default is *not* a schema break
 //! provided the existing serialiser still emits the same bytes when
 //! the field has its default value. Reordering fields in source is
 //! never a schema break (we sort).
 //!
-
 //! ## Why not `bincode` or `postcard`?
 //!
-
 //! `serde_json` is already a workspace dependency and is the format
 //! the rest of `closure_cache` uses for on-disk entries. Sorted-keys
 //! JSON is human-readable, which makes cache-debugging

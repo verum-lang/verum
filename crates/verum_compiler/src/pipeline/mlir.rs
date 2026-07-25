@@ -1,16 +1,13 @@
 //! MLIR JIT/AOT compilation (GPU code path).
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 15). Houses the
 //! AST → Verum MLIR dialect → LLVM dialect → JIT/AOT path used
 //! exclusively for GPU targets (`@device(GPU)` annotation or
 //! tensor-op threshold detection). CPU code never touches MLIR;
 //! it uses LLVM IR directly via `pipeline/native_codegen.rs`.
 //!
-
 //! Methods:
 //!
-
 //!  * `run_mlir_jit` — JIT-compile + execute the module via
 //!  MLIR ExecutionEngine; entry point for `verum run --mlir`.
 //!  * `execute_mlir_jit` — internal helper that drives the

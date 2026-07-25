@@ -1,10 +1,8 @@
 //! Tensor expression chain analyzer (#91-1, #95).
 //!
-
 //! Walks a function's VBC instruction stream and identifies maximal
 //! Pure tensor expression chains — sequences of tensor ops where:
 //!
-
 //!  1. Every op is from the tensor surface (TensorBinop, TensorUnop,
 //!  TensorMatmul, TensorReduce, TensorFlashAttention,
 //!  TensorRmsNorm, TensorLayerNorm, TensorSoftmax, etc.).
@@ -16,7 +14,6 @@
 //!  other since they only touch heap-allocated tensor handles
 //!  that the runtime guarantees `noalias` on.
 //!
-
 //! The analyzer is deliberately conservative: it only fuses
 //! single-use chains. Multi-use intermediates (where a tensor handle
 //! is read by two downstream ops) are left unfused — they need
@@ -24,7 +21,6 @@
 //! follow-up) can fuse them with a "duplicate computation" cost
 //! check against the rematerialisation budget.
 //!
-
 //! Output: `Vec<TensorChain>` — each chain has the registers it
 //! depends on (`inputs`), the ordered tensor ops, and the final
 //! output register. The fusion lowering pass (#96) then emits a

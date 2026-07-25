@@ -1,28 +1,22 @@
 //! GPU CPU-Fallback Semantic Simulator
 //!
-
 //! This module provides a CPU-based simulation of GPU kernel execution
 //! with correct threading semantics. Each kernel launch iterates over
 //! all blocks in the grid and all threads within each block, providing
 //! each thread with its own identity (threadIdx, blockIdx) and access
 //! to per-block shared memory.
 //!
-
 //! ## Threading Model
 //!
-
 //! Threads within a block execute sequentially in the CPU simulation.
 //! This is semantically correct for well-synchronized GPU programs
 //! because `__syncthreads()` is a no-op when threads execute in order.
 //!
-
 //! Atomic operations are regular operations in single-threaded execution,
 //! which is also correct (no data races in sequential execution).
 //!
-
 //! ## Shared Memory
 //!
-
 //! Each block gets its own shared memory buffer that persists for the
 //! duration of the block's execution. All threads within a block can
 //! read and write to this shared memory.

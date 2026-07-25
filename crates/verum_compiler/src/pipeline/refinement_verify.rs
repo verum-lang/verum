@@ -1,17 +1,14 @@
 //! Per-function refinement-type verification (Z3 + CVC5 portfolio).
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 4). Implements full
 //! Z3-based refinement-type verification:
 //!
-
 //!  1. Extracts refinement predicates from parameter / return types.
 //!  2. Generates Z3 assertions for each refinement constraint.
 //!  3. Uses `verum_smt::RefinementVerifier` to verify constraints.
 //!  4. Caches verification results for performance.
 //!  5. Reports detailed error messages with counterexamples.
 //!
-
 //! Fast-path for syntactic subsumption; falls back to full Z3 SMT
 //! solving for complex cases. Timeout-bounded (10-500ms per
 //! sub-check). Refinement-type subsumption via Z3: syntactic check

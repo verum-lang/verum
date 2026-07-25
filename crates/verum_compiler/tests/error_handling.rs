@@ -13,7 +13,6 @@
     unused_assignments
 )]
 //!
-
 //! Tests that the compiler properly reports errors for invalid code
 
 use std::path::PathBuf;

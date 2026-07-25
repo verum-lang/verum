@@ -1,10 +1,8 @@
 //! Precondition handling and verification.
 //!
-
 //! Preconditions are constraints that must hold at function entry.
 //! They represent caller obligations and are assumed during verification.
 //!
-
 //! Verum uses contract literals (`contract#"requires ...; ensures ...;"`) embedded
 //! in functions annotated with `@verify(proof)`. Preconditions (requires clauses) are
 //! translated to SMT assertions that the caller must satisfy. At verification time,

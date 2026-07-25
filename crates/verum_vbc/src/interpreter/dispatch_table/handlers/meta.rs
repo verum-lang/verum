@@ -1,9 +1,7 @@
 //! Meta operation handlers for VBC interpreter dispatch.
 //!
-
 //! Handles: MetaEval (0xB8), MetaQuote (0xB9), MetaSplice (0xBA), MetaReflect (0xBB)
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta fn` and `@` prefix.
 //! MetaEval evaluates compile-time expressions, MetaQuote captures code as TokenStream,
 //! MetaSplice inserts computed values into generated code, MetaReflect provides type

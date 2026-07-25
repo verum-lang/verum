@@ -1,6 +1,5 @@
 //! Symbol attribute handling for LLVM codegen.
 //!
-
 //! This module provides support for linker-level symbol attributes:
 //! - `@alias(target)` - Symbol aliasing
 //! - `@weak` - Weak symbol linkage
@@ -9,10 +8,8 @@
 //! - `@section(name)` - Section placement
 //! - `@export(abi)` - Export with ABI
 //!
-
 //! # LLVM Mapping
 //!
-
 //! | Verum Attribute | LLVM Feature |
 //! |-----------------|--------------|
 //! | `@alias(target)` | `llvm.global.alias` |
@@ -28,7 +25,6 @@
 //! | `@section(name)` | Function/GlobalVar section attribute |
 //! | `@export("C")` | External linkage + C calling convention |
 //!
-
 //! Verum provides unified linker control through attributes:
 //! - `@link_section(".text.hot")` places functions/data in specific ELF/Mach-O/PE sections
 //! - `@no_mangle` / `@export` control symbol visibility and naming

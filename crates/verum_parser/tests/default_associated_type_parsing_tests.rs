@@ -14,7 +14,6 @@
 )]
 //! Tests for parsing default associated types in protocols
 //!
-
 //! Tests for default associated type syntax in protocol definitions
 
 use verum_ast::decl::{ItemKind, ProtocolItemKind};

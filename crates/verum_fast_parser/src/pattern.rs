@@ -1,13 +1,11 @@
 //! Pattern parser for Verum.
 //!
-
 //! This module implements parsing for all pattern forms used in:
 //! - Let bindings
 //! - Function parameters
 //! - Match arms
 //! - For loops
 //!
-
 //! Uses hand-written recursive descent parser for fast compilation and good error recovery.
 
 use verum_ast::ty::PathSegment;

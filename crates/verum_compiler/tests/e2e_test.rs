@@ -13,7 +13,6 @@
     unused_assignments
 )]
 //!
-
 //! These tests verify that the entire compilation pipeline works correctly
 //! from source code to executable output.
 

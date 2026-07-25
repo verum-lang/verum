@@ -1,18 +1,14 @@
 //! Error Context Chain Management
 //!
-
 //! Provides **zero-cost error context chains** that preserve the full error history
 //! while adding contextual information at each level of the call stack. This helps
 //! developers understand what the code was doing when an error occurred.
 //!
-
 //! # Core Concept
 //!
-
 //! Errors don't occur in isolation - they happen in a context. By adding context
 //! at each level, we create a breadcrumb trail that helps debugging:
 //!
-
 //! ```text
 //! Level 1 (bottom): "connection refused"
 //! Level 2: "failed to connect to database"
@@ -20,10 +16,8 @@
 //! Level 4 (top): "failed to render home page"
 //! ```
 //!
-
 //! # Key Features
 //!
-
 //! - **Zero-cost on success path** - Context closures only execute on error
 //! - **Automatic chain preservation** - Contexts are preserved through `?` operator
 //! - **Lazy evaluation** - Context values computed only on error
@@ -31,10 +25,8 @@
 //! - **Nested contexts** - Arbitrary depth of contextual information
 //! - **Easy integration** - Works naturally with `?` operator
 //!
-
 //! # Example Flow
 //!
-
 //! ```rust,ignore
 //! fn render_page() -> Result<(), ContextError<VerumError>> {
 //!  load_user().context("rendering home page")?;
@@ -43,7 +35,6 @@
 //!  Ok(())
 //! }
 //!
-
 //! fn load_user() -> Result<User> {
 //!  fetch_from_db().context("loading user from database")?;
 //!  // ↓
@@ -51,7 +42,6 @@
 //!  Ok(user)
 //! }
 //!
-
 //! fn fetch_from_db() -> Result<User> {
 //!  connect_to_db().context("connecting to database")?;
 //!  // ↓
@@ -59,13 +49,11 @@
 //!  Ok(user)
 //! }
 //!
-
 //! fn connect_to_db() -> Result<Connection> {
 //!  Err(VerumError::new("connection refused", ErrorKind::Network))
 //! }
 //! ```
 //!
-
 //! Result when error reaches top:
 //! ```text
 //! Error chain:

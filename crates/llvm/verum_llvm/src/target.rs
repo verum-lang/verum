@@ -1,6 +1,5 @@
 //! Target machine configuration and code generation
 //!
-
 //! Handles CPU targeting, features, and code model configuration.
 
 use verum_verum_llvm_sys::llvm::target::*;

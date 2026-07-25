@@ -1,22 +1,18 @@
 //! Stdlib (`core/`) bootstrap compilation — the `compile_core` orchestrator.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 8). This submodule
 //! handles the StdlibBootstrap mode: a one-shot compile of the
 //! `core/` standard library into the embeddable `stdlib.vbca`
 //! archive that ships inside the verum binary.
 //!
-
 //! Flow:
 //!
-
 //!  1. Discover all stdlib modules via `StdlibModuleResolver`.
 //!  2. Parse ALL modules to AST.
 //!  3. Register ALL types globally (multi-pass across all modules).
 //!  4. Compile each module to VBC bytecode.
 //!  5. Build and write `stdlib.vbca` archive.
 //!
-
 //! Architectural distinction from `Normal` build mode: stdlib
 //! bootstrap uses GLOBAL type registration across all modules
 //! before compiling any module, eliminating cross-module

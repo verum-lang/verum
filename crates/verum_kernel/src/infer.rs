@@ -1,6 +1,5 @@
 //! Kernel typing judgment — `infer` / `check` / `verify` / `verify_full`.
 //!
-
 //! Split . The core LCF-style judgment `Γ ⊢ t : T` of the
 //! kernel. Every proof term that reaches the kernel is either accepted
 //! with a concrete inferred type, or rejected with a [`KernelError`].

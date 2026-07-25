@@ -1,53 +1,42 @@
 //! Program Extraction from Proofs
 //!
-
 //! This module implements extraction of computational content from constructive proofs
 //! implementing the Curry-Howard correspondence for extracting computational content from proofs.
 //!
-
 //! ## Features
 //!
-
 //! - **Program Extraction**: Extract executable code from constructive proofs
 //! - **Witness Extraction**: Extract witnesses from existential proofs
 //! - **Proof Irrelevance**: Mark and erase proof-irrelevant parts during extraction
 //! - **Contract Generation**: Generate runtime contracts from proof obligations
 //! - **Multi-Target Support**: Extract to Verum, OCaml, or other targets
 //!
-
 //! ## Extraction Process
 //!
-
 //! 1. **Analyze Proof**: Determine if proof is constructive and extractable
 //! 2. **Extract Computational Content**: Convert proof terms to program terms
 //! 3. **Erase Proofs**: Remove proof-irrelevant parts for runtime efficiency
 //! 4. **Generate Contracts**: Convert proof obligations to runtime checks
 //! 5. **Emit Target Code**: Generate code in target language
 //!
-
 //! ## Example Usage
 //!
-
 //! ```rust,ignore
 //! use verum_smt::program_extraction::{ProgramExtractor, ExtractionTarget};
 //! use verum_smt::proof_term_unified::ProofTerm;
 //!
-
 //! let extractor = ProgramExtractor::new();
 //!
-
 //! // Extract function from proof of existence and uniqueness
 //! // theorem div_mod_unique(a, b: Nat, b > 0):
 //! // ∃!(q, r: Nat). a = b * q + r ∧ r < b
 //! let proof = /* ... constructive proof ... */;
 //!
-
 //! if let Some(program) = extractor.extract_program(&proof) {
 //!  println!("Extracted program: {:?}", program);
 //! }
 //! ```
 //!
-
 //! Program extraction: `@extract` on constructive proofs generates executable code.
 //! `@extract_witness` extracts witnesses without proofs. `@extract_contract` generates
 //! runtime contracts. Proof-irrelevant (Prop-typed) components are erased.

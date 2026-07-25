@@ -14,7 +14,6 @@
 )]
 //! CVC5 Backend Integration Tests
 //!
-
 //! Tests the CVC5 backend implementation with stub FFI layer.
 
 #![cfg(feature = "cvc5")]

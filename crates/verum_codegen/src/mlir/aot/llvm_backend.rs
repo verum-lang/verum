@@ -1,11 +1,9 @@
 //! LLVM-based AOT backend.
 //!
-
 //! This module provides an alternative AOT compilation path that uses
 //! verum_llvm for fine-grained LLVM optimization control, LTO support,
 //! and flexible target configuration.
 //!
-
 //! Enabled with the `aot-llvm` feature.
 
 #![cfg(feature = "aot-llvm")]

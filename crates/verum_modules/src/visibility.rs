@@ -1,6 +1,5 @@
 //! Visibility checking for module items.
 //!
-
 //! Implements the five-level visibility system:
 //! - Private (default): accessible only within the current module
 //! - Public: accessible from any module in any crate
@@ -8,7 +7,6 @@
 //! - public(super): accessible only to the immediate parent module
 //! - public(in path): accessible within the specified module subtree
 //!
-
 //! Visibility is checked after name resolution. The algorithm traverses
 //! the module hierarchy to determine access based on the modifier.
 

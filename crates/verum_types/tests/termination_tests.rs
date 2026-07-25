@@ -14,7 +14,6 @@
 )]
 //! Tests for termination checking functionality
 //!
-
 //! These tests verify that the termination checker correctly identifies:
 //! - Structurally recursive functions
 //! - Non-terminating functions

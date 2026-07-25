@@ -1,6 +1,5 @@
 //! # `verum_kernel::soundness` — meta-circular kernel-soundness export
 //!
-
 //! This module implements the cross-export side of task #80
 //! (VERUM-TRUST-1). The Verum-side soundness corpus lives in
 //! `core/verify/kernel_soundness/`; this module walks that corpus
@@ -9,25 +8,20 @@
 //! that an independent reviewer can run through `coqc` / `lean` to
 //! verify Verum is being honest.
 //!
-
 //! ## Architectural shape — protocol-driven, not per-format
 //!
-
 //! Every cross-export target implements one trait, [`SoundnessBackend`].
 //! Concrete instances (`coq::CoqBackend`, `lean::LeanBackend`) are
 //! short — they just say "for this fragment of the corpus, render this
 //! syntax." The corpus walk is shared in [`SoundnessExporter`], which
 //! drives the trait methods in canonical order.
 //!
-
 //! Adding a third tool (Isabelle, Agda, Dedukti) is a single new
 //! implementation of [`SoundnessBackend`]. The exporter, the audit
 //! gate, and the snapshot tests are all parameterised over the trait.
 //!
-
 //! ## Single source of truth
 //!
-
 //! The 35-rule list in this Rust module mirrors the
 //! `verum_kernel::proof_tree::KernelRule` enum. The mirror is
 //! drift-detected at audit time: the exporter cross-checks the
@@ -35,10 +29,8 @@
 //! the `.vr` corpus's `corpus_rows()` length. A one-sided edit
 //! (Rust grows a rule, .vr doesn't, or vice versa) fails the gate.
 //!
-
 //! ## Honest IOUs
 //!
-
 //! When a Verum-side lemma is admitted with reason "requires modal-
 //! depth ordinal arithmetic well-foundedness", the Coq emission ends
 //! in `Admitted. (* requires modal-depth ordinal arithmetic

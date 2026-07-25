@@ -1,17 +1,14 @@
 //! Build script for verum_compiler
 //!
-
 //! Embeds the Verum standard library (core/*.vr) into the compiler binary
 //! as a zstd-compressed archive. This enables single-binary distribution
 //! without external stdlib dependencies.
 //!
-
 //! Archive format:
 //!  [file_count: u32]
 //!  [index: (path_len: u16, path: utf8, content_offset: u32, content_len: u32) × file_count]
 //!  [data: concatenated .vr source texts]
 //!
-
 //! At runtime, the archive is decompressed once into memory (~2ms for 4.7MB)
 //! and provides instant access to all stdlib source files via path lookup.
 

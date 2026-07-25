@@ -1,6 +1,5 @@
 //! Diagnostic emission with support for multiple output formats.
 //!
-
 //! This module provides the emitter that takes diagnostics and outputs them
 //! in various formats (human-readable text, JSON, etc.) for different consumers.
 

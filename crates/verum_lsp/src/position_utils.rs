@@ -1,6 +1,5 @@
 //! Position and range conversion utilities for LSP
 //!
-
 //! This module re-exports span utilities from `verum_common` for backward compatibility.
 //! All new code should import from `verum_common::span_utils` directly.
 

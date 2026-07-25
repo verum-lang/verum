@@ -1,6 +1,5 @@
 //! Public API for verum_compiler
 //!
-
 //! This module provides a clean, well-designed public API for the Verum compiler.
 //! It exposes the key compilation functions that can be used by:
 //! - VCS test runner (vtest)
@@ -8,16 +7,12 @@
 //! - IDE integrations (LSP)
 //! - Embedding applications
 //!
-
 //! # Architecture
 //!
-
 //! The compiler is split into two main pipelines:
 //!
-
 //! ## Common Pipeline (Source → TypedAST)
 //!
-
 //! This is the core of the language implementation, covering:
 //! - Lexical analysis and parsing (verum_lexer, verum_fast_parser)
 //! - Macro expansion (meta-system)
@@ -30,35 +25,27 @@
 //!  - Tier 1: Compiler-proven safe (0ns overhead)
 //!  - Tier 2: Unsafe (manual proof required)
 //!
-
 //! The Common Pipeline produces `TypedAST` which can be verified against
 //! the full language specification.
 //!
-
 //! ## Backend Pipeline (TypedAST → Execution)
 //!
-
 //! Handles tier-specific compilation:
 //! - VBC code generation
 //! - Monomorphization
 //! - Interpreter / JIT / AOT execution
 //!
-
 //! # Example
 //!
-
 //! ```ignore
 //! use verum_compiler::api::{parse, typecheck, run_common_pipeline};
 //!
-
 //! // Parse only
 //! let ast = parse("fn main() { print(\"hello\"); }")?;
 //!
-
 //! // Parse + type check
 //! let typed = typecheck("fn main() { let x: Int = 42; }")?;
 //!
-
 //! // Full common pipeline with verification
 //! let config = CommonPipelineConfig::default();
 //! let result = run_common_pipeline(&["main.vr"], &config)?;

@@ -1,23 +1,18 @@
 //! CBGR (Counter-Based Generational References) Core Types
 //!
-
 //! This module provides Rust-side CBGR types for the VBC interpreter and LLVM
 //! lowering. These types MUST match the stdlib definitions in `core/mem/*.vr`.
 //!
-
 //! # Architecture (VBC-first)
 //!
-
 //! ```text
 //! Source → VBC Bytecode → ┬─ Tier 0: Interpreter (uses THIS module)
 //!  ├─ Tier 1-2: VBC → LLVM JIT
 //!  └─ Tier 3: VBC → LLVM IR/MLIR → AOT
 //! ```
 //!
-
 //! # Crate Responsibilities
 //!
-
 //! | Crate | Purpose |
 //! |-------|---------|
 //! | **verum_common/cbgr.rs** | Rust types for interpreter & LLVM lowering |
@@ -25,10 +20,8 @@
 //! | **verum_cbgr** | Compile-time analysis (escape, lifetime, tier) |
 //! | **verum_vbc/cbgr.rs** | Codegen strategies (tier selection) |
 //!
-
 //! # Memory Layout (MUST match core/mem/header.vr)
 //!
-
 //! ```text
 //! AllocationHeader: 32 bytes (cache-line optimized)
 //! ┌────────────────────────────────────────────────────────────────────┐
@@ -45,10 +38,8 @@
 //! └────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Capability Bits (16-bit, matches core/mem/capability.vr)
 //!
-
 //! | Bit | Name | Description |
 //! |-----|-------------|------------------------------------------|
 //! | 0 | READ | Can read data through reference |
@@ -60,10 +51,8 @@
 //! | 6 | MUTABLE | Can obtain mutable access |
 //! | 7 | NO_ESCAPE | Cannot escape scope (enables SBGL opt) |
 //!
-
 //! # Implementation References
 //!
-
 //! - core/mem/header.vr (source of truth for AllocationHeader layout)
 //! - core/mem/epoch.vr (global epoch management)
 //! - core/mem/capability.vr (capability bit definitions)

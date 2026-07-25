@@ -1,60 +1,47 @@
 //! Flow Functions for Per-Field Interprocedural Analysis
 //!
-
 //! Transfer functions describe how dataflow state changes across IR operations
 //! for per-field interprocedural analysis. Each flow function maps an input
 //! escape state to an output escape state for a specific operation (assignment,
 //! store, load, call, return), enabling field-sensitive escape tracking across
 //! function boundaries for CBGR promotion decisions.
 //!
-
 //! This module implements production-grade flow functions for per-field
 //! interprocedural dataflow analysis. Flow functions represent transfer
 //! functions that describe how dataflow state changes across IR operations,
 //! enabling field-sensitive escape analysis across function boundaries.
 //!
-
 //! # Core Concepts
 //!
-
 //! **Flow Function**: Maps input dataflow state to output dataflow state
 //! for a single IR operation or control flow edge.
 //!
-
 //! **Field-Sensitive**: Tracks dataflow information separately for each
 //! field in a struct, enabling partial promotion.
 //!
-
 //! **Interprocedural**: Flow functions compose across function calls,
 //! enabling whole-program analysis.
 //!
-
 //! # Performance Target
 //!
-
 //! **O(edges × fields)** - Linear in CFG edges and struct fields
 //! - Per-edge: < 100ns typical
 //! - Per-call: < 500ns typical
 //! - Whole-function: < 5ms typical
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::{FlowFunctionCompiler, FlowState};
 //!
-
 //! // Compile flow functions from CFG
 //! let compiler = FlowFunctionCompiler::new(cfg);
 //! let functions = compiler.compile_all();
 //!
-
 //! // Apply flow function for an edge
 //! let mut state = FlowState::new();
 //! state.set_field_safe(ref_id, field_path, true);
 //!
-
 //! let output = functions.apply_edge(edge_id, state);
 //! if output.is_field_safe(ref_id, field_path) {
 //!  // Field can be promoted!

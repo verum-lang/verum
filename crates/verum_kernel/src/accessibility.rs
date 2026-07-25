@@ -1,32 +1,25 @@
 //! Adámek-Rosický 1.26 — λ-filtered colimit closure of κ-accessible
 //! categories. algorithmic kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! AR 1.26 is the **second load-bearing pivot** of MSFS (after HTT
 //! 5.1.4 Grothendieck construction):
 //!
-
 //! > For every regular cardinal κ and regular λ ≤ κ, every κ-accessible
 //! > category C admits all λ-filtered colimits, and the colimit
 //! > inherits κ-accessibility.
 //!
-
 //! Pre-this-module AR 1.26 is admitted as `msfs_lemma_A_8_adamek_rosicky`
 //! framework axiom and routed through `KappaAccessibleInfCategory`
 //! protocol predicates without algorithmic content. ships the
 //! constructive closure operation itself.
 //!
-
 //! ## Algorithm (AR 1.26 finitary skeleton)
 //!
-
 //! Given a λ-filtered diagram `D : I → C` with `I` λ-filtered and
 //! `C` κ-accessible:
 //!
-
 //!  1. **Index-cofinality check**: verify `I.cardinality() ≤ λ`.
 //!  2. **Object enumeration**: collect `D(i)` for every `i ∈ I`.
 //!  3. **Cocone assembly**: build the universal-property cocone
@@ -36,15 +29,12 @@
 //!  5. **Accessibility-preservation witness**: the resulting object
 //!  sits in `C`'s κ-accessible subcategory.
 //!
-
 //! V0 produces the colimit object name + accessibility-preservation
 //! witness; Future work will produce the universal-cocone data + factorisation
 //! morphism.
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **MSFS §6.1 β-part Step 4** (the AFN-T β-part argument
 //!  that requires `κ_1`-accessibility preservation under
 //!  transfinite-tower colimits).

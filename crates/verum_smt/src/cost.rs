@@ -1,6 +1,5 @@
 //! Cost tracking and reporting for SMT verification (P0 for v1.0).
 //!
-
 //! This module provides comprehensive tracking of verification costs and
 //! suggests optimizations when verification becomes expensive.
 

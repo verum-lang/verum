@@ -1,47 +1,37 @@
 //! Dominance Analysis for CBGR Escape Analysis (Phase 3)
 //!
-
 //! CBGR requires that allocation dominates all uses for safe promotion of &T to
 //! &checked T. This module determines the dominator tree so the promotion decision
 //! engine can verify criterion 3 ("allocation dominates all uses in the CFG") and
 //! works alongside atomic thread-safe generation tracking (acquire-release ordering)
 //! and explicit revocation support (CAP_REVOKE capability, atomic generation increment).
 //!
-
 //! This module implements dominance analysis using the Cooper-Harvey-Kennedy algorithm,
 //! which is the third phase of the 4-phase escape analysis pipeline:
 //!
-
 //! - Phase 1: Build SSA representation (`ssa.rs`)
 //! - Phase 2: Track reference flow (`escape_analysis.rs`)
 //! - **Phase 3: Dominance analysis (this module)**
 //! - Phase 4: Promotion decision (`promotion_decision.rs`)
 //!
-
 //! # Algorithm Overview
 //!
-
 //! Dominance analysis determines the dominator tree for a control flow graph.
 //! A block A dominates block B if every path from the entry to B must pass through A.
 //!
-
 //! The Cooper-Harvey-Kennedy algorithm computes dominators efficiently:
 //! - Time complexity: O(n * m) where n = blocks, m = edges (linear in practice)
 //! - Space complexity: O(n) for immediate dominators
 //!
-
 //! # Purpose in Escape Analysis
 //!
-
 //! Dominance is critical for safe reference promotion:
 //! - For `&T` -> `&checked T` promotion, the allocation must dominate all uses
 //! - If a use can occur on a path that doesn't include the allocation, promotion is unsafe
 //! - Dominance frontiers indicate where phi nodes are needed (merge points)
 //!
-
 //! # Example
 //!
-
 //! ```text
 //!  Entry (0)
 //!  |
@@ -59,7 +49,6 @@
 //!  Exit (4)
 //! ```
 //!
-
 //! In this example, block 1 dominates blocks 2, 3, and 4. Since the allocation
 //! in block 1 dominates all use sites, promotion is safe.
 

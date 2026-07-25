@@ -1,47 +1,36 @@
 //! Tensor Shape Verification using Z3 Array Theory
 //!
-
 //! This module provides production-grade tensor shape verification for Verum's
 //! compile-time tensor type checking using Z3's Array theory.
 //!
-
 //! ## Features
 //!
-
 //! - **Matrix Multiplication Shape Checking**: Verify that matrix dimensions are compatible
 //! - **Broadcasting Verification**: NumPy-style broadcasting rules
 //! - **Meta Parameter Resolution**: Support for symbolic tensor shapes
 //! - **Multi-dimensional Tensors**: Full support for arbitrary rank tensors
 //!
-
 //! ## Implementation
 //!
-
 //! Uses Z3 Array theory to model multi-dimensional tensors:
 //! - 1D tensor: Array[Int -> T]
 //! - 2D tensor: Array[Int -> Array[Int -> T]]
 //! - ND tensor: nested arrays with symbolic dimensions
 //!
-
 //! ## Spec Reference
 //!
-
 //! Matrix multiplication type-level dimension checking: for `matmul(A: Tensor<f32, [M, K]>,
 //! B: Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]>`, the inner dimensions must match.
 //! Reshape operations verify product-of-dimensions invariant. Broadcast follows NumPy rules.
 //!
-
 //! ## Examples
 //!
-
 //! ```rust,no_run
 //! use verum_smt::tensor_shapes::TensorShapeVerifier;
 //! use verum_ast::{Expr, ExprKind, Literal, LiteralKind};
 //!
-
 //! let verifier = TensorShapeVerifier::new();
 //!
-
 //! // Matmul verification: [N, K] × [K, M] = [N, M]
 //! // let a_shape = vec![expr_int(2), expr_int(3)]; // [2, 3]
 //! // let b_shape = vec![expr_int(3), expr_int(4)]; // [3, 4]

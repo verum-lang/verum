@@ -1,9 +1,7 @@
 //! Specialization Coherence Verification using CHC
 //!
-
 //! Verum Advanced Protocols — Specialization System
 //!
-
 //! Specialization allows multiple overlapping protocol implementations where a more
 //! specific impl takes precedence. The specialization lattice must satisfy:
 //! - Reflexivity: every impl is at least as specific as itself
@@ -12,36 +10,29 @@
 //! - Unique most-specific: for any concrete type, at most one impl is selected
 //! - Negative bounds: `T: !Protocol` restricts an impl to types that do NOT implement Protocol
 //!
-
 //! This module verifies specialization lattice properties using Constrained Horn Clauses:
 //! 1. No ambiguous specializations (unique most specific impl)
 //! 2. Lattice properties (antisymmetry, transitivity, reflexivity)
 //! 3. Overlap detection between implementations
 //! 4. Specialization precedence resolution
 //!
-
 //! # Performance Targets
 //!
-
 //! - Small lattice (<10 impls): <50ms
 //! - Medium lattice (10-50 impls): <150ms
 //! - Large lattice (>50 impls): <200ms
 //!
-
 //! # CHC Encoding
 //!
-
 //! The specialization lattice is encoded as a set of Horn clauses:
 //! ```smt2
 //! ; more_specific(I1, I2) means I1 is more specific than I2
 //! (declare-rel more_specific (Impl Impl))
 //!
-
 //! ; Transitivity
 //! (rule (=> (and (more_specific I1 I2) (more_specific I2 I3))
 //!  (more_specific I1 I3)))
 //!
-
 //! ; Antisymmetry (no cycles)
 //! (rule (=> (and (more_specific I1 I2) (more_specific I2 I1))
 //!  false))

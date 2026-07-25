@@ -1,6 +1,5 @@
 //! VBC codegen error types.
 //!
-
 //! This module defines errors that can occur during AST-to-VBC compilation.
 
 use std::fmt;

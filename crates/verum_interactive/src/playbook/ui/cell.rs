@@ -1,6 +1,5 @@
 //! Cell widget for rendering individual cells with inline output.
 //!
-
 //! Each cell renders as:
 //! ┌ ▸ [3] ✓ source preview... 0.2ms ┐
 //! │ full source code with syntax highlighting │

@@ -14,16 +14,13 @@
 )]
 //! Integration Tests for Backend Switcher with Real Z3/CVC5 FFI Calls
 //!
-
 //! These tests verify that the backend switcher correctly integrates with
 //! actual Z3 and CVC5 solvers, not just stubs.
 //!
-
 //! Refinement type verification: `Int{> 0}`, `Float{>= 0.0}` predicates are checked
 //! by SMT solvers. The backend switcher routes queries to Z3 or CVC5 with automatic
 //! fallback. Three modes: @verify(runtime), @verify(static), @verify(proof).
 //!
-
 //! NOTE: These tests require the `cvc5` feature to be enabled.
 
 #![cfg(feature = "cvc5")]

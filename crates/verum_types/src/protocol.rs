@@ -1,9 +1,7 @@
 //! Complete Protocol (Trait) System Implementation
 //!
-
 //! Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Complete Protocol System
 //!
-
 //! Protocols are Verum's version of type classes/traits with:
 //! - Structural typing (duck typing)
 //! - Associated types and constants
@@ -12,10 +10,8 @@
 //! - VTable-based method dispatch (<10ns overhead)
 //! - Generic protocols with constraints
 //!
-
 //! # Architecture
 //!
-
 //! - **Protocol**: Protocol definition with methods, associated types
 //! - **ProtocolImpl**: Implementation of protocol for specific type
 //! - **ProtocolChecker**: Registry and resolution engine

@@ -1,27 +1,22 @@
 //! Unified Error Hierarchy
 //!
-
 //! Verum uses a unified error hierarchy with a single VerumError type that
 //! categorizes errors into 5 levels: L0 (type prevention), L1 (static verification),
 //! L2 (explicit handling - IO/parse/memory), L3 (fault tolerance - circuit breaker/retry),
 //! L4 (security containment). Each error carries message, kind, location, context, and
 //! optional backtrace. CBGR violations are a domain-specific subcategory (ErrorKind::Cbgr).
 //!
-
 //! This module provides a **single unified error type** ([`VerumError`]) that consolidates
 //! all error types from across the Verum platform. This eliminates error type proliferation
 //! while maintaining rich error context and diagnostic information.
 //!
-
 //! # Core Concept
 //!
-
 //! Instead of many different error types:
 //! ```text
 //! IoError, ParseError, NetworkError, DatabaseError, ...
 //! ```
 //!
-
 //! Verum uses a single `VerumError` with categorized error kinds:
 //! ```text
 //! VerumError {
@@ -32,10 +27,8 @@
 //! }
 //! ```
 //!
-
 //! # Error Categories
 //!
-
 //! [`VerumError`] categorizes errors by kind:
 //! - **Parse** - Parsing or lexing failed
 //! - **Type** - Type checking failed
@@ -48,10 +41,8 @@
 //! - **NotFound** - Resource not found
 //! - And more...
 //!
-
 //! # Rich Context
 //!
-
 //! Errors capture:
 //! - **Message** - Human-readable description
 //! - **Kind** - Error category for filtering/handling
@@ -59,40 +50,31 @@
 //! - **Backtrace** - Full stack trace (when enabled)
 //! - **Context chain** - Multi-level error context
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_common::error::{VerumError, ErrorKind};
 //!
-
 //! // Create an error
 //! let err = VerumError::new("Invalid input", ErrorKind::Invalid);
 //!
-
 //! // Add context
 //! let err = err.with_context("Processing user input");
 //!
-
 //! // Add location
 //! let err = err.with_location("src/main.rs", 42, 15);
 //!
-
 //! // Display with full information
 //! eprintln!("{}", err); // Shows message, kind, location, context
 //! ```
 //!
-
 //! # Backtrace Support
 //!
-
 //! Backtraces are captured when `VERUM_BACKTRACE=1`:
 //! ```text
 //! error[E0001]: Invalid input (Processing user input)
 //!  at src/main.rs:42:15
 //!
-
 //! Backtrace:
 //!  0: parse_input
 //!  1: main

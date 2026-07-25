@@ -1,14 +1,11 @@
 //! Safe SQL interpolation handler
 //!
-
 //! Safe interpolation handler: receives template strings and expression lists,
 //! returns injection-safe parameterized output at compile-time.
 //!
-
 //! Provides SQL interpolation that prevents injection attacks by using
 //! parameterized queries.
 //!
-
 //! # Example
 //! ```verum
 //! let user_id = 42;

@@ -1,6 +1,5 @@
 //! Build assets context for meta functions
 //!
-
 //! Provides file access during meta function execution with security restrictions.
 
 use verum_ast::MetaValue;

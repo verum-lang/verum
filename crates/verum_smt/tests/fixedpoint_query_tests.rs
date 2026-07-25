@@ -14,7 +14,6 @@
 )]
 //! Fixed-Point Query Tests - Datalog and Transitive Closure
 //!
-
 //! These tests verify that the fixed-point engine can correctly answer
 //! queries about derivable facts using Datalog rules.
 

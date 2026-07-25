@@ -1,15 +1,12 @@
 //! Deserialize derive macro implementation
 //!
-
 //! Generates `implement Deserialize for Type { fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> }`
 //!
-
 //! For record types: deserializes fields by name with validation. For sum types:
 //! reads variant tag and deserializes the matching payload. Supports @rename("..."),
 //! @default, and @skip attributes. Generates proper error diagnostics for missing
 //! or invalid fields.
 //!
-
 //! Generated code pattern for structs:
 //! ```verum
 //! implement Deserialize for MyStruct {

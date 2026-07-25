@@ -16,10 +16,8 @@
 )]
 //! Comprehensive Integration Tests for Advanced Protocol Features
 //!
-
 //! Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Complete Advanced Protocol System
 //!
-
 //! This test suite provides comprehensive end-to-end coverage of all advanced
 //! protocol features including:
 //! - Generic Associated Types (GATs)
@@ -29,10 +27,8 @@
 //! - Higher-Kinded Types
 //! - Complex real-world scenarios
 //!
-
 //! # Test Organization
 //!
-
 //! 1. GAT Tests (10+ tests)
 //! 2. Lending Iterator Tests (8+ tests)
 //! 3. Specialization Tests (8+ tests)
@@ -40,7 +36,6 @@
 //! 5. Higher-Kinded Type Tests (6+ tests)
 //! 6. End-to-End Scenarios (5+ tests)
 //!
-
 //! Total: 40+ comprehensive integration tests
 
 use smallvec::SmallVec;

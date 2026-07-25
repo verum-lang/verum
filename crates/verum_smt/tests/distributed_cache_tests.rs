@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for distributed verification cache
 //!
-
 //! Tests cover:
 //! - Cache entry creation and expiration
 //! - Cache key generation

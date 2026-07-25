@@ -1,22 +1,17 @@
 //! Non-Lexical Lifetimes (NLL) Analysis
 //!
-
 //! This module implements Rust-style Non-Lexical Lifetimes for Verum, enabling
 //! more precise borrow checking based on actual variable liveness rather than
 //! lexical scope. This is the state-of-the-art approach to borrow checking.
 //!
-
 //! # Key Concepts
 //!
-
 //! ## Non-Lexical Regions
 //!
-
 //! Unlike lexical lifetimes that end at scope boundaries, NLL regions are
 //! based on actual liveness - a borrow is active only while it's actually
 //! used:
 //!
-
 //! ```text
 //! fn example() {
 //!  let mut x = 5;
@@ -27,24 +22,19 @@
 //! }
 //! ```
 //!
-
 //! ## Two-Phase Borrows
 //!
-
 //! Enables patterns like `vec.push(vec.len())` where the mutable borrow
 //! is "reserved" but not activated until needed:
 //!
-
 //! ```text
 //! Phase 1 (Reservation): &mut vec is reserved but inactive
 //! Phase 2 (Activation): vec.len() can use &vec
 //! Phase 3 (Use): push activates the mutable borrow
 //! ```
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! CFG → NllAnalyzer → NllAnalysisResult
 //!  │
@@ -57,17 +47,14 @@
 //!  └───────────────────────────────────┘
 //! ```
 //!
-
 //! # Algorithm Overview
 //!
-
 //! 1. **Liveness Analysis**: Compute live ranges for all variables
 //! 2. **Region Inference**: Create minimal regions based on liveness
 //! 3. **Constraint Generation**: Generate subset constraints
 //! 4. **Constraint Solving**: Fixed-point iteration
 //! 5. **Violation Detection**: Check for conflicts
 //!
-
 //! Spec: Based on Rust RFC 2094 (Non-Lexical Lifetimes)
 
 use crate::analysis::{BlockId, ControlFlowGraph, RefId, Span};

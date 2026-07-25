@@ -1,6 +1,5 @@
 //! Tests for the kernel-soundness cross-export pipeline.
 //!
-
 //! Pin coverage:
 //!  - The canonical rule list has exactly 35 entries.
 //!  - The 4 structurally-proved lemmas (K-Var, K-Univ, K-FwAx, K-Pos)

@@ -1,6 +1,5 @@
 //! SSA (Static Single Assignment) Representation for Escape Analysis
 //!
-
 //! Converts function representation to SSA form for precise data flow analysis.
 //! This is Phase 1 of the 4-phase escape analysis pipeline defined by the CBGR
 //! formal escape analysis specification. A reference escapes if it is: (1) returned
@@ -8,33 +7,26 @@
 //! closure, or (4) passed to a function that may retain it. SSA form enables
 //! precise tracking of these escape paths through use-def chains.
 //!
-
 //! SSA form ensures each variable is assigned exactly once, enabling precise
 //! use-def chain analysis for escape detection. This is fundamental for the
 //! 4-phase escape analysis algorithm:
 //!
-
 //! - Phase 1: Build SSA representation (this module)
 //! - Phase 2: Track reference flow
 //! - Phase 3: Dominance analysis
 //! - Phase 4: Promotion decision
 //!
-
 //! # Algorithm Overview
 //!
-
 //! The SSA construction uses the classic algorithm from Cytron et al. (1991):
 //!
-
 //! 1. Compute dominance frontiers for each basic block
 //! 2. Place phi nodes at dominance frontiers for each variable
 //! 3. Rename variables using a stack-based approach
 //! 4. Build use-def chains from the renamed program
 //!
-
 //! # Performance
 //!
-
 //! - Dominance frontier computation: O(|V| + |E|) where V = blocks, E = edges
 //! - Phi placement: O(|V| * |defs|) in worst case
 //! - Variable renaming: O(|instructions|)

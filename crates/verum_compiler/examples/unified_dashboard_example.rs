@@ -1,9 +1,7 @@
 //! Example: Unified Performance Dashboard
 //!
-
 //! Demonstrates creating and using the unified performance dashboard.
 //!
-
 //! Run with:
 //! ```bash
 //! cargo run --example unified_dashboard_example

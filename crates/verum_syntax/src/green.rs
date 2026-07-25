@@ -1,11 +1,9 @@
 //! Green tree - the immutable, persistent core of the syntax tree.
 //!
-
 //! Green trees store relative widths (not absolute offsets), enabling O(log n)
 //! updates when source is edited. They form the "spine" of the red-green tree
 //! pattern used by Roslyn and rust-analyzer.
 //!
-
 //! Green Tree (Immutable Core):
 //! Green nodes store relative widths (not absolute offsets), enabling O(log n)
 //! updates when source is edited -- only the path from edit to root needs recreation.

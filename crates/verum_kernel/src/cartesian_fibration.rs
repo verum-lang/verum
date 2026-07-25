@@ -1,45 +1,35 @@
 //! Cartesian fibrations (HTT 3.1) + Straightening/Unstraightening
 //! (HTT 3.2.0.1) — algorithmic kernel rules.
 //!
-
 //! ## What this delivers
 //!
-
 //! Cartesian fibrations are the ∞-categorical generalisation of
 //! Grothendieck fibrations: a functor `p : E → C` is *Cartesian*
 //! when every morphism `f : c' → p(e)` admits a *Cartesian lift*
 //! `f' : e' → e` with universal-property characterisation.
 //!
-
 //! HTT 3.2.0.1 gives the **Straightening / Unstraightening
 //! equivalence** of ∞-categories:
 //!
-
 //!  `St : coCart(C) ≃ Fun(C, ∞-Cat) : Un`
 //!
-
 //! This is the dual of (and tightly bound to) the ∞-Grothendieck
 //! construction (HTT 5.1.4) shipped in [`crate::grothendieck`].
 //! `Un` is the unstraightening functor; the Grothendieck construction
 //! is precisely `Un` applied to a `C`-indexed diagram.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ### Cartesian fibrations (HTT 3.1.1)
 //!
-
 //!  * [`CartesianFibration`] — the data of `p : E → C` with the
 //!  Cartesian-lifting property declared as a witness flag.
 //!  * [`CartesianMorphism`] — a p-Cartesian morphism `f : e' → e`.
 //!  * [`is_cartesian`] — decidable predicate on `(p, f)` checking
 //!  that `f` is p-Cartesian.
 //!
-
 //! ### Straightening (HTT 3.2.0.1)
 //!
-
 //!  * [`StraighteningEquivalence`] — the witness pair
 //!  `(St, Un, ι, ε)` certifying the equivalence of ∞-categories.
 //!  * [`build_straightening_equivalence`] — algorithmic builder
@@ -48,10 +38,8 @@
 //!  `crate::grothendieck::build_grothendieck` showing that
 //!  `Un` agrees with the Grothendieck construction.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **Theorem 9.3 Step 1** — currently admits via host-stdlib
 //!  framework axiom `msfs_htt_3_2_straightening`. Promotion:
 //!  invoke [`build_straightening_equivalence`] for the concrete

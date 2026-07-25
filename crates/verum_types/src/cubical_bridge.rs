@@ -2,22 +2,18 @@
 //! throughout the type system) and `CubicalTerm` (the internal cubical
 //! normalizer representation).
 //!
-
 //! The type checker stores `Type::Eq { lhs, rhs }` where `lhs`/`rhs`
 //! are `EqTerm` values. Syntactic equality on `EqTerm` is fast but
 //! incomplete — it misses `transport Refl x = x`, path-lambda
 //! β-reduction, hcomp collapse, etc.
 //!
-
 //! This module provides a translation `eq_to_cubical` that lowers
 //! `EqTerm` into `CubicalTerm`, plus a one-shot
 //! `definitionally_equal_cubical` predicate that the unifier uses as
 //! a more powerful fallback when syntactic comparison fails.
 //!
-
 //! ## Mapping
 //!
-
 //! | `EqTerm` | `CubicalTerm` |
 //! |--------------------------------------|---------------------------------------|
 //! | `Var(v)` | `Value(v)` |
@@ -34,7 +30,6 @@
 //! | `Proj { pair, component }` | opaque `Value("proj_<c>(<p>)")` |
 //! | `J { proof, motive, base }` | opaque `Value("J(...)")` |
 //!
-
 //! The opaque fallback is always safe: two opaque values compare
 //! syntactically, matching the conservative behaviour of the pre-bridge
 //! unifier.

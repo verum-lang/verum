@@ -1,16 +1,13 @@
 //! Algebraic laws for tactic combinators.
 //!
-
 //! Closes task #86. A tactic combinator `TacticCombinator` is a
 //! tree over `{Single, AndThen, OrElse, Repeat, TryFor, WithParams,
 //! IfThenElse, ParOr}`. Treated as an algebra, the combinators
 //! satisfy the standard monoid + distribution laws from the
 //! Ltac / LCF / tactical-programming literature.
 //!
-
 //! This module exposes:
 //!
-
 //! * The laws themselves, as pure structural rewrite rules on
 //!  `TacticCombinator`.
 //! * `normalize()` — a fixed-point rewrite that applies every
@@ -21,42 +18,32 @@
 //!  Used by property tests and by
 //!  `core.proof.tactics.laws`-style regression suites.
 //!
-
 //! # Laws
 //!
-
 //! Monoid of AndThen with identity `skip` (0-iteration Repeat of
 //! the identity simplify):
 //!
-
 //!  skip ; t ≡ t (L1 left-identity)
 //!  t ; skip ≡ t (L2 right-identity)
 //!  (t ; u) ; v ≡ t ; (u ; v) (L3 associativity)
 //!
-
 //! Monoid of OrElse with identity `fail`:
 //!
-
 //!  fail | t ≡ t (L4 left-identity)
 //!  t | fail ≡ t (L5 right-identity)
 //!  (t | u) | v ≡ t | (u | v) (L6 associativity)
 //!
-
 //! Repeat:
 //!
-
 //!  Repeat(t, 0) ≡ skip (L7 zero-unfold)
 //!  Repeat(t, 1) ≡ t (L8 one-unfold)
 //!
-
 //! Idempotence (conservative — only on Single-leaf tactics because
 //! a compound combinator's effect sequence is not necessarily
 //! idempotent):
 //!
-
 //!  Single(k) | Single(k) ≡ Single(k) (L9 OrElse-idempotent)
 //!
-
 //! Semantic note on idempotence: `simp ; simp` is *observationally*
 //! idempotent on every known Z3 state, but the solver may have
 //! trace side-effects (proof term size, statistics counters) — so
@@ -64,10 +51,8 @@
 //! is applied; it never changes the solver's proof trace because
 //! only the first alternative runs in practice.
 //!
-
 //! # Why this isn't "just a simplifier"
 //!
-
 //! The laws let `user_tactic::compile_tactic` produce smaller,
 //! deterministic combinators that the executor can dispatch
 //! faster. More fundamentally: they give the `core.proof.tactics`

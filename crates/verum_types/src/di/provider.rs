@@ -1,17 +1,13 @@
 //! Context Providers - Concrete implementations for dependency injection
 //!
-
 //! Context groups: reusable sets defined as "using GroupName = [Ctx1, Ctx2, ...]", composable with other contexts — Provider Interface Definition
 //! Context resolution: resolving context names to declarations, expanding groups, checking provision — .2 - The `provide` Keyword
 //!
-
 //! This module implements context providers, which bind concrete implementations
 //! to context interfaces. Providers are installed using the `provide` keyword.
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! provide Logger = console_logger();
 //! provide Database = postgres_connection().await;

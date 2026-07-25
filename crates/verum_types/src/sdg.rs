@@ -1,49 +1,40 @@
 //! Synthetic Differential Geometry (SDG) — nilpotent infinitesimals.
 //!
-
 //! Classical differential geometry defines derivatives through
 //! limits and ε-δ arguments. **Synthetic** differential geometry,
 //! pioneered by Lawvere and Kock in the 1970s, axiomatises the
 //! existence of *nilpotent infinitesimals* — non-zero quantities
 //! `d` such that `d² = 0` — and *defines* the derivative directly:
 //!
-
 //! ```text
 //!  f'(x) = the unique a such that f(x + d) = f(x) + a·d for all d ∈ D
 //! ```
 //!
-
 //! where `D = { d : d² = 0 }` is the object of first-order
 //! infinitesimals. The **Kock–Lawvere axiom** asserts this `a`
 //! exists and is unique.
 //!
-
 //! ## Why this matters for Verum
 //!
-
 //! SDG gives derivatives a *type-theoretic* foundation rather than
 //! relying on metalevel limit machinery. This integrates cleanly
 //! with the dependent-type infrastructure already in place and
 //! makes automatic differentiation a **language feature** rather
 //! than a separate compiler pass:
 //!
-
 //! * Forward-mode AD becomes evaluation `f(x + d)` with `d ∈ D`.
 //! * Higher-order derivatives use higher-order infinitesimals
 //!  `D_k = { d : d^(k+1) = 0 }`.
 //! * The chain rule is a theorem about composition of polynomial
 //!  maps in `D`.
 //!
-
 //! ## API
 //!
-
 //! * [`Infinitesimal`] — a value paired with its nilpotency order
 //! * [`InfinitesimalRing`] — symbolic computation in `R[d]/(d^(k+1))`
 //! * [`derivative`] — extract f'(x) by polynomial expansion
 //! * [`PolynomialMap`] — finite-degree polynomial f: R → R
 //!
-
 //! This is the **standalone algebraic core**. Integration into the
 //! type system (typing `D` as a refinement of `Float`, allowing
 //! `f(x + d)` syntax) is a future step.

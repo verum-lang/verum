@@ -1,10 +1,8 @@
 //! Verification Boundary Management with Call Graph Analysis
 //!
-
 //! Handles trusted/untrusted code boundaries and proof obligations using
 //! full call graph analysis for boundary detection.
 //!
-
 //! Boundaries occur where code transitions between verification levels (e.g.,
 //! @verify(proof) code calling @verify(runtime) code). At each boundary, proof
 //! obligations are generated to ensure safety is maintained: the callee's

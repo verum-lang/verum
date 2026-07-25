@@ -1,27 +1,21 @@
 //! Test command — discover and execute `@test` functions and whole-
 //! file tests across both execution tiers.
 //!
-
 //! # Tiers
 //!
-
 //! Matches the `verum run` / `verum bench` convention:
 //!
-
 //! | Tier | How a test is run |
 //! |--------------|-------------------------------------------------------------|
 //! | Interpreter | Compile file to VBC once, run main()-or-test via the |
 //! | | interpreter in-process. Fast iteration, full diagnostics. |
 //! | AOT (native) | Build a binary per test file, spawn it; exit 0 == pass. |
 //!
-
 //! Default: **AOT** (a test is a promise about the final artefact;
 //! interpreter is available via `--interp` for fast red-green loops).
 //!
-
 //! # Options modelled on libtest / `cargo test`
 //!
-
 //! * `--filter STR` — substring match on test name. A filter that
 //!   contains `/` only matches at suite-path segment boundaries
 //!   (`--filter sync/` selects `sync/…` and `runtime/sync/…` but never

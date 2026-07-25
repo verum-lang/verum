@@ -1,6 +1,5 @@
 //! Stage information for N-level staging
 //!
-
 //! Provides tracking for staged metaprogramming and code generation provenance.
 
 use verum_ast::Span;

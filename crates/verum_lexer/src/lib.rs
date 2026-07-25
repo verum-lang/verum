@@ -1,14 +1,11 @@
 #![allow(unexpected_cfgs)]
 //! Lexer for the Verum programming language.
 //!
-
 //! This crate provides a high-performance lexer built on top of the `logos` crate,
 //! which uses code generation to produce fast, zero-allocation tokenization.
 //!
-
 //! # Overview
 //!
-
 //! The lexer tokenizes Verum source code into a stream of tokens according to the
 //! language specification. Verum's lexical grammar defines whitespace and comments
 //! (line `//` and block `/* */`), Unicode identifiers (ident_start = letter | '_',
@@ -18,10 +15,8 @@
 //! optional unit suffixes), text literals (plain, multiline `"""`, interpolated `f"..."`,
 //! tagged `tag#"..."`, contract `contract#"..."`), and operators/delimiters.
 //!
-
 //! # Features
 //!
-
 //! - **Zero-copy**: The lexer operates directly on the source string slice
 //! - **Fast**: Uses logos for optimized DFA-based lexing
 //! - **Complete**: Supports all Verum syntax including:
@@ -34,33 +29,26 @@
 //! - **Error recovery**: Handles invalid tokens gracefully
 //! - **Location tracking**: Preserves source spans for error reporting
 //!
-
 //! # Example
 //!
-
 //! ```
 //! use verum_lexer::{Lexer, TokenKind};
 //! use verum_ast::span::FileId;
 //! use verum_common::List;
 //!
-
 //! let source = "fn add(x: Int, y: Int) -> Int { x + y }";
 //! let file_id = FileId::new(0);
 //! let lexer = Lexer::new(source, file_id);
 //!
-
 //! // Tokenize the entire input
 //! let tokens: List<_> = lexer.map(|r| r.unwrap()).collect();
 //!
-
 //! // First token should be 'fn'
 //! assert!(matches!(tokens[0].kind, TokenKind::Fn));
 //! ```
 //!
-
 //! # Module Structure
 //!
-
 //! - [`token`]: Token type definitions and categorization
 //! - [`lexer`]: The main lexer implementation
 //! - [`error`]: Lexical error types

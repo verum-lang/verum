@@ -1,10 +1,8 @@
 //! Red-team adversarial sweep for the V0 Yoneda / Cartesian-fibration /
 //! Adjoint-functor kernel modules.
 //!
-
 //! Five attack categories:
 //!
-
 //!  A. **Precondition bypass** — declare witness flags pathologically
 //!  and verify the kernel-level decision predicates reject the
 //!  inconsistent inputs.

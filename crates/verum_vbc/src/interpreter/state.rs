@@ -1,6 +1,5 @@
 //! Interpreter state management.
 //!
-
 //! The [`InterpreterState`] holds all runtime state for VBC execution:
 //! - Registers
 //! - Call stack
@@ -8,16 +7,13 @@
 //! - Module references
 //! - Profiling data
 //!
-
 //! # V-LLSI Architecture
 //!
-
 //! The interpreter uses built-in opcodes and the stdlib for:
 //! - CBGR operations (via verum_common types)
 //! - Memory allocation (via V-LLSI syscall intrinsics)
 //! - Stdlib functions (collections, I/O, crypto)
 //!
-
 //! This ensures consistent behavior between interpreter and JIT/AOT execution.
 //! The V-LLSI bootstrap kernel provides initial allocator, syscall wrappers, and TLS
 //! initialization before the full Verum runtime loads. This ensures consistent behavior

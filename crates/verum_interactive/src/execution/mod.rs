@@ -1,13 +1,10 @@
 //! Execution module for the Verum Playground.
 //!
-
 //! This module provides the bridge between parsed Verum code and the VBC interpreter,
 //! enabling actual code execution in the playbook environment.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────┐
 //! │ EXECUTION PIPELINE │

@@ -1,14 +1,11 @@
 //! VBC module validation.
 //!
-
 //! This module provides validation of VBC modules to ensure they are
 //! well-formed before execution. Validation catches errors early and
 //! provides meaningful error messages.
 //!
-
 //! # Validation Levels
 //!
-
 //! 1. **Header validation**: Magic number, version, section bounds
 //! 2. **Type table validation**: No circular types, valid references
 //! 3. **Function table validation**: Valid bytecode offsets, register counts

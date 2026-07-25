@@ -1,23 +1,18 @@
 //! MetaValue Operations Extension Trait
 //!
-
 //! This module provides arithmetic, comparison, and logical operations for
 //! `MetaValue` that return `Result<MetaValue, SandboxError>`.
 //!
-
 //! Since `MetaValue` is defined in `verum_ast` and `SandboxError` is defined
 //! in `verum_compiler`, we cannot add these methods directly to `MetaValue`.
 //! Instead, we use an extension trait.
 //!
-
 //! # Usage
 //!
-
 //! ```rust,ignore
 //! use verum_ast::MetaValue;
 //! use verum_compiler::meta_value_ops::MetaValueOps;
 //!
-
 //! let a = MetaValue::int(10);
 //! let b = MetaValue::int(5);
 //! let result = a.add(b)?; // MetaValue::int(15)

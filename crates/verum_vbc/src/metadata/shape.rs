@@ -1,6 +1,5 @@
 //! Shape metadata for compile-time tensor verification.
 //!
-
 //! Provides static shape tracking with symbolic dimension support
 //! for compile-time shape verification of tensor operations.
 

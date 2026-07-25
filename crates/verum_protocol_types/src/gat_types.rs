@@ -1,15 +1,12 @@
 //! Generic Associated Types (GATs) Type Definitions
 //!
-
 //! Generic Associated Types (GATs) extend associated types with their own type
 //! parameters, enabling higher-kinded patterns like Monad, Functor, and lending
 //! iterators. GATs use CBGR generation tracking instead of lifetime annotations.
 //! This module contains type definitions for GATs (planned for future release).
 //!
-
 //! # Features
 //!
-
 //! - Type parameters on associated types
 //! - Where clauses specific to GATs
 //! - Kind tracking (regular, generic, higher-kinded)

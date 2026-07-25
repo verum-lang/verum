@@ -1,29 +1,23 @@
 //! Type-Level Computation for Dependent Types
 //!
-
 //! This module provides type-level function evaluation and normalization
 //! for the dependent types extension (v2.0+).
 //!
-
 //! ## Features
 //!
-
 //! - **Type-level functions**: Compute types from values
 //! - **Beta reduction**: Normalize type-level computations
 //! - **Type application**: Apply type functions to arguments
 //! - **Evaluation cache**: Memoize expensive computations
 //!
-
 //! ## Examples
 //!
-
 //! ```rust,ignore
 //! // Type-level function: List<T, n> where n is a value
 //! let evaluator = TypeLevelEvaluator::new();
 //! let vec_type = evaluator.apply_type_function("Vec", &[int_type, nat_lit(5)])?;
 //! ```
 //!
-
 //! Type-level functions compute types from values: `fn matrix_type(rows, cols) -> Type =
 //! List<List<f64, cols>, rows>`. Beta reduction normalizes applications. Indexed types
 //! like `Fin<n>` enable safe indexing. Type-level natural number arithmetic supports

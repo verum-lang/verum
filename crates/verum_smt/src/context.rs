@@ -1,6 +1,5 @@
 //! Z3 context management and configuration.
 //!
-
 //! This module provides a safe wrapper around Z3's context and solver,
 //! with configuration options for timeout, memory limits, and more.
 

@@ -1,6 +1,5 @@
 //! Transition-recommendation verification pass.
 //!
-
 //! Analyses each function's metrics (complexity, test coverage,
 //! change frequency) and recommends a transition between
 //! verification levels (e.g., runtime → static → proof) per the

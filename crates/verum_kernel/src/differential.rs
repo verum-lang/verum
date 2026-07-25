@@ -1,34 +1,27 @@
 //! Differential-kernel testing harness (#159).
 //!
-
 //! Verum runs **two** kernel implementations in parallel:
 //!
-
 //! 1. The Rust trusted base — [`crate::proof_checker`] — 633 LOC of
 //!  bidirectional type-checking over a minimal CoC fragment, the
 //!  answer reviewers receive when they ask "what do I need to
 //!  trust to trust Verum?".
 //!
-
 //! 2. The Verum-side scaffold — `core/verify/kernel_v0/` — a Verum-
 //!  self-hosted mirror of the same 10-rule bootstrap kernel, whose
 //!  soundness lemmas are enumerated by
 //!  [`crate::soundness::kernel_v0_manifest`].
 //!
-
 //! Differential testing checks that **both** implementations agree on
 //! every test certificate: either they both accept (`Both_Accept`),
 //! both reject (`Both_Reject`), or they disagree (`Disagreement`) —
 //! the last case being the audit failure mode that surfaces a kernel
 //! divergence before it reaches the trust boundary.
 //!
-
 //! ## Three kernel slots active
 //!
-
 //! All three differential slots are populated:
 //!
-
 //!  * Slot A — [`crate::proof_checker`] (bidirectional type-checking
 //!    with explicit substitution + WHNF). The trusted-base
 //!    structural verifier.
@@ -44,7 +37,6 @@
 //!    per-rule strict-intrinsic dispatch through the canonical
 //!    `intrinsic_dispatch` registry).
 //!
-
 //! Disagreements are bugs in EITHER side. An A↔B disagreement
 //! surfaces drift in the structural algorithmic kernels; an
 //! A↔C or B↔C disagreement surfaces drift between the
@@ -54,7 +46,6 @@
 //! schema-stability of the audit JSON but is not produced by the
 //! current registry.
 //!
-
 //! This module is **load-bearing scaffolding**: the entire framework
 //! is in place — `DifferentialReport`, `run_differential_test`, the
 //! per-rule scaffold [`differential_test_rule`], the
@@ -65,10 +56,8 @@
 //! this surface today and will continue to consume it unchanged once
 //! the Verum side comes online.
 //!
-
 //! ## What this module does NOT do
 //!
-
 //! - Does NOT fix the parser blocker on `core/verify/kernel_v0/`.
 //!  That's tracked separately as a multi-day Verum-compiler effort.
 //! - Does NOT shell out to a Verum binary. When the Verum side

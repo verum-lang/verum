@@ -1,13 +1,10 @@
 //! CPU kernel implementations with SIMD optimization.
 //!
-
 //! This module provides scalar and SIMD-optimized implementations of tensor
 //! operations for CPU execution.
 //!
-
 //! # Broadcasting
 //!
-
 //! Binary operations support NumPy-style broadcasting:
 //! - Shapes are right-aligned
 //! - Dimensions match if equal or one is 1

@@ -1,14 +1,11 @@
 //! Bounds Check Elimination with Refinement Type Integration
 //!
-
 //! This module implements comprehensive bounds check elimination for array accesses
 //! through integration with the refinement type system. It eliminates runtime bounds
 //! checks when static analysis can prove safety.
 //!
-
 //! # Core Strategy
 //!
-
 //! For array access `array[index]`, eliminate bounds check when ANY of:
 //! 1. **Refinement types prove bounds**: index: Int{>= 0 && < N}, array.len() >= N
 //! 2. **Loop invariants**: for i in 0..array.len() { array[i] }
@@ -16,18 +13,14 @@
 //! 4. **Dataflow analysis**: Conditional dominance (if index < len { array[index] })
 //! 5. **Check hoisting**: Hoist bounds check out of loops when iteration space is known
 //!
-
 //! # Performance Targets
 //!
-
 //! - Elimination rate: >80% on typical code
 //! - Analysis time: <50ms per function
 //! - No false positives (100% safety)
 //!
-
 //! # Integration Points
 //!
-
 //! - verum_types::refinement - Refinement type constraints
 //! - verum_verification::vcgen - Loop invariant extraction
 //! - verum_codegen - Code generation with eliminated checks

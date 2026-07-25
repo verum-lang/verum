@@ -1,7 +1,6 @@
 //! K-HIT-Form / eliminator auto-generation integration tests
 //! (, + §17.2 Task C3).
 //!
-
 //! Higher inductive types extend ordinary inductives with **path
 //! constructors** — 1-cells whose endpoints are values of the type
 //! itself. The kernel auto-derives the eliminator's type from the

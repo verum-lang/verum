@@ -1,6 +1,5 @@
 //! Framework-citation manifest.
 //!
-
 //! Verum's trust extension via `@framework(<system>, "<path>")`
 //! attributes is the mechanism by which axioms cite upstream
 //! verified proofs (mathlib4, Coq stdlib, ZFC, …). This module
@@ -8,22 +7,18 @@
 //! structured manifest that audit gates and CI pipelines can
 //! consume:
 //!
-
 //!  - Audit dashboards: enumerate per-system citation counts.
 //!  - Path verification: for each citation, shell out to the
 //!  upstream toolchain to verify the path exists.
 //!  - Drift detection: compare a manifest snapshot to the current
 //!  citations to flag any silent change in the trust extension.
 //!
-
 //! The manifest is the data layer underneath
 //! `verum audit --framework-axioms` and
 //! `verum audit --soundness-iou`'s `DischargedByFramework` rows.
 //!
-
 //! ## Schema
 //!
-
 //! ```json
 //! {
 //!  "rows": [

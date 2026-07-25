@@ -1,27 +1,21 @@
 //! Result Extension Traits for Structured Contexts
 //!
-
 //! Provides ergonomic extension methods for adding structured context to Result types.
 //! These traits enable zero-cost error context on the success path while providing
 //! rich diagnostics on the error path.
 //!
-
 //! # Key Features
 //!
-
 //! - **Zero-cost on success** - Closures only execute on error
 //! - **Type-safe** - Context values are type-checked
 //! - **Composable** - Chain multiple structured contexts
 //! - **Ergonomic** - Natural integration with `?` operator
 //!
-
 //! # Examples
 //!
-
 //! ```rust,ignore
 //! use verum_error::prelude::*;
 //!
-
 //! fn fetch_user(id: u64) -> Result<User, ContextError<VerumError>> {
 //!  database_query()
 //!  .with_structured("user_id", id)

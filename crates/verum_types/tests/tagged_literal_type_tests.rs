@@ -1,6 +1,5 @@
 //! Tests for tagged literal type inference
 //!
-
 //! Enhanced Tagged Literals
 //! Verifies that format-specific type inference works correctly
 

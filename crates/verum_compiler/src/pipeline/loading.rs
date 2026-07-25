@@ -1,14 +1,11 @@
 //! Stdlib + project + cog module discovery, parsing, and loading.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 13). Houses the
 //! module-graph plumbing that populates `self.modules` /
 //! `self.project_modules` before semantic analysis runs.
 //!
-
 //! Methods:
 //!
-
 //!  * `load_stdlib_modules` — primary entry; two-tier-cached
 //!  stdlib loader (registry cache → module cache → cold parse).
 //!  Called once per `Compiler` lifecycle before any user code.

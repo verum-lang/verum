@@ -1,6 +1,5 @@
 //! Output widget for displaying cell execution results
 //!
-
 //! Handles rich output rendering including:
 //! - Values with type information
 //! - Tensors with shape and statistics

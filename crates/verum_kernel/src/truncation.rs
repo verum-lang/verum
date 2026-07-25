@@ -1,16 +1,13 @@
 //! n-truncation operators for (∞,1)-categories — V0 algorithmic
 //! kernel rule (HTT 5.5.6).
 //!
-
 //! ## What this delivers
 //!
-
 //! The **n-truncation** operator `τ_{≤n} : C → C_{≤n}` quotients an
 //! ∞-category `C` by collapsing all `(n+1)`-cells and higher to
 //! identities, producing the *n-truncated* sub-∞-category. Per
 //! HTT 5.5.6:
 //!
-
 //!  1. `τ_{≤n}` is a **localisation** at the class of
 //!  `(n+1)`-equivalences (HTT 5.5.6.18).
 //!  2. `τ_{≤n}` is the **left adjoint** of the inclusion
@@ -18,18 +15,14 @@
 //!  3. The class of `n`-truncated objects is **closed under all
 //!  small limits** (HTT 5.5.6.5).
 //!
-
 //! Truncation is the workhorse of level-descent reasoning: it lets
 //! a proof at higher level be reduced to a finite sequence of
 //! 1-categorical / 2-categorical / ... assertions.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`Truncation`] — the apex `τ_{≤n}(x)` of the truncation
 //!  operator, with universal-property witness.
 //!  2. [`truncate_to_level`] — algorithmic builder.
@@ -41,14 +34,11 @@
 //!  witness flag (composed with [`crate::adjoint_functor`]).
 //!  7. [`n_truncated_objects_closed_under_limits`] — HTT 5.5.6.5.
 //!
-
 //! Future work: explicit unit / counit natural-transformation cells
 //! with structurally-checked level-descent trace.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **Theorem 5.1** — id_X violation argument at higher levels:
 //!  `τ_{≤n}(id_X)` is `id_X` itself, so the violation propagates
 //!  down level by level via [`truncate_to_level`].

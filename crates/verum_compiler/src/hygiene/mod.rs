@@ -1,13 +1,10 @@
 //! Hygiene System for Macro Expansion
 //!
-
 //! Implements proper sets-of-scopes hygiene (Scheme/Racket model) for
 //! hygienic macro expansion.
 //!
-
 //! ## Module Structure
 //!
-
 //! - `scope` - Scope, ScopeSet, ScopeId, HygienicIdent
 //! - `marks` - ScopeMark for expansion phases
 //! - `gensym` - Unique identifier generation
@@ -16,24 +13,19 @@
 //! - `expander` - Quote expansion with hygiene enforcement
 //! - `checker` - Post-expansion hygiene verification
 //!
-
 //! ## Design
 //!
-
 //! The hygiene system ensures that:
 //! 1. Identifiers introduced by macros don't capture user bindings
 //! 2. User references to bindings aren't captured by macro-introduced bindings
 //! 3. Macros can intentionally introduce hygiene-breaking bindings when needed
 //!
-
 //! This is achieved through the sets-of-scopes model where each identifier
 //! carries a set of scopes, and resolution finds the binding whose scopes
 //! are a subset of the identifier's scopes (preferring the most specific).
 //!
-
 //! ## Pipeline
 //!
-
 //! The quote expansion pipeline consists of:
 //! 1. **Parse Quote** - Parse quote { ... } into QuoteAST
 //! 2. **Mark Phase** - Assign fresh marks to introduced bindings
@@ -41,7 +33,6 @@
 //! 4. **Hygiene Check** - Verify no accidental capture occurs
 //! 5. **Emit Code** - Generate TokenStream with hygiene metadata
 //!
-
 //! Hygienic macro system: ensures macro expansion preserves lexical scoping
 //! through syntax context marks, preventing accidental name capture.
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,

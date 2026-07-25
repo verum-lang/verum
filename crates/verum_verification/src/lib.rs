@@ -3,44 +3,35 @@
 #![allow(unexpected_cfgs)]
 //! # Verum Gradual Verification System
 //!
-
 //! This crate implements Verum's gradual verification system, providing a smooth
 //! transition from runtime checking to compile-time formal verification.
 //!
-
 //! ## Three-Level Verification System
 //!
-
 //! 1. **Runtime (dynamic)**: Quick runtime checks with ~5-15ns overhead
 //!  - Default mode for development and prototyping
 //!  - All safety checks executed at runtime
 //!  - Immediate feedback during testing
 //!
-
 //! 2. **Static (compile-time)**: SMT verification at compile time, 0ns runtime
 //!  - Conservative static analysis proves safety
 //!  - Checks eliminated in AOT-compiled code when proven safe
 //!  - Fallback to runtime checks if proof incomplete
 //!
-
 //! 3. **Proof (formal)**: Full formal proofs with proof objects
 //!  - SMT solver generates complete correctness proofs
 //!  - Mathematical guarantees of safety properties
 //!  - Optional proof certificate generation
 //!
-
 //! ## Gradual Transition Mechanism
 //!
-
 //! The system supports seamless migration between verification levels:
 //! - Start with `@verify(runtime)` for rapid prototyping
 //! - Gradually add `@verify(static)` for performance-critical code
 //! - Use `@verify(proof)` for critical safety requirements
 //!
-
 //! ## Architecture
 //!
-
 //! - [`level`]: Verification level types and traits
 //! - [`context`]: Verification context and boundary tracking
 //! - [`transition`]: Gradual transition between verification levels
@@ -48,26 +39,20 @@
 //! - [`boundary`]: Trusted/untrusted code boundaries
 //! - [`integration`]: Integration with type system and SMT
 //!
-
 //! ## Example
 //!
-
 //! ```no_run
 //! use verum_verification::{VerificationLevel, VerificationContext};
 //!
-
 //! // Create verification context
 //! let mut ctx = VerificationContext::new();
 //!
-
 //! // Verify a function with gradual verification
 //! // (Full example code omitted - see tests for complete examples)
 //! ```
 //!
-
 //! # Design Principles
 //!
-
 //! This implementation follows the Verum verification system design:
 //! - Three-level gradual verification: runtime -> static -> proof
 //! - Conservative static analysis: safety checks are either proven unnecessary

@@ -1,23 +1,17 @@
 //! Display derive macro implementation
 //!
-
 //! Generates `implement Display for Type { fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> }`
 //!
-
 //! The Display implementation generates human-readable output suitable for end-users.
 //! For error types, consider using @derive(Error) which auto-generates Display.
 //!
-
 //! # Attribute Support
 //!
-
 //! - `@display("custom format {field}")` - Custom display message for variants
 //! - Default behavior: shows variant/type name with field values
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! @derive(Display)
 //! type Status is
@@ -29,7 +23,6 @@
 //!  Failed { reason: Text };
 //! ```
 //!
-
 //! Generates human-readable text representation. For record types: shows type name
 //! and field values. For sum types: matches each variant with optional @display("...")
 //! attribute for custom formatting. Generated code is fully inspectable via

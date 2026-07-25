@@ -1,13 +1,11 @@
 //! Performance profiling command with CBGR overhead analysis
 //!
-
 //! Compiles the input source through the full pipeline, then extracts real
 //! compilation phase timings and CBGR tier analysis results. For --memory mode,
 //! reports reference type breakdown (&T vs &checked T vs &unsafe T), per-function
 //! estimated CBGR overhead, promotion opportunities, and hot spots based on real
 //! escape analysis. For --cpu/--cache modes, reports real compilation phase timings.
 //!
-
 //! All data comes from actual compilation — no hardcoded or simulated values.
 
 use crate::error::Result;

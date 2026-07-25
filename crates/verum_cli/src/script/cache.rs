@@ -1,28 +1,22 @@
 //! Content-addressed cache for compiled Verum scripts.
 //!
-
 //! P1.7 — script cache lives at `~/.verum/script-cache/<blake3>/`. Each
 //! directory holds:
 //!
-
 //! ```text
 //! <blake3-hex>/
 //! ├── cog.vbc — the compiled VBC bytecode
 //! └── meta.toml — typed metadata (schema, key components, timestamps)
 //! ```
 //!
-
 //! # Cache key
 //!
-
 //! `CacheKey = blake3(wire_schema ++ compiler_identity ++ source_bytes ++
 //! compiler_version ++ flags)`.
 //!
-
 //! Every field is part of the digest because a source file alone does NOT
 //! determine the compilation output:
 //!
-
 //!  * the **compiler identity** is the build-unique fingerprint of the
 //!  running `verum` binary (its on-disk length + mtime). Any recompile of
 //!  the executable — including a codegen change in a dependency crate that
@@ -36,14 +30,11 @@
 //!  * the **wire schema** version is a manual belt-and-suspenders bump for
 //!  bytecode wire-format changes (see [`WIRE_SCHEMA_VERSION`]).
 //!
-
 //! Including everything in the key means a cache hit is always a *valid*
 //! reuse — there is no "stale cache" failure mode.
 //!
-
 //! # Atomicity
 //!
-
 //! `store()` writes through a per-entry tempdir (`<blake3>.tmp.<pid>`) and
 //! atomically renames it into place. A crash between writing the VBC and
 //! renaming leaves a `.tmp.<pid>` directory that the next prune sweep
@@ -52,10 +43,8 @@
 //! immutable so the overwrite is byte-identical when both writers used
 //! the same key.
 //!
-
 //! # GC policy
 //!
-
 //! `gc_to_size(max_bytes)` evicts least-recently-accessed entries first
 //! until total disk usage falls under the budget. Access times are
 //! refreshed on every `lookup()`; this is best-effort (we update the
@@ -63,10 +52,8 @@
 //! lookup) and can be disabled via `[cache] track_access = false` in
 //! the user config when latency-sensitive.
 //!
-
 //! # Performance
 //!
-
 //! - `key_for`: single-pass blake3 over `source ++ compiler_version ++
 //!  flags`, ~1 GB/s on modern CPUs. A 10 KB source = ~10 µs.
 //! - `lookup`: 2 fs reads + 1 TOML parse. Cold lookup ~200 µs on SSD;

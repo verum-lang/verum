@@ -1,6 +1,5 @@
 //! Comprehensive examples of semantic types usage
 //!
-
 //! Run with: cargo run --example semantic_types_usage --package verum_common
 
 use verum_common::semantic_types::{List, Map, OrderedMap, OrderedSet, Set, Text};

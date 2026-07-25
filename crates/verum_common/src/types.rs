@@ -1,6 +1,5 @@
 //! Core type definitions
 //!
-
 //! Verum uses semantic type names: Text (not String), List (not Vec), Maybe (not Option).
 //! These aliases provide meaningful domain names while mapping to Rust std types.
 

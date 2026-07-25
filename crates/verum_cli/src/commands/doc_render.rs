@@ -1,6 +1,5 @@
 //! `verum doc-render` subcommand — auto-paper generator surface.
 //!
-
 //! Walks every `.vr` file in the project (using the same
 //! `audit::discover_vr_files` + `audit::parse_file_for_audit`
 //! helpers as the verify-ladder integration), projects each
@@ -9,10 +8,8 @@
 //! the resulting [`DocCorpus`] to
 //! [`DefaultDocRenderer`](verum_verification::doc_render::DefaultDocRenderer).
 //!
-
 //! ## Why a sibling to `doc.rs`
 //!
-
 //! The pre-existing `commands/doc.rs` is a Rust-style API-doc
 //! generator that walks `///` comments on functions/types — useful
 //! but a different concern than the auto-paper pipeline: the
@@ -21,10 +18,8 @@
 //! envelope (closure hash). Two separate generators with two
 //! separate use cases.
 //!
-
 //! ## Subcommands
 //!
-
 //!  * `verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]`
 //!  Render the entire corpus.
 //!  * `verum doc-render graph [--format dot|json] [--public]`

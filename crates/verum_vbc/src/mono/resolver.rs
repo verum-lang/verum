@@ -1,12 +1,10 @@
 //! Monomorphization resolver for resolving generic instantiations.
 //!
-
 //! The resolver implements a three-level resolution strategy:
 //! 1. Stdlib precompiled specializations
 //! 2. Persistent cache (validated)
 //! 3. Schedule for specialization
 //!
-
 //! Three-level resolution: (1) stdlib precompiled specializations, (2) persistent
 //! disk cache with validity checking, (3) schedule for fresh specialization.
 

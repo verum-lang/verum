@@ -1,11 +1,9 @@
 //! Integration Example: Specialization Selection with TypeChecker
 //!
-
 //! This example demonstrates how the SpecializationSelector integrates with
 //! the TypeChecker to automatically select the most specific protocol implementation
 //! during type inference.
 //!
-
 //! Run with: cargo run --example specialization_selection_integration
 
 use verum_ast::span::Span;

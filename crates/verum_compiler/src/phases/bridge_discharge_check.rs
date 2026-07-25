@@ -1,14 +1,11 @@
 //! Kernel-bridge discharge validation pre-pass.
 //!
-
 //! Task #135 / MSFS-L4.2 — the load-bearing piece that converts the
 //! bridge-discharge audit's *observation* (task #134's
 //! `verum audit --bridge-discharge`) into a *compile-time gate*.
 //!
-
 //! ## Architecture
 //!
-
 //! Every `apply kernel_<verb>_strict(literal_args...)` invocation in
 //! a proof body must be a legitimate discharge through Verum's
 //! kernel. This pre-pass walks the proof body BEFORE the SMT proof
@@ -18,22 +15,18 @@
 //! time — the user's proof claim "this discharges through the kernel"
 //! is no longer trusted on faith.
 //!
-
 //! ## Architectural rationale (high-performance, no per-bridge hardcoding)
 //!
-
 //!  * **One code path, all bridges.** The pre-pass is parameterised
 //!  over `verum_kernel::available_intrinsics()` + `dispatch_intrinsic`.
 //!  Adding a new `kernel_<verb>_strict` bridge requires only
 //!  registering its dispatcher entry; this validator picks it up
 //!  automatically with no edit here.
 //!
-
 //!  * **Pre-Z3 cost.** Pure AST walk + hashmap dispatch — no SMT
 //!  solver invocation, no kernel-recheck round-trip. Microsecond-
 //!  scale per proof body. The expensive part stays downstream.
 //!
-
 //!  * **Conservative on non-literal args.** Args that aren't
 //!  literally evaluable at parse time (parameter references,
 //!  arithmetic expressions, function calls) are passed through —
@@ -41,7 +34,6 @@
 //!  gate the literal-arg path because that's where the dispatcher
 //!  can run statically with full information.
 //!
-
 //!  * **Error preservation.** When the dispatcher rejects, the
 //!  compile error carries the dispatcher's `reason` text verbatim
 //!  so the user sees exactly *why* the kernel refused the args

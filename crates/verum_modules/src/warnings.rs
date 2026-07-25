@@ -1,10 +1,8 @@
 //! Module system warnings.
 //!
-
 //! Provides warnings for non-fatal issues like prelude shadowing,
 //! unused imports, and other patterns that may indicate bugs.
 //!
-
 //! Detects patterns like prelude shadowing (local definition shadows a
 //! std.prelude item), unused imports, glob import conflicts, deprecated
 //! items, self-shadowing, and module name collisions (file + inline).

@@ -14,7 +14,6 @@
 )]
 //! Tests for Dependent Types v2.0+ Features
 //!
-
 //! These tests cover the new dependent types features added for v2.0+:
 //! - Universe Hierarchy: Type : Type1 : Type2 : ... (prevents paradoxes via stratification)
 //! - Inductive Types: defined by constructors with strict positivity (e.g., Nat = Zero | Succ(Nat))

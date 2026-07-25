@@ -1,27 +1,21 @@
 //! Staged Compilation Pipeline for N-Level Metaprogramming
 //!
-
 //! This module implements the multi-stage compilation pipeline for Verum's
 //! N-level staged metaprogramming system. It orchestrates the execution of
 //! staged functions from highest stage to lowest.
 //!
-
 //! # Staged Metaprogramming Model
 //!
-
 //! Verum supports N-level staged metaprogramming where functions execute at
 //! different compilation stages:
 //!
-
 //! ```text
 //! Stage N ──► generates ──► Stage N-1 ──► ... ──► Stage 0 (runtime)
 //! (meta(N)) (meta(N-1)) (normal code)
 //! ```
 //!
-
 //! ## Stage Semantics
 //!
-
 //! | Stage | Syntax | Execution | Description |
 //! |-------|--------|-----------|-------------|
 //! | 0 | `fn f()` | Runtime | Normal runtime functions |
@@ -29,26 +23,20 @@
 //! | 2 | `meta(2) fn f()` | Pre-compile | Generates meta functions |
 //! | N | `meta(N) fn f()` | Stage N | Generates Stage N-1 code |
 //!
-
 //! ## Stage Coherence Rule
 //!
-
 //! The fundamental rule of staged metaprogramming:
 //!
-
 //! > **A Stage N function can only DIRECTLY generate Stage N-1 code.**
 //!
-
 //! This means:
 //! - `meta(2)` can only directly generate `meta` (stage 1) code
 //! - To generate runtime (stage 0) code from `meta(2)`, the output must contain
 //!  a `meta` function that performs the final generation
 //! - Each `quote { ... }` lowers the stage by 1
 //!
-
 //! # Compilation Flow
 //!
-
 //! ```text
 //! ┌──────────────────────────────────────────────────────────────────┐
 //! │ StagedPipeline │
@@ -79,10 +67,8 @@
 //! └──────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! // Stage 2: Generates stage 1 code
 //! meta(2) fn derive_factory<T>() -> TokenStream {
@@ -97,11 +83,9 @@
 //!  }
 //! }
 //!
-
 //! // Invocation at stage 2
 //! @derive_factory<MyType>()
 //!
-
 //! // After stage 2 execution, this is injected:
 //! meta fn derive_impl() -> TokenStream {
 //!  quote {
@@ -111,17 +95,14 @@
 //!  }
 //! }
 //!
-
 //! // After stage 1 execution:
 //! impl Factory for MyType {
 //!  fn create() -> Self { Self::default() }
 //! }
 //! ```
 //!
-
 //! # Integration
 //!
-
 //! The StagedPipeline integrates with:
 //! - **verum_types/stage_checker**: Validates stage constraints
 //! - **verum_compiler/meta_registry**: Stores meta functions per stage

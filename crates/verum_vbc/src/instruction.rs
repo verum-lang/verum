@@ -1,13 +1,10 @@
 //! VBC instruction set definitions.
 //!
-
 //! VBC uses a register-based instruction set with variable-length encoding.
 //! Each function has a fixed number of registers allocated at compile time.
 //!
-
 //! # Opcode Categories (v2)
 //!
-
 //! | Range | Category | Description |
 //! |-------|----------|-------------|
 //! | 0x00-0x0F | Data Movement | MOV, LOAD_*, CVT_* |

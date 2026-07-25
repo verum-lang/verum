@@ -1,13 +1,10 @@
 //! # Verify Strategy Extraction
 //!
-
 //! Translates the `@verify(...)` attribute argument from a Verum function/type
 //! declaration into a concrete verification dispatch strategy.
 //!
-
 //! ## Design Principle: Solver Abstraction
 //!
-
 //! This module is the USER-FACING API for verification. It deliberately
 //! exposes only **semantic strategies** (describing intent: "fast",
 //! "thorough", "certified") — never specific solver backends. This keeps
@@ -15,16 +12,13 @@
 //! compiler swap implementations (e.g., migrate from Z3+CVC5 to a custom
 //! solver) without breaking any existing annotations.
 //!
-
 //! Backend selection happens internally based on:
 //! - The strategy's intent (fast ↔ thorough tradeoff)
 //! - The goal's theory signature (routed via `capability_router`)
 //! - The set of linked solvers and their capabilities
 //!
-
 //! ## Grammar (verum.ebnf)
 //!
-
 //! ```ebnf
 //! verify_attribute = 'verify' , '(' ,
 //!  ( 'runtime' | 'static' | 'formal' | 'proof'
@@ -33,10 +27,8 @@
 //!  ')' ;
 //! ```
 //!
-
 //! ## Strategy Semantics
 //!
-
 //! | Attribute | Intent | Performance |
 //! |---------------|-------------------------------------------------|---------------------|
 //! | `runtime` | Runtime assertion (no formal proof) | Fastest, unverified |
@@ -49,10 +41,8 @@
 //! | `certified` | Independent cross-verification; for certs | Slowest, strongest |
 //! | `synthesize` | Generate a term from a specification | Variable |
 //!
-
 //! ## Usage
 //!
-
 //! Callers invoke `VerifyStrategy::from_attribute_value()` with the attribute
 //! argument string, then pass the returned strategy to `BackendSwitcher::
 //! solve_with_strategy()`. The switcher translates semantic strategies into

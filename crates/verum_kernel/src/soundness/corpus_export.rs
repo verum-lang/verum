@@ -1,28 +1,22 @@
 //! Corpus-theorem cross-format export — task #138 / MSFS-L4.5.
 //!
-
 //! Sibling to the kernel-soundness export (`coq.rs` / `lean.rs`) but
 //! aimed at *corpus theorems* (the theorems users write in their
 //! `.vr` modules, not the kernel's own meta-theory). Produces
 //! per-theorem foreign-tool source files that `coqc` / `lean` can
 //! re-check independently.
 //!
-
 //! ## Architecture (protocol-driven)
 //!
-
 //! Single trait [`CorpusBackend`] with one implementation per
 //! foreign tool. Adding Isabelle / Agda / Dedukti is a single new
 //! [`CorpusBackend`] instance — the walker, the audit gate, and the
 //! cross-format runner are all parameterised over the trait.
 //!
-
 //! ## What gets emitted
 //!
-
 //! For every `@theorem name(...) ensures E proof { … }` declaration:
 //!
-
 //!  * The theorem name as the foreign-tool identifier
 //!  (sanitised — Verum `snake_case` maps directly; non-ASCII
 //!  and reserved-word collisions get a `verum_` prefix).
@@ -36,18 +30,15 @@
 //!  foreign system*. Proof-term export is a separate piece
 //!  (proof_replay backends).
 //!
-
 //! This is the **statement-level CI gate**. Even at this scope it
 //! catches:
 //!
-
 //!  * Statements that don't type-check in the foreign system (e.g.,
 //!  malformed quantifier scoping, undefined operators, missing
 //!  imports).
 //!  * Tooling regressions — `coqc` / `lean` version drift surfaces
 //!  when the gate runs.
 //!
-
 //! Proof-term re-check is a strictly stronger gate that requires the
 //! kernel's CoreTerm proof to be lowered to each foreign system's
 //! tactic language; that lives in `verum_smt::proof_replay::*` and is

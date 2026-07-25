@@ -1,9 +1,7 @@
 //! Abstract link time optimization.
 //!
-
 //! ## ThinLTO
 //!
-
 //! ThinLTO is designed to do LTO while requiring fewer resources than regular
 //! LTO. It can run much faster and in less memory (comparable to linking
 //! without LTO) than regular LTO, with essentially no loss in optimization.

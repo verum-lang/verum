@@ -1,6 +1,5 @@
 //! Function parameter information for compile-time reflection
 //!
-
 //! Provides parameter metadata matching core/meta/reflection.vr ParamInfo.
 
 use verum_ast::MetaValue;

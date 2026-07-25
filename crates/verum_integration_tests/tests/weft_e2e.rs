@@ -1,24 +1,20 @@
 //! Weft net-framework end-to-end probes.
 //!
-
 //! Anchors three KВИ (CVE) acceptance gates for `core/net/weft/*`,
 //! pinned by direct invocation of the on-disk `verum` binary against
 //! a freshly-authored hello-world `.vr` source. Each probe is a
 //! single `#[test]` so the failure mode is explicit in CI:
 //!
-
 //!  * `check_passes_for_weft_hello_world`
 //!  CVE axis В — `verum check` must accept a router + handler
 //!  program that mounts every umbrella `core.net.weft.*` symbol.
 //!  Currently passes.
 //!
-
 //!  * `interpreter_runs_weft_hello_world_without_bind`
 //!  CVE axis И (smoke) — `verum run` (Tier 0 interpreter) must
 //!  execute a program that constructs a `Router` + `WeftApp` but
 //!  does NOT call `.bind()`. Currently passes.
 //!
-
 //!  * `aot_runs_weft_hello_world_without_bind`
 //!  CVE axis И (Tier 1) — `verum run --aot` should produce a
 //!  native executable that prints HELLO_OK. Currently *does not*
@@ -27,7 +23,6 @@
 //!  `os_mmap` / `os_alloc_segment` (see task #13). The test is
 //!  gated behind `WEFT_RUN_BIND_PROBES=1` until that lands.
 //!
-
 //! Two known-failure probes capture the foundational gaps surfaced
 //! during the 2026-04-30 audit. They are gated behind
 //! `WEFT_RUN_BIND_PROBES=1` so CI does not red-flag them while the
@@ -35,12 +30,10 @@
 //! #13). When the gate flips green, drop the env-guard and let the
 //! failures regress the bug-fix landings.
 //!
-
 //!  * `interpreter_bind_panics_with_known_message` —
 //!  `Result.map_err` is not resolved by the VBC interpreter's
 //!  method-dispatch path when `TcpListener.bind` invokes it.
 //!
-
 //!  * `aot_bind_segfaults_until_runtime_helpers_landed` —
 //!  `env_ctx_*`, `os_mmap`, `os_alloc_segment`, `swap`,
 //!  `get_thread_id` are skipped during VBC→LLVM lowering with

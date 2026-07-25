@@ -1,14 +1,11 @@
 //! Register file management.
 //!
-
 //! VBC uses a register-based architecture where each function has a fixed
 //! number of registers allocated at compile time. The register file is
 //! a growable array shared across all call frames.
 //!
-
 //! # Layout
 //!
-
 //! ```text
 //! ┌────────────────────────────────────────────────────────────────────────┐
 //! │ REGISTER FILE │
@@ -18,7 +15,6 @@
 //! └────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! Each frame's registers are accessed relative to a base offset.
 
 use crate::instruction::Reg;

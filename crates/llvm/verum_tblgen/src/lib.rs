@@ -12,42 +12,32 @@
 //! This crate provides raw bindings and a safe wrapper for [TableGen](https://llvm.org/docs/TableGen/),
 //! a domain-specific language used by the [LLVM project](https://llvm.org/).
 //!
-
 //! The goal of this crate is to enable users to develop custom [TableGen backends](https://llvm.org/docs/TableGen/BackGuide.html)
 //! in Rust. Hence the primary use case of this crate are procedural macros that
 //! generate Rust code from TableGen description files.
 //!
-
 //! # Safety
 //!
-
 //! This crate aims to be completely safe.
 //!
-
 //! # Supported LLVM Versions
 //!
-
 //! An installation of LLVM is required to use this crate.
 //! The versions of LLVM currently supported are 16.x.x, 17.x.x, 18.x.x,
 //! 19.x.x, 20.x.x, and 21.x.x. Different LLVM version can be selected using
 //! features flags (e.g., `llvm16-0` or `llvm17-0`).
 //!
-
 //! The `TABLEGEN_<version>_PREFIX` environment variable can be used to specify
 //! a custom directory of the LLVM installation.
 //!
-
 //! # Examples
 //!
-
 //! The following example parse simple TableGen code provided as a `&str` and
 //! iterates over classes and defs defined in this file.
 //!
-
 //! ```rust
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
-
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
 //!  .add_source(
@@ -67,14 +57,11 @@
 //! # }
 //! ```
 //!
-
 //! By adding include paths, external TableGen files can be included.
 //!
-
 //! ```rust,ignore
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
-
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
 //!  .add_source(r#"include "mlir/IR/OpBase.td""#)?
@@ -90,14 +77,11 @@
 //! # }
 //! ```
 //!
-
 //! You can also pass an included filename directly.
 //!
-
 //! ```rust,ignore
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
-
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
 //!  .add_source_file("mlir/IR/OpBase.td")
@@ -113,10 +97,8 @@
 //! # }
 //! ```
 //!
-
 //! # API Stability
 //!
-
 //! LLVM does not provide a stable C API for TableGen, and the C API provided by
 //! this crate is not stable. Furthermore, the safe wrapper does not provide a
 //! stable interface either, since this crate is still in early development.

@@ -1,9 +1,7 @@
 //! Bytecode format compatibility tests (#175 step E).
 //!
-
 //! Each test pins one slice of the migration policy:
 //!
-
 //!  * round_trip_preserves_header — `serialize_module` then
 //!  `deserialize_module` round-trip must reproduce the same magic /
 //!  version / hashes that went in.
@@ -23,7 +21,6 @@
 //!  equal-or-lower minor must remain readable (additive minor
 //!  contract).
 //!
-
 //! These complement the unit-level rejection guardrails in
 //! `format::tests::test_rejects_*` (commit 34de051f) by exercising the
 //! full serialize → byte-tamper → deserialize pipeline rather than the

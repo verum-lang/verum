@@ -1,32 +1,25 @@
 //! Lock Ordering Verification for Deadlock Prevention
 //!
-
 //! This module implements compile-time verification of lock acquisition ordering
 //! to prevent deadlocks.
 //!
-
 //! # Design
 //!
-
 //! Lock ordering verification works by:
 //! 1. Collecting `@lock_level(level: N)` attributes from type definitions
 //! 2. Building a lock acquisition graph from code analysis
 //! 3. Verifying that all acquisitions follow the strict partial order (lower -> higher)
 //! 4. Detecting cycles which indicate potential deadlock scenarios
 //!
-
 //! # Algorithm
 //!
-
 //! The verification uses a dataflow-based approach:
 //! - Track which locks are held at each program point
 //! - When a new lock is acquired, verify level(new_lock) > max(level(held_locks))
 //! - Report violation if the ordering constraint is violated
 //!
-
 //! # Deadlock Prevention Strategies
 //!
-
 //! 1. **Lock Ordering (primary)**: All locks must be acquired in ascending level order.
 //!  `@lock_level(level: N)` annotates lock types. Acquiring level L while holding
 //!  level M where L <= M is a compile error.

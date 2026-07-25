@@ -1,13 +1,11 @@
 //! Native ordinal arithmetic for the kernel — Cantor normal form with
 //! large-cardinal extensions.
 //!
-
 //! Pre-this-module the kernel encoded ordinals via raw `u32` placeholders
 //! (`KappaTier::KappaN(u32)`, bounded-arithmetic markers `999_999 = ω-1`,
 //! `1_000_000 = ω`). This module replaces those encodings with a
 //! mathematically-honest [`Ordinal`] type carrying:
 //!
-
 //!  * **Finite ordinals** `0, 1, 2, ...` (every natural number).
 //!  * **Limit ordinals** at `ω, ω·2, ω·3, ..., ω², ω²·2, ..., ω³, ...`
 //!  up to but not including `ε_0` (the supremum of the Cantor-normal-
@@ -18,16 +16,13 @@
 //!  above ω, `κ_2` is the second, etc. Used by the (∞,2)-stack
 //!  model and Drake reflection.
 //!
-
 //! The `lt` / `succ` / `is_regular` / `is_limit` operations are
 //! decidable on the Cantor-normal-form fragment; for `Sup` of an
 //! arbitrary countable family, decidability is delegated to the
 //! Sup operands.
 //!
-
 //! ## Design rationale
 //!
-
 //! Many kernel rules need ordinal comparison: K-Universe-Ascent
 //! checks `source ≤ target`, K-Refine-omega reasons about modal
 //! depth, Diakrisis 113.T autopoiesis requires `κ ≥ ω²`, MSFS
@@ -35,7 +30,6 @@
 //! Each of those operations needs Bool-valued decidable comparison,
 //! not opaque `Int` predicates.
 //!
-
 //! By centralising ordinal arithmetic here we (a) avoid scattered ad-
 //! hoc encodings, (b) get a single point at which Drake reflection
 //! / κ-tower extensions land cleanly, (c) match the literature's

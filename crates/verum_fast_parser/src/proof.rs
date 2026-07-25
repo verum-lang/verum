@@ -1,6 +1,5 @@
 //! Proof parsing for Verum formal proofs system.
 //!
-
 //! This module implements parsing for:
 //! - Theorem, axiom, lemma, corollary declarations
 //! - Proof bodies (term, tactic, structured, by-method)
@@ -8,7 +7,6 @@
 //! - Calculation chains (equational reasoning)
 //! - Proof methods (induction, cases, contradiction)
 //!
-
 //! Verum formal proofs (v2.0+ extension) enable machine-checkable mathematical
 //! proofs. Theorems/lemmas/corollaries use syntax: `theorem name(params): proposition { proof }`.
 //! Proof bodies can be term-mode, tactic-mode (`proof { ... }`), structured, or `by method`.

@@ -14,11 +14,9 @@
 )]
 //! Tests for the visitor pattern and AST traversal.
 //!
-
 //! This module ensures that the visitor pattern correctly traverses
 //! all nodes in the AST and that custom visitors can be implemented.
 //!
-
 //! The visitor system supports two traversal modes:
 //! - Recursive mode (default): Simple traversal using the call stack
 //! - Iterative mode: Stack-safe traversal using IterativeVisitor wrapper

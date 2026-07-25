@@ -1,14 +1,11 @@
 //! 13-strategy verification ladder dispatcher — kernel-checkable.
 //!
-
 //! ## What this module is
 //!
-
 //! Verum's verification model is a strict ν-monotone ladder of 13
 //! strategies (VVA §12 + the existing
 //! [`verum_smt::verify_strategy::VerifyStrategy`] enum):
 //!
-
 //! ```text
 //!  runtime (0) < static (1) < fast (2) < complexity_typed (n<ω) <
 //!  formal (ω) < proof (ω+1) < thorough (ω·2) < reliable (ω·2+1) <
@@ -16,11 +13,9 @@
 //!  coherent (ω·2+5) < synthesize (≤ω·3+1)
 //! ```
 //!
-
 //! Every theorem carries an `@verify(<strategy>)` annotation; this
 //! module is the single dispatcher that:
 //!
-
 //!  1. Projects the annotation to a [`LadderStrategy`] enum.
 //!  2. Routes the obligation through the matching backend
 //!  (Z3 / CVC5 / kernel-recheck / certificate-replay / coherent
@@ -31,10 +26,8 @@
 //!  stricter strategy succeeding **lifts** to the same verdict
 //!  under every coarser strategy.
 //!
-
 //! ## Why this is a fundamental refactor (not a wrapper)
 //!
-
 //! Pre-this-module the dispatch was scattered across
 //! `verum_smt::backend_switcher`, `verum_smt::tactics`,
 //! `verum_kernel::infer`, and the CLI command harness; per-strategy
@@ -44,18 +37,14 @@
 //! making it impossible to silently fall through to a coarser
 //! strategy without a typed acknowledgement.
 //!
-
 //! Each backend adapter is a small, testable concern; the dispatcher
 //! itself is foundation-neutral and works against any obligation
 //! shape that maps onto Verum's [`verum_kernel::CoreTerm`].
 //!
-
 //! ## current surface (this commit)
 //!
-
 //! ships:
 //!
-
 //!  * The full [`LadderStrategy`] / [`LadderVerdict`] /
 //!  [`LadderObligation`] / [`LadderDispatcher`] surface.
 //!  * Adapters for the 5 strategies whose backends already exist:
@@ -70,16 +59,13 @@
 //!  `LadderVerdict::DispatchPending` (the inverse of "silently
 //!  fall through to coarser strategy").
 //!
-
 //! ## V1+ promotion path
 //!
-
 //! V1 lands the per-strategy backends behind the existing trait
 //! interface — no architectural change to consumers. The
 //! `verum verify` CLI uses this dispatcher today; it will gain
 //! strictness as backends fill in.
 //!
-
 //! Aligned with Verum's "no magic, explicit dependencies" philosophy:
 //! per-strategy intent is a *first-class* dispatch contract, not an
 //! audit-time projection.

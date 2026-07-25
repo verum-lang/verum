@@ -1,43 +1,34 @@
 //! # CVC5 Advanced Features
 //!
-
 //! Exposes capabilities that are either exclusive to CVC5 or where CVC5's
 //! implementation is substantially more powerful than Z3's:
 //!
-
 //! - **SyGuS** (Syntax-Guided Synthesis) — synthesize functions matching a
 //!  specification with user-provided grammars. CVC5 is the reference
 //!  implementation; Z3 has no equivalent.
 //!
-
 //! - **Abduction** — given `ψ` unprovable from `Γ`, find the weakest `A` such
 //!  that `Γ ∪ {A} ⊢ ψ`. Useful for discovering missing hypotheses,
 //!  debugging failed proofs, and inferring loop invariants. CVC5-specific.
 //!
-
 //! - **Quantifier Elimination** (QE) — compute a quantifier-free formula
 //!  equivalent to a quantified input. Both solvers support QE, but CVC5's
 //!  implementation handles a broader fragment (including some nonlinear
 //!  reals via CAD).
 //!
-
 //! - **Finite Model Finding** (FMF) — for goals with universal quantifiers
 //!  over uninterpreted domains, CVC5 can enumerate finite models as
 //!  counterexamples. Z3's `model-based quantifier instantiation` is
 //!  weaker in this regard.
 //!
-
 //! ## Runtime Availability
 //!
-
 //! All functions check `cvc5_sys::init()` at entry. When CVC5 is not linked,
 //! they return `Cvc5AdvancedError::NotAvailable` immediately without any
 //! FFI calls. This lets downstream code feature-detect CVC5 at runtime.
 //!
-
 //! ## Safety
 //!
-
 //! This module wraps raw FFI calls into safe Rust APIs. The wrappers:
 //! - Validate all input pointers before dereferencing.
 //! - Convert C strings to owned `String`s (no dangling references).

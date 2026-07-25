@@ -1,6 +1,5 @@
 //! Standard attribute registration for Verum.
 //!
-
 //! This module registers all built-in Verum attributes with the registry.
 //! Attributes are organized by category for maintainability.
 

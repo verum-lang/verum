@@ -1,18 +1,14 @@
 //! LLVM IR helper functions emitted inline for collection operations.
 //!
-
 //! These functions are defined as Internal-linkage LLVM IR functions during
 //! module creation (Phase 0.5 in `lower_module`) for list, set, and map-grow operations.
 //!
-
 //! Most map operations (insert/get/contains/iter) are handled by compiled
 //! `core/collections/map.vr` via Strategy 1/2 dispatch and do NOT need
 //! LLVM IR helpers here.
 //!
-
 //! # LLVM IR Helpers
 //!
-
 //! | Function | Description |
 //! |----------|-------------|
 //! | verum_list_grow | Grow list backing array (2x capacity) |

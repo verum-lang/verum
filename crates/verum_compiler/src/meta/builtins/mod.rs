@@ -1,34 +1,25 @@
 //! Builtin Meta Functions
 //!
-
 //! This module provides all compile-time intrinsic functions available
 //! in meta expressions, organized by their context requirements.
 //!
-
 //! ## Unified Context Model
 //!
-
 //! All builtins are categorized into tiers based on what external state they access:
 //!
-
 //! ### Tier 0: Core Primitives (Always Available)
 //!
-
 //! Pure functions that operate only on their input values:
 //!
-
 //! - **Arithmetic**: `abs`, `min`, `max`, `int_to_text`, `text_to_int`
 //! - **Collections**: `list_len`, `list_push`, `list_get`, `list_concat`, etc.
 //! - **Text**: `text_concat`, `text_len`, `text_split`, `text_join`, etc.
 //! - **Code Gen**: `quote`, `unquote`, `stringify`, `concat_idents`, `format_ident`
 //!
-
 //! ### Tier 1: Capability-Gated Functions (Require Context)
 //!
-
 //! Functions that access external state and require explicit context declaration:
 //!
-
 //! | Context | Module | Purpose |
 //! |---------|--------|---------|
 //! | `MetaTypes` | `reflection`, `type_props` | Type introspection and layout |
@@ -36,10 +27,8 @@
 //! | `CompileDiag` | `code_gen` | Compiler diagnostics |
 //! | `BuildAssets` | `build_assets` | File system access |
 //!
-
 //! ## Usage
 //!
-
 //! ```verum
 //! // Tier 0 - no context required
 //! meta fn pure_example() -> Int {
@@ -48,7 +37,6 @@
 //!  x + s
 //! }
 //!
-
 //! // Tier 1 - requires explicit context
 //! meta fn reflect_example<T>() -> Text
 //!  using [MetaTypes]
@@ -56,7 +44,6 @@
 //!  type_name(T) // Requires MetaTypes context
 //! }
 //!
-
 //! meta fn diagnostic_example()
 //!  using [CompileDiag]
 //! {
@@ -64,7 +51,6 @@
 //! }
 //! ```
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

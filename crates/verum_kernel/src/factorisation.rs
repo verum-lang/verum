@@ -1,14 +1,11 @@
 //! Factorisation systems on (∞,1)-categories — V0 algorithmic
 //! kernel rule (HTT 5.2.8).
 //!
-
 //! ## What this delivers
 //!
-
 //! A **factorisation system** on an ∞-category `C` is an orthogonal
 //! pair `(L, R)` of classes of morphisms such that:
 //!
-
 //!  1. **Orthogonality** (HTT 5.2.8.5): every `l ∈ L` is *left
 //!  orthogonal* to every `r ∈ R`, i.e. for every commuting square
 //!  `l ⊥ r` there is a *unique* (up to iso) lift.
@@ -19,28 +16,22 @@
 //!  closed under composition + retracts; `L` under cobase change;
 //!  `R` under base change.
 //!
-
 //! Common examples:
 //!
-
 //!  * `(epi, mono)` — surjection / injection (HTT 5.2.8.4).
 //!  * `(local equivalence, locally constant)` — the localisation
 //!  factorisation (HTT 5.2.7.5).
 //!  * `(n-connected, n-truncated)` — the n-truncation factorisation
 //!  (HTT 5.2.8.16).
 //!
-
 //! Pre-this-module factorisation systems are admitted via the
 //! host-stdlib axioms `msfs_epi_mono_factorisation` and
 //! `msfs_n_truncation_factorisation`.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`FactorisationSystem`] — the `(L, R)` data with closure
 //!  witnesses (HTT 5.2.8.6).
 //!  2. [`Factorisation`] — concrete `f = r ∘ l` decomposition.
@@ -52,15 +43,12 @@
 //!  6. [`build_n_truncation_factorisation`] — HTT 5.2.8.16 with
 //!  bridge to [`crate::truncation`].
 //!
-
 //! Future work: explicit lifting cells with full pentagonal
 //! coherence; the current surface ships the structural skeleton + flag
 //! witnesses.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **§6 β-part Step 5** — currently admits via
 //!  `msfs_epi_mono_factorisation` framework axiom. Promotion:
 //!  invoke [`build_epi_mono_factorisation`] directly.

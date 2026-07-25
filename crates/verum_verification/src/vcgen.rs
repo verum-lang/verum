@@ -1,37 +1,29 @@
 //! Verification Condition Generation
 //!
-
 //! This module implements the Verification Condition (VC) Generation system
 //! for Verum's formal verification. VCs are logical formulas whose validity
 //! implies program correctness.
 //!
-
 //! # Specification
 //!
-
 //! Verification conditions are logical formulas whose validity implies program
 //! correctness. The generator uses Dijkstra's weakest precondition (wp) calculus:
 //!  VC(f) = forall params. Precondition => wp(body, Postcondition)
 //! For loops, 3 VCs are generated: initialization (pre => invariant),
 //! preservation (inv /\ cond => wp(body, inv)), and exit (inv /\ !cond => post).
 //!
-
 //! # Weakest Precondition Calculus
 //!
-
 //! The core algorithm is based on Dijkstra's weakest precondition calculus:
 //!
-
 //! - `wp(skip, Q) = Q`
 //! - `wp(x := e, Q) = Q[x/e]`
 //! - `wp(S1; S2, Q) = wp(S1, wp(S2, Q))`
 //! - `wp(if b then S1 else S2, Q) = (b => wp(S1, Q)) && (!b => wp(S2, Q))`
 //! - `wp(while b inv I, Q) = I && (forall v. I && b => wp(S, I)[v/v']) && (I && !b => Q)`
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! @verify(proof)
 //! fn increment(x: Int) -> Int {
@@ -42,7 +34,6 @@
 //!  return x + 1;
 //! }
 //!
-
 //! // Generated VC:
 //! // (x >= 0) => wp(return x + 1, result > x)
 //! // = (x >= 0) => (x + 1 > x)

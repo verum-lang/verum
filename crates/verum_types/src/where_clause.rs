@@ -1,35 +1,27 @@
 //! Where Clause Disambiguation
 //!
-
 //! Where clause disambiguation: value-level refinements vs type-level constraints (where type T: Protocol)
 //!
-
 //! Starting with Verum v1.2, the `where` keyword supports four distinct uses
 //! with explicit prefixes for LL(1) parsing and improved clarity:
 //!
-
 //! 1. **Type Constraints**: `where type T: Ord` - Generic protocol bounds
 //! 2. **Meta Constraints**: `where meta N > 0` - Compile-time meta constraints
 //! 3. **Value Refinements**: `where value it > 0` - Runtime value constraints
 //! 4. **Postconditions**: `where ensures result >= 0` - Return value guarantees
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! // Type constraint
 //! fn sort<T>(list: List<T>) where type T: Ord { ... }
 //!
-
 //! // Meta constraint
 //! fn zeros<N>() -> [Int; N] where meta N > 0 { ... }
 //!
-
 //! // Value refinement
 //! type Positive is Int where value it > 0;
 //!
-
 //! // Postcondition
 //! fn abs(x: Int) -> Int where ensures result >= 0 { ... }
 //! ```

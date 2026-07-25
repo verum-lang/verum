@@ -1,9 +1,7 @@
 //! Cross-format CI hard gate — algorithmic kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! Verum proofs can be exported to four foreign proof-assistant
 //! formats: **Coq**, **Lean 4**, **Isabelle/HOL**, and **Dedukti**.
 //! Each export must be re-checked by the foreign system; the
@@ -11,12 +9,10 @@
 //! survives a round-trip through every backend before being
 //! merged.
 //!
-
 //! Pre-this-module the gate was a series of ad-hoc shell scripts in
 //! `vcs/scripts/` that were neither composable nor inspectable from
 //! kernel-side tooling. ships:
 //!
-
 //!  1. [`ExportFormat`] — Coq / Lean4 / Isabelle / Dedukti enumeration.
 //!  2. [`FormatStatus`] — per-format CI status (`Passed` / `Failed` /
 //!  `NotRun`).
@@ -30,15 +26,12 @@
 //!  command that reproduces a given format's check (used by
 //!  `verum audit --reproducibility`).
 //!
-
 //! Future work: tighten the hard gate to additionally require
 //! kernel-recheck of the foreign-system's *output* (closing the loop
 //! on the cross-format trust boundary).
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **`verum audit --cross-format`** CLI command: walks the gate
 //!  report and surfaces the precise per-format pass/fail state.
 //!  - **MSFS reproducibility chain** — every `@verify(certified)`

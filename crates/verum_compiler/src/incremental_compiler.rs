@@ -1,21 +1,17 @@
 //! Incremental Compilation Support
 //!
-
 //! Enables fast recompilation by caching:
 //! - Parsed ASTs
 //! - Type checking results
 //! - Meta registry
 //! - Optimization results
 //!
-
 //! Incremental compilation: item-level hashing distinguishes signature changes
 //! (which invalidate dependents) from body-only changes (which skip recompilation).
 //! Phase 2 meta registry cached; Phase 3 re-expands only changed modules.
 //!
-
 //! ## Key Features
 //!
-
 //! - **Dependency Tracking**: Automatic transitive dependency invalidation
 //! - **Cache Persistence**: Save/load cache across compilation sessions
 //! - **Topological Sorting**: Correct recompilation order based on dependency graph

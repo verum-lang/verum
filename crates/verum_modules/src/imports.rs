@@ -1,6 +1,5 @@
 //! Import resolution for modules.
 //!
-
 //! Resolves import statements (mount/import) to actual items in modules.
 //! Supports single imports, glob imports (path.*), nested imports (path.{A, B}),
 //! and renamed imports (path.X as Y). Visibility is checked during resolution

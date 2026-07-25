@@ -1,6 +1,5 @@
 //! Context-specific error types and diagnostics.
 //!
-
 //! This module provides world-class error messages for context-related issues,
 //! especially E0301 (context used but not declared). It implements:
 //! - Call chain propagation visualization

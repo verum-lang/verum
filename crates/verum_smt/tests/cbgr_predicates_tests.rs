@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for CBGR predicates
 //!
-
 //! Tests cover:
 //! - Generation counter operations
 //! - Epoch extraction

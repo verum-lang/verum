@@ -1,11 +1,9 @@
 //! Protocol coherence checking — orphan rule, overlap detection,
 //! cross-crate violations, specialization.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 6). Validates that
 //! protocol implementations follow coherence rules:
 //!
-
 //!  * **Orphan rule** — implementation must be in the crate that
 //!  defines either the protocol OR the type.
 //!  * **Overlap prevention** — no two implementations can apply to
@@ -13,15 +11,12 @@
 //!  * **Specialization** — overlapping impls must opt-in via
 //!  `@specialize`.
 //!
-
 //! The cluster is gated on `[protocols].coherence` in `verum.toml`:
 //!
-
 //!  * `unchecked` → skip coherence checking entirely.
 //!  * `lenient` → emit violations as warnings (default).
 //!  * `strict` → emit violations as errors.
 //!
-
 //! Pre-registered "trusted" crates (`core`, `sys`, `mem`, …) are
 //! allowed to define blanket implementations like
 //! `implement<T, U: From<T>> Into<U> for T { ... }` without

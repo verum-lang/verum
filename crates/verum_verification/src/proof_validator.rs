@@ -1,36 +1,27 @@
 //! Proof Validator for Verum's Formal Proof System
 //!
-
 //! This module implements complete proof term validation according to
 //! the Verum formal proof system. It validates that proof terms correctly prove
 //! their claimed propositions using the Curry-Howard correspondence and
 //! formal proof rules.
 //!
-
 //! ## Architecture
 //!
-
 //! The validator consists of three main components:
 //!
-
 //! 1. **ProofValidator** - Main validation engine that checks proof terms
 //!  against their propositions using formal proof rules
 //!
-
 //! 2. **HypothesisContext** - Manages hypothesis scoping during proof validation,
 //!  tracking available assumptions and their types
 //!
-
 //! 3. **ProofCertificateGenerator** - Generates proof certificates in standard
 //!  formats (Dedukti, Coq, Lean) for external verification
 //!
-
 //! ## Validation Rules
 //!
-
 //! The validator implements all proof rules from the unified proof term system:
 //!
-
 //! - **Axiom**: Valid if axiom exists in the axiom database
 //! - **Assumption/Hypothesis**: Valid if assumption is in hypothesis context
 //! - **ModusPonens**: Given proofs of P and P→Q, validate proof of Q
@@ -42,23 +33,18 @@
 //! - **Apply**: Check function application is well-typed
 //! - **SmtProof**: Validate SMT-generated proofs match propositions
 //!
-
 //! ## Example Usage
 //!
-
 //! ```no_run
 //! use verum_verification::proof_validator::ProofValidator;
 //!
-
 //! // Create validator with axiom database
 //! let validator = ProofValidator::new();
 //!
-
 //! // Register axioms and validate proof terms
 //! // (Full example code omitted - see tests for complete examples)
 //! ```
 //!
-
 //! Formal Proofs System (Verum 2.0+ planned):
 //! Proof terms are first-class values (type Proof<P: Prop>). Core rules include
 //! Axiom, Assumption, ModusPonens, Rewrite, Symmetry, Transitivity, Reflexivity,

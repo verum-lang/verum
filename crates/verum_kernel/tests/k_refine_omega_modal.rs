@@ -1,17 +1,13 @@
 //! K-Refine-omega modal-depth integration tests (Modal-depth, Theorem 136.T).
 //!
-
 //! Diakrisis Definition 136.D1: transfinite modal language L^ω_α with
 //! ordinal-valued modal-depth `md^ω`. The K-Refine-omega rule extends
 //! K-Refine with the second invariant
 //!
-
 //!  md^ω(P) < md^ω(A) + 1
 //!
-
 //! blocking every modal-paradox witness up to depth κ_2.
 //!
-
 //! This file exercises the V1 m_depth_omega computation on the four
 //! canonical modal-rank shapes: atomic (md^ω = 0), single-box
 //! (md^ω = 1), nested-box (md^ω = 2), and big-and (sup over

@@ -1,22 +1,17 @@
 //! Incremental parsing infrastructure
 //!
-
 //! This module provides the core incremental parsing system for the LSP server.
 //! It enables efficient re-parsing of documents by tracking changes and reusing
 //! unchanged AST subtrees.
 //!
-
 //! # Performance Characteristics
 //!
-
 //! - Document sync: <10ms for typical changes
 //! - Incremental parse: <50ms for 1000 LOC files
 //! - Memory overhead: <10MB per open document
 //!
-
 //! # Architecture
 //!
-
 //! The incremental parsing system works by:
 //! 1. Tracking changed text ranges when documents are edited
 //! 2. Identifying which AST nodes are affected by the changes
@@ -24,10 +19,8 @@
 //! 4. Reusing cached, unchanged AST subtrees
 //! 5. Updating parent nodes incrementally
 //!
-
 //! # Integration with verum_syntax and verum_parser
 //!
-
 //! This module integrates with:
 //! - `verum_syntax::IncrementalEngine` for green tree manipulation
 //! - `verum_parser::IncrementalParserEngine` for parsing integration

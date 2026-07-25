@@ -3,7 +3,6 @@
 //! `prove_current_goal()` unconditionally and accepted ANY term as
 //! a proof of ANY goal:
 //!
-
 //! ```ignore
 //! fn apply_exact(&mut self, _proof: &Heap<Expr>) -> TacticResult<()> {
 //!  // For now, just mark as proven
@@ -12,7 +11,6 @@
 //! }
 //! ```
 //!
-
 //! Post-fix the term must be one of:
 //! - A Path naming a hypothesis whose proposition equals the goal.
 //! - The goal expression itself (covers literal `true`, reflexive

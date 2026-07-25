@@ -1,12 +1,9 @@
 //! Code Generation Intrinsics
 //!
-
 //! This module provides compile-time code generation functions organized by tier.
 //!
-
 //! ## Tier 0: Pure AST/Text Manipulation (Always Available)
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `quote(expr)` | `(Expr) -> Ast` | Quote an expression as AST |
@@ -15,23 +12,18 @@
 //! | `concat_idents(parts...)` | `(...Text) -> Text` | Concatenate identifiers |
 //! | `format_ident(fmt, args...)` | `(Text, ...) -> Text` | Format identifier name |
 //!
-
 //! ## Tier 1: Compiler Diagnostics (Requires CompileDiag)
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `compile_error(msg)` | `(Text) -> !` | Emit compile-time error |
 //! | `compile_warning(msg)` | `(Text) -> ()` | Emit compile-time warning |
 //!
-
 //! ## Context Requirements
 //!
-
 //! - **Tier 0**: `quote`, `unquote`, `stringify`, `concat_idents`, `format_ident` - No context required
 //! - **Tier 1**: `compile_error`, `compile_warning` - Requires `using [CompileDiag]`
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

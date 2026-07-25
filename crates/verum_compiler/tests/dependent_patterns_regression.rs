@@ -20,10 +20,8 @@
 //! should NEVER regress — any change to the type checker, unifier, or
 //! refinement system must keep all of these passing.
 //!
-
 //! # Strategic finding (Phase A.1 audit)
 //!
-
 //! The plan originally listed "Phase A.1 Pi-type surface syntax" as a
 //! blocker for downstream work (hott.vr, simplicial.vr, infinity topos,
 //! etc.). The assumption was that Verum lacked a way to express
@@ -32,27 +30,23 @@
 //! dependent-type patterns needed for production dependently-typed
 //! programming through three composable mechanisms:
 //!
-
 //! 1. **Refinement types with earlier-param references**
 //!  `fn index(len: Int, i: Int{>= 0, < len}) -> Int`
 //!  The predicate `i < len` treats `len` as an in-scope term, which
 //!  is exactly the Π-type `(len: Int) → (i: Int) → Int` with the
 //!  `len`-bound witnessed by the refinement predicate.
 //!
-
 //! 2. **Meta parameters for type-level values**
 //!  `fn fill<N: meta Int>(v: Int) -> [Int; N]`
 //!  `N` is a compile-time integer that can appear in type positions
 //!  (sized arrays, matrix dimensions, etc.), providing full
 //!  type-level computation over integer indices.
 //!
-
 //! 3. **Higher-kinded types**
 //!  `fn map<F<_>, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>`
 //!  Full HKT support enables Functor, Monad, and similar abstractions
 //!  without new syntax.
 //!
-
 //! **Implication**: Phase A.1 is re-scoped from "add new Pi surface
 //! syntax" to "document and regression-test existing support". The
 //! remaining unique feature of classical Π-types —
@@ -62,7 +56,6 @@
 //! missing piece should be added to this file as a failing test first,
 //! then implemented.
 //!
-
 //! Related: plan at `~/.claude/plans/rustling-churning-unicorn.md`,
 //! Phase A.1 (to be updated).
 

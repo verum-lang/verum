@@ -1,27 +1,21 @@
 //! Algebraic Structure Verification
 //!
-
 //! Implements verification of algebraic structures and their laws.
 //!
-
 //! Verifies algebraic structure axioms using SMT. Groups require associativity
 //! `(a*b)*c = a*(b*c)`, identity `e*a = a`, and inverse `inv(a)*a = e`.
 //! Homomorphisms verify `f(a*b) = f(a)*f(b)`. Substructures verify closure,
 //! identity inclusion, and inverse closure. All verified via Z3 proof search.
 //!
-
 //! ## Features
 //!
-
 //! - **Group Axioms**: Verify associativity, identity, and inverse laws
 //! - **Monoid Verification**: Verify associativity and identity
 //! - **Homomorphism Checking**: Verify structure-preserving maps
 //! - **Substructure Validation**: Check closure and containment properties
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Axiom verification: < 100ms per law
 //! - Structure validation: < 50ms per check
 

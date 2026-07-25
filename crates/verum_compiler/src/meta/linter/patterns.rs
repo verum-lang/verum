@@ -1,9 +1,7 @@
 //! Unsafe Pattern Definitions for Meta Linter
 //!
-
 //! Defines the 18 kinds of unsafe patterns detected in meta code.
 //!
-
 //! Meta linter: static analysis of meta code for unsafe patterns (unbounded
 //! recursion, infinite loops, unsafe interpolation without @safe attribute).
 

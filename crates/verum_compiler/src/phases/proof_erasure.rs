@@ -1,33 +1,25 @@
 //! Phase 4.5: Proof Erasure
 //!
-
 //! This phase runs between semantic analysis (Phase 4) and VBC codegen
 //! (Phase 5). It strips all proof-level items from the typed AST so that
 //! the runtime carries **zero proof-term overhead**:
 //!
-
 //! - `theorem`, `lemma`, `corollary`, `axiom`, `tactic` declarations
 //!  are verified during the proof-verification phase and then **completely
 //!  removed** from the item list before VBC code generation.
 //!
-
 //! - Function parameters with `Quantity::Zero` (erased/irrelevant
 //!  parameters) are removed from runtime calling conventions.
 //!
-
 //! - Values of type `Proof<P>` are replaced with unit values.
 //!
-
 //! ## Invariant
 //!
-
 //! After this phase, the remaining AST contains **only** runtime-relevant
 //! items. The VBC codegen can process every item without any proof-awareness.
 //!
-
 //! ## Integration
 //!
-
 //! Called from `pipeline.rs` after `phase_semantic_analysis` and before
 //! `phase_vbc_codegen`. The erasure is idempotent — running it twice
 //! produces the same result.

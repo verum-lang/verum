@@ -15,7 +15,6 @@
 )]
 //! Correctness tests for verum_lexer
 //!
-
 //! Tests functional behavior of lexer components.
 //! Covers token recognition for keywords, literals, operators, and delimiters
 //! as defined by the Verum lexical grammar.

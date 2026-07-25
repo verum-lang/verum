@@ -1,6 +1,5 @@
 //! Procedural macros for verum_llvm.
 //!
-
 //! This crate provides derive macros for safe LLVM enum conversions.
 //! Simplified from inkwell_internals for LLVM 21 only (no version conditionals).
 

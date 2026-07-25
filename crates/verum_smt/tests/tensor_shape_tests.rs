@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for tensor shape verification using Z3 Array theory
 //!
-
 //! This test suite validates:
 //! - Matrix multiplication shape checking
 //! - NumPy-style broadcasting
@@ -23,7 +22,6 @@
 //! - Reshape validation with Z3 product constraints
 //! - Bounds check elimination verification
 //!
-
 //! Tests all tensor shape verification features: Tensor<T, Shape> with compile-time
 //! shape parameters, matrix multiplication dimension checking, NumPy-style broadcasting,
 //! reshape validation (product of old shape = product of new shape), and bounds check

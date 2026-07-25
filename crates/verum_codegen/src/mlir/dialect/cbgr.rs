@@ -1,6 +1,5 @@
 //! Comprehensive CBGR (Compile-time Borrow and Generation-based Reference) dialect operations.
 //!
-
 //! This module implements the full CBGR memory safety system for Verum, providing:
 //! - Three-tier reference system (Managed/Checked/Unsafe)
 //! - Generation-based validity tracking
@@ -8,19 +7,15 @@
 //! - Escape analysis annotations
 //! - Borrow scope management
 //!
-
 //! # CBGR Reference Layout
 //!
-
 //! ```text
 //! ThinRef<T>: { ptr: *mut T, generation: u32, epoch_caps: u32 } = 16 bytes
 //! FatRef<T>: { ptr: *mut T, generation: u32, epoch_caps: u32, metadata: u64 } = 24 bytes
 //! ```
 //!
-
 //! # Reference Tiers
 //!
-
 //! | Tier | Name | Overhead | Validation |
 //! |------|---------|----------|------------|
 //! | 0 | Managed | ~15ns | Full CBGR checks |

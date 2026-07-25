@@ -1,15 +1,12 @@
 //! Cross-file module resolution + per-module type-check driver.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 24). Houses the
 //! mount-graph resolution + cross-file context machinery that
 //! sits between parse and type-check, plus the actual per-module
 //! analysis driver (`analyze_module`).
 //!
-
 //! Surface:
 //!
-
 //!  * `expand_module` — Pass-2 macro expansion entry; walks
 //!  every item, collects macro/meta invocations, dispatches
 //!  to `MacroExpander`.

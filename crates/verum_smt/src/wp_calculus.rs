@@ -1,17 +1,13 @@
 //! Weakest Precondition (WP) Calculus for Contract Verification
 //!
-
 //! This module implements Dijkstra's weakest precondition calculus for verifying
 //! function contracts (requires/ensures) and loop invariants.
 //!
-
 //! ## Theory
 //!
-
 //! For a statement S and postcondition Q, `wp(S, Q)` is the weakest condition
 //! such that if `wp(S, Q)` holds before executing S, then Q holds after.
 //!
-
 //! Key rules:
 //! - `wp(skip, Q) = Q`
 //! - `wp(x := e, Q) = Q[e/x]` (substitution)
@@ -19,7 +15,6 @@
 //! - `wp(if b then S1 else S2, Q) = (b => wp(S1, Q)) && (!b => wp(S2, Q))`
 //! - For loops: `wp(while b inv I, Q) = I && forall state. (I && !b => Q) && (I && b => wp(body, I))`
 //!
-
 //! Implements the contract literal verification pipeline: contract literals
 //! (`contract#"requires P; ensures Q;"`) on `@verify(proof)` functions are parsed
 //! into precondition/postcondition pairs, then WP calculus generates verification

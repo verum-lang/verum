@@ -1,18 +1,14 @@
 //! `verum fmt` throughput benchmarks.
 //!
-
 //! Two cost layers:
 //!
-
 //! 1. `fmt_single_file` — cost of running `format_string` against
 //!  one ~1 KLOC fixture. Measures the fixed per-file overhead
 //!  (parser + pretty-printer + post-processing).
 //!
-
 //! 2. `fmt_repo_parallel` — end-to-end cost of `verum fmt --check`
 //!  against a 100-file corpus through the parallel runner.
 //!
-
 //! Run with: `cargo bench -p verum_cli --bench fmt_throughput`.
 //! Compare runs with `--save-baseline` / `--baseline`.
 

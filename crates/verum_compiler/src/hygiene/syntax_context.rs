@@ -1,20 +1,16 @@
 //! Syntax Context for Hygiene Tracking
 //!
-
 //! Every identifier in Verum carries a SyntaxContext that tracks where it was introduced.
 //! This enables hygienic macro expansion where identifiers introduced by macros
 //! don't accidentally capture user bindings.
 //!
-
 //! ## Design
 //!
-
 //! Based on Racket's sets-of-scopes model with additional support for:
 //! - Multi-stage metaprogramming (stages 0, 1, 2+)
 //! - Transparency modes (opaque, semi-transparent, transparent)
 //! - Expansion chain tracking for error messages
 //!
-
 //! Syntax context tracking for hygienic macro expansion.
 //! Each identifier carries a syntax context marking its expansion origin.
 

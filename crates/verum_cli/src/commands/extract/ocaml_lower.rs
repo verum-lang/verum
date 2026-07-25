@@ -1,6 +1,5 @@
 //! Verum AST → OCaml lowerer.
 //!
-
 //! Walks a [`verum_ast::expr::Expr`] (or [`verum_ast::expr::Block`])
 //! and emits the corresponding OCaml source text. The lowerer is
 //! **partial-coverage by design** — covering the common pure-
@@ -9,7 +8,6 @@
 //! its current vocabulary so the caller can gracefully fall back
 //! to the V12.1 metadata-comment scaffold.
 //!
-
 //! Architectural notes (per VVA semantic-honesty):
 //!  * Pure functional subset matches OCaml's strict-evaluation
 //!  ML core; effectful Verum constructs (mutation, async,

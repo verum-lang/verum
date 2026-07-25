@@ -1,16 +1,12 @@
 //! # Intrinsic Type Signatures
 //!
-
 //! This module provides type signature validation for intrinsic functions,
 //! including support for generic intrinsics with protocol bounds.
 //!
-
 //! ## Protocol Bounds
 //!
-
 //! Protocol bounds constrain generic type parameters:
 //!
-
 //! | Protocol | Types | Description |
 //! |----------|-------|-------------|
 //! | `Atomic` | U8, U16, U32, U64, Int, Bool, *const T, *mut T | Atomic operations |
@@ -19,10 +15,8 @@
 //! | `UnsignedInteger` | U8-U64, USize | Unsigned arithmetic |
 //! | `FloatingPoint` | F32, F64 | Floating-point math |
 //!
-
 //! ## Example
 //!
-
 //! ```ignore
 //! // Generic atomic intrinsic with protocol bound
 //! @intrinsic("atomic_load")

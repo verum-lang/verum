@@ -1,20 +1,17 @@
 //! Ratchet: count lenient `SKIP` warnings emitted during a stdlib-loading
 //! compile and fail CI if the count grows.
 //!
-
 //! Each `[lenient] SKIP <fn>: <reason>` is a body that VBC codegen
 //! could not compile and dropped silently — runtime calls to that
 //! function panic with `method 'X.Y' not found on value` or
 //! `FunctionNotFound(...)` far from the cause. The lenient surface is
 //! the most direct measurement of stdlib hygiene.
 //!
-
 //! Earlier fixes drove the count from ~50 to 0 on a tiny bare-`None`
 //! fixture (#158, #161, #159). This test pins that baseline at zero
 //! and forces any new stdlib bug that introduces a SKIP to land its
 //! own task / fix before the PR can merge.
 //!
-
 //! When this fails, look at the warning text:
 //!  * `undefined function: <name>` → real missing function or
 //!  mount-alias not propagating; add the function or de-alias the

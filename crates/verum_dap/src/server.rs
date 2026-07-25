@@ -1,6 +1,5 @@
 //! DAP server transport layer.
 //!
-
 //! Implements the DAP message framing protocol (Content-Length headers + JSON body)
 //! over stdio or TCP streams.
 

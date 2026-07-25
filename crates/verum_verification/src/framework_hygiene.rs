@@ -6,16 +6,13 @@
 //! same way the K-rules were orphan kernel code before this commit
 //! series.
 //!
-
 //! This module ports R1+R2+R3 into Rust and exposes them as a
 //! first-class [`HygieneRecheckPass`] so the discipline applies on
 //! every `verum verify` invocation, catching stdlib-author and
 //! framework-author mistakes uniformly.
 //!
-
 //! # Severity contract (mirrors the Verum stdlib spec)
 //!
-
 //!  * **R1** (foundation-neutral names) — Warning. A brand-prefix
 //!  name (`diakrisis_*`, `actic_*`, `msfs_*`, `uhm_*`,
 //!  `noesis_*`) embedded in a public axiom name is a hygiene
@@ -29,7 +26,6 @@
 //!  role per module-tree; a violation is a coordinate-system
 //!  conflict that the build cannot recover from.
 //!
-
 //! `HygieneRecheckPass` returns `success == false` only when an
 //! Error-severity diagnostic fires. Warnings are recorded for the
 //! caller to surface but do not halt the pipeline.

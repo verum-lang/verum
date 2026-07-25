@@ -1,30 +1,24 @@
 //! Dependent Types Support for Future Extensions (v2.0+)
 //!
-
 //! This module provides SMT backend support for dependent types as specified in:
 //! - Dependent types: Pi types `(x: A) -> B(x)`, Sigma types `(x: A, B(x))`,
 //!  Equality types `Eq<A, x, y>`, universe hierarchy `Type : Type1 : Type2 ...`
 //! - Formal proofs: proof terms as first-class values, SMT integration for
 //!  decidable fragments, custom theories for bitvectors and arrays
 //!
-
 //! ## Features Prepared for v2.0+
 //!
-
 //! - **Pi Types**: Dependent function types (x: A) -> B(x)
 //! - **Sigma Types**: Dependent pair types (x: A, B(x))
 //! - **Equality Types**: Propositional equality a = b
 //! - **Proof Terms**: Integration for formal verification
 //! - **Quantifiers**: First-class support for ∀ and ∃
 //!
-
 //! ## Current Status
 //!
-
 //! This module provides the foundation for dependent types support.
 //! The actual implementation will be fully activated in v2.0+.
 //!
-
 //! SMT backend requirements for dependent types: Pi/Sigma types encode as universally/
 //! existentially quantified formulas. Equality types use Z3's built-in equality.
 //! Custom SMT theories (e.g., BitVector) extend the solver with domain-specific axioms.

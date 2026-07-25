@@ -1,16 +1,13 @@
 //! Tactic Metaprogramming — quote, splice, reflect.
 //!
-
 //! In a tactic metaprogramming system the user writes proof
 //! procedures *in the host language* (here, Verum itself), inspects
 //! and constructs proof terms as data, and elaborates the result
 //! back into the type checker. Lean 4, Coq's Ltac2, and Agda's
 //! reflection module all implement variants of this.
 //!
-
 //! ## The metalanguage
 //!
-
 //! ```text
 //!  M ::= ⌜e⌝ (quote: lift expression e to data)
 //!  | ▸M (splice: lower data M back to expression)
@@ -20,30 +17,24 @@
 //!  | const(v) (an opaque constant value)
 //! ```
 //!
-
 //! ## Quote–splice duality
 //!
-
 //! `splice(quote(e)) ≡ e` — splicing a quoted expression yields it
 //! back. The reverse `quote(splice(M))` only normalises when M is
 //! already a quote — otherwise `quote` and `splice` remain stuck
 //! on opaque metavalues, mirroring Lean 4's `Expr.quote` and
 //! `Expr.unquote` behaviour.
 //!
-
 //! ## Custom elaborators
 //!
-
 //! `custom(F)` calls a registered elaborator `F: MetaTerm →
 //! MetaTerm` to perform arbitrary transformations on quoted
 //! expressions. Elaborators are registered in [`MetaContext`] by
 //! name; this enables third-party tactic libraries without
 //! recompiling the host.
 //!
-
 //! ## Status
 //!
-
 //! This module is the standalone evaluator core. Wiring `quote`
 //! and `splice` to the actual Verum AST (via `expr_to_eqterm` and
 //! its inverse) is a future integration step.

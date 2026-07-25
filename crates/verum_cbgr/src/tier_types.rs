@@ -1,13 +1,10 @@
 //! Unified Tier Types for CBGR Analysis
 //!
-
 //! This module provides the canonical type definitions for reference tiers
 //! used throughout the compilation pipeline.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_cbgr::tier_types (this module)
 //!  │
@@ -24,25 +21,20 @@
 //!  └── vbc_codegen.rs (code generation)
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::tier_types::{ReferenceTier, Tier0Reason};
 //!
-
 //! let tier = ReferenceTier::tier0(Tier0Reason::Escapes);
 //! assert_eq!(tier.tier_number(), 0);
 //! assert_eq!(tier.overhead_ns(), 15);
 //!
-
 //! let promoted = ReferenceTier::tier1();
 //! assert!(promoted.is_promoted());
 //! assert_eq!(promoted.to_vbc_tier(), CbgrTier::Tier1);
 //! ```
 //!
-
 //! Canonical tier definitions for the CBGR-VBC integration pipeline. Tier 0
 //! uses full CBGR validation (~15ns), Tier 1 is compiler-verified safe (0ns),
 //! Tier 2 is unsafe/manual (0ns). VBC codegen converts these to instruction-level

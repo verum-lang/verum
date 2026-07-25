@@ -1,9 +1,7 @@
 //! Tensor Shape Checker
 //!
-
 //! SIMD and tensor system: unified Tensor<T, Shape> type with compile-time shape validation, SIMD acceleration (SSE/AVX/NEON), auto-differentiation — Tensor Type System
 //!
-
 //! This module provides comprehensive tensor shape validation including:
 //! - Shape inference and validation for binary/ternary operations
 //! - Broadcasting compatibility checking (NumPy-style)
@@ -12,10 +10,8 @@
 //! - Reshape validation
 //! - Transpose shape computation
 //!
-
 //! # Performance
 //!
-
 //! All operations are compile-time with 0ns runtime overhead.
 
 use crate::ty::Type;

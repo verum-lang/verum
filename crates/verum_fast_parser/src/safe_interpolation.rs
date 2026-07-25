@@ -1,6 +1,5 @@
 //! Safe interpolated string parsing for Verum
 //!
-
 //! This module implements parsing for safe interpolated strings with semantic tags.
 //! These strings provide compile-time safety for different domains:
 //! - `sql"{user_id}"` - SQL-safe parameterization
@@ -9,7 +8,6 @@
 //! - `url"{path}"` - URL encoding
 //! - `gql"{id}"` - GraphQL safe queries
 //!
-
 //! Grammar: interpolated_string = identifier , '"' , { string_char | interpolation } , '"' ;
 //!  interpolation = '{' , expression , '}' ;
 //! Tags: sql (SQL-safe params), html (auto-escaping), json (encoding),

@@ -15,7 +15,6 @@
 )]
 //! Tests for declaration AST nodes.
 //!
-
 //! This module tests all declaration types including functions, types,
 //! protocols (traits), implementations, modules, and more.
 

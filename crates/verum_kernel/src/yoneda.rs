@@ -1,35 +1,27 @@
 //! Yoneda embedding + ∞-Kan extensions — algorithmic kernel rules.
 //!
-
 //! ## What this delivers
 //!
-
 //! Two foundational ∞-categorical operations that gate MSFS
 //! Definition 3.3 (the S_S Yoneda + Kan-extension closure):
 //!
-
 //! 1. **Yoneda embedding** `y : C → PSh(C)` (HTT 1.2.1). The
 //!  fundamental embedding that lifts any ∞-category into its
 //!  presheaf ∞-topos.
 //!
-
 //! 2. **∞-Kan extensions** (HTT 4.3.3.7). Given `f : C → D` and
 //!  `p : C → E`, the left Kan extension `Lan_f(p) : D → E` exists
 //!  when `E` has appropriate colimits.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! Both operations are produced as concrete kernel-checkable values
 //! (algorithmic builders + universal-property witness). Future work will add
 //! the higher-coherence content (associator + pentagonal coherence
 //! cells); ships the 1-categorical skeleton + closure invariants.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **Definition 3.3** S_S closure under Yoneda — currently
 //!  admits via host stdlib axiom `msfs_s_s_closed_under_yoneda`.
 //!  Promotion: invoke `yoneda_embedding(c)` to produce the

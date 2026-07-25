@@ -1,16 +1,12 @@
 //! Meta Context Validation for Compile-Time Functions
 //!
-
 //! This module implements capability-based meta context validation for `meta fn`.
 //! Meta functions can only use compiler-provided meta contexts, not runtime contexts.
 //!
-
 //! # Meta Contexts
 //!
-
 //! The compiler provides 14 meta contexts (Spec: core/meta/contexts.vr):
 //!
-
 //! - **BuildAssets**: File loading during compilation
 //! - **TypeInfo**: Type introspection (fields_of, variants_of, etc.)
 //! - **AstAccess**: AST manipulation and parsing
@@ -26,13 +22,10 @@
 //! - **DepGraph**: Dependency graph analysis
 //! - **MetaBench**: Meta function benchmarking
 //!
-
 //! # Context Groups
 //!
-
 //! Convenience groups bundle related contexts (Spec: core/meta/contexts.vr lines 2847-3102):
 //!
-
 //! - **MetaCore**: [TypeInfo, AstAccess, CompileDiag, Hygiene] (most macros)
 //! - **MetaFull**: All 14 contexts
 //! - **MetaTypes**: [TypeInfo] only
@@ -49,33 +42,27 @@
 //! - **MetaProfiled**: [MetaBench, TypeInfo, AstAccess, CompileDiag]
 //! - **MetaTooling**: [CodeSearch, ProjectInfo, SourceMap, Schema, DepGraph, MetaBench, TypeInfo, AstAccess, CompileDiag, MacroState]
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! // Valid: uses meta context
 //! meta fn field_count<T>() -> Int using TypeInfo {
 //!  TypeInfo.fields_of::<T>().len()
 //! }
 //!
-
 //! // Invalid: uses runtime context
 //! meta fn bad() using Database { // E502: Database is not a meta context
 //!  ...
 //! }
 //! ```
 //!
-
 //! # Architecture
 //!
-
 //! The validation happens in three places (defense-in-depth):
 //! 1. **Type System** (this module): Validates context requirements at type check time
 //! 2. **Meta Linter**: Additional static analysis in lint passes
 //! 3. **Sandbox Runtime**: Runtime enforcement during meta evaluation
 //!
-
 //! Meta audit: validation that meta functions are pure and do not access runtime state
 
 use verum_ast::span::Span;

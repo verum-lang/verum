@@ -1,24 +1,18 @@
 //! Expression compilation for VBC codegen.
 //!
-
 //! Transforms Verum AST expressions into VBC instructions.
 //!
-
 //! # CBGR Tier-Aware Reference Compilation
 //!
-
 //! Reference operations are compiled based on the tier determined by
 //! escape analysis:
 //!
-
 //! - **Tier 0 (Managed)**: Emit `Ref`/`Deref` with `ChkRef` validation
 //! - **Tier 1 (Checked)**: Emit `RefChecked` - direct access, no checks
 //! - **Tier 2 (Unsafe)**: Emit `RefUnsafe` - unchecked access
 //!
-
 //! # Well-Known Type (WKT) Usage
 //!
-
 //! This module uses the centralized `WellKnownType` enum (from `verum_common`)
 //! to identify types that need special codegen treatment. This is intentional:
 //! the bytecode compiler must emit different instruction sequences for wrapper
@@ -26,7 +20,6 @@
 //! concurrency primitives (Channel creation). All type identity checks go
 //! through the single `WKT` enum -- no raw string comparisons.
 //!
-
 //! Protocol-related dispatch uses `WellKnownProtocol` and `method_to_protocol`
 //! from the same central registry.
 

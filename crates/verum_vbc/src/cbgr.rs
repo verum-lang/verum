@@ -1,26 +1,20 @@
 //! CBGR Codegen Abstractions for VBC
 //!
-
 //! This module provides abstract code generation strategies for CBGR (Counter-Based
 //! Garbage Rejection) memory safety operations. These abstractions are used by:
 //!
-
 //! - VBC interpreter for inline CBGR checks (dispatch.rs)
 //! - VBC → MLIR lowering for generating optimized memory operations
 //! - Escape analysis integration for tier decisions
 //!
-
 //! # Three-Tier Safety Model
 //!
-
 //! - **Tier 0 (Managed)**: Runtime CBGR validation (~15ns overhead)
 //! - **Tier 1 (Checked)**: Compiler-proven safe (0ns overhead)
 //! - **Tier 2 (Unsafe)**: Manual safety proof (0ns overhead)
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_cbgr (compile-time analysis)
 //!  │
@@ -36,18 +30,14 @@
 //! └─────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_vbc::cbgr::{DereferenceCodegen, CbgrTier};
 //!
-
 //! // Tier decision from escape analysis
 //! let tier = CbgrTier::Tier1; // compiler proved safe
 //!
-
 //! // Select codegen strategy
 //! let strategy = DereferenceCodegen::for_tier(tier);
 //! assert!(matches!(strategy, DereferenceCodegen::DirectAccess));

@@ -1,6 +1,5 @@
 //! Call Graph Construction and Analysis
 //!
-
 //! Builds interprocedural analysis data structures for escape analysis.
 //! Interprocedural escape analysis requires tracking reference flow across function
 //! boundaries. A reference escapes if passed to a function that may retain it (store
@@ -8,14 +7,12 @@
 //! whole-program analysis: can_promote_to_checked() checks (1) no escape, (2) exclusive
 //! access, (3) lifetime dominance, and (4) no conflicting mutations across all callees.
 //!
-
 //! This module provides:
 //! - Call graph data structures for interprocedural analysis
 //! - Reference flow analysis between caller and callee
 //! - Known safe function tracking
 //! - Thread spawn detection for escape analysis
 //!
-
 //! Note: AST processing methods are provided separately in `verum_parser` to avoid
 //! circular dependencies. Use `CallGraphBuilder`'s programmatic API to build call
 //! graphs manually, or use the parser's integration module.

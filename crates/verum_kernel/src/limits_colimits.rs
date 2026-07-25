@@ -1,14 +1,11 @@
 //! Limits and colimits in (∞,1)-categories — algorithmic kernel
 //! rule (HTT 1.2.13 + HTT 5.5.3 + HTT 4.4).
 //!
-
 //! ## What this delivers
 //!
-
 //! The (∞,1)-categorical theory of limits and colimits is the
 //! load-bearing layer of higher-categorical existence proofs:
 //!
-
 //!  * **Limits** (HTT 1.2.13.4): the limit `lim_I D` of a diagram
 //!  `D : I → C` is the terminal cone over `D`.
 //!  * **Colimits** (HTT 1.2.13.4 dual): `colim_I D` is the initial
@@ -19,13 +16,10 @@
 //!  * **Cocompleteness of presheaf categories** (HTT 5.5.3.5):
 //!  `PSh(C)` admits all small limits and colimits.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`LimitDiagram`] / [`ColimitDiagram`] — diagram input data
 //!  with shape (the indexing category) + per-vertex object data.
 //!  2. [`Limit`] / [`Colimit`] — output structures with apex and
@@ -40,14 +34,11 @@
 //!  * [`build_equaliser`] / [`build_coequaliser`] — parallel-pair.
 //!  * [`build_terminal`] / [`build_initial`] — empty diagrams.
 //!
-
 //! Future work: explicit universal-cone natural transformations
 //! with full pentagonal coherence cells.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **Definition 3.3 closure** under (co)limits — currently
 //!  admits via `msfs_s_s_closed_under_colimits` framework axiom.
 //!  Promotion: invoke [`compute_colimit_in_psh`] directly.

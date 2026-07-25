@@ -1,6 +1,5 @@
 //! Interactive REPL (Read-Eval-Print Loop)
 //!
-
 //! VBC-backed evaluation. Each input is parsed; top-level items
 //! (`fn`, `type`, `protocol`, `implement`, `static`, `mount`) are
 //! accumulated into a session source buffer. Bare expressions are
@@ -8,7 +7,6 @@
 //! the result; the session buffer is recompiled with the new function
 //! and that function is executed via the VBC interpreter.
 //!
-
 //! `let NAME [: TYPE] = EXPR` at the REPL surface is desugared to a
 //! `static NAME[: TYPE] = EXPR;` so bindings persist across prompts.
 //! `:reset` clears the session.

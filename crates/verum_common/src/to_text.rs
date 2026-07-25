@@ -1,6 +1,5 @@
 //! ToText trait for converting values to Text
 //!
-
 //! This provides a convenient way to convert various types to Text.
 
 use crate::Text;

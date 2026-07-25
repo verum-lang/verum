@@ -1,22 +1,17 @@
 //! Refinement Evidence Propagation System
 //!
-
 //! Flow-sensitive refinement evidence tracking: maintains proof witnesses for satisfied
 //! refinement predicates, propagates evidence through control flow (if/match narrowing),
 //! and enables zero-cost refinement checks when evidence is available.
 //!
-
 //! This module implements flow-sensitive refinement tracking, enabling the type
 //! checker to learn and propagate refinement predicates through control flow.
 //!
-
 //! # Problem
 //!
-
 //! Without evidence propagation, the compiler cannot reason about values after
 //! conditional checks:
 //!
-
 //! ```verum
 //! fn process(data: List<Int>) -> Int {
 //!  if data.is_empty() { return 0; }
@@ -25,27 +20,21 @@
 //! }
 //! ```
 //!
-
 //! # Solution
 //!
-
 //! Track refinement evidence through control flow:
 //! 1. After `if cond { return/break/continue }`, we know `!cond` holds
 //! 2. In `if cond { ... }` then-branch, we know `cond` holds
 //! 3. In match arms, we know the pattern matched
 //!
-
 //! # Architecture
 //!
-
 //! - `PathCondition`: A predicate known to be true on current path
 //! - `RefinementEvidence`: Maps variables to learned predicates
 //! - `EvidenceStack`: Stack of evidence scopes for nested control flow
 //!
-
 //! # Performance
 //!
-
 //! - Evidence lookup: O(1) hash map
 //! - Evidence propagation: O(n) where n = active conditions
 //! - Memory: ~64 bytes per tracked variable

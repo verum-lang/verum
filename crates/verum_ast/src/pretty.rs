@@ -1,13 +1,10 @@
 //! Pretty-printing (formatting) support for the Verum AST.
 //!
-
 //! This module provides the infrastructure to convert parsed AST back to
 //! well-formatted source code. It's used by the `verum fmt` command.
 //!
-
 //! # Features
 //!
-
 //! - Complete AST-to-source conversion for all node types
 //! - Configurable indentation (spaces vs tabs)
 //! - Configurable line width

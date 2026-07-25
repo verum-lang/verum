@@ -1,25 +1,20 @@
 //! Verum AST → Coq/Lean Prop syntax translator.
 //!
-
 //! Task #140 / MSFS-L4.7 — the foundational piece that lifts the
 //! cross-format roundtrip's foreign-tool re-check from "this name
 //! exists in Prop" to "this proposition's TYPE STRUCTURE is
 //! well-formed in the target system."
 //!
-
 //! ## Architecture (protocol-driven)
 //!
-
 //! Single trait [`ExprRenderer`] with one implementation per foreign
 //! format. `CoqExprRenderer` and `LeanExprRenderer` ship in this
 //! module. Adding Isabelle / Agda / Dedukti is a single new
 //! [`ExprRenderer`] instance — the corpus-export walker and the
 //! cross-format gate are unchanged.
 //!
-
 //! ## What gets translated
 //!
-
 //!  * Literals: `Int n` → `n` (Coq `nat`/`Z` infer; Lean `Nat`/`Int` infer);
 //!  `Bool b` → `True` / `False`; `Text s` → `"s"`.
 //!  * Path: identifier reference rendered verbatim (segments joined
@@ -36,10 +31,8 @@
 //!  * Application: `f a b` (curried) — works directly in both Coq
 //!  and Lean.
 //!
-
 //! ## What falls back to placeholder
 //!
-
 //! Match expressions, refinement types, tagged literals, complex
 //! pattern bindings — these don't map cleanly to a one-line Prop
 //! syntax, so the renderer returns `Prop` and emits the original

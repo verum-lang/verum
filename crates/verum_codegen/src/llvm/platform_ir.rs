@@ -1,13 +1,11 @@
 //! Platform-native LLVM IR generation — all runtime functions emitted as pure LLVM IR.
 //!
-
 //! ALL runtime functions are emitted as LLVM IR. No C compilation needed.
 //! This enables:
 //!  - Full LTO across runtime + user code
 //!  - Embedded/OS-kernel compilation (bare-metal)
 //!  - Zero C toolchain dependency
 //!
-
 //! Platform strategy:
 //!  Linux x86_64: inline asm syscalls (syscall instruction)
 //!  Linux aarch64: inline asm syscalls (svc #0)

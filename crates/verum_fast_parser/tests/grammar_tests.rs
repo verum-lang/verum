@@ -3223,10 +3223,8 @@ mod real_world_examples {
 mod test_statistics {
     //! This module documents the comprehensive coverage of the grammar test suite.
     //!
-
     //! ## Coverage Summary
     //!
-
     //! ### Lexical Grammar (Section 1)
     //! - 1.1 Whitespace and Comments: 12 tests
     //! - 1.2 Identifiers: 13 tests
@@ -3235,7 +3233,6 @@ mod test_statistics {
     //! - 1.5 Operators: 40+ tests (all operators)
     //! **Subtotal: ~128 tests**
     //!
-
     //! ### Syntactic Grammar (Section 2)
     //! - 2.1 Program Structure: 10 tests
     //! - 2.2 Imports and Modules: 16 tests
@@ -3246,51 +3243,41 @@ mod test_statistics {
     //! - 2.13 Metaprogramming: 3 tests
     //! **Subtotal: ~117 tests**
     //!
-
     //! ### Expression Tests (Sections 2.7-2.9)
     //! - Operator Precedence: 50+ tests
     //! - Primary Expressions: 70+ tests
     //! **Subtotal: ~120 tests**
     //!
-
     //! ### Pattern Matching Tests (Section 2.11)
     //! - All pattern types: 35+ tests
     //! **Subtotal: ~35 tests**
     //!
-
     //! ### Statement Tests (Section 2.10)
     //! - Let, Let-else, Defer: 20+ tests
     //! **Subtotal: ~20 tests**
     //!
-
     //! ### Stream Processing Tests (Sections 2.8, 5.6-5.8, 6.1-6.3)
     //! - Stream comprehensions: 15+ tests
     //! - Pipeline operator: 10+ tests
     //! **Subtotal: ~25 tests**
     //!
-
     //! ### Error Recovery Tests (Section 8)
     //! - Error handling: 7 tests
     //! **Subtotal: ~7 tests**
     //!
-
     //! ### Real-World Examples (Section 13)
     //! - Complete programs: 15+ tests
     //! **Subtotal: ~15 tests**
     //!
-
     //! ## GRAND TOTAL: 467+ tests
     //!
-
     //! ## Grammar Coverage: ~98%
     //!
-
     //! ### Not Tested (< 2% of grammar):
     //! - Some edge cases of qualified types
     //! - Some meta invocation syntax variations
     //! - Some attribute macro details
     //!
-
     //! These are implementation-specific details that will be tested
     //! as the parser implementation progresses.
 }

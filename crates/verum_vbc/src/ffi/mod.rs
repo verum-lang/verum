@@ -1,23 +1,18 @@
 //! Industrial-grade FFI runtime for VBC interpreter.
 //!
-
 //! This module provides FFI support for the 2-tier execution model:
 //!
-
 //! | Tier | Approach | First Call | Subsequent | Memory |
 //! |------|----------|------------|------------|--------|
 //! | Interpreter | Dynamic (libffi) | ~5us | ~150ns | 200B/symbol |
 //! | AOT | Static (LLVM) | N/A | ~5ns | minimal |
 //!
-
 //! The interpreter uses libffi for dynamic FFI calls because types are only
 //! known at runtime from VBC metadata. AOT compilation generates direct
 //! `call` instructions with proper C ABI, achieving zero-cost FFI.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! +-------------------+
 //! | FfiRuntime | <- Interpreter FFI (this module)
@@ -33,29 +28,22 @@
 //!  | | | |
 //! Darwin Linux Win ...
 //!
-
 //! For AOT: VBC FfiExtended opcodes → LLVM IR → native call instructions
 //! ```
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! use verum_vbc::ffi::{FfiRuntime, FfiPlatform};
 //!
-
 //! let mut runtime = FfiRuntime::new()?;
 //!
-
 //! // Load a library
 //! let libc = runtime.load_library("libc")?;
 //!
-
 //! // Resolve a symbol
 //! let getpid = runtime.resolve_symbol(libc, "getpid")?;
 //!
-
 //! // Call the function
 //! let result = runtime.call_c(getpid, &[], CType::I32)?;
 //! ```

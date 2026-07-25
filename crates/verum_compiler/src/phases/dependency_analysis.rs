@@ -1,18 +1,14 @@
 //! Dependency Analysis Phase for Embedded Constraints
 //!
-
 //! This module implements dependency analysis for tracking item requirements
 //! (`needs_alloc`, `needs_os`, `needs_runtime`) and validating them against
 //! target constraints for embedded and no_alloc builds.
 //!
-
 //! ## Architecture
 //!
-
 //! The unified stdlib uses compiler-driven dependency analysis rather than
 //! physical separation into separate cogs (like Rust's core/alloc/std).
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │ STDLIB LOGICAL LAYERS │
@@ -28,7 +24,6 @@
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! Dependency analysis: validates items against target profile constraints
 //! (no_alloc, no_std, embedded, cbgr_static_only, no_gpu).
 

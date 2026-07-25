@@ -1,14 +1,11 @@
 //! Stage Information Intrinsics (Tier 1 - Requires StageInfo)
 //!
-
 //! Provides compile-time information about N-level staged metaprogramming.
 //! All functions in this module require the `StageInfo` context since they
 //! access staged compilation state.
 //!
-
 //! ## Stage Query
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_current()` | `() -> Int` | Current compilation stage |
@@ -17,10 +14,8 @@
 //! | `stage_is_compile_time()` | `() -> Bool` | True if stage > 0 |
 //! | `stage_is_max_stage()` | `() -> Bool` | True if at max stage |
 //!
-
 //! ## Stage Validation
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_is_valid(n)` | `(Int) -> Bool` | Check if stage level valid |
@@ -28,28 +23,22 @@
 //! | `stage_quote_target()` | `() -> Int` | Target stage for quote |
 //! | `stage_can_generate(from, to)` | `(Int, Int) -> Bool` | Check generation validity |
 //!
-
 //! ## Stage-Aware Generation
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_unique_ident(prefix)` | `(Text) -> Text` | Generate unique identifier |
 //! | `stage_quote_depth()` | `() -> Int` | Current quote nesting depth |
 //!
-
 //! ## Function Stage Information
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_function_stage(name)` | `(Text) -> Int` | Get stage of named function |
 //! | `stage_functions_at(level)` | `(Int) -> List<Text>` | All functions at stage N |
 //!
-
 //! ## Configuration
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_is_enabled()` | `() -> Bool` | Staging enabled |
@@ -57,19 +46,15 @@
 //! | `stage_recursion_limit()` | `() -> Int` | Recursion limit |
 //! | `stage_memory_limit()` | `() -> Int` | Memory limit (bytes) |
 //!
-
 //! ## Tracing and Debugging
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `stage_generation_chain()` | `() -> List<StageRecord>` | Generation provenance chain |
 //! | `stage_trace_marker(name, data)` | `(Text, Text) -> ()` | Add trace marker |
 //!
-
 //! ## Context Requirements
 //!
-
 //! **Tier 1**: All functions require `using [StageInfo]` context.
 
 use verum_common::{List, OrderedMap, Text};

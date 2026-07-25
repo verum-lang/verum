@@ -1,36 +1,28 @@
 //! Escape Analysis Integration with CBGR Codegen
 //!
-
 //! When escape analysis proves NoEscape, CBGR codegen replaces ThinRef/FatRef
 //! structures with direct pointers, eliminating the generation check against
 //! AllocationHeader. This saves ~15ns per dereference on hot paths by bypassing
 //! the atomic load + compare of generation and epoch fields.
 //!
-
 //! This module integrates escape analysis results with CBGR code generation,
 //! enabling automatic elimination of CBGR checks for `NoEscape` references.
 //!
-
 //! # Purpose
 //!
-
 //! When escape analysis proves a reference doesn't escape (`NoEscape` state),
 //! we can safely skip CBGR generation checks and use direct pointers instead,
 //! achieving 0ns overhead instead of ~15ns.
 //!
-
 //! # Integration Points
 //!
-
 //! 1. **Reference Dereference**: Skip `cbgr_check()` for `NoEscape` refs
 //! 2. **Reference Creation**: Use direct pointers instead of ThinRef/FatRef
 //! 3. **Function Calls**: Pass raw pointers for `NoEscape` params
 //! 4. **IDE Hints**: Show `[0ns - escape analysis]` for optimized refs
 //!
-
 //! # Safety
 //!
-
 //! All optimizations are conservative:
 //! - Only apply when escape analysis **proves** safety
 //! - Fall back to CBGR if any uncertainty

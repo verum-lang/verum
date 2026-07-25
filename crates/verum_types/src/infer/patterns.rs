@@ -1,6 +1,5 @@
 //! Pattern-related methods extracted from `infer.rs`.
 //!
-
 //! Contains 12 `TypeChecker` methods responsible for pattern binding,
 //! compound destructuring, variant payload matching, active pattern
 //! variable binding, exhaustive pattern collection, and capture analysis.

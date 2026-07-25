@@ -1,19 +1,15 @@
 //! Hot Code Replacement for JIT.
 //!
-
 //! Enables live code updates without restarting the application.
 //! Functions can be replaced at runtime while maintaining state.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ Hot Code Replacement Pipeline │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!
-
 //!  Updated Source
 //!  │
 //!  ▼
@@ -36,31 +32,24 @@
 //!  └───────────┘ └─────────┘ └───────────┘
 //! ```
 //!
-
 //! # Safety
 //!
-
 //! Hot code replacement is inherently unsafe. The system provides:
 //! - Signature validation (parameter/return type checking)
 //! - Version tracking
 //! - Rollback capability
 //! - State migration hooks
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use crate::mlir::jit::{HotReloader, HotReloadConfig};
 //!
-
 //! let mut reloader = HotReloader::new(engine, HotReloadConfig::default())?;
 //!
-
 //! // Replace a function
 //! reloader.replace_function("process", new_module)?;
 //!
-
 //! // Rollback if needed
 //! if something_wrong {
 //!  reloader.rollback("process")?;

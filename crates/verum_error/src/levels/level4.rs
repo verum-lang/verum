@@ -1,43 +1,34 @@
 //! Level 4: Security Containment (Isolation Boundaries)
 //!
-
 //! The outermost layer of the 5-Level Error Defense Architecture. Level 4 limits
 //! the blast radius of failures through capability-based security and isolation
 //! boundaries. The context system (`using [...]`) tracks required capabilities at
 //! the type level, and sandboxed code can only invoke operations for which it
 //! holds explicit capabilities. Four isolation levels are defined:
 //!
-
 //! - **Trusted**: Full access, no isolation
 //! - **Sandbox**: Limited capabilities, isolated from system resources
 //! - **Restricted**: Minimal capabilities, ephemeral execution
 //! - **Hardened**: Maximum restrictions, formal verification required
 //!
-
 //! Fine-grained capabilities control access to file I/O, networking, process
 //! spawning, and other system resources. Sandbox enforcement prevents escalation.
 //!
-
 //! Provides error types for **security violations and isolation boundaries**. This level
 //! protects against malicious or compromised code through capability-based isolation.
 //!
-
 //! # Error Categories
 //!
-
 //! - **Authentication failures** - identity verification failed
 //! - **Authorization violations** - insufficient permissions
 //! - **Capability violations** - missing required capabilities
 //! - **Sandbox violations** - attempted escape from isolation boundary
 //! - **Resource limit exceeded** - quota or rate limit exceeded
 //!
-
 //! # Capability-Based Security
 //!
-
 //! Level 4 uses a capability-based security model:
 //!
-
 //! ```rust,ignore
 //! // Code is restricted to specific capabilities
 //! fn process_file(file: &File, creds: Capability<FileIO>) -> Result<()> {
@@ -47,26 +38,21 @@
 //! }
 //! ```
 //!
-
 //! # Isolation Levels
 //!
-
 //! - **Level 1 (Trusted)**: Full access, no isolation
 //! - **Level 2 (Sandbox)**: Limited capabilities, isolated from system
 //! - **Level 3 (Restricted)**: Minimal capabilities, ephemeral execution
 //! - **Level 4 (Hardened)**: Maximum restrictions, formal verification required
 //!
-
 //! # Use Cases
 //!
-
 //! - Running untrusted plugins safely
 //! - Executing user-provided scripts
 //! - Multi-tenant isolation
 //! - Defense-in-depth security
 //! - Zero-trust architecture
 //!
-
 //! Provides error types for security and isolation violations.
 
 use crate::{ErrorKind, VerumError};

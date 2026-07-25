@@ -1,12 +1,9 @@
 //! Phase 3a: Contract Verification
 //!
-
 //! SMT-based formal verification of contract literals and refinement types.
 //!
-
 //! ## Features
 //!
-
 //! - Translate contracts to SMT-LIB format
 //! - Verify with Z3/CVC5 solvers
 //! - Check pre/post conditions
@@ -15,17 +12,14 @@
 //! - Counterexample generation on failure
 //! - Integration with verum_smt for SMT solving
 //!
-
 //! ## Verification Flow
 //!
-
 //! 1. Extract contracts from function attributes and body
 //! 2. Parse RSL (Refinement Specification Language) clauses
 //! 3. Translate to SMT formulas
 //! 4. Verify using Z3 solver
 //! 5. Generate counterexamples on failure
 //!
-
 //! Phase 3a: Contract verification. Translates contract#"..." to SMT-LIB,
 //! generates verification conditions, invokes Z3/CVC5, verifies
 //! preconditions => postconditions. Output: Verified AST or CompileError.

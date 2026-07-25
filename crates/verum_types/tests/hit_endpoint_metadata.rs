@@ -2,7 +2,6 @@
 //! `Foo(args) = from..to` syntax flow through to the type checker's
 //! `hit_path_constructors` side-channel registry.
 //!
-
 //! The lowering keeps `Type::Variant` as the primary representation for
 //! ordinary type checking; HIT-aware tactics (cubical, descent) then
 //! consult the side channel for path-constructor topology.

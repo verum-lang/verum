@@ -1,29 +1,23 @@
 //! Incremental Meta Evaluation Cache
 //!
-
 //! This module implements a content-addressed LRU cache for meta-programming
 //! evaluation results, providing 2-10x speedup for incremental builds by
 //! avoiding redundant meta function executions.
 //!
-
 //! ## Cached Items
 //!
-
 //! - Meta function call results (pure functions only)
 //! - Builtin function call results (for deterministic builtins)
 //! - Type definition lookups
 //! - AST-to-MetaExpr conversion results
 //!
-
 //! ## Cache Invalidation
 //!
-
 //! The cache uses content hashing for automatic invalidation:
 //! - Source file changes invalidate dependent entries
 //! - Type definition changes invalidate type lookup entries
 //! - All entries expire after a configurable TTL
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

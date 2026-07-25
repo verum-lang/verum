@@ -1,7 +1,6 @@
 //! K-Quot-Form / K-Quot-Intro / K-Quot-Elim integration tests for
 //! quotient types.
 //!
-
 //! Quotient types `T / ~` collapse equivalence classes of T into
 //! single elements. The kernel checks:
 //!  • K-Quot-Form: `Quotient(T, ~)` is a type when T is a type

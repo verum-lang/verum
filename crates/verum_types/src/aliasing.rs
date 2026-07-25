@@ -1,19 +1,15 @@
 //! Reference Aliasing Detection System
 //!
-
 //! Reference safety invariants: managed refs validated at dereference, checked refs proven safe at compile time, unsafe refs unchecked
 //!
-
 //! This module implements compile-time verification of Verum's borrowing rules:
 //! - At most one mutable reference to a value at any time
 //! - Multiple immutable references allowed if no mutable references exist
 //! - References cannot outlive their referents
 //! - Field-level aliasing detection for partial borrows
 //!
-
 //! # Borrow Rules
 //!
-
 //! ```verum
 //! let mut x = 42;
 //! let r1 = &x; // OK: first immutable borrow
@@ -23,10 +19,8 @@
 //! let r3 = &mut x; // OK: now allowed, r1 and r2 no longer used
 //! ```
 //!
-
 //! # Field-Level Borrowing
 //!
-
 //! ```verum
 //! type Point is { x: Int, y: Int };
 //! let mut p = Point { x: 1, y: 2 };

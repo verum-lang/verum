@@ -2,7 +2,6 @@
 //! `verum_types::exhaustiveness::smt` to break the
 //! `verum_types ↔ verum_smt` circular dependency.
 //!
-
 //! The public types consumed by callers (`GuardedPattern`,
 //! `SmtGuardConfig`, `SmtGuardResult`, `SmtValue`, `SmtWitness`) stay in
 //! `verum_types::exhaustiveness` so `verum_types` can express guard

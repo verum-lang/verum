@@ -14,17 +14,13 @@
 )]
 //! Comprehensive tests for E0204: Multiple conversion paths detection
 //!
-
 //! E0204 Multiple conversion paths: when try (?) operator finds multiple From implementations for error conversion, requiring explicit disambiguation
 //!
-
 //! This test suite validates that the type checker correctly detects ambiguous
 //! From implementations that create multiple conversion paths for the ? operator.
 //!
-
 //! # Test Coverage
 //!
-
 //! 1. Direct vs indirect path ambiguity
 //! 2. Multiple indirect paths
 //! 3. Single path (no ambiguity)

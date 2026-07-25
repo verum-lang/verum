@@ -1,10 +1,8 @@
 //! Coverage Matrix Representation
 //!
-
 //! This module implements the pattern coverage matrix used by the usefulness algorithm.
 //! Each row represents a pattern, and each column represents a component of the scrutinee.
 //!
-
 //! The matrix enables efficient analysis by allowing:
 //! - Specialization (focus on one constructor)
 //! - Column extraction (analyze sub-patterns)

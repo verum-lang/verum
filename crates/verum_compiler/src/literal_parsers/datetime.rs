@@ -1,10 +1,8 @@
 //! DateTime literal parser
 //!
-
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
-
 //! Parses datetime literals in ISO 8601 format:
 //! - d#"2024-01-15T10:30:00Z"
 //! - d#"2024-01-15T10:30:00+05:00"

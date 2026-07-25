@@ -1,6 +1,5 @@
 //! Code generation and object file emission
 //!
-
 //! High-level API for generating object files, assembly, and bitcode.
 
 use std::path::Path;

@@ -1,16 +1,13 @@
 //! `@cfg(...)` predicate evaluation utilities.
 //!
-
 //! Extracted from `pipeline.rs` (#106 crate-split foundation) so the
 //! cfg-evaluation surface is independently reviewable / testable and
 //! pipeline.rs shrinks toward a thin orchestration layer. All
 //! functions here are pure: no `&self`, no `&mut state`. They take
 //! AST nodes + a target spec and return diagnostics-ready data.
 //!
-
 //! # Surface
 //!
-
 //!  * [`extract_cfg_predicates`] — walk an item's `@cfg(...)`
 //!  attributes plus the module-path platform inference, return
 //!  the list of predicate strings.

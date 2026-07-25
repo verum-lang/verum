@@ -1,10 +1,8 @@
 //! Contract literal handling and verification.
 //!
-
 //! This module provides the main interface for working with contract# literals,
 //! including parsing, validation, and SMT translation.
 //!
-
 //! Contract literals use the RSL (Refinement Specification Language) mechanism via
 //! `contract#"requires P; ensures Q;"` syntax. Preconditions become caller obligations;
 //! postconditions become proof obligations verified by SMT. In `@verify(proof)` mode,

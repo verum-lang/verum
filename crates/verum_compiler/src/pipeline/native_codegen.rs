@@ -1,14 +1,11 @@
 //! Native LLVM AOT codegen + linking (Phase 6, Tier 1 execution).
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 12). Houses the
 //! AST → VBC → LLVM IR → native-binary path, plus the C-stubs
 //! / linker discovery / lld driver helpers it depends on.
 //!
-
 //! Methods:
 //!
-
 //!  * `phase_generate_native` — primary AOT entry; lowers VBC
 //!  to LLVM IR via `VbcToLlvmLowering`, runs LLVM optimisation
 //!  passes, emits object files, links the executable.

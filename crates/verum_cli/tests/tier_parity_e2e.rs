@@ -3,7 +3,6 @@
 //! → safety-gate → verify → context-validation → VBC codegen →
 //! execute).
 //!
-
 //! These tests use Tier 0 (VBC interpreter) which is 100% stable.
 //! A separate `#[ignore]` test suite would cross-check Tier 1 (LLVM
 //! AOT) once the pre-existing LLVM codegen crash (SIGSEGV ~60% of

@@ -1,24 +1,19 @@
 //! # Portfolio Solver Adapters
 //!
-
 //! Adapters that wrap `Z3Backend` and `Cvc5Backend` (from the existing
 //! `SmtBackend` trait implementations) to implement the `PortfolioSolver`
 //! trait used by `portfolio_executor`.
 //!
-
 //! These adapters bridge two different abstraction layers:
 //!
-
 //! - The `SmtBackend` trait (in `backend_trait.rs`) provides a rich,
 //!  session-oriented API with typed sorts, terms, assertions, models,
 //!  incremental solving, unsat cores, proofs, etc.
 //!
-
 //! - The `PortfolioSolver` trait (in `portfolio_executor.rs`) provides a
 //!  minimal, thread-safe API with just `check_sat(&interrupt)` and
 //!  `solver_id()`, designed for use in `std::thread` workers.
 //!
-
 //! The adapters own their underlying backends and manage interrupt
 //! propagation cooperatively.
 

@@ -1,6 +1,5 @@
 //! Kernel dispatch layer for tensor operations.
 //!
-
 //! This module provides backend-specific implementations of tensor operations,
 //! with automatic dispatch based on device type and capabilities.
 

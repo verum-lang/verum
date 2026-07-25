@@ -1,10 +1,8 @@
 //! Adaptive SMT Strategy Selection with Multi-Solver Support
 //!
-
 //! This module implements intelligent strategy selection based on problem characteristics.
 //! Supports both Z3 and CVC5 solvers with automatic fallback and portfolio solving.
 //!
-
 //! ## Performance Impact
 //! - 30-50% speedup on complex queries (benchmarked)
 //! - Automatic theory detection (QF_LIA, QF_BV, QF_NRA, etc.)
@@ -12,7 +10,6 @@
 //! - Solver redundancy: fallback to CVC5 when Z3 fails
 //! - Portfolio solving: run both solvers in parallel
 //!
-
 //! Refinement type verification uses SMT solvers to prove predicates like `Int{> 0}`.
 //! Three verification modes: @verify(runtime) = runtime checks, @verify(static) = dataflow
 //! analysis, @verify(proof) = full SMT proof. Strategy selection picks the best solver/tactic

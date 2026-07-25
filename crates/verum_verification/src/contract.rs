@@ -1,13 +1,10 @@
 //! Contract Literals System for Verum Verification
 //!
-
 //! This module implements the contract#"..." compiler intrinsic for Hoare-logic
 //! style contracts embedded directly in the language.
 //!
-
 //! # Contract DSL Syntax
 //!
-
 //! The contract DSL supports:
 //! - `requires` clauses (preconditions)
 //! - `ensures` clauses (postconditions)
@@ -16,10 +13,8 @@
 //! - `result` keyword for return values
 //! - `forall` and `exists` quantifiers
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! @verify(proof)
 //! fn transfer_funds(from: &mut Account, to: &mut Account, amount: Money) {
@@ -32,17 +27,14 @@
 //! }
 //! ```
 //!
-
 //! # Architecture
 //!
-
 //! The contract system consists of:
 //! 1. **ContractParser** - Parses contract#"..." literals into ContractSpec AST
 //! 2. **ContractSpec** - Structured representation of preconditions, postconditions, invariants
 //! 3. **SMT Translation** - Converts contracts to SMT-LIB for verification
 //! 4. **Runtime Instrumentation** - Generates runtime assertion code for @verify(runtime)
 //!
-
 //! The contract system is a compiler intrinsic (NOT a user-defined tagged literal).
 //! It integrates deeply with the type system, SMT solver, and verification modes.
 //! The 4-phase pipeline is: (1) parse contract literal into ContractSpec,

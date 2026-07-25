@@ -1,26 +1,21 @@
 //! Production-Ready Subsumption Checking
 //!
-
 //! Refinement type subsumption: `T{P} <: T{Q}` iff `forall x. P(x) => Q(x)`.
 //! For example, `Int{> 10} <: Int{> 0}` because `x > 10` implies `x > 0`.
 //!
-
 //! Implements three-tiered subsumption checking for refinement types:
 //! - Syntactic: <1ms (pattern matching for common cases)
 //! - SMT-based: 10-500ms (Z3 solver for complex predicates)
 //! - Proof caching: >90% hit rate target
 //!
-
 //! ## Subsumption Rule
 //!
-
 //! ```text
 //! Γ ⊢ φ₁ ⇒ φ₂ (in SMT logic)
 //! ─────────────────────────────────
 //! Γ ⊢ T{φ₁} <: T{φ₂}
 //! ```
 //!
-
 //! Interpretation: Type `T{φ₁}` is a subtype of `T{φ₂}` if predicate `φ₁` logically implies `φ₂`.
 
 use std::hash::{Hash, Hasher};

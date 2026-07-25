@@ -1,10 +1,8 @@
 //! CLI permission flags + frontmatter merger (P3.3).
 //!
-
 //! Three permission sources, merged into one [`PermissionSet`] for the
 //! script run:
 //!
-
 //! 1. **Frontmatter `permissions = [...]`** — what the script *declares*
 //!  it needs. Source of truth for the script's intent.
 //! 2. **Frontmatter `[run].default-permissions = [...]`** — what the
@@ -14,29 +12,23 @@
 //! 3. **CLI `--allow <scope>`** — caller-side grants, additive over
 //!  whatever the frontmatter declared. Repeatable.
 //!
-
 //! Plus two override switches:
 //!
-
 //! - `--allow-all` — bypass; grant blanket access for every kind.
 //! - `--deny-all` — bypass the other direction; empty set regardless
 //!  of what the frontmatter or `--allow` flags say. Useful for forcing
 //!  an unprivileged test run.
 //!
-
 //! `--allow-all` and `--deny-all` are mutually exclusive.
 //!
-
 //! # Precedence
 //!
-
 //! ```text
 //!  deny_all → PermissionSet::empty()
 //!  allow_all → blanket grant of every kind
 //!  otherwise → union(frontmatter, run.default-permissions, --allow flags)
 //! ```
 //!
-
 //! Union order is preserved (frontmatter first, then run defaults, then
 //! CLI flags). [`PermissionSet::check`] is union-permissive — a request
 //! matches if *any* grant authorises it — so order is informational

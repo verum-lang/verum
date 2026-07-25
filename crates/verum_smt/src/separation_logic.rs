@@ -1,9 +1,7 @@
 //! Separation Logic for Heap Verification
 //!
-
 //! Implements separation logic for verifying heap-manipulating programs using Z3 SMT solver.
 //!
-
 //! Separation logic assertions model disjoint heap ownership:
 //! - Separating conjunction (P * Q): heap splits into disjoint regions satisfying P and Q
 //! - Magic wand (P -* Q): separating implication for frame reasoning
@@ -11,14 +9,11 @@
 //! - Frame rule: {P} c {Q} implies {P * R} c {Q * R} (frame preservation)
 //! - List segments lseg(x, y, xs) and tree predicates tree(x, t)
 //!
-
 //! SMT encoding uses Z3 array theory: heap as Array<Int, Int>, disjointness via
 //! quantified constraints over array domains.
 //!
-
 //! ## Features
 //!
-
 //! - **Separating Conjunction (P * Q)**: Disjoint heap regions encoded via Z3 array theory
 //! - **Magic Wand (P -* Q)**: Separating implication for frame reasoning
 //! - **Points-To Assertions (x |-> v)**: Single heap cell ownership
@@ -28,10 +23,8 @@
 //! - **Heap Entailment**: P |- Q verification via SMT
 //! - **Weakest Precondition**: wp(c, Q) computation
 //!
-
 //! ## Z3 Encoding
 //!
-
 //! Heaps are encoded as arrays from addresses to values:
 //! ```text
 //! Heap = Array(Address, Value)
@@ -39,10 +32,8 @@
 //! Sep(P, Q) = P(h1) AND Q(h2) AND disjoint(dom(h1), dom(h2))
 //! ```
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Assertion checking: < 10ms
 //! - Frame rule application: < 5ms
 //! - WP computation: < 20ms

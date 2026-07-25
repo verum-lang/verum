@@ -1,20 +1,16 @@
 //! Production-grade IR-based Call Site Extraction for CBGR
 //!
-
 //! Provides precise call site extraction from IR instructions for context-sensitive
 //! escape analysis. Unlike heuristic CFG-based detection, this parses actual IR to
 //! identify function calls, map arguments to parameters, and track return values,
 //! enabling accurate per-parameter escape tracking for CBGR promotion decisions.
 //!
-
 //! This module implements IR-based call site extraction for context-sensitive escape analysis.
 //! Unlike heuristic CFG-based call site detection, this module parses actual IR instructions
 //! to precisely identify function calls, map arguments to parameters, and track return values.
 //!
-
 //! # Key Features
 //!
-
 //! - **Real IR instruction parsing**: Direct parsing of simplified IR representation
 //! - **Call instruction identification**: Precise detection of call sites in IR
 //! - **Callee resolution**: Maps call instructions to target functions
@@ -22,10 +18,8 @@
 //! - **Return value tracking**: Follows return values across call boundaries
 //! - **Linear scan performance**: O(instructions) complexity
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌────────────────────────────────────────────────────────────┐
 //! │ IR Call Extraction │
@@ -40,20 +34,16 @@
 //! └────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Example Usage
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::ir_call_extraction::{IrCallExtractor, IrFunction, IrInstruction, IrOperand};
 //! use verum_cbgr::analysis::{FunctionId, BlockId, RefId};
 //!
-
 //! // Create simplified IR function
 //! let mut func = IrFunction::new(FunctionId(1), "process_data");
 //! func.add_parameter(0, "data");
 //!
-
 //! // Add call instruction
 //! let call_inst = IrInstruction::Call {
 //!  target: "validate".into(),
@@ -62,17 +52,14 @@
 //! };
 //! func.add_instruction(BlockId(0), 0, call_inst);
 //!
-
 //! // Extract call sites
 //! let extractor = IrCallExtractor::new();
 //! let call_sites = extractor.extract_from_function(&func);
 //!
-
 //! // Examine first call site
 //! let site = &call_sites[0];
 //! println!("Call to {} at {}:{}", site.callee_name, site.block, site.instruction_offset);
 //!
-
 //! // Map arguments
 //! let mapping = site.arg_mapping();
 //! for (arg_idx, param_idx) in &mapping.arg_to_param {
@@ -80,27 +67,21 @@
 //! }
 //! ```
 //!
-
 //! # Performance Characteristics
 //!
-
 //! - **Call site extraction**: O(n) where n = number of instructions
 //! - **Argument mapping**: O(args) per call site
 //! - **Memory overhead**: ~200 bytes per call site
 //! - **Target**: <10µs for 1000-instruction function
 //!
-
 //! # Simplified IR Representation
 //!
-
 //! Since full MIR integration is future work, we use a simplified IR:
 //!
-
 //! - **`IrFunction`**: Function representation with parameters and instructions
 //! - **`IrInstruction`**: Call, Assign, Return, Branch instructions
 //! - **`IrOperand`**: `LocalVar`, Argument, Constant operands
 //!
-
 //! This allows production-grade call site extraction without full compiler integration.
 
 use crate::analysis::{BlockId, FunctionId, RefId};

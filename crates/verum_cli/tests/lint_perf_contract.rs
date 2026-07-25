@@ -1,12 +1,10 @@
 //! Performance regression contract for `verum lint`.
 //!
-
 //! These tests run the same fixtures the criterion benchmarks use,
 //! with a relaxed wall-clock cap (~3× the criterion target) so they
 //! don't flake on slow CI hardware while still catching the case
 //! where someone reintroduces O(n²) behaviour.
 //!
-
 //! Targets (the published performance contract): full-repo lint of the
 //! stdlib-scale corpus stays within the wall-clock and allocation budgets
 //! asserted below; the same numbers are published on the website

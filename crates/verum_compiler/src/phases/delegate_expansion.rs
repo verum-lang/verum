@@ -1,18 +1,14 @@
 //! # `@delegate(target)` attribute expansion
 //!
-
 //! Task #146 / MSFS-L4.14 — eliminates the corpus/stdlib duplication
 //! pattern observed across MSFS §9 + §10 where every corpus-side
 //! "anchor theorem" carries a hand-written proof body that is
 //! identical in shape: `proof { apply <stdlib_full_form>(args); }`.
 //!
-
 //! ## The pattern this phase eliminates
 //!
-
 //! Pre-#146 every delegating theorem looks like:
 //!
-
 //! ```verum
 //! public theorem msfs_theorem_9_3_meta_categoricity(
 //!  f1: &MetaClsTopWitness,
@@ -26,11 +22,9 @@
 //!  };
 //! ```
 //!
-
 //! Post-#146 the manual `proof { apply … }` boilerplate disappears —
 //! the attribute carries the same information declaratively:
 //!
-
 //! ```verum
 //! @delegate(msfs_theorem_9_3_meta_categoricity_full)
 //! public theorem msfs_theorem_9_3_meta_categoricity(
@@ -42,17 +36,14 @@
 //!  ensures <2-line ensures clause>;
 //! ```
 //!
-
 //! This phase walks every theorem in every parsed module and, when the
 //! `@delegate(target)` attribute is present, synthesises the
 //! equivalent `proof { apply target(p1, p2, …); }` body — passing the
 //! theorem's parameters positionally as arguments, in declaration
 //! order.
 //!
-
 //! ## Architectural significance
 //!
-
 //! - Reduces ~100 LOC of boilerplate per delegating module across the
 //!  MSFS corpus (the §9 + §10 files lose ~90% of their proof-body
 //!  text).
@@ -67,10 +58,8 @@
 //!  body don't co-occur on the same theorem — the user picks one
 //!  surface form per theorem.
 //!
-
 //! ## Recipe
 //!
-
 //! When a stdlib has both a "load-bearing form" and a "namespace
 //! anchor" version that differ only in proof body shape, promote the
 //! duplication to a single declarative attribute. Recipe extension

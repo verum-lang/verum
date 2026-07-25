@@ -1,6 +1,5 @@
 //! MLIR module translation to LLVM IR.
 //!
-
 //! Provides safe wrappers around MLIR's C API for translating MLIR modules
 //! (in the LLVM dialect) to LLVM IR modules.
 

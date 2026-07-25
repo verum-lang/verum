@@ -1,18 +1,14 @@
 //! Termination Checking for Dependent Types
 //!
-
 //! This module provides termination verification for recursive functions
 //! as required by the dependent types extension for total functions
 //!
-
 //! ## Features
 //!
-
 //! - **Structural recursion**: Verify calls on structurally smaller arguments
 //! - **Well-founded measures**: Custom termination measures
 //! - **Lexicographic ordering**: Multi-argument termination proofs
 //!
-
 //! Structural recursion is automatically checked (calls on subterms of inductive args).
 //! General recursion requires explicit `decreasing (args) by ordering` annotations.
 //! Well-founded measures map arguments to a well-ordered domain (typically Nat).

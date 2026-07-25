@@ -1,6 +1,5 @@
 //! Macro state context for meta functions
 //!
-
 //! Provides caching, memoization, and invocation tracking for meta functions.
 
 use verum_ast::MetaValue;

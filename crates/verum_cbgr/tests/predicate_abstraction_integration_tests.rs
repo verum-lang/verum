@@ -14,7 +14,6 @@
 )]
 //! Integration tests for predicate abstraction with escape analysis
 //!
-
 //! These tests verify that predicate abstraction correctly integrates with
 //! the escape analyzer and prevents path explosion in real-world scenarios.
 

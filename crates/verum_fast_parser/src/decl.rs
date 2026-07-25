@@ -1,6 +1,5 @@
 //! Declaration parser for Verum using hand-written recursive descent.
 //!
-
 //! This module implements parsing for top-level items:
 //! - Functions
 //! - Types (records, variants, newtypes, aliases)
@@ -8,10 +7,8 @@
 //! - Implementations
 //! - Modules, constants, statics, imports
 //!
-
 //! ## Migration Status
 //!
-
 //! This module has been fully migrated to hand-written recursive descent parser.
 //! It provides:
 //! - API: `RecursiveParser::parse_module()`, `RecursiveParser::parse_item()`

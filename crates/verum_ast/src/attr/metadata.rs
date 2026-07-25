@@ -1,21 +1,16 @@
 //! Attribute metadata definitions for the Verum AST.
 //!
-
 //! This module defines [`AttributeMetadata`], which provides complete
 //! compile-time information about an attribute: its name, valid targets,
 //! argument specification, documentation, and more.
 //!
-
 //! # Overview
 //!
-
 //! Every registered attribute in Verum has associated metadata:
 //!
-
 //! ```rust
 //! use verum_ast::attr::{AttributeMetadata, AttributeTarget, ArgSpec, ArgType, AttributeCategory};
 //!
-
 //! let inline_meta = AttributeMetadata::new("inline")
 //!  .targets(AttributeTarget::Function)
 //!  .args(ArgSpec::Optional(ArgType::Ident))
@@ -25,17 +20,13 @@
 //!  .build();
 //! ```
 //!
-
 //! # Design
 //!
-
 //! Metadata is created using the builder pattern for ergonomic construction.
 //! Once built, metadata is immutable and can be shared across threads.
 //!
-
 //! # Attribute Registry
 //!
-
 //! Every attribute in Verum is registered with metadata specifying valid targets
 //! (function, type, field, etc.), argument specs, category, stability, conflicts,
 //! and requirements. Built-in attributes include @inline, @cold, @hot, @derive,

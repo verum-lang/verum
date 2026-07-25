@@ -1,11 +1,9 @@
 //! File-based compilation commands
 //!
-
 //! This module provides single-file operations that work independently
 //! of Verum projects. These commands are useful for quick scripts,
 //! testing, and REPL-style development.
 //!
-
 //! Single-file compilation commands integrated into the main verum CLI.
 
 use anyhow::Result;

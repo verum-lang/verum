@@ -1,10 +1,8 @@
 //! Performance benchmarks for automatic tactic selection
 //!
-
 //! These benchmarks verify that automatic tactic selection improves
 //! solver performance compared to the default SMT tactic.
 //!
-
 //! Performance targets:
 //! - Analysis overhead: <100us per formula
 //! - Tactic selection speedup: 2-5x for specialized problems

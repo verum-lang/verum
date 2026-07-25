@@ -14,7 +14,6 @@
 )]
 //! Tests for multi-stage metaprogramming (staging) validation.
 //!
-
 //! Covers:
 //! - Stage coherence: quote generates correct stage
 //! - Cross-stage call restrictions

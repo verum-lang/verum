@@ -1,43 +1,33 @@
 //! FFI callback trampolines.
 //!
-
 //! This module provides support for creating callback trampolines that allow
 //! C code to call back into Verum functions. It uses libffi's closure mechanism
 //! to generate C-callable function pointers.
 //!
-
 //! # Overview
 //!
-
 //! When C code needs to call a Verum function (e.g., qsort comparator),
 //! we generate a trampoline using libffi closures that:
 //! 1. Marshals C arguments to Verum values
 //! 2. Invokes the Verum function through a registered callback handler
 //! 3. Marshals the result back to C
 //!
-
 //! # Architecture
 //!
-
 //! The callback system uses a two-tier approach:
 //! 1. `TrampolineRegistry` - manages callback metadata and lifetimes
 //! 2. `CallbackContext` - holds per-callback state passed through libffi's userdata
 //!
-
 //! The actual function invocation happens through a registered handler function
 //! that the interpreter provides when setting up callbacks.
 //!
-
 //! # Thread Safety
 //!
-
 //! Callbacks are associated with the thread that created them. A thread-local
 //! handler is used to route callbacks to the correct interpreter instance.
 //!
-
 //! # Example
 //!
-
 //! ```ignore
 //! // Create a callback for a comparator function: fn(i32, i32) -> i32
 //! let callback_id = registry.create_callback(
@@ -46,11 +36,9 @@
 //!  42, // function ID in VBC module
 //! )?;
 //!
-
 //! // Get the C function pointer
 //! let fn_ptr = registry.get_code_ptr(callback_id)?;
 //!
-
 //! // Pass fn_ptr to C code (e.g., qsort)
 //! // When C calls fn_ptr, our handler is invoked
 //! ```

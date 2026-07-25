@@ -14,7 +14,6 @@
 )]
 //! Oracle-Based Validation System for SMT Backend Cross-Validation
 //!
-
 //! This module provides independent verification of SMT solver results through:
 //! - Ground truth oracle (known results for standard benchmarks)
 //! - Model validation (verify SAT models satisfy constraints)
@@ -22,13 +21,11 @@
 //! - Automated mismatch detection and reporting
 //! - Statistical analysis of solver agreement
 //!
-
 //! SMT verification for CBGR: the SMT backend verifies safety properties that enable
 //! promotion from `&T` (managed, ~15ns CBGR check) to `&checked T` (0ns, statically proven).
 //! Oracle validation cross-checks Z3/CVC5 results against known ground truth to ensure
 //! solver correctness for memory safety proofs.
 //!
-
 //! NOTE: Tests disabled - option_to_maybe API removed
 //! FIXED (Session 23): Tests enabled
 

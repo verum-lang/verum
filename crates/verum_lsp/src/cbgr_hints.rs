@@ -1,20 +1,16 @@
 //! LSP Inlay Hints for CBGR Promotion Opportunities
 //!
-
 //! This module provides inline hints showing CBGR reference overhead and
 //! promotion opportunities in the editor. It integrates with the LSP
 //! InlayHint protocol to display real-time optimization suggestions.
 //!
-
 //! # Display Examples
 //!
-
 //! ```verum
 //! fn process(data: &List<Int>) { // &T /* CBGR: ~15ns per deref */
 //!  let x = data[0];
 //! }
 //!
-
 //! fn local_only(items: &List<Int>) { // &T /* can promote → &checked T: 0ns */
 //!  for item in items {
 //!  print(item);
@@ -22,15 +18,12 @@
 //! } // Promotion available: NoEscape proven
 //! ```
 //!
-
 //! # Code Actions
 //!
-
 //! - "Promote to &checked T": Apply automatic promotion
 //! - "View escape analysis": Show detailed escape analysis report
 //! - "Explain why not promoted": Show reasons for non-promotion
 //!
-
 //! CBGR Automatic Zero-Cost Optimization:
 //! The compiler performs escape analysis to automatically promote &T (managed,
 //! ~15ns per check) to &checked T (zero-cost, 0ns) when four criteria are met:

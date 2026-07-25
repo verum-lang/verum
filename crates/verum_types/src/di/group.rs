@@ -1,21 +1,16 @@
 //! Context Groups - Reusable context sets
 //!
-
 //! Context group expansion: resolving context group names to their constituent contexts recursively — Context Requirements
 //!
-
 //! Context groups allow defining reusable sets of contexts that are commonly
 //! used together. Groups are defined with the `using` keyword:
 //!
-
 //! ```verum
 //! using WebContext = [Database, Logger, Auth, Metrics]
 //! ```
 //!
-
 //! Functions can then use the group instead of listing all contexts:
 //!
-
 //! ```verum
 //! fn handle_request() using WebContext { ... }
 //! ```

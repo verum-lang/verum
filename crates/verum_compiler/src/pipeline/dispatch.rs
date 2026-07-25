@@ -1,11 +1,9 @@
 //! Public dispatch entry points (single-file run / check / parse).
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 16). Houses the
 //! single-source entry points that the CLI tier-selection logic
 //! routes to:
 //!
-
 //!  * `run` — unified dispatch based on `CompilerOptions`
 //!  flags; routes to `run_check_only` (Checked) or
 //!  `run_native_compilation` (Built).

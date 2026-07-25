@@ -1,16 +1,12 @@
 //! FromTensorLiteral Protocol Implementation
 //!
-
 //! Tensor protocol: operations on Tensor<T, Shape> including element-wise ops, reductions, reshaping with compile-time shape validation — Tensor Literal Protocol
 //!
-
 //! This module implements the `FromTensorLiteral` protocol for compile-time
 //! tensor literal construction with shape validation.
 //!
-
 //! # Protocol Definition
 //!
-
 //! ```verum
 //! protocol FromTensorLiteral<Shape: meta [usize], T> {
 //!  fn from_tensor_literal(elements: NestedArray<T, Shape>) -> Self
@@ -18,53 +14,42 @@
 //! }
 //! ```
 //!
-
 //! # Key Features
 //!
-
 //! - **Compile-time shape validation** - Verify element count matches shape
 //! - **Type-safe construction** - Ensure element types match tensor type
 //! - **Zero-cost abstraction** - All validation at compile-time, no runtime overhead
 //! - **Nested array support** - Handle multi-dimensional tensor literals
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! // 1D tensor (vector)
 //! let vec = tensor<4>i32{1, 2, 3, 4};
 //! // Calls: FromTensorLiteral<[4], i32>::from_tensor_literal([1, 2, 3, 4])
 //!
-
 //! // 2D tensor (matrix)
 //! let mat = tensor<2, 2>f32{{1.0, 2.0}, {3.0, 4.0}};
 //! // Calls: FromTensorLiteral<[2, 2], f32>::from_tensor_literal([[1.0, 2.0], [3.0, 4.0]])
 //!
-
 //! // Broadcasting (single element repeated)
 //! let ones = tensor<8>f32{1.0}; // Expands to {1.0, 1.0, ..., 1.0}
 //! ```
 //!
-
 //! # Architecture
 //!
-
 //! The protocol integrates with:
 //! - **const_eval**: Compile-time shape computation and validation
 //! - **type checker**: Shape type inference and element type checking
 //! - **diagnostics**: Rich error messages for shape/type mismatches
 //!
-
 //! # Performance
 //!
-
 //! All operations happen at compile-time:
 //! - Shape validation: 0ns runtime overhead
 //! - Element count checking: 0ns runtime overhead
 //! - Type checking: Standard type inference cost
 //!
-
 //! Result: Direct LLVM constant initialization (optimal codegen)
 
 use verum_ast::span::Span;

@@ -1,17 +1,14 @@
 //! Cross-compilation-correct TARGET-triple inspection helpers.
 //!
-
 //! Codegen decisions that depend on the **target** OS / architecture
 //! (syscall numbers, sockaddr layout, socket-option constants, errno
 //! function names, …) MUST inspect the LLVM module's target triple,
 //! never the compile host's `#[cfg(target_os = "...")]` directives.
 //!
-
 //! `#[cfg(target_os = "...")]` binds at *compile-time* of the codegen
 //! crate itself — that's the **host** OS. Using it to gate emitted IR
 //! silently miscompiles every cross build:
 //!
-
 //!  * Build the compiler on x86_64-darwin, target Linux/aarch64 →
 //!  host gates compile out the Linux syscall arms, codegen falls
 //!  through to libSystem clock_gettime, the resulting Linux binary
@@ -21,13 +18,11 @@
 //!  IN the Linux syscall arms, codegen emits `syscall` (kernel
 //!  trap) into a Darwin binary that crashes on the first call.
 //!
-
 //! The LLVM module's *target* triple is the source of truth. These
 //! helpers extract OS / architecture flags from that triple at codegen
 //! time, so the same compiled `verum_codegen` crate produces correct
 //! IR for every target regardless of host.
 //!
-
 //! Per user 2026-04-30 directive: "ты уверен что для emit_linux_syscall
 //! нужна директива #[cfg(target_os=linux)] - разве это не помешает
 //! кросскомпиляции? убедись, что подобного нет в других местах."

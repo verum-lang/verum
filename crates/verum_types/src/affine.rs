@@ -1,24 +1,18 @@
 //! Affine and Linear Type System Implementation
 //!
-
 //! Higher-kinded types: type constructors parameterized by type-level functions
 //! Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 6 (Linear Types)
 //!
-
 //! This module implements compile-time verification for resource types:
 //!
-
 //! # Resource Kinds
 //!
-
 //! - **Copy**: Can be used any number of times (default for primitives)
 //! - **Affine**: Can be used at most once (heap-allocated types)
 //! - **Linear**: Must be used exactly once (resources requiring explicit cleanup)
 //!
-
 //! # Key Features
 //!
-
 //! - **At-most-once usage (Affine)**: Values can be used 0 or 1 times
 //! - **Exactly-once usage (Linear)**: Values must be used exactly once
 //! - **Move semantics**: First use consumes the value
@@ -26,25 +20,20 @@
 //! - **Linear checking**: Unused linear values cause compile error
 //! - **CBGR bypass**: Affine references promote to &checked (0ns overhead)
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! // Affine type - at most once
 //! type affine FileHandle is { fd: Int };
 //!
-
 //! // Linear type - exactly once (must be consumed)
 //! type linear MustClose is { fd: Int };
 //!
-
 //! fn good() {
 //!  let f = open_file("data.txt"); // Linear value
 //!  close_file(f); // OK - consumed exactly once
 //! }
 //!
-
 //! fn bad() {
 //!  let f = open_file("data.txt");
 //!  // ERROR: linear value `f` must be consumed exactly once

@@ -1,6 +1,5 @@
 //! Performance benchmarks for verum_common semantic types
 //!
-
 //! Validates performance targets for Text, List, Map, Set operations
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

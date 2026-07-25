@@ -1,13 +1,10 @@
 //! Meta Context - Compile-time execution environment
 //!
-
 //! This module provides the MetaContext struct which maintains variable bindings,
 //! type definitions, and protocol implementations during compile-time execution.
 //!
-
 //! ## Responsibility
 //!
-
 //! MetaContext is the central state container for meta-programming:
 //! - Variable bindings (name -> MetaValue)
 //! - Type definitions registry
@@ -15,15 +12,12 @@
 //! - Context subsystems (RuntimeInfo, BuildAssets, MacroState, etc.)
 //! - Enabled contexts for builtin function access control
 //!
-
 //! ## Context Model
 //!
-
 //! The meta-system uses a unified context model where builtins are categorized into tiers:
 //! - **Tier 0**: Always available (pure computation)
 //! - **Tier 1**: Require explicit `using [...]` declaration (MetaTypes, MetaRuntime, CompileDiag, BuildAssets)
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

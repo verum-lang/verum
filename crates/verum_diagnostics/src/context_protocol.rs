@@ -1,20 +1,17 @@
 //! Error Context Protocol Implementation
 //!
-
 //! The Error Context Protocol provides a standardized, truly zero-cost mechanism for
 //! adding rich contextual information to errors as they propagate. On the success path,
 //! context operations compile to no-ops (zero allocations, zero closure instantiation).
 //! On the error path, context chains capture operational state at each call stack layer,
 //! transforming opaque errors into actionable diagnostics.
 //!
-
 //! Key guarantees:
 //! - SUCCESS PATH: absolutely zero overhead (no allocations, no string formatting)
 //! - ERROR PATH: minimal overhead (allocate only on actual errors)
 //! - with_context(|| f"...") closures are completely eliminated by dead code elimination on success
 //! - Integrates with '?' operator, async/await, and context handlers
 //!
-
 //! This module provides the complete Error Context Protocol implementation with:
 //! - Zero-cost context on success path
 //! - Full stack trace preservation
@@ -23,22 +20,17 @@
 //! - Multiple display formats
 //! - Backtrace capture (controlled by VERUM_BACKTRACE env var)
 //!
-
 //! # Performance Guarantees
 //!
-
 //! - **Success Path**: Absolutely zero overhead - no allocations, no closures
 //! - **Error Path**: Minimal overhead - only allocate on actual errors
 //! - **Backtrace**: Off by default, controlled by VERUM_BACKTRACE env var
 //!
-
 //! # Example Usage
 //!
-
 //! ```rust,ignore
 //! use verum_diagnostics::context_protocol::*;
 //!
-
 //! fn load_config(path: &str) -> Result<Config, ErrorWithContext<std::io::Error>> {
 //!  std::fs::read_to_string(path)
 //!  .context("Failed to read config file")?;

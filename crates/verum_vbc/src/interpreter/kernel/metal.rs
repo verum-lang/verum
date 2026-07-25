@@ -1,13 +1,10 @@
 //! Metal GPU backend for tensor operations.
 //!
-
 //! This module provides Metal-accelerated tensor operations for macOS/iOS.
 //! Metal is Apple's low-level, high-performance GPU programming framework.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │ MetalBackend │
@@ -20,13 +17,10 @@
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Apple Silicon M3 Optimizations
 //!
-
 //! This implementation follows Apple's Metal best practices for M3/A17 Pro:
 //!
-
 //! - **Optimal threadgroup sizes**: Uses 256 threads per group (8 SIMD groups)
 //!  for compute shaders, balancing occupancy and register pressure
 //! - **Reduced threadgroup memory**: On M3, direct buffer access is often faster
@@ -34,19 +28,15 @@
 //! - **Tiled matrix multiplication**: 16x16 tiles for better cache utilization
 //! - **Unified memory model**: Shared buffers avoid H2D/D2H copies
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! let backend = MetalBackend::new()?;
 //! let result = backend.binop(&a, &b, TensorBinaryOp::Add)?;
 //! ```
 //!
-
 //! # References
 //!
-
 //! - [Metal Overview](https://developer.apple.com/metal/)
 //! - [Metal Performance Shaders](https://developer.apple.com/documentation/metalperformanceshaders)
 //! - [Learn performance best practices for Metal shaders](https://developer.apple.com/videos/play/tech-talks/111373/)

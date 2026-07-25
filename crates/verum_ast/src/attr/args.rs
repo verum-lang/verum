@@ -1,16 +1,12 @@
 //! Attribute argument specifications for the Verum AST.
 //!
-
 //! This module defines the type system for attribute arguments, enabling
 //! compile-time validation of attribute syntax.
 //!
-
 //! # Overview
 //!
-
 //! Verum attributes can have various argument forms:
 //!
-
 //! ```verum
 //! @cold // No arguments
 //! @inline(always) // Single positional argument
@@ -21,18 +17,14 @@
 //! @deprecated(since = "2.0", use = "new") // Multiple named strings
 //! ```
 //!
-
 //! # Design
 //!
-
 //! - [`ArgSpec`]: Specification for what arguments an attribute accepts
 //! - [`ArgType`]: Type of a single argument value
 //! - [`NamedArgSpec`]: Specification for a named argument
 //!
-
 //! # Argument Validation
 //!
-
 //! Attribute argument specs define what arguments an attribute accepts: none (@cold),
 //! optional (@inline or @inline(always)), required (@align(16)), named keyword-style
 //! (@serialize(rename = "x")), variadic (@derive(Clone, Serialize)), or mixed.

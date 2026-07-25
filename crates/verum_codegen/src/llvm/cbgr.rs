@@ -1,31 +1,24 @@
 //! CBGR (Capability-Based Generational References) lowering to LLVM IR.
 //!
-
 //! This module implements tier-aware reference operations for the CBGR
 //! memory safety system.
 //!
-
 //! # Reference Tiers
 //!
-
 //! - **Tier 0**: Full runtime checks (~15ns overhead)
 //!  - Generation validation on every dereference
 //!  - Capability checks for read/write/borrow
 //!
-
 //! - **Tier 1**: Compiler-proven safe (zero overhead)
 //!  - Escape analysis proves reference validity
 //!  - Direct pointer access
 //!
-
 //! - **Tier 2**: Manually marked unsafe (zero overhead)
 //!  - User asserts safety via `&unsafe T`
 //!  - Direct pointer access
 //!
-
 //! # Memory Layout
 //!
-
 //! ThinRef<T>: 16 bytes
 //! ```text
 //! +--------+------------+------------+
@@ -34,7 +27,6 @@
 //! +--------+------------+------------+
 //! ```
 //!
-
 //! FatRef<T>: 32 bytes (for unsized types — slices, trait objects).
 //! Layout matches `core/mem/fat_ref.vr` `@repr(C, size(32), align(8))`.
 //! ```text

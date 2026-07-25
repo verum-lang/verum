@@ -1,9 +1,7 @@
 //! Hygiene Violation Types
 //!
-
 //! Defines all types of hygiene violations that can occur during macro expansion.
 //!
-
 //! Violations: AccidentalCapture (M402), ScopeResolutionFailure (M404),
 //! StageMismatch (M405), UnresolvedSplice, DuplicateBinding, ShadowingWarning.
 //! Each violation tracks the identifier, its mark set, and source span.

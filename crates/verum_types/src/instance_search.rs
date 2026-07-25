@@ -1,6 +1,5 @@
 //! Phase D.4: Protocol Instance Search with Coherence Checking
 //!
-
 //! Automatic resolution of protocol instances ("trait instances" in
 //! Rust terminology). When the type checker encounters a generic
 //! function call that requires a protocol constraint like
@@ -8,16 +7,13 @@
 //! Monoid for F` block in the environment — or emits an error if no
 //! implementation exists (or multiple conflicting ones do).
 //!
-
 //! ## Coherence
 //!
-
 //! Global coherence rule: for any given type `T` and protocol `P`,
 //! there must be at most **one** `implement P for T` in the project.
 //! Multiple implementations are a coherence violation — this module
 //! detects the conflict and emits a diagnostic.
 //!
-
 //! The `@instance` attribute marks implementations as candidates for
 //! automatic selection; the `@coherent` attribute asserts coherence
 //! has been verified by the solver.

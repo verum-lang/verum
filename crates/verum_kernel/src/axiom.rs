@@ -1,9 +1,7 @@
 //! Axiom registry — explicit trusted-axiom set + AST loader.
 //!
-
 //! Split per #198. Two complementary surfaces:
 //!
-
 //!  • [`AxiomRegistry`] / [`RegisteredAxiom`] — the in-memory
 //!  trusted-base set. Every `register` call extends the TCB;
 //!  every `all` call enumerates the current boundary so the CLI
@@ -11,7 +9,6 @@
 //!  results a proof depends on. UIP-shape axioms are syntactically
 //!  rejected to preserve cubical-univalence soundness.
 //!
-
 //!  • [`load_framework_axioms`] — AST-level loader that scans a
 //!  parsed Verum module for `@framework(identifier, "citation")`
 //!  attributes on axiom declarations and inserts a

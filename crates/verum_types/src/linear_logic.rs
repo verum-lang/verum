@@ -1,11 +1,9 @@
 //! Linear Logic — full propositional connectives + exponentials.
 //!
-
 //! Where QTT (`qtt_usage`) tracks resource usage by quantity
 //! arithmetic, **linear logic** (Girard 1987) does it through
 //! a richer connective algebra:
 //!
-
 //! ```text
 //!  A, B ::= a (atom)
 //!  | A ⊗ B (tensor: both A and B, paired)
@@ -20,13 +18,10 @@
 //!  | A^⊥ (linear negation / dual)
 //! ```
 //!
-
 //! ## de Morgan dualities
 //!
-
 //! Linear negation is involutive (`(A^⊥)^⊥ = A`) and exchanges:
 //!
-
 //! ```text
 //!  (A ⊗ B)^⊥ = A^⊥ ⅋ B^⊥
 //!  (A & B)^⊥ = A^⊥ ⊕ B^⊥
@@ -36,19 +31,15 @@
 //!  (A ⊸ B) ≡ A^⊥ ⅋ B (definitional)
 //! ```
 //!
-
 //! ## Structural rules
 //!
-
 //! Linear logic restricts contraction (use a hypothesis twice)
 //! and weakening (drop a hypothesis) to formulas under `!`. The
 //! [`is_unrestricted`] and [`is_weakenable`] predicates classify
 //! formulas accordingly.
 //!
-
 //! ## Status
 //!
-
 //! Standalone algebraic core. Integration with QTT is a future
 //! step — `!A` corresponds to `Quantity::Omega`, `?A` to
 //! `Quantity::AtMost(n)` for some n, plain atoms to

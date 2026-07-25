@@ -1,22 +1,17 @@
 //! Static Single Assignment (SSA) Construction Module
 //!
-
 //! Implements SSA form construction for Verum's verification system.
 //! Each variable is assigned exactly once in SSA form, which simplifies
 //! dataflow analysis and enables efficient verification.
 //!
-
 //! # Algorithm (Cytron et al. 1991)
 //!
-
 //! 1. Compute dominance frontiers
 //! 2. Insert phi nodes at join points
 //! 3. Rename variables to SSA form
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! // Original code:
 //! if condition {
@@ -26,7 +21,6 @@
 //! }
 //! y = x + 3;
 //!
-
 //! // SSA form:
 //! if condition {
 //!  x1 = 1;
@@ -37,7 +31,6 @@
 //! y1 = x3 + 3;
 //! ```
 //!
-
 //! SSA form is crucial for efficient verification: each variable is assigned
 //! exactly once, simplifying dataflow analysis and enabling precise weakest
 //! precondition computation. The standard Cytron et al. (1991) algorithm is used:

@@ -1,6 +1,5 @@
 //! Per-script lockfile (P2.2).
 //!
-
 //! A `<script>.lock` sidecar pins the resolved-dependency graph for a
 //! single `.vr` script so subsequent runs (a) skip dependency resolution
 //! when the source + compiler are unchanged, and (b) reproduce identical
@@ -9,10 +8,8 @@
 //! the cog root and tracks a multi-cog graph; this module is its single-
 //! file analogue.
 //!
-
 //! # On-disk layout
 //!
-
 //! ```text
 //! version = 1
 //! source_path = "/abs/path/to/script.vr"
@@ -21,7 +18,6 @@
 //! created_at = 1714161000
 //! updated_at = 1714161000
 //!
-
 //! [[deps]]
 //! name = "json"
 //! version = "1.4.0"
@@ -29,19 +25,15 @@
 //! integrity = "<blake3 hex>"
 //! ```
 //!
-
 //! # Verification
 //!
-
 //! [`ScriptLockfile::verify_against`] returns a [`VerifyOutcome`] that
 //! tells the caller whether the lockfile is fresh or must be regenerated.
 //! Schema-skew is silent (treated as "regenerate"), matching the
 //! script-cache convention.
 //!
-
 //! # Atomicity
 //!
-
 //! [`ScriptLockfile::write_to`] uses a tempfile + rename so a crash never
 //! leaves a partially-written lockfile.
 

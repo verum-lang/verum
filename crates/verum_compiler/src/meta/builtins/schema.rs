@@ -1,23 +1,18 @@
 //! Schema Validation Intrinsics (Tier 1 - Requires MetaTypes)
 //!
-
 //! Provides compile-time code schema validation builtins for meta-programming.
 //! Schemas define structural constraints on code (functions, types, expressions)
 //! and can validate token streams against those constraints.
 //!
-
 //! ## Schema Builder Functions
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `schema_function()` | `() -> Schema` | Start building a function schema |
 //! | `schema_type()` | `() -> Schema` | Start building a type schema |
 //!
-
 //! ## Validation Functions
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `schema_validate(code, schema)` | `(Text, Map) -> List<Map>` | Validate code against schema |
@@ -25,10 +20,8 @@
 //! | `schema_is_type(code)` | `(Text) -> Bool` | Quick check: is code a type? |
 //! | `schema_is_expression(code)` | `(Text) -> Bool` | Quick check: is code an expression? |
 //!
-
 //! ## Context Requirements
 //!
-
 //! **Tier 1**: All functions require `using [MetaTypes]` context.
 
 use verum_common::{List, OrderedMap, Text};

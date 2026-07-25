@@ -1,6 +1,5 @@
 //! Type context and environment for type checking.
 //!
-
 //! This module provides the typing context that tracks:
 //! - Variable bindings and their types
 //! - Type schemes for let-polymorphism

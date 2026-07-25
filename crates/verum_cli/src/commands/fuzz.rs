@@ -1,12 +1,10 @@
 //! Fuzz-target orchestration for `[test].fuzzing = true` (#299).
 //!
-
 //! When the manifest enables `[test].fuzzing`, the `verum test`
 //! command runs not only the @test / @property suite but also each
 //! cargo-fuzz target discovered under `fuzz/` directories. This
 //! module owns:
 //!
-
 //!  1. Discovery — walk the workspace for `fuzz/Cargo.toml` (at
 //!  project root) and `crates/*/fuzz/Cargo.toml` (per-crate
 //!  fuzz harnesses), parse each TOML for `[[bin]]` entries,
@@ -19,7 +17,6 @@
 //!  3. Reporting — aggregate per-target outcomes into a
 //!  `FuzzReport` with crash artifacts attached.
 //!
-
 //! Cargo-fuzz toolchain dependency: requires `cargo-fuzz`
 //! installed (`cargo install cargo-fuzz`). When the binary is
 //! absent the runner emits a single hint line and returns an

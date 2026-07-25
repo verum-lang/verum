@@ -14,7 +14,6 @@
 )]
 //! Tests for Phase 7.5: Final Linking
 //!
-
 //! These tests verify the linking phase functionality including:
 //! - OutputKind enum for different output formats
 //! - Symbol resolution

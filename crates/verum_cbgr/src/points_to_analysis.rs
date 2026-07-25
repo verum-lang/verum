@@ -1,39 +1,31 @@
 //! Points-to Analysis for CBGR Escape Analysis
 //!
-
 //! Implements Andersen-style inclusion-based points-to analysis for CBGR. Determines
 //! which memory locations each reference may point to, enabling precise alias analysis.
 //! Two references with disjoint points-to sets are guaranteed NoAlias, allowing
 //! independent promotion decisions. Works with the escape analysis pipeline to refine
 //! escape categories based on actual pointer relationships.
 //!
-
 //! This module implements production-grade Andersen-style points-to analysis to track
 //! pointer relationships across the entire program. This enables precise alias analysis
 //! and escape detection by determining what memory locations each reference may point to.
 //!
-
 //! # Algorithm Overview
 //!
-
 //! **Andersen's Algorithm** (inclusion-based points-to analysis):
 //! - Complexity: O(n³) worst-case, O(n²) typical
 //! - Precision: Flow-insensitive, context-insensitive
 //! - Constraint-based: Generate and solve inclusion constraints
 //!
-
 //! # Constraint Types
 //!
-
 //! 1. **Address-of**: `x = &y` → pts(x) ⊇ {y}
 //! 2. **Copy**: `x = y` → pts(x) ⊇ pts(y)
 //! 3. **Load**: `x = *y` → pts(x) ⊇ ⋃{pts(z) | z ∈ pts(y)}
 //! 4. **Store**: `*x = y` → ∀z ∈ pts(x): pts(z) ⊇ pts(y)
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! fn example() {
 //!  let x = 42; // Allocation: x
@@ -43,19 +35,15 @@
 //! }
 //! ```
 //!
-
 //! # Performance
 //!
-
 //! Target: O(n³) worst-case, O(n) for typical programs
 //! - Constraint generation: O(n) where n = instructions
 //! - Constraint solving: O(n³) worst-case with optimizations
 //! - Typical: O(n) to O(n²) for real programs
 //!
-
 //! # Integration
 //!
-
 //! Points-to analysis integrates with:
 //! - Alias analysis: Precise may-alias/must-alias queries
 //! - Escape analysis: Heap escape detection

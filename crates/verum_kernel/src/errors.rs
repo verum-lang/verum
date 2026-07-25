@@ -1,11 +1,9 @@
 //! Kernel error type — the diagnostic surface for ill-typed proof terms.
 //!
-
 //! Kernel errors are **never** rescued by downstream passes. If you
 //! see one, either the proof is wrong or a non-trusted component
 //! (tactic, elaborator, SMT backend) produced a malformed term.
 //!
-
 //! Split out of `lib.rs` for auditability (#198): grouping all error
 //! variants in a single file makes the diagnostic surface trivially
 //! greppable for documentation, format-string consistency checks,

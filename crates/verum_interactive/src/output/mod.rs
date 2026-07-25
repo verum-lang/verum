@@ -1,6 +1,5 @@
 //! Output rendering module for the Verum Playground.
 //!
-
 //! This module provides rich output formatting for various data types,
 //! including tensors, structured data, collections, and more.
 

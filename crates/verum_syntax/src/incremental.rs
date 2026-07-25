@@ -1,51 +1,40 @@
 //! Production-quality incremental parsing support.
 //!
-
 //! Enables efficient re-parsing when source is edited by:
 //! 1. Tracking text changes (insertions, deletions, replacements)
 //! 2. Identifying the smallest affected subtree using node stability analysis
 //! 3. Re-parsing only that subtree with proper context
 //! 4. Replacing it in the green tree using structural sharing
 //!
-
 //! # Key Concepts
 //!
-
 //! ## Node Stability
 //!
-
 //! A node is "stable" if it can be independently re-parsed without affecting
 //! surrounding nodes. Stable boundaries include:
 //! - Top-level items (functions, types, imports)
 //! - Blocks delimited by braces
 //! - Statements ending with semicolons
 //!
-
 //! ## Reparse Context
 //!
-
 //! When re-parsing a subtree, we need to know what parsing rule to use:
 //! - SOURCE_FILE nodes use module parsing
 //! - FN_DEF nodes use function definition parsing
 //! - BLOCK nodes use block parsing
 //! - LET_STMT nodes use statement parsing
 //!
-
 //! ## Structural Sharing
 //!
-
 //! Green trees store relative widths, not absolute offsets. This enables
 //! O(log n) updates: only the path from the edit to the root needs recreation.
 //!
-
 //! # Performance Targets
 //!
-
 //! - Single character edit: < 5ms
 //! - Multi-line edit (< 10 lines): < 20ms
 //! - Large edit (> 10 lines): Falls back to full reparse
 //!
-
 //! Incremental Parsing Algorithm:
 //! 1. Find smallest affected subtree containing the edit (walk down green tree)
 //! 2. Compute local edit coordinates relative to subtree start

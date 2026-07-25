@@ -1,6 +1,5 @@
 //! Meta statement IR
 //!
-
 //! This module defines the intermediate representation for meta statements.
 
 use verum_common::{Maybe, Text};

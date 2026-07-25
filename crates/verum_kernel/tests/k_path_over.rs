@@ -1,11 +1,9 @@
 //! PathOver kernel-level tests.
 //!
-
 //! `PathOver(motive, p, lhs, rhs)` is the dependent path-over
 //! constructor needed when a HIT path-constructor's endpoints have
 //! distinct motive images. This file pins:
 //!
-
 //!  • PathOver typing rule (K-PathOver-Form): motive must be a Pi
 //!  B → U, path must be a PathTy, endpoints must type-check;
 //!  result inhabits the same universe as motive's codomain.

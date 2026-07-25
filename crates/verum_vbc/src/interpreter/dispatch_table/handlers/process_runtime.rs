@@ -1,6 +1,5 @@
 //! High-level Rust intercepts for `core.io.process` operations.
 //!
-
 //! Sibling to `shell_runtime.rs` (VBC-1), `file_runtime.rs`
 //! (VBC-FILE-1 + VBC-FS-2), `env_runtime.rs` (VBC-ENV-1 +
 //! VBC-PROC-1), and `stdio_runtime.rs` (VBC-STDIO-1/2).
@@ -12,10 +11,8 @@
 //! `wait_for_child` calls at the `Call` boundary and dispatching
 //! straight to `std::process::Command`.
 //!
-
 //! # Functions intercepted
 //!
-
 //!  * `spawn_child_with_output(cmd: &Command) -> Result<Output, Text>`
 //!  — `std::process::Command::output()`. Constructs the full
 //!  stdlib `Output { status, stdout_bytes, stderr_bytes }` record.
@@ -24,10 +21,8 @@
 //!  * `wait_for_child(pid: Int) -> Result<ExitStatus, Text>` —
 //!  defers (depends on prior spawn_child path).
 //!
-
 //! # Command field layout
 //!
-
 //! `core/io/process.vr::Command` is a 7-field record laid out as
 //! `[ObjectHeader][program: Value][args: Value][env_vars: Value]
 //!  [working_dir: Value][stdin_cfg: Value][stdout_cfg: Value]

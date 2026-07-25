@@ -2,18 +2,15 @@
 // the unified cog dependency system instead of special-case stdlib loading.
 //! Stdlib metadata loader from VBC archives.
 //!
-
 //! This module provides functionality to load stdlib type metadata from
 //! pre-compiled VBC archives (stdlib.vbca). This enables the type checker
 //! to use stdlib types without parsing .vr files.
 //!
-
 //! Architecture:
 //! ```text
 //! stdlib.vbca ─── VbcArchive ─── CoreMetadata ─── TypeChecker
 //! ```
 //!
-
 //! VBC-first pipeline: Source → VBC bytecode → Interpreter (Tier 0) or LLVM AOT (Tier 1).
 //! Stdlib bootstrap: loads pre-compiled core/ modules from embedded .vbca archive.
 

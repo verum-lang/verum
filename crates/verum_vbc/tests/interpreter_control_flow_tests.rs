@@ -14,7 +14,6 @@
 )]
 //! Interpreter tests for control flow, function calls, and CBGR generation tracking.
 //!
-
 //! Covers:
 //! - JmpIf / JmpNot branching
 //! - Loops via backward jumps

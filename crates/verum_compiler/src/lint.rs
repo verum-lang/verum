@@ -1,22 +1,17 @@
 //! Lint Configuration and Intrinsic Diagnostics
 //!
-
 //! This module provides configurable lint levels for intrinsic-related diagnostics,
 //! following rustc-compatible semantics for lint severity.
 //!
-
 //! ## Lint Levels
 //!
-
 //! - `Allow`: Suppress the lint entirely
 //! - `Warn`: Emit as warning (default for most lints)
 //! - `Deny`: Emit as error, fail compilation
 //! - `Forbid`: Like `Deny`, but cannot be overridden
 //!
-
 //! ## Diagnostic Codes
 //!
-
 //! ### Errors (E09xx)
 //! - E0901: Missing intrinsic (strict mode)
 //! - E0902: Wrong argument count
@@ -25,7 +20,6 @@
 //! - E0905: Platform not supported
 //! - E0906: Compile-time evaluation failed
 //!
-
 //! ### Warnings (W09xx)
 //! - W0901: Missing intrinsic (default mode)
 //! - W0902: Deprecated intrinsic

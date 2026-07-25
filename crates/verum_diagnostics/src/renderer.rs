@@ -1,6 +1,5 @@
 //! Pretty-printing and rendering of diagnostics with colors and source context.
 //!
-
 //! This module provides beautiful, Rust-like error rendering with:
 //! - Color-coded output
 //! - Source code snippets with line numbers

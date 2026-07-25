@@ -1,17 +1,13 @@
 //! # Capability-Based SMT Solver Router
 //!
-
 //! Intelligent dispatcher that routes each proof goal to the most capable
 //! SMT solver, using the complementary strengths of Z3 and CVC5.
 //!
-
 //! ## Design Philosophy
 //!
-
 //! Z3 and CVC5 are both top-tier SMT solvers, but they excel at different
 //! theories:
 //!
-
 //! | Theory | Winner | Rationale |
 //! |-----------------------------|--------|----------------------------------------|
 //! | Linear Integer Arithmetic | Z3 | Faster LIA decision procedure |
@@ -27,13 +23,10 @@
 //! | Finite model finding | CVC5 | Specialized mode |
 //! | Higher-order logic | CVC5 | Experimental HOL support |
 //!
-
 //! ## Routing Strategy
 //!
-
 //! Given a goal, the router analyzes its structure and chooses one of:
 //!
-
 //! 1. **`Z3Only`** — Goal matches a theory where Z3 clearly dominates.
 //! 2. **`Cvc5Only`** — Goal matches a theory where CVC5 clearly dominates.
 //! 3. **`Portfolio`** — Both solvers run in parallel; first result wins.
@@ -41,22 +34,17 @@
 //! 4. **`CrossValidate`** — Both solvers must independently agree. Used for
 //!  security-critical verification and proof certificate generation.
 //!
-
 //! ## Integration
 //!
-
 //! The router is invoked from `BackendSwitcher::solve()` as the first
 //! dispatch stage, before any fallback or portfolio logic. It operates on
 //! `ProblemCharacteristics` extracted by the `StrategySelector`.
 //!
-
 //! ## Example
 //!
-
 //! ```rust,ignore
 //! use verum_smt::capability_router::{CapabilityRouter, RouterConfig};
 //!
-
 //! let router = CapabilityRouter::new(RouterConfig::default());
 //! match router.route(&characteristics) {
 //!  SolverChoice::Z3Only => /* dispatch to Z3 */,

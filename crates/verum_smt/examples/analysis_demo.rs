@@ -1,9 +1,7 @@
 //! Analysis Module Demonstration
 //!
-
 //! Demonstrates the formal verification capabilities of the Analysis module.
 //!
-
 //! This example shows:
 //! 1. Complete ordered field verification (real numbers)
 //! 2. Function continuity verification

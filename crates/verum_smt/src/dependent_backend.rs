@@ -1,13 +1,11 @@
 //! SMT-based implementation of the `DependentTypeChecker` trait.
 //!
-
 //! This module lives in `verum_smt` (rather than `verum_types`) so the
 //! `verum_smt` → `verum_types` dependency edge remains acyclic. The trait
 //! definition and constraint types stay in
 //! `verum_types::dependent_integration`; only the concrete Smt-based
 //! implementation was migrated here.
 //!
-
 //! ```text
 //! TypeChecker (verum_types)
 //!  ↓ uses

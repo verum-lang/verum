@@ -1,6 +1,5 @@
 //! Maybe type - Optional values
 //!
-
 //! Verum semantic type: Maybe<T> is the optional value type (equivalent to Option<T>).
 
 use std::fmt;

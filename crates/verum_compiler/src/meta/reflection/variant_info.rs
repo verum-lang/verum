@@ -1,6 +1,5 @@
 //! Variant information for compile-time reflection
 //!
-
 //! Provides detailed enum variant metadata matching core/meta/reflection.vr VariantInfo.
 
 use verum_ast::MetaValue;

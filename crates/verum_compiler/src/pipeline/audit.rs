@@ -1,11 +1,9 @@
 //! Stdlib quality / audit reporting.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 18). Houses the
 //! diagnostic introspection surface that quality-gate / audit
 //! tooling consumes. Five methods:
 //!
-
 //!  * `count_stdlib_type_errors` — header-only registration
 //!  errors (type names + function signatures + protocols +
 //!  impl blocks). Cheap; suppressed during normal compilation

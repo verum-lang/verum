@@ -1,7 +1,6 @@
 //! Foundation profile — classification of the logical foundation
 //! a corpus of theorems assumes.
 //!
-
 //! Verum's "foundation-neutral" claim — that the same proof
 //! infrastructure works across **ZFC**, **HoTT** (Homotopy Type
 //! Theory), **Cubical** (CCHM cubical type theory), and other
@@ -10,17 +9,14 @@
 //! audit gates / corpus organizers must be able to filter by
 //! foundation profile.
 //!
-
 //! This module establishes the canonical `FoundationProfile`
 //! enum + classification helpers. It plugs into the existing
 //! [`crate::zfc_self_recognition`] machinery for ZFC-specific
 //! axiom decomposition while extending the surface to non-ZFC
 //! foundations.
 //!
-
 //! ## Architectural alignment with Verum philosophy
 //!
-
 //! - **Foundation-neutral**: the same kernel rules and certificate
 //!  format work across all foundations. `FoundationProfile`
 //!  classifies which foundation a corpus chooses, without

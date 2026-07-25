@@ -1,10 +1,8 @@
 //! Postcondition handling and verification.
 //!
-
 //! Postconditions are constraints that the function guarantees to hold
 //! at exit. They are what we verify using the SMT solver.
 //!
-
 //! Verum uses contract literals (`contract#"requires ...; ensures ...;"`) embedded
 //! in functions annotated with `@verify(proof)`. Postconditions (ensures clauses) are
 //! the proof obligations verified by the SMT solver. The weakest-precondition calculus

@@ -14,10 +14,8 @@
 )]
 //! Correctness tests for verum_types
 //!
-
 //! Tests functional behavior per project standards.
 //!
-
 //! NOTE: Correctness testing for verum_types is extensively covered in the following test files:
 //! - infer_tests.rs: Type inference correctness
 //! - unify_tests.rs: Unification algorithm correctness
@@ -27,7 +25,6 @@
 //! - context_tests.rs: Type context correctness
 //! - ty_tests.rs: Type representation correctness
 //!
-
 //! This file exists as a placeholder for additional correctness tests that don't fit
 //! into the specific test categories above. As new features are added, tests should
 //! be added to the appropriate specialized test file rather than this general file.

@@ -1,31 +1,25 @@
 //! Production-Grade Refinement Type System
 //!
-
 //! Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — Refinement Types
 //!
-
 //! This module implements Verum's complete refinement type system with:
 //! - Three subsumption modes (syntactic, SMT-based, user proof)
 //! - Full SMT integration via Z3
 //! - High-quality error messages with counterexamples
 //! - Performance optimization through proof caching
 //!
-
 //! # Architecture
 //!
-
 //! ## Core Data Structures
 //! - `RefinementPredicate`: AST representation of refinement predicates
 //! - `RefinementType`: Base type + predicate constraint
 //! - `VerificationCondition`: SMT queries to verify
 //!
-
 //! ## Checker Modes
 //! 1. **Syntactic**: Fast pattern matching for obvious cases (~1ms)
 //! 2. **SMT-Based**: Z3 solver for complex predicates (10-500ms)
 //! 3. **User Proof**: Cached proof terms (0ms) [future]
 //!
-
 //! ## Performance Targets
 //! - Syntactic checks: < 1ms
 //! - SMT queries: < 100ms (with timeout)

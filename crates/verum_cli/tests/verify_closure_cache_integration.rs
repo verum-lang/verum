@@ -1,10 +1,8 @@
 //! End-to-end integration tests for `verum verify --closure-cache`.
 //!
-
 //! Validates the full pipeline integration of `verum_verification::
 //! closure_cache::FilesystemCacheStore` into `verum verify`:
 //!
-
 //!  1. First verify with `--closure-cache --closure-cache-root <DIR>`
 //!  → cache is empty → engine runs → entries are written.
 //!  2. Second verify with the same flag against the same project →
@@ -16,7 +14,6 @@
 //!  sub via `--closure-cache-root` to a *different* directory,
 //!  which is the standard CI pattern for cache isolation).
 //!
-
 //! Together with the 31 trait-level tests in
 //! `verum_verification::closure_cache::tests` and the 14 handler
 //! unit tests in `commands::cache_closure::tests`, this proves the

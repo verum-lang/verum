@@ -1,12 +1,10 @@
 //! Real TCP / UDP intrinsics for the VBC interpreter (Tier 0).
 //!
-
 //! Backs the `__tcp_*_raw` and `__udp_*_raw` family declared in
 //! `core/sys/raw.vr`. The previous interpreter handler returned -1
 //! for all of them — script-mode + interpreter-mode networking was
 //! a documentation-only feature.
 //!
-
 //! Resource model: a thread-local `HashMap<i64, Resource>` keyed by a
 //! synthetic file-descriptor number. The number is a small monotonic
 //! counter (starts at 1) — NOT a kernel fd, so we never hand the
@@ -14,7 +12,6 @@
 //! removes the entry; `Drop` of the resource closes the underlying
 //! socket.
 //!
-
 //! The contract is the one declared in `core/sys/raw.vr`:
 //!  * `__tcp_listen_raw(port: Int) -> Int` — bind 0.0.0.0:port, listen.
 //!  * `__tcp_accept_raw(fd: Int) -> Int` — blocking accept.
@@ -27,12 +24,10 @@
 //!  * `__udp_recv_raw(fd: Int, max_len: Int) -> Text` — recv (peer ignored).
 //!  * `__udp_close_raw(fd: Int) -> Int`
 //!
-
 //! Binary safety: `recv` returns Text via `String::from_utf8_lossy` —
 //! same caveat as the AOT runtime's TCP API. Truly binary protocols
 //! should use `core/net/tcp.vr` (syscall-driven, currently AOT-only).
 //!
-
 //! These intrinsics are deliberately blocking: they deliver the
 //! "raw FFI fallback" promised by `core/sys/net_ops.vr` and unlock
 //! `verum run --interp` HTTP demos at the cost of the executor

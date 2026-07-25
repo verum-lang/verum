@@ -1,18 +1,14 @@
 //! Optimization Pass Infrastructure for Verum MLIR.
 //!
-
 //! This module provides the pass management infrastructure for Verum's
 //! MLIR-based code generation. It includes:
 //!
-
 //! - **Domain-specific passes**: CBGR elimination, context monomorphization, refinement propagation
 //! - **Standard MLIR passes**: CSE, canonicalization, LICM, inlining
 //! - **Pipeline management**: Ordered pass execution with verification
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │ PassPipeline │
@@ -40,27 +36,21 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Pass Execution Order
 //!
-
 //! 1. **Early optimization**: Canonicalization, CSE
 //! 2. **Domain passes**: CBGR elimination, context mono, refinement
 //! 3. **Late optimization**: LICM, inlining, DCE
 //! 4. **Lowering**: Verum → SCF → CF → LLVM
 //!
-
 //! # Usage
 //!
-
 //! ```rust,ignore
 //! use crate::mlir::passes::{PassPipeline, PassConfig};
 //!
-
 //! // Create pipeline with default configuration
 //! let mut pipeline = PassPipeline::new(&context);
 //!
-
 //! // Configure passes
 //! pipeline.with_config(PassConfig {
 //!  enable_cbgr_elimination: true,
@@ -70,7 +60,6 @@
 //!  verbose: true,
 //! });
 //!
-
 //! // Run pipeline
 //! let result = pipeline.run(&mut module)?;
 //! println!("{}", result.summary());

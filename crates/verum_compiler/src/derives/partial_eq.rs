@@ -1,9 +1,7 @@
 //! PartialEq derive macro implementation
 //!
-
 //! Generates `implement PartialEq for Type { fn eq(&self, other: &Self) -> Bool }`
 //!
-
 //! For record types: compares all fields pairwise with &&. For sum types: matches
 //! variant tags first, then compares payloads field-by-field. Returns false for
 //! mismatched variants. NaN != NaN for float fields (IEEE 754 semantics).

@@ -1,10 +1,8 @@
 //! CBGR (Capability-Based Generation References) tier analysis.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 9). Performs tier
 //! analysis on all functions in the module:
 //!
-
 //!  1. Builds control flow graphs (CFGs) for each function.
 //!  2. Runs escape analysis to determine reference tier selection.
 //!  3. Decides which references can be promoted from Tier 0
@@ -12,7 +10,6 @@
 //!  `&checked T`).
 //!  4. Logs analysis statistics for optimisation feedback.
 //!
-
 //! The cluster is the second-largest single concern in pipeline.rs
 //! (~1794 LOC across 14 methods): one orchestrator
 //! (`phase_cbgr_analysis`) plus the AST-to-CFG construction

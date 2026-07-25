@@ -1,16 +1,12 @@
 //! Context Requirements - Function dependency declarations
 //!
-
 //! Context group expansion: resolving context group names to their constituent contexts recursively — Context Requirements
 //!
-
 //! This module implements context requirements, which specify what contexts
 //! a function needs to execute. Requirements are declared with `using [Ctx1, Ctx2]`.
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! fn process() using [Logger, Database] {
 //!  Logger.log(Level.Info, "Processing...");

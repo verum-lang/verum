@@ -14,13 +14,11 @@
 )]
 //! Proof Validator Tests
 //!
-
 //! Comprehensive tests for the proof validation implementations including:
 //! - SMT re-checking (recheck_with_smt)
 //! - Witness type validation (validate_witness_type)
 //! - Type normalization (normalize_types)
 //!
-
 //! Implements validation of the formal proof system (Verum 2.0+ planned):
 //! - Proof terms are first-class values via Curry-Howard correspondence
 //! - Core rules: Axiom, Assumption, ModusPonens, Rewrite, Induction, Lambda, Cases

@@ -1,6 +1,5 @@
 //! Naming-hygiene contract for `core/database/sqlite/native/`.
 //!
-
 //! Several catalogue waves shipped public type definitions whose names
 //! shadowed stdlib type or variant names — most notably `public type Result
 //! is | RNull | RText/RBytes`, which silently overrode `Result<T,E>::{Ok,
@@ -10,7 +9,6 @@
 //! RText]" — confusing because the catalogue and the test file looked
 //! syntactically fine in isolation.
 //!
-
 //! This test is a guardrail: it walks `core/database/sqlite/native/` and
 //! fails CI when any `.vr` file declares `public type {RESERVED} is …` for
 //! any name in the reserved set. The reserved set is the small list of
@@ -18,7 +16,6 @@
 //! accidentally shadow — types and variant constructors that carry critical
 //! "stdlib protocol" meaning.
 //!
-
 //! Spec: see `sqlite-native spec` and
 //! `memory/feedback_explicit_mount_glob_shadow.md` for prior incidents.
 

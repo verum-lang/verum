@@ -1,6 +1,5 @@
 //! Binary encoding primitives for VBC format.
 //!
-
 //! This module provides utilities for encoding and decoding:
 //! - Variable-length integers (VarInt)
 //! - Signed variable-length integers (SignedVarInt)
@@ -8,16 +7,13 @@
 //! - Floating point numbers
 //! - Registers and register ranges
 //!
-
 //! # VarInt Encoding
 //!
-
 //! Uses continuation bit encoding:
 //! - Each byte has 7 data bits and 1 continuation bit (MSB)
 //! - If continuation bit is 1, more bytes follow
 //! - Values 0-127 encode in 1 byte
 //!
-
 //! ```text
 //! 0xxxxxxx - 7 bits (0-127)
 //! 1xxxxxxx 0xxxxxxx - 14 bits (128-16383)

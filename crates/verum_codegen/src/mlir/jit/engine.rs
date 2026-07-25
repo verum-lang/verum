@@ -1,9 +1,7 @@
 //! Industrial-grade JIT Engine for MLIR-based code execution.
 //!
-
 //! Provides comprehensive JIT compilation and execution with:
 //!
-
 //! - Type-safe function calling via generic traits
 //! - Packed calling convention support (MLIR standard)
 //! - External symbol registration with symbol resolver integration
@@ -11,16 +9,13 @@
 //! - Callback mechanism for JIT → Rust interop
 //! - Multi-threaded support
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ JIT Execution Pipeline │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!
-
 //!  MLIR Module (lowered to LLVM dialect)
 //!  │
 //!  ▼
@@ -42,24 +37,19 @@
 //!  └─────────────────┘
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use crate::mlir::jit::{JitEngine, JitConfig};
 //!
-
 //! // Create JIT with optimization level 2
 //! let config = JitConfig::new().optimization_level(2);
 //! let engine = JitEngine::compile(&module, config)?;
 //!
-
 //! // Type-safe function call
 //! let result: i64 = engine.call("add", (1i64, 2i64))?;
 //! assert_eq!(result, 3);
 //!
-
 //! // Or use packed calling convention
 //! let mut args = [1i64 as *mut (), 2i64 as *mut ()];
 //! let mut result = 0i64;

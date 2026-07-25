@@ -1,6 +1,5 @@
 //! Type classification for compile-time reflection
 //!
-
 //! Provides type kind enumeration matching core/meta/reflection.vr TypeKind.
 
 use verum_ast::MetaValue;

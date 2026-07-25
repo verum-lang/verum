@@ -41,7 +41,6 @@
 #![allow(clippy::while_let_loop)]
 //! Verum Type System with Bidirectional Type Checking
 //!
-
 //! This crate implements Verum's complete type system including:
 //! - **Bidirectional type checking** (3x faster than Algorithm W)
 //! - **Refinement types** with SMT integration and five binding rules
@@ -51,49 +50,38 @@
 //! - **Context tracking** through types
 //! - **Meta parameters** for compile-time computation
 //!
-
 //! # Refinement Types (Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — )
 //!
-
 //! Verum supports five binding rules for refinement types:
 //!
-
 //! 1. **Inline refinement** - `Int{> 0}` (implicit `it` binding) - **Preferred**
 //! 2. **Lambda-style** - `Int where |x| x > 0` (explicit binding) - **Recommended**
 //! 3. **Sigma-type** - `x: Int where x > 0` (canonical form) - **Dependent types**
 //! 4. **Named predicate** - `Int where is_positive` (reusable logic) - **Reusable**
 //! 5. **Bare where** - `Int where it > 0` (deprecated) - **Backward compatibility**
 //!
-
 //! # Three-Tier Reference Model (Three-tier reference model: &T (managed, CBGR ~15ns), &checked T (statically verified, 0ns), &unsafe T (unchecked, 0ns). Memory layouts: ThinRef 16 bytes (ptr+generation+epoch), FatRef 24 bytes (+len) — )
 //!
-
 //! - **&T** - CBGR-managed reference (~15ns overhead, runtime safety)
 //! - **&checked T** - Statically verified reference (0ns, compile-time proof)
 //! - **&unsafe T** - Unsafe reference (0ns, no checks, manual safety)
 //!
-
 //! Coercion hierarchy: `&unsafe T <: &checked T <: &T` (implicit upcasts only)
 //!
-
 //! # Architecture
 //!
-
 //! The type checker operates in two modes:
 //! - **Synthesis mode (⇒)**: Infer type from expression
 //! - **Checking mode (⇐)**: Check expression against expected type
 //!
-
 //! This bidirectional approach provides:
 //! - 3-5x faster type checking than traditional unification
 //! - Better error messages with context
 //! - Fewer type annotations required
 //! - Foundation for IDE integration
 //!
-
 //! # Key Components
 //!
-
 //! - [`ty`]: Type representation (primitives, compounds, refinements)
 //! - [`infer`]: **PRIMARY** bidirectional type inference engine
 //! - [`unify`]: Type unification algorithm
@@ -102,43 +90,34 @@
 //! - [`protocol`]: Protocol (trait) system
 //! - [`context`]: Type environment and context management
 //!
-
 //! # Performance Targets
 //!
-
 //! - **Type checking**: < 100ms for 10K LOC
 //! - **Inference speed**: 3-5x faster than Algorithm W
 //! - **Memory usage**: < 10% overhead vs naive approach
 //! - **Compilation**: > 50K LOC/sec in release mode
 //!
-
 //! # Example
 //!
-
 //! ```ignore
 //! use verum_types::TypeChecker;
 //! use verum_ast::expr::Expr;
 //!
-
 //! // Create type checker
 //! let mut checker = TypeChecker::new();
 //!
-
 //! // Infer type from expression (synthesis mode)
 //! let expr = /* ... */;
 //! let result = checker.infer(&expr)?;
 //!
-
 //! // Check expression against expected type (checking mode)
 //! let expected = /* ... */;
 //! checker.check(&expr, &expected)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-
 //! # Integration Points
 //!
-
 //! - **verum_ast**: AST definition and traversal
 //! - **verum_parser**: Parsing produces AST
 //! - **verum_codegen**: Code generation from typed AST

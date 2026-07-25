@@ -1,13 +1,10 @@
 //! Cross-cog module resolution.
 //!
-
 //! Maps external cog names to their filesystem roots, enabling `mount http.client.Response`
 //! to resolve to the installed `http` cog's `client.vr` file.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! mount http.client.Response;
 //!  │
@@ -18,10 +15,8 @@
 //!  └── ModuleLoader searches http_root/client.vr or http_root/client/mod.vr
 //! ```
 //!
-
 //! # Resolution Strategy
 //!
-
 //! The first segment of a mount path is checked against registered cog names.
 //! If it matches, the remaining segments are resolved relative to that cog's root.
 //! This requires no grammar changes — existing `mount` syntax works as-is.

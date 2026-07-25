@@ -1,9 +1,7 @@
 //! # Kernel reflection — the meta-theory escape hatch (#158, current slice)
 //!
-
 //! ## Architectural role
 //!
-
 //! Reflective theorem provers let the kernel reason about ITS OWN
 //! syntax + semantics from inside the language. ACL2's metafunctions,
 //! Coq's `Reflection` library, and Lean's `decide` / `native_decide`
@@ -13,7 +11,6 @@
 //! has to either re-import `proof_checker.rs` (widening the trusted
 //! base) or hand-roll its own term mirror (introducing a drift hazard).
 //!
-
 //! This module ships the **V0 reflective surface**: a serializable
 //! mirror of [`proof_checker::Term`] that carries the kernel's term
 //! grammar + judgment shape as **data**, exposed to non-trusted
@@ -22,10 +19,8 @@
 //! on [`ReflectedTerm`] / [`ReflectedKernelRule`] without ever
 //! importing `proof_checker.rs` directly.
 //!
-
 //! ## scope (this slice)
 //!
-
 //! 1. [`ReflectedTerm`] — serializable mirror of [`proof_checker::Term`].
 //!  One variant per kernel term constructor. `From<&Term>` +
 //!  `TryFrom<&ReflectedTerm>` give a total round-trip.
@@ -39,10 +34,8 @@
 //!  (de Bruijn indices in range, reflected types reference live
 //!  binders, …).
 //!
-
 //! ## non-goals (deferred to V1)
 //!
-
 //! - **Wiring into the elaborator.** Reflection is a *data layer*
 //!  today; downstream callers can read the surface but no
 //!  elaborator path consumes it. Wiring follows once the V0
@@ -53,10 +46,8 @@
 //!  `reflected_def_eq` / `reflected_normalize` / `reflected_type_check`
 //!  yet — those compose with V1.
 //!
-
 //! ## Structural sketch — what each kernel rule reflects to
 //!
-
 //! The `reflect_kernel_rule` builders ship **abstract structural
 //! sketches** of each rule. These are intentionally *schematic*:
 //! they record the SHAPE of premises + conclusion using stand-in
@@ -66,26 +57,21 @@
 //! sketch shows that with a two-premise / one-conclusion shape but
 //! plugs in concrete universe levels).
 //!
-
 //! The structural sketches are sufficient for V0 meta-tactics that
 //! enumerate "the kernel has six rules, here's their arity and
 //! premise count". Future work will lift the sketches to fully-quantified
 //! schemata once the pattern-matching DSL on the meta-tactic side
 //! lands.
 //!
-
 //! ## Mirror invariant
 //!
-
 //! The mirror invariant is:
 //!
-
 //! ```text
 //!  for every t : Term ,
 //!  Term::try_from(&ReflectedTerm::from(&t)) == Ok(t)
 //! ```
 //!
-
 //! Tests pin this for every variant. Drift between `Term` and
 //! [`ReflectedTerm`] is the failure mode: adding a variant to one
 //! without the other breaks the round-trip.

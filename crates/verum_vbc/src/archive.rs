@@ -1,18 +1,14 @@
 //! VBC Archive Format
 //!
-
 //! A VBC Archive (.vbca) is a collection of VBC modules that together form
 //! a library or the standard library. The archive format enables:
 //!
-
 //! - **Dependency tracking**: Module dependencies are explicitly recorded
 //! - **Incremental compilation**: Only recompile changed modules
 //! - **Fast loading**: Single file with index for quick module lookup
 //!
-
 //! # Archive Format
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ VBC ARCHIVE FORMAT │

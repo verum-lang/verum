@@ -1,6 +1,5 @@
 //! Auto-completion support
 //!
-
 //! Provides context-aware code completions for keywords, types, functions, and variables.
 //! Includes member access completion for struct/enum fields, module import completion,
 //! and attribute completion with full registry support.

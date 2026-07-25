@@ -1,19 +1,15 @@
 //! Build Configuration Sub-Context
 //!
-
 //! Manages runtime information, build assets, project metadata, and
 //! staged metaprogramming configuration.
 //!
-
 //! ## Responsibility
 //!
-
 //! - Runtime/platform information (target_os, target_arch, etc.)
 //! - Build assets (file loading, include_bytes, etc.)
 //! - Project metadata (name, version, etc.)
 //! - Stage configuration for staged metaprogramming
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

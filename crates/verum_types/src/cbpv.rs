@@ -1,14 +1,12 @@
 //! Call-by-Push-Value (CBPV) — Levy's separation of values from
 //! computations.
 //!
-
 //! Most calculi treat values and computations as the same syntactic
 //! category: a function application is "just another expression" and
 //! the language designer must pick *call-by-value* or *call-by-name*
 //! evaluation. CBPV (Levy, 2003) factors this choice out by
 //! introducing two distinct kinds of terms:
 //!
-
 //! ```text
 //!  V ::= x | λx. C | thunk C (values)
 //!  C ::= return V (computations)
@@ -17,22 +15,18 @@
 //!  | V₁ V₂ (application: V₁ a thunk-of-fn)
 //! ```
 //!
-
 //! `thunk` packages a computation as a value; `force` runs the
 //! computation back. `return V` lifts a value into a trivial
 //! computation; `to x. C` sequences. The two reduction rules are
 //! the eponymous β rules:
 //!
-
 //! ```text
 //!  force (thunk C) ↦ C (force-thunk)
 //!  return V to x. C ↦ C[x := V] (return-to)
 //! ```
 //!
-
 //! ## Why CBPV matters
 //!
-
 //! Both call-by-value and call-by-name lambda-calculi embed into
 //! CBPV through systematic translations, and effects (state, IO,
 //! exceptions) gain a clean denotational semantics where they
@@ -40,10 +34,8 @@
 //! canonical setting for monadic semantics, algebraic-effects
 //! research, and intermediate representations like Bauer-Pretnar's.
 //!
-
 //! ## Status
 //!
-
 //! Standalone algebraic core: term language for V/C, capture-
 //! avoiding substitution into both kinds, single-step reduction
 //! for the two CBPV β rules. The translation from λ-calculus and

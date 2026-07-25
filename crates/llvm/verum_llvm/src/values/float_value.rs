@@ -1,6 +1,5 @@
 //! Float values in LLVM.
 //!
-
 //! Note: In LLVM 17+, many const_* operations were removed from the C API.
 //! Constant folding is now done automatically by instruction builders.
 //! Use Builder::build_float_* methods instead of const_* methods.

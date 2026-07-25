@@ -1,6 +1,5 @@
 //! Subtyping with refinement types.
 //!
-
 //! This module implements subtyping rules including:
 //! - Structural subtyping for records and variants
 //! - Refinement subtyping (stronger predicates are subtypes)
@@ -8,7 +7,6 @@
 //! - Array/List subtyping (covariant in element type)
 //! - Reference variance rules (covariant for shared, invariant for mutable)
 //!
-
 //! Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .3 - Subtyping Algorithm
 
 use crate::ty::{Type, TypeVar};

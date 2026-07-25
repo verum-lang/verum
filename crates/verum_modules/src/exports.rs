@@ -1,6 +1,5 @@
 //! Export management for modules.
 //!
-
 //! Tracks what items are exported by each module and handles re-exports.
 //! Re-exports make internal items available through a different path using
 //! `public import internal.Item` or `public import internal.Item as PublicName`.

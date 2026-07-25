@@ -1,14 +1,11 @@
 //! ShellRender derive macro.
 //!
-
 //! Generates `implement <Type> { fn render(&self) -> Text { ... } }` for
 //! record types whose fields carry `@flag("...")`, `@positional` or no
 //! attribute (default: `--<kebab-name> <value>`).
 //!
-
 //! Generated body shape:
 //!
-
 //!  fn render(&self) -> Text {
 //!  let mut out = "".into();
 //!  out.push_str(<flag-prefix>);
@@ -17,7 +14,6 @@
 //!  out
 //!  }
 //!
-
 //! Field-type awareness (List<T> as repeat-flag, Maybe<T> as if-let, Bool
 //! flag-only-when-true) requires control-flow shapes (For / IfLet / If
 //! with IfCondition) that this derive doesn't yet emit; those refinements

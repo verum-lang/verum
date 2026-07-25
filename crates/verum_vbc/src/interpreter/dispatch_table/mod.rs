@@ -1,26 +1,20 @@
 //! Function table dispatch for VBC interpreter.
 //!
-
 //! This module implements an optimized dispatch mechanism using a pre-computed
 //! function pointer table. Instead of a large match statement, we use direct
 //! array indexing for O(1) dispatch.
 //!
-
 //! # Performance
 //!
-
 //! - Switch-based dispatch: ~5-8 cycles per instruction (branch prediction misses)
 //! - Function table dispatch: ~2-3 cycles per instruction (indirect call, predictable)
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! opcode byte → DISPATCH_TABLE[opcode] → handler function → DispatchResult
 //! ```
 //!
-
 //! Interpreter dispatch optimization: pre-computed function pointer table indexed by opcode
 //! byte (0x00-0xFF). Each handler reads operands from the bytecode stream, executes the
 //! operation, and returns a DispatchResult. Expected throughput improvement of 30-50% over

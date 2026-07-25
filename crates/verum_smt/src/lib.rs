@@ -58,14 +58,11 @@
 #![allow(clippy::match_like_matches_macro)]
 //! # Verum SMT Solver Integration
 //!
-
 //! This crate provides Z3 SMT solver integration for the Verum compiler,
 //! enabling verification of refinement types and formal properties.
 //!
-
 //! ## Features
 //!
-
 //! - **Refinement Type Verification**: Verify that values satisfy type constraints
 //! - **Counterexample Generation**: Produce concrete values that violate constraints
 //! - **Multiple Verification Modes**:
@@ -75,31 +72,24 @@
 //! - **Cost Tracking**: Monitor verification time and suggest optimizations
 //! - **Timeout Handling**: Configurable timeout (default 30s) for expensive proofs
 //!
-
 //! ## Example Usage
 //!
-
 //! ```rust,no_run
 //! use verum_smt::{Context, verify_refinement, VerifyMode};
 //! use verum_ast::{Type, TypeKind, Expr};
 //!
-
 //! // Create Z3 context
 //! let ctx = Context::new();
 //!
-
 //! // Verify a refinement type
 //! // type Positive = Int{> 0}
 //! // (Full example code omitted for brevity - see tests for complete examples)
 //! ```
 //!
-
 //! ## Architecture
 //!
-
 //! The SMT integration consists of several modules:
 //!
-
 //! - [`context`]: Z3 context management and configuration
 //! - [`translate`]: Translation from Verum AST to Z3 expressions
 //! - [`verify`]: Core refinement type verification logic

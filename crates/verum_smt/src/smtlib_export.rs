@@ -1,17 +1,14 @@
 //! SMT-LIB2 Export for External Verification
 //!
-
 //! This module provides facilities to export verification problems
 //! to SMT-LIB2 format for use with external solvers and tools.
 //!
-
 //! ## Use Cases
 //! - Share verification problems with other SMT solvers (CVC5, Yices, etc.)
 //! - Debug verification failures in external tools
 //! - Archive verification problems for regression testing
 //! - Generate benchmarks for SMT-COMP
 //!
-
 //! ## SMT-LIB2 Standard
 //! Complies with SMT-LIB 2.6 standard: http://smtlib.cs.uiowa.edu/
 

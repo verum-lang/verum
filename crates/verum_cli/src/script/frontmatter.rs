@@ -1,14 +1,11 @@
 //! PEP-723-style inline metadata for Verum scripts.
 //!
-
 //! A Verum script may carry an inline metadata block delimited by
 //! `// /// script` and `// ///` line comments. The interior is line-prefixed
 //! with `// `; after stripping that prefix, the remainder is parsed as TOML.
 //!
-
 //! Example:
 //!
-
 //! ```verum
 //! #!/usr/bin/env verum
 //! // /// script
@@ -21,15 +18,12 @@
 //! // tier = 0
 //! // ///
 //!
-
 //! mount core.io
 //! print("hello");
 //! ```
 //!
-
 //! # Why this format
 //!
-
 //! - **Inert under regular Verum tooling**: the entire block is line comments,
 //!  so the LSP, formatter, and linter do not need a special parse mode.
 //! - **Industry alignment**: PEP 723 (Python, accepted Jan 2024) uses the same
@@ -39,13 +33,10 @@
 //! - **Single source of truth**: TOML is already the manifest format
 //!  (`verum.toml`), so the field schema is reused — no new dialect.
 //!
-
 //! # Schema
 //!
-
 //! Top-level keys recognised today:
 //!
-
 //! | key | type | meaning |
 //! |---|---|---|
 //! | `verum` | semver spec | required minimum Verum compiler |
@@ -55,7 +46,6 @@
 //! | `[profile]` | table | per-script profile overrides |
 //! | `[run]` | table | run-time defaults (inherits from `[run]` in `verum.toml`) |
 //!
-
 //! Unknown keys are preserved in `raw` and surfaced to callers — this lets
 //! future schema additions be picked up without parser revisions.
 

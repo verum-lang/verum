@@ -1,6 +1,5 @@
 //! CBGR Generation Tracking Predicates for SMT
 //!
-
 //! CBGR (Counter-Based Generational References) is Verum's memory safety system.
 //! References carry generation counters validated at dereference (~15ns overhead).
 //! ThinRef<T> is 16 bytes: ptr + 48-bit generation + 16-bit epoch.
@@ -10,36 +9,29 @@
 //! at runtime. Generation tracking predicates (generation/epoch/valid/same_allocation)
 //! are available in ensures/requires clauses for dependent return types.
 //!
-
 //! This module provides SMT predicates for reasoning about CBGR generation counters:
 //! 1. `generation(ref)` - Extract generation counter from reference
 //! 2. `epoch(ref)` - Extract epoch counter from reference
 //! 3. `valid(ref)` - Check if reference is still valid
 //! 4. `same_allocation(a, b)` - Check if references point to same allocation
 //!
-
 //! These predicates enable refinement verification of generation-aware code.
 //!
-
 //! # Memory Model
 //!
-
 //! ```text
 //! ThinRef<T>:
 //!  ptr: *const T // 8 bytes
 //!  generation: u64 // 8 bytes (48-bit generation + 16-bit epoch)
 //!  Total: 16 bytes
 //!
-
 //! Generation counter layout (64-bit):
 //!  Bits 0-47: Generation (48 bits, ~281 trillion)
 //!  Bits 48-63: Epoch (16 bits, 65536 epochs)
 //! ```
 //!
-
 //! # Performance
 //!
-
 //! - Predicate evaluation: <5ns (inline assembly)
 //! - SMT verification: <50ms for typical properties
 //! - Generation check overhead: ~15ns (CBGR baseline)

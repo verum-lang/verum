@@ -1,33 +1,27 @@
 //! AST-driven lint engine for `verum lint`.
 //!
-
 //! This module is the foundation for Phases B/C of the lint roadmap
 //! (`docs/testing/lint-configuration-design.md`): every refinement /
 //! capability / context / CBGR / verification / naming /
 //! architecture rule discussed there is implemented as a `LintPass`
 //! plugged into this engine.
 //!
-
 //! # Why AST-driven
 //!
-
 //! The text-scan engine in `lint.rs` is fast and pragmatic but
 //! cannot distinguish a `TODO` in a comment from one in a string
 //! literal, can't find an unused `mount` after rename, and can't
 //! reason about refinement-type bounds. The lint passes here run on
 //! the parsed `verum_ast::Module` and can:
 //!
-
 //! * see attributes attached to a declaration as structured data,
 //! * walk into refinement predicates via `TypeKind::Refined`,
 //! * resolve which `mount X.Y.Z` paths are actually used by name,
 //! * inspect every CBGR reference qualifier (`&`, `&checked`, `&unsafe`),
 //! * inspect `using [Logger, Database]` context lists.
 //!
-
 //! # Design — reuse, not reinvent
 //!
-
 //! `verum_ast` already ships a production-grade `Visitor` trait with
 //! a default-walking implementation for every AST node. Lint passes
 //! implement that trait directly — there is no parallel walker to
@@ -35,7 +29,6 @@
 //! visit-methods relevant to its concern and pushes diagnostics into
 //! a shared `Vec<LintIssue>`.
 //!
-
 //! The dispatch loop is a single `for pass in PASSES { pass.check(ctx) }`
 //! — composability without any plugin loader.
 

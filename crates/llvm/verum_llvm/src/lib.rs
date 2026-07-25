@@ -1,6 +1,5 @@
 //! verum_llvm - Safe LLVM bindings for Verum compiler
 //!
-
 //! This crate provides safe Rust wrappers around LLVM C API for code generation.
 //! Simplified from inkwell for LLVM 21 only (no version conditionals).
 

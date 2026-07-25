@@ -4,10 +4,8 @@
 //! combinator catalogue what its 15 entries are, what their algebraic
 //! laws look like, and what a single combinator's full doc record is.
 //!
-
 //! ## Why this is the integration that #76 was missing
 //!
-
 //! Pre-this-module the canonical combinator set lived as prose
 //! comments in `core/proof/tactics/combinators.vr` and as ad-hoc
 //! pattern-matches in `verum_smt::tactic_laws`. There was no
@@ -15,23 +13,19 @@
 //! "what's `solve`'s signature?", "what algebraic laws does the
 //! simplifier exploit?".
 //!
-
 //! This command is the **transport-layer integration**: it wires
 //! [`DefaultTacticCatalog`](verum_verification::tactic_combinator::DefaultTacticCatalog)
 //! to a typed CLI. LSP can shell out for completion metadata; the
 //! docs generator can ingest the JSON output verbatim; CI can pin
 //! the catalogue's shape via golden tests.
 //!
-
 //! Same architectural pattern as proof-draft / verify-ladder /
 //! proof-repair: single trait boundary + reference V0 impl + future
 //! domain-specific catalogues plug in via [`CompositeTacticCatalog`]
 //! without touching this command handler.
 //!
-
 //! ## Subcommands
 //!
-
 //!  * `verum tactic list [--format=plain|json] [--category=…]`
 //!  Lists every combinator with a one-line summary.
 //!  * `verum tactic explain <name> [--format=plain|json]`

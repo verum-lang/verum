@@ -1,15 +1,12 @@
 //! End-to-end integration tests for `verum tactic`.
 //!
-
 //! Spawns the actual `verum` binary and validates the chain:
 //!
-
 //!  `verum tactic {list,explain,laws}` (clap) →
 //!  `commands::tactic::run_*` →
 //!  `verum_verification::tactic_combinator::DefaultTacticCatalog` →
 //!  ranked plain / JSON output
 //!
-
 //! Together with the 17 trait-level tests in
 //! `verum_verification::tactic_combinator::tests` and the 17 handler
 //! unit tests in `commands::tactic::tests`, this proves the

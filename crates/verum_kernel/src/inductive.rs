@@ -1,29 +1,24 @@
 //! Inductive-type registry + strict-positivity checking (K-Pos rule).
 //!
-
 //! Split out of `lib.rs` . An inductive type is well-formed
 //! only when its own name appears *strictly positively* in every
 //! constructor's argument types. Allowing non-positive recursion
 //! (e.g. `type Bad = Wrap(Bad -> A)`) admits Berardi's paradox and
 //! lets the user derive `False`.
 //!
-
 //! The kernel enforces this at registration time via
 //! [`InductiveRegistry::register`]: every [`RegisteredInductive`] is
 //! validated by [`check_strict_positivity`] before it is admitted.
 //! A failure surfaces as `KernelError::PositivityViolation` with a
 //! human-readable position string for diagnostic copy.
 //!
-
 //! VVA spec §7.3 (`K-Pos`): for every constructor `C(t1, ..., tn) -> T`
 //! of an inductive type `T`, every recursive occurrence of `T` in any
 //! `ti` must appear strictly positively.
 //!
-
 //! Strict positivity, formally — for an inductive type name `T` and
 //! a type `t`, the predicate `appears_only_strictly_positively(T, t)`:
 //!
-
 //!  * For `Universe(_)` / `Var(_)` / `Path(_)` / `Sigma(_)` (no
 //!  functional negation through any arrow): admit iff every nested
 //!  type satisfies the predicate.
@@ -35,13 +30,11 @@
 //!  * For `Inductive(other_name, args)`: admit iff every `arg` is
 //!  strictly positive in `T`.
 //!
-
 //! The check is *constructor-by-constructor*: each constructor is a
 //! Π-chain of argument types, with the codomain being the type's own
 //! `Inductive(T, _)` head. We descend each argument's type tree under
 //! the strictly-positive discipline.
 //!
-
 //! This module also hosts `is_uip_shape` (UIP-detection for the
 //! axiom registry), `is_var_named` and `is_path_over` — these
 //! cross-cut into axiom-registry's UIP rejection (`pub(crate)` so

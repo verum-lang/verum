@@ -1,14 +1,11 @@
 //! (∞,1)-topos infrastructure — algorithmic kernel rule
 //! (Lurie HTT 6.1).
 //!
-
 //! ## What this delivers
 //!
-
 //! An **(∞,1)-topos** `T` is, per Lurie HTT 6.1.0.4 (Giraud's
 //! theorem for ∞-categories), an ∞-category satisfying:
 //!
-
 //!  1. `T` is **presentable** (HTT 5.5.0.1).
 //!  2. `T` admits **all small colimits** and they are **universal**
 //!  (i.e. preserved by base change).
@@ -18,34 +15,27 @@
 //!  effective (HTT 6.1.0.4 (iv) — generalisation of Stone's
 //!  effective-equivalence-relation criterion).
 //!
-
 //! Equivalently (HTT 6.1.0.6), `T` is an (∞,1)-topos iff it is
 //! a **left-exact-localisation of a presheaf ∞-category** —
 //! i.e. there exists a fully-faithful inclusion `T ↪ PSh(C)` whose
 //! left adjoint is *left exact* (preserves finite limits).
 //!
-
 //! This second characterisation is the algorithmic surface ships:
 //! it composes [`crate::reflective_subcategory`] +
 //! [`crate::limits_colimits`] + a left-exactness witness flag.
 //!
-
 //! ## Why this matters for MSFS
 //!
-
 //! MSFS §3 takes place inside `S_S^global`, an (∞,1)-topos of
 //! S-definable foundations. Pre-this-module the topos structure
 //! is admitted via the host-stdlib axiom `msfs_s_s_is_infty_topos`.
 //! ships [`build_infinity_topos`] as the constructive
 //! discharge.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`GiraudAxioms`] — the four Giraud-axiom witness flags.
 //!  2. [`InfinityTopos`] — the topos data: base category,
 //!  reflective inclusion, Giraud witnesses, level.
@@ -57,14 +47,11 @@
 //!  6. [`left_exact_localisation_witness`] — HTT 6.1.0.6 (ii)
 //!  witness flag.
 //!
-
 //! Future work: explicit Giraud-axiom witnesses with structural
 //! checking of effective-groupoid + universal-colimit content.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **§3 Definition 3.3** — `S_S^global` is an (∞,1)-topos.
 //!  Promotion: invoke [`build_infinity_topos`] with the
 //!  reflective-subcategory inclusion `S_S^global ↪ PSh(...)`.

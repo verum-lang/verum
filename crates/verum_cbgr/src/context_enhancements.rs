@@ -1,38 +1,30 @@
 //! Context-Sensitive Analysis Enhancements for CBGR
 //!
-
 //! Enhances escape analysis precision through context-sensitive interprocedural
 //! analysis. Without context sensitivity, a function called from two sites with
 //! different escape behaviors would be conservatively marked as escaping for both.
 //! Context tracking distinguishes calling contexts to enable more promotions.
 //!
-
 //! This module implements three production-grade enhancements to context-sensitive
 //! interprocedural escape analysis:
 //!
-
 //! 1. **Flow-sensitive Context Tracking**: Track dataflow state per calling context
 //! 2. **Adaptive Context Depth**: Dynamic depth adjustment based on importance heuristics
 //! 3. **Context Compression**: Merge similar contexts to reduce explosion
 //!
-
 //! # Performance Target
 //!
-
 //! - **2-3x speedup** vs fixed-depth context-sensitive analysis
 //! - **50-80% more promotions** vs context-insensitive analysis
 //! - **<100ms** for 10K LOC with adaptive depth
 //!
-
 //! # Example Usage
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::analysis::{EscapeAnalyzer, ContextSensitiveAnalyzer};
 //! use verum_cbgr::context_enhancements::*;
 //! use verum_cbgr::call_graph::CallGraph;
 //!
-
 //! let cfg = build_cfg();
 //! let analyzer = EscapeAnalyzer::with_function(cfg, FunctionId(1));
 //! let mut cs_analyzer = ContextSensitiveAnalyzer::new(analyzer)
@@ -40,11 +32,9 @@
 //!  .with_adaptive_depth() // Enable adaptive depth
 //!  .with_compression(); // Enable context compression
 //!
-
 //! let call_graph = CallGraph::new();
 //! let info = cs_analyzer.analyze_with_context(RefId(1), &call_graph);
 //!
-
 //! // 2-3x faster analysis with better precision!
 //! println!("Analysis time: {:.2}ms", info.stats.analysis_time_ms);
 //! println!("Promotion rate: {:.1}%", info.promotion_rate() * 100.0);

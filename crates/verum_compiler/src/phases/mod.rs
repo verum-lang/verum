@@ -1,16 +1,12 @@
 //! Compilation Pipeline Phases
 //!
-
 //! This module implements all phases of the Verum compilation pipeline
 //! Multi-pass compilation phases: parsing, meta registry, macro expansion,
 //!
-
 //! ## VBC-First Pipeline (Target Architecture)
 //!
-
 //! ### Common Pipeline (Source → TypedAST)
 //!
-
 //! - **Phase 1**: Lexical Analysis & Parsing
 //! - **Phase 2**: Meta Registry & AST Registration
 //! - **Phase 3**: Macro Expansion & Literal Processing
@@ -18,37 +14,29 @@
 //! - **Phase 4**: Semantic Analysis (Type Inference, CBGR Tier Analysis)
 //! - **Phase 4b**: Context System Validation
 //!
-
 //! ### Backend Pipeline (TypedAST → Execution)
 //!
-
 //! - **Phase 5**: VBC Code Generation (TypedAST → VBC bytecode)
 //! - **Phase 6**: VBC Monomorphization (Generic specialization)
 //! - **Phase 7**: VBC Execution (Interpreter Tier 0 | AOT Tier 1)
 //! - **Phase 7.5**: Final Linking (for AOT)
 //!
-
 //! ## Legacy MIR Pipeline (Deprecated - for verification only)
 //!
-
 //! MIR infrastructure exists only for:
 //! - SMT-based verification
 //! - CBGR analysis
 //! - Advanced optimization passes
 //!
-
 //! **NOT** used in main compilation path.
 //!
-
 //! ## Key Features
 //!
-
 //! - VBC-first: All tiers share the same VBC intermediate representation
 //! - CBGR tier analysis determines reference safety levels
 //! - Context system requires explicit 'using' declarations
 //! - Persistent monomorphization cache for fast recompilation
 //!
-
 //! Multi-pass compilation pipeline: Parse → Meta Registry → Macro Expansion →
 //! Contract Verification → Semantic Analysis → HIR → MIR → Optimization → Codegen.
 //! VBC-first execution: Source → VBC → Interpreter (Tier 0) or LLVM AOT (Tier 1).

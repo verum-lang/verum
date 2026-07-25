@@ -1,40 +1,31 @@
 //! Type-level computation for dependent types
 //!
-
 //! Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — Type-Level Programming
 //!
-
 //! This module implements type-level functions that allow types to be computed
 //! from values. This is a core feature of dependent types, enabling:
 //!
-
 //! - Type functions: `fn type_function(b: bool) -> Type = if b then i32 else Text`
 //! - Type-level arithmetic: `plus(m: Nat, n: Nat) -> Nat`
 //! - Indexed types: `List<T, n: meta Nat>` with length tracking
 //! - Type-level conditionals and pattern matching
 //!
-
 //! # Architecture
 //!
-
 //! The type-level evaluator works in two phases:
 //! 1. **Value evaluation**: Compute values using ConstEvaluator
 //! 2. **Type computation**: Use computed values to construct types
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! // Type-level conditional
 //! fn type_function(b: bool) -> Type =
 //!  if b then i32 else Text
 //!
-
 //! fn example(b: bool) -> type_function(b) =
 //!  if b then 42 else "hello"
 //!
-
 //! // Type-level arithmetic
 //! fn plus(m: Nat, n: Nat) -> Nat =
 //!  match m {
@@ -42,17 +33,14 @@
 //!  Succ(m') => Succ(plus(m', n))
 //!  }
 //!
-
 //! fn append<T, m: meta Nat, n: meta Nat>(
 //!  xs: List<T, m: meta Nat>,
 //!  ys: List<T, n: meta Nat>
 //! ) -> List<T, plus(m, n): meta Nat>
 //! ```
 //!
-
 //! # Performance
 //!
-
 //! All type-level computation happens at compile-time with zero runtime overhead.
 //! Results are cached to avoid redundant computation.
 

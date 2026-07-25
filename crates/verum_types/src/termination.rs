@@ -1,6 +1,5 @@
 //! Termination checking for recursive functions.
 //!
-
 //! This module ensures that recursive functions terminate by checking that:
 //! 1. Recursive calls are on structurally smaller arguments
 //! 2. At least one argument decreases in size on each recursive call
@@ -8,13 +7,10 @@
 //! 4. Size-change termination for complex recursive patterns
 //! 5. Productivity for coinductive types
 //!
-
 //! Termination checking: ensuring recursive functions terminate via structural recursion on well-founded orderings — Termination and Totality
 //!
-
 //! # Design
 //!
-
 //! The termination checker operates in several phases:
 //! 1. **Call graph construction** - Identify all function calls and recursion
 //! 2. **Structural analysis** - Track which parameters are structurally smaller
@@ -24,10 +20,8 @@
 //! 6. **Mutual recursion** - Analyze strongly connected components
 //! 7. **Productivity checking** - Ensure coinductive definitions are productive
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! // Structural recursion - automatically checked
 //! fn length<A>(xs: List<A>) -> Nat =
@@ -36,7 +30,6 @@
 //!  Cons(_, tail) => Succ(length(tail)) // OK: tail smaller than xs
 //!  }
 //!
-
 //! // General recursion needs proof
 //! fn ackermann(m: Nat, n: Nat) -> Nat
 //!  decreasing (m, n) by lex_order = {

@@ -1,10 +1,8 @@
 //! Cross-evaluator recursion-budget consistency pin (#307).
 //!
-
 //! Three foundation evaluators in `verum_types` now share a uniform
 //! builder-pattern API for recursion-depth configuration:
 //!
-
 //!  * [`TypeLevelEvaluator`] — `TypeLevelConfig.max_depth` gates
 //!  `apply_function` recursion (#302).
 //!  * [`ConstEvaluator`] — `with_max_depth(n)` overrides the
@@ -12,7 +10,6 @@
 //!  * [`Unifier`] — `with_max_unify_depth(n)` overrides
 //!  the historical 50-frame `unify_inner` cap (#304).
 //!
-
 //! This file is a single-place architectural pin: any future
 //! refactor that drops the builder, the getter, or the zero-rejects
 //! contract from one evaluator without dropping it from the others

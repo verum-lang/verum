@@ -1,26 +1,20 @@
 //! CBGR Elimination Pass - Industrial-Grade Implementation.
 //!
-
 //! This pass performs comprehensive escape analysis to eliminate unnecessary
 //! CBGR (Compile-time Borrow and Generation-based Reference) checks.
 //!
-
 //! # Algorithm Overview
 //!
-
 //! The pass operates in multiple phases:
 //!
-
 //! 1. **Collection Phase**: Walk the IR and collect all CBGR operations
 //! 2. **Def-Use Analysis**: Build a complete def-use graph for tracked values
 //! 3. **Escape Analysis**: Categorize each value's escape behavior
 //! 4. **Optimization Phase**: Eliminate/promote checks based on analysis
 //! 5. **Cleanup Phase**: Remove dead operations and update types
 //!
-
 //! # Escape Categories
 //!
-
 //! | Category | Description | Action |
 //! |----------|-------------|--------|
 //! | NoEscape | Value stays in function | Remove check |
@@ -28,10 +22,8 @@
 //! | MayEscape | May escape to caller | Promote to Checked |
 //! | Unknown | Cannot determine | Keep check |
 //!
-
 //! # Performance Impact
 //!
-
 //! - Per-check savings: ~15ns → 0ns
 //! - Typical elimination rate: 40-70%
 //! - Net improvement: ~6-10ns average per reference access

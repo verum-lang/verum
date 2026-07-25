@@ -1,12 +1,10 @@
 //! LSP refinement validation extensions
 //!
-
 //! This module implements the custom LSP methods for refinement validation:
 //! - `verum/validateRefinement`: Validate refinement at cursor position
 //! - `verum/promoteToChecked`: Promote &T to &checked T with escape analysis proof
 //! - `verum/inferRefinement`: Infer tightest refinement from usage
 //!
-
 //! LSP Refinement Validation Protocol Extensions:
 //! Three custom LSP methods extend the standard protocol:
 //! 1. `verum/validateRefinement` - validates refinement type at cursor position,

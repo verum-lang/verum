@@ -1,6 +1,5 @@
 //! Suppression baseline contract tests.
 //!
-
 //! Each test exercises one knob in the workflow:
 //! 1. `--write-baseline` snapshots current issues; subsequent run
 //!  finds nothing to fail on.

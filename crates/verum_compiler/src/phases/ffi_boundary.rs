@@ -1,40 +1,32 @@
 //! Phase 4b: FFI Boundary Processing - Production Implementation
 //!
-
 //! Complete FFI boundary validation and marshalling system for safe interop
 //! with foreign code. This is a PRODUCTION system, not a prototype.
 //!
-
 //! ## Responsibilities
 //!
-
 //! 1. **Boundary Validation**: Validate ALL FFI boundaries and type safety
 //! 2. **Marshalling Generation**: Generate automatic marshalling wrappers
 //! 3. **CBGR Protection**: Ensure CBGR references never cross FFI boundaries
 //! 4. **Safety Analysis**: Detect all memory safety violations at compile time
 //! 5. **Performance**: <10ns marshalling overhead per call
 //!
-
 //! ## Key Principles
 //!
-
 //! Phase 4b: FFI boundary processing:
 //! - FFI boundaries are compile-time metadata, NOT types
 //! - FFI boundaries use `ffi` blocks, not `type` definitions
 //! - FFI boundaries specify how Verum code interfaces with foreign code
 //! - Processing happens after all semantic analysis
 //!
-
 //! FFI interop rules:
 //! - Only C ABI is supported for FFI
 //! - Seven mandatory components in every boundary contract
 //! - ZERO false negatives in safety checks
 //! - Complete marshalling for all FFI-safe types
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! FfiBoundaryPhase
 //! ├── FfiBoundaryValidator // Validates boundaries and types
@@ -51,15 +43,12 @@
 //!  └── check_thread_safety() // Concurrency safety
 //! ```
 //!
-
 //! ## Output
 //!
-
 //! - HIR + FFI metadata & wrappers
 //! - Marshalling code for all FFI functions
 //! - Safety analysis results
 //!
-
 //! Phase 4b: Validates FFI boundary declarations, generates foreign function
 //! wrappers, verifies FFI call sites against boundary specs.
 //! FFI boundaries declare safe interfaces to foreign code with type marshalling.

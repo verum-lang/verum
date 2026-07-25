@@ -14,12 +14,10 @@
 )]
 //! Parser tests for universe polymorphism syntax.
 //!
-
 //! Tests the `universe u` generic parameter form (verum-ext.md §2.1) and the
 //! existing `u: Level` alternative form. Also tests `Type(max(u, v))` level
 //! expressions inside type annotations.
 //!
-
 //! Grammar rules exercised:
 //!  universe_param = 'universe' , identifier ;
 //!  level_param = identifier , ':' , 'Level' ;

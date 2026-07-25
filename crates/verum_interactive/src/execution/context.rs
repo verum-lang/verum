@@ -1,6 +1,5 @@
 //! Execution context for cross-cell state preservation.
 //!
-
 //! The `ExecutionContext` maintains variable bindings and function definitions
 //! across cell executions, enabling a notebook-like experience where later cells
 //! can reference values defined in earlier cells.

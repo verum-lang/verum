@@ -1,16 +1,12 @@
 //! Attribute target definitions for the Verum AST.
 //!
-
 //! This module defines [`AttributeTarget`], a bitflag type that specifies
 //! which syntactic positions an attribute can be applied to.
 //!
-
 //! # Overview
 //!
-
 //! Verum supports attributes on many syntactic elements:
 //!
-
 //! ```verum
 //! @profile(application) // Module
 //! module server {
@@ -21,7 +17,6 @@
 //!  id: Int,
 //!  };
 //!
-
 //!  @inline(always) // Function
 //!  fn process(
 //!  @unused _ctx: &Context, // Parameter
@@ -34,17 +29,13 @@
 //! }
 //! ```
 //!
-
 //! # Design
 //!
-
 //! `AttributeTarget` uses bitflags to allow efficient combination and checking
 //! of valid targets. Common combinations are provided as constants.
 //!
-
 //! # Target Validation
 //!
-
 //! Each registered attribute declares which syntactic positions it can appear on
 //! using `AttributeTarget` bitflags. The compiler validates at parse time that
 //! attributes only appear on their declared targets (e.g., @inline only on functions,

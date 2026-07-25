@@ -2,32 +2,26 @@
 //! `verum_verification::ladder_dispatch::DefaultLadderDispatcher` into the
 //! CLI verify command path.
 //!
-
 //! Walks every `.vr` file in the project, projects every
 //! `@verify(<strategy>)` annotation onto a typed
 //! [`LadderObligation`](verum_verification::ladder_dispatch::LadderObligation),
 //! routes through [`LadderDispatcher::dispatch`](verum_verification::ladder_dispatch::LadderDispatcher::dispatch),
 //! and emits the per-theorem [`LadderVerdict`](verum_verification::ladder_dispatch::LadderVerdict).
 //!
-
 //! ## Why this is the integration that #71 was missing
 //!
-
 //! Before this command, the dispatcher trait surface was unit-tested but
 //! never invoked from the CLI — meaning the typed-strategy contract was
 //! a closed module with no production consumer. This wires it through
 //! the same architectural pattern as the proof-draft integration:
 //!
-
 //!  * single trait boundary (`LadderDispatcher`)
 //!  * reference V0 impl (`DefaultLadderDispatcher`)
 //!  * future LLM / portfolio / cross-format adapters slot in without
 //!  touching the command handler
 //!
-
 //! ## Exit status
 //!
-
 //!  * `0` — every dispatched obligation is Closed or DispatchPending.
 //!  * `non-zero` — at least one obligation is Open or Timeout (a *real*
 //!  verification failure, distinct from "not yet implemented").
@@ -36,10 +30,8 @@
 //!  in V1+; failing the build on every annotated `@verify(formal)`
 //!  would be louder than useful at this stage.
 //!
-
 //! ## Output formats
 //!
-
 //!  * `plain` — human-readable verdict table + summary.
 //!  * `json` — LSP / CI-friendly structured payload.
 

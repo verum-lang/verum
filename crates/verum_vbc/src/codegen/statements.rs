@@ -1,6 +1,5 @@
 //! Statement compilation for VBC codegen.
 //!
-
 //! Transforms Verum AST statements into VBC instructions.
 
 use super::error::CodegenOptionExt;

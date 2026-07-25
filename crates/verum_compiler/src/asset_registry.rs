@@ -1,12 +1,9 @@
 //! Asset Registry for Compile-Time Asset Loading
 //!
-
 //! Provides build-time asset embedding via the `BuildAssets` meta-context.
 //!
-
 //! # Asset Loading (Meta System)
 //!
-
 //! Asset loading is the ONLY exception to the meta-system's "no I/O" sandbox rule.
 //! Meta functions with `using BuildAssets` context may load files at compile-time,
 //! with strict safety guarantees: deterministic builds (same input files produce same
@@ -14,10 +11,8 @@
 //! root only, no `..` traversal), and no network access. The build system tracks all
 //! loaded assets for cache invalidation.
 //!
-
 //! # Security
 //!
-
 //! Asset loading is strictly controlled via the BuildAssets context:
 //! - Only relative paths from project root allowed
 //! - No path traversal (..)
@@ -25,10 +20,8 @@
 //! - Explicit `using BuildAssets` context required
 //! - All loaded assets tracked for rebuild detection
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! @tagged_literal("img")
 //! meta fn image_literal(path: Text) -> EmbeddedImage using BuildAssets {
@@ -36,7 +29,6 @@
 //!  EmbeddedImage { data, format: detect_format(&data) }
 //! }
 //!
-
 //! const LOGO: EmbeddedImage = img#"assets/logo.png";
 //! ```
 

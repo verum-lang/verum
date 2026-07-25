@@ -1,6 +1,5 @@
 //! Boundary-detection verification pass.
 //!
-
 //! Performs full call-graph analysis to detect verification
 //! boundaries between functions at different verification levels.
 //! Generates proof obligations at boundary crossings (proof-level

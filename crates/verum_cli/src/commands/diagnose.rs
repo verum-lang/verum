@@ -1,6 +1,5 @@
 //! `verum diagnose` — inspect and bundle crash reports.
 //!
-
 //! Subcommands:
 //!  - `list` — show recent reports in `~/.verum/crashes/`.
 //!  - `show` — print the latest (or a specified) report.

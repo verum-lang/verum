@@ -1,6 +1,5 @@
 //! LSP backend implementation
 //!
-
 //! This is the main LSP server backend that handles all LSP protocol messages.
 
 use tower_lsp::jsonrpc::Result;

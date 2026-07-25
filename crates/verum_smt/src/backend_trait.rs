@@ -1,23 +1,18 @@
 //! Unified SMT Backend Trait - Isomorphic API for All Solvers
 //!
-
 //! This module defines a trait-based abstraction that allows transparent switching
 //! between SMT solvers (Z3, CVC5, etc.) with zero runtime overhead when using
 //! static dispatch.
 //!
-
 //! ## Design Principles
 //!
-
 //! 1. **Isomorphic API**: All backends expose identical functionality
 //! 2. **Type Safety**: Associated types ensure compile-time correctness
 //! 3. **Zero Cost**: Static dispatch eliminates virtual call overhead
 //! 4. **Completeness**: All operations from both Z3 and CVC5 are supported
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────┐
 //! │ SmtBackend Trait │
@@ -30,7 +25,6 @@
 //!  └──────────┘ └───────────┘
 //! ```
 //!
-
 //! Verum's refinement type system allows types like `Int{> 0}`, `Text{len(it) > 5}`,
 //! and sigma-type refinements `n: Int where n > 0`. These refinements become SMT
 //! constraints during `@verify(proof)` compilation. The backend trait abstracts over

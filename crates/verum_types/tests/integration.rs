@@ -15,7 +15,6 @@
 )]
 //! Comprehensive test suite for the type system.
 //!
-
 //! This module contains ~100+ integration tests covering:
 //! - Bidirectional type checking
 //! - Type inference
@@ -24,7 +23,6 @@
 //! - Protocol system
 //! - Context tracking
 //!
-
 //! Target: ~1000 tests total (including unit tests in each module)
 
 use verum_ast::{expr::*, literal::*, pattern::Pattern, span::Span, stmt::*, ty::Ident};

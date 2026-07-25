@@ -1,14 +1,12 @@
 //! Cubical cofibration calculus — interval subsumption + face-formula algebra
 //! (M-VVA-FU Sub-2.4-cubical, V1 deferred per VVA spec L579).
 //!
-
 //! Pre-this-module the kernel's cubical rules (`HComp`, `Transp`,
 //! `Glue` at `infer.rs:431-510`) treated the face formula `φ` as
 //! "well-typed but not interval-subsumption-checked" — see the
 //! `infer.rs:422-424` deferral comment. This module ships the
 //! decidable cofibration-formula algebra:
 //!
-
 //! * **Carrier:** `FaceFormula` — a finite distributive-lattice
 //!  element over generators `(i = 0)` / `(i = 1)` for interval
 //!  variables `i`.
@@ -19,7 +17,6 @@
 //! * **Subsumption:** decidable `φ ≤ ψ` via DNF normalisation +
 //!  per-clause containment.
 //!
-
 //! The CCHM cubical-set semantics requires HComp / Transp / Glue to
 //! satisfy *cofibration coherence*: the wall family must be defined
 //! exactly on `φ`, and the result's restriction to `φ` must agree
@@ -27,7 +24,6 @@
 //! post-Sub-2.4 the kernel rejects walls whose support does not
 //! match φ's coverage (interval subsumption).
 //!
-
 //! References:
 //!  * Cohen, Coquand, Huber, Mörtberg (CCHM), "Cubical Type Theory:
 //!  a constructive interpretation of the univalence axiom" (2015).

@@ -1,30 +1,23 @@
 //! Source File Registry for Error Diagnostics
 //!
-
 //! This module provides a registry for tracking source files and converting
 //! byte-offset Spans to human-readable LineColSpans for error messages.
 //!
-
 //! # Design Principles
 //!
-
 //! 1. **Lazy Loading**: Files are loaded only when needed for error messages
 //! 2. **Thread-Safe**: Uses RwLock for concurrent access
 //! 3. **Efficient Lookup**: FileId-indexed HashMap for O(1) lookup
 //! 4. **Fallback Handling**: Graceful degradation when source unavailable
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! use verum_types::source_files::SourceFileRegistry;
 //!
-
 //! let registry = SourceFileRegistry::new();
 //! registry.register_file(file_id, "path/to/file.vr", source_code);
 //!
-
 //! let line_col_span = registry.span_to_line_col(span);
 //! ```
 

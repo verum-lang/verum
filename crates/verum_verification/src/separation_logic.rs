@@ -1,41 +1,32 @@
 //! Separation Logic for Verum
 //!
-
 //! This module implements Separation Logic (SL) for reasoning about heap-manipulating
 //! programs in Verum. Separation Logic extends Hoare Logic with spatial reasoning
 //! capabilities, enabling compositional verification of pointer-based data structures.
 //!
-
 //! # Core Concepts
 //!
-
 //! ## Separation Logic Assertions (SepProp)
 //!
-
 //! - **Points-to predicate**: `x ↦ v` - location x points to value v
 //! - **Separating conjunction**: `P * Q` - heap splits into disjoint parts
 //! - **Magic wand**: `P -* Q` - if given P, produces Q
 //! - **Empty heap**: `emp` - the heap is empty
 //!
-
 //! ## Heap Model
 //!
-
 //! The heap is modeled as a partial function from addresses to values:
 //! ```text
 //! Heap = Address ⇀ Value
 //! ```
 //!
-
 //! Heaps can be composed via disjoint union (⊎):
 //! ```text
 //! h = h₁ ⊎ h₂ iff dom(h₁) ∩ dom(h₂) = ∅
 //! ```
 //!
-
 //! ## Frame Rule
 //!
-
 //! The key compositional reasoning principle:
 //! ```text
 //! {P} c {Q}
@@ -43,26 +34,20 @@
 //! {P * R} c {Q * R}
 //! ```
 //!
-
 //! ## Standard Predicates
 //!
-
 //! - `list(x, α)` - linked list at x with content α
 //! - `tree(x, t)` - tree structure at x with shape t
 //! - `array(x, len, data)` - array segment from x with length len
 //!
-
 //! # Integration with Verum
 //!
-
 //! - **CBGR Integration**: Maps CBGR allocations to separation logic heap model
 //! - **Hoare Logic**: Extends weakest precondition calculus with heap reasoning
 //! - **Z3 Backend**: Uses Z3's array theory for heap encoding
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! @verify(proof)
 //! fn swap_list_nodes(x: &Heap<Node>, y: &Heap<Node>)
@@ -75,10 +60,8 @@
 //! }
 //! ```
 //!
-
 //! # Specification Compliance
 //!
-
 //! Implements the complete separation logic system including:
 //! - Spatial assertions: points-to (x |-> v), separating conjunction (P * Q),
 //!  magic wand (P -* Q), empty heap (emp)

@@ -1,6 +1,5 @@
 //! Link-Time Optimization (LTO) support
 //!
-
 //! Provides ThinLTO and Full LTO with incremental caching.
 
 // On MSVC, the linker processes static libraries in single-pass order.

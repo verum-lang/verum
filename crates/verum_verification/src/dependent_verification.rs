@@ -1,10 +1,8 @@
 //! Dependent-Type Verification Orchestrator.
 //!
-
 //! This module wires together the four standalone verification
 //! subsystems built in Phase A-D into a single dispatch API:
 //!
-
 //! * **Cubical normalization** (`verum_types::cubical`) — Path-type
 //!  definitional equality via WHNF reduction.
 //! * **Universe constraint solving** (`verum_types::universe_solver`)
@@ -16,18 +14,14 @@
 //! * **Domain encodings** (`verum_smt::domains::{sheaf,epistemic}`)
 //!  — ∞-sheaf descent + quantum-epistemic invariant preservation.
 //!
-
 //! ## Usage
 //!
-
 //! Downstream code (e.g., the pipeline's verification phase) creates
 //! a `DependentVerifier`, registers the goals encountered during
 //! type checking, and invokes `verify_all()` at module-boundary.
 //!
-
 //! ## Status
 //!
-
 //! This is the **integration layer** the plan refers to. The
 //! underlying modules all work standalone; this orchestrator makes
 //! them a cohesive verification pipeline.

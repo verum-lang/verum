@@ -1,26 +1,21 @@
 //! Conditional Compilation Configuration (`@cfg`) for Verum.
 //!
-
 //! This module provides the AST types and evaluation logic for conditional
 //! compilation based on target platform, features, and custom conditions.
 //!
-
 //! # Syntax
 //!
-
 //! ```verum
 //! // Simple predicate
 //! @cfg(unix)
 //! @cfg(windows)
 //! @cfg(debug_assertions)
 //!
-
 //! // Key-value predicates
 //! @cfg(target_os = "linux")
 //! @cfg(target_arch = "x86_64")
 //! @cfg(feature = "simd")
 //!
-
 //! // Combinators
 //! @cfg(all(unix, target_arch = "x86_64"))
 //! @cfg(any(target_os = "linux", target_os = "macos"))
@@ -28,13 +23,10 @@
 //! @cfg(all(unix, not(target_os = "ios")))
 //! ```
 //!
-
 //! # Target Configuration
 //!
-
 //! The following cfg options are predefined:
 //!
-
 //! | Option | Values | Description |
 //! |--------|--------|-------------|
 //! | `target_os` | linux, macos, windows, ios, android, freebsd, etc. | Operating system |
@@ -46,13 +38,10 @@
 //! | `target_vendor` | unknown, apple, pc, nvidia | Hardware vendor |
 //! | `feature` | user-defined | Cargo-style feature flags |
 //!
-
 //! # Simple Predicates
 //!
-
 //! These are shorthand for common conditions:
 //!
-
 //! | Predicate | Equivalent |
 //! |-----------|------------|
 //! | `unix` | `target_family = "unix"` |
@@ -60,10 +49,8 @@
 //! | `test` | Running in test mode |
 //! | `debug_assertions` | Debug build |
 //!
-
 //! # Conditional Compilation
 //!
-
 //! Verum supports only the C ABI for FFI (the only stable, universal ABI).
 //! Platform-specific code is selected via @cfg predicates that query target_os,
 //! target_arch, target_family, target_pointer_width, target_endian, target_env,

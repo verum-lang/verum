@@ -14,11 +14,9 @@
 )]
 //! Tests for quantifier depth calculation in dependent types
 //!
-
 //! This test suite validates the quantifier depth computation functionality
 //! added to support Forall and Exists quantifiers in dependent types (v2.0+).
 //!
-
 //! Type-level computation: types computed by functions, with quantifiers for dependent types.
 //! Pi types `(x: A) -> B(x)` use universal quantifiers; Sigma types `(x: A, B(x))` use
 //! existential quantifiers. Quantifier depth measures nesting level for complexity analysis

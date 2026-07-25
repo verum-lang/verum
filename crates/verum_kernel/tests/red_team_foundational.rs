@@ -1,7 +1,6 @@
 //! Red-team adversarial test suite for the foundational kernel
 //! infrastructure (Ordinal + InfinityCategory + DiakrisisBridge).
 //!
-
 //! These tests systematically probe boundary conditions, hidden
 //! invariants, and structural assumptions that could break under
 //! adversarial input. Each failure is either a bug to fix or an

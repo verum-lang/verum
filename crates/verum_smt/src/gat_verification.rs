@@ -1,31 +1,25 @@
 //! GAT (Generic Associated Type) Constraint Verification
 //!
-
 //! GATs (Generic Associated Types) allow protocol associated types to have their own
 //! type parameters, e.g., `type Item<T> where T: Clone`. Well-formedness requires:
 //! (1) where-clause constraints are satisfiable, (2) no circular type dependencies,
 //! (3) variance annotations are consistent. In CBGR, GATs use generation tracking
 //! instead of lifetime parameters, simplifying lending iterator patterns.
 //!
-
 //! This module encodes GAT constraints to Z3 and verifies:
 //! 1. Type parameter constraints are satisfied
 //! 2. Where clauses hold for all instantiations
 //! 3. No circular dependencies in GAT definitions
 //! 4. Variance constraints are respected
 //!
-
 //! # Performance Targets
 //!
-
 //! - Simple GAT verification: <50ms
 //! - Complex GAT with multiple constraints: <100ms
 //! - Circular dependency detection: <20ms
 //!
-
 //! # Theory
 //!
-
 //! GATs are encoded as universally quantified formulas in Z3:
 //! ```smt2
 //! (forall ((T Sort))

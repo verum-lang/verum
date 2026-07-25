@@ -1,27 +1,21 @@
 //! Pass pipeline configuration and execution.
 //!
-
 //! Manages the sequence of optimization passes applied to MLIR modules.
 //!
-
 //! # Pipeline Architecture
 //!
-
 //! The pass pipeline is organized into phases:
 //!
-
 //! ```text
 //! Phase 1: Early Optimizations (MLIR Transform)
 //!  ├── Canonicalization
 //!  └── CSE (Common Subexpression Elimination)
 //!
-
 //! Phase 2: Domain-Specific Passes (Verum)
 //!  ├── CBGR Elimination (escape analysis)
 //!  ├── Context Monomorphization (specialization)
 //!  └── Refinement Propagation (redundancy elimination)
 //!
-
 //! Phase 3: Late Optimizations (MLIR Transform)
 //!  ├── SCCP (Sparse Conditional Constant Propagation)
 //!  ├── LICM (Loop Invariant Code Motion)
@@ -29,7 +23,6 @@
 //!  ├── Inlining
 //!  └── DCE (Dead Code Elimination)
 //!
-
 //! Phase 4: Lowering (MLIR Conversion)
 //!  ├── SCF → CF
 //!  ├── Arith/Func/Index/Math → LLVM

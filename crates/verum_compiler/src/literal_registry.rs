@@ -1,6 +1,5 @@
 //! Registry for custom tagged literal handlers
 //!
-
 //! Tagged and Compile-Time Literal Protocols:
 //! Tagged text literals (§1.4.4) use `tag#"content"` syntax for compile-time
 //! parsing and validation. Tags are registered via @tagged_literal attribute on
@@ -10,7 +9,6 @@
 //! @interpolation_handler, which receive template strings and expression lists,
 //! returning injection-safe parameterized output (e.g., `sql"SELECT * WHERE id = {id}"`).
 //!
-
 //! This module implements the Revolutionary Literal System v3.0, providing:
 //! - Tagged literal registration via @tagged_literal attribute
 //! - Compile-time parsing and validation

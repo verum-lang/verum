@@ -1,15 +1,12 @@
 //! Verification pipeline composer.
 //!
-
 //! `VerificationPipeline` runs an ordered list of [`VerificationPass`]
 //! implementations on a module, with **fail-fast** semantics: when
 //! any pass returns `result.success == false`, the pipeline records
 //! that failure and skips the remaining passes.
 //!
-
 //! Two built-in pipelines:
 //!
-
 //!  • [`VerificationPipeline::static_analysis_pipeline`] — 5
 //!  lightweight passes (level inference + kernel-recheck +
 //!  hygiene-recheck + boundary detection + transition

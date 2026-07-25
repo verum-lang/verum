@@ -1,21 +1,17 @@
 //! Higher-Kinded Type Inference System
 //!
-
 //! Higher-kinded type (HKT) kind inference: infers kinds for type constructors
 //! (e.g., List has kind Type -> Type, Map has kind Type -> Type -> Type).
 //! Uses constraint-based kind inference with unification.
 //!
-
 //! This module implements automatic kind inference and checking for higher-kinded types.
 //! Kinds describe the "type of a type":
 //! - `*` (Type): Kind of concrete types (Int, Bool, List<Int>)
 //! - `* -> *`: Kind of type constructors (List, Maybe, GenRef)
 //! - `* -> * -> *`: Kind of binary type constructors (Map, Result)
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────┐
 //! │ Kind System │
@@ -39,33 +35,26 @@
 //! └─────────────────────────────────────┘
 //! ```
 //!
-
 //! # Performance Guarantees
 //!
-
 //! - Kind inference: <5ms for typical protocols
 //! - Kind checking: <1ms per type application
 //! - Constraint solving: <10ms for complex kinds
 //! - Zero runtime overhead (compile-time only)
 //!
-
 //! # Example Usage
 //!
-
 //! ```ignore
 //! use verum_types::kind_inference::{KindInferer, Kind};
 //!
-
 //! let mut inferer = KindInferer::new();
 //!
-
 //! // Infer kind of List type constructor
 //! let list_kind = inferer.infer_kind(&Type::Named {
 //!  path: Path::single(Ident::new("List", Span::default())),
 //!  args: List::from(vec![Type::Var(TypeVar::new(0))]),
 //! })?;
 //!
-
 //! assert_eq!(list_kind, Kind::unary_constructor()); // * -> *
 //! ```
 

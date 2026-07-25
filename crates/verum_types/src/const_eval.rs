@@ -1,27 +1,21 @@
 //! Compile-time constant evaluation for meta parameters
 //!
-
 //! Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Unified meta-system for compile-time computation
 //!
-
 //! This module implements compile-time expression evaluation for meta parameters,
 //! enabling features like:
 //! - Compile-time arithmetic: N: meta usize = 2 + 3
 //! - Compile-time comparisons: N: meta usize{> 0}
 //! - Tensor shape computation: Shape: meta [usize] = [2, 3]
 //!
-
 //! # Architecture
 //!
-
 //! The evaluator operates in two modes:
 //! 1. **Value evaluation**: Compute concrete values from expressions
 //! 2. **Type evaluation**: Resolve meta types with computed values
 //!
-
 //! # Performance
 //!
-
 //! All evaluation happens at compile-time with zero runtime overhead.
 //! Evaluation is cached to avoid redundant computation.
 

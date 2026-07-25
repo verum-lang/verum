@@ -1,43 +1,32 @@
 //! Existential Type Inference
 //!
-
 //! This module implements full support for existential types in the type system,
 //! including skolemization for unpacking and packing with bound verification.
 //!
-
 //! # Theory
 //!
-
 //! Existential types (`some T: Bound`) hide the concrete type while exposing
 //! its properties. They are the dual of universal types:
 //!
-
 //! - Universal: `forall T: Bound. Body` - consumer chooses T
 //! - Existential: `some T: Bound. Body` - producer chooses T, consumer sees opaque
 //!
-
 //! # Key Operations
 //!
-
 //! 1. **Packing**: Creating an existential by hiding a witness type
 //!  `pack(witness_type, value) : some T: Bound. Body`
 //!
-
 //! 2. **Unpacking (Skolemization)**: Using an existential by introducing a skolem
 //!  `unpack(existential, x => body)` - x has skolem type that cannot escape
 //!
-
 //! # Scope Safety
 //!
-
 //! Skolem constants represent "unknown but fixed" types. They must not escape
 //! their scope - this ensures type safety by preventing the hidden type from
 //! leaking.
 //!
-
 //! # References
 //!
-
 //! - Existential types: hiding concrete types behind protocol bounds (impl Protocol returns)
 //! - Types and Programming Languages, Chapter 24
 //! - Type inference for existential types: unifying impl Protocol with concrete implementations

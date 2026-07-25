@@ -1,23 +1,18 @@
 //! Tactic Evaluation Engine for Verum Formal Proofs
 //!
-
 //! This module implements a comprehensive tactic evaluation system that maintains
 //! proof state and applies tactics to transform goals in the Verum proof system.
 //!
-
 //! # Architecture
 //!
-
 //! The tactic evaluation engine consists of:
 //! - **Goal State**: Current proof goals and hypotheses
 //! - **Tactic Application**: Transform goals via tactic primitives
 //! - **Progress Tracking**: Monitor proof completion status
 //! - **SMT Integration**: Leverage Z3 for automated tactics
 //!
-
 //! # Core Tactics
 //!
-
 //! - `intro`: Introduce variables/hypotheses from goal
 //! - `apply`: Apply a lemma to the current goal
 //! - `rewrite`: Rewrite using an equality hypothesis
@@ -26,24 +21,19 @@
 //! - `cases`: Case analysis on an expression
 //! - `simp`, `ring`, `omega`, `smt`: Automated tactics via SMT
 //!
-
 //! # Example
 //!
-
 //! ```no_run
 //! use verum_verification::tactic_evaluation::{TacticEvaluator, Goal, Hypothesis};
 //! use verum_ast::decl::TacticExpr;
 //!
-
 //! // Create evaluator
 //! let mut evaluator = TacticEvaluator::new();
 //!
-
 //! // Set initial goal
 //! // (Example code - see tests for complete usage)
 //! ```
 //!
-
 //! Formal Proofs System (Verum 2.0+ planned):
 //! Proof terms are first-class values via Curry-Howard correspondence.
 //! Theorem syntax: `theorem name(params): proposition { proof_term }`

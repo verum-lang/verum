@@ -1,37 +1,29 @@
 #![allow(dead_code, unused_imports)]
 //! Build script for `cvc5-sys`.
 //!
-
 //! This script provides three modes, selected via feature flags:
 //!
-
 //! 1. **`vendored` (default for distribution)**: Build CVC5 from source using
 //!  the vendored source tree in `cvc5/`. Produces a static library linked
 //!  directly into the final binary. Requires CMake + C++17 compiler + GMP.
 //!
-
 //! 2. **`system`**: Link against a system-installed `libcvc5.so`/`libcvc5.dylib`.
 //!  Fast builds, but requires the user to install CVC5 separately.
 //!
-
 //! 3. **No features (fallback)**: Check `CVC5_ROOT` environment variable for
 //!  a pre-built CVC5 installation. If found, use it; otherwise, report an
 //!  actionable error telling the user how to proceed.
 //!
-
 //! ## Environment Variables
 //!
-
 //! * `CVC5_ROOT` — Path to a CVC5 installation (contains `include/` and `lib/`).
 //!  Takes precedence over vendored and system builds.
 //! * `CVC5_NO_VENDOR` — If set, disables vendored build (useful for CI).
 //! * `CVC5_JOBS` — Number of parallel jobs for CMake build (default: `num_cpus`).
 //! * `DOCS_RS` — Set by docs.rs; skips linking and provides stub bindings.
 //!
-
 //! ## Output
 //!
-
 //! Sets the following Cargo instructions:
 //! - `cargo:rustc-link-lib=static=cvc5` (and dependencies)
 //! - `cargo:rustc-link-search=native=<build_dir>/lib`

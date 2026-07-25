@@ -1,22 +1,17 @@
 //! Verification Command with Cost Reporting
 //!
-
 //! P0 Feature for v1.0: Show verification costs and suggest optimizations
 //!
-
 //! # Example Output
 //!
-
 //! ```text
 //! $ verum verify app.vr --show-costs
 //!
-
 //! Verification Report:
 //!  ✓ algorithm(): Proved in 1.2s (Z3)
 //!  ⚠ complex_fn(): Timeout after 30s, falling back to runtime
 //!  ✗ invalid_fn(): Counterexample found: n = 0
 //!
-
 //! Suggestions:
 //!  - Use @verify(runtime) for complex_fn (30s → 0s)
 //!  - Add precondition n > 0 to invalid_fn

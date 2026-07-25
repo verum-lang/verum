@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for script parsing modes
 //!
-
 //! These tests verify the script parser, incremental parsing, recovery strategies,
 //! and type integration work correctly in REPL and interactive contexts.
 

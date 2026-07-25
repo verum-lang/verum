@@ -1,19 +1,15 @@
 //! Integration tests for the complementary Z3 + CVC5 SMT architecture.
 //!
-
 //! These tests exercise the full pipeline end-to-end:
 //!
-
 //!  `@verify(...)` attribute → `VerifyStrategy` → `BackendSwitcher`
 //!  → `CapabilityRouter`
 //!  → telemetry recording
 //!
-
 //! They use in-memory constructed goals rather than a compiled Verum source
 //! because constructing real VBC-backed goals requires the full compilation
 //! pipeline. The tests focus on verifying that:
 //!
-
 //! 1. The routing decisions match the expected theory winners.
 //! 2. Telemetry is recorded correctly for each routing path.
 //! 3. `VerifyStrategy` parses all documented attribute values.

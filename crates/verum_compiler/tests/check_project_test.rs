@@ -1,6 +1,5 @@
 //! Tests for the check_project() method in the compilation pipeline.
 //!
-
 //! This tests multi-file type checking without code generation.
 
 use anyhow::Result;

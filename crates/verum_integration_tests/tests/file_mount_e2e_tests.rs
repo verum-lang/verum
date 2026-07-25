@@ -2,7 +2,6 @@
 
 //! End-to-end tests for file-relative mount (#5 / P1.5).
 //!
-
 //! These tests build small two-/three-file `.vr` projects in
 //! a temp directory, run them through the
 //! `verum_modules::file_mount::resolve_file_mounts` walker
@@ -10,7 +9,6 @@
 //! data matches what the pipeline expects to register in
 //! `ModuleRegistry`.
 //!
-
 //! Pipeline-side wiring (insertion of resolve_file_mounts
 //! between Phase 1 and Phase 1.5) is verified separately in
 //! pipeline.rs. These tests pin the cross-crate integration:

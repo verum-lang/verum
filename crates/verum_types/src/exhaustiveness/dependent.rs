@@ -1,19 +1,15 @@
 //! Dependent Pattern Matching Integration
 //!
-
 //! This module bridges the exhaustiveness checking module with dependent type
 //! pattern matching. It provides index-aware exhaustiveness checking that
 //! understands type indices and can identify absurd patterns.
 //!
-
 //! # Overview
 //!
-
 //! When pattern matching on indexed types (like `List<T, n>` where `n` is a
 //! type-level natural), some patterns may be impossible based on index
 //! constraints. For example:
 //!
-
 //! ```verum
 //! fn head<T, n>(xs: List<T, Succ(n): meta Nat>) -> T =
 //!  match xs {
@@ -22,16 +18,13 @@
 //!  }
 //! ```
 //!
-
 //! This module handles:
 //! 1. Filtering absurd constructors based on index constraints
 //! 2. Integrating with the matrix-based exhaustiveness algorithm
 //! 3. Generating appropriate diagnostics for dependent types
 //!
-
 //! # References
 //!
-
 //! - Dependent pattern matching: patterns that refine types in branches, with coverage checking
 //! - Pattern exhaustiveness checking: ensuring match expressions cover all possible values
 

@@ -1,13 +1,10 @@
 //! Dependency Graph Analysis Intrinsics (Tier 1 - Requires MetaTypes)
 //!
-
 //! Provides compile-time dependency graph analysis for module relationships.
 //! Uses the module registry from MetaContext to build and query the dependency graph.
 //!
-
 //! ## Dependency Query Functions
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `dep_dependencies_of(module)` | `(Text) -> List<Text>` | Direct dependencies |
@@ -15,10 +12,8 @@
 //! | `dep_dependents_of(module)` | `(Text) -> List<Text>` | Who depends on this |
 //! | `dep_depth(module)` | `(Text) -> Int` | Max depth in dep tree |
 //!
-
 //! ## Graph Analysis Functions
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `dep_find_cycles()` | `() -> List<List<Text>>` | Find all cycles |
@@ -28,10 +23,8 @@
 //! | `dep_root_modules()` | `() -> List<Text>` | Modules nothing depends on |
 //! | `dep_strongly_connected_components()` | `() -> List<List<Text>>` | SCCs (Tarjan's) |
 //!
-
 //! ## Context Requirements
 //!
-
 //! **Tier 1**: All functions require `using [MetaTypes]` context.
 
 use std::collections::{HashMap, HashSet};

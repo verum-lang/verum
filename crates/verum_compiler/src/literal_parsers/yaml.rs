@@ -1,10 +1,8 @@
 //! YAML literal parser
 //!
-
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
-
 //! Parses and validates YAML literals:
 //! - yaml#"key: value"
 //! - yaml#"- item1\n- item2"

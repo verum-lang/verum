@@ -14,7 +14,6 @@
 )]
 //! Integration tests for AST span to diagnostic span conversion
 //!
-
 //! Tests the complete flow from source file -> AST -> diagnostics with accurate
 //! line/column information in error messages.
 

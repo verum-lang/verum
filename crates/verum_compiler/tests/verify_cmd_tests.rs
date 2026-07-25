@@ -14,7 +14,6 @@
 )]
 //! Tests for verify_cmd module
 //!
-
 //! Migrated from src/verify_cmd.rs to comply with CLAUDE.md test organization.
 
 use std::time::Duration;

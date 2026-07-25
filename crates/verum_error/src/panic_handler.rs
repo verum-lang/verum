@@ -1,6 +1,5 @@
 //! Panic Hook Integration for Verum Error Handling System
 //!
-
 //! Part of Level 3 (Fault Tolerance) of the 5-Level Error Defense Architecture.
 //! Panics in Verum represent programmer errors (bugs), not expected failures.
 //! Expected failures use `Result<T, E>`. This module converts panics into
@@ -9,20 +8,16 @@
 //! by default (`VERUM_BACKTRACE=0`) for zero overhead in production; enable
 //! with `VERUM_BACKTRACE=1` when debugging.
 //!
-
 //! This module provides production-ready panic handling infrastructure that integrates
 //! with the Verum error handling system, providing:
 //!
-
 //! - **Global panic hook** - Centralized panic capture and logging
 //! - **Async task panic recovery** - catch_unwind wrapper for task isolation
 //! - **PanicInfo capture** - Structured panic data with location and backtrace
 //! - **Integration with ErrorLogger** - Unified panic logging infrastructure
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌──────────────────────────────────────────────────────┐
 //! │ Panic Handler Module │
@@ -42,26 +37,21 @@
 //! └──────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Usage
 //!
-
 //! ```rust
 //! use verum_error::panic_handler::{setup_panic_hook, catch_task_panics};
 //!
-
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // 1. Setup global panic hook at application startup
 //! setup_panic_hook();
 //!
-
 //! // 2. Use catch_task_panics for async task isolation
 //! let result = catch_task_panics(|| {
 //!  // Code that might panic
 //!  panic!("Something went wrong!");
 //! });
 //!
-
 //! match result {
 //!  Ok(value) => println!("Task succeeded: {:?}", value),
 //!  Err(panic_err) => eprintln!("Task panicked: {}", panic_err),
@@ -70,19 +60,15 @@
 //! # }
 //! ```
 //!
-
 //! # Performance
 //!
-
 //! - **Hook installation**: ~1-2μs (one-time setup cost)
 //! - **Panic capture**: ~5-10μs overhead (only on panic path, not hot path)
 //! - **Backtrace capture**: ~100-500μs (configurable, disabled by default)
 //! - **catch_unwind**: ~50-100ns wrapper overhead (zero-cost on success path)
 //!
-
 //! # Thread Safety
 //!
-
 //! All panic handling operations are thread-safe:
 //! - Global panic hook is protected by std::panic::set_hook
 //! - PanicLogger uses atomic counters and mutexes

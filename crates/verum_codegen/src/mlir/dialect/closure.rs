@@ -1,6 +1,5 @@
 //! Comprehensive closure dialect operations for Verum.
 //!
-
 //! This module implements industrial-grade closure support, including:
 //! - Closure creation with capture analysis
 //! - Three capture modes: by value, by reference, by move
@@ -8,10 +7,8 @@
 //! - Indirect function calls
 //! - Closure optimization passes
 //!
-
 //! # Closure Layout
 //!
-
 //! ```text
 //! Closure<F> = {
 //!  fn_ptr: *const (), // Pointer to closure function
@@ -19,7 +16,6 @@
 //!  drop_fn: *const (), // Optional destructor for env
 //! }
 //!
-
 //! Env<F> = {
 //!  capture_0: T0, // First captured variable
 //!  capture_1: T1, // Second captured variable
@@ -27,10 +23,8 @@
 //! }
 //! ```
 //!
-
 //! # Capture Modes
 //!
-
 //! | Mode | Symbol | Behavior |
 //! |----------|--------|----------|
 //! | ByValue | `=` | Copy/clone value into closure |

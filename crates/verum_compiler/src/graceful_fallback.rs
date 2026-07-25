@@ -1,20 +1,16 @@
 //! Graceful Fallback System
 //!
-
 //! Verum uses a two-tier execution model:
 //! - Interpreter: VBC bytecode for development/debugging
 //! - Aot: Native code via LLVM for production
 //!
-
 //! The fallback system ensures the compiler can always make progress:
 //! - LLVM unavailable → Interpreter
 //! - AOT compilation failure → Interpreter
 //!
-
 //! Note: JIT infrastructure is preserved as an internal component of the
 //! AOT pipeline for REPL, incremental compilation, and hot reload.
 //!
-
 //! Graceful Fallback Guarantee: The compiler always produces a runnable result.
 //! If AOT compilation fails (e.g., LLVM unavailable or codegen error), the
 //! compiler falls back to VBC interpretation. This ensures developers always

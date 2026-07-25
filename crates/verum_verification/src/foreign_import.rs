@@ -1,9 +1,7 @@
 //! Foreign-system theorem import — inverse of cross-format export.
 //!
-
 //! ## Goal
 //!
-
 //! Verum is foundation-neutral. A Coq/Lean/Mizar/Isabelle corpus
 //! can be imported as Verum theorem skeletons whose statement is
 //! preserved, framework-attributed back to the source file/line, and
@@ -13,15 +11,12 @@
 //! bidirectional reproducibility across every supported proof
 //! system.
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / tactic_combinator / proof_repair /
 //! closure_cache / doc_render):
 //!
-
 //!  * [`ForeignTheorem`] — typed projection of one imported decl.
 //!  * [`ForeignSystem`] enum — Coq / Lean4 / Mizar / Isabelle.
 //!  * [`ForeignSystemImporter`] trait — single dispatch interface.
@@ -32,10 +27,8 @@
 //!  * [`importer_for`] dispatcher — pick the right importer for a
 //!  [`ForeignSystem`] tag.
 //!
-
 //! ## V0 contract
 //!
-
 //!  * The importer extracts theorem **statements** (signature +
 //!  proposition) but admits the proof body as `@axiom` with a
 //!  `@framework(<system>, "<source>:<line>")` citation.

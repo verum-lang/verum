@@ -14,7 +14,6 @@
 )]
 //! Tests for v6.0-BALANCED type system features.
 //!
-
 //! This module tests the advanced type system features introduced in v6.0:
 //! - TypeKind::Refined with an explicit binder (the canonical sigma form per
 //!  — `x: T where P(x)` parses to `Refined` with
@@ -25,7 +24,6 @@
 //! - WherePredicateKind::Ensures
 //! - Where clause disambiguation
 //!
-
 //! Tests for Verum's five refinement binding rules (inline, lambda, sigma, named, bare).
 //! Tests for where clause disambiguation (type, meta, value, postcondition).
 

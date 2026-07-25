@@ -1,15 +1,12 @@
 //! VBC interpreter dispatch (Phase 7, Tier 0 execution).
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 11). Houses the
 //! interpreter-side execution path: AST → VBC codegen → VBC
 //! interpreter, plus the main-function discovery and exit-code
 //! propagation helpers it depends on.
 //!
-
 //! Methods:
 //!
-
 //!  * `phase_interpret` — primary AST-driven entry; compiles to
 //!  VBC, builds an interpreter, finds main, runs.
 //!  * `phase_interpret_with_args` — args-bearing variant; passes

@@ -2,7 +2,6 @@
 
 //! T0231 (PRINT-POLY-PRELUDE-SHADOW-1) regression gate.
 //!
-
 //! `print` / `println` / `eprint` / `eprintln` are polymorphic
 //! compiler intrinsics (`fn<T>(T) -> Unit`); the runtime renders any
 //! value. Before this gate the implicit-prelude import replay
@@ -10,7 +9,6 @@
 //! `&Text` signatures through an unguarded insert channel, so every
 //! bare `print(42)` failed with a false E400 on BOTH tiers.
 //!
-
 //! Related code:
 //! - `verum_types/src/infer/env.rs` — `insert_fn_scheme_guarded`,
 //!  the ONE authority every registration channel routes through.

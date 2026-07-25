@@ -1,36 +1,27 @@
 //! Span conversion utilities for LSP and diagnostics.
 //!
-
 //! This module provides efficient conversions between different span
 //! representations used in the Verum compiler ecosystem:
 //!
-
 //! - Byte offsets → Line/column positions
 //! - `Span` → `LineColSpan`
 //! - Verum spans → LSP Range/Position (when tower_lsp feature enabled)
 //!
-
 //! # Design Principles
 //!
-
 //! 1. **Lazy Conversion**: Only convert when needed for output
 //! 2. **Cache Line Starts**: Pre-compute line boundaries for O(log n) lookup
 //! 3. **Zero Copy Where Possible**: Use references and indices
 //!
-
 //! # Specification
 //!
-
 //! Centralized span conversion utilities shared across all compiler crates.
 //!
-
 //! # Examples
 //!
-
 //! ```rust
 //! use verum_common::span_utils::offset_to_line_col;
 //!
-
 //! let source = "line 1\nline 2\nline 3";
 //! let (line, col) = offset_to_line_col(7, source);
 //! assert_eq!(line, 1); // Second line (0-indexed)

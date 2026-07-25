@@ -2,10 +2,8 @@
 //! tactics from `verum_kernel::tactics_industrial` into the SMT
 //! tactic dispatcher's call site.
 //!
-
 //! ## What this delivers
 //!
-
 //! The kernel's industrial tactics (`tactic_lia`, `tactic_decide`,
 //! `tactic_induction`, `tactic_congruence`, `tactic_eauto`) are
 //! deterministic decision procedures that close certain subgoal
@@ -16,24 +14,19 @@
 //! a `Closed` outcome it returns immediately, on `Open` it falls
 //! through to Z3's tactic.
 //!
-
 //! ## Integration contract
 //!
-
 //! [`try_industrial_fast_path`] takes a tactic-kind name + a parsed
 //! argument bundle (already routed through the kernel's typed
 //! tactic surface) and returns:
 //!
-
 //!  * `Some(closed_witness)` — the kernel decided the goal; the
 //!  witness should be packaged as an SMT certificate so the
 //!  Z3 dispatch can be skipped.
 //!  * `None` — fall through to Z3.
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - `apply lia` / `apply decide` / `apply induction` /
 //!  `apply congruence` / `apply eauto` in MSFS proof bodies
 //!  can now route through deterministic kernel tactics for the

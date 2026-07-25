@@ -1,12 +1,10 @@
 //! Interpreter dispatch benchmarks for VBC.
 //!
-
 //! Benchmarks the function table dispatch performance which provides:
 //! - O(1) opcode lookup via array indexing
 //! - Better branch prediction for indirect calls
 //! - Reduced code size improving instruction cache utilization
 //!
-
 //! Run with: cargo bench -p verum_vbc -- interpreter
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

@@ -1,6 +1,5 @@
 //! MLIR lowering hints for VBC → MLIR optimization.
 //!
-
 //! Provides hints for the VBC → MLIR lowering pass to enable:
 //! - Kernel fusion opportunities
 //! - Target-specific optimizations (Tensor Cores, Matrix Cores)

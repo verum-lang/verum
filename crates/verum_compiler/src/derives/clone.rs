@@ -1,9 +1,7 @@
 //! Clone derive macro implementation
 //!
-
 //! Generates `implement Clone for Type { fn clone(&self) -> Self }`
 //!
-
 //! For record types: clones each field recursively via field.clone().
 //! For sum types: matches each variant and clones payload fields.
 //! Generated code has identical performance to hand-written Clone implementations.

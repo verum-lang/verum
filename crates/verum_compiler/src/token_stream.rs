@@ -1,11 +1,9 @@
 //! TokenStream - Re-export of TokenStream from quote module
 //!
-
 //! This module provides a convenient re-export of the TokenStream type
 //! and related functionality from the quote module. This allows users to
 //! import from either `verum_compiler::token_stream` or `verum_compiler::quote`.
 //!
-
 //! Token stream for procedural macros: provides the interface between
 //! meta functions and the compiler, enabling AST manipulation via quote!.
 

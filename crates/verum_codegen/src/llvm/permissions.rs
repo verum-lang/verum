@@ -1,7 +1,6 @@
 //! AOT permission policy lowering — closes the script-mode security
 //! gap on the Tier-1 path.
 //!
-
 //! The Tier-0 interpreter enforces script permissions through a runtime
 //! [`PermissionRouter`](verum_vbc::interpreter::permission::PermissionRouter)
 //! installed by the CLI before script execution. The same source
@@ -10,7 +9,6 @@
 //! `Unimplemented VBC instruction` arm and either failed to build or
 //! ran without checks (depending on whether the build pipeline saw it).
 //!
-
 //! This module fixes that by baking the resolved policy into the
 //! generated binary at compile time. The CLI still computes the same
 //! `PermissionSet`, but instead of passing only a closure to the
@@ -18,13 +16,10 @@
 //! [`AotPermissionPolicy`] which the LLVM lowerer consumes when
 //! emitting each `PermissionAssert` site.
 //!
-
 //! ## Why bake into the binary
 //!
-
 //! Three alternatives were considered:
 //!
-
 //! * A separate `verum_runtime_permissions` cdylib that the binary
 //!  loads at process start — adds a build-time and link-time
 //!  dependency, complicates packaging, and the env-var hand-off
@@ -42,10 +37,8 @@
 //!  neighbours. The policy is sealed in the binary — there is no
 //!  env-var or external table to tamper with.
 //!
-
 //! ## What is enforced
 //!
-
 //! Permission grants live in
 //! [`PermissionScope`](verum_vbc::interpreter::permission::PermissionScope)
 //! space and are tagged via
@@ -54,10 +47,8 @@
 //! FileSystem=1, Network=2, Process=3, Memory=4, Cryptography=5,
 //! Time=6) is the contract this module assumes.
 //!
-
 //! Policy semantics:
 //!
-
 //! * `always_allow` — scope is passed through with no check (script
 //!  policy treats Memory and Cryptography this way today).
 //! * `wildcards` — any `target_id` for the scope is allowed (matches
@@ -67,7 +58,6 @@
 //!  after target hashing).
 //! * Anything else → deny → panic with code 143.
 //!
-
 //! Exit code 143 mirrors `SIGTERM` semantics — the binary is being
 //! shut down because it stepped outside its declared capability
 //! envelope, not because of a logic error in the script. Tooling can

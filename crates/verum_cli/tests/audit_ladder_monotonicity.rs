@@ -1,7 +1,6 @@
 //! Integration tests for `verum audit --ladder-monotonicity`
 //! (#139 / MSFS-L4.6).
 //!
-
 //! Pin coverage:
 //!  - Empty project (no `@verify(...)` annotations) → 0 walks, 0
 //!  violations, exit 0.
@@ -11,7 +10,6 @@
 //!  - JSON output carries the schema_version=1 envelope and per-walk
 //!  metadata.
 //!
-
 //! NOTE: producing a real *violation* in an end-to-end test requires
 //! a custom dispatcher impl (the `DefaultLadderDispatcher` in
 //! `verum_verification` is monotone-by-construction). Violation

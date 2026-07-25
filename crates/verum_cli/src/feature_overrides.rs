@@ -1,30 +1,23 @@
 //! Language-feature overrides applied on top of `verum.toml`.
 //!
-
 //! CLI flags in this module let users override any subsection of the
 //! manifest without editing the file. Two interfaces are supported:
 //!
-
 //! 1. **High-level flags** — the most common toggles (`--tier`, `--gpu`,
 //!  `--cbgr`, `--strict`, …). Designed for everyday use.
 //!
-
 //! 2. **Generic escape hatch** — `-Z KEY=VALUE` style (mirrors `rustc`).
 //!  Any dotted path into the manifest may be overridden (e.g.
 //!  `-Z types.universe_polymorphism=true`,
 //!  `-Z codegen.inline_depth=5`).
 //!
-
 //! Precedence (low → high): built-in defaults < `verum.toml` <
 //! high-level flags < generic `-Z` overrides < environment variables.
 //!
-
 //! See `integrate-language-features.md` for the full design discussion.
 //!
-
 //! ## Example
 //!
-
 //! ```bash
 //! verum build \
 //!  --tier aot --gpu --cbgr checked \

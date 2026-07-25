@@ -1,24 +1,19 @@
 //! Z3 SMT Backend Implementation for Refinement Type Checking
 //!
-
 //! Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 - Refinement Types with SMT
 //!
-
 //! This module provides a bridge implementation that delegates to verum_smt's
 //! SubsumptionChecker for all SMT operations. It implements the
 //! `verum_types::refinement::SmtBackend` trait.
 //!
-
 //! Historical note: this module used to live in `verum_types::smt_backend`.
 //! It was moved into `verum_smt` to break the circular dependency between
 //! `verum_smt` and `verum_types`. The public type was renamed from
 //! `Z3Backend` to `RefinementZ3Backend` to avoid colliding with the
 //! pre-existing `verum_smt::solver::Z3Backend` type.
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! RefinementChecker (verum_types)
 //!  ↓ (uses SmtBackend trait from verum_types::refinement)

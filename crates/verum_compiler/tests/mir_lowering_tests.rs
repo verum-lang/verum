@@ -1,6 +1,5 @@
 //! Tests for MIR lowering phase
 //!
-
 //! These tests verify the lowering of various AST constructs to MIR.
 
 #![allow(

@@ -1,6 +1,5 @@
 //! Coq proof-replay backend.
 //!
-
 //! Lowers an [`SmtCertificate`] into a Coq tactic chain. The backend
 //! distinguishes Z3-style and CVC5-style traces by the certificate's
 //! `backend` field; when the trace is empty or its shape is not
@@ -8,7 +7,6 @@
 //! scaffold (`admitted = true` on the [`TargetTactic`]) so the
 //! exported Coq file stays syntactically valid.
 //!
-
 //! Tactic vocabulary (V6.0 baseline):
 //!  * `intros` / `intro <H>` for quantifier introduction.
 //!  * `apply <hyp>` for forward-chaining via depends_on hypotheses.
@@ -19,7 +17,6 @@
 //!  * `reflexivity` / `congruence` for terminal closing.
 //!  * `Admitted.` as the strict fallback when nothing else fits.
 //!
-
 //! V6.1+ adds full Z3 `(proof ...)` parsing and ALETHE step-by-step
 //! reconstruction; the V6.0 baseline produces compilable Coq with
 //! the right tactic vocabulary so downstream tooling can iterate

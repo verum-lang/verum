@@ -1,34 +1,26 @@
 //! Stdlib Integration Module
 //!
-
 //! This module provides the bridge between the stdlib-agnostic type system architecture
 //! and the existing `ProtocolChecker` infrastructure.
 //!
-
 //! ## Key Components
 //!
-
 //! - `StdlibAgnosticChecker`: A wrapper around `ProtocolChecker` that supports
 //!  dynamic method registration from parsed stdlib files or preloaded metadata.
 //!
-
 //! - `DynamicMethodRegistry`: Registers methods dynamically instead of hardcoding
 //!  them in Rust code.
 //!
-
 //! ## Usage
 //!
-
 //! ```ignore
 //! // Create with preloaded metadata (normal usage)
 //! let checker = StdlibAgnosticChecker::with_metadata(core_metadata);
 //!
-
 //! // Create empty and register methods dynamically
 //! let mut checker = StdlibAgnosticChecker::new();
 //! checker.register_inherent_method("List", "len", signature);
 //!
-
 //! // Legacy mode - for backward compatibility with hardcoded methods
 //! let checker = StdlibAgnosticChecker::legacy();
 //! ```

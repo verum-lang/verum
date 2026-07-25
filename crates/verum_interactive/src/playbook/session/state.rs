@@ -1,6 +1,5 @@
 //! Playbook session state management
 //!
-
 //! This module manages the execution state for a playbook session, including:
 //! - Cell management (create, delete, reorder)
 //! - VBC execution pipeline integration

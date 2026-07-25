@@ -1,16 +1,13 @@
 //! High-level Rust intercepts for `core.io.stdio` operations.
 //!
-
 //! Sibling to `shell_runtime.rs` (VBC-1), `file_runtime.rs`
 //! (VBC-FILE-1), and `env_runtime.rs` (VBC-ENV-1 + VBC-PROC-1).
 //! Bypasses the libSystem `write(2)`/`read(2)` FFI dispatch on
 //! stdin/stdout/stderr and uses `std::io::stdin/stdout/stderr`
 //! directly from the host process.
 //!
-
 //! # Functions intercepted
 //!
-
 //!  * `read_line() -> IoResult<Text>` — `std::io::stdin().read_line()`
 //!  with trailing `\n` (and `\r` for CRLF) stripped to match the
 //!  Verum stdlib's contract.
@@ -25,7 +22,6 @@
 //!  write + flush; `eprintln` appends `\n`.
 //!  * `println_empty()` — `std::io::stdout()` write `\n` + flush.
 //!
-
 //! No permission gate — stdin/stdout/stderr are the script's
 //! foreground I/O channels, always available. (The Verum stdlib's
 //! surface-layer permission gates apply at the higher `using [...]`

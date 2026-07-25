@@ -1,21 +1,16 @@
 //! Phase 3: Macro Expansion & Literal Processing
 //!
-
 //! Executes meta code and expands macros in a sandboxed environment.
 //!
-
 //! ## Multi-Pass Architecture
 //!
-
 //! This phase implements Pass 2 of the three-pass compilation:
 //! - Pass 1: Parse + Register (done in MetaRegistryPhase)
 //! - **Pass 2: Expand Macros** (this phase)
 //! - Pass 3: Semantic Analysis (done in type checking)
 //!
-
 //! ## Features
 //!
-
 //! - @derive macro expansion using DeriveRegistry
 //! - Tagged literal processing (d#"...", rx#"...", etc.)
 //! - Interpolation handler invocation (sql"...", html"...", etc.)
@@ -24,16 +19,13 @@
 //! - Compile-time code generation via quote!
 //! - Cross-file macro resolution via MetaRegistry
 //!
-
 //! ## Safety
 //!
-
 //! All meta code is validated by the MetaLinter before execution:
 //! - @safe functions must pass all safety checks
 //! - @unsafe functions emit warnings
 //! - I/O operations are forbidden (except via `using BuildAssets` context)
 //!
-
 //! Phase 3: Macro expansion and literal processing. Executes @derive macros
 //! in sandboxed const_eval, parses tagged literals, processes interpolated
 //! strings with safe injection prevention, validates numeric suffixes.

@@ -1,57 +1,44 @@
 //! Array Theory Integration for Memory Model Verification
 //!
-
 //! This module provides comprehensive Z3 Array theory integration for verifying
 //! memory safety properties in Verum programs. It supports:
 //!
-
 //! - **Memory region modeling**: Arrays as address -> value mappings
 //! - **Invariant verification**: Check that memory invariants are preserved across updates
 //! - **Invariant synthesis**: Generate stability properties for array modifications
 //! - **Frame conditions**: Verify that unmodified regions remain unchanged
 //!
-
 //! ## Architecture
 //!
-
 //! The module integrates with the CBGR (Coarse-grained Borrow and Region) system
 //! to verify memory safety at the SMT level. Arrays model memory regions with:
 //!
-
 //! - Domain: Integer addresses (or bitvectors for bounded memory)
 //! - Range: Values stored at each address
 //!
-
 //! ## Z3 Array Operations
 //!
-
 //! Uses the Z3 Array theory (QF_AUFLIA logic):
 //! - `Array::new_const(name, domain, range)` - Create symbolic array
 //! - `Array::const_array(domain, val)` - Constant array (all same value)
 //! - `array.select(index)` - Read value at index
 //! - `array.store(index, value)` - Write value at index (functional update)
 //!
-
 //! ## Example
 //!
-
 //! ```rust,ignore
 //! use verum_smt::array_model::{ArrayModel, ArrayUpdate};
 //! use z3::ast::{Bool, Int};
 //!
-
 //! let mut model = ArrayModel::new();
 //!
-
 //! // Create array representing memory region
 //! model.declare_array("heap", ArraySort::IntToInt);
 //!
-
 //! // Verify invariant preservation after update
 //! let update = ArrayUpdate::store("heap", Int::from_i64(42), Int::from_i64(100));
 //! let invariant = model.array("heap").select(&Int::from_i64(0)).eq(&Int::from_i64(0));
 //!
-
 //! let preserved = model.verify_invariant_preservation(&invariant, &[update])?;
 //! assert!(preserved);
 //! ```

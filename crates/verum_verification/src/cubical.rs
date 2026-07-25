@@ -1,10 +1,8 @@
 //! Cubical / HoTT first-class catalogue — typed primitive
 //! inventory + computation-rule registry + face-formula validator.
 //!
-
 //! ## Goal
 //!
-
 //! Verum becomes the first production proof assistant where
 //! cubical type theory, HoTT, AND classical foundation co-exist
 //! under foundation-neutral toggles. Cubical-Agda and Lean's
@@ -12,11 +10,9 @@
 //! foundation-neutrality (cubical layer is opt-in, not the only
 //! option).
 //!
-
 //! This module is the **architectural foundation** for the cubical
 //! layer:
 //!
-
 //!  * Typed enumeration of cubical primitives (HComp / Transp /
 //!  Glue / Path / Equiv / J-rule / Univalence / …).
 //!  * Per-primitive structured doc (signature + semantics +
@@ -27,23 +23,18 @@
 //!  * Single trait boundary [`CubicalCatalog`] consumed by IDE /
 //!  docs / kernel re-check.
 //!
-
 //! ## V0 contract
 //!
-
 //! ships:
 //!
-
 //!  * The full primitive catalogue (16 entries covering every
 //!  #78 acceptance bullet).
 //!  * Production-grade face-formula parser / validator.
 //!  * Per-primitive structured doc with computation-rule names.
 //!  * The trait surface and reference catalogue impl.
 //!
-
 //! V1+ adds:
 //!
-
 //!  * Actual kernel-side reduction rules (currently the catalogue
 //!  names them; the reductions live in the kernel).
 //!  * HIT support (higher inductive types) checked via the

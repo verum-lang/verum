@@ -1,12 +1,10 @@
 //! UTF-8-safe primitives for byte-offset / char-boundary navigation.
 //!
-
 //! This module is the canonical home for the operations that previously
 //! showed up as ad-hoc byte-vs-char-index confusion across the LSP and
 //! VBC layers — every fix in the 2026-04-29 R2-§8.1 sweep ultimately
 //! reduces to one of three primitives:
 //!
-
 //! 1. **Clamp a byte offset to a char boundary.** The LSP protocol
 //!  delivers cursor positions that may land mid-codepoint (e.g.,
 //!  UTF-16-column ↔ UTF-8-byte rounding); naive `&line[..offset]`
@@ -22,7 +20,6 @@
 //!  content it silently mis-locates or returns false-positive
 //!  matches.
 //!
-
 //! All three primitives are zero-allocation on the hot path (the
 //! word-extraction primitive returns byte-offset bounds rather than
 //! a copy), use only standard-library `is_char_boundary` /

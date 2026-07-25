@@ -1,6 +1,5 @@
 //! Region Calculus — Tofte-Talpin style memory-region tracking.
 //!
-
 //! In a region calculus, every heap allocation is tagged with a
 //! **region** — a named lifetime within which the allocation lives.
 //! Regions are introduced by `letregion ρ in e` (which allocates
@@ -8,21 +7,17 @@
 //! consumed by allocation `new[ρ] v` (which puts `v` into region
 //! `ρ`).
 //!
-
 //! The type system enforces that no value escapes its containing
 //! region: a function returning a value of type `T at ρ` may only
 //! release `ρ` via the caller, never deallocate it locally.
 //!
-
 //! Tofte-Talpin gave a complete inference algorithm in 1997 for
 //! the ML fragment without explicit annotations. This module
 //! provides the **algebraic core**: region names, region sets,
 //! escape checking, and region-polymorphism substitution.
 //!
-
 //! ## Why not just borrow checking?
 //!
-
 //! Verum's CBGR + lifetime system already handles many of the
 //! same use cases. Region calculus is complementary: it gives a
 //! more *static* discipline (no run-time CBGR check, fully erased
@@ -30,10 +25,8 @@
 //! coexist — region-polymorphic code can interop with CBGR-managed
 //! code through region-to-lifetime translation.
 //!
-
 //! ## API
 //!
-
 //! * [`Region`] — a named region.
 //! * [`RegionSet`] — set of regions a computation touches.
 //! * [`RegionEnv`] — the regions in scope at a program point.

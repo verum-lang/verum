@@ -1,6 +1,5 @@
 //! Backend trait for device-agnostic tensor operations.
 //!
-
 //! This module defines the `Backend` trait that abstracts compute backends
 //! (CPU, CUDA, Metal, etc.) for tensor operations.
 

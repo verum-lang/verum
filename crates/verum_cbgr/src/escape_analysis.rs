@@ -1,29 +1,23 @@
 //! Enhanced Escape Analysis for CBGR Optimization
 //!
-
 //! This module implements comprehensive escape analysis to automatically promote
 //! `&T` (managed, ~15ns) references to `&checked T` (0ns) when the compiler can
 //! prove the reference doesn't escape its scope.
 //!
-
 //! # Purpose
 //!
-
 //! Escape analysis is critical for CBGR performance. It enables automatic
 //! elimination of runtime checks for references that are provably local, transforming
 //! ~15ns CBGR overhead into 0ns.
 //!
-
 //! # CBGR Memory Alignment and Escape Analysis Requirements
 //!
-
 //! The CBGR allocation system uses careful memory alignment (MIN_ALIGNMENT=16,
 //! HEADER_SIZE=32, CACHE_LINE_SIZE=64). Each allocation has a 32-byte header
 //! containing generation counters and epoch information. Escape analysis must
 //! correctly track references through this header structure to determine if
 //! references can bypass CBGR validation:
 //!
-
 //! 1. **Track reference creation points**: Monitor all allocation sites
 //! 2. **Analyze all uses**: Determine if references escape to heap, return, etc.
 //! 3. **Skip CBGR validation**: References that don't escape can use direct pointers
@@ -31,17 +25,14 @@
 //! 4. **Mark `NoEscape` references**: Enable SBGL (Scope-Bound Generation-Less)
 //!  optimization where raw pointers replace ThinRef/FatRef internally
 //!
-
 //! # Escape Scenarios
 //!
-
 //! ```text
 //! ✅ NoEscape (0ns CBGR):
 //!  - Used only within local scope
 //!  - Passed to function by reference only (callee doesn't escape)
 //!  - Loop iteration variables
 //!
-
 //! ❌ Escapes (~15ns CBGR):
 //!  - Stored in heap-allocated structure
 //!  - Passed to function that stores it
@@ -49,18 +40,14 @@
 //!  - Crosses thread boundaries
 //! ```
 //!
-
 //! # Performance Impact
 //!
-
 //! - **Hot loops**: 0ns (promoted to &checked T via escape analysis)
 //! - **Application code**: 0.5-1% overhead (many refs proven `NoEscape`)
 //! - **Complex flows**: 1-2% overhead (conservative CBGR where needed)
 //!
-
 //! # Algorithm
 //!
-
 //! 1. Build SSA form for precise data flow tracking
 //! 2. Perform forward dataflow analysis to track reference flow
 //! 3. Detect escape points (heap stores, returns, thread spawns)

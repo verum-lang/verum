@@ -1,10 +1,8 @@
 //! Helper methods for integrating dependent types into the type checker
 //!
-
 //! This module provides extension methods and utilities that the TypeChecker
 //! can use to verify dependent type constraints when checking types.
 //!
-
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Dependent Types Extension (v2.0+)
 
 use verum_ast::ContextList;

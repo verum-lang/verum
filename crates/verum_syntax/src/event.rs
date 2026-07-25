@@ -1,12 +1,10 @@
 //! Event-based parsing infrastructure.
 //!
-
 //! The parser emits events instead of building trees directly. This enables:
 //! 1. Retroactive modifications via markers (precede pattern)
 //! 2. Different tree representations from the same parse
 //! 3. Easy testing without tree construction
 //!
-
 //! Event-Based Parser Design:
 //! Events are emitted in parsing order, then reordered to tree order via
 //! forward_parent links. The `precede` pattern enables retroactive parent

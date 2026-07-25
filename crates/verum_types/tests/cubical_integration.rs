@@ -1,6 +1,5 @@
 //! Integration tests for the cubical normalizer (Phase B.2).
 //!
-
 //! Exercises the `whnf()` reduction + `definitionally_equal` equivalence
 //! with realistic proof patterns that occur in cubical type theory.
 

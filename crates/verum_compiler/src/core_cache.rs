@@ -2,15 +2,12 @@
 // for lightweight source scanning. Migration to verum_fast_parser planned for cog system.
 //! Stdlib Compilation Cache
 //!
-
 //! Industrial-grade caching system for compiled Verum stdlib.
 //! Ensures stdlib is compiled exactly once per project, with proper cache
 //! invalidation based on compiler version, target configuration, and source hash.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ CoreCache │
@@ -23,27 +20,21 @@
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Cache Invalidation
 //!
-
 //! The cache is invalidated when:
 //! - Verum compiler version changes
 //! - Target configuration changes (os, arch)
 //! - Stdlib source content changes (hash mismatch)
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! let cache = CoreCache::new(project_root)?;
 //!
-
 //! // Get compiled stdlib (compiles if needed, uses cache if valid)
 //! let stdlib = cache.get_or_compile(&source, &target)?;
 //!
-
 //! // Use stdlib for user code compilation
 //! pipeline.set_stdlib(stdlib);
 //! ```

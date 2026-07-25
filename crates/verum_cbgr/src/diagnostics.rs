@@ -1,13 +1,10 @@
 //! CBGR Diagnostics Integration
 //!
-
 //! This module converts CBGR analysis results into `verum_diagnostics::Diagnostic`
 //! instances for consistent error reporting throughout the compiler.
 //!
-
 //! # Diagnostic Codes
 //!
-
 //! | Code | Category | Description |
 //! |------|----------|-------------|
 //! | E1001 | Memory | Use-after-free detected |
@@ -20,10 +17,8 @@
 //! | E1008 | Borrow | Borrow violation (NLL) |
 //! | W1009 | Tier | Reference kept at Tier 0 |
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! TierAnalysisResult
 //!  │
@@ -34,7 +29,6 @@
 //! Vec<verum_diagnostics::Diagnostic>
 //! ```
 //!
-
 //! Converts CBGR tier analysis results into standardized verum_diagnostics::Diagnostic
 //! instances. Reports memory safety issues (use-after-free E1001, double-free E1002,
 //! leaks W1003), concurrency issues (data race E1004, deadlock E1005, thread safety

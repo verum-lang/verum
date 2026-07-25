@@ -12,7 +12,6 @@
 //! This module contains smart pointers that reference various `Init` types in
 //! TableGen.
 //!
-
 //! Init reference types can be converted to Rust types using [`Into`] and
 //! [`TryInto`]. Most conversions are cheap, except for conversion to
 //! [`String`].

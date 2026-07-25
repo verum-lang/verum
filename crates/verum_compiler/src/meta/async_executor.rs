@@ -1,28 +1,22 @@
 //! Meta Async Executor - Parallel Execution of Meta Functions
 //!
-
 //! Implements parallel execution of `meta async fn` using Rayon for CPU-bound parallelism.
 //!
-
 //! Meta async functions enable parallel pure computation at compile time.
 //! async/await in meta context is for PARALLELISM (multiple CPU cores), NOT for I/O.
 //! The meta sandbox FORBIDS all I/O operations even in async meta functions.
 //! Use cases: parallel type generation, parallel macro expansion, parallel validation.
 //!
-
 //! # CRITICAL: Rayon NOT Tokio
 //!
-
 //! Meta async functions use **RAYON** (work-stealing CPU parallelism), NOT **TOKIO** (I/O parallelism).
 //! This is because:
 //! - Meta functions are compile-time, CPU-bound operations
 //! - NO I/O is allowed in meta context
 //! - Work-stealing provides better load balancing for independent tasks
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! // ✅ ALLOWED: Parallel pure computation
 //! meta async fn parallel_type_generation() -> List<Type> {
@@ -31,11 +25,9 @@
 //!  async { generate_types_for_module_b() }
 //!  ).await;
 //!
-
 //!  merge_types(branch_a, branch_b)
 //! }
 //!
-
 //! // ❌ FORBIDDEN: I/O operations
 //! meta async fn fetch_config() -> Config {
 //!  http.get("...").await // COMPILE ERROR: I/O in meta context

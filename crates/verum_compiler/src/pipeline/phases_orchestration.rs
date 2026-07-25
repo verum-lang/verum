@@ -1,17 +1,14 @@
 //! Phase orchestration cluster (safety gate → typecheck → verify
 //! → context/send_sync/cbgr/ffi).
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 23). Houses eight
 //! phase orchestrator wrappers that drive the per-module
 //! compilation lifecycle. Each wrapper either delegates to a
 //! dedicated phase crate (`crate::phases::*`) or composes the
 //! sub-pass set itself.
 //!
-
 //! Surface:
 //!
-
 //!  * `phase_safety_gate` — Phase 2.9 `[safety]` feature gates
 //!  (unsafe blocks, `@ffi`, extern fn).
 //!  * `phase_stdlib_lints` — pure-AST stdlib hazard linter

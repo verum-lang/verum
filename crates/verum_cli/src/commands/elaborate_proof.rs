@@ -1,31 +1,25 @@
 //! `verum elaborate-proof <file.vr>` — walk Verum source and emit
 //! kernel-checkable certificates.
 //!
-
 //! ## What this command does
 //!
-
 //! Walks every theorem / lemma / corollary in a `.vr` source file.
 //! For each declaration with a supported proof body, runs
 //! [`verum_kernel::tactic_elaborator::elaborate_theorem`] to construct
 //! a [`Certificate`] and writes it to disk as a `.vproof` file.
 //!
-
 //! The emitted `.vproof` files are kernel-checked at construction
 //! time — the de Bruijn criterion is enforced before the file is
 //! written. Independent re-verification is available via
 //! `verum check-proof <file.vproof>`.
 //!
-
 //! Together with `verum check-proof`, this command closes the
 //! round-trip from source theorem to kernel verdict: the elaborator
 //! exercises the tactic_elaborator on real Verum source rather than
 //! the hand-built ASTs the unit tests use.
 //!
-
 //! ## Output
 //!
-
 //! Per-theorem `.vproof` files in `<source-dir>/elaborated/` (the
 //! `--output-dir` flag overrides the destination). Stdout reports
 //! per-theorem outcomes: `✓ verified` / `✗ FAILED <reason>` /

@@ -1,10 +1,8 @@
 //! Tests for order-independent (two-pass) type resolution.
 //!
-
 //! These tests verify that types can reference each other regardless of
 //! definition order, and that cyclic type definitions are properly detected.
 //!
-
 //! The implementation uses a two-pass approach:
 //! 1. Register all type names as placeholders
 //! 2. Resolve full type definitions with forward references available

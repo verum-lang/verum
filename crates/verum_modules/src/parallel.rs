@@ -1,14 +1,11 @@
 //! Parallel module loading infrastructure.
 //!
-
 //! Provides async parallel loading of independent modules using tokio.
 //! Modules at the same dependency level can be loaded concurrently,
 //! significantly improving compilation times for large projects.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! Level 0: [A, B, C] ──── Parallel Load ────┐
 //!  │
@@ -17,7 +14,6 @@
 //! Level 2: [F] ──── Sequential Load ──┘
 //! ```
 //!
-
 //! Modules at the same dependency level (determined by the dependency graph's
 //! independent_groups algorithm) can be loaded concurrently, significantly
 //! improving compilation times for large projects.

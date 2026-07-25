@@ -1,20 +1,16 @@
 //! SIMD Type Validation
 //!
-
 //! SIMD type validation: verifying SIMD vector types match hardware capabilities and element type constraints — SIMD Vector Types
 //! SIMD and tensor system: unified Tensor<T, Shape> type with compile-time shape validation, SIMD acceleration (SSE/AVX/NEON), auto-differentiation — Tensor Type System
 //!
-
 //! This module provides compile-time validation for SIMD operations including:
 //! - `Vec<T, N>` type validation (T: SimdElement, N: power of 2)
 //! - `Mask<N>` type validation for masked operations
 //! - SIMD intrinsic operand validation
 //! - @multiversion attribute validation for runtime CPU dispatch
 //!
-
 //! # SIMD Type Hierarchy
 //!
-
 //! ```text
 //! Vec<T: SimdElement, N: meta USize>
 //! │
@@ -23,10 +19,8 @@
 //! └── 512-bit (AVX-512): Vec16f, Vec8d, Vec16i, Vec8l
 //! ```
 //!
-
 //! # Platform Support
 //!
-
 //! | Platform | 128-bit | 256-bit | 512-bit |
 //! |-----------|---------|---------|---------|
 //! | x86_64 | SSE4.2 | AVX2 | AVX-512 |

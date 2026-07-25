@@ -1,6 +1,5 @@
 //! Bit-Vector Decision Procedure — finite-domain reasoning.
 //!
-
 //! Many verification problems live in finite domains: cryptography
 //! (AES/ChaCha bit operations), embedded systems (CAN frames,
 //! register layouts), bounded-precision arithmetic, packet
@@ -8,10 +7,8 @@
 //! decision procedure tailored to *fixed-width bit-vectors* is
 //! both faster and more directly useful.
 //!
-
 //! This module provides:
 //!
-
 //! * [`BitVec`] — fixed-width bit-vector value (up to 64 bits) with
 //!  bitwise ops, modular arithmetic, and equality decision
 //! * [`BvOp`] — abstract bit-vector operation tree for symbolic
@@ -21,19 +18,15 @@
 //! * [`decide`] — sound + complete decision procedure for QF_BV
 //!  formulas over concrete bit-vectors
 //!
-
 //! ## Soundness
 //!
-
 //! Every operation is performed in `u64` with explicit width
 //! masking, so width truncation matches SMT-LIB QF_BV semantics
 //! exactly (modulo the 64-bit width cap). Decision results are
 //! reproducible and deterministic.
 //!
-
 //! ## Status
 //!
-
 //! Standalone algebraic core. Integration with the SMT translator
 //! (so user-supplied bit-vector formulas reach this decider as a
 //! fast path before falling back to Z3) is a future step.

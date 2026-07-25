@@ -1,10 +1,8 @@
 //! XML literal parser
 //!
-
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
-
 //! Parses and validates XML literals:
 //! - xml#"<root><item>value</item></root>"
 

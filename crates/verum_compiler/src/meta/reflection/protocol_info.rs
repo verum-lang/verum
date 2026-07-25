@@ -1,6 +1,5 @@
 //! Protocol information for compile-time reflection
 //!
-
 //! Provides protocol/trait metadata matching core/meta/reflection.vr ProtocolInfo.
 
 use verum_common::{List, Maybe, Text};

@@ -1,23 +1,18 @@
 //! Context Declarations - Interface definitions for dependency injection
 //!
-
 //! Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Section 2 - Context Definitions
 //!
-
 //! This module implements context declarations, which are interface-like
 //! specifications for dependency injection. Contexts define operations that
 //! can be provided by different implementations.
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! context Logger {
 //!  fn log(level: Level, message: Text)
 //! }
 //!
-
 //! context async Database {
 //!  async fn query(sql: SqlQuery) -> Result<Rows, DbError>
 //! }

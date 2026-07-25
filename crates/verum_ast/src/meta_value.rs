@@ -1,14 +1,11 @@
 //! Meta Value - AST-aware compile-time value representation
 //!
-
 //! This module provides `MetaValue`, an extended constant value type for
 //! compile-time meta-programming. It extends `verum_common::ConstValue`
 //! semantics with AST node variants for code generation.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_common::ConstValue verum_ast::MetaValue
 //! ───────────────────────── ────────────────────────────────
@@ -31,19 +28,15 @@
 //!  Item(Item) ← AST only
 //! ```
 //!
-
 //! # Design Principles
 //!
-
 //! 1. **Zero-cost abstraction**: Flat enum, no wrapper indirection
 //! 2. **Bidirectional conversion**: `From<ConstValue>` and `TryFrom<MetaValue>`
 //! 3. **Mixed collections**: Arrays/tuples can contain both primitives and AST
 //! 4. **Maximum precision**: i128/u128 for integers (from ConstValue)
 //!
-
 //! # Meta System Integration
 //!
-
 //! MetaValue is the runtime representation for the unified meta-system, which is the ONLY
 //! compile-time computation mechanism in Verum (no separate const fn or const generics).
 //! All compile-time constructs use `@` prefix: `@derive(...)`, `@const`, `@cfg`, etc.

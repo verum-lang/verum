@@ -1,12 +1,10 @@
 //! K-PathTy β-normalization integration tests (V8, #216).
 //!
-
 //! Pre-V8 the PathTy formation rule used `structural_eq` (byte-
 //! identity) to compare endpoint types against the carrier.
 //! Definitionally-equal-but-syntactically-different terms (e.g.
 //! `App(Lam(x, _, x), Nat) ≡_β Nat`) FALSELY REJECTED.
 //!
-
 //! V8 ships `support::normalize` (β-normaliser to fixed point or
 //! `NORMALIZE_STEP_LIMIT` steps) and `support::definitional_eq`
 //! (normalise-then-compare). PathTy formation now uses the latter.

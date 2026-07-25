@@ -1,16 +1,13 @@
 //! Safe URL interpolation handler
 //!
-
 //! Safe interpolation handlers (compile-time literal protocol):
 //! Interpolation handlers registered via @interpolation_handler receive template
 //! strings and expression lists, returning injection-safe parameterized output.
 //! URL interpolation URL-encodes all interpolated values to prevent injection.
 //!
-
 //! Provides URL interpolation that prevents injection attacks by URL-encoding
 //! all interpolated values.
 //!
-
 //! # Example
 //! ```verum
 //! let query = "hello world";

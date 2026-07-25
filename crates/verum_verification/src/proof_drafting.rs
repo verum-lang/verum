@@ -1,16 +1,13 @@
 //! Proof-drafting infrastructure — zero-friction goal display +
 //! tactic suggestion + obligation auto-completion.
 //!
-
 //! ## What this module is
 //!
-
 //! The user-facing surface for interactive proof development. Builds
 //! on the existing `tactic_evaluation::{Goal, ProofState}` types and
 //! adds a clean trait boundary that LSP / REPL / CLI consumers all
 //! drive through:
 //!
-
 //!  * [`ProofStateView`] — read-only snapshot of the live proof
 //!  state at a given cursor / step.
 //!  * [`TacticSuggestion`] — ranked candidate next-step.
@@ -20,20 +17,16 @@
 //!  fuzzy-match against a lemma name registry + tactic-registry
 //!  lookup.
 //!
-
 //! ## Why a single trait boundary
 //!
-
 //! Pre-this-module, IDE/LSP consumed proof state via ad-hoc parsing
 //! of compiler diagnostics; REPL had its own goal-printer; CLI had
 //! none. A single typed surface eliminates the per-consumer
 //! re-parsing tax and gives LLM-tactic adapters (VERUM-EXPR-2) a
 //! clean integration point.
 //!
-
 //! ## Invariants
 //!
-
 //!  1. Every [`TacticSuggestion`] carries enough metadata for the
 //!  kernel to verify the suggested step independently — no
 //!  "suggestion that can't be checked".
@@ -42,10 +35,8 @@
 //!  3. `ProofStateView` snapshots are immutable; advancing the proof
 //!  produces a new snapshot.
 //!
-
 //! ## Foundation-neutral
 //!
-
 //! The trait is foundation-neutral: it accepts any goal-shape that
 //! reduces to `verum_kernel::CoreTerm` (via `tactic_evaluation::Goal`
 //! → CoreTerm projection). Cubical / classical / paraconsistent

@@ -1,10 +1,8 @@
 //! Re-export tests.
 //!
-
 //! Tests re-exporting types and functions through module boundaries,
 //! including transitive access and API flattening patterns.
 //!
-
 //! Tests re-exports (`public import internal.Item`) for API flattening,
 //! transitive access, and the re-export pattern for version migration.
 

@@ -1,20 +1,16 @@
 //! AOT lowering coverage guard.
 //!
-
 //! Locks in the #77 / #80–#88 audit: every `Instruction::*` variant
 //! defined in `crates/verum_vbc/src/instruction.rs` must have a
 //! corresponding match arm in `crates/verum_codegen/src/llvm/instruction.rs`.
 //!
-
 //! Approach: scan both files for variant names and diff. Failure
 //! means a new VBC opcode was added without an LLVM lowering — the
 //! programmer should either add the arm or, if the opcode is genuinely
 //! unreachable at AOT, mark it via the explicit allow-list below.
 //!
-
 //! The check is intentionally text-grep based rather than reflective:
 //!
-
 //!  * It catches additions that haven't been wired in yet, even if
 //!  the match arm exists with a stale signature.
 //!  * It runs in `cargo test` without LLVM context setup or any of

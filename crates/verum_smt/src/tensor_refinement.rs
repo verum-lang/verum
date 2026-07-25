@@ -1,28 +1,22 @@
 //! Tensor Refinement Type Integration
 //!
-
 //! This module integrates tensor shape verification with Verum's refinement type system,
 //! allowing tensor constraints to be verified alongside other refinement predicates.
 //!
-
 //! ## Features
 //!
-
 //! - Refinement types for tensor shapes: `Tensor<f32, [M, N]>{M > 0 && N > 0}`
 //! - Integration with existing refinement verification pipeline
 //! - Automatic shape constraint extraction from tensor operations
 //! - Compositional verification of tensor programs
 //!
-
 //! ## Examples
 //!
-
 //! ```verum
 //! type PositiveTensor<T, Shape> = Tensor<T, Shape>{
 //!  forall i in 0..len(Shape): Shape[i] > 0
 //! }
 //!
-
 //! fn safe_matmul<M: meta usize, N: meta usize, K: meta usize>(
 //!  a: &PositiveTensor<f32, [M, K]>,
 //!  b: &PositiveTensor<f32, [K, N]>

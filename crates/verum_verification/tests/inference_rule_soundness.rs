@@ -1,13 +1,11 @@
 //! Soundness regression: an unknown inference rule must NOT silently pass.
 //!
-
 //! Pre-fix `apply_inference_rule` had an unsound fallback for any rule name
 //! it didn't have a hardcoded match for: if the user supplied at least one
 //! premise, it returned `Ok(expected.clone())`. That made the downstream
 //! `expr_eq(derived, expected)` check trivially true and let arbitrary
 //! "rule names" stand in for real proofs:
 //!
-
 //! ```ignore
 //! ProofTerm::Apply {
 //!  rule: "totally_made_up_rule", // no such rule registered
@@ -15,7 +13,6 @@
 //! } // → validated as proof of ANY claim
 //! ```
 //!
-
 //! Post-fix the apply branch routes through `register_inference_rule` and
 //! returns `ValidationError::ValidationFailed { "unknown inference rule" }`
 //! when the name is unknown.

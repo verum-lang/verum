@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for hover module
 //!
-
 //! Tests the hover functionality including:
 //! - Builtin type information
 //! - Keyword documentation

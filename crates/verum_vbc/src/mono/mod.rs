@@ -1,14 +1,11 @@
 //! VBC Monomorphization
 //!
-
 //! This module implements generic function specialization for VBC bytecode.
 //! It is used by the compilation phase to specialize generic functions with
 //! concrete type arguments.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC Module (with generics)
 //!  │
@@ -27,17 +24,14 @@
 //! VBC Module (fully monomorphized)
 //! ```
 //!
-
 //! # Modules
 //!
-
 //! - [`graph`]: Instantiation tracking and dependency graph
 //! - [`substitution`]: Type parameter substitution
 //! - [`specializer`]: Bytecode specialization
 //! - [`optimizer`]: Post-specialization optimization
 //! - [`cache`]: Persistent specialization cache
 //!
-
 //! Monomorphization pipeline: (1) Resolution phase checks stdlib precompiled cache, then
 //! persistent cache, scheduling misses for specialization. (2) Specialization phase loads
 //! generic VBC, applies type substitution (replacing TypeRef::Param with concrete types),

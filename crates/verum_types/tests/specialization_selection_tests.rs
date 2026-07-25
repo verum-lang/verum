@@ -14,7 +14,6 @@
 )]
 //! Comprehensive Tests for Specialization Selection
 //!
-
 //! Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Section 9.1 - Automatic Specialization Selection
 
 use verum_ast::span::Span;

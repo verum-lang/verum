@@ -1,13 +1,10 @@
 //! Type Exporter for VBC Generation
 //!
-
 //! This module exports type information from the TypeChecker to VBC format,
 //! enabling stdlib to be distributed as VBC with full type metadata.
 //!
-
 //! # VBC Type Metadata Format
 //!
-
 //! The VBC format includes:
 //! - Type definitions (structs, enums, protocols)
 //! - Generic type parameters and bounds
@@ -15,10 +12,8 @@
 //! - Protocol implementations
 //! - Exported names and visibility
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! let exporter = TypeExporter::new(&type_checker);
 //! let metadata = exporter.export_module("core/maybe")?;

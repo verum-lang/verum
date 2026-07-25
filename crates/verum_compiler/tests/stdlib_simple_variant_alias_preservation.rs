@@ -1,6 +1,5 @@
 //! Regression contract for the simple-variant-alias preservation invariant.
 //!
-
 //! Background. Verum stdlib registers a small set of "convenience aliases"
 //! (`None`, `Some`, `Ok`, `Err`, `Less`, `Equal`, `Greater`, …) so that bare
 //! identifiers resolve to the right `MakeVariant` instruction at codegen
@@ -8,7 +7,6 @@
 //! `return None` or `Poll.Ready(None)` (BTreeMap, Receiver.poll, every
 //! Stream adapter, etc.) lowers through that simple-name lookup.
 //!
-
 //! Several stdlib types coincidentally declare a `None` variant of their own
 //! — `RecoveryStrategy`, `BackoffStrategy`, `JitterConfig`, `LockKind` (see
 //! `core/runtime/recovery.vr`, `core/async/spawn_config.vr`,
@@ -20,14 +18,11 @@
 //! cross-type collision-detection in user-mode and *unregisters* the bare
 //! `None` alias. Subsequent stdlib bodies fail to compile with
 //!
-
 //!  [lenient] SKIP <Method>: undefined variable: None
 //!
-
 //! and disappear from the runtime function table — so callers panic with
 //! `method 'X.Y' not found on value` later, far from the original bug.
 //!
-
 //! This test pins the fix in place: it spawns a vtest run on a tiny fixture
 //! that uses bare `None`, captures stderr, and fails CI if even one
 //! `undefined variable: None` warning appears. Any future change that
@@ -35,7 +30,6 @@
 //! collisions on built-in aliases) will fail this test instead of silently
 //! dropping stdlib methods.
 //!
-
 //! Spec: `crates/verum_types/src/CLAUDE.md` — "Variant constructors:
 //! User-defined variant names must freely override built-in convenience
 //! aliases. Only protect variants from ALREADY-REGISTERED types in the

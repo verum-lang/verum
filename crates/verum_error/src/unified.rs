@@ -1,13 +1,10 @@
 //! Unified Error Type System
 //!
-
 //! This module provides a single unified error type that can represent errors from all Verum modules,
 //! eliminating the proliferation of incompatible Result type aliases while maintaining rich error context.
 //!
-
 //! # Design Philosophy
 //!
-
 //! Instead of having 6+ different Result types across crates:
 //! - `verum_cbgr::Result<T>` = `Result<T, Error>`
 //! - `verum_runtime::Result<T>` = `Result<T, RuntimeError>`
@@ -16,18 +13,14 @@
 //! - `verum_verification::Result<T>` = `Result<T, VerificationError>`
 //! - `verum_parser::ParseResult<T>` = `Result<List<ParseError>, T>`
 //!
-
 //! We provide a single unified `VerumError` that can represent any of these errors with automatic
 //! conversion via `From` trait implementations.
 //!
-
 //! # Usage
 //!
-
 //! ```rust,ignore
 //! use verum_error::unified::{VerumError, Result};
 //!
-
 //! fn example() -> Result<i32> {
 //!  // Automatically converts from any crate-specific error
 //!  let value = some_cbgr_operation()?; // Converts from verum_cbgr::Error
@@ -36,10 +29,8 @@
 //! }
 //! ```
 //!
-
 //! # Migration Strategy
 //!
-
 //! This is an **additive change** - existing crate-specific error types are preserved for backward
 //! compatibility. Code can gradually migrate to using the unified error type at boundaries where
 //! multiple error types need to be handled.

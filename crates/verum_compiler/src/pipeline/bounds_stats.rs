@@ -1,16 +1,13 @@
 //! AST-level bounds-statistics gathering for `phase_verify`.
 //!
-
 //! Pure read-only walks over the typed AST that count `Expr::Index`
 //! sites for diagnostic statistics — never elimination. Actual
 //! bounds-check elimination happens at MIR level in
 //! `phases/verification_phase.rs` via dataflow analysis on the
 //! Control Flow Graph (full def-use chains, dominance, etc.).
 //!
-
 //! # Why a separate file
 //!
-
 //! Extracted from `pipeline.rs` (#106 crate-split) so the
 //! bounds-statistics surface is independently reviewable and
 //! `pipeline.rs` shrinks toward a thin orchestration layer. All

@@ -1,25 +1,21 @@
 //! UnsafeCell - The core primitive for interior mutability
 //!
-
 //! Interior Mutability: UnsafeCell<T> opts out of the shared reference immutability
 //! guarantee — &UnsafeCell<T> may point to data being mutated. This is the ONLY legal
 //! way to obtain aliasable mutable data. It has zero runtime overhead and same layout as T.
 //! UnsafeCell is NOT Sync (cannot be safely shared across threads). It is the foundation
 //! for Cell<T> and Mutable<T>.
 //!
-
 //! UnsafeCell<T> is the fundamental building block for all interior mutability
 //! patterns in Verum. It is a compiler primitive that opts out of the shared
 //! reference immutability guarantee.
 //!
-
 //! # Key Properties
 //! - Zero runtime overhead
 //! - NOT Sync (cannot be shared across threads safely)
 //! - Provides raw pointer access to inner value
 //! - Foundation for Cell<T> and Mutable<T>
 //!
-
 //! # Safety
 //! UnsafeCell provides no synchronization or runtime checks. Users must ensure:
 //! - No data races occur

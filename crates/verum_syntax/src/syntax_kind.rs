@@ -1,10 +1,8 @@
 //! SyntaxKind enum defining all node and token types in the Verum syntax tree.
 //!
-
 //! Design: u16 for compact storage in green nodes. Values 0-255 are tokens,
 //! values 256+ are composite nodes.
 //!
-
 //! SyntaxKind Design: u16 representation for compact storage in green nodes.
 //! Values 0-255 are tokens (keywords, punctuation, literals, identifiers).
 //! Values 256+ are composite nodes (expressions, statements, declarations).

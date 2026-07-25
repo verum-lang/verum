@@ -1,6 +1,5 @@
 //! Exhaustiveness Diagnostics
 //!
-
 //! This module provides error and warning types for exhaustiveness checking,
 //! with helpful messages for developers.
 

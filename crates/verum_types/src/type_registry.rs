@@ -1,38 +1,30 @@
 //! Type Registry for AST → Type mapping
 //!
-
 //! This module provides a registry that maps AST nodes to their inferred types,
 //! enabling type information propagation from the type checker to code generation.
 //!
-
 //! # Architecture
 //!
-
 //! The TypeRegistry solves the critical problem of passing type information from
 //! verum_types to verum_codegen without modifying AST structures:
 //!
-
 //! ```text
 //! Parser → AST (verum_ast::Type) → TypeChecker → TypeRegistry → Codegen
 //!  ↓
 //!  verum_types::Type
 //! ```
 //!
-
 //! # Usage
 //!
-
 //! During type checking:
 //! ```ignore
 //! // Register expression types
 //! registry.register_expr(expr.span, inferred_type);
 //!
-
 //! // Register variable types
 //! registry.register_var(param.span, param.name.clone(), param_type);
 //! ```
 //!
-
 //! During code generation:
 //! ```ignore
 //! // Lookup expression type
@@ -40,7 +32,6 @@
 //!  // Use inferred type
 //! }
 //!
-
 //! // Lookup variable type
 //! if let Some(ty) = registry.lookup_var(param.span, &param.name) {
 //!  // Use inferred type

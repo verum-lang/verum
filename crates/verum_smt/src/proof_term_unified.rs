@@ -1,16 +1,13 @@
 //! Unified Proof Term Representation
 //!
-
 //! This module provides a unified ProofTerm type that consolidates the three
 //! incompatible ProofTerm definitions found in:
 //! - proof_extraction.rs (11 variants, classical logic focus)
 //! - proof_search.rs (6 variants, constructive proof focus)
 //! - dependent.rs (struct + ProofStructure enum, dependent types focus)
 //!
-
 //! ## Design Philosophy
 //!
-
 //! The unified ProofTerm supports:
 //! 1. **Classical reasoning** (from proof_extraction.rs): Modus ponens, rewrite rules,
 //!  theory lemmas, unit resolution, reflexivity/symmetry/transitivity
@@ -18,16 +15,13 @@
 //!  induction, axioms, application
 //! 3. **Dependent types** (from dependent.rs): SMT proofs, substitution, assumptions
 //!
-
 //! ## Architecture
 //!
-
 //! - All 17+ unique proof term variants are unified in a single enum
 //! - Uses Heap<> for recursive structures (Verum semantic type for Box<>)
 //! - Uses Text, List, Map, Set (Verum semantic types)
 //! - Implements all methods from all three sources
 //!
-
 //! Proof terms are first-class values: `type Proof<P: Prop> is evidence of P`.
 //! Construction via modus_ponens, or_elim, and_intro, etc. Proofs can be
 //! exported to Coq, Lean, Dedukti for independent verification.

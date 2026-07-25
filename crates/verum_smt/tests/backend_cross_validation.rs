@@ -14,11 +14,9 @@
 )]
 //! Comprehensive Cross-Validation Test Suite for Z3 and CVC5 Backends
 //!
-
 //! This test suite provides exhaustive validation that both SMT backends produce
 //! consistent results across all theory combinations and edge cases.
 //!
-
 //! Test Coverage:
 //! - Basic SAT/UNSAT tests (50 tests)
 //! - Linear Integer Arithmetic (50 tests)
@@ -33,15 +31,12 @@
 //! - Stress Tests (50 tests)
 //! - Edge Cases (100 tests)
 //!
-
 //! Total: 650+ tests
 //!
-
 //! SMT integration for CBGR memory safety: verifies reference safety properties to enable
 //! `&T` -> `&checked T` promotion (15ns -> 0ns). Cross-validation runs both Z3 and CVC5
 //! on the same queries, checking result consistency. Performance: overhead < 2x single solver.
 //!
-
 //! NOTE: These tests require the `cvc5` feature to be enabled.
 
 #![cfg(feature = "cvc5")]

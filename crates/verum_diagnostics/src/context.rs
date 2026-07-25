@@ -1,6 +1,5 @@
 //! Error context and chaining for propagating diagnostic information.
 //!
-
 //! This module provides types for building error chains and maintaining context
 //! as errors propagate through the compiler.
 

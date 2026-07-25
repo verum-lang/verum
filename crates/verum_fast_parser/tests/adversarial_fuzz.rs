@@ -1,7 +1,6 @@
 //! Adversarial-input fuzz against the real `VerumParser` (R2-§1.1
 //! closure).
 //!
-
 //! The fundamental contract pinned here: the parser MUST NOT panic
 //! on any byte sequence — it may emit diagnostics, may bail out
 //! early on UTF-8 errors, may hit recursion caps and surface a
@@ -9,7 +8,6 @@
 //! parser panic is a denial-of-service vector for every consumer
 //! (LSP, CLI, test runner, language server in editors, etc.).
 //!
-
 //! Pre-existing infrastructure: `vcs/fuzz/harnesses/parser_harness.rs`
 //! exists with a `ParserHarness::fuzz(&[u8])` API but its
 //! `simulate_parse` is a heuristic stub that counts parens/braces
@@ -17,11 +15,9 @@
 //! test file is the primary behavioural guardrail until that
 //! harness is wired to the real parser too.
 //!
-
 //! Test corpus covers the empirical adversarial-input categories
 //! that have historically broken parsers in the wild:
 //!
-
 //!  - **Empty / trivial**: zero bytes, single whitespace, single
 //!  comment.
 //!  - **Unbalanced delimiters**: nested-open / nested-close /
@@ -46,7 +42,6 @@
 //!  - **Pseudo-random small inputs**: deterministic LCG-generated
 //!  short byte sequences (5-50 bytes) covering the byte alphabet.
 //!
-
 //! Every test asserts:
 //!  - parser invocation does not panic;
 //!  - parser terminates within a generous timeout (proves the

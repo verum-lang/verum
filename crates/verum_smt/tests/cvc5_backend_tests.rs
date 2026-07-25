@@ -14,7 +14,6 @@
 )]
 //! CVC5 Backend Comprehensive Test Suite
 //!
-
 //! Tests all CVC5 backend functionality:
 //! - Basic SAT/UNSAT queries
 //! - Model extraction
@@ -25,7 +24,6 @@
 //! - Multiple theories
 //! - Consistency with Z3
 //!
-
 //! NOTE: These tests are only compiled when the `cvc5` feature is enabled.
 //! The CVC5 backend and related types are feature-gated.
 

@@ -1,6 +1,5 @@
 //! Integration tests for `KernelRecheckPass` (#187 V0).
 //!
-
 //! End-to-end pipeline tests: build a `Module` with one or more
 //! `FunctionDecl`s, run the default `VerificationPipeline`, and
 //! inspect the kernel-recheck pass's outcome via the per-pass

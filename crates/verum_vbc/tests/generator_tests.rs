@@ -1,14 +1,11 @@
 //! Generator Integration Tests
 //!
-
 //! Comprehensive tests for the VBC interpreter generator state machine.
 //!
-
 //! Generator state machine: fn* functions compile to a state enum with Yield/Return transitions.
 //! Each yield point becomes a state; local variables are saved/restored on suspend/resume.
 //! Generators implement the Iterator protocol (has_next/next) for for-in loop integration.
 //!
-
 //! These tests verify:
 //! - Generator creation and lifecycle
 //! - Yield suspension and resumption

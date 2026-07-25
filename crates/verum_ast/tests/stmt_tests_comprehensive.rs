@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for statement AST nodes
 //!
-
 //! Tests cover all statement types:
 //! - Let bindings
 //! - Let-else statements
@@ -24,7 +23,6 @@
 //! - Provide statements (context injection)
 //! - Empty statements
 //!
-
 //! Comprehensive tests for statement AST nodes.
 
 use verum_ast::*;

@@ -1,25 +1,19 @@
 //! AST Sink - Converts green/red syntax tree to semantic AST.
 //!
-
 //! This module provides the `AstSink` that traverses a `SyntaxNode` (red tree)
 //! and builds the semantic AST types (Module, Item, Expr, Type, etc.).
 //!
-
 //! This enables single-pass parsing architecture:
 //!
-
 //! ```text
 //! Source → Events → GreenTree → AstSink → Module (semantic AST)
 //! ```
 //!
-
 //! # Architecture
 //!
-
 //! The AstSink traverses the red tree and converts each SyntaxKind
 //! to the appropriate AST type:
 //!
-
 //! - SOURCE_FILE → Module
 //! - FN_DEF → Item(FunctionDecl)
 //! - TYPE_DEF → Item(TypeDecl)
@@ -27,10 +21,8 @@
 //! - TYPE_* → Type
 //! - etc.
 //!
-
 //! # Error Handling
 //!
-
 //! The sink handles ERROR nodes gracefully by creating placeholder AST nodes
 //! that allow the rest of the tree to be processed. This enables IDE features
 //! to work on incomplete code.

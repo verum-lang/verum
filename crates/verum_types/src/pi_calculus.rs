@@ -1,6 +1,5 @@
 //! π-calculus — process algebra for concurrent computation.
 //!
-
 //! Milner's π-calculus is the canonical theoretical foundation for
 //! mobile concurrent processes: channels are first-class values
 //! that can be sent over other channels, modelling dynamic network
@@ -8,10 +7,8 @@
 //! protocol, the π-calculus describes the entire interaction
 //! pattern between concurrently executing parties.
 //!
-
 //! ## Syntax
 //!
-
 //! ```text
 //!  P, Q ::= 0 (terminated process)
 //!  | P | Q (parallel composition)
@@ -21,26 +18,20 @@
 //!  | !P (replication: ∞ copies of P)
 //! ```
 //!
-
 //! ## Reduction
 //!
-
 //! The single core rule is **COMM**:
 //!
-
 //! ```text
 //!  x⟨y⟩.P | x(z).Q → P | Q[y/z]
 //! ```
 //!
-
 //! A send and a matching receive on the same channel react,
 //! producing the residual processes with the received name
 //! substituted in.
 //!
-
 //! ## Status
 //!
-
 //! Standalone algebraic core: process AST, capture-avoiding
 //! substitution, structural-congruence simplification, single-step
 //! COMM reduction. Higher-level analyses (bisimulation, type

@@ -14,7 +14,6 @@
 )]
 //! Tests for pattern matching AST nodes.
 //!
-
 //! This module tests all pattern types and their combinations,
 //! including complex destructuring patterns.
 

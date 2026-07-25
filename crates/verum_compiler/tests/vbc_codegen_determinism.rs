@@ -1,6 +1,5 @@
 //! Determinism contract for the VBC bytecode emission pipeline.
 //!
-
 //! Compiles the same fixed Verum source twice in a row inside a single
 //! process and asserts the resulting bytecode is byte-identical. Without
 //! this guardrail, any new HashMap iteration inserted into the codegen
@@ -8,25 +7,21 @@
 //! into FunctionId / TypeId assignment, producing the symptom matrix
 //! that motivated commits 0723ad43 + 82303f94 (task #143):
 //!
-
 //!  * `method 'X.Y' not found on value`
 //!  * `Null pointer dereference`
 //!  * `Division by zero`
 //!  * `field index N (offset M) exceeds object data size K`
 //!
-
 //! Each of those happens when the runtime resolves a function-id /
 //! variant-tag / field-offset that was assigned to a *different* symbol
 //! in the run that produced the bytecode — which is exactly what
 //! non-deterministic iteration causes.
 //!
-
 //! Mechanism: spawn the same vtest invocation twice, compare the
 //! exit-code-and-stderr signature. If the underlying bytecode differs
 //! between runs, the panic surface (or the absence of panic) differs
 //! too.
 //!
-
 //! Why two child-processes rather than two in-process compiles: each
 //! process gets a fresh random hasher seed. In-process repeats reuse
 //! the same seed and would fail to detect HashMap-iteration leaks.

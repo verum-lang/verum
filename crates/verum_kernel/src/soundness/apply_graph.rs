@@ -1,16 +1,13 @@
 //! # Apply-graph traversal — transitive bridge-discharge classifier
 //!
-
 //! Task #150 / MSFS-L4.13 — the load-bearing piece that converts the
 //! L3 → L4 promotion claim ("every step transitively reduces to
 //! Verum kernel rules ∪ ZFC ∪ paper-cited external references") from
 //! a *property of the immediate `apply` callsite* into a *property
 //! of the entire transitive proof chain*.
 //!
-
 //! ## Why transitive matters
 //!
-
 //! Pre-#150 the bridge-discharge pre-pass at
 //! `verum_compiler::phases::bridge_discharge_check::validate_proof_body_bridges`
 //! walked *only the immediate apply callsites* in a theorem's proof
@@ -19,7 +16,6 @@
 //! grounds out in kernel-discharged bridges" was treated *on faith*
 //! once the chain went through any intermediate `_full` form.
 //!
-
 //! Concretely: the standard MSFS pattern after the #143 audit refactor
 //! is `corpus_thm.proof { apply stdlib_full(args); }` where
 //! `stdlib_full.proof { apply kernel_strict_bridge_1(...); apply
@@ -28,13 +24,11 @@
 //! and accepted it. A `stdlib_full` that bottomed out at a
 //! placeholder axiom would pass the gate without raising any signal.
 //!
-
 //! Post-#150 the apply-graph walker resolves each apply-target against
 //! the workspace-wide symbol table, recursively walks into its proof
 //! body, and classifies the apply-graph's *leaves*. The leaf taxonomy
 //! is:
 //!
-
 //!  * [`LeafKind::KernelStrict`] — apply-target is a `kernel_*_strict`
 //!  bridge that goes through `verum_kernel::dispatch_intrinsic`.
 //!  The L4 trust base.
@@ -50,20 +44,16 @@
 //!  the symbol table. Indicates either a workspace-discovery gap
 //!  or a built-in-kernel-rule reference outside the corpus.
 //!
-
 //! The composition `(kernel_strict, framework_axiom, placeholder_axiom,
 //! unresolved)` for a theorem's transitive apply-graph is the L4
 //! certificate. A non-zero `placeholder_axiom` count means the L4
 //! claim is *not yet load-bearing* for that theorem — every chain
 //! continues to a stand-in that still requires elimination.
 //!
-
 //! ## Architecture
 //!
-
 //! Three layers:
 //!
-
 //!  1. `ApplyTarget` — one resolved apply-callsite reference.
 //!  2. [`SymbolEntry`] / [`ApplyGraph`] — workspace-wide symbol
 //!  lookup table with each entry classified at construction time.
@@ -72,7 +62,6 @@
 //!  [`LeafComposition`]. Cycle detection via the visited set
 //!  so mutual recursion (or self-reference) doesn't loop forever.
 //!
-
 //! The walker is *pure* (no I/O, no Z3 invocation, no kernel re-check
 //! round-trip) — graph traversal + hashmap lookup. Microsecond-scale
 //! per theorem so the audit gate can walk the entire MSFS corpus

@@ -1,63 +1,48 @@
 //! Phase 4: Promotion Decision Engine
 //!
-
 //! Integrates results from all prior phases to make final promotion decisions.
 //! Uses atomic generation tracking (acquire-release semantics, epoch-aware
 //! wraparound) and explicit revocation support to determine which references
 //! can safely bypass CBGR runtime checks.
 //!
-
 //! This module implements the final phase of the escape analysis pipeline,
 //! making promotion decisions by integrating:
 //!
-
 //! - Phase 1: SSA form and use-def chains
 //! - Phase 2: Escape analysis (reference flow tracking)
 //! - Phase 3: Dominance analysis (allocation dominates uses)
 //! - **Phase 4: Promotion decision (this module)**
 //!
-
 //! # Purpose
 //!
-
 //! The promotion decision engine determines which references can be safely
 //! promoted from `&T` (managed, ~15ns overhead) to `&checked T` (0ns overhead).
 //!
-
 //! # Decision Algorithm
 //!
-
 //! For each reference, the engine:
 //!
-
 //! 1. Gets escape category from Phase 2 (`NoEscape`, `MayEscape`, Escapes)
 //! 2. Checks dominance from Phase 3 (allocation dominates all uses)
 //! 3. Applies additional safety checks
 //! 4. Returns conservative decision if any criterion fails
 //!
-
 //! # Integration with Codegen
 //!
-
 //! The promotion decisions are consumed by `escape_codegen_integration.rs`
 //! to generate appropriate LLVM IR:
 //!
-
 //! - `PromoteToChecked`: Generate Tier 1 direct access (0ns)
 //! - `KeepManaged*`: Generate Tier 0 CBGR validation (~15ns)
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::promotion_decision::PromotionDecisionEngine;
 //!
-
 //! let mut engine = PromotionDecisionEngine::new(cfg);
 //! engine.analyze_function(&function_ir);
 //!
-
 //! for ref_id in function.references() {
 //!  let decision = engine.decide_promotion(ref_id);
 //!  match decision {

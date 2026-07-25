@@ -1,13 +1,10 @@
 //! Verum dialect types.
 //!
-
 //! Custom MLIR types for Verum language constructs. These types are
 //! represented using MLIR's opaque type system with custom parsing/printing.
 //!
-
 //! # Type Hierarchy
 //!
-
 //! ```text
 //! VerumType
 //! ├── RefType<T, tier> - CBGR three-tier reference

@@ -1,15 +1,12 @@
 //! Formal verification command with real Z3 SMT integration
 //!
-
 //! Verifies refinement types and contracts using the Z3 SMT solver via the
 //! verum_compiler compilation pipeline. Supports three modes:
 //!
-
 //! - **proof**: Full SMT verification at compile time (0ns runtime overhead)
 //! - **runtime**: Runtime checks only (0ns compile overhead)
 //! - **compare**: Run both modes and display cost/benefit analysis
 //!
-
 //! When the `verification` feature is not enabled (no Z3), the command
 //! clearly reports that Z3 is unavailable and suggests how to enable it.
 

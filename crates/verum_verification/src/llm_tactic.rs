@@ -1,10 +1,8 @@
 //! LLM-native tactic protocol — LCF-style fail-closed bridge between
 //! a language-model proof proposer and the trusted kernel.
 //!
-
 //! ## Goal
 //!
-
 //! Verum is the first proof assistant where LLM assistance is
 //! guaranteed sound *by construction*. An LLM may propose tactic
 //! sequences for any goal, but the proposal is **always re-checked
@@ -12,19 +10,15 @@
 //! any step, the proposal is discarded and the audit trail records
 //! the rejection. The LLM never short-circuits the kernel.
 //!
-
 //! This is the LCF principle, generalised: every term is kernel-
 //! checked regardless of who / what proposed it.
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / proof_drafting / proof_repair / closure_cache
 //! / doc_render / foreign_import):
 //!
-
 //!  * [`LlmGoalSummary`] — typed projection of the focused proof
 //!  state (goal + hypotheses + lemmas + recent history + framework
 //!  axioms in scope) handed to the LLM.
@@ -47,10 +41,8 @@
 //!  consumer points it). Every LLM invocation produces an
 //!  event so the proof is reproducible from the log.
 //!
-
 //! ## Fail-closed contract
 //!
-
 //! `KernelGate::run` returns [`KernelVerdict::Accepted`] only when
 //! the kernel re-checked every step in the proposal. Any rejection
 //! produces [`KernelVerdict::Rejected`] with the failing step's

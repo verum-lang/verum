@@ -1,6 +1,5 @@
 //! Integration tests for `HygieneRecheckPass` (#190).
 //!
-
 //! End-to-end pipeline tests: build a `Module` with synthetic
 //! axiom/theorem declarations carrying `@framework(...)` attributes,
 //! run the pass, and inspect the accumulated diagnostics for R1+R2+R3

@@ -1,6 +1,5 @@
 //! Literal value nodes in the AST.
 //!
-
 //! This module defines all literal types supported by Verum, including
 //! integers, floats, strings, characters, and booleans.
 

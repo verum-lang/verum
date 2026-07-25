@@ -14,7 +14,6 @@
 )]
 //! Integration test for unified span handling
 //!
-
 //! This test verifies that the span consolidation from verum_ast and
 //! verum_diagnostics into verum_common works correctly.
 

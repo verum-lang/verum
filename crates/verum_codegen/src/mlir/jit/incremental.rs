@@ -1,19 +1,15 @@
 //! Incremental Compilation Support for JIT.
 //!
-
 //! Provides intelligent caching and incremental recompilation to minimize
 //! compilation time for unchanged code.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ Incremental Compilation Pipeline │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!
-
 //!  Source Code (AST)
 //!  │
 //!  ▼
@@ -40,27 +36,21 @@
 //!  └───────────────┘
 //! ```
 //!
-
 //! # Features
 //!
-
 //! - Content-based hashing for accurate change detection
 //! - Dependency tracking between modules
 //! - Intelligent invalidation
 //! - Persistent cache across sessions
 //! - Compression for cache storage
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use crate::mlir::jit::{IncrementalCache, CacheConfig};
 //!
-
 //! let cache = IncrementalCache::new(CacheConfig::default());
 //!
-
 //! // Check if compilation is needed
 //! if let Some(cached) = cache.get(&module_hash)? {
 //!  // Use cached compilation

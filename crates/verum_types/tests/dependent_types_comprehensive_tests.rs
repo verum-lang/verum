@@ -14,17 +14,14 @@
 )]
 //! Comprehensive tests for dependent types system
 //!
-
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking
 //!
-
 //! This test suite covers:
 //! - Pi types (dependent functions): (x: A) -> B(x)
 //! - Sigma types (dependent pairs): (x: A, B(x))
 //! - Equality types: Eq<A, x, y>
 //! - Type-level computation
 //!
-
 //! All examples are from the specification and cover both success
 //! and error cases for comprehensive validation.
 

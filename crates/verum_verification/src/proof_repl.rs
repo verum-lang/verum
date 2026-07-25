@@ -1,10 +1,8 @@
 //! Live proof REPL — stepwise tactic feedback + proof-tree
 //! visualisation.
 //!
-
 //! ## Goal
 //!
-
 //! Mathematicians need a workflow where every tactic produces
 //! immediate, kernel-grade feedback: did the step type-check, what
 //! does the new goal stack look like, and what's the proof tree
@@ -13,15 +11,12 @@
 //! concern (`verum_interactive`); LSP integration is a separate
 //! transport — both consume the same trait surface defined here.
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / proof_drafting / proof_repair / closure_cache
 //! / doc_render / foreign_import / llm_tactic):
 //!
-
 //!  * [`ReplCommand`] — typed enum of every command the user can
 //!  issue (`Apply` a tactic, `Undo` the last step, request a
 //!  `Hint`, ask for the `ProofTree`, etc.).
@@ -37,20 +32,16 @@
 //!  steps with kernel verdicts and elapsed times. Renders to
 //!  Graphviz DOT for `:visualise`.
 //!
-
 //! ## Stepwise feedback contract
 //!
-
 //! Every tactic application produces:
 //!
-
 //!  * The kernel verdict (Accepted / Rejected with cause).
 //!  * Wall-clock duration in milliseconds.
 //!  * The updated proof state (open-goal stack snapshot).
 //!  * A node in the proof tree linking the step to the goal it
 //!  was applied to.
 //!
-
 //! Rejected steps DO NOT mutate the proof state — the LCF
 //! fail-closed contract carries through from `llm_tactic`.
 

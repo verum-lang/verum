@@ -1,13 +1,10 @@
 //! Core type definitions for meta system
 //!
-
 //! This module provides the fundamental type definition structures for
 //! struct/enum field and variant lookup during compile-time execution.
 //!
-
 //! ## Industrial-Grade Features
 //!
-
 //! This module supports comprehensive type introspection:
 //! - Field and variant lookup
 //! - Attribute retrieval with values
@@ -16,7 +13,6 @@
 //! - Super types (protocol inheritance)
 //! - Method signatures
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

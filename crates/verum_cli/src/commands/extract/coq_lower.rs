@@ -1,6 +1,5 @@
 //! Verum AST → Coq lowerer.
 //!
-
 //! Mirrors `ocaml_lower` / `lean_lower` shape but emits Coq term
 //! syntax (gallina). Coq differences:
 //!  * `let-in` is `let x := value in rest` (`:=` for definition,

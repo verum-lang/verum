@@ -1,81 +1,63 @@
 //! Polonius-Style Origin Analysis
 //!
-
 //! This module implements a Polonius-inspired borrow checking algorithm that uses
 //! a Datalog-style approach for more precise and permissive analysis. Polonius is
 //! the next generation of Rust's borrow checker, offering:
 //!
-
 //! - **Better error messages**: More precise location of where borrows conflict
 //! - **More permissive analysis**: Accepts more programs that NLL rejects
 //! - **Location-sensitive analysis**: Borrows tracked at each program point
 //! - **Datalog semantics**: Clear, declarative specification
 //!
-
 //! # Key Concepts
 //!
-
 //! ## Origins (Lifetimes)
 //!
-
 //! In Polonius, "origins" replace traditional lifetimes. An origin represents
 //! the set of loans (borrows) that a reference might contain:
 //!
-
 //! ```text
 //! let x = 5;
 //! let r: &'a i32 = &x; // Origin 'a contains the loan for x
 //! ```
 //!
-
 //! ## Loans
 //!
-
 //! A loan represents a borrow of a specific place at a specific point:
 //!
-
 //! ```text
 //! Loan { place: x, point: P1, kind: Shared }
 //! ```
 //!
-
 //! ## Facts
 //!
-
 //! The analysis is expressed as Datalog-style facts and rules:
 //!
-
 //! - `loan_issued_at(origin, loan, point)`: A loan was created
 //! - `origin_live_on_entry(origin, point)`: Origin is live at point
 //! - `loan_invalidated_at(loan, point)`: A loan becomes invalid
 //! - `errors(loan, point)`: Detected borrow error
 //!
-
 //! # Algorithm
 //!
-
 //! 1. Generate input facts from CFG
 //! 2. Apply Datalog rules to compute derived facts
 //! 3. Check for `errors` facts
 //!
-
 //! # Example Rules
 //!
-
 //! ```datalog
 //! // A loan is live if its origin is live
 //! loan_live_at(Loan, Point) :-
 //!  origin_live_on_entry(Origin, Point),
 //!  loan_issued_at(Origin, Loan, _).
 //!
-
 //! // An error occurs if a live loan is invalidated
 //! errors(Loan, Point) :-
 //!  loan_live_at(Loan, Point),
 //!  loan_invalidated_at(Loan, Point).
 //! ```
 //!
-
 //! Spec: Based on Polonius (https://github.com/rust-lang/polonius)
 
 use crate::analysis::{BlockId, ControlFlowGraph, RefId};

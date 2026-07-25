@@ -1,28 +1,22 @@
 //! Active Pattern Exhaustiveness
 //!
-
 //! This module provides exhaustiveness checking for variant-returning active patterns.
 //! When an active pattern returns a sum type instead of Bool/Maybe, we can prove
 //! exhaustiveness by checking that all variants of the return type are handled.
 //!
-
 //! # Concept
 //!
-
 //! Standard active patterns return `Bool` (total) or `Maybe<T>` (partial), which
 //! cannot participate in exhaustiveness checking. However, if an active pattern
 //! returns a sum type, we can check exhaustiveness:
 //!
-
 //! ```verum
 //! // Variant-returning active pattern
 //! type Parity is Even | Odd;
 //!
-
 //! pattern Parity(n: Int) -> Parity =
 //!  if n % 2 == 0 { Even } else { Odd };
 //!
-
 //! // Can be checked for exhaustiveness!
 //! match Parity(x) {
 //!  Even => "even",
@@ -30,28 +24,22 @@
 //! }
 //! ```
 //!
-
 //! # Design Rationale
 //!
-
 //! This approach leverages existing sum type exhaustiveness infrastructure rather
 //! than introducing a new `@complete` annotation system like F#. The key insight
 //! is that matching on the *result* of the pattern application uses standard
 //! exhaustiveness checking.
 //!
-
 //! ## Alternative Considered: @complete Attribute
 //!
-
 //! F# uses `@complete(Even, Odd)` annotations. We rejected this because:
 //! 1. Requires new attribute infrastructure
 //! 2. More error-prone (manual listing of cases)
 //! 3. Doesn't leverage existing type system
 //!
-
 //! # References
 //!
-
 //! - Active pattern exhaustiveness: checking that user-defined active patterns cover all cases
 //! - Pattern exhaustiveness checking: ensuring match expressions cover all possible values
 

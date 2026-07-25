@@ -1,6 +1,5 @@
 //! Pattern matching nodes in the AST.
 //!
-
 //! Patterns are used in let bindings, function parameters, match expressions,
 //! and other contexts where values are destructured or matched.
 

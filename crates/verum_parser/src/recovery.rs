@@ -1,47 +1,36 @@
 //! LSP-specific error recovery extensions.
 //!
-
 //! This module extends the base recovery infrastructure from `verum_fast_parser`
 //! with LSP-specific features:
 //!
-
 //! - **Recovery Sets**: Define which tokens can start valid constructs for grammar rules
 //! - **Event-Based Recovery**: Create ERROR nodes for unparseable content
 //! - **TokenKind to SyntaxKind Mapping**: Bridge between lexer and syntax tree
 //!
-
 //! For base recovery types (Delimiter, SyncPoint, RecoveryStrategy, RecoveryContext),
 //! see `verum_fast_parser::recovery`.
 //!
-
 //! # Event-Based Recovery
 //!
-
 //! The event-based recovery system integrates with the marker/precede pattern:
 //!
-
 //! ```text
 //! Source → Events → GreenTree (with ERROR nodes) → AstSink → Module
 //! ```
 //!
-
 //! Unparseable content is wrapped in ERROR nodes to preserve source fidelity
 //! while marking problematic regions for downstream error reporting.
 //!
-
 //! # Recovery Sets
 //!
-
 //! Recovery sets define tokens that can start various language constructs:
 //!
-
 //! - **ITEM_RECOVERY**: Tokens that start top-level items
 //! - **STMT_RECOVERY**: Tokens that start statements
 //! - **EXPR_RECOVERY**: Tokens that start expressions
 //! - **TYPE_RECOVERY**: Tokens in type position
 //! - **PATTERN_RECOVERY**: Tokens in pattern position
 //!
-
 //! See `recovery_sets` module for all pre-defined sets.
 
 use verum_ast::Span;

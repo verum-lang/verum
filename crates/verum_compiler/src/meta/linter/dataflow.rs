@@ -1,10 +1,8 @@
 //! Dataflow Analysis for Meta Linter
 //!
-
 //! Tracks external input propagation and function call graphs for
 //! recursion detection.
 //!
-
 //! Meta linter: static analysis of meta code for unsafe patterns (unbounded
 //! recursion, infinite loops, unsafe interpolation without @safe attribute).
 

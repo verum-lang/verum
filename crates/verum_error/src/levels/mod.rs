@@ -1,10 +1,8 @@
 //! 5-Level Error Defense Architecture
 //!
-
 //! Implements Verum's defense-in-depth error architecture with five complementary
 //! layers, each providing progressively stronger safety guarantees:
 //!
-
 //! - **Level 0: Type Prevention** - Compile-time safety via refinement types
 //!  (e.g., `Int{> 0}`), affine/move semantics, and context tracking. Errors at
 //!  this level are prevented from being written in the first place.

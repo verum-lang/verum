@@ -1,6 +1,5 @@
 //! AOT whole-module native-object cache (AOT-STDLIB-NATIVE-CACHE-1).
 //!
-
 //! Every `verum <run|test> --aot` compile re-lowers and re-optimizes
 //! the ENTIRE merged VBC module — user code plus the ~9K precompiled
 //! stdlib functions that `merge_archive_function_bodies` folds into
@@ -10,7 +9,6 @@
 //! baseline per test file (see AOT-BUDGET-1 in
 //! `verum_cli::commands::test`).
 //!
-
 //! **Boundary choice: whole-module object.**  A stdlib-only object
 //! split was investigated and rejected as too invasive for now:
 //!
@@ -26,7 +24,6 @@
 //!  main wrapper) into EVERY module, so two objects would carry
 //!  duplicate symbols.
 //!
-
 //! Instead we cache the FINAL object file of the whole module,
 //! keyed by the compile's deterministic INPUTS:
 //!
@@ -60,12 +57,10 @@
 //! downstream (`needs_metal`, the post-globaldce GPU-usage probe)
 //! is persisted in a tiny sidecar `<key>.meta` file.
 //!
-
 //! This mainly accelerates REPEATED identical compiles — exactly
 //! the shape of the meta AOT determinism gate (each file compiled
 //! twice) and of re-running a test suite after edits elsewhere.
 //!
-
 //! Cache layout: `<project>/target/aot-object-cache/<blake3>.o`
 //! plus `<blake3>.meta`.  Simple mtime-LRU eviction on insert
 //! (caps: 50 entries / 500 MB).  Writes are temp-file + rename so
@@ -74,7 +69,6 @@
 //! meta-visible ⇒ object in place.  All cache failures degrade to
 //! a normal compile (never fatal).
 //!
-
 //! Kill switch: `VERUM_NO_OBJECT_CACHE=1` disables read AND write.
 //! `VERUM_TRACE_OBJECT_CACHE=1` prints key/hit/miss/timing lines to
 //! stderr (used by the validation runs; the separate `vbc` hash in

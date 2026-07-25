@@ -1,12 +1,9 @@
 //! Phase 4a: Autodiff Compilation
 //!
-
 //! Generate VJP functions for @differentiable functions.
 //!
-
 //! ## Features
 //!
-
 //! - Reverse-mode automatic differentiation (VJP)
 //! - Forward-mode automatic differentiation (JVP)
 //! - Generate gradient functions automatically
@@ -14,25 +11,20 @@
 //! - Optimize gradient computation
 //! - CBGR-aware code generation (~15ns overhead per check)
 //!
-
 //! ## @differentiable Attribute Parameters
 //!
-
 //! - `wrt`: Parameters to differentiate with respect to (required)
 //! - `mode`: "forward" or "reverse" (default: "reverse")
 //! - `order`: Derivative order (1, 2, etc., default: 1)
 //! - `custom_vjp`: User-provided VJP implementation
 //!
-
 //! ## Generated Functions
 //!
-
 //! For `@differentiable(wrt = "weights, bias")`:
 //! - `fn_vjp(...)`: Vector-Jacobian Product (reverse-mode)
 //! - `fn_jvp(...)`: Jacobian-Vector Product (forward-mode)
 //! - `fn_grad(...)`: Gradient (for scalar outputs)
 //!
-
 //! Phase 4a: Autodiff compilation. Builds computational graphs for
 //! @differentiable functions, generates VJP (reverse-mode) functions,
 //! type-checks generated gradient code.

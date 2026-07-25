@@ -1,11 +1,9 @@
 //! Performance Benchmarks for Kind Inference
 //!
-
 //! Higher-kinded type (HKT) kind inference: infers kinds for type constructors
 //! (e.g., List has kind Type -> Type, Map has kind Type -> Type -> Type).
 //! Uses constraint-based kind inference with unification.
 //!
-
 //! Performance Targets:
 //! - Kind inference: <5ms for typical protocols
 //! - Kind checking: <1ms per type application

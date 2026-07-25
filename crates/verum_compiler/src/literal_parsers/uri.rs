@@ -1,10 +1,8 @@
 //! URI/URL literal parser
 //!
-
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
-
 //! Parses and validates URI/URL literals:
 //! - url#"https://example.com"
 //! - url#"https://api.example.com/v1/users"

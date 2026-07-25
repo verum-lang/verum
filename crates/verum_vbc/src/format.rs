@@ -1,6 +1,5 @@
 //! VBC binary format definitions.
 //!
-
 //! This module defines the binary format for VBC files, including:
 //! - Magic number and version
 //! - Header structure (64 bytes)

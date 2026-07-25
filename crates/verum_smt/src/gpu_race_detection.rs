@@ -1,37 +1,29 @@
 //! GPU Race Condition Detection using Z3
 //!
-
 //! This module implements data race detection for GPU kernels using SMT solving.
 //! A data race occurs when:
 //! 1. Two accesses to the same memory location
 //! 2. At least one access is a write
 //! 3. Accesses are not ordered by happens-before relation
 //!
-
 //! ## Happens-Before Relations
 //!
-
 //! - **Program Order**: Within a thread, operations are ordered
 //! - **Barrier Synchronization**: Barrier creates happens-before edge
 //! - **Block Scope**: Threads in different blocks don't synchronize (except global barriers)
 //!
-
 //! ## Z3 Encoding Strategy
 //!
-
 //! - Memory accesses: Symbolic addresses and values
 //! - Happens-before: Partial order constraints
 //! - Race condition: SAT query for conflicting accesses
 //!
-
 //! ## Performance
 //!
-
 //! - Per-access overhead: O(1) encoding
 //! - Race detection: O(n²) where n = number of accesses (with optimizations)
 //! - Parallel checking: Multiple Z3 solvers for large kernels
 //!
-
 //! GPU data race detection for Verum's `@gpu` annotated kernels.
 //! Encodes memory accesses as SMT constraints and checks for conflicting accesses
 //! without proper synchronization barriers.

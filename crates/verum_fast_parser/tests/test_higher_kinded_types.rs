@@ -14,11 +14,9 @@
 )]
 //! Tests for Higher-Kinded Type (HKT) parsing.
 //!
-
 //! Tests for higher-kinded type syntax in grammar
 //! higher_kinded_type = path , '<' , '_' , '>' ;
 //!
-
 //! Examples:
 //! - List<_>
 //! - Maybe<_>

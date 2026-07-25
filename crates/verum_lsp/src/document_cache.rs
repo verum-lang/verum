@@ -1,14 +1,11 @@
 //! Document cache with incremental parsing support
 //!
-
 //! This module provides a high-performance document cache that integrates with
 //! the incremental parsing system. It tracks document versions, manages parsing,
 //! and provides efficient access to document state.
 //!
-
 //! # Features
 //!
-
 //! - Version tracking for consistency
 //! - Incremental text updates
 //! - Smart re-parsing decisions

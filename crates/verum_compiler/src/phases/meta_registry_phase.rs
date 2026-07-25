@@ -1,21 +1,16 @@
 //! Phase 2: Meta Registry & AST Registration
 //!
-
 //! Registers all meta handlers BEFORE any macro expansion.
 //!
-
 //! ## Multi-Pass Architecture
 //!
-
 //! This phase implements **Pass 1** of the three-pass compilation:
 //! - **Pass 1: Parse + Register** (this phase)
 //! - Pass 2: Expand Macros (MacroExpansionPhase)
 //! - Pass 3: Semantic Analysis (type checking)
 //!
-
 //! ## Responsibilities
 //!
-
 //! 1. Register @tagged_literal handlers - e.g., `d#"2025-11-05"`
 //! 2. Register @derive macros - e.g., `@derive(Serialize)`
 //! 3. Register @differentiable functions - for autodiff
@@ -23,22 +18,17 @@
 //! 5. Register meta fn declarations
 //! 6. Build complete MetaRegistry (order-independent cross-file resolution)
 //!
-
 //! ## Output
 //!
-
 //! - Complete MetaRegistry with all handlers
 //! - Used by Phase 3 (Macro Expansion)
 //!
-
 //! ## Cross-File Resolution
 //!
-
 //! The MetaRegistry enables macros defined in one file to be used in any other
 //! file, regardless of parsing order. This eliminates the "chicken-and-egg"
 //! problem where a macro might be used before its definition is seen.
 //!
-
 //! Phase 2: Meta Registry and AST Registration. Registers @tagged_literal handlers,
 //! @derive macros, @differentiable functions, @verify annotations, and
 //! @interpolation_handler definitions. Order-independent (cross-file resolution).

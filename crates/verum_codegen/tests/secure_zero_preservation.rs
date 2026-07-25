@@ -1,14 +1,11 @@
 //! LLVM IR audit harness — `secure_zero` volatile-memset preservation.
 //!
-
 //! Closes Action #2 of the TLS/QUIC security audit
 //! (`tls-quic-security-audit spec` §2): "LLVM-IR audit
 //! of zeroise memset preservation — follow-up."
 //!
-
 //! # What this guards against
 //!
-
 //! LLVM's standard `memset` intrinsic is non-volatile. When the
 //! optimiser proves the buffer is dead immediately after the memset
 //! (which is the *exact* situation we use it for — wiping secret
@@ -18,13 +15,11 @@
 //! swap-out, post-exit heap inspection, or use-after-free read can
 //! expose it.
 //!
-
 //! `verum_codegen::llvm::ffi::FfiLowering::lower_secure_zero` emits a
 //! *volatile* memset — the `i1 true` flag in the call signature
 //! tells LLVM the call is observable, and every optimisation pass
 //! preserves it. This harness pins that property at two levels:
 //!
-
 //!  1. **Emission level**: directly asserts `lower_secure_zero`
 //!  produces IR containing a volatile-memset call. Catches a
 //!  future regression where someone flips the volatile bit.
@@ -33,15 +28,12 @@
 //!  future regression where LLVM changes semantics of the
 //!  volatile flag for memset.
 //!
-
 //! Includes a negative-control test demonstrating that an otherwise-
 //! identical NON-volatile memset IS elided at -O3 — proves the
 //! volatile flag is doing real work, not just decorating the IR.
 //!
-
 //! # Failure modes
 //!
-
 //! If this test ever fails:
 //!  * Emission test fails → someone flipped the volatile bit in
 //!  `lower_secure_zero`. Revert.

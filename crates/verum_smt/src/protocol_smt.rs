@@ -1,30 +1,24 @@
 //! Protocol Constraint Encoding to SMT
 //!
-
 //! Encodes Verum's protocol system (traits) as SMT predicates for verification.
 //! Protocols use `type X is protocol { ... }` syntax with associated types and
 //! method signatures. Protocol coherence ensures unique implementations per type.
 //! Specialization uses a lattice-based precedence system (concrete > partial > generic).
 //!
-
 //! This module encodes protocol constraints as SMT predicates for verification:
 //! 1. `implements(T, Protocol)` - Type T implements Protocol
 //! 2. Associated type resolution - Resolve Protocol.AssocType for type T
 //! 3. Protocol hierarchy - Verify superprotocol relationships
 //! 4. Protocol coherence - Check uniqueness of implementations
 //!
-
 //! # Performance Targets
 //!
-
 //! - Protocol check: <50ms
 //! - Hierarchy verification: <30ms
 //! - Coherence check: <100ms
 //!
-
 //! # SMT Encoding Strategy
 //!
-
 //! Protocols are encoded as uninterpreted predicates in Z3:
 //! ```smt2
 //! (declare-fun implements (Type Protocol) Bool)

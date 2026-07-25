@@ -1,16 +1,12 @@
 //! Flow-Sensitive Control Flow Analysis for @must_handle Annotation
 //!
-
 //! Error handling: Result<T, E> and Maybe<T> types, try (?) operator with automatic From conversion, error propagation — Section 2.6
 //!
-
 //! This module implements compile-time enforcement that Result<T, E> values with
 //! @must_handle error types are explicitly handled before being dropped.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │ Control Flow Analysis │
@@ -35,32 +31,26 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! @must_handle
 //! type CriticalError is | ConnectionLost | DataCorruption;
 //!
-
 //! fn risky() -> Result<Data, CriticalError> { ... }
 //!
-
 //! // ❌ ERROR: Result not handled
 //! fn bad() {
 //!  let result = risky(); // Unhandled
 //!  // Drop point: E0317 - unused Result that must be used
 //! }
 //!
-
 //! // ✅ OK: Result handled with ?
 //! fn good1() -> Result<(), CriticalError> {
 //!  let data = risky()?; // Handled via propagation
 //!  Ok(())
 //! }
 //!
-
 //! // ✅ OK: Result handled with match
 //! fn good2() {
 //!  match risky() {
@@ -69,7 +59,6 @@
 //!  } // Handled via pattern matching
 //! }
 //!
-
 //! // ✅ OK: Result checked before drop
 //! fn good3() {
 //!  let result = risky();
@@ -79,13 +68,10 @@
 //! }
 //! ```
 //!
-
 //! # Control Flow Graph (CFG)
 //!
-
 //! The CFG represents program structure as basic blocks with edges:
 //!
-
 //! ```text
 //!  ┌────────────┐
 //!  │ Entry │
@@ -109,13 +95,10 @@
 //!  └──────┘
 //! ```
 //!
-
 //! # State Tracking
 //!
-
 //! Each Result variable transitions through states:
 //!
-
 //! ```text
 //! Unhandled ──[?, unwrap, match]──► Handled
 //!  │
@@ -124,13 +107,10 @@
 //!  └────[drop without check]───────────────────────► ❌ E0317
 //! ```
 //!
-
 //! # Join Point Semantics
 //!
-
 //! At control flow merge points, states are joined:
 //!
-
 //! ```text
 //! Handled ∧ Handled = Handled ✅
 //! Handled ∧ Checked = Handled ✅

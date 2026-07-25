@@ -1,6 +1,5 @@
 //! Runtime information for meta functions
 //!
-
 //! Provides compile-time and build-time information that can be
 //! queried by meta functions via the MetaRuntime context.
 

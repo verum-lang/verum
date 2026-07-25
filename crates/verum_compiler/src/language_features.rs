@@ -1,20 +1,17 @@
 //! Language-feature flag system for the compilation pipeline.
 //!
-
 //! This module consolidates every language-level toggle (type-system features,
 //! runtime behavior, codegen knobs, safety constraints, …) into a single
 //! strongly-typed [`LanguageFeatures`] value that travels with every
 //! compilation session. It is the **compiler-facing** view of the
 //! `[types] / [runtime] / [codegen] / ... ` sections of `verum.toml`.
 //!
-
 //! The CLI populates this struct from the merged configuration
 //! (defaults → `verum.toml` → `--set KEY=VALUE` overrides → env vars)
 //! and hands it to the compiler via [`crate::options::CompilerOptions`].
 //! Compiler phases then query individual feature flags instead of
 //! re-reading the manifest, keeping the boundary crisp.
 //!
-
 //! A [`LanguageFeatures::validate`] method enforces internal consistency
 //! (e.g., refinement types require some form of verification) so invalid
 //! configurations are caught once, centrally, before any phase runs.

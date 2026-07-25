@@ -1,6 +1,5 @@
 //! Counterexample extraction and formatting.
 //!
-
 //! When verification fails, this module extracts concrete values from Z3's
 //! model that demonstrate why a constraint is violated.
 

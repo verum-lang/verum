@@ -1,6 +1,5 @@
 //! Framework-compatibility matrix — V0.
 //!
-
 //! metatheory table delegates "axiom bundle's mutual
 //! consistency" to "the bundle's citation" — an honest soundness
 //! escape hatch. A user who imports two contradictory framework
@@ -8,16 +7,13 @@
 //! `core.math.frameworks.univalence` with the wrong cube
 //! interpretation) gets `False` in their kernel without warning.
 //!
-
 //! This module ports the well-known compatibility table from
 //! corpus folklore (Coquand 1990 paradox; HoTT Book chapter 4;
 //! Awodey-Bauer-Hofmann 2018) into a Rust data structure that the
 //! verification pipeline can query.
 //!
-
 //! # current surface
 //!
-
 //!  * [`IncompatiblePair`] — one (framework_a, framework_b)
 //!  conflict, with reason + literature citation.
 //!  * [`KNOWN_INCOMPATIBLE_PAIRS`] — the static table. ships
@@ -26,7 +22,6 @@
 //!  used in a module, return a diagnostic for every incompatible
 //!  pair found.
 //!
-
 //! Future work will:
 //!  * Wire `audit_framework_set` into `HygieneRecheckPass` so the
 //!  check fires on every `verum verify`.

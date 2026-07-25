@@ -1,9 +1,7 @@
 //! Document state management for the LSP server
 //!
-
 //! Tracks the content, AST, type information, and diagnostics for each open document.
 //!
-
 //! This module provides comprehensive document tracking with:
 //! - Real-time parsing and type checking
 //! - Symbol table management for completion and navigation

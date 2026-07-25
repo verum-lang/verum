@@ -1,18 +1,15 @@
 //! Goal-Based Formula Decomposition and Fast Contradiction Detection
 //!
-
 //! This module provides early contradiction detection and complexity-based tactic selection
 //! using Z3's Goal API. Enables 10-20% speedup on simple constraints by catching 90% of
 //! trivial contradictions in <1ms.
 //!
-
 //! ## Performance Targets
 //! - Fast path detection: <1ms for 90% of trivial cases
 //! - Complexity analysis: <100μs per formula
 //! - Tactic selection overhead: <50μs
 //! - Overall speedup: 10-20% on simple checks
 //!
-
 //! ## Z3 Goal API Usage
 //! - `Goal::new()` - Create goal for formula decomposition
 //! - `Goal::assert()` - Add formulas to goal
@@ -21,7 +18,6 @@
 //! - `Goal::depth()` - Quantifier nesting depth for complexity
 //! - `Goal::precision()` - Formula precision analysis
 //!
-
 //! Goal analysis accelerates verification by detecting trivial contradictions early
 //! and selecting appropriate tactics based on formula complexity. This supports the
 //! overall performance targets: CBGR check <15ns, type inference <100ms per 10K LOC,

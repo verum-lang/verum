@@ -1,14 +1,11 @@
 //! Phase D.4: User-Facing Tactic DSL Execution Bridge
 //!
-
 //! Bridges the gap between the surface-level tactic syntax (as parsed from
 //! `grammar/verum.ebnf::tactic_expr`) and the internal Z3 tactic combinators
 //! in `tactics.rs`.
 //!
-
 //! ## Surface Syntax → Internal Strategy
 //!
-
 //! ```verum
 //! // User writes:
 //! proof by cubical;
@@ -17,15 +14,12 @@
 //! proof by { repeat(3) { rewrite(assoc); simp; } }
 //! ```
 //!
-
 //! These surface forms are parsed into `TacticExpr` AST nodes by the parser,
 //! then this module translates them into `TacticCombinator` strategies that
 //! the Z3 backend can execute.
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! User `.vr` file
 //!  │ (parser)

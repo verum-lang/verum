@@ -1,13 +1,10 @@
 //! Comprehensive async/await state machine for Verum.
 //!
-
 //! This module implements industrial-grade async compilation, transforming
 //! async functions into state machines that can be polled to completion.
 //!
-
 //! # State Machine Structure
 //!
-
 //! ```text
 //! AsyncStateMachine<T> = {
 //!  state: u32, // Current state
@@ -17,10 +14,8 @@
 //! }
 //! ```
 //!
-
 //! # Poll Result
 //!
-
 //! ```text
 //! PollResult<T> = {
 //!  tag: u8, // 0 = Pending, 1 = Ready
@@ -28,18 +23,14 @@
 //! }
 //! ```
 //!
-
 //! # State Machine States
 //!
-
 //! - State 0: Initial state (first poll)
 //! - State N: Resumed after Nth await point
 //! - State -1: Completed (poisoned on repoll)
 //!
-
 //! # Compilation Pipeline
 //!
-
 //! 1. Identify await points in async function
 //! 2. Compute live variables across each await
 //! 3. Generate state machine struct

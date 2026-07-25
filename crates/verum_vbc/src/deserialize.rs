@@ -1,12 +1,9 @@
 //! VBC module deserialization.
 //!
-
 //! This module provides deserialization of VBC modules from binary format.
 //!
-
 //! ## Compression Support
 //!
-
 //! VBC files may be compressed using zstd or lz4. The deserializer automatically
 //! detects and decompresses compressed sections based on the compression header.
 

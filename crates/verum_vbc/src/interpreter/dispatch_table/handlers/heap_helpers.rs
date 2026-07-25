@@ -2,7 +2,6 @@
 //! (`shell_runtime`, `file_runtime`, `env_runtime`, `stdio_runtime`,
 //! `process_runtime`, `net_runtime`).
 //!
-
 //! Pre-extraction, every sibling module carried a verbatim copy of
 //! these primitives — `alloc_byte_list`, `alloc_record_n_fields`,
 //! `wrap_in_variant`, `lookup_type_id_by_name`, `extract_text_arg`,
@@ -12,15 +11,12 @@
 //! be applied THREE times after the same defect was originally
 //! introduced in three modules.
 //!
-
 //! This module is the single canonical source. Sibling modules
 //! `use super::heap_helpers::{...}` — adding a new intercept module
 //! costs zero copy-paste of these primitives.
 //!
-
 //! # Layout invariants this module encodes
 //!
-
 //!  * **Variant heap-record**: `[ObjectHeader][tag:u32][n_fields:u32]
 //!  [Value;N]`. Constructed via [`wrap_in_variant`].
 //!  * **Plain record**: `[ObjectHeader][Value;N]`. Constructed via
@@ -33,7 +29,6 @@
 //!  via [`alloc_byte_list`]; reverse-decoded via
 //!  [`extract_byte_slice`].
 //!
-
 //! Any change to these layouts must update BOTH this module AND the
 //! `memory_collections` GetE/SetE handlers in lockstep.
 

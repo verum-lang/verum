@@ -1,43 +1,35 @@
 //! Protocol coherence checking and orphan rule validation.
 //!
-
 //! Implements the coherence system from Section 4 of the specification:
 //! - Orphan rule validation (Section 4.1.1)
 //! - Overlap prevention (Section 4.1.3)
 //! - Specialization tracking (Section 4.1.4)
 //! - Cross-crate conflict detection (Section 4.2)
 //!
-
 //! # Overview
 //!
-
 //! Protocol coherence ensures that there is exactly one implementation of a
 //! protocol for any given type across the entire program. This prevents
 //! ambiguity in method dispatch and enables modular reasoning.
 //!
-
 //! # Key Principles
 //!
-
 //! **Orphan Rule** (Section 4.1.1):
 //! For `implement Protocol for Type` to be valid, at least one of:
 //! - Protocol is defined in the current crate, OR
 //! - Type is defined in the current crate (or uses a local type parameter)
 //!
-
 //! **Overlap Prevention** (Section 4.1.3):
 //! Two implementations overlap if there exists a type substitution that makes
 //! them apply to the same Protocol-Type pair. Overlap is a compile error
 //! unless using explicit specialization.
 //!
-
 //! **Specialization** (Section 4.1.4):
 //! Specialized implementations can override more general implementations when:
 //! - Marked with `@specialize` annotation
 //! - Strictly more specific than the general implementation
 //! - In the same crate as the general implementation
 //!
-
 //! These rules ensure global coherence of the type system across the entire
 //! dependency graph.
 

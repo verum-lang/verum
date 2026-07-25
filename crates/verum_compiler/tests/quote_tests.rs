@@ -13,7 +13,6 @@
     unused_assignments
 )]
 //!
-
 //! Comprehensive tests for the Quote module (meta-system code generation).
 //! Tests quote hygiene, splice interpolation ($name, #expr, #(#items),*),
 //! and token stream construction for procedural macros and derives.

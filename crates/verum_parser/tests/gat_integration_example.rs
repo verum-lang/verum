@@ -14,7 +14,6 @@
 )]
 //! GAT Integration Example - Complete End-to-End Test
 //!
-
 //! This test demonstrates parsing a complete Verum program with multiple
 //! GATs showcasing all supported syntax variations.
 

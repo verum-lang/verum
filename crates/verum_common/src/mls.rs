@@ -1,51 +1,41 @@
 //! Multi-Level Security (MLS) classification lattice — Phase 2a (#282).
 //!
-
 //! Foundational primitive for Verum's information-flow analysis. Phase 1
 //! (#266) established the call-site friction layer: every dangerous
 //! declaration (extern fn, unsafe fn) must carry an explicit
 //! `@classification(level)` attribute matching the manifest floor.
 //!
-
 //! This module promotes the enum from its private home in
 //! `verum_compiler::phases::safety_gate` to the shared layer so the
 //! type checker (Phase 2b: propagation through Pi-types) and the
 //! context system (Phase 3: side-effect classification) can consume
 //! the same lattice without re-defining it.
 //!
-
 //! # Lattice
 //!
-
 //! The classification levels form a total order:
 //!
-
 //! ```text
 //!  Public ⊑ Secret ⊑ TopSecret
 //! ```
 //!
-
 //! - **Join (⊔)** — least upper bound. The classification of a value
 //!  derived from multiple sources is the join of the source
 //!  classifications. Adding `Secret` and `Public` produces `Secret`;
 //!  adding `Secret` and `TopSecret` produces `TopSecret`.
 //!
-
 //! - **Meet (⊓)** — greatest lower bound. The classification floor
 //!  that ALL of a set of contexts can write into. Used for sink-
 //!  detection: the meet of every consumer's classification gives the
 //!  minimum classification a value must have to flow into all of
 //!  them.
 //!
-
 //! - **Subsumes (⊒)** — `a ⊒ b` iff `a` is at least as classified as
 //!  `b`. Used for the surface gate (`@classification(top_secret)`
 //!  satisfies `mls_level = "secret"` because TopSecret ⊒ Secret).
 //!
-
 //! # Phase Roadmap
 //!
-
 //! - **Phase 1 (#266)**: surface gate at safety_gate.rs — closed.
 //! - **Phase 2a (#282)**: this module — lattice primitive.
 //! - **Phase 2b (#282-Followup)**: type-level taint propagation. Add

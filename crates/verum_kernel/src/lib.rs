@@ -1,6 +1,5 @@
 //! # `verum_kernel` — Verum's LCF-style trusted kernel
 //!
-
 //! This crate is the **sole trusted checker** in Verum's verification
 //! stack. All other components (elaborator, tactics, SMT backends,
 //! cubical NbE, framework-axiom registry) produce proof terms in this
@@ -9,12 +8,10 @@
 //! theorem is considered proved modulo the kernel plus whatever
 //! explicitly-registered axioms were used (see [`AxiomRegistry`]).
 //!
-
 //! Target size: **under 5000 lines of Rust, audit-able by a single
 //! reviewer in one session**. Everything that is not strictly required
 //! for checking proof terms lives in other crates:
 //!
-
 //! - `verum_types` — elaboration / inference (produces terms)
 //! - `verum_verification` — tactic evaluation (produces proof scripts)
 //! - `verum_smt` — SMT encoding + solver interface
@@ -22,29 +19,23 @@
 //! - `verum_vbc` — bytecode codegen
 //! - `verum_codegen` — LLVM / MLIR lowering
 //!
-
 //! None of the above sit in the trusted computing base (TCB). They can
 //! have bugs, and those bugs can only manifest as "the elaborator
 //! refused a valid program" or "the SMT cert replay failed" — never as
 //! "the kernel accepted a false theorem".
 //!
-
 //! ## Trusted Computing Base
 //!
-
 //! The authoritative TCB after this crate is complete:
 //!
-
 //! 1. The Rust compiler and its linked dependencies (unavoidable).
 //! 2. This crate's [`check`] / [`verify`] loop and its subroutines.
 //! 3. The axioms explicitly registered via [`AxiomRegistry::register`]
 //!  (every registration records a framework name + citation so the
 //!  TCB can be enumerated by `verum audit --framework-axioms`).
 //!
-
 //! Notably **outside** the TCB:
 //!
-
 //! - Z3 / CVC5 / E / Vampire / Alt-Ergo (any SMT backend) — their
 //!  outputs arrive as [`SmtCertificate`] values and must be replayed
 //!  by [`replay_smt_cert`] in this kernel.
@@ -53,10 +44,8 @@
 //! - The elaborator — a buggy elaborator can produce an ill-typed
 //!  [`CoreTerm`], which the kernel will reject.
 //!
-
 //! ## Current status
 //!
-
 //! This file is the **skeleton** introduced when Verum's verification
 //! architecture was driven to its ultimate form. The [`CoreTerm`] and
 //! [`CoreType`] enums cover the shape of the explicit calculus; the
@@ -66,7 +55,6 @@
 //! lands incrementally; every filled-in constructor is gated by a
 //! dedicated unit test so the TCB grows strictly monotonically.
 //!
-
 //! The public API is the commitment: downstream code should compile
 //! against this surface today, and incremental checker growth is
 //! purely implementation-internal.

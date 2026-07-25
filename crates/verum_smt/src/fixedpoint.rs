@@ -1,11 +1,9 @@
 //! Fixed-Point Engine (μZ) Module
 //!
-
 //! This module provides support for recursive predicates and fixed-point computation
 //! using Z3's μZ engine, enabling verification of recursive data structures and
 //! inductive properties.
 //!
-
 //! Based on experiments/z3.rs documentation and z3-sys FFI bindings.
 //! Recursive refinement types (e.g., sorted lists, balanced trees) require fixed-point
 //! reasoning. Z3's muZ engine computes least/greatest fixed points for recursive

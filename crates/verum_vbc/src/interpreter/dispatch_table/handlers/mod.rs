@@ -1,6 +1,5 @@
 //! Handler modules for VBC interpreter dispatch.
 //!
-
 //! These modules contain extracted handler functions from dispatch_table.rs,
 //! organized by category for maintainability.
 

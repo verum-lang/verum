@@ -1,44 +1,34 @@
 //! Build Assets Intrinsics (Tier 1 - Requires BuildAssets)
 //!
-
 //! Provides compile-time file system access with security restrictions.
 //! All functions in this module require the `BuildAssets` context since they
 //! access the file system.
 //!
-
 //! ## File Loading
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `load_text(path)` | `(Text) -> Text` | Load file as text |
 //! | `include_bytes(path)` | `(Text) -> Bytes` | Load file as bytes |
 //! | `include_str(path)` | `(Text) -> Text` | Alias for load_text |
 //!
-
 //! ## File System Operations
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `asset_exists(path)` | `(Text) -> Bool` | Check if file exists |
 //! | `asset_list_dir(path)` | `(Text) -> List<Text>` | List directory contents |
 //! | `asset_metadata(path)` | `(Text) -> AssetMetadata` | Get file metadata |
 //!
-
 //! ## Security
 //!
-
 //! All paths are restricted to the project root and configured asset directories.
 //! Path traversal (e.g., `..`) and absolute paths are not allowed.
 //!
-
 //! ## Context Requirements
 //!
-
 //! **Tier 1**: All functions require `using [BuildAssets]` context.
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

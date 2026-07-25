@@ -1,18 +1,15 @@
 //! Whole-program type-table consistency tests (#170).
 //!
-
 //! Compiles real stdlib `.vr` files via the production
 //! `compile_module_with_mounts` path and asserts that the resulting
 //! whole-program type table satisfies the cross-module hygiene
 //! invariants:
 //!
-
 //!  * No two `TypeDescriptor`s share a single `TypeId.0`.
 //!  * No two `TypeDescriptor`s share a name with conflicting ids.
 //!  * Within every sum type, variant tags form a dense
 //!  `0..variants.len()` set with no gaps and no duplicates.
 //!
-
 //! These invariants are the cross-module analogue of #146's per-module
 //! `verify_type_layout_invariants`. When a stdlib refactor introduces
 //! a name collision (most commonly: two unrelated modules both declare
@@ -22,7 +19,6 @@
 //! exceeds object data size K`, `null pointer dereference`) that this
 //! check is designed to surface at compile time.
 //!
-
 //! The test suite uses small, focused stdlib subgraphs so a regression
 //! pinpoints the introduced violation rather than burying it in a
 //! whole-stdlib reload.

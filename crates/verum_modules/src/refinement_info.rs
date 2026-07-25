@@ -1,10 +1,8 @@
 //! Refinement type information for module exports.
 //!
-
 //! This module stores refinement information without creating a circular dependency
 //! with verum_types. The actual RefinementType is constructed by verum_types when needed.
 //!
-
 //! Refinement types work across module boundaries: when a type with refinements
 //! is exported, the refinement becomes part of the public API contract. All three
 //! refinement syntaxes (inline: Int{> 0}, declarative: Text where is_email,

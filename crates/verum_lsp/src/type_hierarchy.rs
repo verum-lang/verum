@@ -1,6 +1,5 @@
 //! Type hierarchy support
 //!
-
 //! Provides supertype and subtype navigation for Verum types and protocols.
 //! - Supertypes: for a type, finds implemented protocols; for a protocol, finds bounds
 //! - Subtypes: for a protocol, finds all types implementing it

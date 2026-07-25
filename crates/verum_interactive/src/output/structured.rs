@@ -1,6 +1,5 @@
 //! Structured data output rendering.
 //!
-
 //! Provides rich visualization for records, variants, and collections.
 
 use verum_common::Text;

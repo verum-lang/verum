@@ -1,34 +1,28 @@
 //! Compilation Pipeline Orchestration
 //!
-
 //! Implements the End-to-End Compiler Architecture (Tier 0-2):
 //!
-
 //! **Tier 0: Frontend**
 //! - Lexing (verum_lexer)
 //! - Parsing (verum_fast_parser)
 //! - Type checking (verum_types)
 //! - CBGR analysis (verum_cbgr)
 //!
-
 //! **Tier 1: Analysis**
 //! - Refinement checking (verum_smt)
 //! - Context resolution
 //! - Meta function expansion (meta_registry)
 //!
-
 //! **Tier 2: Backend**
 //! - Module system (verum_modules)
 //! - VBC codegen (verum_vbc::codegen)
 //! - VBC interpretation (verum_vbc::interpreter)
 //!
-
 //! This architecture enables:
 //! - Cross-file meta function resolution
 //! - Compile-time code generation
 //! - Direct interpretation and execution
 //!
-
 //! Implementation follows a dependency-driven roadmap: Tier 0 foundation
 //! (lexer, parser, AST, types, CBGR, interpreter), then Tier 1 value-proof
 //! features (protocols, refinement codegen, SMT verification, gradual verification,

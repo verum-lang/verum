@@ -14,7 +14,6 @@
 )]
 //! Integration tests for VBC -> LLVM IR code generation (CPU path).
 //!
-
 //! These tests verify the VBC -> LLVM lowering pipeline:
 //!  1. Basic LLVM IR emission
 //!  2. Type codegen (Int, Float, Bool, Text, etc.)

@@ -1,6 +1,5 @@
 //! Output renderer trait and implementations.
 //!
-
 //! Provides a unified interface for rendering different value types.
 
 use verum_common::Text;

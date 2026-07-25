@@ -1,6 +1,5 @@
 //! Polymorphic Kinds — kind variables, kind unification.
 //!
-
 //! In Hindley-Milner-style type systems, the *kind* of a type is
 //! `Type` (concrete) or `Type → Type` (a type constructor). The
 //! existing `kind_inference` module covers this fragment for HKT
@@ -8,22 +7,17 @@
 //! into the polymorphic fragment: kind variables `κ`, kind
 //! quantification `∀κ. K`, and kind unification across them.
 //!
-
 //! Practical use cases:
 //!
-
 //! * **Heterogeneous data types** — `data HList :: forall κ. [κ] → Type`.
 //! * **Levitated functor combinators** — `Functor :: forall κ. (κ → κ) → Constraint`.
 //! * **Type-class hierarchies parameterised by kind** — Haskell's
 //!  `PolyKinds` extension.
 //!
-
 //! ## Algebra
 //!
-
 //! Kinds form a small algebra:
 //!
-
 //! ```text
 //!  K ::= Type (kind of value-level types)
 //!  | K₁ → K₂ (kind of type constructors)
@@ -31,15 +25,12 @@
 //!  | Constraint (kind of typeclass constraints)
 //! ```
 //!
-
 //! Unification is structural: arrows match arrows, constants match
 //! constants, and a kind variable `κ` unifies with any kind `K`
 //! by substitution.
 //!
-
 //! ## API
 //!
-
 //! * [`Kind`] — the kind algebra.
 //! * [`KindSubst`] — a substitution `κ ↦ K`.
 //! * [`KindUnifier`] — accumulates substitutions, with `unify`

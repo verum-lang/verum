@@ -1,6 +1,5 @@
 //! Name resolution across modules.
 //!
-
 //! Resolves identifiers to their definitions using the path resolution algorithm:
 //! 1. Check local scope (explicit bindings)
 //! 2. Check explicit imports
@@ -8,7 +7,6 @@
 //! 4. Check prelude (std.prelude.*)
 //! 5. Error if ambiguous (no "last import wins")
 //!
-
 //! Resolution rules: explicit imports take precedence over glob imports,
 //! local bindings shadow all imports, ambiguous names are compile errors,
 //! absolute paths (crate.*) bypass local scope, and visibility is checked

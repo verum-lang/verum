@@ -1,6 +1,5 @@
 //! LLVM dialect lowering pass.
 //!
-
 //! Converts Verum dialect operations to LLVM dialect for final code generation.
 
 use super::{PassResult, PassStats, VerumPass};

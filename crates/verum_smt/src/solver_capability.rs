@@ -1,11 +1,9 @@
 //! # Unified Solver Capability Layer
 //!
-
 //! A high-level API that lets users request advanced solver features without
 //! caring which backend implements them. The capability layer automatically
 //! routes each request to the appropriate solver:
 //!
-
 //! | Capability | Z3 | CVC5 | Router Picks |
 //! |---------------------------|-------|-------|--------------|
 //! | Interpolation | ✓ | ✗ | Z3 |
@@ -16,23 +14,18 @@
 //! | Finite Model Finding | Weak | ✓ | CVC5 |
 //! | Quantifier Elimination | ✓ | ✓ | Best-fit |
 //!
-
 //! ## Usage
 //!
-
 //! ```rust,ignore
 //! use verum_smt::solver_capability::{SolverCapability, CapabilityRegistry};
 //!
-
 //! let registry = CapabilityRegistry::detect();
 //!
-
 //! // Request Craig interpolation — routes to Z3 automatically.
 //! if registry.supports(SolverCapability::Interpolation) {
 //!  // ... use Z3 interpolation ...
 //! }
 //!
-
 //! // Request SyGuS — routes to CVC5 if available.
 //! match registry.find_provider(SolverCapability::SygusSynthesis) {
 //!  Some(provider) => /* use the provider */,
@@ -40,10 +33,8 @@
 //! }
 //! ```
 //!
-
 //! ## Graceful Fallback
 //!
-
 //! When a capability is requested but the specialized solver is unavailable,
 //! the registry can fall back to a less-capable implementation (e.g.,
 //! Z3's limited finite-model-finding) if one exists, or return `None` to

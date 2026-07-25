@@ -1,6 +1,5 @@
 //! Meta type system IR
 //!
-
 //! This module defines the type system for meta expressions,
 //! used for parameter typing in meta functions.
 

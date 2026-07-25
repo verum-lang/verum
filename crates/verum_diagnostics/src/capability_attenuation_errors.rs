@@ -1,33 +1,26 @@
 //! Capability Attenuation Error Diagnostics
 //!
-
 //! This module provides comprehensive diagnostics for capability attenuation errors in Verum.
 //! Capability attenuation is a security mechanism that restricts the capabilities a function
 //! can use, ensuring that code can only access the specific sub-contexts it declares.
 //!
-
 //! # Error Codes
 //!
-
 //! - **E0306**: Capability Violation - Function uses a capability not declared in `using` clause
 //! - **E0307**: Sub-Context Not Found - Reference to undefined sub-context in context hierarchy
 //! - **E0308**: Capability Not Provided - Required capability not available in environment
 //! - **E0309**: Partial Implementation Warning - Context implementation missing some sub-contexts
 //!
-
 //! # Design Philosophy
 //!
-
 //! These diagnostics emphasize:
 //! 1. **Security awareness** - Clear explanation of capability violations
 //! 2. **Precise locations** - Show exactly where capabilities are declared vs. used
 //! 3. **Actionable fixes** - Multiple suggestions for resolving capability issues
 //! 4. **Capability hierarchy** - Visual representation of context/sub-context relationships
 //!
-
 //! # Example: E0306 Capability Violation
 //!
-
 //! ```verum
 //! fn attempt_delete(id: Int) -> Result<()>
 //!  using [Database::Query]
@@ -36,7 +29,6 @@
 //! }
 //! ```
 //!
-
 //! The function declares `Database::Query` but attempts to use `Database::Execute`,
 //! which is a capability violation.
 

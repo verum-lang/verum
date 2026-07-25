@@ -1,6 +1,5 @@
 //! Comprehensive VBC Interpreter Tests
 //!
-
 //! Tests cover:
 //! - Data movement instructions (Mov, LoadI, LoadF, LoadTrue, etc.)
 //! - Integer arithmetic (Add, Sub, Mul, Div, Mod)

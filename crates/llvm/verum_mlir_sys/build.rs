@@ -1,6 +1,5 @@
 //! Build script for verum_mlir_sys
 //!
-
 //! This script handles:
 //! 1. Using local LLVM installation from llvm/install/ (PRIMARY)
 //! 2. Optional override via VERUM_LLVM_DIR environment variable

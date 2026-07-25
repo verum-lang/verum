@@ -1,13 +1,10 @@
 //! Phase 0: Entry Point Detection with Context Validation
 //!
-
 //! Detects `async fn main()` or `fn main()` entry point and validates
 //! context system compliance.
 //!
-
 //! ## Responsibilities
 //!
-
 //! 1. Find the main function across all modules
 //! 2. Determine if it's sync or async
 //! 3. Validate that all used contexts are explicitly declared with 'using'
@@ -15,23 +12,18 @@
 //! 5. Detect circular context group references
 //! 6. Validate async/sync consistency for contexts
 //!
-
 //! ## Output
 //!
-
 //! - `MainConfig`: Configuration for entry point validation
 //! - `EntryContextValidation`: Context validation results
 //!
-
 //! ## Context System Compliance
 //!
-
 //! Context system integration:
 //! - ALL contexts must be explicitly declared with 'using'
 //! - ALL contexts must be provided with 'provide' statements
 //! - NO automatic provision of contexts (auto-provide feature removed)
 //!
-
 //! Phase 0: Detects main() function, validates signature (fn main() or
 //! fn main(args: List<Text>)), and configures execution mode.
 

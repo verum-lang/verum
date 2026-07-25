@@ -1,6 +1,5 @@
 //! Security Pattern Detection for Meta Linter
 //!
-
 //! Detects CWE-mapped security vulnerabilities in meta code:
 //! - SQL Injection (CWE-89)
 //! - Command Injection (CWE-78)
@@ -10,7 +9,6 @@
 //! - Sensitive Data Exposure (CWE-200)
 //! - Buffer Overflow (CWE-119)
 //!
-
 //! Meta linter: static analysis of meta code for unsafe patterns (unbounded
 //! recursion, infinite loops, unsafe interpolation without @safe attribute).
 

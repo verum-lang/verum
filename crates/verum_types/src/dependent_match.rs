@@ -1,31 +1,25 @@
 //! Dependent Pattern Matching
 //!
-
 //! Dependent pattern matching: patterns that refine types in branches, with coverage checking and type narrowing — Dependent Pattern Matching
 //!
-
 //! This module implements dependent pattern matching where:
 //! 1. The type of each branch can depend on the constructor matched
 //! 2. Pattern matching refines type indices based on constructor arguments
 //! 3. Motives describe how the result type varies with the matched value
 //! 4. Absurd patterns handle impossible cases (empty types)
 //!
-
 //! # Key Concepts
 //!
-
 //! ## Motive
 //! A motive is a type function that describes how the result type depends
 //! on the scrutinee value. For example, when matching on `Vec n T`:
 //! - In the `nil` branch, we know `n = 0`
 //! - In the `cons` branch, we know `n = m+1` for some `m`
 //!
-
 //! ## Constructor Unification
 //! When matching a constructor, we unify the scrutinee type with the
 //! constructor's return type, which refines type indices.
 //!
-
 //! ## Branch Type Refinement
 //! Each branch is type-checked with refined knowledge about the scrutinee
 //! type based on the matched constructor.

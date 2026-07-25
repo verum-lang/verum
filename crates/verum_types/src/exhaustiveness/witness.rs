@@ -1,6 +1,5 @@
 //! Witness Generation
 //!
-
 //! This module generates concrete examples of values not covered by patterns.
 //! Witnesses help developers understand what cases are missing from their match.
 

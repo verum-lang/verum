@@ -1,35 +1,28 @@
 //! Whitehead criterion for (∞, n)-equivalence — V0 algorithmic
 //! kernel rule (HTT 1.2.4.3 generalised).
 //!
-
 //! ## What this delivers
 //!
-
 //! The classical Whitehead theorem says: a continuous map between
 //! CW-complexes is a weak homotopy equivalence iff it induces an
 //! isomorphism on every homotopy group `π_k` for `k ≥ 0`. Lurie's
 //! generalisation (HTT 1.2.4.3) lifts this to (∞, n)-categories:
 //!
-
 //! > A morphism `f : X → Y` in an `(∞, n)`-category is an
 //! > equivalence iff for every `0 ≤ k ≤ n`:
 //! > * `f` induces an isomorphism on `π_0` (the 0-cells).
 //! > * For every basepoint `x ∈ X` and every `1 ≤ k ≤ n`,
 //! > `f` induces an isomorphism on `π_k(X, x)`.
 //!
-
 //! This is the **decidable characterisation** of (∞, n)-equivalence
 //! that lets the kernel certify equivalences without invoking the
 //! `BridgeAudit` machinery used by [`crate::infinity_category::is_equivalence_at`]
 //! for limit-level cases.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`WhiteheadCriterion`] — per-level homotopy-group iso
 //!  witness data.
 //!  2. [`is_equivalence_via_whitehead`] — decidable predicate
@@ -42,10 +35,8 @@
 //!  witness flag: in a Kan complex (= `(∞, 1)`-groupoid),
 //!  every weak equivalence is an honest equivalence.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **Theorem 5.1 §5** — `id_X` step at higher levels: with
 //!  Whitehead's per-level structure the step is decidable
 //!  for every concrete `n`, no bridge admit needed.

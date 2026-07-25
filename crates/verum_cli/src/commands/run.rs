@@ -1,14 +1,11 @@
 //! Run command - builds and executes the project
 //!
-
 //! # Two-Tier Architecture
 //!
-
 //! The execution tiers are:
 //! - Tier 0: VBC Interpreter (direct VBC execution, full diagnostics)
 //! - Tier 1: AOT compilation via LLVM (native executable)
 //!
-
 //! Use `verum run --tier 1` or `--tier aot` for native execution.
 
 use std::path::PathBuf;

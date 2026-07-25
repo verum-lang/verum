@@ -1,13 +1,10 @@
 //! Formal Topology Theory with SMT Verification
 //!
-
 //! This module provides industrial-grade topological space verification using Z3 SMT solver.
 //! All topological properties are formally verified with proof term generation.
 //!
-
 //! ## Features
 //!
-
 //! - **Topological Spaces**: Verify topology axioms (unions, intersections, empty set, whole space)
 //! - **Continuity**: Verify continuous maps and homeomorphisms
 //! - **Separation Axioms**: T0, T1, T2 (Hausdorff), Regular, Normal spaces
@@ -15,42 +12,33 @@
 //! - **Connectedness**: Connected and path-connected spaces with component analysis
 //! - **Metric Spaces**: Complete metric space verification with Cauchy sequences
 //!
-
 //! ## Formal Mathematics Foundation
 //!
-
 //! Implements topological space verification from the formal proof system: topological
 //! spaces with open set axioms, continuous maps as preimage-preserving functions,
 //! separation axioms (T0-T4), compactness via finite subcovers, and metric space
 //! completeness via Cauchy sequence convergence. All proofs produce exportable
 //! proof terms compatible with Coq, Lean, and Dedukti proof checkers.
 //!
-
 //! ## Architecture
 //!
-
 //! All verification operations return `ProofTerm` evidence that can be:
 //! - Exported to proof assistants (Coq, Lean)
 //! - Used for gradual verification
 //! - Cached for incremental compilation
 //!
-
 //! ## Examples
 //!
-
 //! ```rust,ignore
 //! use verum_smt::topology::{TopologicalSpace, MetricSpace};
 //! use verum_std::{Set, List};
 //!
-
 //! // Create topological space
 //! let mut space = TopologicalSpace::discrete(vec!["a", "b", "c"].into());
 //!
-
 //! // Verify topology axioms
 //! let proof = space.verify_topology_axioms().unwrap();
 //!
-
 //! // Check separation properties
 //! assert!(space.is_hausdorff().unwrap());
 //! ```

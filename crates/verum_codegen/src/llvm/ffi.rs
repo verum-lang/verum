@@ -1,15 +1,12 @@
 //! FFI lowering for VBC → LLVM IR.
 //!
-
 //! This module provides zero-cost FFI lowering by translating VBC FfiExtended
 //! instructions directly to LLVM IR. Unlike the interpreter (which uses libffi
 //! at ~150ns/call), AOT-compiled code achieves ~5ns/call through direct
 //! native function calls.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC FfiExtended Instruction
 //!  │
@@ -24,10 +21,8 @@
 //!  └── Raw Pointer Ops ────────► LLVM load/store/GEP
 //! ```
 //!
-
 //! # Calling Conventions
 //!
-
 //! | VBC Sub-opcode | LLVM Calling Convention |
 //! |----------------|-------------------------|
 //! | CallFfiC | C (0) |
@@ -36,10 +31,8 @@
 //! | CallFfiFastcall| X86_FastCall (65) |
 //! | CallFfiVariadic| C with variadic marker |
 //!
-
 //! # Performance
 //!
-
 //! - Direct FFI call: ~5ns (vs 150ns interpreter)
 //! - memcpy intrinsic: optimal SIMD on supported platforms
 //! - Pointer arithmetic: single instruction

@@ -1,13 +1,10 @@
 //! VBC → LLVM IR lowering entry point.
 //!
-
 //! This module provides the main entry point for lowering VBC (Verum Bytecode)
 //! modules to LLVM IR for the CPU compilation path.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC Module
 //!  │
@@ -30,14 +27,11 @@
 //! └─────────┘ └─────────┘
 //! ```
 //!
-
 //! # CBGR Tier Awareness
 //!
-
 //! The lowering process is tier-aware, generating different code based on
 //! the CBGR tier:
 //!
-
 //! - **Tier 0**: Full runtime checks (~15ns overhead per check)
 //! - **Tier 1**: Compiler-proven safe (zero overhead)
 //! - **Tier 2**: Manually marked unsafe (zero overhead)

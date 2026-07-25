@@ -1,12 +1,9 @@
 //! Builder derive macro implementation
 //!
-
 //! Generates a type-safe builder pattern with compile-time required field verification.
 //!
-
 //! ## Generated Code
 //!
-
 //! For a type like:
 //! ```verum
 //! @builder
@@ -19,28 +16,22 @@
 //! };
 //! ```
 //!
-
 //! This derive generates:
 //! 1. `HttpRequestBuilder` type with appropriate field types
 //! 2. `HttpRequest.builder()` static method returning `HttpRequestBuilder`
 //! 3. `.method(value)`, `.url(value)`, etc. setter methods (chainable)
 //! 4. `.build()` method that constructs the final type
 //!
-
 //! ## Type Safety
 //!
-
 //! Required fields are stored as `Maybe<T>` in the builder and validated at build time.
 //! Optional fields (those with default values) keep their original type.
 //!
-
 //! ## CBGR Considerations
 //!
-
 //! The builder pattern creates owned values, avoiding reference lifetime issues.
 //! Each setter takes ownership and returns the modified builder.
 //!
-
 //! @derive(Builder): generates builder pattern with .with_field() methods,
 //! optional fields, validation, and type-safe construction.
 //! @derive infrastructure: macro expansion framework for automatic code

@@ -1,18 +1,15 @@
 //! K-FwAx subsingleton-check integration tests (V8, #217).
 //!
-
 //! Per `verification-architecture.md` §4.4 and §4.5, a framework
 //! axiom's body must be a *subsingleton* (proof-irrelevant: at
 //! most one inhabitant up to definitional equality) for subject
 //! reduction to hold. Two acceptance routes:
 //!
-
 //!  1. **Closed-proposition route** — body has no free vars.
 //!  2. **UIP route** — body may have free vars iff module
 //!  imports `core.math.frameworks.uip` (caller signals via
 //!  [`SubsingletonRegime::UipPermitted`]).
 //!
-
 //! These tests exercise both routes plus the legacy-unchecked
 //! shim used for backwards-compat with pre-V8 callers.
 

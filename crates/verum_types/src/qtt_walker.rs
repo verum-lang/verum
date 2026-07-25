@@ -1,12 +1,10 @@
 //! AST walker that produces a QTT `UsageMap` from a function body.
 //!
-
 //! Given a set of tracked binding names and an expression, the
 //! walker counts occurrences of each binding using the QTT
 //! composition rules: sequential composition sums counts, branching
 //! composition takes the worst-case maximum.
 //!
-
 //! The walker is intentionally **conservative**: any expression
 //! shape it does not understand contributes zero usage. This means
 //! the analysis may **miss** uses (false negatives) but never
@@ -15,13 +13,10 @@
 //! some violations might escape detection until the walker grows
 //! more cases.
 //!
-
 //! ## Coverage
 //!
-
 //! Recognised expression shapes:
 //!
-
 //! * `Path(p)` — single-segment identifier matches a tracked binding
 //! * `Call { func, args }` — sequential composition
 //! * `Binary { left, right }` — sequential composition
@@ -34,10 +29,8 @@
 //! * `Match { expr, arms }` — sequential(scrut) + max over arms
 //! * `If { condition, then, else }` — sequential(cond) + max(then, else)
 //!
-
 //! ## Shadowing
 //!
-
 //! Closure parameters and pattern bindings shadow tracked names —
 //! a tracked outer `x` is no longer matched inside `|x| x` because
 //! the inner `x` refers to the closure parameter.

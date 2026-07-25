@@ -1,6 +1,5 @@
 //! ARCH-P5 cross-tier drift pin — BYTE_SLICE (528) byte-view stamp.
 //!
-
 //! The Tier-1 `TextExtended::AsBytes` lowering must stamp its slice
 //! Pack with `verum_vbc::types::TypeId::BYTE_SLICE` via
 //! `lower_pack_typed` — the SAME TypeId the Tier-0 interpreter stamps
@@ -9,7 +8,6 @@
 //! dispatch on the header instead of the retired `len <= 1_000_000`
 //! FatRef-as-Text heuristic.
 //!
-
 //! Two guards, in the same text-grep style as
 //! `aot_lowering_coverage.rs` (no LLVM context setup needed):
 //!

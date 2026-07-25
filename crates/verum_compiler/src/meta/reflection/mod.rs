@@ -1,13 +1,10 @@
 //! Reflection API for compile-time introspection
 //!
-
 //! This module provides type introspection capabilities for meta functions,
 //! enabling compile-time inspection of types, fields, variants, and methods.
 //!
-
 //! ## Module Structure
 //!
-
 //! - [`type_kind`] - Type classification (Struct, Enum, Protocol, etc.)
 //! - [`field_info`] - Struct field metadata
 //! - [`variant_info`] - Enum variant metadata
@@ -21,13 +18,10 @@
 //! - [`primitive_type`] - Primitive type information
 //! - [`type_info`] - Complete type information
 //!
-
 //! ## Usage
 //!
-
 //! These types are used by the meta system to provide compile-time reflection:
 //!
-
 //! ```ignore
 //! // Get fields of a struct at compile time
 //! let fields = fields_of(Point);
@@ -36,7 +30,6 @@
 //! }
 //! ```
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

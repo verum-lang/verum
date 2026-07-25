@@ -1,6 +1,5 @@
 //! Method resolution for compile-time reflection
 //!
-
 //! Provides method resolution metadata matching core/meta/reflection.vr MethodResolution.
 
 use verum_ast::MetaValue;

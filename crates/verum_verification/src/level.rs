@@ -1,15 +1,12 @@
 //! Verification Level Types
 //!
-
 //! Implements the three-level gradual verification system:
 //! - Runtime: Dynamic checks with ~5-15ns overhead
 //! - Static: Compile-time verification with SMT solver
 //! - Proof: Formal proofs with proof certificates
 //!
-
 //! Verum has three verification levels forming a gradual spectrum:
 //!
-
 //! | Level | Annotation | Runtime Cost | Compile Time | Use Case |
 //! |----------|----------------------|------------------|--------------|---------------------------------|
 //! | Runtime | @verify(runtime) | ~5-15ns per check| +0% | Development, debugging |

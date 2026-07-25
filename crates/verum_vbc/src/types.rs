@@ -1,6 +1,5 @@
 //! VBC type system definitions.
 //!
-
 //! This module defines the type system used in VBC bytecode, including:
 //! - Type identifiers (TypeId, TypeParamId, ProtocolId)
 //! - Type references (TypeRef) with support for generics

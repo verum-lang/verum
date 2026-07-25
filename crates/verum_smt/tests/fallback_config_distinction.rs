@@ -7,7 +7,6 @@
 //! falling back on genuine unknowns (where both solvers are
 //! likely to give up).
 //!
-
 //! Closes the inert-defense pattern that wired
 //! `FallbackConfig.on_timeout` (commit cee85686). These tests
 //! pin the configuration contract — every flag round-trips

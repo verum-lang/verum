@@ -14,10 +14,8 @@
 )]
 //! Comprehensive tests for advanced protocol parsing
 //!
-
 //! Tests for advanced protocol features: GATs, higher-rank bounds, specialization
 //!
-
 //! Tests:
 //! - Generic Associated Types (GATs)
 //! - Higher-kinded types

@@ -1,31 +1,25 @@
 //! CBGR Generation Tracking Predicate Types
 //!
-
 //! CBGR Generation Tracking Predicates for SMT Verification:
 //! Provides type definitions for generation counter predicates used by the SMT
 //! solver to verify reference safety at compile time. The actual SMT encoding
 //! and verification logic is in verum_smt.
 //!
-
 //! # CBGR Memory Model
 //!
-
 //! ```text
 //! ThinRef<T>:
 //!  ptr: *const T // 8 bytes
 //!  generation: u64 // 8 bytes (48-bit generation + 16-bit epoch)
 //!  Total: 16 bytes
 //!
-
 //! Generation counter layout (64-bit):
 //!  Bits 0-47: Generation (48 bits, ~281 trillion)
 //!  Bits 48-63: Epoch (16 bits, 65536 epochs)
 //! ```
 //!
-
 //! # Predicates
 //!
-
 //! - `generation(ref)` - Extract generation counter from reference
 //! - `epoch(ref)` - Extract epoch counter from reference
 //! - `valid(ref)` - Check if reference is still valid

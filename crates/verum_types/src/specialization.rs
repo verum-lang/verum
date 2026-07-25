@@ -1,37 +1,29 @@
 //! Specialization Validation and Enforcement
 //!
-
 //! Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — Protocol Specialization
 //!
-
 //! This module implements the validation layer for @specialize attribute, ensuring:
 //! 1. Specialized implementations are actually more specific than base implementations
 //! 2. No overlapping implementations exist without a specialization relationship
 //! 3. Specialization lattice is well-formed (coherence)
 //!
-
 //! # Architecture
 //!
-
 //! The specialization system works in two phases:
 //!
-
 //! ## Compile-Time Validation (this module)
 //! - Detect overlapping implementations
 //! - Verify specialization relationships
 //! - Build specialization lattice
 //! - Check coherence constraints
 //!
-
 //! ## Runtime Selection (specialization_selection.rs)
 //! - Select most specific implementation
 //! - Cache selection decisions
 //! - Handle method dispatch
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! // General implementation
 //! implement<T> Clone for Maybe<T> where T: Clone {
@@ -43,7 +35,6 @@
 //!  }
 //! }
 //!
-
 //! // Specialized implementation (more specific)
 //! @specialize
 //! implement<T> Clone for Maybe<T> where T: Copy {

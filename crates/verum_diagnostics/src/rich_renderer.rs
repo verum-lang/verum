@@ -1,6 +1,5 @@
 //! Rich diagnostic renderer with world-class error messages.
 //!
-
 //! Provides Rust/Elm-level error rendering with:
 //! - Colored ANSI output
 //! - Code snippets with line numbers

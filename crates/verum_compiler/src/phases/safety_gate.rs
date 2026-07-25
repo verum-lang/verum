@@ -1,13 +1,11 @@
 //! Pre-typecheck safety-feature gates.
 //!
-
 //! Walks the parsed AST looking for language constructs that are
 //! disabled by the current `[safety]` feature set, emitting clean
 //! diagnostics before type-checking runs. Keeping these checks in
 //! their own walker avoids threading feature flags through the
 //! ~52K-line `TypeChecker` and keeps the gate logic auditable.
 //!
-
 //! Currently gates:
 //!  - `unsafe { … }` expressions when `safety.unsafe_allowed = false`.
 

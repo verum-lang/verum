@@ -1,10 +1,8 @@
 //! SQL literal parser
 //!
-
 //! Tagged text literal parser for `sql#"..."`, `sql.postgres#"..."`,
 //! `sql.sqlite#"..."`, `sql.mysql#"..."` per database.md §5.1 / §5.3.
 //!
-
 //! v0.1 contract (compile-time):
 //!  * String must be non-empty after trimming.
 //!  * Brace / bracket / paren depths must end balanced (catches the
@@ -26,14 +24,12 @@
 //!  Two queries differing only in whitespace / comments share the
 //!  same server-side cached statement.
 //!
-
 //! Schema-aware row-typing (`SELECT id FROM users` → typed
 //! `PreparedQuery<{id: UserId}, ()>`) is gated on a separate
 //! schema-snapshot file (`schema.snap.vr`); when absent the
 //! parameter-count and fingerprint are still produced and the row
 //! shape is left as `Unknown` for the caller to ascribe explicitly.
 //!
-
 //! Spec: database spec §5.1 (PreparedQuery), §5.3 (sql#).
 
 use verum_ast::Span;

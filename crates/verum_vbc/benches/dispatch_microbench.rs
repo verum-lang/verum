@@ -1,6 +1,5 @@
 //! Per-opcode VBC dispatch microbenchmarks (#102).
 //!
-
 //! Measures the wall-clock cost of each opcode's dispatch + execute
 //! path in isolation, by building a function whose body is a tight
 //! straight-line block of N copies of the opcode under test followed
@@ -9,26 +8,21 @@
 //! cycles, multiply by the host CPU frequency in GHz (e.g. 3.2 GHz
 //! Apple-silicon performance core ⇒ cycles ≈ ns × 3.2).
 //!
-
 //! ## Targets (`crates/verum_vbc/CLAUDE.md`)
 //!
-
 //! | Opcode class | Target | Source |
 //! |-----------------------------|-----------------------|---------------------|
 //! | Dispatch (any opcode) | < 20 cycles | "Performance Targets" |
 //! | `Call` / `CallM` | < 50 cycles | "Method call" |
 //! | `NewList` / `NewMap` / `NewSet` | < 100 cycles | "Memory alloc" |
 //!
-
 //! Any benchmark exceeding 2× the relevant target (e.g. > 40 cycles
 //! on a basic dispatch opcode) flags a perf gap that warrants
 //! investigation. The bench output ends with a synthesised "GAP /
 //! PASS / WARN" report when run via `cargo bench`.
 //!
-
 //! ## Methodology notes
 //!
-
 //! - **Straight-line, no branches**: We avoid loop frameworks so
 //!  the measurement is dominated by the dispatch + execute of the
 //!  target opcode rather than the loop bookkeeping (CmpI, JmpNot,
@@ -42,7 +36,6 @@
 //!  same bench: only `execute_table` is timed, mirroring the
 //!  typical hot-path where one VBC module runs many times.
 //!
-
 //! Run with:
 //! ```sh
 //! cargo bench -p verum_vbc --bench dispatch_microbench

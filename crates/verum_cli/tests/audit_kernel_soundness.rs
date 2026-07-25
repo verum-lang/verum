@@ -1,6 +1,5 @@
 //! Integration tests for `verum audit --kernel-soundness` (#80 / VERUM-TRUST-1).
 //!
-
 //! Pin coverage:
 //!  - Plain output reports the canonical 38-rule corpus + IOU list.
 //!  - JSON output is structured with the schema_version=1 envelope.

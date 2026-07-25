@@ -1,6 +1,5 @@
 //! LSP-wide configuration driven by the client's `initializationOptions`.
 //!
-
 //! Every knob surfaced in the VS Code extension's `package.json` (and the
 //! settings snippet in `docs/detailed/25-developer-tooling.md §3.12`) lands
 //! here. Components that need the value (refinement validator, CBGR hints,
@@ -8,7 +7,6 @@
 //! we can update it from the `initialize` handler without `&mut self` on
 //! the `LanguageServer` trait.
 //!
-
 //! All fields have sensible defaults: a freshly constructed `LspConfig`
 //! reproduces the old hard-coded behaviour, so existing code paths continue
 //! to work even when the client sends no init options.

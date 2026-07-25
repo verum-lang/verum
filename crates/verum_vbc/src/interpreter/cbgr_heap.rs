@@ -1,18 +1,14 @@
 //! CBGR-integrated heap allocation for VBC interpreter.
 //!
-
 //! This module provides heap allocation with full CBGR (Compile-time Borrow
 //! checking with Generational References) integration using verum_common types.
 //!
-
 //! # V-LLSI Architecture
 //!
-
 //! With the V-LLSI (Verum Low-Level System Interface) architecture, CBGR types
 //! are defined in verum_common and used consistently across the interpreter.
 //! The interpreter bridges VBC execution with the unified allocation system:
 //!
-
 //! ```text
 //! ┌────────────────────────────────────────────────────────────────────────┐
 //! │ CBGR HEAP ALLOCATION LAYOUT │
@@ -37,10 +33,8 @@
 //! └────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # CBGR Implementation
 //!
-
 //! Each allocation has a 32-byte AllocationHeader: [size:u32, align:u32, generation:u32,
 //! epoch:u16, flags:u16, type_id:u32, padding:u32, reserved:u64]. References carry generation
 //! counters; on deref, the reference's generation is compared to the allocation's current

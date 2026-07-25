@@ -1,6 +1,5 @@
 //! Core refinement type verification using Z3.
 //!
-
 //! This module provides the main verification logic for checking if values
 //! satisfy refinement predicates.
 

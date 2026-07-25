@@ -1,14 +1,11 @@
 //! # Routing Statistics
 //!
-
 //! Tracks how the capability router dispatches proof goals to SMT solvers,
 //! enabling diagnostic analysis, performance tuning, and validation that
 //! the router's theory-winner predictions match reality.
 //!
-
 //! ## Collected Metrics
 //!
-
 //! - **Routing decisions**: how many times each `SolverChoice` variant was
 //!  selected, broken down by inferred theory.
 //! - **Solver wins**: for portfolio races, which solver produced the winning
@@ -19,10 +16,8 @@
 //! - **Confidence calibration**: for each theory, the router's predicted
 //!  confidence vs. the empirical win rate — measures routing quality.
 //!
-
 //! ## Usage
 //!
-
 //! `RoutingStats` is embedded in `BackendSwitcher` and updated after every
 //! `solve()` call. Call `RoutingStats::report()` for a human-readable
 //! summary, or `RoutingStats::as_json()` for machine-readable export.

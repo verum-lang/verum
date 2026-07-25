@@ -1,19 +1,16 @@
 //! Production-ready refinement type verification for Tier 1
 //!
-
 //! Verum refinement types constrain base types with predicates: five binding forms are
 //! supported (inline `T{pred}`, lambda `T where |x| pred`, sigma-type `x: T where pred(x)`,
 //! named predicate `T where pred_name`, bare `T where pred`). Refinement subtyping:
 //! `T{P} <: T{Q}` iff `forall x. P(x) => Q(x)`. All forms desugar to sigma types
 //! in the dependent type core: `(x: T, Proof(P(x)))`.
 //!
-
 //! Implements the three-tier verification strategy:
 //! 1. Syntactic checks: <1ms for simple cases
 //! 2. SMT solver: 10-500ms for complex predicates (with timeout)
 //! 3. Runtime fallback: For undecidable cases
 //!
-
 //! Supports three verification modes:
 //! - @verify(runtime): Skip SMT, use runtime checks only
 //! - @verify(proof): Full SMT verification (may be slow)

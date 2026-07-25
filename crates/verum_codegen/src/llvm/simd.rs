@@ -1,42 +1,32 @@
 //! SIMD (Single Instruction, Multiple Data) code generation.
 //!
-
 //! This module provides LLVM IR generation for SIMD vector operations,
 //! implementing platform-specific lowering for various CPU architectures.
 //!
-
 //! # Overview
 //!
-
 //! SIMD operations in Verum use portable vector types (`Vec<T, N>`, `Mask<N>`)
 //! that compile to optimal instructions on each target platform:
 //!
-
 //! - **x86_64**: SSE4.2, AVX, AVX2, AVX-512
 //! - **aarch64**: NEON, SVE
 //! - **RISC-V**: V extension
 //!
-
 //! # Generated Code Patterns
 //!
-
 //! ```llvm
 //! ; Vector addition (4xf32)
 //! %sum = fadd <4 x float> %a, %b
 //!
-
 //! ; Fused multiply-add (with intrinsic)
 //! %fma = call <4 x float> @llvm.fma.v4f32(<4 x float> %a, <4 x float> %b, <4 x float> %c)
 //!
-
 //! ; Horizontal sum reduction
 //! %sum = call float @llvm.vector.reduce.fadd.v4f32(float 0.0, <4 x float> %v)
 //! ```
 //!
-
 //! # SIMD Architecture
 //!
-
 //! Verum provides portable SIMD via `Vec<T: SimdElement, N>` types with `@repr(simd)`.
 //! Key features:
 //! - Portable vector types compile to optimal instructions per platform:

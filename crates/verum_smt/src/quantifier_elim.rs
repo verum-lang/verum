@@ -1,56 +1,45 @@
 //! Quantifier Elimination Module for Verum SMT
 //!
-
 //! This module provides comprehensive quantifier elimination (QE) capabilities using Z3's
 //! powerful QE tactics and model-based projection. QE is essential for:
 //!
-
 //! - **Loop Invariant Synthesis**: Generate loop invariants by eliminating loop-local variables
 //! - **Precondition/Postcondition Synthesis**: Derive contracts from implementations
 //! - **Variable Projection**: Project formulas onto subsets of variables
 //! - **Formula Simplification**: Reduce formula complexity via QE
 //! - **Counterexample Minimization**: Extract minimal failing conditions
 //!
-
 //! ## Quantifier Elimination Techniques
 //!
-
 //! 1. **QE-Lite**: Lightweight QE for linear arithmetic (fastest, ~15ns overhead)
 //! 2. **QE-SAT**: SAT-based QE with model enumeration
 //! 3. **Model-Based Projection**: Project models to variable subsets
 //! 4. **Skolemization**: Replace existential quantifiers with fresh constants
 //! 5. **Full QE**: Complete quantifier elimination with all tactics
 //!
-
 //! ## Performance Targets
 //!
-
 //! - QE-Lite: < 100μs for linear arithmetic formulas
 //! - Model projection: < 500μs for typical refinement types
 //! - Full QE: < 5s timeout for complex cases
 //! - Invariant synthesis: 15-25% improvement over manual approaches
 //!
-
 //! ## Example Usage
 //!
-
 //! ```ignore
 //! use verum_smt::{QuantifierEliminator, QEConfig};
 //! use z3::Context;
 //! use std::sync::Arc;
 //!
-
 //! let ctx = Arc::new(Context::thread_local());
 //! let mut qe = QuantifierEliminator::new(ctx.clone());
 //!
-
 //! // Eliminate existential quantifiers
 //! // ∃x. (x > 0 ∧ y = x + 1) => y > 1
 //! // let formula = ...; // Build Z3 formula
 //! // let simplified = qe.eliminate_existential(&formula, &["x"]);
 //! ```
 //!
-
 //! Refinement type verification: Verum's type system combines HM inference with refinement
 //! types (e.g., `Int{> 0}`, `Text where valid_email`). Refinements are verified via SMT
 //! solvers. QE simplifies refinement predicates by eliminating local variables, enabling

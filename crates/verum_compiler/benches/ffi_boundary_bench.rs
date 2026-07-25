@@ -1,9 +1,7 @@
 //! Performance Benchmarks for FFI Boundary Processing
 //!
-
 //! Target: <10ns marshalling overhead per call
 //!
-
 //! Measures:
 //! - Type validation performance
 //! - Marshalling wrapper generation time

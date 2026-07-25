@@ -1,11 +1,9 @@
 //! Tier-specific pipeline constructors + VBC JIT/AOT entries.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 19). Houses the
 //! sibling-mode constructor variants and their corresponding
 //! tier-execution entry points:
 //!
-
 //!  * `new_mlir_jit` / `new_mlir_aot` — MLIR JIT / AOT
 //!  constructors (GPU code path).
 //!  * `new_vbc_jit` / `new_vbc_aot` — VBC JIT / AOT

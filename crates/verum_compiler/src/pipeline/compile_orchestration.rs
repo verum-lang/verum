@@ -1,11 +1,9 @@
 //! Multi-file compilation orchestration.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 14). Houses the four
 //! public entry points that drive compilation across discovered
 //! source files:
 //!
-
 //!  * `compile_string` — single-source convenience for testing
 //!  and simple use cases.
 //!  * `compile_multi_pass` — three-pass architecture

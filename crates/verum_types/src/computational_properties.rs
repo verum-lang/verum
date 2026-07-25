@@ -1,18 +1,14 @@
 //! Computational Properties Tracking for Verum
 //!
-
 //! Tracks side effects and purity of functions: Pure/IO/Async/Divergent
 //!
-
 //! ⚠️ NOTE: This is NOT the Context System (DI)!
 //! - Context System = Dependency Injection (provide/using) - see context_check.rs module
 //! - This module = Purity and effect tracking for optimization
 //!
-
 //! Computational properties: compile-time tracking of Pure, IO, Async, Fallible, Mutates effects
 //! Context type system integration: context requirements tracked in function types, checked at call sites — (distinguishes from DI contexts)
 //!
-
 //! This module tracks the computational properties of functions and expressions
 //! for optimization and safety:
 //! - Pure: No side effects, always terminates

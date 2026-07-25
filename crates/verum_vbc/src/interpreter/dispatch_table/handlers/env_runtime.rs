@@ -1,15 +1,12 @@
 //! High-level Rust intercepts for `core.base.env` operations.
 //!
-
 //! Sibling to `shell_runtime.rs` (VBC-1) and `file_runtime.rs`
 //! (VBC-FILE-1). Bypasses the libSystem `getenv`/`setenv`/`unsetenv`
 //! FFI chain and dispatches directly to `std::env` from the
 //! interpreter host process.
 //!
-
 //! # Functions intercepted
 //!
-
 //!  * `var(key: &Text) -> Result<Text, VarError>` — `std::env::var`
 //!  mapped to `Result.Ok(text)` / `Result.Err(VarError.NotPresent)`
 //!  / `Result.Err(VarError.NotUnicode(bytes))`.
@@ -18,10 +15,8 @@
 //!  * `set_var(key: &Text, value: &Text) -> Unit` — `std::env::set_var`.
 //!  * `remove_var(key: &Text) -> Unit` — `std::env::remove_var`.
 //!
-
 //! # Permission gate
 //!
-
 //! Reading env vars is unrestricted (matches the libSystem
 //! `getenv` permission policy at `ffi_extended.rs` — the symbol is
 //! NOT in `ffi_symbol_permission_scope`'s table). Mutating env

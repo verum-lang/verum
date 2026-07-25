@@ -1,18 +1,15 @@
 //! Thread-local breadcrumb trail attached to crash reports.
 //!
-
 //! A breadcrumb records *where in the pipeline* we are — phase name plus
 //! a short detail (file being compiled, function, pass). On a crash the
 //! trail is serialised into the report so the dev who receives the
 //! report can see the last few steps before the fault without having
 //! access to the user's `.vr` sources.
 //!
-
 //! Each breadcrumb is pushed via `enter(...)` and popped automatically
 //! when the returned RAII guard is dropped. Trails are bounded
 //! (`MAX_TRAIL_LEN`) so long compilations don't retain unbounded memory.
 //!
-
 //! Crossing a signal boundary: the trail lives in thread-local storage;
 //! signal handlers read it via a process-wide "last known trail" snapshot
 //! updated on every push/pop. This makes the last good trail visible

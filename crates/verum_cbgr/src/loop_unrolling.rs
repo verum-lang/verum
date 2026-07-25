@@ -1,24 +1,19 @@
 //! Loop Unrolling for Bounded Iteration Analysis
 //!
-
 //! By unrolling loops up to a configurable bound, escape analysis can track
 //! per-iteration behavior precisely rather than conservatively merging all
 //! iterations. This enables promotion of references that are only used within
 //! a single loop iteration (NoEscape per iteration).
 //!
-
 //! This module implements production-grade loop unrolling for CBGR escape analysis.
 //! By unrolling loops up to a configurable bound, we can achieve better precision
 //! in tracking escape behavior on a per-iteration basis.
 //!
-
 //! # Overview
 //!
-
 //! Loop unrolling transforms loops into a sequence of explicit iterations,
 //! enabling more precise escape analysis:
 //!
-
 //! ```rust,ignore
 //! // Original loop
 //! for i in 0..4 {
@@ -27,7 +22,6 @@
 //!  // data may or may not escape depending on i
 //! }
 //!
-
 //! // Unrolled version
 //! {
 //!  let data_0 = allocate(); // RefId(1_0)
@@ -47,34 +41,27 @@
 //! }
 //! ```
 //!
-
 //! # Key Features
 //!
-
 //! 1. **Bounded Unrolling**: Configurable limit (default: 4, max: 16)
 //! 2. **Loop Invariant Detection**: Identify allocations that don't depend on iteration
 //! 3. **Per-Iteration Tracking**: Track escape separately for each iteration
 //! 4. **CFG Rewriting**: Generate unrolled control flow graph
 //! 5. **Loop Peeling**: Separate first/last iterations for special analysis
 //!
-
 //! # Performance Impact
 //!
-
 //! - **Precision**: 2-5x improvement in promotion rate for loop-heavy code
 //! - **Analysis Time**: `O(unroll_bound` × `loop_body_size`)
 //! - **Target**: < 10ms for typical loops with bound=4
 //!
-
 //! # Example Use Case
 //!
-
 //! ```rust,ignore
 //! fn process_chunks(data: &[u8]) {
 //!  for i in 0..4 {
 //!  let chunk = &data[i*256..(i+1)*256]; // RefId varies by i
 //!
-
 //!  if i < 3 {
 //!  // No escape: chunk used locally
 //!  validate(chunk);
@@ -86,7 +73,6 @@
 //! }
 //! ```
 //!
-
 //! With unrolling, we can prove that iterations 0-2 don't escape,
 //! allowing promotion for 75% of iterations.
 

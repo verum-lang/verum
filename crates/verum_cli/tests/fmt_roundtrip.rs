@@ -1,6 +1,5 @@
 //! Round-trip contract: `fmt(parse(src)) ≅ src` (up to whitespace).
 //!
-
 //! The strict invariant is that parsing the formatted output and
 //! re-formatting it produces the same text — equivalent to asserting
 //! the AST shape is preserved across format → parse → format. We
@@ -8,7 +7,6 @@
 //! parses, so structural AST equality requires a span-stripping
 //! comparator we don't need to maintain.
 //!
-
 //! In short: every fixture must satisfy
 //!  `fmt(parse(fmt(parse(src)))) == fmt(parse(src))`
 //! Combined with idempotence (`fmt(fmt(src)) == fmt(src)`), this

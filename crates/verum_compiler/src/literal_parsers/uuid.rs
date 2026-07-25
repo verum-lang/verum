@@ -1,9 +1,7 @@
 //! UUID literal parser
 //!
-
 //! Parses and validates UUID strings at compile-time.
 //!
-
 //! # Format
 //! Supports standard UUID formats:
 //! - Full: `550e8400-e29b-41d4-a716-446655440000`
@@ -11,13 +9,11 @@
 //! - Braced: `{550e8400-e29b-41d4-a716-446655440000}`
 //! - URN: `urn:uuid:550e8400-e29b-41d4-a716-446655440000`
 //!
-
 //! # Example
 //! ```verum
 //! let id = uuid#"550e8400-e29b-41d4-a716-446655440000"
 //! ```
 //!
-
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 

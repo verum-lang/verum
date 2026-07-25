@@ -1,25 +1,20 @@
 //! End-to-end integration tests for `verum cache-closure`.
 //!
-
 //! Spawns the actual `verum` binary and validates the chain:
 //!
-
 //!  `verum cache-closure {stat,list,get,clear,decide}` (clap) →
 //!  `commands::cache_closure::run_*` →
 //!  `verum_verification::closure_cache::FilesystemCacheStore` →
 //!  per-theorem JSON record on disk
 //!
-
 //! Together with the 26 trait-level tests in
 //! `verum_verification::closure_cache::tests` and the 14 handler
 //! unit tests in `commands::cache_closure::tests`, this proves the
 //! `IncrementalCacheStore` trait surface is consumable from a shell
 //! — closing the integration gap #79 was opened to address.
 //!
-
 //! ## Test fixture pattern
 //!
-
 //! Every test points the cache at a tempdir via `--root <dir>`, so
 //! the test never touches the developer's actual `target/.verum_cache/`.
 

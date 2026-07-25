@@ -1,13 +1,10 @@
 //! Comprehensive Context System dialect operations for Verum.
 //!
-
 //! The context system provides dependency injection (DI) capabilities in Verum,
 //! allowing functions to declare required contexts and receive them implicitly.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │ Context Stack │
@@ -18,18 +15,14 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Context Lookup (~5-30ns overhead)
 //!
-
 //! 1. Check current frame for context
 //! 2. Walk up the stack if not found
 //! 3. Monomorphization pass can eliminate lookups
 //!
-
 //! # Operations
 //!
-
 //! - `context_get`: Retrieve context value
 //! - `context_provide`: Provide new context value
 //! - `context_scope`: Scoped context provision

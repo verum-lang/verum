@@ -1,10 +1,8 @@
 //! Module loading from the filesystem.
 //!
-
 //! Loads Verum source files (.vr) and parses them into AST modules.
 //! Supports conditional compilation via @cfg attributes.
 //!
-
 //! File system mapping rules:
 //! 1. `lib.vr` or `main.vr` is the crate root
 //! 2. `foo.vr` defines module `foo`

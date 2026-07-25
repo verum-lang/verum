@@ -1,17 +1,13 @@
 //! Tactic-to-proof-term elaboration — connects Verum proof bodies
 //! to kernel-checkable [`Certificate`] values.
 //!
-
 //! # The de Bruijn criterion
 //!
-
 //! The architectural pattern that makes a proof assistant
 //! trustworthy is:
 //!
-
 //!  trusted_kernel + tactic_as_proof_term_builder
 //!
-
 //! Hilbert-style proofs run inside the kernel itself; tactic-style
 //! proofs are *productivity sugar* whose semantics IS proof-term
 //! construction. Without the second half, the trust base
@@ -19,16 +15,13 @@
 //! trustworthy but practically unused — no Verum theorem reduces
 //! to a kernel-readable term.
 //!
-
 //! This module is the second half: it walks
 //! `ProofBody::Tactic(TacticExpr)` (or `ProofBody::Term(Expr)`) and
 //! emits a `Term` that the kernel re-checks against the theorem's
 //! [`crate::verification_goal::VerificationGoal::to_term`].
 //!
-
 //! # Surface
 //!
-
 //!  - [`ElabContext`] — name → de-Bruijn-index map for local
 //!  binders + global axiom registry.
 //!  - [`elaborate_theorem`] — top-level entry: `TheoremDecl` →
@@ -44,33 +37,26 @@
 //!  forms, undeclared lemmas, unsupported expression shapes,
 //!  and kernel-rejection contract violations.
 //!
-
 //! # Tactic coverage
 //!
-
 //! Tactics that emit kernel-readable terms:
 //!
-
 //!  - `Apply { lemma, args }` — `App` chain over an axiom or local
 //!  binder resolved via [`resolve_apply_target`].
 //!  - `Exact(expr)` — direct Curry-Howard term via [`expr_to_term`].
 //!  - `Reflexivity` — innermost-binder reference (placeholder until
 //!  `DefinitionalEquality::Refl` is wired into the kernel checker).
 //!
-
 //! Other tactic forms ([`TacticExpr::Seq`], `Intro`, `Rewrite`,
 //! `Induction`, `Smt`, `Ring`, `Omega`, …) return
 //! [`ElabError::UnsupportedTactic`] with the variant name so
 //! downstream tooling can route around them.
 //!
-
 //! # Proposition coverage
 //!
-
 //! [`proposition_to_term`] translates the following Verum proposition
 //! shapes into kernel terms:
 //!
-
 //!  - `Literal(Bool::*)` → `Universe(0)` (trivially-inhabited).
 //!  - `Path` / `Field` / `Call` — axiom resolution + App chain.
 //!  - `Binary` — opaque connective axiom application
@@ -78,18 +64,14 @@
 //!  [`register_propositional_connectives`]).
 //!  - `Unary { op: Not, .. }` — `Not` connective App.
 //!
-
 //! Quantifiers, pattern matches, blocks, and conditionals fall
 //! through to [`ElabError::UnsupportedExpression`].
 //!
-
 //! # Usage pattern
 //!
-
 //! ```ignore
 //! use verum_kernel::tactic_elaborator::{ElabContext, elaborate_theorem};
 //!
-
 //! let mut ctx = ElabContext::new();
 //! ctx.register_axiom("ZFC.foundation", &foundation_type);
 //! let cert = elaborate_theorem(&theorem_decl, &ctx)?;
@@ -98,10 +80,8 @@
 //!  // criterion check
 //! ```
 //!
-
 //! # Discipline pin
 //!
-
 //! When this module produces a [`Certificate`], the certificate's
 //! [`Certificate::verify`] MUST succeed in well-formed inputs
 //! (theorem with a complete proof body and all referenced lemmas in

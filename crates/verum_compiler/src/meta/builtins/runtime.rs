@@ -1,14 +1,11 @@
 //! Runtime/Target Information Intrinsics (Tier 1 - Requires MetaRuntime)
 //!
-
 //! Provides compile-time information about the target platform and build.
 //! All functions in this module require the `MetaRuntime` context since they
 //! access build configuration and environment information.
 //!
-
 //! ## Target Information
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `target_os()` | `() -> Text` | Get target OS (linux, macos, windows) |
@@ -18,10 +15,8 @@
 //! | `target_endian()` | `() -> Text` | Get endianness ("little" or "big") |
 //! | `target_has_feature(feat)` | `(Text) -> Bool` | Check target feature |
 //!
-
 //! ## Build Information
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `crate_name()` / `cog_name()` | `() -> Text` | Get current crate name |
@@ -32,31 +27,24 @@
 //! | `opt_level()` | `() -> Int` | Get optimization level (0-3) |
 //! | `compiler_version()` | `() -> Text` | Get compiler version |
 //!
-
 //! ## Feature Flags
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `has_feature(name)` | `(Text) -> Bool` | Check if feature enabled |
 //! | `enabled_features()` | `() -> List<Text>` | List all enabled features |
 //!
-
 //! ## Environment
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `env(name)` | `(Text) -> Maybe<Text>` | Get environment variable |
 //! | `is_ci()` | `() -> Bool` | Check if running in CI |
 //!
-
 //! ## Context Requirements
 //!
-
 //! **Tier 1**: All functions require `using [MetaRuntime]` context.
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

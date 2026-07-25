@@ -1,6 +1,5 @@
 //! Comprehensive CLI Integration Tests
 //!
-
 //! These tests verify ALL CLI parameters work correctly with REAL execution.
 //! No mocks - all tests use actual compiler/runtime infrastructure.
 //! Uses tempfile for auto-cleanup after each test.

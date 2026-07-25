@@ -1,17 +1,13 @@
 //! Bitfield types for the Verum AST.
 //!
-
 //! This module defines AST nodes for Verum's first-class bitfield system,
 //! which provides type-safe bit-level data manipulation for hardware drivers,
 //! network protocols, and embedded systems.
 //!
-
 //! # Design Philosophy
 //!
-
 //! Verum bitfields follow the language's core principles:
 //!
-
 //! - **Semantic Honesty**: Types describe meaning (`BitWidth`, `ByteOrder`)
 //!  rather than implementation details
 //! - **Type Safety**: Bit widths are validated at compile time
@@ -19,13 +15,10 @@
 //! - **Zero-Cost**: Compiles to optimal bit manipulation instructions
 //! - **Verifiable**: SMT integration for constraint verification
 //!
-
 //! # Grammar
 //!
-
 //! Per `grammar/verum.ebnf`, bitfield attributes use standard attribute syntax:
 //!
-
 //! ```text
 //! @bits(N) - Field bit width
 //! @bitfield - Type uses packed bitfield layout
@@ -33,10 +26,8 @@
 //! @offset(N) - Explicit bit offset (optional)
 //! ```
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! // Network packet header with explicit bit layout
 //! @bitfield
@@ -56,7 +47,6 @@
 //!  @bits(32) dest_addr: U32,
 //! };
 //!
-
 //! // Hardware register with read-only and write-only fields
 //! @bitfield
 //! @endian(little)
@@ -68,10 +58,8 @@
 //! };
 //! ```
 //!
-
 //! # Compile-Time Verification
 //!
-
 //! The type checker validates:
 //! - Field bit width does not exceed storage type width
 //! - Total bits fit within specified container size

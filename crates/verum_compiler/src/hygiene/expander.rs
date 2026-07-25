@@ -1,20 +1,16 @@
 //! Quote Expansion with Hygiene
 //!
-
 //! Implements the quote expansion pipeline with proper hygiene enforcement.
 //! This module handles the mark phase, splice phase, and stage management.
 //!
-
 //! ## Pipeline Stages
 //!
-
 //! 1. Parse Quote - Parse quote { ... } into QuoteAST
 //! 2. Mark Phase - Assign fresh marks to introduced bindings
 //! 3. Splice Phase - Substitute $var and $[for...] expressions
 //! 4. Hygiene Check - Verify no accidental capture occurs
 //! 5. Emit Code - Generate TokenStream with hygiene metadata
 //!
-
 //! Hygienic macro expansion: ensures macro-introduced bindings do not
 //! capture or shadow user bindings via syntax context tracking.
 

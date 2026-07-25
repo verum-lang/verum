@@ -14,7 +14,6 @@
 )]
 //! Safety tests for verum_lexer
 //!
-
 //! Tests memory safety, bounds checking, and panic-free guarantees
 //! including error recovery for invalid tokens.
 

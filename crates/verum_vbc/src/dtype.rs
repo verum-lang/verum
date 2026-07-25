@@ -1,14 +1,11 @@
 //! Tensor data type definitions.
 //!
-
 //! This module provides the canonical `DType` enum used throughout VBC for
 //! tensor operations. It unifies the previously duplicated definitions in
 //! `metadata/shape.rs` (compile-time) and `interpreter/tensor.rs` (runtime).
 //!
-
 //! # Naming Convention
 //!
-
 //! Type names match `core/math/tensor.vr`:
 //! - Float types: F16, BF16, F32, F64
 //! - Signed integers: I8, I16, I32, I64

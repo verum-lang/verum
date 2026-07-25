@@ -1,15 +1,12 @@
 //! Proof Verification Phase
 //!
-
 //! Bridges the AST proof system (in `verum_ast`) with the SMT proof search engine
 //! (in `verum_smt`). This module converts AST-level proof constructs — tactic
 //! expressions, structured proof steps, calculation chains, and proof methods —
 //! into SMT-level proof tactics that can be executed by `ProofSearchEngine`.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_ast::TacticExpr ──┐
 //! verum_ast::ProofStep ├──► proof_verification ──► verum_smt::ProofTactic
@@ -17,10 +14,8 @@
 //! verum_ast::ProofBody ──┘ ──► VerificationResult
 //! ```
 //!
-
 //! # Proof Body Variants
 //!
-
 //! - **Term**: Curry-Howard proof term — type-checked as an expression whose type
 //!  matches the proposition.
 //! - **Tactic**: Single tactic expression converted to `ProofTactic` and executed.

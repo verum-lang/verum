@@ -1,6 +1,5 @@
 //! Complete type information for compile-time reflection
 //!
-
 //! Provides comprehensive type metadata combining all reflection components.
 
 use verum_common::{List, Maybe, Text};

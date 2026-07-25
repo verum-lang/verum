@@ -2,7 +2,6 @@
 //! the type-theoretic results currently outside the Verum kernel's
 //! decidable fragment.
 //!
-
 //! This module is the **trusted boundary** for K-Round-Trip's
 //! universal canonicalize. Each admit names a specific Diakrisis
 //! preprint result (paragraph + theorem number); when the preprint
@@ -10,10 +9,8 @@
 //! algorithm, the corresponding admit is removed and call sites are
 //! re-checked against the now-derivable lemma.
 //!
-
 //! # Why bridge admits, not silent assumptions
 //!
-
 //! Pre-V2 the round-trip rule had a single error variant
 //! (`KernelError::RoundTripFailed`) that fired whenever the
 //! decidable fragment couldn't admit a pair. Calls into the universal
@@ -21,26 +18,22 @@
 //! `@framework(...)` axiom citation in user code. V2 closes this gap
 //! by making the dependency explicit at the kernel surface:
 //!
-
 //!  * `BridgeId::ConfluenceOfModalRewrite` — Diakrisis Theorem 16.10
 //!  confluence of the (Box / Diamond / Shape / Flat / Sharp)
 //!  rewrite system. Required when two canonical-form paths over
 //!  a modal subterm produce structurally-different normal forms;
 //!  the bridge asserts they meet at a common further reduct.
 //!
-
 //!  * `BridgeId::QuotientCanonicalRepresentative` — Diakrisis
 //!  Theorem 16.7 canonical-representative selector for
 //!  `Quotient(base, equiv)`. Required when two terms differ
 //!  only in their choice of equivalence-class representative.
 //!
-
 //!  * `BridgeId::CohesiveAdjunctionUnitCounit` — Diakrisis Theorem
 //!  14.3 unit/counit naturality for the (∫ ⊣ ♭ ⊣ ♯) cohesive
 //!  adjunction triple. Required for `Flat(Sharp(x))` collapse
 //!  under the right adjoint side.
 //!
-
 //!  * `BridgeId::EpsMuTauWitness` — Diakrisis Axiom A-3 σ_α / π_α
 //!  τ-witness construction. The K-Eps-Mu rule's
 //!  decides necessary conditions structurally; the
@@ -49,7 +42,6 @@
 //!  axiom A-3) is the residual preprint-blocked step.
 //!  surfaces the construction as this admit.
 //!
-
 //! Each admit has a kernel re-check facade — `check_<bridge>` —
 //! that audits the bridge invocation site (recording the
 //! [`BridgeAdmit`] in a returned audit trail) but does NOT verify
@@ -57,10 +49,8 @@
 //! (`vcs/red-team/round-1-architecture.md`, the `verum audit
 //! --proof-honesty` walker) enumerate every bridge-admit usage.
 //!
-
 //! # Future direction (V3 promotion)
 //!
-
 //! When Diakrisis 16.10 confluence lands as a structural algorithm,
 //! `check_confluence_of_modal_rewrite` is rewritten to actually
 //! compute the common reduct (instead of admitting it) and the

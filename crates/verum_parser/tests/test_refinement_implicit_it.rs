@@ -14,7 +14,6 @@
 )]
 //! Test cases for implicit 'it' in inline refinement types.
 //!
-
 //! The grammar allows implicit `it` in refinements:
 //! - `Int{> 0}` should be equivalent to `Int{it > 0}`
 //! - `Int{>= 0 && <= 100}` should be equivalent to `Int{it >= 0 && it <= 100}`

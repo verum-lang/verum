@@ -1,19 +1,15 @@
 //! Continuous benchmarking — head-to-head vs Coq / Lean4 / Isabelle
 //! / Agda.
 //!
-
 //! ## Goal
 //!
-
 //! Establish Verum's quantitative leadership claim with
 //! **reproducible** benchmarks across the proof-assistant
 //! landscape. Anyone can re-run the suite and verify the
 //! numbers. No marketing claims, only verifiable measurements.
 //!
-
 //! Per benchmark this module captures:
 //!
-
 //!  1. **Trusted Computing Base size** — kernel LOC + transitive
 //!  trust dependencies.
 //!  2. **Compilation / verification speed** — LOC/sec or
@@ -29,14 +25,11 @@
 //!  proofs that pass the kernel (only Verum supports this
 //!  today; comparable systems baseline at 0%).
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as the rest of the
 //! integration arc:
 //!
-
 //!  * [`BenchmarkSystem`] enum — Verum / Coq / Lean4 / Isabelle /
 //!  Agda.
 //!  * [`BenchmarkMetric`] enum — typed measurement category.
@@ -49,10 +42,8 @@
 //!  * [`ComparisonMatrix`] aggregator — produces head-to-head
 //!  matrices across systems.
 //!
-
 //! ## V0 contract
 //!
-
 //!  * The trait surface, result schema, and aggregator ship now.
 //!  * Production runners (running actual `coqc` / `lean` /
 //!  `isabelle` / `agda`) are V1+; this module ships the

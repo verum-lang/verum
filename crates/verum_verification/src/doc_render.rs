@@ -1,10 +1,8 @@
 //! Auto-paper generator from @theorem / @lemma / @corollary / @axiom
 //! declarations.
 //!
-
 //! ## Goal
 //!
-
 //! Eliminate the duplicate-source problem (#84): a Verum corpus IS
 //! the formal proof AND the paper draft. Pre-this-module a project
 //! had to maintain a `paper.tex` alongside the `.vr` corpus,
@@ -14,15 +12,12 @@
 //! proof body into a structured [`DocItem`] and emits Markdown /
 //! LaTeX / HTML directly from that.
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as the rest of the integration
 //! arc (ladder_dispatch / tactic_combinator / proof_repair /
 //! closure_cache):
 //!
-
 //!  * [`DocItem`] — typed projection of one declaration.
 //!  * [`DocCorpus`] — collection + citation-graph + cross-ref
 //!  validator.
@@ -31,15 +26,12 @@
 //!  * [`DefaultDocRenderer`] — V0 reference covering all three
 //!  formats.
 //!
-
 //! Future per-format adapters (LaTeX-with-proof-tree-collapse,
 //! HTML-with-MathJax, Markdown-with-Mermaid-graphs) plug in via
 //! the same trait without touching consumers.
 //!
-
 //! ## Reproducibility envelope
 //!
-
 //! [`DocItem`] carries an optional `closure_hash` — when present,
 //! readers of the rendered paper can run `verum cache-closure decide
 //! <name> --signature … --body … --cite …` against the same kernel
@@ -47,10 +39,8 @@
 //! statement that was kernel-checked. This is the "auto-paper +
 //! re-check" envelope #84 ships.
 //!
-
 //! ## Foundation-neutral
 //!
-
 //! The renderer knows nothing about how a `.vr` file is parsed —
 //! callers (CLI / docs build) construct [`DocItem`]s from whatever
 //! AST surface they've got and hand them in. Rendering is a pure

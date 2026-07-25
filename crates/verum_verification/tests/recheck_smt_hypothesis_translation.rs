@@ -1,7 +1,6 @@
 //! Soundness regression: `recheck_with_smt` must translate hypothesis
 //! propositions, not bind them as opaque fresh booleans.
 //!
-
 //! Pre-fix the loop bound a `Bool::new_const(name)` for each
 //! hypothesis and discarded the actual `prop` expression. Z3 thus saw
 //! every hypothesis as a vacuous `h0 := true` regardless of whether
@@ -10,7 +9,6 @@
 //! counterexample (because the assumed hypotheses don't actually
 //! entail the conclusion) silently passed.
 //!
-
 //! Post-fix the loop translates `prop` to a Z3 Bool and asserts it.
 //! When the prop carries the actual claim `x = 0`, the rechecker now
 //! sees that constraint and correctly disproves `x > 0`.

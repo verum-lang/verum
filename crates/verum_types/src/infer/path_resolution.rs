@@ -1,6 +1,5 @@
 //! Path resolution methods extracted from `infer.rs`.
 //!
-
 //! Contains the 10 `TypeChecker` methods and 1 standalone function responsible
 //! for resolving type names, qualified paths, multi-segment paths, crate-rooted
 //! paths, super paths, self paths, variable field access, and inline module paths.

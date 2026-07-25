@@ -1,11 +1,9 @@
 //! Cog-level registry for user-authored tactic packages.
 //!
-
 //! This module is the shared lookup surface that binds tactic names
 //! at the cog-dependency layer rather than at the compiler-intrinsic
 //! layer. The four consumers of the registry:
 //!
-
 //! 1. **stdlib** `core.proof.tactics.*` — loaded at session start as
 //!  a well-known package with a fixed revision.
 //! 2. **User project** — `@tactic` / `@tactic meta fn` declarations
@@ -17,10 +15,8 @@
 //!  DSL refers to them, producing a clear "unknown tactic in
 //!  which package" diagnostic on miss.
 //!
-
 //! Semantics
 //!
-
 //! Each registered entry is keyed by `(package, name)` and carries
 //! a revision tag for version-skew diagnostics. Duplicate
 //! registration is rejected — the compiler surfaces it as
@@ -30,7 +26,6 @@
 //! always shadows an imported or stdlib tactic with the same name
 //! (the shadowing is explicit, not accidental).
 //!
-
 //! The registry is deliberately unaware of tactic semantics — it
 //! stores opaque `TacticBody` handles that the user_tactic compiler
 //! consumes. Decoupling registration from execution lets the

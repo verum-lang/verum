@@ -2,16 +2,13 @@
 //! [`normalize_with_axioms`] / [`normalize_with_inductives`] keyed
 //! on a stable structural hash of the input term (#100, task #42).
 //!
-
 //! Mirror of `verum_smt::tactics::TacticCache` (#103) and
 //! `verum_smt::capability_router::CvcStrategyCache` (#6) — same
 //! `DashMap + AtomicU64 hits/misses + blake3 sig` shape so per-pass
 //! telemetry is uniform across the verification stack.
 //!
-
 //! # Why caching pays off here
 //!
-
 //! `mount core.*` brings the entire stdlib (~thousands of
 //! refinement-typed functions) into scope. Type-checking each
 //! function calls `normalize` repeatedly on the SAME small set of
@@ -23,10 +20,8 @@
 //! O(N) for the hash but with very small constant; in practice the
 //! dominant cost moves to hash computation, which is ~1 GiB/s.
 //!
-
 //! # Cache key — stable structural hash
 //!
-
 //! [`StructuralHash`] is computed via `blake3` over the term's
 //! `Debug` rendering. `Debug` is `#[derive]`'d on `CoreTerm` and
 //! every constituent type, so the rendering is deterministic across
@@ -34,10 +29,8 @@
 //! Same approach as `tactics::FormulaSignature` and
 //! `capability_router::AssertionSetSignature`.
 //!
-
 //! # Cache invalidation
 //!
-
 //! The cache stores **pure normalization results** —
 //! `normalize(t) = t'` is a function of `t` alone (the axiom-aware
 //! variants take an `AxiomRegistry` snapshot, so when axioms change
@@ -45,10 +38,8 @@
 //! [`AxiomAwareKey`]). Per-session bounding via [`NormalizeCache::clear`]
 //! between top-level decls keeps working-set predictable.
 //!
-
 //! # Thread safety
 //!
-
 //! `Send + Sync` so the cache sits on a verification context shared
 //! across rayon workers. `DashMap`'s sharded interior makes
 //! concurrent `get`/`insert` lock-free under typical contention.

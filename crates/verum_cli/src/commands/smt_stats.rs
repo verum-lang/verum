@@ -1,11 +1,9 @@
 //! `verum smt-stats` — show verification routing telemetry.
 //!
-
 //! Reads statistics from the session-local stats cache (written during the
 //! most recent `verum build`, `verum check`, or `verum verify` run) and
 //! prints either a human-readable report or machine-readable JSON.
 //!
-
 //! The stats cache lives at `$VERUM_STATE_DIR/smt-stats.json` (defaults to
 //! `~/.verum/state/smt-stats.json` or the project's `.verum/state/` directory).
 

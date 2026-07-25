@@ -1,48 +1,36 @@
 //! Protocol-Based Method Resolution
 //!
-
 //! This module provides abstractions for resolving methods through protocol implementations,
 //! enabling a stdlib-agnostic type system architecture.
 //!
-
 //! ## Architecture
 //!
-
 //! The method resolution system is designed around two key principles:
 //!
-
 //! 1. **No Hardcoded Type Names**: Method resolution never checks for specific type names
 //!  like "List", "Text", or "Maybe". All methods are resolved through protocols.
 //!
-
 //! 2. **Pluggable Resolution**: The `MethodResolver` trait allows different implementations
 //!  for different compilation modes (stdlib bootstrap vs normal compilation).
 //!
-
 //! ## Resolution Order
 //!
-
 //! When resolving `receiver.method(args)`:
 //!
-
 //! 1. **Inherent Methods**: Check `implement Type { ... }` blocks for the receiver type
 //! 2. **Protocol Methods**: Check all protocols the receiver type implements
 //! 3. **Auto-Deref**: If receiver implements Deref, try resolving on `*receiver`
 //! 4. **Auto-Ref**: Try resolving with `&receiver` or `&mut receiver`
 //!
-
 //! ## Example
 //!
-
 //! ```ignore
 //! // Resolving: some_list.len()
 //!
-
 //! // 1. Check inherent methods on List<T>
 //! // Found: implement List<T> { fn len(&self) -> Int { ... } }
 //! // -> Returns MethodResolution
 //!
-
 //! // Or if not found in inherent:
 //! // 2. Check protocol implementations
 //! // implement Len for List<T> { ... }

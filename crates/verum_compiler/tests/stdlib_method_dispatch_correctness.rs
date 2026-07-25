@@ -1,6 +1,5 @@
 //! Method-dispatch receiver-type-narrowing guardrail (#169 / method-dispatch narrowing).
 //!
-
 //! Multiple stdlib types declare a method with the same simple name —
 //! most notably `unwrap`, declared on Result, Maybe, Poll, and (historic)
 //! generic-T paths. The codegen in
@@ -11,28 +10,24 @@
 //! covered, and the dispatcher picked WHICHEVER candidate was
 //! registered first by name+arity.
 //!
-
 //! For `Result<Int, Int>::Err(99).unwrap()` that frequently resolved to
 //! a candidate whose `unwrap` does NOT panic on Err — the call returned
 //! 99 silently and downstream code saw a malformed value, surfacing
 //! later as `field index N (offset M) exceeds object data size K` or
 //! `null pointer dereference` far from the cause.
 //!
-
 //! method-dispatch narrowing added a safety net: after the giant match, if the
 //! resulting `effective_method_name` is still bare (no `.`, no `$`),
 //! retry via `infer_expr_type_name(receiver)` — a generic best-effort
 //! type-inference helper — and prefix as `Type.method` when the
 //! inference succeeds with an Uppercase-typed base name.
 //!
-
 //! This test pins the contract: the `unwrap` family on each of its
 //! stdlib types panics correctly on the receiver-type's bottom
 //! element. A regression that re-introduces the silent fallback fails
 //! one of these fixtures, and the failure message points at
 //! `compile_method_call` directly.
 //!
-
 //! Each fixture lives under
 //! `vcs/specs/L0-critical/_codegen_regressions/` with the
 //! `@test: run-interpreter-panic` directive and an `@expected-panic`
@@ -40,10 +35,8 @@
 //! matching; this guardrail just runs vtest and asserts the spec
 //! passed.
 //!
-
 //! Adding a new method-dispatch contract:
 //!
-
 //!  1. Build a fixture under `vcs/specs/L0-critical/_codegen_regressions/`
 //!  that exercises the receiver type's bottom-element method call
 //!  and uses `@expected-panic: <substring>`.

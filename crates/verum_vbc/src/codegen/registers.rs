@@ -1,14 +1,11 @@
 //! Register allocator for VBC codegen.
 //!
-
 //! Uses a simple linear scan allocator that assigns virtual registers
 //! to variables and temporaries. The register file is unlimited during
 //! codegen; the final register count is stored in the function descriptor.
 //!
-
 //! # Register Layout
 //!
-
 //! ```text
 //! r0..rN-1 : Function parameters (N = param count)
 //! rN..rM-1 : Local variables

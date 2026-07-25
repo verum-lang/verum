@@ -1,10 +1,8 @@
 //! Interval literal parser
 //!
-
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
-
 //! Parses mathematical interval literals:
 //! - interval#"[0, 100]" // Closed interval
 //! - interval#"[0, 100)" // Half-open interval

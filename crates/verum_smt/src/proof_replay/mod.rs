@@ -1,7 +1,6 @@
 //! Cross-target
 //! proof-replay framework.
 //!
-
 //! The certificate-export pipeline (`verum_cli::commands::export`)
 //! ships **statement-only** scaffolds today: every theorem is emitted
 //! with its target-language Pi/forall signature and an admitted /
@@ -10,10 +9,8 @@
 //! into the target language's tactic / proof-term shape so the
 //! exported file actually proves what it claims.
 //!
-
 //! This module ships the **architecture** for that lowering:
 //!
-
 //!  • [`ProofReplayBackend`] — the trait every per-target replayer
 //!  implements. Given a [`SmtCertificate`] and the surrounding
 //!  [`DeclarationHeader`], the backend produces a [`TargetTactic`]
@@ -28,7 +25,6 @@
 //!  is the V1 default; it preserves the existing statement-only
 //!  export contract when no real lowering is wired.
 //!
-
 //! V4.1+ work attaches actual SmtCertificate→target lowering for
 //! each backend; this module provides the shape both sides commit
 //! to so the integration is plug-and-play.

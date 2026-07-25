@@ -1,6 +1,5 @@
 //! Main Playbook application: state, event loop, and rendering.
 //!
-
 //! Cyberpunk-inspired research environment for Verum language exploration.
 //! All keybinding dispatch uses the centralized `Keybindings` module.
 

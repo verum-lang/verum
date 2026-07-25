@@ -1,13 +1,10 @@
 //! VBC Code Generation Phase
 //!
-
 //! This phase compiles typed AST to VBC bytecode with tier-aware instructions.
 //! It runs CBGR tier analysis before codegen to determine optimal reference tiers.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! Typed AST (from Phase 4)
 //!  │
@@ -26,19 +23,15 @@
 //! VbcModuleData (bytecode + tier stats)
 //! ```
 //!
-
 //! # Tier Analysis Integration
 //!
-
 //! The phase uses `verum_cbgr::tier_analysis` to determine which references
 //! can be promoted from Tier 0 (runtime checked) to Tier 1 (zero-overhead).
 //!
-
 //! - Tier 0: ~15ns overhead per dereference (CBGR validation)
 //! - Tier 1: 0ns overhead (compiler proven safe)
 //! - Tier 2: 0ns overhead (manual unsafe)
 //!
-
 //! VBC codegen with CBGR: TypedAST to VBC bytecode with CBGR safety checks.
 
 use std::time::{Duration, Instant};

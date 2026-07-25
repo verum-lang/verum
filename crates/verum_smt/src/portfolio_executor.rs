@@ -1,16 +1,12 @@
 //! # Portfolio SMT Solver Executor
 //!
-
 //! Runs Z3 and CVC5 concurrently on the same goal and returns the first
 //! result, or cross-validates both results for security-critical goals.
 //!
-
 //! ## Design
 //!
-
 //! The executor uses `std::thread` with `crossbeam::channel` for coordination:
 //!
-
 //! ```text
 //!  goal goal
 //!  │ │
@@ -25,31 +21,24 @@
 //!  (first wins)
 //! ```
 //!
-
 //! For cross-validation, both solvers run to completion and results are
 //! compared. Divergent results (one says SAT, the other UNSAT) indicate a
 //! solver bug or an encoding issue and are reported as a hard error.
 //!
-
 //! ## Cancellation
 //!
-
 //! Z3 and CVC5 support cooperative cancellation via their C APIs
 //! (`Z3_interrupt`, `cvc5_solver_interrupt`). After one solver returns, the
 //! other is interrupted to release resources promptly.
 //!
-
 //! ## Thread Safety
 //!
-
 //! - Each solver instance is used by exactly one thread.
 //! - Results are passed via channels (no shared mutable state).
 //! - The `PortfolioExecutor` itself is `Send + Sync`.
 //!
-
 //! ## Performance
 //!
-
 //! Portfolio execution typically achieves 1.5–3x speedup on hard goals
 //! where the winning solver varies by problem structure. For bread-and-butter
 //! goals where Z3 is consistently fastest, portfolio adds ~20% overhead,

@@ -1,6 +1,5 @@
 //! Generic parameter information for compile-time reflection
 //!
-
 //! Provides generic type parameter metadata matching core/meta/reflection.vr GenericParam.
 
 use verum_ast::MetaValue;

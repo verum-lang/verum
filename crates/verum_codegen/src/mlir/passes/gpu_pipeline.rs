@@ -1,54 +1,44 @@
 //! GPU pass pipeline configuration and execution.
 //!
-
 //! Manages the sequence of MLIR passes for GPU code generation.
 //! This pipeline is separate from the CPU pass pipeline because GPU
 //! compilation requires fundamentally different pass stages:
 //!
-
 //! ```text
 //! Phase 1: Early Optimizations
 //!  ├── Canonicalization
 //!  └── CSE
 //!
-
 //! Phase 2: Tensor-to-Linalg Conversion
 //!  └── tensor → linalg (named ops)
 //!
-
 //! Phase 3: Linalg Optimizations
 //!  ├── Element-wise fusion
 //!  ├── Fold unit extent dims
 //!  └── Inline scalar operands
 //!
-
 //! Phase 4: Linalg → Parallel Loops
 //!  └── linalg → scf.parallel
 //!
-
 //! Phase 5: GPU Mapping
 //!  ├── parallel loops → gpu.launch
 //!  ├── GPU kernel outlining
 //!  └── GPU launch sink index computations
 //!
-
 //! Phase 6: GPU Optimizations
 //!  ├── GPU decompose memrefs
 //!  ├── GPU eliminate barriers
 //!  └── GPU async region (optional)
 //!
-
 //! Phase 7: Target-Specific Lowering
 //!  ├── Attach target (NVVM / ROCDL / SPIRV)
 //!  └── GPU ops → target ops (nvvm / rocdl / spirv)
 //!
-
 //! Phase 8: Host Code Lowering
 //!  ├── SCF → CF
 //!  ├── Host code → LLVM
 //!  └── GPU → LLVM (host-side runtime calls)
 //!
-
 //! Phase 9: GPU Binary Generation
 //!  └── gpu.module → binary (PTX / HSACO / SPIR-V)
 //! ```

@@ -1,6 +1,5 @@
 //! Demo of Error Context Protocol features
 //!
-
 //! Run with:
 //! ```
 //! cargo run --example error_context_demo

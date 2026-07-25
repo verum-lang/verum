@@ -1,17 +1,13 @@
 //! verum_lld - Linker Bindings for Verum Compiler
 //!
-
 //! This crate provides linker functionality for the Verum compiler.
 //! It supports two modes:
 //!
-
 //! 1. **embedded-lld**: Uses LLVM's LLD linker directly (requires LLD dev headers)
 //! 2. **system-linker**: Uses the system's linker (cc/ld) - default
 //!
-
 //! # Installation of LLD Development Headers
 //!
-
 //! ## macOS (with LLD from source)
 //! ```bash
 //! # Clone LLVM with LLD
@@ -24,12 +20,10 @@
 //!  -DCMAKE_INSTALL_PREFIX=/usr/local/llvm-lld
 //! ninja && ninja install
 //!
-
 //! # Set environment variable
 //! export LLVM_PREFIX=/usr/local/llvm-lld
 //! ```
 //!
-
 //! ## Ubuntu/Debian
 //! ```bash
 //! apt-get install lld-21 liblld-21-dev
@@ -37,20 +31,16 @@
 //! apt-get install lld liblld-dev
 //! ```
 //!
-
 //! ## Arch Linux
 //! ```bash
 //! pacman -S lld
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_lld::{Linker, LinkerFlavor};
 //!
-
 //! let linker = Linker::new(LinkerFlavor::native());
 //! let result = linker
 //!  .add_object("main.o")

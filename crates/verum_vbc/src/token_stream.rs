@@ -1,16 +1,13 @@
 //! TokenStream serialization for VBC heap storage.
 //!
-
 //! This module provides serialization and deserialization of TokenStream for
 //! the VBC meta-system. When a meta function generates code via `quote { ... }`,
 //! the resulting TokenStream is serialized to a binary format and stored on the
 //! VBC interpreter's heap. When the meta function returns, the TokenStream is
 //! deserialized and parsed back into AST.
 //!
-
 //! ## Binary Format (Version 1)
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │ TokenStream Binary Format │
@@ -31,16 +28,13 @@
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! ## Performance Characteristics
 //!
-
 //! - Serialization: O(n) where n = number of tokens
 //! - Deserialization: O(n)
 //! - Memory overhead: ~20% over raw token data (due to length prefixes)
 //! - Typical throughput: >1M tokens/sec on modern hardware
 //!
-
 //! Part of Verum's unified meta-system: all compile-time computation uses `meta fn` and the
 //! `@` prefix for macros/attributes. Token streams are the interchange format between the
 //! meta-system and procedural macros. Tagged literals (`d#"..."`, `sql"..."`), derives

@@ -14,11 +14,9 @@
 )]
 //! Integration tests for end-to-end AST construction
 //!
-
 //! These tests verify that complex AST structures can be built correctly
 //! and that all components work together properly.
 //!
-
 //! Comprehensive tests for statement AST nodes.
 
 use verum_ast::decl::*;

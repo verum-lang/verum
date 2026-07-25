@@ -1,6 +1,5 @@
 //! Device placement hints for VBC tensor operations.
 //!
-
 //! Enables explicit and automatic device placement for tensor operations,
 //! supporting CPU, multiple GPU backends, and TPUs.
 

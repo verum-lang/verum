@@ -1,6 +1,5 @@
 //! Unified Reference Promotion System
 //!
-
 //! CBGR Reference Promotion: Manages promotion between three reference tiers:
 //! Tier 0 (&T, ~15ns CBGR check), Tier 1 (&checked T, 0ns compile-time proven),
 //! Tier 2 (&unsafe T, 0ns manual safety). Promotion from &T to &checked T requires:
@@ -8,14 +7,11 @@
 //! (3) allocation dominates all uses, (4) lifetime is stack-bounded,
 //! (5) confidence >= threshold (default 0.95).
 //!
-
 //! This module provides a unified API for reference tier promotion and degradation
 //! across all execution tiers (Tier 0-3) and reference types (&T, &checked T, &unsafe T).
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────┐
 //! │ Unified Promotion System (verum_common) │
@@ -47,20 +43,16 @@
 //! └─────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Three-Tier Reference Model
 //!
-
 //! | Tier | Type | Overhead | Safety | Use Case |
 //! |------|------|----------|--------|----------|
 //! | 0 | &T | ~15ns | Runtime checked | Default, safe |
 //! | 1 | &checked T | 0ns | Compile-time proven | Optimized, verified |
 //! | 2 | &unsafe T | 0ns | Manual responsibility | FFI, performance-critical |
 //!
-
 //! # Promotion Criteria
 //!
-
 //! For &T → &checked T promotion, ALL must be true:
 //! 1. Reference doesn't escape function scope
 //! 2. No concurrent access possible
@@ -68,14 +60,11 @@
 //! 4. Lifetime is stack-bounded
 //! 5. Confidence ≥ threshold (default 0.95)
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_common::promotion::{PromotionContext, PromotionStrategy, PromotionPolicy, RefId};
 //!
-
 //! // Create promotion context
 //! let context = PromotionContext {
 //!  ref_id: Some(RefId(42)),
@@ -85,7 +74,6 @@
 //!  profile_data: None,
 //! };
 //!
-
 //! // Decide on promotion
 //! let strategy = PromotionStrategy::ByRefCount(100);
 //! if strategy.should_promote(&context) {

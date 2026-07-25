@@ -1,6 +1,5 @@
 //! Operation builders for the Verum dialect.
 //!
-
 //! High-level builders for constructing Verum MLIR operations with
 //! convenient APIs and proper error handling.
 

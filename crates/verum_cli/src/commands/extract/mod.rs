@@ -3,13 +3,11 @@
 //! `@extract_witness` / `@extract_contract` typed attributes
 //! ().
 //!
-
 //! Walk the project's `.vr` files, collect every item carrying an
 //! Extract* typed attribute, dispatch to the [`verum_smt::program_extraction`]
 //! pipeline at the attribute's `ExtractTarget`, and emit a per-target
 //! file at `<output>/<decl>.<ext>` (`.vr` / `.ml` / `.lean` / `.v`).
 //!
-
 //! V12 (this revision) ships the **driver scaffolding**: walks the
 //! AST, projects each marked declaration into a target-language
 //! scaffold via the existing `CodeGenerator`, writes the result to

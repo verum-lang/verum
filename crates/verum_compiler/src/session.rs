@@ -1,10 +1,8 @@
 //! Compilation Session Management
 //!
-
 //! Manages state across compilation phases including source files,
 //! diagnostics, caches, and compiler options.
 //!
-
 //! Compilation session: holds compiler options, diagnostics, module registry,
 //! and file/module state for the duration of a single compilation run.
 

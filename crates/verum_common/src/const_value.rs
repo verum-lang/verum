@@ -1,47 +1,37 @@
 //! Unified compile-time constant values
 //!
-
 //! Compile-time constant representation for the Verum meta-programming system.
 //! Used in @const evaluation, @cfg conditions, compile-time function evaluation,
 //! and attribute argument processing. Supports Unit, Bool, Int (i128), UInt (u128),
 //! Float (f64), Char, Text, Bytes, Array, Tuple, Maybe, Map, and Set values.
 //!
-
 //! This module provides the canonical `ConstValue` type used throughout Verum
 //! for representing compile-time constant values. It unifies previously
 //! separate definitions from verum_types and verum_protocol_types.
 //!
-
 //! # Design Decisions
 //!
-
 //! - **Maximum precision**: Uses `i128`/`u128` for integers to avoid precision loss
 //! - **Layer-compliant**: No dependency on higher layers (verum_ast, etc.)
 //! - **Extensible**: verum_compiler provides AST-extended variant for meta-programming
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_common::ConstValue (base type)
 //!  - Unit, Bool, Int, UInt, Float, Char, Text, Bytes, Array, Tuple, Maybe
 //!  - Used by: verum_types, verum_protocol_types, and as base for verum_compiler
 //!
-
 //! verum_compiler::ConstValue (extended type)
 //!  - Includes all base variants plus AST variants (Expr, Type, Pattern, Item)
 //!  - Used for meta-programming and compile-time code generation
 //! ```
 //!
-
 //! # Usage
 //!
-
 //! ```rust
 //! use verum_common::{ConstValue, List, Text};
 //!
-
 //! let int_val = ConstValue::Int(42);
 //! let text_val = ConstValue::Text(Text::from("hello"));
 //! let array_val = ConstValue::Array(List::from_iter([

@@ -1,19 +1,15 @@
 //! Recursive functions + Gödel coding — algorithmic kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! Self-reference and Gödel-style incompleteness arguments require a
 //! decidable encoding of formulae and proofs as natural numbers
 //! (Gödel numbers). Pre-this-module Verum's kernel had no algorithmic
 //! Gödel-coding surface — proofs about provability/representability
 //! had to admit via framework axioms.
 //!
-
 //! ships:
 //!
-
 //!  1. [`PrimitiveRecursive`] — the canonical Gödel-style enum of
 //!  *primitive recursive functions*: `Zero`, `Succ`, `Proj(i, k)`,
 //!  `Comp(g, hs)`, `PrimRec(g, h)`. Decidable evaluation on
@@ -34,10 +30,8 @@
 //!  function is *representable* in Peano arithmetic (every
 //!  primitive recursive function is; not every μ-recursive one).
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **Gödel's first incompleteness theorem** — the meta-theorem
 //!  that any consistent recursively-axiomatised system extending
 //!  PA admits a true-but-unprovable sentence. Pre-this-module

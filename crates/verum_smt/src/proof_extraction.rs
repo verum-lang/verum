@@ -1,10 +1,8 @@
 //! Proof Extraction and Analysis for Formal Verification
 //!
-
 //! This module provides facilities for extracting and analyzing Z3 proof objects,
 //! enabling formal verification workflows and proof certification (v2.0+).
 //!
-
 //! ## Features
 //! - Extract proof terms from Z3 solver
 //! - Analyze proof structure and dependencies
@@ -14,7 +12,6 @@
 //! - Proof serialization/deserialization for caching
 //! - Solver configuration for proof generation
 //!
-
 //! ## Proof Rules Supported
 //! This module extracts structured proof terms from all Z3 proof rules including:
 //! - Logical rules: ModusPonens, AndElim, NotOrElim, IffTrue, IffFalse
@@ -26,15 +23,12 @@
 //! - Definition rules: DefAxiom, DefIntro, DestructiveEqRes
 //! - Theory rules: TheoryLemma, Distributivity
 //!
-
 //! ## Usage
 //!
-
 //! ```ignore
 //! use verum_smt::proof_extraction::{ProofExtractor, ProofGenerationConfig};
 //! use z3::{Config, Context, Solver, SatResult};
 //!
-
 //! // Create solver with proof generation enabled
 //! let config = ProofGenerationConfig::production();
 //! let mut cfg = Config::new();
@@ -53,7 +47,6 @@
 //! });
 //! ```
 //!
-
 //! Spec: Future v2.0 - Formal Proofs (foundation for dependent types)
 
 use crate::tactics::{StrategyBuilder, TacticCombinator, TacticKind};

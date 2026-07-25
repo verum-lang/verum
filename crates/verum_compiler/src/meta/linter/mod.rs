@@ -1,20 +1,16 @@
 //! Meta Linter - Static Analysis for Meta Function Safety
 //!
-
 //! This module implements the Meta Linter, which automatically detects unsafe patterns
 //! in meta functions and enforces safety annotations.
 //!
-
 //! The Meta Linter provides static analysis for safety in compile-time code.
 //! It detects unsafe patterns and requires explicit @safe/@unsafe annotations.
 //! Meta functions marked @safe are verified to have no unsafe patterns.
 //! Functions with detected unsafe patterns are auto-marked @unsafe and generate
 //! warnings at usage sites.
 //!
-
 //! ## Detected Unsafe Patterns
 //!
-
 //! The linter automatically detects these unsafe patterns:
 //! 1. String concatenation with external input (injection risk)
 //! 2. Direct format! with user input (no escaping)
@@ -24,17 +20,13 @@
 //! 6. Unbounded loops
 //! 7. Hidden I/O operations
 //!
-
 //! ## Safety Annotations
 //!
-
 //! - `@safe`: Explicitly marks meta function as safe (linter verifies)
 //! - `@unsafe`: Explicitly marks meta function as potentially unsafe
 //!
-
 //! ## Module Structure
 //!
-
 //! - `patterns` - UnsafePatternKind definitions
 //! - `results` - LintResult, LintWarning, LintError
 //! - `config` - LinterConfig

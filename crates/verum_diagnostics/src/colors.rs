@@ -1,6 +1,5 @@
 //! ANSI color support for rich diagnostics.
 //!
-
 //! Provides a clean abstraction over terminal colors with support for:
 //! - Theme-based color schemes
 //! - Automatic color detection and disabling

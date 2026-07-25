@@ -1,6 +1,5 @@
 //! Import provenance — MOD-MED-2.
 //!
-
 //! Glob imports (`mount X.*`) without provenance discipline produced
 //! source-text-dependent name resolution: when two globs both
 //! re-export `Nil`, the second-encountered glob always overwrote the
@@ -9,21 +8,17 @@
 //! user's project must always have precedence over stdlib — and made
 //! glob-vs-glob shadowing observably non-deterministic across reorders.
 //!
-
 //! Fix: tag every glob-imported name with its `ImportOrigin` so that
 //! conflict resolution becomes a total ordering rather than
 //! source-position-dependent. Priority (lowest → highest):
 //!
-
 //!  Stdlib < External < Project
 //!
-
 //! Same-origin ties default to first-wins (deterministic given the
 //! sorted import order in `import_all_from_module_impl`). When a
 //! project glob shadows a stdlib name, emit `W_STDLIB_SHADOW` so the
 //! user can audit the eviction.
 //!
-
 //! Explicit imports (`mount X.{Bar}`) always win over any glob —
 //! that rule predates this module and is enforced separately via the
 //! `explicit_imports` set.

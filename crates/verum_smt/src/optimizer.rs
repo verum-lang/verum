@@ -1,10 +1,8 @@
 //! Z3 Optimizer Module for MaxSAT/MinSAT
 //!
-
 //! This module provides comprehensive support for optimization problems using Z3's
 //! Optimize API, including soft constraints, weighted objectives, and Pareto optimization.
 //!
-
 //! Based on experiments/z3.rs documentation
 //! Used for optimizing refinement type constraints: finding minimal/maximal values
 //! satisfying predicates like `Int{> 0 && < 100}`, solving weighted soft constraint

@@ -1,12 +1,10 @@
 //! AOT permission policy lowering — IR-level guardrails.
 //!
-
 //! These tests build a minimal VBC module containing a single
 //! `PermissionAssert` site, lower it under each policy shape, and
 //! pin the emitted LLVM IR. The contract under test is the
 //! script-mode security gap closer (SCRIPT-5d):
 //!
-
 //! * **No policy installed.** AOT trusted-application path. The
 //!  assert is elided — the produced IR contains neither the
 //!  permission-denied message string nor an `_exit` call.

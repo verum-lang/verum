@@ -1,10 +1,8 @@
 //! Directory module tests.
 //!
-
 //! Tests directory-based module structures with mod.vr files
 //! and child modules in subdirectories.
 //!
-
 //! Tests directory-based modules (foo/mod.vr), mixed hierarchy (file + directory),
 //! and module tree organization with public/private child modules.
 

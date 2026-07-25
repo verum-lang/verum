@@ -1,20 +1,16 @@
 //! Kripke Semantics — modal worlds + accessibility.
 //!
-
 //! Kripke frames give a formal model for modal logic: a set of
 //! *worlds* and an *accessibility* relation between them. A
 //! formula `□φ` ("necessarily φ") holds at a world iff `φ` holds
 //! at every accessible world; `◇φ` ("possibly φ") iff `φ` holds
 //! at some accessible world.
 //!
-
 //! ## Frame classes
 //!
-
 //! Different modal logics correspond to constraints on the
 //! accessibility relation:
 //!
-
 //! ```text
 //!  K — no constraints
 //!  T — reflexive (every world sees itself)
@@ -25,10 +21,8 @@
 //!  S5 — equivalence relation (refl + sym + trans)
 //! ```
 //!
-
 //! ## API
 //!
-
 //! * [`World`] — a world identifier
 //! * [`KripkeFrame`] — set of worlds + accessibility edges
 //! * [`Valuation`] — assigns truth values to atomic propositions

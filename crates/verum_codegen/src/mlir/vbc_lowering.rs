@@ -1,14 +1,11 @@
 //! VBC → MLIR Lowering for GPU Path
 //!
-
 //! Converts VBC (Verum Bytecode) instructions to MLIR operations with proper
 //! operand wiring. The GPU path handles tensor operations, GPU kernel launches,
 //! and scalar pass-through for hybrid CPU+GPU functions.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC Module (GPU functions)
 //!  │

@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for IR-based call site extraction
 //!
-
 //! Tests the production-grade IR call extraction implementation with 18+ scenarios
 
 use verum_cbgr::analysis::{BlockId, ControlFlowGraph, EscapeAnalyzer, FunctionId, RefId};

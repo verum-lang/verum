@@ -1,6 +1,5 @@
 //! n-cell HIT eliminator tests.
 //!
-
 //! Higher inductive types extend 1-cells (paths) to 2-cells
 //! (homotopies between paths), 3-cells (homotopies between
 //! homotopies), …, n-cells. Per the kernel surface
@@ -8,7 +7,6 @@
 //! eliminator emit recursively nests `PathOver` `dim` times so
 //! the per-dimensional shape is recorded.
 //!
-
 //! Coverage:
 //!  • 1-cell (dim=1) — homogeneous (S¹) and heterogeneous (Interval)
 //!  cases; baseline check that nothing regresses vs the existing

@@ -1,26 +1,22 @@
 //! Continuation Calculus — delimited control as a first-class
 //! computational primitive.
 //!
-
 //! Where ordinary control flow (return, throw, return-via-Result)
 //! is *limited* — you can only escape one level at a time —
 //! delimited continuations let a computation reify "what to do
 //! next" as a value and pass it around. The classical operators
 //! are:
 //!
-
 //! ```text
 //!  reset { e } install a delimiter (prompt)
 //!  shift k. e capture the rest up to the nearest
 //!  reset, bind it to k, run e
 //! ```
 //!
-
 //! With these, programmers can express coroutines, nondeterministic
 //! search, backtracking, and full algebraic-effect handlers as a
 //! library — without language-level effect machinery.
 //!
-
 //! Verum chose contexts + specialized constructs (async/Iterator/
 //! Result) over general handlers. This module provides delimited
 //! continuations as a **standalone analysis core**: callers that
@@ -28,10 +24,8 @@
 //! translate other languages with shift/reset into Verum's
 //! semantics get the core algebra here.
 //!
-
 //! ## Core syntax
 //!
-
 //! ```text
 //!  M ::= v (value)
 //!  | x (variable)
@@ -42,25 +36,19 @@
 //!  | k @ M (resume captured continuation)
 //! ```
 //!
-
 //! ## Reduction
 //!
-
 //! The cardinal computation rule is the **shift-reset reaction**:
 //!
-
 //! ```text
 //!  reset (E[shift k. M]) ↦ reset (M[k := λx. reset E[x]])
 //! ```
 //!
-
 //! where `E[]` is the evaluation context inside the nearest reset.
 //! When no shift remains, `reset v ↦ v`.
 //!
-
 //! ## Status
 //!
-
 //! Algebraic core: term language, capture-avoiding substitution,
 //! single-step reduction at the redex `reset (E[shift k. M])`.
 //! Higher-level driver loops, type systems for shift/reset

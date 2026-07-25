@@ -1,6 +1,5 @@
 //! SMT Solver Performance Benchmarks
 //!
-
 //! NOTE: Rewritten to use current API (verify_refinement, Translator).
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

@@ -1,14 +1,11 @@
 //! Safe HTML interpolation handler
 //!
-
 //! Safe interpolation handler: receives template strings and expression lists,
 //! returns injection-safe parameterized output at compile-time.
 //!
-
 //! Provides HTML interpolation that prevents XSS attacks by auto-escaping
 //! all interpolated values.
 //!
-
 //! # Example
 //! ```verum
 //! let user_name = "<script>alert('xss')</script>";

@@ -1,22 +1,17 @@
 //! Shared module utilities for Verum compilation.
 //!
-
 //! This module provides common functionality used by both stdlib compilation
 //! and regular program compilation, eliminating duplication between the two modes.
 //!
-
 //! # Key Features
 //!
-
 //! - **Module-level @cfg handling**: Evaluate @cfg attributes to determine if modules
 //!  should be compiled for the current target
 //! - **Platform detection**: Target-aware module filtering based on target_os/target_arch
 //! - **Import validation**: Common import validation logic (to be moved here)
 //!
-
 //! # Usage
 //!
-
 //! Both `core_compiler.rs` and `pipeline.rs` should use these shared utilities
 //! instead of implementing their own versions.
 

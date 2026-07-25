@@ -1,6 +1,5 @@
 //! Core diagnostic types for the Verum compiler.
 //!
-
 //! This module provides the fundamental building blocks for compiler diagnostics:
 //! spans, labels, severity levels, and the main diagnostic structure.
 

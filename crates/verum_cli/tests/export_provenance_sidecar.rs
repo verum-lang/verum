@@ -1,7 +1,6 @@
 //! Integration tests for `verum export --with-provenance` (
 //! follow-up, §8.5 V2-foundation).
 //!
-
 //! Statement-level export (Admitted / sorry / `?` placeholder) is
 //! unchanged when the flag is absent. With the flag, a per-decl
 //! provenance JSON sidecar lands at `<output>.provenance.json`

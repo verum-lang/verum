@@ -1,12 +1,9 @@
 //! Meta execution errors
 //!
-
 //! This module provides the error types used during compile-time meta function execution.
 //!
-
 //! ## Error Categories (46 total error codes)
 //!
-
 //! - **M0XX - Core meta errors** (8 codes): Basic evaluation and stage failures
 //! - **M1XX - Builtin errors** (5 codes): Builtin function call failures
 //! - **M2XX - Context errors** (5 codes): Missing or invalid context
@@ -15,7 +12,6 @@
 //! - **M5XX - Type-level errors** (6 codes): Type computation failures
 //! - **M6XX - Const evaluation errors** (7 codes): Constant folding failures
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

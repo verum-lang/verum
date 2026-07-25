@@ -1,17 +1,13 @@
 //! # Verum Bytecode (VBC)
 //!
-
 //! VBC is the unified intermediate representation for the Verum compiler. It serves three purposes:
 //!
-
 //! 1. **Interpreter execution** (Tier 0) - direct interpretation with inline caching
 //! 2. **JIT compilation** (Tier 1-2) - lowering to MLIR for runtime compilation
 //! 3. **AOT compilation** (Tier 3) - lowering to MLIR → LLVM → native code
 //!
-
 //! ## Design Principles
 //!
-
 //! - **Register-based**: 2x fewer instructions than stack-based (Lua, Dalvik)
 //! - **Typed operands**: Direct dispatch without boxing for primitives
 //! - **Reified generics**: Type parameters preserved for specialization
@@ -19,10 +15,8 @@
 //! - **Compact encoding**: Variable-length instructions, deduplication
 //! - **CBGR-aware**: Memory safety operations as first-class instructions
 //!
-
 //! ## Module Structure
 //!
-
 //! - [`format`]: VBC binary format definitions (header, sections)
 //! - [`types`]: Type system (TypeId, TypeRef, TypeDescriptor)
 //! - [`instruction`]: Instruction set (256 opcodes)
@@ -32,10 +26,8 @@
 //! - [`deserialize`]: Binary deserialization
 //! - [`validate`]: Module validation
 //!
-
 //! ## Performance Targets
 //!
-
 //! | Metric | Target |
 //! |--------|--------|
 //! | Serialize 10K functions | < 100ms |

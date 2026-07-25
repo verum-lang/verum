@@ -2,7 +2,6 @@
 //! assistant syntax (Lean 4 / Coq / Agda / Dedukti / Metamath).
 //! M-VVA-FU Sub-2.5/2.6/2.7 (deferred per VVA spec L1422).
 //!
-
 //! Pre-this-module the cross-format export emitted statement-level
 //! declarations only — the @theorem signature followed by `sorry` /
 //! `Admitted` / `postulate`. V1 (this module) lowers the structural
@@ -13,7 +12,6 @@
 //! and modal modalities (Shape / Flat / Sharp / ModalBox /
 //! ModalDiamond / EpsilonOf / AlphaOf).
 //!
-
 //! **Architectural shape.** Each target gets its own lowering module:
 //!  * `lean::lower_term(t)` — `CoreTerm → String` (Lean 4 syntax).
 //!  * `coq::lower_term(t)` — `CoreTerm → String` (Coq / Gallina).
@@ -21,14 +19,12 @@
 //!  * `dedukti::lower_term(t)` — `CoreTerm → String` (λΠ-modulo).
 //!  * `metamath::lower_term(t)` — `CoreTerm → String` (label form).
 //!
-
 //! All five use the same conservative-fallback strategy: when an
 //! unsupported constructor is encountered, return `sorry` (Lean) /
 //! `admit` (Coq) / `?` (Agda) / `(* unsupported *)` (Dedukti) /
 //! `( ?ctor )` (Metamath) with the constructor name embedded in a
 //! tactic-mode comment for downstream re-derivation hints.
 //!
-
 //! References:
 //!  * Lean 4 manual §6 (term mode).
 //!  * Coq reference manual ch. 11 (Gallina).

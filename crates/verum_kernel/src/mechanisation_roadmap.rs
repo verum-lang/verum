@@ -1,10 +1,8 @@
 //! HTT + Adámek-Rosický mechanisation roadmap — V0 algorithmic
 //! kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! Lurie's *Higher Topos Theory* (HTT) and Adámek & Rosický's
 //! *Locally Presentable and Accessible Categories* (AR 1994) are the
 //! two load-bearing reference texts for Verum's (∞,1)-categorical
@@ -12,7 +10,6 @@
 //! community project — the kernel cannot ship the entire content
 //! at once, but it CAN expose a structured roadmap that:
 //!
-
 //!  1. Enumerates each chapter / section's mechanisation status.
 //!  2. Lists the precise kernel modules / functions that discharge
 //!  each section.
@@ -23,16 +20,13 @@
 //!  can monotonically increase coverage without losing audit
 //!  provenance.
 //!
-
 //! ships the static enumeration + per-section status flag. V1
 //! promotion: each section gains a structural verification hook
 //! (a `pub fn verify_section_X_Y` that re-checks the kernel
 //! discharge).
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **`verum audit --htt-roadmap`** — emits a per-chapter coverage
 //!  report comparable across Verum releases.
 //!  - **`verum audit --adamek-rosicky-roadmap`** — same for AR 1994.

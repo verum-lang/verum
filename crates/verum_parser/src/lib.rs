@@ -11,23 +11,18 @@
 #![allow(clippy::if_same_then_else)]
 //! Production-ready parser for the Verum language with LSP support.
 //!
-
 //! This crate extends `verum_fast_parser` with LSP-specific features:
 //!
-
 //! - **Lossless parsing**: Preserves all trivia (whitespace, comments) for formatting
 //! - **Event-based parsing**: Marker/precede pattern for retroactive tree building
 //! - **Incremental parsing**: Efficient reparsing for IDE document synchronization
 //! - **Enhanced error recovery**: IDE-optimized recovery with structured ERROR nodes
 //!
-
 //! For compilation (direct AST construction), use `verum_fast_parser` directly.
 //! For IDE features, use this crate.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_fast_parser (core parsing engine)
 //!  ↑
@@ -36,16 +31,13 @@
 //!  verum_lsp (script parsing, completion, etc.)
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_parser::VerumParser;
 //! use verum_lexer::Lexer;
 //! use verum_ast::span::FileId;
 //!
-
 //! let source = r#"
 //!  fn factorial(n: Int{>= 0}) -> Int {
 //!  match n {
@@ -55,13 +47,11 @@
 //!  }
 //! "#;
 //!
-
 //! let file_id = FileId::new(0);
 //! let lexer = Lexer::new(source, file_id);
 //! let parser = VerumParser::new();
 //! let result = parser.parse_module(lexer, file_id);
 //!
-
 //! match result {
 //!  Ok(module) => println!("Parsed successfully: {} items", module.items.len()),
 //!  Err(errors) => {
@@ -72,43 +62,33 @@
 //! }
 //! ```
 //!
-
 //! # LSP-Specific Features
 //!
-
 //! ## Lossless Parsing
 //!
-
 //! ```rust,ignore
 //! use verum_parser::{LosslessParser, LosslessParse};
 //! use verum_ast::FileId;
 //!
-
 //! let parser = LosslessParser::new();
 //! let result = parser.parse("fn foo() { }", FileId::new(0));
 //!
-
 //! // Access both AST and green tree
 //! let module = result.module;
 //! let green = result.green;
 //!
-
 //! // Reconstruct original source (lossless)
 //! assert_eq!(result.text(), "fn foo() { }");
 //! ```
 //!
-
 //! ## Incremental Parsing
 //!
-
 //! ```rust,ignore
 //! use verum_parser::IncrementalParserEngine;
 //!
-
 //! let mut engine = IncrementalParserEngine::new();
 //! engine.parse_full("fn foo() { }");
 //!
-
 //! // Apply incremental edit
 //! engine.apply_lsp_change(lsp_change);
 //! ```

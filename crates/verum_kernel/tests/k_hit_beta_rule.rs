@@ -1,21 +1,17 @@
 //! HIT eliminator
 //! β-reduction tests.
 //!
-
 //! The standard inductive β-rule is:
 //!
-
 //!  Elim(motive, [c₀, c₁, …, cₙ]) ( C(arg₁, …, argₘ) )
 //!  ↦ App-chain(cᵢ, arg₁, …, argₘ, recursor-calls)
 //!
-
 //! where C is the i-th point ctor of the parent inductive and
 //! every recursive argument argⱼ (whose declared ctor type is the
 //! same parent inductive) is followed by a recursor call
 //! `Elim(motive, cases)(argⱼ)`. This matches the dependent-elim
 //! shape Coq / Lean / Agda generate automatically.
 //!
-
 //! Path-constructor β-rule (path substitution) is V3.1 follow-up;
 //! these tests cover point-ctor β-rule on:
 //!  • Bool — non-recursive ctors, two cases

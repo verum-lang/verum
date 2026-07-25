@@ -1,36 +1,29 @@
 //! Script-mode dispatch for `verum`.
 //!
-
 //! Verum can be invoked in two distinct modes:
 //!
-
 //! 1. **Project mode** — `verum run`, `verum build`, etc., dispatched through
 //!  clap subcommands and operating on a `verum.toml`-rooted project tree.
 //! 2. **Script mode** — `verum path/to/file.vr [args…]` or, via shebang,
 //!  `./file.vr [args…]`. The `.vr` file is parsed, compiled, and executed
 //!  directly. No `verum.toml` is required.
 //!
-
 //! Script mode is signalled by a `#!` line at byte 0 of the source file (the
 //! POSIX-shebang convention). [`verum_lexer::strip_shebang`] strips the line
 //! before tokenisation; this module is responsible only for deciding whether
 //! `verum`'s argv looks like a script invocation, and if so, rewriting argv so
 //! that downstream clap parsing sees `verum run <file> <args…>`.
 //!
-
 //! Why argv rewriting and not a clap fallback? Two reasons:
 //!
-
 //! - Shebang invocations (`./file.vr`) hit the kernel as
 //!  `verum file.vr [args…]`. Clap would reject `file.vr` as an unknown
 //!  subcommand. A pre-clap rewrite is the simplest, most robust fix.
 //! - The rewrite is safe: `run` is an existing subcommand whose arity already
 //!  accepts `<file> [args…]`. We are not inventing a new dispatch path.
 //!
-
 //! # Invariants
 //!
-
 //! - The rewrite ONLY fires when argv[1] points at an existing file with a
 //!  `.vr` extension OR a `#!` shebang. Existing subcommands win
 //!  unconditionally; if `argv[1]` matches a known clap subcommand name, no

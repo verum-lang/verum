@@ -1,30 +1,24 @@
 //! Heap memory management with CBGR integration.
 //!
-
 //! The heap provides memory allocation for interpreter objects with:
 //! - Object headers for type info and GC
 //! - Generation counters for CBGR memory safety
 //! - Epoch tracking for cross-allocator validation
 //! - Simple bump allocation
 //!
-
 //! # CBGR Integration
 //!
-
 //! This heap implements full CBGR (Compile-time Borrow checking with Generational
 //! References) semantics:
 //!
-
 //! - **Generation**: 32-bit counter incremented on each allocation, used to detect
 //!  use-after-free when a slot is reused.
 //! - **Epoch**: 16-bit value from global epoch counter, prevents ABA problem when
 //!  generation wraps around.
 //! - **Capabilities**: 16-bit flags for read/write/delegate permissions.
 //!
-
 //! # Object Layout
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │ OBJECT LAYOUT (24 bytes header) │

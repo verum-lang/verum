@@ -1,53 +1,41 @@
 //! Value Tracking for Concrete Value Analysis
 //!
-
 //! Tracks concrete values (constants, ranges, symbolic expressions) through the CFG
 //! to refine escape decisions. When a branch condition is known to be always-true or
 //! always-false, infeasible paths are pruned, reducing false escapes.
 //!
-
 //! This module implements concrete value tracking through control flow graphs
 //! to enable more precise escape analysis. By tracking constant propagation,
 //! range analysis, and symbolic execution, we can refine escape decisions
 //! based on actual runtime values.
 //!
-
 //! # Core Algorithm
 //!
-
 //! Value tracking operates in three phases:
 //!
-
 //! 1. **Value Extraction**: Extract concrete values from assignments and constants
 //! 2. **Value Propagation**: Propagate values through CFG using dataflow analysis
 //! 3. **Predicate Evaluation**: Evaluate path predicates with concrete values
 //!
-
 //! # Key Benefits
 //!
-
 //! - **Precise Range Analysis**: Prove array bounds never escape
 //! - **Constant Folding**: Evaluate conditions at compile-time
 //! - **Path Pruning**: Eliminate infeasible paths early
 //! - **Symbolic Tracking**: Handle complex expressions
 //!
-
 //! # Performance Target
 //!
-
 //! - Typical function: < 200μs
 //! - With Z3 integration: < 1ms
 //! - Overhead vs basic analysis: < 10%
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! fn conditional_escape(flag: bool, size: usize) {
 //!  let data = vec![0; size];
 //!
-
 //!  if size < 100 { // Value tracking: size ∈ [0, 99]
 //!  process(&data); // ✅ Small allocation, can prove no escape
 //!  } else {

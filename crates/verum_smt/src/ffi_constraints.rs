@@ -1,20 +1,16 @@
 //! FFI Boundary Constraint Translation to SMT
 //!
-
 //! This module translates FFI boundary contracts into SMT constraints for verification.
 //! FFI boundary contracts are compile-time specifications (not types) that describe
 //! cross-language interfaces via C ABI. Verum supports only C ABI for FFI.
 //!
-
 //! - **Preconditions** → Requirements (MUST check before calling FFI)
 //! - **Postconditions** → Assumptions (HOPE they hold, cannot verify)
 //! - **Memory Effects** → Frame conditions (for optimization)
 //! - **Ownership** → Allocation constraints (for memory safety)
 //!
-
 //! ## Architecture
 //!
-
 //! The translation process:
 //! 1. Parse FFI function contracts from AST
 //! 2. Encode preconditions as SMT assertions to verify
@@ -22,10 +18,8 @@
 //! 4. Encode memory effects as frame conditions using array theory
 //! 5. Encode ownership as allocation/deallocation constraints
 //!
-
 //! ## SMT Theory Usage
 //!
-
 //! - **Bitvectors (BV)**: For pointer representation (64-bit)
 //! - **Arrays**: For memory modeling (address → value mapping)
 //! - **Quantifiers**: For frame conditions (∀ addr not in range)

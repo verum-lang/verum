@@ -1,33 +1,26 @@
 //! Proof-body translator — Verum proof bodies → Coq tactics / Lean tactics.
 //!
-
 //! Sibling to [`super::expr_translate`] (which translates
 //! propositions); this module handles the load-bearing other half:
 //! translating the actual proof body that closes a Verum theorem.
 //!
-
 //! # The shape problem
 //!
-
 //! Pre-this-module, every proof-bearing theorem emitted to Coq/Lean
 //! ended in `Admitted.` / `:= by sorry`. The proof body was
 //! ignored. This is task #153 / Phase 2 — replace the placeholder
 //! with a real, foreign-tool-checkable proof.
 //!
-
 //! # Coverage strategy
 //!
-
 //! Translators land iteratively, smallest-shape-first. covers
 //! the two highest-frequency shapes in the corpus:
 //!
-
 //!  * **Term-mode** (`ProofBody::Term`): the proof is an explicit
 //!  expression (Curry-Howard). Pass through the existing
 //!  [`super::expr_translate::ExprRenderer`]. Coq form:
 //!  `exact (<expr>).` Lean form: `<expr>` (term-mode, no `by`).
 //!
-
 //!  * **Single-apply tactic-mode** (`ProofBody::Tactic` with
 //!  [`TacticExpr::Apply`]): the proof is `apply <name>(args)`.
 //!  This is the shape produced by the `@delegate(target)`
@@ -35,16 +28,13 @@
 //!  synthesises this body. Coq form: `apply <name>.` Lean
 //!  form: `by apply <name>`.
 //!
-
 //! Other shapes (`ProofBody::Structured`, `ProofBody::ByMethod`,
 //! complex tactic chains) fall back to [`TranslatedProofBody::Fallback`]
 //! and the renderer reverts to `Admitted.` / `sorry` — partial
 //! coverage is safe, no broken artefacts emitted.
 //!
-
 //! # Why this shape
 //!
-
 //! The MSFS corpus's @delegate-driven design (post-#146) makes
 //! single-apply the dominant proof-body shape. Closing this case
 //! converts the largest cohort of `Admitted.` to `Qed.` in a

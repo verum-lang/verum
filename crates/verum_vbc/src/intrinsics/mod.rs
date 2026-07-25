@@ -1,27 +1,21 @@
 //! # Industrial-Grade Intrinsic System
 //!
-
 //! This module implements a zero-overhead intrinsic system for Verum that:
 //!
-
 //! - Maps intrinsic names to optimal VBC instruction sequences
 //! - Provides compile-time constant folding for pure intrinsics
 //! - Enables MLIR/LLVM lowering with full optimization pass compatibility
 //! - Maximizes interpreter performance through direct dispatch
 //!
-
 //! ## Design Principles
 //!
-
 //! 1. **Zero Overhead**: Intrinsics compile to inline VBC opcodes, not function calls
 //! 2. **LLVM Transparent**: MLIR lowering produces operations LLVM can fully optimize
 //! 3. **Interpreter Fast Path**: Hot intrinsics use dedicated dispatch handlers
 //! 4. **Compile-Time Evaluation**: Pure intrinsics fold to constants when possible
 //!
-
 //! ## Intrinsic Categories
 //!
-
 //! | Category | VBC Mapping | Example |
 //! |----------|-------------|---------|
 //! | Arithmetic | Direct opcode | `add_i64` → AddI |
@@ -30,10 +24,8 @@
 //! | Memory | Inline sequence | `memcpy` → optimized copy loop |
 //! | System | Syscall opcode | `syscall0` → SyscallLinux |
 //!
-
 //! ## Performance Targets
 //!
-
 //! | Operation | VBC Interpreter | AOT/LLVM |
 //! |-----------|-----------------|----------|
 //! | add_i64 | 1 cycle | 1 cycle |

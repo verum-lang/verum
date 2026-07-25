@@ -1,16 +1,13 @@
 //! VBC Interpreter - register-based virtual machine.
 //!
-
 //! The VBC interpreter provides execution of VBC bytecode with:
 //! - **Fast startup**: Minimal initialization overhead
 //! - **NaN-boxing**: Compact 64-bit value representation
 //! - **Register-based execution**: No operand stack
 //! - **CBGR integration**: Memory safety through runtime checks
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │ INTERPRETER ENGINE │
@@ -33,25 +30,20 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Performance Targets
 //!
-
 //! | Operation | Target | Notes |
 //! |-----------|--------|-------|
 //! | Arithmetic | 100M ops/sec | Integer add loop |
 //! | Function call | 10M calls/sec | Non-generic |
 //! | Object alloc | 1M allocs/sec | Small objects |
 //!
-
 //! # Example
 //!
-
 //! ```ignore
 //! use verum_vbc::interpreter::Interpreter;
 //! use verum_vbc::VbcModule;
 //!
-
 //! let module = VbcModule::new("example".to_string());
 //! let mut interp = Interpreter::new(&module);
 //! let result = interp.execute_function(FunctionId(0))?;

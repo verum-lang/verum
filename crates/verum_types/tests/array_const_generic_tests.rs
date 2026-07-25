@@ -14,7 +14,6 @@
 )]
 //! Tests for array types with const generic size parameters.
 //!
-
 //! This test suite verifies that arrays with explicit sizes work correctly
 //! in type inference and unification.
 

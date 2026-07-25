@@ -1,11 +1,9 @@
 //! Structured lowering from `verum_ast::Expr` to `EqTerm`.
 //!
-
 //! `EqTerm` is the term language understood by the equality-type and
 //! cubical normalizer. Many AST expression shapes have direct
 //! counterparts:
 //!
-
 //! | `ExprKind` | `EqTerm` |
 //! |----------------------------|---------------------------------------|
 //! | `Path(p)` (single ident) | `Var(name)` |
@@ -19,7 +17,6 @@
 //!  (curried for multi-param)
 //! | other | `Var("<expr>")` opaque fallback |
 //!
-
 //! The fallback is always safe: opaque `EqTerm::Var` values compare
 //! syntactically, matching the conservative behaviour the type checker
 //! has used historically for non-canonical equality terms.

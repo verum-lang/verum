@@ -1,6 +1,5 @@
 //! Function-level reachability analysis over a VBC module (T0103).
 //!
-
 //! An AOT build lowers `module.functions` wholesale — for a hello-world
 //! that is the entire baked stdlib (~48K functions), and every
 //! unresolved cross-module call inside a *never-executed* archive body
@@ -11,13 +10,10 @@
 //! strict gate, and — later — the lowering loop itself) can scope
 //! themselves to code that can actually run.
 //!
-
 //! # Conservatism contract
 //!
-
 //! The walk over-approximates, never under-approximates:
 //!
-
 //!  * Direct calls (`Call` / `TailCall` / `CallG` / `Spawn` /
 //!  `GenCreate` / `NewClosure`) follow the function id; band / stub
 //!  ids are chased through `external_function_names` the same way
@@ -36,7 +32,6 @@
 //!  anything that can flow into an indirect call stays.
 //!  * Global ctors / dtors and mount aliases are roots.
 //!
-
 //! New fn-id-bearing instructions MUST be added to `visit_function`
 //! (the codegen serializer keeps the same list in its remap arm —
 //! `codegen/mod.rs`, `Instruction::Call | TailCall | …` — keep the

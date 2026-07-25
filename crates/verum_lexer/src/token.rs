@@ -1,6 +1,5 @@
 //! Token definitions for the Verum lexer.
 //!
-
 //! Defines all token types in the Verum language, including keywords, operators,
 //! literals, and delimiters.
 

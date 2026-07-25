@@ -1,6 +1,5 @@
 //! Ownership information for compile-time reflection
 //!
-
 //! Provides ownership and borrowing metadata matching core/meta/reflection.vr OwnershipInfo.
 
 use verum_ast::MetaValue;

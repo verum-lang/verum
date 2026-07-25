@@ -1,50 +1,40 @@
 //! Recovery Strategies (Level 3: Fault Tolerance)
 //!
-
 //! Level 3 of the 5-Level Error Defense Architecture provides production-ready
 //! fault tolerance. The core design principles are: (1) fail fast when something
 //! is broken, (2) automatically attempt recovery, (3) always expose health status,
 //! (4) isolate failures to prevent cascading, and (5) make recovery behavior tunable.
 //!
-
 //! Integrates with the Unified Execution Environment (ExecutionEnv / theta+) for
 //! automatic error recovery in the async runtime, with supervision trees providing
 //! hierarchical restart semantics (OneForOne, OneForAll, RestForOne strategies).
 //!
-
 //! Provides **production-ready fault tolerance mechanisms** for building resilient systems
 //! that can recover automatically from failures. Includes:
 //!
-
 //! - **Circuit Breakers** - Stop calling failing services, detect recovery
 //! - **Retry Policies** - Retry transient errors with adaptive backoff strategies
 //! - **Supervision Trees** - Hierarchical fault tolerance with automatic restarts
 //! - **Health Monitoring** - Detect and respond to degradation
 //! - **Graceful Degradation** - Reduce functionality rather than crash
 //!
-
 //! # Integration Points
 //!
-
 //! - **ExecutionEnv** - Automatic error recovery in async runtime
 //! - **verum_runtime** - Full supervision tree implementation
 //! - **ObservabilityFramework** - Metrics and logging integration
 //! - **ConcurrencyPrimitives** - Timeout and cancellation support
 //!
-
 //! # Design Principles
 //!
-
 //! 1. **Fast failure** - Fail quickly when something is broken
 //! 2. **Eventual recovery** - Automatically attempt to recover
 //! 3. **Observable** - Always know the system's health status
 //! 4. **Cascading isolation** - Prevent failure propagation
 //! 5. **Tunable** - Configure recovery for your specific use case
 //!
-
 //! # Common Patterns
 //!
-
 //! ## Simple Retry
 //! ```rust,ignore
 //! // Retry 3 times with 100ms delay between attempts
@@ -56,7 +46,6 @@
 //! };
 //! ```
 //!
-
 //! ## Exponential Backoff
 //! ```rust,ignore
 //! // Start at 100ms, double each time, max 10 seconds
@@ -69,7 +58,6 @@
 //! };
 //! ```
 //!
-
 //! ## Circuit Breaker
 //! ```rust,ignore
 //! let strategy = RecoveryStrategy::CircuitBreaker {
@@ -81,7 +69,6 @@
 //! };
 //! ```
 //!
-
 //! ## Supervised Task
 //! ```rust,ignore
 //! let strategy = RecoveryStrategy::Supervision {
@@ -93,7 +80,6 @@
 //! };
 //! ```
 //!
-
 //! These components integrate with ExecutionEnv for automatic error recovery.
 
 use parking_lot::RwLock;

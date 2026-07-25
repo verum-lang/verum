@@ -1,13 +1,10 @@
 //! Meta pattern IR
 //!
-
 //! This module defines the intermediate representation for meta patterns
 //! used in match expressions during compile-time execution.
 //!
-
 //! ## Industrial-Grade Pattern Support
 //!
-
 //! This module provides comprehensive pattern matching for meta evaluation:
 //! - Wildcard, literal, and identifier patterns
 //! - Tuple, array, and record patterns
@@ -18,7 +15,6 @@
 //! - Reference patterns
 //! - Subpattern binding (@ syntax)
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

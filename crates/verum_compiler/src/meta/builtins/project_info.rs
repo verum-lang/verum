@@ -1,32 +1,25 @@
 //! Project Info Intrinsics (Tier 1 - Requires ProjectInfo)
 //!
-
 //! Provides compile-time access to project metadata from Verum.toml.
 //! All functions require the `ProjectInfo` context.
 //!
-
 //! ## Package Metadata
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `project_package_name()` | `() -> Text` | Package name from Verum.toml |
 //! | `project_package_version()` | `() -> Text` | Package version |
 //! | `project_package_authors()` | `() -> List<Text>` | Package authors |
 //!
-
 //! ## Dependencies
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `project_dependencies()` | `() -> List<(Text, Text)>` | All dependencies |
 //! | `project_has_dependency(name)` | `(Text) -> Bool` | Check dependency exists |
 //!
-
 //! ## Build Configuration
 //!
-
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `project_target_os()` | `() -> Text` | Target OS |
@@ -38,10 +31,8 @@
 //! | `project_enabled_features()` | `() -> List<Text>` | Enabled features |
 //! | `project_is_feature_enabled(f)` | `(Text) -> Bool` | Check feature enabled |
 //!
-
 //! ## Context Requirements
 //!
-
 //! **Tier 1**: All functions require `using [ProjectInfo]` context.
 
 use verum_common::{List, Text};

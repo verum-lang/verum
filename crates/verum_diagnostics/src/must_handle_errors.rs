@@ -1,24 +1,19 @@
 //! E0317: Unused Result that must be used
 //!
-
 //! The @must_handle annotation provides compile-time enforcement that Result<T, E> values
 //! with critical error types are explicitly handled before being dropped. Unlike @must_use
 //! (which is a warning on function return values), @must_handle is a compile ERROR that
 //! applies to the error TYPE itself -- once a type is marked @must_handle, ALL functions
 //! returning Result<T, ThatType> inherit the enforcement.
 //!
-
 //! This module provides comprehensive diagnostics for @must_handle annotation violations.
 //! When a Result<T, E> has an error type E marked with @must_handle, the compiler enforces
 //! that the Result is explicitly handled before being dropped.
 //!
-
 //! # Error Code E0317
 //!
-
 //! **Severity**: Error (compile-time failure)
 //!
-
 //! **Trigger**: A Result<T, E> value where E is marked with @must_handle is dropped
 //! without being explicitly handled through one of the allowed operations:
 //! - `?` operator (error propagation)
@@ -28,27 +23,21 @@
 //! - `if let Ok/Err` (conditional handling)
 //! - `.is_err()` check before drop
 //!
-
 //! # Examples
 //!
-
 //! ## Example 1: Basic violation
 //!
-
 //! ```verum
 //! @must_handle
 //! type CriticalError is | ConnectionLost | DataCorruption;
 //!
-
 //! fn risky() -> Result<Data, CriticalError> { ... }
 //!
-
 //! fn bad() {
 //!  let result = risky(); // ❌ E0317
 //! }
 //! ```
 //!
-
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used
@@ -64,17 +53,14 @@
 //!  = help: use `match risky() { Ok(x) => ..., Err(e) => ... }` to handle both cases
 //! ```
 //!
-
 //! ## Example 2: Wildcard pattern
 //!
-
 //! ```verum
 //! fn bad() {
 //!  let _ = risky(); // ❌ E0317
 //! }
 //! ```
 //!
-
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used
@@ -90,10 +76,8 @@
 //!  = help: use pattern matching to handle both cases
 //! ```
 //!
-
 //! ## Example 3: Binding without use
 //!
-
 //! ```verum
 //! fn bad() {
 //!  let result = risky();
@@ -101,7 +85,6 @@
 //! } // ❌ E0317
 //! ```
 //!
-
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used
@@ -120,10 +103,8 @@
 //!  = help: or match on the Result to handle both Ok and Err cases
 //! ```
 //!
-
 //! ## Example 4: Conditional branches (partial handling)
 //!
-
 //! ```verum
 //! fn bad(flag: bool) {
 //!  let result = risky();
@@ -134,7 +115,6 @@
 //! } // ❌ E0317
 //! ```
 //!
-
 //! **Error message**:
 //! ```text
 //! error[E0317]: unused Result that must be used in some code paths

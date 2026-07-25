@@ -1,21 +1,16 @@
 //! Operator Protocol System
 //!
-
 //! Maps operators to their corresponding protocols for stdlib-agnostic resolution.
 //!
-
 //! ## Architecture
 //!
-
 //! Instead of hardcoding operator behavior for specific types (like Int, Float),
 //! the type system resolves operators through protocol implementations:
 //!
-
 //! ```verum
 //! // User code
 //! let sum = a + b;
 //!
-
 //! // Type checker resolves:
 //! // 1. Get protocol for `+` operator -> "Add"
 //! // 2. Check if type of `a` implements `Add`
@@ -23,10 +18,8 @@
 //! // 4. Type check arguments and return type
 //! ```
 //!
-
 //! ## Protocol Mappings
 //!
-
 //! | Operator | Protocol | Method |
 //! |----------|----------|--------|
 //! | `+` | Add | add |

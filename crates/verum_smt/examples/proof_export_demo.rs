@@ -1,10 +1,8 @@
 //! Demonstration of Coq and Lean proof export functionality
 //!
-
 //! This example shows how to convert ProofTerm structures into
 //! valid Coq and Lean tactic syntax.
 //!
-
 //! Run with: cargo run --package verum_smt --example proof_export_demo
 
 use verum_common::Map;

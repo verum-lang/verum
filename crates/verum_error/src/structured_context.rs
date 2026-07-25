@@ -1,14 +1,11 @@
 //! Structured Error Context
 //!
-
 //! Provides **structured key-value contexts** for rich error diagnostics.
 //! Extends the basic text context system with typed data that can be
 //! formatted as JSON, YAML, or Logfmt for logging and monitoring systems.
 //!
-
 //! # Core Concept
 //!
-
 //! While text contexts provide human-readable breadcrumbs, structured contexts
 //! add machine-readable data that helps with:
 //! - Automated error analysis
@@ -16,21 +13,17 @@
 //! - Debugging with specific values
 //! - Monitoring and alerting
 //!
-
 //! # Examples
 //!
-
 //! ```rust,ignore
 //! use verum_error::structured_context::{ContextValue, ToContextValue};
 //!
-
 //! // Add structured data to errors
 //! database_query()
 //!  .with_structured("user_id", 12345)
 //!  .with_structured("operation", "fetch_profile")
 //!  .with_structured("timeout_ms", 5000)?;
 //!
-
 //! // Output as JSON:
 //! // {
 //! // "error": "Connection timeout",

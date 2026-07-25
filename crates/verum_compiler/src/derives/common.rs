@@ -1,6 +1,5 @@
 //! Common types and utilities for derive macros
 //!
-
 //! This module provides shared infrastructure for all derive implementations:
 //! - TypeInfo: Extracted information about the type being derived
 //! - FieldInfo: Information about struct/record fields

@@ -1,43 +1,33 @@
 //! Attribute validation integration for the parser.
 //!
-
 //! This module provides infrastructure for validating attributes during parsing.
 //! It is designed to work without creating circular dependencies by using a
 //! trait-based abstraction that can be implemented by higher-level crates.
 //!
-
 //! # Design
 //!
-
 //! The validation system uses a trait-based approach:
 //!
-
 //! 1. [`AttributeValidatorTrait`] - The trait that validators must implement
 //! 2. [`AttributeValidator`] - A concrete validator that can be configured
 //! 3. [`ValidationConfig`] - Configuration for validation behavior
 //!
-
 //! By default, the parser uses a permissive validator that allows all attributes.
 //! Higher-level crates (like verum_compiler) can provide a strict validator that
 //! uses the attribute registry from verum_types.
 //!
-
 //! # Usage
 //!
-
 //! ```rust,ignore
 //! use verum_parser::{RecursiveParser, attr_validation::ValidationConfig};
 //!
-
 //! // Create parser with validation enabled
 //! let mut parser = RecursiveParser::with_attr_validation(&tokens, file_id);
 //!
-
 //! // Or enable it later
 //! let mut parser = RecursiveParser::new(&tokens, file_id);
 //! parser.enable_attr_validation();
 //!
-
 //! // Parse and get warnings
 //! let module = parser.parse_module()?;
 //! let warnings = parser.take_attr_warnings();

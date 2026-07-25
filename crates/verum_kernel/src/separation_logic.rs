@@ -1,6 +1,5 @@
 //! Separation logic — the verification surface for stateful programs.
 //!
-
 //! Verum's pure-theorem verification (theorems / lemmas / fn
 //! contracts over functional values) is handled by
 //! [`crate::verification_goal`]. This module extends the surface to
@@ -9,28 +8,22 @@
 //! commitment; the verification dispatcher consumes it via the same
 //! pattern as [`crate::verification_goal::VerificationGoal`].
 //!
-
 //! ## The fundamentals
 //!
-
 //! Separation logic (Reynolds 2002, O'Hearn 2007) extends Hoare
 //! logic with the **separating conjunction** `P ∗ Q` — meaning
 //! "the heap splits into disjoint parts; `P` holds in one, `Q` in
 //! the other". The associated **frame rule**
 //!
-
 //!  { P } c { Q }
 //!  ─────────────────
 //!  { P ∗ R } c { Q ∗ R }
 //!
-
 //! makes local reasoning sound: a command's effect on its
 //! footprint doesn't disturb invariants on disjoint heap fragments.
 //!
-
 //! ## Architectural alignment with Verum philosophy
 //!
-
 //! - **Semantic honesty**: a separation goal IS what we're proving
 //!  about a stateful operation — a Hoare triple, not "the SMT layer
 //!  wants this". One concept, one type.
@@ -43,10 +36,8 @@
 //!  three-tier reference model (Ref / RefChecked / RefUnsafe) so
 //!  the verification pipeline can run at any tier.
 //!
-
 //! ## Surface
 //!
-
 //!  - [`HeapPredicate`] — a heap-shaped proposition (kernel `Term`
 //!  parameterised by an implicit heap variable).
 //!  - [`HoareTriple`] — `{ pre } command { post }` with footprint

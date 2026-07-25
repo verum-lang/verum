@@ -1,13 +1,10 @@
 //! `kernel_v0` bootstrap-meta-theory manifest (#154 / Phase 3 of
 //! Milawa-style trust-base shrinkage).
 //!
-
 //! # Architectural role
 //!
-
 //! Verum's trusted base shrinks across stages:
 //!
-
 //! ```text
 //!  Pre-#157: 10K LOC `verum_kernel` Rust + 38 rules / 34 admits
 //!  Post-#157: 796 LOC `proof_checker.rs` Rust + 7 rules
@@ -15,18 +12,15 @@
 //!  Phase 3 ✓: 100 LOC bootstrap shim (Rust interpreter of kernel_v0)
 //! ```
 //!
-
 //! The Verum-side mirror lives at
 //! [`core/verify/kernel_v0/`](https://github.com/oldman/verum/tree/main/core/verify/kernel_v0).
 //! It carries one file per kernel rule (`rules/k_*.vr`) plus
 //! supporting infrastructure (`core_term.vr`, `context.vr`,
 //! `judgment.vr`, `soundness.vr`).
 //!
-
 //! This manifest is the **Rust-side static record** of that
 //! directory's structure. It serves three load-bearing purposes:
 //!
-
 //! 1. **Drift gate**: if `proof_checker.rs` adds a kernel rule
 //!  that `kernel_v0/rules/` doesn't mirror, the audit fails.
 //!  Symmetric: a rule file under `kernel_v0/rules/` that has no
@@ -38,16 +32,13 @@
 //!  need to trust?" — this manifest is the canonical answer for
 //!  the Verum-side trusted-base contents.
 //!
-
 //! ## What this manifest is NOT
 //!
-
 //! It's not the kernel logic itself — that lives in the .vr files
 //! and (currently) in `proof_checker.rs`. The manifest is a
 //! cross-cutting record that lets audit gates verify the Rust ↔
 //! Verum mirror invariant without parsing the .vr files.
 //!
-
 //! Once the Verum compiler matures enough that `kernel_v0/` is
 //! fully self-checking (the parse errors at
 //! `kernel_v0/soundness.vr` are tracked separately), this manifest

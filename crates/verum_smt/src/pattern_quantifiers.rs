@@ -1,50 +1,39 @@
 //! Quantifier Instantiation Patterns for Dependent Type Verification
 //!
-
 //! Refinement types (`T{P}`) generate universally quantified SMT formulas for
 //! subtyping checks. Dependent types (Pi/Sigma) add nested quantifiers. Pattern-based
 //! instantiation guides Z3's E-matching to avoid exponential blowup on these formulas.
 //!
-
 //! This module provides pattern-based quantifier instantiation to improve
 //! Z3 performance on dependent types. Without patterns, Z3 uses heuristic
 //! quantifier instantiation which can be slow or incomplete.
 //!
-
 //! ## Pattern Benefits
 //!
-
 //! - **20-30% speedup** on dependent type verification
 //! - **Better instantiation control** - guide Z3 to relevant instances
 //! - **Reduced search space** - avoid irrelevant quantifier instantiations
 //! - **Improved completeness** - help Z3 find proofs faster
 //!
-
 //! ## Pattern Strategy
 //!
-
 //! We generate patterns for common Verum type operations:
 //! - List operations: list_len, list_get, list_contains
 //! - Map operations: map_get, map_contains_key
 //! - Set operations: set_member
 //! - Refinement predicates: type-specific constraints
 //!
-
 //! ## Usage
 //!
-
 //! ```rust,ignore
 //! use verum_smt::pattern_quantifiers::{PatternGenerator, PatternConfig};
 //!
-
 //! let config = PatternConfig::default();
 //! let generator = PatternGenerator::new(config);
 //!
-
 //! // Generate patterns for a universal quantifier
 //! let patterns = generator.create_list_patterns(&list_var);
 //!
-
 //! // Create quantified formula with patterns
 //! let quantified = generator.mk_quantified_property(
 //!  &bound_vars,

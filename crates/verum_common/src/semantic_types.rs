@@ -1,10 +1,8 @@
 //! Complete semantic types implementation with full API
 //!
-
 //! This module provides newtype wrappers around Rust standard types with
 //! comprehensive APIs to support all stdlib needs.
 //!
-
 //! Verum's semantic honesty principle: types describe meaning (List, Text, Map),
 //! not implementation (Vec, String, HashMap). These wrappers provide rich APIs
 //! while maintaining the semantic naming convention.

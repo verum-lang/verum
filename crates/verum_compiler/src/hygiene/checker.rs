@@ -1,20 +1,16 @@
 //! Hygiene Checker
 //!
-
 //! Verifies that expanded macro code maintains proper hygiene, detecting
 //! violations such as accidental capture, shadow conflicts, and stage mismatches.
 //!
-
 //! ## Verification Algorithm
 //!
-
 //! The checker walks the expanded AST and for each identifier:
 //! 1. Resolves the binding using sets-of-scopes algorithm
 //! 2. Verifies mark compatibility between reference and binding
 //! 3. Checks stage accessibility
 //! 4. Reports any violations found
 //!
-
 //! Hygienic macro system: syntax contexts track expansion origins to prevent
 //! macro-introduced bindings from capturing or shadowing user bindings.
 //! Uses mark/unmark operations on syntax contexts for proper scoping.

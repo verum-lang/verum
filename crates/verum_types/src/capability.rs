@@ -1,33 +1,25 @@
 //! Capability tracking for context attenuation
 //!
-
 //! This module implements compile-time tracking of context capabilities
 //! Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Section 10.
 //!
-
 //! # Overview
 //!
-
 //! The capability system tracks which capabilities are available for each
 //! context at compile time, enabling:
 //!
-
 //! - Static verification that operations match available capabilities
 //! - Capability intersection during attenuation
 //! - Clear error messages for capability violations
 //!
-
 //! # Integration with Type System
 //!
-
 //! Context types track their associated capabilities:
 //!
-
 //! ```text
 //! Context<T> with Capabilities[ReadOnly, Query]
 //! ```
 //!
-
 //! When attenuating, the type system verifies that:
 //! 1. New capabilities are a subset of existing capabilities
 //! 2. Operations only use available capabilities

@@ -10,7 +10,6 @@
 )]
 //! Comprehensive tests for must_handle_errors module
 //!
-
 //! Tests the MustHandleTracker and E0317 error generation for @must_handle Results.
 
 use verum_common::span::{FileId, Span};

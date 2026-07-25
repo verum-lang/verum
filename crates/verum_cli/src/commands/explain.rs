@@ -1,6 +1,5 @@
 //! Error code explanation command.
 //!
-
 //! Provides detailed explanations for Verum compiler error codes.
 //! Usage: verum explain E0312
 

@@ -1,7 +1,6 @@
 //! End-to-end tests for language-feature gates exercised through the
 //! real CLI binary.
 //!
-
 //! These tests close the audit gap "no test that actually runs
 //! `verum <cmd>` against a real verum.toml and checks the observable
 //! behavior". We don't compile .vr source here (that's what

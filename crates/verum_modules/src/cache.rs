@@ -1,6 +1,5 @@
 //! Module caching for performance.
 //!
-
 //! Caches parsed modules to avoid re-parsing unchanged files.
 
 use crate::ModuleInfo;

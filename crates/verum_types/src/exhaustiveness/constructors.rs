@@ -1,13 +1,10 @@
 //! Type Constructor Enumeration
 //!
-
 //! This module provides the ability to enumerate all constructors for a given type.
 //! Constructors represent the different ways a value of a type can be built.
 //!
-
 //! # Examples
 //!
-
 //! - `Bool` has two constructors: `true` and `false`
 //! - `Maybe<T>` has two constructors: `Some(T)` and `None`
 //! - `Int` has infinitely many constructors (each integer value)

@@ -1,6 +1,5 @@
 //! Category-Theoretic Morphism Algebra.
 //!
-
 //! A *category* consists of objects and morphisms (arrows between
 //! objects), with composition that is associative and respects
 //! identity. This module provides a finite, finitely-presented
@@ -8,7 +7,6 @@
 //! by source/target, a composition table, and verification of
 //! the categorical laws.
 //!
-
 //! The existing `core/math/category.vr` stdlib module (738 LoC)
 //! describes categories at the protocol level. This module
 //! complements it with a *concrete data structure* for working
@@ -16,23 +14,18 @@
 //! categorical SMT encodings, diagram chasing, and presheaf
 //! algorithmics.
 //!
-
 //! ## Laws
 //!
-
 //! For all morphisms `f : A → B`, `g : B → C`, `h : C → D`:
 //!
-
 //! ```text
 //!  id_B ∘ f = f (left identity)
 //!  f ∘ id_A = f (right identity)
 //!  h ∘ (g ∘ f) = (h ∘ g) ∘ f (associativity)
 //! ```
 //!
-
 //! ## API
 //!
-
 //! * [`Object`] — categorical object identifier.
 //! * [`Morphism`] — typed arrow `source → target`.
 //! * [`Category`] — finite presentation (objects, morphisms,

@@ -1,6 +1,5 @@
 //! Unicode range tables and LLVM emission helpers.
 //!
-
 //! This module replaces the C runtime Unicode classification and case conversion
 //! functions with LLVM global constants + inline binary search / linear scan.
 //! The tables are emitted once per module and shared across all call sites.

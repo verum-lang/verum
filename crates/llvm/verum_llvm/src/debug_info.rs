@@ -1,15 +1,12 @@
 //! Debug symbols - `DebugInfoBuilder` interface
 //!
-
 //! # Example usage
 //!
-
 //! ## Setting up the module for holding debug info:
 //! ```ignore
 //! let context = Context::create();
 //! let module = context.create_module("bin");
 //!
-
 //! let debug_metadata_version = context.i32_type().const_int(3, false);
 //! module.add_basic_value_flag(
 //!  "Debug Info Version",
@@ -68,7 +65,6 @@
 //!  fn_val.set_subprogram(func_scope);
 //! ```
 //!
-
 //! ## Setting debug locations
 //! ```ignore
 //! let lexical_block = dibuilder.create_lexical_block(
@@ -77,34 +73,26 @@
 //!  /* line_no */ 0,
 //!  /* column_no */ 0);
 //!
-
 //! let loc = dibuilder
 //!  .create_debug_location(&context, /* line */ 0, /* column */ 0,
 //!  /* current_scope */ lexical_block.as_debug_info_scope(),
 //!  /* inlined_at */ None);
 //! builder.set_current_debug_location(&context, loc);
 //!
-
 //! // Create global variable
 //! let gv = module.add_global(context.i64_type(), Some(inkwell::AddressSpace::Global), "gv");
 //!
-
 //!
-
 //! let const_v = di.create_constant_expression(10);
 //!
-
 //! let gv_debug = di.create_global_variable_expression(cu.get_file().as_debug_info_scope(), "gv", "", cu.get_file(), 1, ditype.as_type(), true, Some(const_v), None, 8);
 //!
-
 //! let meta_value: inkwell::values::BasicMetadataValueEnum = gv_debug.as_metadata_value(&context).into();
 //! let metadata = context.metadata_node(&[meta_value]);
 //! gv.set_metadata(metadata, 0);//dbg
 //!
-
 //! ```
 //!
-
 //! ## Finalize debug info
 //! Before any kind of code generation (including verification passes; they generate code and
 //! validate debug info), do:

@@ -1,6 +1,5 @@
 //! VBC instruction → LLVM IR lowering.
 //!
-
 //! This module handles the translation of individual VBC instructions
 //! to their LLVM IR equivalents.
 

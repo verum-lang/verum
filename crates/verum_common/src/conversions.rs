@@ -1,45 +1,36 @@
 //! Type Conversions - Central conversion utilities for Rust std ↔ Verum types
 //!
-
 //! This module provides THE central place for all conversions between Rust std types
 //! and Verum semantic types. This eliminates duplication across the codebase.
 //!
-
 //! # Architecture
 //!
-
 //! - Generic conversion functions for common operations
 //! - Trait-based conversions for ergonomic usage
 //! - From/Into implementations for seamless interop
 //!
-
 //! # Examples
 //!
-
 //! ```
 //! use verum_common::conversions::*;
 //! use verum_common::Maybe;
 //!
-
 //! // Option to Maybe
 //! let opt: Option<i32> = Some(42);
 //! let maybe: Maybe<i32> = option_to_maybe(opt);
 //! assert_eq!(maybe, Maybe::Some(42));
 //!
-
 //! // Maybe to Option
 //! let maybe: Maybe<i32> = Maybe::Some(42);
 //! let opt: Option<i32> = maybe_to_option(maybe);
 //! assert_eq!(opt, Some(42));
 //!
-
 //! // Using traits
 //! let opt: Option<i32> = Some(42);
 //! let maybe: Maybe<i32> = opt.to_maybe();
 //! assert_eq!(maybe, Maybe::Some(42));
 //! ```
 //!
-
 //! Central conversion utilities between Rust std types and Verum semantic types,
 //! ensuring seamless interop while maintaining the semantic naming convention.
 

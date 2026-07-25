@@ -1,10 +1,8 @@
 //! Context system and capability operation handlers for VBC interpreter dispatch.
 //!
-
 //! Handles: CtxGet (0xB0), CtxProvide (0xB1), CtxEnd (0xB2), PushContext (0xB3),
 //! PopContext (0xB4), Attenuate (0xB5), HasCapability (0xB6), RequireCapability (0xB7)
 //!
-
 //! Verum context system: capability-based dependency injection via `using [Ctx]` / `provide`.
 //! Contexts are runtime-varying dependencies stored in task-local storage (theta). Functions
 //! declare required contexts with `using [Logger, Database]`; providers are installed with

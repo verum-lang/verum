@@ -1,6 +1,5 @@
 //! Kernel-rule re-checking verification pass .
 //!
-
 //! Invokes the trusted-base K-rules from `verum_kernel` on every
 //! function in the module. Currently runs `K-Refine-omega` over
 //! every refinement type appearing in parameter / return positions;
@@ -8,15 +7,12 @@
 //! Corollary/Axiom signatures, Module nested items, and
 //! function-body let-binding refinements.
 //!
-
 //! # Why this is its own pass
 //!
-
 //! Kernel rules are the trusted base of the verification ladder.
 //! Routing them through a dedicated pass gives
 //! three structural advantages:
 //!
-
 //!  1. *Defense-in-depth* — `SmtVerificationPass::verify_function`
 //!  *also* runs the recheck preamble; with `KernelRecheckPass`
 //!  in the default pipeline the K-rules fire even when SMT is

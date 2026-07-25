@@ -1,6 +1,5 @@
 //! Execution pipeline: Parse → Codegen → Execute.
 //!
-
 //! This module orchestrates the transformation of Verum source code into
 //! executed results via the VBC interpreter.
 

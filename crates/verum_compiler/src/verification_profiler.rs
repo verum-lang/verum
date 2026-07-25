@@ -1,38 +1,30 @@
 //! Verification Profiler - Tracks SMT verification performance and provides diagnostics.
 //!
-
 //! Architecture: Each function with @verify(proof) contracts is profiled individually.
 //! ProfileEntry records: function name, file location, verification time, SMT solver used,
 //! logic (QF_LIA, QF_NRA, etc.), query count, detected bottleneck, and recommendations.
 //! Reports sort by time descending, flagging functions exceeding 5s as slow verifications.
 //! Cache statistics track hits/misses for incremental compilation speedup.
 //!
-
 //! Tracks verification performance, detects bottlenecks, and provides actionable
 //! recommendations for optimizing SMT verification.
 //!
-
 //! # Features
 //!
-
 //! - **Per-function profiling**: Track verification time, SMT solver, logic, query count
 //! - **Bottleneck detection**: Identify array reasoning, quantifiers, nonlinear arithmetic
 //! - **Actionable recommendations**: Suggest specific optimizations (hints, runtime checks, splits)
 //! - **Cache transparency**: Show cache hits/misses and time saved
 //! - **Budget enforcement**: Fail builds if verification exceeds time budget
 //!
-
 //! # Example Usage
 //!
-
 //! ```rust,no_run
 //! use verum_compiler::verification_profiler::VerificationProfiler;
 //! use std::time::Duration;
 //!
-
 //! let mut profiler = VerificationProfiler::new();
 //!
-
 //! // Profile function verification
 //! // let result = profiler.profile_function(
 //! // "my_function",
@@ -41,7 +33,6 @@
 //! // &mut verifier,
 //! // )?;
 //!
-
 //! // Generate and print report
 //! profiler.print_report();
 //! ```

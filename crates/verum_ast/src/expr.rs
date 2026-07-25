@@ -1,6 +1,5 @@
 //! Expression nodes in the AST.
 //!
-
 //! This module defines all expression types in Verum, including:
 //! - Literals and identifiers
 //! - Arithmetic and logical operations

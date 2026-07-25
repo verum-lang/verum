@@ -1,35 +1,29 @@
 //! Phase 7: Code Generation (Two-Tier)
 //!
-
 //! Complete implementation of two-tier execution model:
 //!
-
 //! ## Tier 0: Tree-Walking Interpreter (Development)
 //! - Full safety checks (~100ns CBGR, 3-5% bounds)
 //! - Rich diagnostics
 //! - Instant startup
 //!
-
 //! ## Tier 1: Baseline JIT (Scripts)
 //! - Fast compilation (~1ms/function)
 //! - ALL checks preserved (~15ns CBGR, 2-3% bounds)
 //! - 5-10x interpreter performance
 //! - Uses ORC JIT with lazy compilation
 //!
-
 //! ## Tier 2: Optimizing JIT (Hot Paths)
 //! - Escape analysis for check elimination
 //! - ~5ns CBGR for promoted refs
 //! - 15-30x interpreter performance
 //!
-
 //! ## Tier 3: AOT Compiler (Production)
 //! - LLVM backend with full optimization
 //! - Proven-safe checks eliminated (0ns)
 //! - 50-90% check elimination (typical)
 //! - 0.85-0.95x Rust performance
 //!
-
 //! Phase 7: Code generation. Tier 0 (interpreter, full CBGR ~100ns),
 //! Tier 1 (baseline JIT, ~15ns CBGR), Tier 2 (optimizing JIT, ~5ns),
 //! Tier 3 (AOT/LLVM, proven checks eliminated to 0ns).

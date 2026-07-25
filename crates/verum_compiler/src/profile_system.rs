@@ -1,19 +1,15 @@
 //! Language Profile System
 //!
-
 //! Three profiles for progressive complexity:
 //! - **Application**: Safe, productive, full checks. VBC-interpretable.
 //! - **Systems**: Performance-critical, optional unsafe. NOT VBC-interpretable.
 //! - **Research**: Experimental features, dependent types. VBC-interpretable.
 //!
-
 //! # VBC Interpretability
 //!
-
 //! The **Application** and **Research** profiles produce code that can be executed
 //! by the VBC interpreter (Tier 0). This enables rapid development iteration.
 //!
-
 //! The **Systems** profile produces code that is **NOT interpretable** by VBC.
 //! VBC serves only as an intermediate representation for systems profile code.
 //! Systems code must be compiled to native code via AOT (Tier 1) before execution.
@@ -23,16 +19,13 @@
 //! - Device drivers
 //! - Low-level system programming
 //!
-
 //! # No-libc Linking
 //!
-
 //! All profiles use Verum's self-contained runtime without libc dependency:
 //! - **Linux**: Direct syscalls (stable ABI)
 //! - **macOS**: libSystem.B.dylib only
 //! - **Windows**: ntdll.dll + kernel32.dll only
 //!
-
 //! Language Profile System (Compilation Pipeline Phase):
 //! Three profiles control progressive complexity in the compilation pipeline.
 //! Application profile enables all safety checks and is VBC-interpretable for

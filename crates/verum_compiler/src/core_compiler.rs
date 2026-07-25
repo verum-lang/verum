@@ -3,7 +3,6 @@
 // The known_deps map should be derived from parsing `mount` statements in .vr files.
 //! Stdlib Compilation Support Types
 //!
-
 //! This module provides types and utilities for stdlib compilation:
 //! - `CoreConfig` - Configuration for stdlib compilation
 //! - `StdlibCompilationResult` - Result of stdlib compilation
@@ -12,30 +11,23 @@
 //! - `build_export_index` - Build export index for import validation
 //! - `validate_imports` - Validate imports against export index
 //!
-
 //! # Architecture
 //!
-
 //! Stdlib compilation is handled by `CompilationPipeline::compile_core()` in
 //! `BuildMode::StdlibBootstrap` mode. See `pipeline.rs` for the unified compilation
 //! implementation.
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! use verum_compiler::{CompilationPipeline, CompilerOptions, Session, CoreConfig};
 //!
-
 //! let config = CoreConfig::new("stdlib")
 //!  .with_output("target/stdlib.vbca");
 //!
-
 //! let mut session = Session::new(CompilerOptions::default());
 //! let mut pipeline = CompilationPipeline::new_core(&mut session, config);
 //!
-
 //! let result = pipeline.compile_core()?;
 //! println!("Compiled {} modules", result.modules_compiled);
 //! ```

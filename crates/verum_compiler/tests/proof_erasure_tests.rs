@@ -16,23 +16,19 @@
 
 //! Proof erasure regression tests.
 //!
-
 //! Proofs are a purely compile-time phenomenon in Verum. Theorem, Lemma,
 //! Corollary, Axiom, and Tactic declarations must be verified by the
 //! `proof_verification` phase and then **completely erased** before VBC
 //! codegen so that the runtime carries zero proof-term overhead.
 //!
-
 //! These tests guarantee:
 //!
-
 //! 1. All 5 proof item kinds parse, type-check, and do not reach VBC codegen.
 //! 2. Compilation succeeds end-to-end even when proof items are interleaved
 //!  with runtime functions.
 //! 3. Removing a proof item does not change the compiled VBC module footprint
 //!  for runtime functions (regression guard).
 //!
-
 //! Related code:
 //! - `crates/verum_vbc/src/codegen/mod.rs:3233` — explicit skip of all 5
 //!  proof item kinds in `register_top_level_item`.

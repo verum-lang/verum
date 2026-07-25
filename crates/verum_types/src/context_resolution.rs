@@ -1,25 +1,19 @@
 //! Context Group Resolution for Type Checking
 //!
-
 //! This module integrates context group expansion into the type checking phase.
 //! It bridges the parser's ContextGroupDecl AST nodes with the type checker's
 //! context requirement system.
 //!
-
 //! # Overview
 //!
-
 //! The parser can parse context group declarations:
 //!
-
 //! ```verum
 //! using WebContext = [Database, Logger, FileSystem];
 //! ```
 //!
-
 //! Or the alternative syntax:
 //!
-
 //! ```verum
 //! context group WebContext {
 //!  Database,
@@ -28,38 +22,29 @@
 //! }
 //! ```
 //!
-
 //! When type checking a function that uses a context group:
 //!
-
 //! ```verum
 //! fn handler() using WebContext { }
 //! ```
 //!
-
 //! This module expands `WebContext` to `[Database, Logger, FileSystem]` and
 //! validates that all referenced contexts exist.
 //!
-
 //! # Architecture
 //!
-
 //! 1. **Registration Phase**: During type checking of program items, context group
 //!  declarations are registered in a ContextGroupRegistry.
 //!
-
 //! 2. **Resolution Phase**: When type checking function signatures, context
 //!  requirements are resolved. If a requirement references a group name,
 //!  it's expanded to the full list of contexts.
 //!
-
 //! 3. **Validation Phase**: Each expanded context is validated to ensure it
 //!  references a valid context type.
 //!
-
 //! # Integration with Type Checker
 //!
-
 //! The TypeChecker maintains a ContextGroupRegistry field that stores all
 //! defined context groups. During the check_item phase, ContextGroup items
 //! populate this registry. During check_function, context requirements are

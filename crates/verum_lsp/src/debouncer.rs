@@ -1,14 +1,11 @@
 //! Debouncing system for real-time updates
 //!
-
 //! This module provides a debouncing mechanism to prevent excessive diagnostics
 //! updates during rapid typing. It delays updates until the user has stopped
 //! typing for a configurable duration (default: 300ms).
 //!
-
 //! # Design
 //!
-
 //! The debouncer uses a hash map of timers, one per document URI. When a change
 //! is detected, the timer is reset. Only when the timer expires without being
 //! reset is the callback executed.

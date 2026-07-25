@@ -1,9 +1,7 @@
 //! Production Target Benchmarks for verum_types
 //!
-
 //! Target: Type inference < 100ms / 10K LOC
 //!
-
 //! Measures type checking throughput at various scales to verify
 //! the production target.
 

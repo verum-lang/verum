@@ -1,13 +1,10 @@
 //! Dual-Path Compilation Infrastructure
 //!
-
 //! This module provides the infrastructure for determining whether code should
 //! be compiled via the CPU path (VBC → LLVM IR) or GPU path (VBC → MLIR).
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC Bytecode
 //!  │

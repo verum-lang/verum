@@ -1,6 +1,5 @@
 //! Categorical coherence K-Universe-Ascent kernel rule + UniverseTier — split per #198.
 //!
-
 //! Verifies that meta-classifier applications `M_stack(α)` ascend
 //! Grothendieck-universe levels per the canonical κ-tower of
 //! Theorem 131.T (∞,2)-stack model. Per Theorem 134.T (tight 2-inacc

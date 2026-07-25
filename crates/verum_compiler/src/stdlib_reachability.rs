@@ -1,16 +1,13 @@
 //! Compute the set of stdlib modules reachable from a user entry point.
 //!
-
 //! This is the bridge between the AST (`MountDecl` / `MountTreeKind`) and
 //! the pre-computed `stdlib_dep_graph::DepGraph`. The pipeline calls
 //! [`compute_reachable_stdlib_modules`] once per user compilation; the
 //! result is the minimal set of stdlib modules that need to be parsed +
 //! registered for type-checking to succeed.
 //!
-
 //! # Algorithm
 //!
-
 //!  1. Walk the user `Module` AST, extracting every `mount` statement.
 //!  Convert each `MountTree` into one or more **module-path seeds**.
 //!  2. Hand the seed set to `DepGraph::reachable_from`, which BFS-walks
@@ -18,13 +15,10 @@
 //!  for nested-leaf seeds and glob expansion via the index).
 //!  3. Return the closed set.
 //!
-
 //! # Conservative pruning
 //!
-
 //! The walk is deliberately over-approximate:
 //!
-
 //!  * `mount core.X.{a, b}` enqueues `core.X`, `core.X.a`, `core.X.b`.
 //!  If `a` is an item rather than a module, the runtime resolver
 //!  drops it during registration. If `a` is a re-exported module
@@ -36,10 +30,8 @@
 //!  left to the existing late-resolution path; this pass does not
 //!  attempt to enumerate them.
 //!
-
 //! # Performance contract
 //!
-
 //!  * Walk over a ~50-statement entry point: <1 ms.
 //!  * BFS over the dep graph for typical reachable sets (50-300 nodes):
 //!  <2 ms.

@@ -1,6 +1,5 @@
 //! Safety Pattern Detection for Meta Linter
 //!
-
 //! Detects general safety issues in meta code:
 //! - String concatenation with external input
 //! - Unbounded recursion
@@ -8,7 +7,6 @@
 //! - Panic/unwrap usage
 //! - Non-deterministic operations
 //!
-
 //! Meta linter: static analysis of meta code for unsafe patterns (unbounded
 //! recursion, infinite loops, unsafe interpolation without @safe attribute).
 

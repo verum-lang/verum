@@ -1,81 +1,64 @@
 //! Production-Grade Predicate Abstraction for Path Merging
 //!
-
 //! This module implements predicate abstraction to prevent exponential path
 //! explosion in CBGR escape analysis. Path-sensitive analysis can suffer from
 //! exponential growth (2^n paths for n branches), and predicate abstraction
 //! merges similar paths while maintaining precision.
 //!
-
 //! # Overview
 //!
-
 //! Predicate abstraction is a technique for reducing the number of paths in
 //! path-sensitive analysis by merging paths with similar predicates. This
 //! maintains soundness (never misses true escapes) while avoiding exponential
 //! path explosion.
 //!
-
 //! # Abstraction Strategies
 //!
-
 //! 1. **Syntactic Similarity**: Merge predicates with similar structure
 //! 2. **Semantic Equivalence**: Use Z3 to check logical equivalence
 //! 3. **Subsumption**: Merge predicates where one implies the other
 //! 4. **Widening**: After N iterations, abstract to weaker predicates
 //!
-
 //! # Abstraction Levels
 //!
-
 //! - **Level 0**: Concrete (no abstraction, maximum precision)
 //! - **Level 1**: Syntactic normalization (canonical ordering, constant folding)
 //! - **Level 2**: Subsumption (merge implied predicates)
 //! - **Level 3**: Widening (abstract to weaker predicates)
 //! - **Level 4**: Top abstraction (fall back to path-insensitive)
 //!
-
 //! # Soundness Guarantee
 //!
-
 //! All abstractions are SOUND: they never eliminate feasible paths incorrectly.
 //! Abstractions use conservative over-approximation only. If in doubt, both
 //! paths are kept.
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::analysis::{PathPredicate, PathCondition};
 //! use verum_cbgr::predicate_abstraction::{PredicateAbstractor, AbstractionConfig};
 //! use verum_common::List;
 //!
-
 //! // Create abstractor with default config
 //! let mut abstractor = PredicateAbstractor::new(AbstractionConfig::default());
 //!
-
 //! // Create similar paths that can be merged
 //! let path1 = PathCondition::with_predicate(PathPredicate::BlockTrue(1));
 //! let path2 = PathCondition::with_predicate(PathPredicate::BlockTrue(2));
 //! let path3 = PathCondition::with_predicate(PathPredicate::BlockTrue(3));
 //!
-
 //! let mut paths = List::new();
 //! paths.push(path1);
 //! paths.push(path2);
 //! paths.push(path3);
 //!
-
 //! // Merge similar paths (3 paths -> fewer abstract paths)
 //! let merged = abstractor.merge_similar_paths(paths);
 //! ```
 //!
-
 //! # Performance
 //!
-
 //! - Abstraction overhead: ~50-100ns per predicate
 //! - Cache hit rate: >90% for typical programs
 //! - Path reduction: 10-100x for complex CFGs

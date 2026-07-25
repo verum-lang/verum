@@ -1,10 +1,8 @@
 //! Z3 Tactics and Strategies Module
 //!
-
 //! This module provides a comprehensive wrapper around Z3's tactics system,
 //! enabling sophisticated proof search strategies and formula simplification.
 //!
-
 //! Based on experiments/z3.rs documentation.
 //! Performance targets: CBGR check <15ns (L1 cache hot), type inference <100ms/10K LOC,
 //! compilation >50K LOC/sec, runtime 0.85-0.95x native C, memory overhead <5%.

@@ -1,7 +1,6 @@
 //! End-to-end integration tests for the PermissionCheckWire
 //! opcode (#12 / P3.2). Verifies that:
 //!
-
 //!  1. The bytecode encoder writes a `TensorExtended` opcode +
 //!  `PermissionCheckWire` sub-opcode + three register bytes
 //!  that round-trip through the decoder.

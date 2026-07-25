@@ -1,6 +1,5 @@
 //! Script context for tracking session state
 //!
-
 //! Moved from verum_parser::script
 
 use verum_common::{List, Map, Text};

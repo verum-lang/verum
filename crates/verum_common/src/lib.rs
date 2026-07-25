@@ -7,27 +7,22 @@
 
 //! Verum Core - Foundation types without dependencies
 //!
-
 //! This crate provides the core semantic types used throughout Verum.
 //! It has NO dependencies on verum_cbgr or stdlib, breaking circular deps.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_common (foundation)
 //!  ├─ Core types: List, Text, Map, Set, Maybe, Result, Heap
 //!  ├─ No dependencies on other verum crates
 //!  └─ Foundation layer
 //!
-
 //! verum_cbgr
 //!  ├─ Depends on: verum_common (for types)
 //!  ├─ Provides: ThinRef, FatRef, CheckedRef, UnsafeRef
 //!  └─ No circular dependency
 //!
-
 //! stdlib
 //!  ├─ Depends on: verum_common, verum_cbgr
 //!  ├─ Re-exports: All verum_common types
@@ -35,13 +30,10 @@
 //!  └─ Can use CBGR types freely!
 //! ```
 //!
-
 //! # MANDATORY SEMANTIC TYPES (v6.0-BALANCED)
 //!
-
 //! **ALL Verum crates MUST use these semantic types instead of Rust std types:**
 //!
-
 //! | Verum Type | Rust Type | Usage |
 //! |------------|-----------|-------|
 //! | `List<T>` | `List<T>` | Dynamic arrays |
@@ -54,18 +46,15 @@
 //! | `OrderedMap<K,V>` | `BTreeMap<K,V>` | Ordered maps |
 //! | `OrderedSet<T>` | `BTreeSet<T>` | Ordered sets |
 //!
-
 //! **FORBIDDEN in all crates except verum_common:**
 //! - Direct use of `Vec`, `Text`, `HashMap`, `HashSet`
 //! - Aliasing std types (e.g., `HashMap as StdHashMap`)
 //! - Importing from std::collections or std::vec
 //!
-
 //! **CORRECT usage:**
 //! ```rust
 //! use verum_common::{List, Text, Map, Set};
 //!
-
 //! fn process_items(items: List<Text>) -> Map<Text, i32> {
 //!  let mut result = Map::new();
 //!  // ...
@@ -73,19 +62,16 @@
 //! }
 //! ```
 //!
-
 //! **INCORRECT usage:**
 //! ```rust,ignore
 //! use std::collections::HashMap; // ❌ FORBIDDEN
 //! use stdlib::core::List; // ❌ FORBIDDEN
 //!
-
 //! fn bad_function(items: List<Text>) -> HashMap<Text, i32> {
 //!  // ❌ SPECIFICATION VIOLATION
 //! }
 //! ```
 //!
-
 //! All Verum crates MUST use semantic types (List, Text, Map, Set, Maybe, Heap)
 //! instead of Rust std types (Vec, String, HashMap, HashSet, Option, Box).
 

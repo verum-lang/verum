@@ -1,12 +1,10 @@
 //! VBC → LLVM IR lowering + native-binary generation.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 20). Houses the
 //! AOT-only LLVM lowering surface that translates VBC bytecode
 //! to LLVM IR (CPU code path) and drives the native-binary
 //! generation steps that follow:
 //!
-
 //!  * `lower_vbc_to_llvm` — core CPU compilation step;
 //!  translates VBC bytecode instructions to LLVM IR via
 //!  `VbcToLlvmLowering`, applying tier-aware CBGR

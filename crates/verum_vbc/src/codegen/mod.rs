@@ -1,15 +1,12 @@
 //! AST to VBC code generation.
 //!
-
 //! This module transforms Verum AST into VBC bytecode that can be:
 //! - Executed directly by the VBC interpreter (Tier 0)
 //! - Lowered to MLIR for JIT compilation (Tier 1-2)
 //! - Compiled to native code via MLIR/LLVM (Tier 3)
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! AST (verum_ast)
 //!  │
@@ -42,15 +39,12 @@
 //! VbcModule (instructions + constants + strings)
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```ignore
 //! use verum_vbc::codegen::VbcCodegen;
 //! use verum_ast::Module;
 //!
-
 //! let ast: Module = parse_source_code(source);
 //! let mut codegen = VbcCodegen::new();
 //! let vbc_module = codegen.compile_module(&ast)?;

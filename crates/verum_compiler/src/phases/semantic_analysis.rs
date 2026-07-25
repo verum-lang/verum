@@ -1,14 +1,11 @@
 //! Phase 4: Semantic Analysis
 //!
-
 //! Bidirectional type checking with refinement types.
 //!
-
 //! This phase supports two modes:
 //! 1. **StdlibBootstrap**: Compiling stdlib itself (uses minimal context with builtins only)
 //! 2. **NormalBuild**: Compiling user code (loads stdlib types from embedded stdlib.vbca)
 //!
-
 //! Phase 4: Semantic analysis. Name resolution with profile awareness,
 //! bidirectional type checking, refinement subsumption (syntactic + SMT),
 //! reference validation (&mut exclusive, & shared), context resolution.

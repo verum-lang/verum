@@ -1,6 +1,5 @@
 //! VBC module and function structures.
 //!
-
 //! This module defines the high-level structures for VBC modules:
 //! - [`VbcModule`]: Complete compiled module
 //! - [`VbcFunction`]: Individual function with bytecode

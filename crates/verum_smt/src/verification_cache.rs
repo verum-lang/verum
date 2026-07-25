@@ -1,6 +1,5 @@
 //! Verification result caching for refinement type checking.
 //!
-
 //! This module implements a hash-based LRU cache for SMT verification results,
 //! providing 10-100x speedup for incremental builds by avoiding redundant
 //! solver invocations.

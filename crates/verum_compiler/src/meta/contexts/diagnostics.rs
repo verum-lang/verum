@@ -1,19 +1,15 @@
 //! Diagnostics Sub-Context
 //!
-
 //! Manages compilation diagnostics, source mapping, and error/warning collection
 //! during meta function execution.
 //!
-
 //! ## Responsibility
 //!
-
 //! - Error and warning collection
 //! - Source code mapping (file_id -> source text)
 //! - Span mappings for generated code
 //! - Line directives for debugging
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

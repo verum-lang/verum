@@ -14,10 +14,8 @@
 )]
 //! Comprehensive tests for @must_handle annotation flow-sensitive analysis
 //!
-
 //! Error handling: Result<T, E> and Maybe<T> types, try (?) operator with automatic From conversion, error propagation — Section 2.6
 //!
-
 //! This test suite validates that the flow-sensitive control flow analysis correctly
 //! enforces @must_handle annotation requirements across various code patterns.
 

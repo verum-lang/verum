@@ -1,22 +1,18 @@
 //! SMT Guard Verification — Types and Trait
 //!
-
 //! Keeps the pure *data types* used for guard verification (pattern,
 //! configuration, result, witness, value) plus a trait boundary
 //! `GuardVerifier`. The Z3-based implementation (`SmtGuardVerifier`) lives
 //! in `verum_smt::exhaustiveness_backend` to avoid cyclic dependencies.
 //!
-
 //! ## Integration with Exhaustiveness
 //!
-
 //! The main exhaustiveness checker treats guards conservatively (as potentially failing).
 //! This module defines the data types consumed by:
 //! - A match has only guarded arms (E0603 warning candidate)
 //! - Guards use arithmetic that can be proven exhaustive
 //! - Guards are demonstrably redundant via SMT
 //!
-
 //! Callers obtain an SMT-backed verifier from `verum_smt` and pass it as
 //! `&dyn GuardVerifier` to `check_exhaustiveness_with_options`.
 

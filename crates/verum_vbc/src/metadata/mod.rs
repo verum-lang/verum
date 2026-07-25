@@ -1,20 +1,16 @@
 //! VBC Tensor Metadata Sections.
 //!
-
 //! This module provides compile-time metadata for tensor operations as defined
 //! in the tensor-GPU architecture specification. These metadata sections enable:
 //!
-
 //! - **Shape verification**: Compile-time shape checking with symbolic dimensions
 //! - **Device placement**: Hints for CPU/GPU/TPU execution
 //! - **Distribution topology**: Mesh topology and sharding specifications
 //! - **MLIR lowering**: Hints for VBC → MLIR optimization passes
 //! - **Autodiff graph**: Forward/backward mapping and checkpointing
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │ VBC MODULE (.vbca) │
@@ -31,14 +27,11 @@
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! use verum_vbc::metadata::{ShapeMetadata, DeviceHints, DistributionMetadata};
 //!
-
 //! // Shape metadata for compile-time verification
 //! let mut shapes = ShapeMetadata::new();
 //! shapes.add_static_shape(instr_id, StaticShape::new(vec![
@@ -46,7 +39,6 @@
 //!  ShapeDim::Static(1024),
 //! ], DType::F32));
 //!
-
 //! // Device placement hints
 //! let mut devices = DeviceHints::new();
 //! devices.set_placement(block_id, DevicePreference::PreferGPU);

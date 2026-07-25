@@ -1,12 +1,10 @@
 //! Bridge-discharge audit walker — task #134 / MSFS-L4.1.
 //!
-
 //! Walks the corpus's `.vr` modules, finds every
 //! `apply kernel_*_strict(args)` invocation in proof bodies, and
 //! invokes [`verum_kernel::dispatch_intrinsic`] against the literal-arg
 //! call sites. Reports per-bridge:
 //!
-
 //!  * **callsites_total** — total `apply` invocations of the bridge
 //!  * **callsites_literal_args** — invocations whose args reduce to literals
 //!  (the dispatcher can run on these; the elaborator wiring in #135
@@ -19,7 +17,6 @@
 //!  * **false_discharges** — count of invocations where the
 //!  dispatcher returned `holds: false` (CI-fail trigger)
 //!
-
 //! **Architecture**: this module is the *observability layer* on top
 //! of the existing `verum_kernel::intrinsic_dispatch` infrastructure.
 //! It introduces no per-bridge hardcoding — every bridge auto-registers

@@ -1,13 +1,10 @@
 //! Attribute definitions for the Verum AST.
 //!
-
 //! This module defines special attributes that can be attached to items,
 //! including profile and feature attributes for module-level control.
 //!
-
 //! # Specification
 //!
-
 //! Language profiles control which language features are available (systems, application, etc.).
 
 use crate::span::{Span, Spanned};

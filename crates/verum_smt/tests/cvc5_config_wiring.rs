@@ -4,7 +4,6 @@
 //! prior to wiring these fields had no readers, so callers
 //! configuring them had no effect on the underlying CVC5 solver.
 //!
-
 //! Behavioural verification (CVC5 actually honours the option
 //! values) is exercised by the wider Cvc5Backend integration
 //! suite. These tests pin the configuration contract at the

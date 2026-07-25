@@ -1,20 +1,17 @@
 //! Red-team Round 1 §5.1 — Z3 timeout fail-closed soundness invariant.
 //!
-
 //! When Z3 cannot decide a refinement obligation within the configured
 //! timeout, every consumer in the verifier translates `SatResult::Unknown`
 //! into a verification failure (Err / `keep-runtime-check`). This test
 //! programmatically constructs a Z3-hard formula (nonlinear arithmetic
 //! over unbounded Ints) plus a pathologically tiny timeout and asserts:
 //!
-
 //!  1. Z3 returns `SatResult::Unknown` (not Sat/Unsat).
 //!  2. The reason hints at timeout / incompleteness, not "decided".
 //!  3. The canonical Verum translation pattern (`SatResult::Unknown ->
 //!  Err`) is applied — this is the property all 9 audit sites in
 //!  `vcs/red-team/round-1-architecture.md §5.1` jointly enforce.
 //!
-
 //! Companion guardrails:
 //!  - `vcs/specs/L0-critical/verification/z3_timeout_fail_closed.vr`
 //!  - `vcs/specs/L1-core/refinement/smt/proof_timeout.vr`

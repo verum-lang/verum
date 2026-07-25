@@ -1,6 +1,5 @@
 //! K-Pos strict-positivity check integration tests .
 //!
-
 //! Strict positivity: an inductive type `T` is well-formed only when
 //! every recursive occurrence of `T` in any constructor's argument
 //! types appears strictly positively. Berardi 1998 establishes that
@@ -9,7 +8,6 @@
 //! enforces strict positivity at registration time so `False` is not
 //! reachable through ill-formed inductives.
 //!
-
 //! The accept paths cover the standard inductive zoo (`Nat`, `List<A>`,
 //! `Tree<A>`, `Vec<A, n>`); the reject paths cover Berardi-shaped
 //! definitions (`Bad = Wrap(Bad → A)`, indirect non-positive via

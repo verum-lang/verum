@@ -1,15 +1,12 @@
 //! Per-theorem closure-hash incremental verification cache.
 //!
-
 //! ## Goal
 //!
-
 //! For corpora with hundreds of theorems (MSFS = 30, Diakrisis = 142,
 //! Mathlib-class = thousands), full re-check on every save is
 //! unacceptable. This module provides closure-hash incremental
 //! verification per #79's contract:
 //!
-
 //!  * Per-theorem [`ClosureFingerprint`] = blake3 over signature +
 //!  proof body + transitive @framework citations + kernel version.
 //!  * Cache key MUST include `verum_kernel::VVA_VERSION` so any
@@ -17,14 +14,11 @@
 //!  * Cached `Ok` verdict + matching fingerprint ⇒ **skip** the
 //!  kernel re-check entirely.
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as ladder_dispatch /
 //! tactic_combinator / proof_repair:
 //!
-
 //!  * [`IncrementalCacheStore`] — single dispatch interface.
 //!  * [`MemoryCacheStore`] — V0 reference impl (in-process map).
 //!  * [`FilesystemCacheStore`] — V0 disk-backed impl (one JSON file
@@ -34,10 +28,8 @@
 //!  `verum_cli::commands::verify::ProfileConfig`) plug in via the
 //!  same trait without touching consumer call-sites.
 //!
-
 //! ## Decision model
 //!
-
 //! Callers don't ask the cache "do I have this entry?" — they ask
 //! [`decide`]: given a theorem name + its current
 //! [`ClosureFingerprint`], should I skip the recheck or run it? The
@@ -47,10 +39,8 @@
 //! specific cause (no entry / hash drift / kernel-version drift /
 //! previous failure).
 //!
-
 //! ## Foundation-neutral
 //!
-
 //! The module knows nothing about the kernel verification pipeline —
 //! callers compute the fingerprint themselves from the elaborated
 //! theorem (signature hash from CoreType, body hash from CoreTerm,

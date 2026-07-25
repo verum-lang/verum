@@ -1,22 +1,18 @@
 //! Thread-safe reference-counted smart pointer with weak reference support
 //!
-
 //! Shared<T> implements thread-safe atomic reference counting with CBGR generation
 //! tracking. SharedInner<T> stores {strong_count: AtomicUsize, weak_count: AtomicUsize, data: T}.
 //! Shared<T> size = 8 bytes (pointer). SharedInner overhead = 24 bytes (with CBGR tracking) + sizeof(T).
 //!
-
 //! This module provides `Shared<T>` (atomic reference counting) and `Weak<T>`
 //! (weak references) with full CBGR integration for generation tracking.
 //!
-
 //! # Performance Targets (from spec)
 //! - Shared<T> creation: <50ns overhead vs raw allocation
 //! - downgrade: <20ns
 //! - upgrade: <50ns (successful), <10ns (failed)
 //! - Memory layout: 16 bytes overhead (2 atomic counters)
 //!
-
 //! # Memory Ordering
 //! - Strong increment: Relaxed ordering
 //! - Strong decrement: Release + Acquire fence on zero

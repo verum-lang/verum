@@ -1,7 +1,6 @@
 //! HIT path-constructor β-rule
 //! tests.
 //!
-
 //! Per `K-Elim` extension: when the eliminator's scrutinee is a
 //! bare path-ctor reference (a 1-cell or higher cell of the
 //! surrounding inductive), the eliminator β-reduces to the
@@ -10,7 +9,6 @@
 //! homogeneous `PathTy` value of the right type per the
 //! eliminator-emit convention.
 //!
-
 //! Coverage:
 //!  • S¹ Loop reduces to case_Loop (closed-loop branch).
 //!  • Interval Seg reduces to case_Seg (heterogeneous PathOver).

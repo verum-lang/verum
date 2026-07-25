@@ -1,14 +1,11 @@
 //! Macro / meta-function invocation collection + expansion.
 //!
-
 //! Extracted from `pipeline.rs` (#106 Phase 21). Houses the
 //! AST-visitor that walks a module to find macro / meta-function
 //! invocations and expands them via the meta registry.
 //!
-
 //! Surface:
 //!
-
 //!  * `InvocationArgs` — enum distinguishing traditional
 //!  `macro!()` token-tree args from `@meta()` parsed-Expr args.
 //!  * `MacroInvocation` — record for a single found invocation
@@ -21,7 +18,6 @@
 //!  * `MacroExpander::collect_macro_invocations` /
 //!  `MacroExpander::expand_macro` — driver methods.
 //!
-
 //! Plus: `reset_test_isolation()` — public test-harness helper
 //! lives at the bottom of this concern (it resets the same global
 //! tables the macro expander touches).

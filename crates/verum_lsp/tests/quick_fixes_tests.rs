@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for quick_fixes module
 //!
-
 //! Tests the quick fix generation for refinement violations including:
 //! - Fix categorization
 //! - Fix priority ordering

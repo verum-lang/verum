@@ -14,7 +14,6 @@
 )]
 //! Integration tests for the Verum diagnostics system
 //!
-
 //! These tests demonstrate the full capabilities of the diagnostic system,
 //! particularly for refinement type errors.
 

@@ -1,21 +1,17 @@
 //! Core Protocol Type Definitions
 //!
-
 //! Verum Protocol System Core Types:
 //! Protocols (analogous to traits) declare required methods, associated types,
 //! and associated constants. Implementations provide concrete definitions.
 //! Protocol bounds constrain generic type parameters. Object safety rules
 //! determine which protocols can be used as dynamic dispatch (dyn Protocol).
 //!
-
 //! This module contains the foundational protocol (trait) type definitions
 //! without any verification logic. These types are used by both verum_types
 //! and verum_smt.
 //!
-
 //! # Design
 //!
-
 //! These are pure data structures representing:
 //! - Protocol declarations (methods, associated types, constants)
 //! - Protocol implementations

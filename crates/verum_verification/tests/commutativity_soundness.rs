@@ -1,7 +1,6 @@
 //! Soundness regression: `is_commutative_pair` must restrict to
 //! actually commutative operators.
 //!
-
 //! Pre-fix the function returned true whenever two expressions shared
 //! the SAME `BinOp` and had swapped operands — without checking that
 //! the operator is actually commutative. Result: a "commutativity"
@@ -9,7 +8,6 @@
 //! was accepted. Same gap for Div, Imply, Lt/Le/Gt/Ge, Concat,
 //! Shl/Shr, In, and the Call arm trusted any 2-arg function.
 //!
-
 //! Post-fix: only `Add`, `Mul`, `And`, `Or`, `Eq`, `Ne`, `BitAnd`,
 //! `BitOr`, `BitXor` flow through. Call arm now returns false (no
 //! special-cased trust).

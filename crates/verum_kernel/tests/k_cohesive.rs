@@ -1,7 +1,6 @@
 //! K-Shape / K-Flat / K-Sharp integration tests for cohesive
 //! modalities.
 //!
-
 //! Cohesive modalities ∫ ⊣ ♭ ⊣ ♯ (Schreiber DCCT, cohesive HoTT).
 //! The kernel admits the type-formers unconditionally; the
 //! triple-adjunction laws (η, ε, triangle identities) are framework

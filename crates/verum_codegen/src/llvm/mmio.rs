@@ -1,51 +1,39 @@
 //! MMIO (Memory-Mapped I/O) code generation for volatile memory operations.
 //!
-
 //! This module provides LLVM IR generation for volatile memory operations
 //! used in hardware register access and MMIO programming.
 //!
-
 //! # Overview
 //!
-
 //! Volatile operations guarantee that:
 //! - Reads are never optimized away or reordered
 //! - Writes are never optimized away or reordered
 //! - Memory barriers are properly placed for hardware synchronization
 //!
-
 //! # Generated Code Patterns
 //!
-
 //! ```llvm
 //! ; Volatile read (32-bit register)
 //! %val = load volatile i32, ptr %reg_addr, align 4
 //!
-
 //! ; Volatile write (32-bit register)
 //! store volatile i32 %val, ptr %reg_addr, align 4
 //!
-
 //! ; Read-modify-write with atomic ordering
 //! %old = atomicrmw or i32* %addr, i32 %mask seq_cst
 //!
-
 //! ; Memory barrier (full fence)
 //! fence seq_cst
 //! ```
 //!
-
 //! # Architecture-Specific Notes
 //!
-
 //! - **ARM**: Uses DMB (data memory barrier) for fences
 //! - **x86**: Most volatile operations are naturally ordered
 //! - **RISC-V**: Uses FENCE instruction
 //!
-
 //! # MMIO Volatile Codegen
 //!
-
 //! Verum provides type-safe MMIO through `Register<T, MODE>` wrappers with
 //! `*volatile T` pointer types. Access modes (ReadOnly, WriteOnly, ReadWrite,
 //! WriteOneToClear, etc.) are enforced at compile time. Volatile semantics

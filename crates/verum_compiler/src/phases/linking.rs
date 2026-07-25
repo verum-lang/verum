@@ -1,39 +1,31 @@
 //! Phase 7.5: Final Linking
 //!
-
 //! This phase performs the final linking step where user-compiled code is combined
 //! with the pre-compiled stdlib. This is crucial for achieving zero-cost abstractions
 //! through LTO (Link Time Optimization).
 //!
-
 //! Runtime support is provided by stdlib via FFI and intrinsics. The VBC interpreter
 //! handles all execution internally, and AOT compilation links directly with stdlib.
 //!
-
 //! ## NO LIBC ARCHITECTURE
 //!
-
 //! **IMPORTANT**: Verum does NOT link against libc or any system C libraries.
 //! All runtime functionality is provided by:
 //! - LLVM intrinsics (llvm.sin.f32, llvm.sqrt.f64, etc.)
 //! - Custom Verum runtime implementations in `/core/`
 //! - Platform-specific system calls via the Verum syscall layer
 //!
-
 //! This enables:
 //! - Fully self-contained binaries with no external dependencies
 //! - Consistent behavior across all platforms
 //! - Smaller binary sizes (no libc bloat)
 //! - Better optimization opportunities (no opaque library calls)
 //!
-
 //! Entry point: `/core/sys/init.vr` provides the custom entry point that
 //! initializes the Verum runtime before calling the user's `main` function.
 //!
-
 //! ## Features
 //!
-
 //! - Object file linking with proper symbol resolution
 //! - Stdlib linking (stdlib.vbca provides all runtime support)
 //! - Link-Time Optimization (Thin/Full LTO)
@@ -46,17 +38,14 @@
 //!  - Static library (.a)
 //!  - Object file (.o)
 //!
-
 //! ## Performance Characteristics
 //!
-
 //! | Linking Mode | Time | Binary Size | Runtime Performance |
 //! |-------------|------|-------------|-------------------|
 //! | Debug (no LTO) | ~100ms | 5MB | Baseline |
 //! | Release (thin LTO) | ~500ms | 3MB | 1.5x faster |
 //! | Release (full LTO) | ~2s | 2.5MB | 2x faster |
 //!
-
 //! Phase 7.5: Final linking. Links object files with libverum_std.a,
 //! applies LTO optimization, produces final executable binary.
 

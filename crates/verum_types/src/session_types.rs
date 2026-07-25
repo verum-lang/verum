@@ -1,6 +1,5 @@
 //! Session Types — typed protocols for bidirectional channels.
 //!
-
 //! A *session type* describes the sequence of sends, receives, and
 //! choices that two communicating parties must perform on a shared
 //! channel. Every channel end carries a session type indexing its
@@ -8,10 +7,8 @@
 //! time that both ends follow compatible (dual) protocols, ruling
 //! out deadlocks, protocol mismatches, and linearity violations.
 //!
-
 //! ## The session calculus
 //!
-
 //! ```text
 //!  S ::= !T. S (send value of type T, then continue as S)
 //!  | ?T. S (recv value of type T, then continue as S)
@@ -20,14 +17,11 @@
 //!  | end (protocol complete)
 //! ```
 //!
-
 //! ## Duality
 //!
-
 //! Two protocols `P` and `Q` are *dual* when they perform
 //! mirror-image actions:
 //!
-
 //! ```text
 //!  dual(!T. S) = ?T. dual(S)
 //!  dual(?T. S) = !T. dual(S)
@@ -36,18 +30,14 @@
 //!  dual(end) = end
 //! ```
 //!
-
 //! `dual(dual(P)) = P` — duality is an involution.
 //!
-
 //! ## Usage
 //!
-
 //! Session types integrate with the rest of Verum's type system as
 //! type-level descriptors on channel values. The channel's current
 //! protocol advances after every send/recv/offer/select:
 //!
-
 //! ```text
 //!  chan : Channel<!Int. ?Bool. end>
 //!  chan.send(42) // chan now has type Channel<?Bool. end>
@@ -55,15 +45,12 @@
 //!  chan.close() // matched by `end`
 //! ```
 //!
-
 //! Linearity of channels (each handle used exactly once per step)
 //! is enforced by the QTT usage tracker — session types compose
 //! cleanly with `Quantity::One` on the channel handle.
 //!
-
 //! ## Implementation
 //!
-
 //! This module is the pure algebraic layer — `Protocol` values, the
 //! `dual` function, a compatibility predicate, and a protocol
 //! stepper. Integration into the surface syntax (parse

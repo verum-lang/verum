@@ -17,20 +17,16 @@
 #![allow(clippy::unnecessary_filter_map)]
 //! Module system for the Verum programming language.
 //!
-
 //! This crate provides comprehensive module resolution, loading, and management
 //! for the Verum compiler. It implements the Verum module system with three
 //! core responsibilities: namespace management (hierarchical modules), visibility
 //! control (private-by-default with public/public(crate)/public(super)/public(in path)),
 //! and dependency resolution (deterministic, unambiguous name resolution).
 //!
-
 //! # Overview
 //!
-
 //! The module system provides:
 //!
-
 //! - **Name Resolution**: Resolves identifiers to their definitions across modules
 //! - **Module Loading**: Loads modules from the filesystem (.vr files)
 //! - **Dependency Management**: Tracks module dependencies and compilation order
@@ -39,10 +35,8 @@
 //! - **Language Profiles**: Profile-aware module control (Application/Systems/Research)
 //! - **Protocol Coherence**: Orphan rule validation and overlap detection
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────┐
 //! │ ModuleLoader │ ← Loads .vr files from filesystem
@@ -74,50 +68,39 @@
 //! └─────────────────┘
 //! ```
 //!
-
 //! # Language Profiles
 //!
-
 //! Verum supports three language profiles:
 //! - **Application**: Safe, productive, async-first (default)
 //! - **Systems**: Unsafe allowed, manual memory management
 //! - **Research**: Formal verification, dependent types, proofs
 //!
-
 //! Modules can declare their profile with `@profile(application)`, `@profile(systems)`,
 //! or `@profile(research)`. Child modules inherit parent profile restrictions.
 //!
-
 //! # Example Usage
 //!
-
 //! ```rust,ignore
 //! use verum_modules::{ModuleLoader, NameResolver, ProfileChecker};
 //! use std::path::Path;
 //!
-
 //! // Create module loader
 //! let mut loader = ModuleLoader::new(Path::new("src"));
 //!
-
 //! // Load module
 //! let module_info = loader.load_and_parse(&ModulePath::root(), ModuleId::new(0))?;
 //!
-
 //! // Check profile compatibility
 //! let profile_checker = ProfileChecker::new(LanguageProfile::Application);
 //! profile_checker.check_module(&module_info)?;
 //!
-
 //! // Resolve names
 //! let resolver = NameResolver::new();
 //! resolver.resolve(&module_info)?;
 //! ```
 //!
-
 //! # Key Design Principles
 //!
-
 //! - Explicit is better than implicit (no magical globals)
 //! - File system mirrors module hierarchy
 //! - Visibility defaults to private (principle of least privilege)

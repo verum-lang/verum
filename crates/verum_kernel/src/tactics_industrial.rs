@@ -2,25 +2,20 @@
 //! rule. Production tactics that close subgoals via decision
 //! procedures or structural recursion, NOT via SMT delegation.
 //!
-
 //! ## What this delivers
 //!
-
 //! Verum's existing 22 built-in tactics are *paper-cited* — they
 //! drive an SMT backend or a framework-axiom citation, then the
 //! kernel re-checks the resulting term. This is sound but not
 //! *closing* — most subgoals still hand off to Z3.
 //!
-
 //! Industrial-grade tactics close subgoals **without external help**:
 //! they implement decision procedures whose correctness is proved
 //! once-and-for-all in the kernel, then dispatched per-subgoal.
 //!
-
 //! ships the following tactics, each with a kernel-checkable
 //! decision predicate + explicit-witness emission:
 //!
-
 //!  1. [`tactic_lia`] — *Linear Integer Arithmetic*. Decides
 //!  validity of formulae over ℤ with `+`, `−`, multiplication
 //!  by constants, equality and inequality. Reduction: Presburger
@@ -41,17 +36,14 @@
 //!  a goal against a hint database via depth-bounded back-chaining;
 //!  records used hints for kernel re-check.
 //!
-
 //! Each tactic returns a [`TacticOutcome`] structure that carries
 //! the closing-witness data (linear-elimination certificate /
 //! truth-table assignment / induction split / congruence chain /
 //! hint sequence). The kernel re-checks the witness in linear
 //! time relative to the witness size.
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **MSFS proof bodies** that currently delegate to SMT can
 //!  instead invoke [`tactic_lia`] / [`tactic_decide`] for
 //!  in-kernel discharge.

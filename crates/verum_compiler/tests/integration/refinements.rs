@@ -1,9 +1,7 @@
 //! Refinement Types Integration Tests
 //!
-
 //! Tests the complete refinement type system integration:
 //!
-
 //! - Runtime constraint checking
 //! - Compile-time verification (when possible)
 //! - SMT solver integration for proof checking
@@ -11,7 +9,6 @@
 //! - Error reporting for constraint violations
 //! - Performance of runtime checks
 //!
-
 //! Refinement types add predicates to base types: `Int{> 0}`, `List<T>{.len() > 0}`.
 //! Predicates are verified at compile time via SMT solver (Z3). Three verification modes:
 //! @verify(proof) - compile-time proof (contracts erased), @verify(runtime) - runtime

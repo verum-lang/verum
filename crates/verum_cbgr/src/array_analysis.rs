@@ -1,53 +1,42 @@
 //! Production-Grade Array Index Analysis for CBGR Escape Analysis
 //!
-
 //! Symbolic array index tracking enables independent analysis of array elements.
 //! Traditional escape analysis treats all array elements conservatively: if any
 //! element escapes, all elements are marked as escaping. This module tracks
 //! symbolic indices (constants, ranges, induction variables) to distinguish
 //! elements, allowing per-element promotion decisions for CBGR optimization.
 //!
-
 //! This module implements symbolic array index tracking to enable independent
 //! analysis of array elements, dramatically improving promotion opportunities.
 //!
-
 //! # Overview
 //!
-
 //! Traditional escape analysis treats array elements conservatively: if any
 //! element escapes, all elements are considered to escape. This module enables
 //! fine-grained tracking through symbolic index representation.
 //!
-
 //! # Core Algorithm
 //!
-
 //! 1. **Index Extraction**: Parse array accesses from CFG instructions
 //! 2. **Symbolic Representation**: Build symbolic index expressions (i+1, 2*i, etc.)
 //! 3. **Range Analysis**: Infer min/max bounds for indices
 //! 4. **Aliasing Analysis**: Determine if two indices may refer to same element
 //! 5. **Integration**: Enhance field-sensitive analysis with array indices
 //!
-
 //! # Performance Characteristics
 //!
-
 //! - Index extraction: O(instructions)
 //! - Range inference: O(loop depth)
 //! - Aliasing check: O(1) for constants, O(expr depth) for symbolic
 //! - Total overhead: < 5% of escape analysis time
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! fn process(arr: &[i32]) -> i32 {
 //!  let x = arr[0]; // Index 0
 //!  let y = arr[1]; // Index 1
 //!
-
 //!  // Traditional: arr[0] and arr[1] may alias (conservative)
 //!  // This module: arr[0] and arr[1] don't alias (precise)
 //!  //

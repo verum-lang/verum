@@ -14,13 +14,11 @@
 )]
 //! # Core Standard Library Validation Tests
 //!
-
 //! These tests ensure that ALL core/ .vr files parse and type-check correctly.
 //! The stdlib is loaded during every compilation — these tests explicitly verify
 //! that no parsing errors, type errors, or import resolution failures exist in
 //! the standard library.
 //!
-
 //! Run with: `cargo test -p verum_compiler --test core_stdlib_validation_test`
 
 use std::path::PathBuf;

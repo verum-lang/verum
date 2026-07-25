@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for module-level type inference
 //!
-
 //! Tests cover:
 //! - Cross-function type inference
 //! - Mutual recursion

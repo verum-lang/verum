@@ -1,15 +1,12 @@
 //! Module merging for monomorphization.
 //!
-
 //! The ModuleMerger combines:
 //! - User module VBC
 //! - Stdlib precompiled specializations
 //! - Newly monomorphized functions
 //!
-
 //! Into a final monomorphized VBC module ready for execution.
 //!
-
 //! Key responsibilities:
 //! 1. Copy user module structure (types, strings, constants)
 //! 2. Copy user bytecode with offset remapping
@@ -17,7 +14,6 @@
 //! 4. Add newly specialized functions
 //! 5. **CRITICAL: Fixup all function references in bytecode**
 //!
-
 //! Final phase of monomorphization: produces a self-contained VBC module with all
 //! generic instantiations resolved to concrete specialized functions.
 

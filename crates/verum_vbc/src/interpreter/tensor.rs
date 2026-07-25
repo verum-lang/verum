@@ -1,13 +1,10 @@
 //! Tensor runtime support for the VBC interpreter.
 //!
-
 //! This module provides the runtime representation and operations for tensors,
 //! enabling ML/AI workloads in the Verum VBC interpreter.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │ TENSOR REPRESENTATION │
@@ -27,17 +24,13 @@
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Memory Layout
 //!
-
 //! Tensors use row-major (C-style) layout by default. The strides are computed
 //! automatically from the shape.
 //!
-
 //! # Thread Safety
 //!
-
 //! TensorData uses atomic reference counting for safe sharing across async tasks.
 //! Mutation requires exclusive access (enforced at runtime).
 

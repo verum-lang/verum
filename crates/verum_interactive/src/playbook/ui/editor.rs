@@ -1,6 +1,5 @@
 //! Full-featured editor widget for editing cell content
 //!
-
 //! Features:
 //! - Syntax highlighting for Verum code
 //! - Text selection with mouse/keyboard

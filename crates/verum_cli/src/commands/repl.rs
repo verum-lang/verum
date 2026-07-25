@@ -1,6 +1,5 @@
 //! REPL command - Interactive Read-Eval-Print Loop for Verum
 //!
-
 //! VBC-backed evaluation. Each input is parsed; top-level items
 //! (`fn`, `type`, `protocol`, `implement`, `static`, `mount`) are
 //! accumulated into a session source buffer. Bare expressions are
@@ -8,7 +7,6 @@
 //! the result, the session buffer is recompiled with the new
 //! function, and the function is executed via the VBC interpreter.
 //!
-
 //! Each `let`-style binding is desugared at the REPL surface into a
 //! `static` declaration so it persists across prompts. `:reset`
 //! clears the session.

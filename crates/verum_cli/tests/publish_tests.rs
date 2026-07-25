@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for the publish module
 //!
-
 //! These tests cover:
 //! - PublishOptions validation and defaults
 //! - Package validation (name, version, dependencies)

@@ -1,18 +1,14 @@
 #![allow(unexpected_cfgs)]
 //! Abstract Syntax Tree (AST) for the Verum language.
 //!
-
 //! This crate provides complete AST node definitions for the Verum compiler,
 //! including all expression types, statements, declarations, patterns, and
 //! the critical refinement type system.
 //!
-
 //! # Overview
 //!
-
 //! The AST is organized into several modules:
 //!
-
 //! - [`span`]: Source location tracking for error reporting
 //! - [`literal`]: Literal values (integers, floats, strings, etc.)
 //! - [`ty`]: Type system including refinement types
@@ -22,55 +18,41 @@
 //! - [`decl`]: Top-level declarations (functions, types, protocols, etc.)
 //! - [`visitor`]: AST traversal using the visitor pattern
 //!
-
 //! # Key Features
 //!
-
 //! ## Refinement Types
 //!
-
 //! Verum's unique value proposition is its refinement type system. The AST
 //! fully supports refinement predicates:
 //!
-
 //! ```verum
 //! type Positive is Int{> 0}
 //! type Email is Text{is_email(it)}
 //! type SortedList<T> is List<T>{is_sorted(it)}
 //! ```
 //!
-
 //! These are represented in the AST as [`TypeKind::Refined`] nodes.
 //!
-
 //! ## Stream Comprehensions
 //!
-
 //! First-class support for lazy stream processing:
 //!
-
 //! ```verum
 //! stream [x * 2 for x in source if x > 0]
 //! ```
 //!
-
 //! Represented as [`ExprKind::StreamComprehension`].
 //!
-
 //! ## Three-Tier Reference Model
 //!
-
 //! Support for Verum's three-tier reference system:
 //!
-
 //! - Safe references: `&T`, `&mut T` ([`TypeKind::Reference`])
 //! - Checked references: `&checked T` (runtime bounds checking)
 //! - Unsafe references: `&unsafe T` (no bounds checking)
 //!
-
 //! # Example Usage
 //!
-
 //! ```rust
 //! use verum_ast::*;
 //! use verum_ast::span::{Span, FileId};
@@ -78,7 +60,6 @@
 //! use verum_ast::literal::Literal;
 //! use verum_common::Heap;
 //!
-
 //! // Create a simple binary expression: 1 + 2
 //! let span = Span::new(0, 5, FileId::new(0));
 //! let left = Heap::new(Expr::literal(Literal::int(1, span)));
@@ -93,10 +74,8 @@
 //! );
 //! ```
 //!
-
 //! # Design Principles
 //!
-
 //! 1. **Explicit over implicit**: All information is represented explicitly
 //! 2. **Memory efficient**: Use `SmallVec` for common cases
 //! 3. **Serializable**: All nodes derive `Serialize` and `Deserialize`

@@ -1,18 +1,14 @@
 //! Mathematical Structures Library for Verum
 //!
-
 //! Implements comprehensive mathematical structures for formal verification
 //! for the Verum formal proof system (planned for version 2.0+).
 //!
-
 //! Mathematical structures provide the algebraic, analytic, and categorical
 //! foundations for formal verification. Each structure defines a carrier set,
 //! operations, and governing axioms that can be checked by the proof system.
 //!
-
 //! ## Features
 //!
-
 //! - **Abstract Algebra**: Groups, Rings, Fields, Modules, Vector Spaces
 //! - **Analysis**: Complete ordered fields, limits, continuity
 //! - **Category Theory**: Categories, Functors, Natural Transformations
@@ -20,19 +16,15 @@
 //! - **Topology**: Topological spaces, continuous functions, compactness
 //! - **Standard Lemma Database**: Automated lemma lookup for proof search
 //!
-
 //! ## Integration
 //!
-
 //! This module integrates with:
 //! - `verum_smt::proof_search` for automated proof tactics
 //! - `verum_smt::algebra` for algebraic structure verification
 //! - `verum_types` for type-level mathematical properties
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Structure verification: < 100ms per axiom
 //! - Lemma lookup: < 1ms
 //! - Theorem proving: < 5s for standard theorems

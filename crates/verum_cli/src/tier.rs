@@ -1,13 +1,11 @@
 //! Shared execution-tier resolver used by `run`, `test` and `bench`.
 //!
-
 //! Keeps the flag semantics identical across commands:
 //!  * `--interp` → Tier::Interpret
 //!  * `--aot` → Tier::Aot
 //!  * `--tier <name>` → resolved via `LanguageFeatureOverrides::tier`
 //!  * otherwise → caller-supplied default
 //!
-
 //! `--interp` and `--aot` are mutually exclusive in the clap definition;
 //! the resolver additionally reports a clean error if the `--tier` value
 //! is unknown, and lets each command pin its own default (e.g. `run` and

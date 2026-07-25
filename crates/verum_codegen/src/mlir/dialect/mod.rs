@@ -1,10 +1,8 @@
 //! Verum MLIR Dialect - Industrial-Grade Implementation.
 //!
-
 //! This module defines the comprehensive Verum-specific MLIR dialect with custom types
 //! and operations for:
 //!
-
 //! - **CBGR (Three-Tier Reference System)**: Complete memory safety with
 //!  generation-based validation, borrow scopes, and tier promotion/demotion
 //! - **Context System**: Full dependency injection with scoping, requirements,
@@ -16,10 +14,8 @@
 //! - **Collections**: `verum.list_*`, `verum.map_*`, `verum.set_*`
 //! - **Refinement Types**: `verum.refinement_check` with predicate propagation
 //!
-
 //! # Dialect Structure
 //!
-
 //! ```text
 //! Verum Dialect ("verum")
 //! ├── Types

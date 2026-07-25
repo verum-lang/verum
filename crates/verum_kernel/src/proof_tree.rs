@@ -1,7 +1,6 @@
 //! Phase 2 proof-tree replay foundation for Z3 `(proof …)` and
 //! CVC5 ALETHE format.
 //!
-
 //! The kernel's Phase 1 replay (`replay_smt_cert`) accepts
 //! single-byte trust-tag certificates — a minimal shape the SMT
 //! layer emits when a goal closes via the
@@ -12,38 +11,31 @@
 //! certificate fails the structural check before producing a
 //! term the kernel admits.
 //!
-
 //! This module lands the parser + rule-catalogue foundation.
 //! Individual rule → `CoreTerm` mappings for each backend
 //! arrive in dedicated follow-up patches (Z3's ~35 rules +
 //! CVC5 ALETHE's ~70 rules are too many to review in one
 //! commit).
 //!
-
 //! # Supported formats
 //!
-
 //! * **Z3**: `(proof
 //!  (step-name premise_1 premise_2 …)
 //!  (step-name' …))`
 //!  — S-expression tree, rule names are Z3-specific
 //!  (`mp`, `asserted`, `refl`, `trans`, etc.).
 //!
-
 //! * **CVC5 ALETHE**: `(assume a0 …) (step t1 :rule <name>
 //!  :premises (a0) :args (…) :conclusion …)`
 //!  — linear sequence of steps with named premises.
 //!
-
 //! Both formats share the S-expression lexical shape — this
 //! module parses into a common `ProofNode` tree and dispatches
 //! to the backend-specific rule table by inspecting the trace's
 //! first atom.
 //!
-
 //! # Trust contract
 //!
-
 //! `replay_tree(backend, trace)` validates that every rule name
 //! in the tree is in the backend's allowlist. Unknown rules
 //! fail with `KernelError::UnknownRule` so a backend update

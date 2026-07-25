@@ -1,6 +1,5 @@
 //! Statement parser for Verum using hand-written recursive descent.
 //!
-
 //! This module implements parsing for all statement forms:
 //! - Let bindings: `let x = expr`, `let mut x: Type = expr`
 //! - Let-else: `let Some(x) = opt else { return }`

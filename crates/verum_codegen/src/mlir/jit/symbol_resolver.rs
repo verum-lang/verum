@@ -1,26 +1,21 @@
 //! Industrial-grade Symbol Resolution for JIT compilation.
 //!
-
 //! Provides comprehensive symbol resolution for verum_std FFI functions
 //! and other runtime dependencies with:
 //!
-
 //! - Dynamic library loading (cross-platform)
 //! - Lazy symbol binding with caching
 //! - Symbol validation and type checking
 //! - Error recovery and fallback mechanisms
 //! - Statistics and diagnostics
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────┐
 //! │ Symbol Resolution Pipeline │
 //! └─────────────────────────────────────────────────────────────────────┘
 //!
-
 //!  JIT-compiled code
 //!  │
 //!  ▼
@@ -41,21 +36,16 @@
 //!  Native call
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use crate::mlir::jit::{SymbolResolver, SymbolInfo};
 //!
-
 //! let mut resolver = SymbolResolver::new();
 //!
-
 //! // Load verum_std dynamically
 //! resolver.load_library("libverum_std.so")?;
 //!
-
 //! // Resolve a symbol
 //! let info = resolver.resolve("verum_std_list_i64_new")?;
 //! println!("Symbol at: {:p}", info.address);

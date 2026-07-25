@@ -1,10 +1,8 @@
 //! AST formatting utilities for LSP
 //!
-
 //! This module provides formatting functions specific to verum_ast types,
 //! used across hover.rs, completion.rs, and other LSP modules.
 //!
-
 //! Formatting utilities shared across LSP modules (hover, completion, etc.).
 
 use verum_ast::LiteralKind;

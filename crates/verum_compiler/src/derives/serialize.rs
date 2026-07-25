@@ -1,9 +1,7 @@
 //! Serialize derive macro implementation
 //!
-
 //! Generates `implement Serialize for Type { fn serialize<S>(&self, serializer: S) -> Result<S.Ok, S.Error> }`
 //!
-
 //! For record types: serializes each field by name. For sum types: serializes variant
 //! tag + payload. Supports @rename("...") and @skip attributes on fields.
 //! Critical for web frameworks, APIs, and data persistence.

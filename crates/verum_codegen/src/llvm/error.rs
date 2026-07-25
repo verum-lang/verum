@@ -1,6 +1,5 @@
 //! Error types for LLVM-based VBC lowering.
 //!
-
 //! This module defines errors that can occur during the VBC → LLVM IR
 //! lowering process.
 

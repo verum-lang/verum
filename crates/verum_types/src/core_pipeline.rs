@@ -1,13 +1,10 @@
 //! Stdlib Type Registration Pipeline
 //!
-
 //! This module provides the infrastructure for registering types from the Verum
 //! standard library in dependency order.
 //!
-
 //! ## Overview
 //!
-
 //! The stdlib pipeline processes pre-parsed ASTs in a specific order:
 //! 1. core/primitives.vr - primitive type methods
 //! 2. core/protocols.vr - core protocols (Eq, Ord, Clone)
@@ -16,26 +13,20 @@
 //! 5. collections/*.vr - List, Map, Set
 //! 6. And so on...
 //!
-
 //! Each module's exports (types, protocols, functions) are registered before
 //! subsequent modules are processed, enabling forward references within the stdlib.
 //!
-
 //! ## Usage
 //!
-
 //! ```ignore
 //! use verum_types::core_pipeline::{StdlibTypeRegistry, ModuleOrder};
 //! use verum_types::infer::TypeChecker;
 //!
-
 //! let mut checker = TypeChecker::with_minimal_context();
 //! checker.register_builtins();
 //!
-
 //! let registry = StdlibTypeRegistry::new();
 //!
-
 //! // Register types from pre-parsed modules in order
 //! for module_name in ModuleOrder::default_order() {
 //!  if let Some(ast) = parsed_modules.get(module_name) {
@@ -44,7 +35,6 @@
 //! }
 //! ```
 //!
-
 //! Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
 
 use std::time::{Duration, Instant};

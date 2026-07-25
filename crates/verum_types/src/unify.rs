@@ -1,6 +1,5 @@
 //! Type unification algorithm.
 //!
-
 //! This module implements Robinson's unification algorithm with extensions for:
 //! - Refinement types (structural unification)
 //! - Occurs check (prevent infinite types)
@@ -10,7 +9,6 @@
 //! - Higher inductive types (HITs)
 //! - Quantitative type theory
 //!
-
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking
 
 use crate::ty::{EqTerm, Quantity, Substitution, SubstitutionExt, Type, TypeVar, UniverseLevel};

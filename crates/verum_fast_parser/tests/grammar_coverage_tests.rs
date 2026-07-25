@@ -14,7 +14,6 @@
 )]
 //! Grammar coverage tests for Verum parser.
 //!
-
 //! Tests grammar productions from grammar/verum.ebnf that lack dedicated
 //! test coverage. Each test references the specific EBNF production it covers.
 

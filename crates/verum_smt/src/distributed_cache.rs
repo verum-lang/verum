@@ -1,13 +1,10 @@
 //! Distributed verification cache with S3, Redis, and filesystem backends
 //!
-
 //! Enables teams to share verification results across CI/CD pipelines,
 //! dramatically reducing verification time on unchanged code.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────┐ ┌─────────────────┐ ┌────────────────┐
 //! │ Local Cache │────►│ Distributed │────►│ Remote Storage │
@@ -18,20 +15,16 @@
 //!  └─────────────────────┴────────────────────────┘
 //! ```
 //!
-
 //! # Backend Options
 //!
-
 //! | Backend | Feature Flag | Use Case |
 //! |---------|--------------|----------|
 //! | S3 | `distributed-cache` | Team/CI sharing via cloud storage |
 //! | Redis | `redis-cache` | Low-latency team sharing |
 //! | Filesystem | (always available) | Local persistent fallback |
 //!
-
 //! # Features
 //!
-
 //! - **S3-compatible storage**: Works with AWS S3, MinIO, Cloudflare R2, etc.
 //! - **Redis storage**: Low-latency distributed caching for teams
 //! - **Filesystem fallback**: Persistent local cache when cloud unavailable
@@ -40,16 +33,13 @@
 //! - **TTL-based expiration**: Configurable max age for cache entries
 //! - **Local cache layer**: Minimize network round-trips
 //!
-
 //! # Example
 //!
-
 //! ```rust,no_run
 //! use verum_smt::distributed_cache::{DistributedCache, DistributedCacheConfig, TrustLevel, CachedResult};
 //! use verum_common::Maybe;
 //! use std::time::Duration;
 //!
-
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = DistributedCacheConfig {
 //!  storage_url: "s3://my-bucket/verum-cache".into(),
@@ -60,10 +50,8 @@
 //!  redis_url: Maybe::None,
 //! };
 //!
-
 //! let mut cache = DistributedCache::new(config);
 //!
-
 //! // Check if result is cached
 //! if let Maybe::Some(entry) = cache.get("some-key").await {
 //!  println!("Cache hit! Saved time: {}ms", entry.metadata.original_time_ms);
@@ -75,17 +63,14 @@
 //! # }
 //! ```
 //!
-
 //! # Enabling Features
 //!
-
 //! To use S3 backend:
 //! ```toml
 //! [dependencies]
 //! verum_smt = { version = "*", features = ["distributed-cache"] }
 //! ```
 //!
-
 //! To use Redis backend:
 //! ```toml
 //! [dependencies]

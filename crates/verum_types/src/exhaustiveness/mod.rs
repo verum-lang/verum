@@ -1,27 +1,21 @@
 //! Pattern Exhaustiveness Checking
 //!
-
 //! This module implements comprehensive exhaustiveness checking for pattern matching
 //! in Verum. It uses a matrix-based algorithm inspired by Maranget's "Warnings for
 //! pattern matching" paper.
 //!
-
 //! # Overview
 //!
-
 //! The algorithm works in several phases:
 //!
-
 //! 1. **Type Deconstruction**: Enumerate all constructors for a type
 //! 2. **Matrix Construction**: Convert patterns into a coverage matrix
 //! 3. **Usefulness Check**: Determine if each pattern adds coverage
 //! 4. **Exhaustiveness Check**: Verify all cases are covered
 //! 5. **Witness Generation**: Create examples of uncovered cases
 //!
-
 //! # Supported Pattern Kinds
 //!
-
 //! The system handles all 19 pattern kinds in Verum's AST:
 //! - Wildcard, Rest, Ident: Cover everything
 //! - Literal: Cover one specific value
@@ -38,21 +32,17 @@
 //! - TypeTest: Runtime type checking
 //! - Stream: Iterator head/tail decomposition
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_types::exhaustiveness::{check_exhaustiveness, ExhaustivenessResult};
 //!
-
 //! let result = check_exhaustiveness(
 //!  &patterns,
 //!  &scrutinee_type,
 //!  &type_env,
 //! )?;
 //!
-
 //! if !result.is_exhaustive {
 //!  for witness in &result.uncovered_witnesses {
 //!  eprintln!("Uncovered case: {}", witness);
@@ -60,10 +50,8 @@
 //! }
 //! ```
 //!
-
 //! # References
 //!
-
 //! - Maranget, L. "Warnings for pattern matching" (2007)
 //! - Rust RFC 3637: Guard Patterns
 //! - Pattern exhaustiveness checking: ensuring match expressions cover all possible values

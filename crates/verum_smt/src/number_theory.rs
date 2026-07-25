@@ -1,18 +1,14 @@
 //! Number Theory Library with Formal Verification
 //!
-
 //! Comprehensive industrial-grade number theory implementation with Z3-based
 //! formal proofs of fundamental theorems.
 //!
-
 //! Part of the formal mathematics library for Verum's proof system. Provides
 //! verified number-theoretic primitives: primality, divisibility, Euler's totient,
 //! and core theorems (Fermat's Little, Euler's, Wilson's, FTA) with SMT proofs.
 //!
-
 //! ## Features
 //!
-
 //! - **Primality Testing**: Miller-Rabin and deterministic algorithms
 //! - **Prime Factorization**: Complete factorization with trial division
 //! - **GCD/LCM**: Euclidean algorithm with extended GCD
@@ -20,10 +16,8 @@
 //! - **Number-Theoretic Functions**: Euler phi, divisor count/sum, Möbius
 //! - **Theorem Verification**: Fermat's Little Theorem, Euler's Theorem, Wilson's Theorem
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Primality test: < 1ms for 64-bit integers
 //! - Prime factorization: < 10ms for 64-bit integers
 //! - GCD: < 100ns via Euclidean algorithm

@@ -1,31 +1,24 @@
 //! Specialized diagnostics for the `?` operator (try operator).
 //!
-
 //! This module implements error codes E0203, E0204, and E0205 for the '?' (try) operator.
 //!
-
 //! The '?' operator desugars to: match expr { Ok(v) => v, Err(e) => return Err(e.into()) }.
 //! It requires: (1) the enclosing function returns Result<T, E> or Maybe<T>, and
 //! (2) there is a From<InnerError> for OuterError implementation when error types differ.
 //! E0203 fires on incompatible error types, E0204 on ambiguous multiple conversion paths,
 //! and E0205 when '?' is used in a function that doesn't return Result/Maybe.
 //!
-
 //! The `?` operator provides ergonomic error propagation, but requires careful
 //! type checking to ensure errors are properly converted and propagated.
 //!
-
 //! # Error Codes
 //!
-
 //! - **E0203**: Result type mismatch - error types not compatible
 //! - **E0204**: Missing From implementation - no conversion path exists
 //! - **E0205**: Cannot use `?` in non-Result context - function doesn't return Result
 //!
-
 //! # Design Philosophy
 //!
-
 //! These diagnostics focus on providing:
 //! 1. **Clear problem identification** - What exactly went wrong
 //! 2. **Concrete examples** - Show code before and after fixes

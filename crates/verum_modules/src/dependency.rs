@@ -1,12 +1,10 @@
 //! Module dependency graph and topological sorting.
 //!
-
 //! Manages module dependencies and determines compilation order.
 //! Circular type dependencies (via references) are allowed, but circular
 //! value dependencies (constants depending on each other) cause compile errors.
 //! Function call cycles are allowed (resolved at runtime).
 //!
-
 //! The compiler uses topological sorting for compilation order:
 //! 1. Build dependency graph from import statements
 //! 2. Detect cycles in value dependencies

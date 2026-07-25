@@ -1,19 +1,15 @@
 //! Phase D.5: Proof Term Extraction Bridge
 //!
-
 //! Connects tactic execution results to extractable proof terms and
 //! certificates. When a `proof by <tactic>` block succeeds, this module
 //! translates the Z3 proof object into a `ProofTerm` that can be:
 //!
-
 //! 1. Erased at codegen (zero-cost proofs — the common case)
 //! 2. Exported as a certificate in Dedukti, Coq, Lean, or Metamath format
 //! 3. Stored alongside VBC bytecode as Proof-Carrying Code (PCC)
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! TacticResult (from user_tactic.rs / tactics.rs)
 //!  │
@@ -31,10 +27,8 @@
 //!  └─ erase_proof() → () (zero-cost: remove at codegen)
 //! ```
 //!
-
 //! ## Integration Points
 //!
-
 //! - `certificates.rs` — handles the actual format-specific serialization
 //! - `proof_extraction.rs` — Z3 proof object → internal proof tree
 //! - `proof_term_unified.rs` — unified proof term representation

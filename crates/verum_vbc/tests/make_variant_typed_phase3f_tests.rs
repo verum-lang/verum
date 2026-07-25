@@ -1,10 +1,8 @@
 //! #146 Phase 3f — bytecode determinism + cross-tier consistency
 //! tests for the `MakeVariantTyped` instruction.
 //!
-
 //! Two contracts:
 //!
-
 //! 1. **Bytecode determinism**: encoding the same
 //!  `Instruction::MakeVariantTyped` IR variant twice produces
 //!  bit-identical bytes across compilations. Catches subtle
@@ -12,7 +10,6 @@
 //!  address-based ids, time-of-day reads) that would surface
 //!  later as caching-cache-invalidation churn.
 //!
-
 //! 2. **Cross-tier consistency**: the Tier-0 interpreter
 //!  (`handle_extended → MakeVariantTyped → alloc_variant_into_
 //!  with_type_id`) and the Tier-1 AOT path (LLVM lowering at
@@ -22,7 +19,6 @@
 //!  the bytecode + decode level (the AOT path's IR-emission is
 //!  pinned by `verum_codegen` test suites).
 //!
-
 //! See `verum_vbc::interpreter::dispatch_table::handlers::extended`
 //! and `verum_codegen::llvm::instruction::Instruction::MakeVariantTyped`
 //! for the validation + lowering counterparts.

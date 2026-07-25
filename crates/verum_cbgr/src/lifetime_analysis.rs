@@ -1,19 +1,15 @@
 //! Lifetime Analysis for Compile-Time Memory Safety
 //!
-
 //! This module implements compile-time lifetime analysis inspired by Rust's borrow checker,
 //! adapted for Verum's three-tier CBGR reference model. It enables:
 //!
-
 //! - **Lifetime Inference**: Automatically infer lifetimes for references
 //! - **Constraint Generation**: Generate lifetime constraints from code
 //! - **Constraint Solving**: Solve constraints to verify safety
 //! - **Outlives Checking**: Ensure references don't outlive referents
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! CFG → LifetimeAnalyzer → LifetimeAnalysisResult
 //!  │
@@ -26,41 +22,32 @@
 //!  └───────────────────────────────┘
 //! ```
 //!
-
 //! # Lifetime Model
 //!
-
 //! Lifetimes in Verum follow a region-based model:
 //! - Each reference has an associated lifetime region
 //! - Lifetimes form a partial order based on outlives relationships
 //! - Lifetime constraints are gathered during analysis and solved
 //!
-
 //! # Integration with CBGR
 //!
-
 //! - **Tier 0**: Lifetimes used for optimization hints (runtime still validates)
 //! - **Tier 1**: Lifetimes MUST be proven for promotion (no runtime checks)
 //! - **Tier 2**: Lifetimes unchecked (manual safety proof required)
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::lifetime_analysis::LifetimeAnalyzer;
 //!
-
 //! let analyzer = LifetimeAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
-
 //! for violation in &result.violations {
 //!  println!("Lifetime violation: {:?}", violation);
 //! }
 //! ```
 //!
-
 //! Lifetime analysis determines whether references outlive their referents. For
 //! Tier 0, lifetimes provide optimization hints (runtime CBGR still validates).
 //! For Tier 1 (&checked T), lifetimes MUST be proven sound (no runtime fallback).

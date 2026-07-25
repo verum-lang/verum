@@ -1,6 +1,5 @@
 //! Function information for compile-time reflection
 //!
-
 //! Provides function signature metadata matching core/meta/reflection.vr FunctionInfo.
 
 use verum_ast::MetaValue;

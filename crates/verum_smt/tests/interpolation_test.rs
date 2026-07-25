@@ -14,7 +14,6 @@
 )]
 //! Tests for Z3 Interpolation Engine
 //!
-
 //! Verifies Craig interpolation implementation for compositional verification.
 //!
 

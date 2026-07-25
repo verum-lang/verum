@@ -1,6 +1,5 @@
 //! Type nodes in the AST.
 //!
-
 //! This module defines all type representations in Verum, including:
 //! - Primitive types (Int, Float, Bool, Text)
 //! - Compound types (tuples, arrays, functions)

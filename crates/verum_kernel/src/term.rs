@@ -1,7 +1,6 @@
 //! Core syntactic surface — `CoreTerm`, `CoreType`, `UniverseLevel`.
 //! Split per #198 V7 (final lib.rs sweep).
 //!
-
 //! These three types form the kernel's syntactic foundation: every
 //! other module (errors, depth, infer, support, etc.) builds on top
 //! of them. They live in their own module so the explicit calculus

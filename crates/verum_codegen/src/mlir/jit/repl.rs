@@ -1,25 +1,20 @@
 //! REPL (Read-Eval-Print-Loop) Integration for JIT.
 //!
-
 //! Provides interactive execution environment for Verum code with:
 //!
-
 //! - Session state management
 //! - Expression evaluation and variable binding
 //! - Persistent scope across evaluations
 //! - History tracking
 //! - Auto-completion hooks
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ REPL Execution Flow │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!
-
 //!  User Input (expression/statement)
 //!  │
 //!  ▼
@@ -50,23 +45,18 @@
 //!  Result (display)
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use crate::mlir::jit::{ReplSession, ReplConfig};
 //!
-
 //! let mut session = ReplSession::new(ReplConfig::default())?;
 //!
-
 //! // Evaluate expressions
 //! let result = session.eval("let x = 42")?;
 //! let result = session.eval("x + 1")?;
 //! println!("Result: {:?}", result); // 43
 //!
-
 //! // Check session state
 //! println!("Bindings: {:?}", session.bindings());
 //! ```

@@ -1,15 +1,12 @@
 //! Cubical Tactic Runtime Bridge
 //!
-
 //! This module wires the `cubical`, `category_simp`, `category_law`, and
 //! `descent_check` builtin tactics (declared in `grammar/verum.ebnf` and
 //! compiled to `TacticCombinator` by `user_tactic.rs`) to concrete
 //! execution logic operating on `ProofGoal` values.
 //!
-
 //! ## Why a separate module?
 //!
-
 //! `verum_types` cannot be imported from `verum_smt` due to a circular
 //! dependency (`verum_types → verum_smt → verum_types`). The cubical
 //! normalizer that lives in `verum_types::cubical` therefore cannot be
@@ -19,10 +16,8 @@
 //! identical to `verum_types::cubical::CubicalTerm` but carry no
 //! cross-crate `use` dependencies.
 //!
-
 //! ## Tactics implemented
 //!
-
 //! | Surface syntax | Handler function |
 //! |-----------------------------|-------------------------------------|
 //! | `proof by cubical;` | [`execute_cubical_tactic`] |
@@ -31,10 +26,8 @@
 //! | `proof by category_law;` | [`execute_category_law_tactic`] |
 //! | `proof by descent_check;` | [`execute_descent_check_tactic`] |
 //!
-
 //! ## Path-goal structure
 //!
-
 //! The `cubical` tactic acts on equality goals of the form `lhs == rhs`
 //! (AST node `ExprKind::Binary { op: BinOp::Eq, .. }`). It converts
 //! each side to a [`CubicalNorm`] via [`expr_to_cubical_norm`] and
@@ -42,20 +35,16 @@
 //! normalised forms coincide the goal is closed with no subgoals; if
 //! not, the tactic falls back to the SMT solver.
 //!
-
 //! ## Category-law structure
 //!
-
 //! The `category_simp` and `category_law` tactics look for goals of the
 //! form `f == g` where `f` and `g` are compositions of morphisms. They
 //! apply a fixed set of rewrite rules (associativity, left/right
 //! identity, functor preservation) up to a bounded number of steps,
 //! then hand off to the SMT solver.
 //!
-
 //! ## Descent structure
 //!
-
 //! The `descent_check` tactic is a thin wrapper: it recognises goals
 //! whose head is `descent_condition(…)` or `compatible_sections(…)` and
 //! delegates to the SMT solver with a hint that the sheaf-domain

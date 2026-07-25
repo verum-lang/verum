@@ -1,6 +1,5 @@
 //! LLVM Pass Infrastructure
 //!
-
 //! LLVM 17+ removed the legacy pass manager. This module provides the new pass builder API.
 
 use verum_llvm_sys::core::{

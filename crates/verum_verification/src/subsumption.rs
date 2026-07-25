@@ -1,39 +1,30 @@
 //! # Refinement Type Subsumption Checking
 //!
-
 //! Implements refinement type subtyping via logical implication.
 //!
-
 //! This module implements **subtype relationships** for refinement types through
 //! logical implication. Subsumption is critical for function calls, variable
 //! assignment, and type checking.
 //!
-
 //! ## Formal Rule
 //!
-
 //! ```text
 //! Γ ⊢ φ₁ ⇒ φ₂ (in SMT logic)
 //! ─────────────────────────────────
 //! Γ ⊢ T{φ₁} <: T{φ₂}
 //! ```
 //!
-
 //! **Interpretation**: Type `T{φ₁}` is a **subtype** of `T{φ₂}` if predicate `φ₁`
 //! logically implies `φ₂`.
 //!
-
 //! ## Three-Mode Checking Algorithm
 //!
-
 //! 1. **Mode 1: Syntactic** - Pattern-based implication (< 1ms, ~60% cases)
 //! 2. **Mode 2: SMT-Based** - Full Z3 verification (10-500ms, ~35% cases)
 //! 3. **Mode 3: Fallback** - Runtime check with user notification (~5% cases)
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Syntactic checks: < 1ms
 //! - SMT checks: 10-500ms (with configurable timeout)
 //! - Cache hit rate: > 90%

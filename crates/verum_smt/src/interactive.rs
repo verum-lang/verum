@@ -1,18 +1,14 @@
 //! Interactive Theorem Proving
 //!
-
 //! Implements an interactive proof mode for step-by-step theorem proving.
 //!
-
 //! Implements the interactive proof assistant mode (`@interactive` annotation on theorems).
 //! Supports goal-directed proving with intro/split/apply/destruct tactics, induction with
 //! IH hypotheses, proof by reflection (quote goal + decision procedure), and Ltac-style
 //! scripts with repeat-match patterns. Proofs can be exported to Coq, Lean, and Dedukti.
 //!
-
 //! ## Features
 //!
-
 //! - **Goal-Directed Proving**: Track current proof goals with context
 //! - **Tactic Application**: Apply tactics interactively with pattern matching
 //! - **Proof History**: Undo/redo support with full state restoration
@@ -21,10 +17,8 @@
 //! - **Focus Management**: Focus on specific goals or subgoals
 //! - **Proof by Reflection**: Quote goals and run decision procedures
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Tactic application: < 10ms
 //! - State display: < 5ms
 //! - Undo/redo: < 1ms

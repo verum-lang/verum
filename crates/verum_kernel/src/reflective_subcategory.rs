@@ -1,18 +1,14 @@
 //! Reflective subcategories (HTT 5.2.7) — algorithmic kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! A *reflective subcategory* `D ⊆ C` is a fully-faithful inclusion
 //! `ι : D ↪ C` that admits a left adjoint `r : C → D` (the
 //! *reflector*). Equivalently (HTT 5.2.7.4): `D` is the essential
 //! image of an idempotent monad on `C`.
 //!
-
 //! Reflective subcategories are the load-bearing abstraction for:
 //!
-
 //!  * **MSFS Lemma 10.3** — the `(ι, r)` construction lands `S_S`
 //!  into `cF` as a reflective subcategory.
 //!  * **Diakrisis 16.3** — `ι ⊣ r` reflective-subcategory existence
@@ -22,13 +18,10 @@
 //!  * **OWL2 → DL bridge** — the OWL2 Hilbert-style fragment is a
 //!  reflective subcategory of the full DL signature.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships the **algorithmic skeleton**:
 //!
-
 //!  1. [`ReflectiveSubcategory`] — first-class record with the data
 //!  `(D, C, ι, r, η)` plus idempotency / fully-faithful / adjoint
 //!  witnesses.
@@ -42,15 +35,12 @@
 //!  adjunction unit `η : id_C ⇒ ι ∘ r` exhibits `r` as a
 //!  localisation at the class of η-equivalences.
 //!
-
 //! Future work: explicit unit/idempotency natural-transformation
 //! cells with full pentagonal coherence between the localisation and
 //! the underlying adjunction.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **Lemma 10.3 (`(ι, r)` construction)** — the host-stdlib axiom
 //!  `msfs_aft_iota_r` is replaced by a direct invocation of
 //!  [`build_reflective_subcategory`]; the resulting value is

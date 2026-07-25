@@ -1,10 +1,8 @@
 //! Canonical `ForeignSystem` enum — single source of truth for the
 //! external proof systems Verum interacts with.
 //!
-
 //! Verum talks to upstream proof assistants in five capacities:
 //!
-
 //!  1. **Cross-format export** — emit Verum theorems to Coq / Lean
 //!  for foreign re-check (`verum_kernel::soundness::corpus_export`).
 //!  2. **Kernel-soundness mirror** — emit the meta-circular kernel-
@@ -20,7 +18,6 @@
 //!  or Docker) to verify exported certificates
 //!  (`verum_smt::cross_format_runner`).
 //!
-
 //! Each capacity historically had its own enumeration of supported
 //! systems (string IDs in `proof_replay`, `ExportFormat` in
 //! `cross_format_runner`, the 4-variant enum in `foreign_import`).
@@ -28,7 +25,6 @@
 //! references; the per-capacity surfaces stay specialized but agree
 //! on **which system** they're dispatching for.
 //!
-
 //! The enum lives in `verum_kernel` because that crate is the
 //! lowest-level domain crate every other layer depends on. Putting
 //! it in `verum_common` would mix domain concepts into the

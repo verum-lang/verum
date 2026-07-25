@@ -1,6 +1,5 @@
 //! Specialization Lattice Type Definitions
 //!
-
 //! Specialization Lattice for Protocol Implementations:
 //! Allows more specific implementations to override more general ones using
 //! `@specialize` attribute. Lattice precedence (most specific wins):
@@ -11,24 +10,19 @@
 //!  Coherence: mutual exclusion via negative bounds (e.g., `T: Send + !Sync`).
 //!  The actual verification logic is in verum_smt.
 //!
-
 //! # Specialization Overview
 //!
-
 //! Specialization enables optimization through more specific implementations:
 //!
-
 //! ```verum
 //! // General implementation
 //! impl Display for List<T> where T: Display { ... }
 //!
-
 //! // Specialized for Text (more efficient)
 //! @specialize
 //! impl Display for List<Text> { ... }
 //! ```
 //!
-
 //! The lattice ensures:
 //! - Unique most-specific implementation for each type
 //! - No ambiguous overlaps

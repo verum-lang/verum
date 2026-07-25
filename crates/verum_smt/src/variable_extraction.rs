@@ -1,21 +1,16 @@
 //! Variable Extraction Utilities for Z3 AST
 //!
-
 //! This module provides centralized utilities for extracting variable names from Z3 AST nodes.
 //! Previously, this functionality was duplicated across z3_backend.rs and interpolation.rs.
 //!
-
 //! # Features
 //!
-
 //! - **AST Traversal**: Walks Z3 AST trees to find uninterpreted constants
 //! - **Memoization**: Uses visited set to avoid traversing shared subexpressions
 //! - **Variable Filtering**: Filters out Z3 internal names (k!, !, numeric)
 //!
-
 //! # Performance
 //!
-
 //! - Linear time in AST size with memoization
 //! - Typically < 1ms for typical verification formulas
 

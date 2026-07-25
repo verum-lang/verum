@@ -1,6 +1,5 @@
 //! Production-Grade Z3 SMT Backend - Full API Utilization
 //!
-
 //! This module provides enterprise-grade Z3 integration leveraging ALL Z3 capabilities:
 //! - **Tactics & Strategies**: Automatic tactic selection based on problem analysis
 //! - **Unsat Cores**: Minimal counterexample extraction
@@ -12,10 +11,8 @@
 //! - **Proof Generation**: For formal verification workflows
 //! - **Theory-Specific Solvers**: Optimized for QF_LIA, QF_BV, QF_NRA, etc.
 //!
-
 //! Based on experiments/z3.rs reference implementation.
 //!
-
 //! Refinement types (`Int{> 0}`, `Text{len(it) > 5}`, sigma-type `n: Int where n > 0`)
 //! are translated to Z3 formulas for verification. Theory selection (QF_LIA, QF_BV,
 //! QF_NRA) is automatic based on formula structure.

@@ -1,17 +1,13 @@
 //! LLVM-based code generation for the Verum compiler.
 //!
-
 //! This module provides direct VBC → LLVM IR lowering for the CPU compilation path.
 //! It is the primary code generation path for:
 //!
-
 //! - **Tier 1/2 JIT**: Hot path optimization with LLVM's JIT
 //! - **Tier 3 AOT**: Ahead-of-time compilation to native binaries
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC Module (verum_vbc)
 //!  │
@@ -34,64 +30,49 @@
 //! └─────────┘ └─────────┘
 //! ```
 //!
-
 //! # CBGR Integration
 //!
-
 //! The lowering is tier-aware, generating different code based on CBGR analysis:
 //!
-
 //! - **Tier 0**: Full runtime checks (~15ns overhead)
 //!  - Generation validation on dereference
 //!  - Capability checks for read/write/borrow
 //!
-
 //! - **Tier 1**: Compiler-proven safe (zero overhead)
 //!  - Escape analysis proves reference validity
 //!  - Direct pointer access
 //!
-
 //! - **Tier 2**: Manually marked unsafe (zero overhead)
 //!  - User asserts safety via `&unsafe T`
 //!  - Direct pointer access
 //!
-
 //! # Example Usage
 //!
-
 //! ```rust,ignore
 //! use verum_codegen::llvm::{VbcToLlvmLowering, LoweringConfig};
 //! use verum_llvm::context::Context;
 //!
-
 //! // Create LLVM context
 //! let context = Context::create();
 //!
-
 //! // Configure lowering
 //! let config = LoweringConfig::release("my_module");
 //!
-
 //! // Create lowering context
 //! let mut lowering = VbcToLlvmLowering::new(&context, config);
 //!
-
 //! // Lower VBC module
 //! lowering.lower_module(&vbc_module)?;
 //!
-
 //! // Get LLVM IR
 //! println!("{}", lowering.get_ir());
 //!
-
 //! // Or take the module for further processing
 //! let llvm_module = lowering.into_module();
 //! ```
 //!
-
 //! # Performance Targets
 //!
-
 //! - CBGR check elimination: 50-90% typical
 //! - Lowering throughput: > 100K VBC instructions/sec
 //! - Generated code: within 5% of hand-written LLVM IR

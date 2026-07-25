@@ -1,6 +1,5 @@
 //! VBC error types.
 //!
-
 //! This module defines all error types used throughout the VBC crate,
 //! covering format parsing, validation, serialization, and interpretation.
 

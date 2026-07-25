@@ -14,7 +14,6 @@
 )]
 //! Tests for enhanced quantifier binding syntax.
 //!
-
 //! Grammar Reference:
 //!  forall_expr = 'forall' quantifier_binding { ',' quantifier_binding } '.' expression
 //!  exists_expr = 'exists' quantifier_binding { ',' quantifier_binding } '.' expression

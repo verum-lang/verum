@@ -1,46 +1,37 @@
 //! Unified Performance Dashboard
 //!
-
 //! Combines verification costs, CBGR overhead, compilation metrics, and cache statistics
 //! into a single comprehensive performance analysis dashboard.
 //!
-
 //! Unified compilation dashboard: real-time progress display for all
 //! compilation phases, verification status, and performance metrics.
 //!
-
 //! # Example
 //!
-
 //! ```bash
 //! $ verum profile --all src/main.vr
 //! ```
 //!
-
 //! Output format matches spec exactly:
 //! ```text
 //! ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //! Verum Performance Analysis
 //! ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //!
-
 //! Compilation Time: 45.2s
 //!  ├─ Parsing: 2.1s (4.6%)
 //!  ├─ Type checking: 8.7s (19.2%)
 //!  ├─ Verification (SMT): 28.3s (62.6%) ⚠ SLOW
 //!  └─ Codegen: 6.1s (13.5%)
 //!
-
 //! Runtime Performance: 2.34s total
 //!  ├─ Business logic: 2.18s (93.2%)
 //!  └─ CBGR overhead: 0.16s (6.8%)
 //!
-
 //! Hot Spots:
 //!  1. complex_algorithm() 28.3s verification (reduce to <5s)
 //!  2. process_matrix() 28.7ms CBGR (convert to &checked)
 //!
-
 //! Recommendations:
 //!  1. Split complex_algorithm() into smaller functions
 //!  2. Use @verify(runtime) for complex_algorithm() in development

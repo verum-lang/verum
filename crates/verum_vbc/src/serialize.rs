@@ -1,28 +1,22 @@
 //! VBC module serialization.
 //!
-
 //! This module provides serialization of VBC modules to binary format.
 //! The output is a self-contained `.vbc` file that can be loaded for
 //! interpretation, JIT, or AOT compilation.
 //!
-
 //! ## Compression Support
 //!
-
 //! VBC files can be compressed using zstd or lz4 to reduce storage and improve
 //! load times (CPU-bound decompression is often faster than disk I/O for
 //! compressed data).
 //!
-
 //! ```rust,ignore
 //! use verum_vbc::serialize::{serialize_module, serialize_module_compressed};
 //! use verum_vbc::compression::CompressionOptions;
 //!
-
 //! // Serialize without compression (default)
 //! let bytes = serialize_module(&module)?;
 //!
-
 //! // Serialize with zstd compression
 //! let compressed = serialize_module_compressed(&module, CompressionOptions::zstd())?;
 //! ```

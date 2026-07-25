@@ -1,6 +1,5 @@
 //! Debug session state management.
 //!
-
 //! Tracks breakpoints, thread state, step mode, and source-to-bytecode mappings
 //! for a single debug session.
 

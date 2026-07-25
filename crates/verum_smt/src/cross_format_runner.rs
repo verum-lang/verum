@@ -1,23 +1,18 @@
 //! Cross-format foreign-system runner.
 //!
-
 //! ## What this module is
 //!
-
 //! `verum_kernel::cross_format_gate` ships pure types
 //! (`ExportFormat`, `FormatStatus`, `CrossFormatReport`); it cannot
 //! invoke external tools because the kernel is sandboxed. This
 //! module provides the **runner layer** that actually drives the
 //! foreign proof checkers and populates a `CrossFormatReport`.
 //!
-
 //! ## Architecture
 //!
-
 //! Single trait boundary [`ForeignSystemChecker`] with one
 //! implementation per format:
 //!
-
 //!  * [`CoqChecker`] — `coqc <file>.v`
 //!  * [`LeanChecker`] — `lean <file>.lean`
 //!  * [`IsabelleChecker`] — `isabelle build -d <dir> <session>`
@@ -25,29 +20,23 @@
 //!  * [`AgdaChecker`] — `agda --no-libraries <file>.agda`
 //!  * [`MetamathChecker`] — `metamath '...verify proof *' '...quit'`
 //!
-
 //! Each checker:
 //!
-
 //!  1. Probes whether the foreign tool is installed
 //!  ([`ForeignSystemChecker::is_available`]).
 //!  2. Invokes it on a given file
 //!  ([`ForeignSystemChecker::check_file`]).
 //!  3. Returns a typed [`CheckResult`] capturing pass/fail/missing.
 //!
-
 //! ## Foundation-neutral
 //!
-
 //! The runner is foundation-neutral: it cares only about EXIT-CODE
 //! verdicts from the foreign tool. Any tool that follows the
 //! Unix-style "exit 0 = ok" convention plugs in via a new
 //! [`ForeignSystemChecker`] impl.
 //!
-
 //! ## Trust boundary
 //!
-
 //! The runner DOES NOT trust the foreign system's verdict
 //! unconditionally — it merely captures it. The final gate verdict
 //! lives in `verum_kernel::cross_format_gate::evaluate_gate`, which

@@ -1,7 +1,6 @@
 //! Soundness regression: an unknown rewrite rule with cross-ExprKind
 //! source/target must NOT silently pass.
 //!
-
 //! Pre-fix `structurally_compatible` had a catch-all `_ => true` arm
 //! that made the "unknown rewrite rule" branch in
 //! `validate_apply_rewrite_rule` accept ANY source→target pair
@@ -9,12 +8,10 @@
 //! soundness pattern as the catch-all arm fixed in 8429bd4e and
 //! the quantifier rules in 80f43418.
 //!
-
 //! Post-fix the catch-all uses `std::mem::discriminant` so cross-kind
 //! pairs (e.g. Path source, Literal target where both arms aren't
 //! the explicit Literal↔Path cross-pair) reject.
 //!
-
 //! Note: the explicit Literal↔Path cross-pair stays accepted —
 //! definition unfolding legitimately swaps a constant for its name.
 //! This test pins the cross-kind rejection for OTHER pairs (Path

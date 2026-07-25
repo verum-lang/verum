@@ -1,10 +1,8 @@
 //! Visibility enforcement tests.
 //!
-
 //! Tests that visibility modifiers (public, private, public(crate), public(super))
 //! are correctly enforced across module boundaries.
 //!
-
 //! Tests the five visibility modifiers: private (default), public, public(crate),
 //! public(super), and public(in path), including struct field visibility.
 

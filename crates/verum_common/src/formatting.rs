@@ -1,13 +1,10 @@
 //! Formatting utilities for Verum
 //!
-
 //! This module provides centralized formatting functions to eliminate duplication
 //! across the codebase. All formatting operations should use these utilities.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_common::formatting (foundation)
 //!  ├─ List formatting (format_list, format_list_with, format_list_pretty)
@@ -18,30 +15,24 @@
 //!  └─ Builders (ListFormatter, TableFormatter)
 //! ```
 //!
-
 //! # Usage
 //!
-
 //! ```rust
 //! use verum_common::formatting::{format_list, format_cycle, format_code_block};
 //!
-
 //! // Format a simple list
 //! let items = vec!["a", "b", "c"];
 //! assert_eq!(format_list(&items, ", "), "a, b, c");
 //!
-
 //! // Format a dependency cycle
 //! let cycle = vec!["mod_a", "mod_b", "mod_c"];
 //! assert_eq!(format_cycle(&cycle), "mod_a -> mod_b -> mod_c -> mod_a");
 //!
-
 //! // Format a code block with indentation
 //! let code = "fn main() {\n println!(\"Hello\");\n}";
 //! let formatted = format_code_block(code, 4);
 //! ```
 //!
-
 //! Centralized formatting eliminates duplication across crates and ensures
 //! consistent output formatting for diagnostics, error messages, and debug output.
 

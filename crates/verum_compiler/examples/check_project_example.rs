@@ -1,6 +1,5 @@
 //! Example demonstrating the check_project() method
 //!
-
 //! This shows how to use the compilation pipeline to type-check
 //! a multi-file project without generating any code.
 

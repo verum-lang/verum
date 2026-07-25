@@ -1,16 +1,13 @@
 //! Reference Type Implementations with Deref Protocol
 //!
-
 //! CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Deref Protocol Implementation
 //!
-
 //! This module implements the three reference types in Verum:
 //! - `ThinRef<T>` - CBGR-managed reference for sized types (16 bytes, ~15ns overhead)
 //! - `FatRef<T>` - CBGR-managed reference for unsized types (24 bytes, ~15ns overhead)
 //! - `CheckedRef<T>` - Statically verified reference with zero-cost transmute
 //! - `UnsafeRef<T>` - Unsafe reference with zero-cost transmute
 //!
-
 //! Each type implements the Deref protocol with different semantics:
 //! - ThinRef/FatRef: Runtime CBGR validation (~15ns overhead)
 //! - CheckedRef: Static verification + transmute (0ns overhead)

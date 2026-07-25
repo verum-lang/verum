@@ -1,40 +1,32 @@
 //! GPU Synchronization Verification using Z3
 //!
-
 //! This module implements verification of GPU synchronization primitives:
 //! - Barrier synchronization (`__syncthreads()` in CUDA)
 //! - Atomic operations
 //! - Memory fences
 //! - Lock-free algorithms
 //!
-
 //! ## Barrier Semantics
 //!
-
 //! A barrier ensures that:
 //! 1. All threads in the block reach the barrier
 //! 2. No thread proceeds past the barrier until all arrive
 //! 3. Memory operations before barrier are visible after barrier
 //!
-
 //! ## Atomic Operations
 //!
-
 //! Atomic operations provide:
 //! - Atomicity: Operation appears indivisible
 //! - Sequential consistency: Total order on atomic operations
 //! - Memory ordering: Synchronization between threads
 //!
-
 //! ## Verification Properties
 //!
-
 //! - **Barrier Reachability**: All threads must reach every barrier
 //! - **Deadlock Freedom**: No circular wait on synchronization
 //! - **Progress**: At least one thread makes progress
 //! - **Atomicity**: Atomic operations appear indivisible
 //!
-
 //! GPU synchronization verification for Verum's `@gpu` annotated kernels.
 //! Extends the type system's refinement verification to thread-level parallelism.
 //! Based on: GPUVerify, CUDA Programming Guide, PTX ISA

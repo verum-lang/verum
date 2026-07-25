@@ -14,7 +14,6 @@
 )]
 //! Comprehensive test suite for verum_protocol_types
 //!
-
 //! Tests cover:
 //! - Protocol type construction
 //! - Type equality and comparison

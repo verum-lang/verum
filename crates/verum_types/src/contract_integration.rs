@@ -1,29 +1,23 @@
 //! Contract Integration for Type Checking
 //!
-
 //! This module enables the type checker to leverage verified contracts from Phase 3a
 //! to strengthen type inference and validate call sites.
 //!
-
 //! ## Features
 //!
-
 //! - Store verified contracts from SMT-based verification phase
 //! - Strengthen parameter types using verified preconditions
 //! - Strengthen return types using verified postconditions
 //! - Validate call sites against function preconditions
 //! - Check return values against function postconditions
 //!
-
 //! ## Integration Flow
 //!
-
 //! 1. Phase 3a verifies contracts with Z3
 //! 2. Verified contracts passed to Phase 4 via VerifiedContractRegistry
 //! 3. TypeChecker stores registry and uses it during type checking
 //! 4. Call sites and returns are validated against contracts
 //!
-
 //! Verification system: three levels - @verify(runtime) for assertions, @verify(static) for dataflow analysis, @verify(proof) for SMT-based proofs — Contract integration
 //! Compilation pipeline: parse -> type check -> verify -> lower -> codegen phases — Phase 4
 

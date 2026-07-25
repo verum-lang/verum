@@ -1,16 +1,12 @@
 //! Error types and recovery strategies for the parser.
 //!
-
 //! This module provides standalone error types for parsing errors using
 //! native recursive descent parsing.
 //!
-
 //! # Error Codes
 //!
-
 //! The parser uses a comprehensive error code system for categorized diagnostics:
 //!
-
 //! - **E001-E009**: Lexer/literal errors
 //!  - E001: Unterminated character literal
 //!  - E002: Invalid escape sequence

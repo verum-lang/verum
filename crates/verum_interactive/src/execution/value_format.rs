@@ -1,6 +1,5 @@
 //! Value formatting for display in the playbook.
 //!
-
 //! Converts VBC `Value` instances to human-readable string representations
 //! with appropriate formatting for different types.
 

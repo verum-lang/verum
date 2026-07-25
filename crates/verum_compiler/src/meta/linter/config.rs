@@ -1,9 +1,7 @@
 //! Linter Configuration for Meta Linter
 //!
-
 //! Contains LinterConfig for customizing linter behavior.
 //!
-
 //! Meta linter: static analysis of meta code for unsafe patterns (unbounded
 //! recursion, infinite loops, unsafe interpolation without @safe attribute).
 

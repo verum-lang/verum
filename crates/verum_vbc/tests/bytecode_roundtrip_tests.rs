@@ -14,7 +14,6 @@
 )]
 //! Bytecode encoding/decoding roundtrip tests.
 //!
-
 //! These tests verify that `encode_instruction` followed by `decode_instruction`
 //! produces the original instruction for all major instruction categories.
 

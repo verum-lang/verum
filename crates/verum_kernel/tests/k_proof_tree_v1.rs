@@ -1,6 +1,5 @@
 //! KernelProofNode V1 tests (V8, #224).
 //!
-
 //! Verifies the typed proof-graph reconstruction surface:
 //! `record_inference` walks a CoreTerm post-hoc and builds a
 //! KernelProofNode tree mirroring the typing derivation.

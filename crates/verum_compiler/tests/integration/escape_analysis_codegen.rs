@@ -1,6 +1,5 @@
 //! Integration Tests for Escape Analysis → Codegen Pipeline
 //!
-
 //! These tests verify that escape analysis results correctly flow through
 //! the compiler pipeline to code generation, enabling automatic promotion
 //! of references from Tier 0 (&T) to Tier 1 (&checked T).

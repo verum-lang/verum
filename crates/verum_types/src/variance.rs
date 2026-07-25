@@ -1,40 +1,31 @@
 //! Variance Inference and Checking
 //!
-
 //! Variance inference: determining covariant/contravariant/invariant usage of type parameters from their positions
 //!
-
 //! Variance determines how generic type parameters behave under subtyping.
 //! This module implements variance inference and checking to ensure type soundness.
 //!
-
 //! # Variance Rules
 //!
-
 //! - **Covariant** (+T): If S <: T, then Container<S> <: Container<T>
 //! - **Contravariant** (-T): If S <: T, then Container<T> <: Container<S>
 //! - **Invariant** (T): Requires exact type match
 //!
-
 //! # Examples
 //!
-
 //! ```rust,ignore
 //! use verum_types::variance::*;
 //! use verum_types::ty::Type;
 //! use verum_common::{List, Text};
 //!
-
 //! // Container<+T> with only covariant uses of T
 //! // type Container<+T> is { value: T, get: Unit -> T }
 //! // ✅ Covariant (safe)
 //!
-
 //! // Sink<-T> with only contravariant uses of T
 //! // type Sink<-T> is { put: T -> Unit }
 //! // ✅ Contravariant (safe)
 //!
-
 //! // Cell<T> with mutable reference
 //! // type Cell<T> is { value: &mut T }
 //! // ✅ Invariant (required for soundness)

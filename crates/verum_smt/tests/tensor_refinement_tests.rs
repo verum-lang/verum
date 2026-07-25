@@ -14,7 +14,6 @@
 )]
 //! Integration tests for tensor refinement type system
 //!
-
 //! Tests the integration between tensor shape verification and
 //! Verum's refinement type system.
 //!

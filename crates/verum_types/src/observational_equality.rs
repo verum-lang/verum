@@ -1,6 +1,5 @@
 //! Observational Type Theory (OTT) — alternative to cubical.
 //!
-
 //! Where cubical type theory makes equality computational by
 //! reducing `transport` and `hcomp`, **observational** type
 //! theory takes a different route: equality is *defined by
@@ -10,24 +9,20 @@
 //! a coinductive type are equal iff every observation yields
 //! equal results (bisimilarity).
 //!
-
 //! This is type-directed — the equality relation depends on the
 //! *type* of the values being compared. The result is a system
 //! that retains UIP (uniqueness of identity proofs) while still
 //! supporting funext and propositional irrelevance, all without
 //! the cubical machinery.
 //!
-
 //! Verum's main equality story is cubical (with the EqTerm↔
 //! CubicalTerm bridge). This module provides OTT as a
 //! *complementary* alternative — useful for fragments where
 //! strict computability is desired without the cubical overhead,
 //! and for comparison/research purposes.
 //!
-
 //! ## Core rules
 //!
-
 //! ```text
 //!  Eq Bool b₁ b₂ ↦ b₁ ≡ b₂ (decidable)
 //!  Eq Nat n₁ n₂ ↦ n₁ ≡ n₂ (decidable)
@@ -36,10 +31,8 @@
 //!  Eq (Σ x:A. P x) (a, p) (b, q) ↦ Eq A a b × Eq P[a/x] p q
 //! ```
 //!
-
 //! ## Status
 //!
-
 //! Standalone algebraic core. No coupling to the cubical
 //! normalizer or the type checker — intended for opt-in use by
 //! fragments that prefer OTT semantics, and as a reference

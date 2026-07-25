@@ -1,6 +1,5 @@
 //! Meta expression IR
 //!
-
 //! This module defines the intermediate representation for meta expressions,
 //! which are evaluated at compile time.
 

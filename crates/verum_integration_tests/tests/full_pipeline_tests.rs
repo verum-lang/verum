@@ -14,7 +14,6 @@
 )]
 //! Full compilation pipeline integration tests
 //!
-
 //! Tests the complete flow from source code through parsing and AST construction.
 //! Each test verifies that valid Verum source successfully parses into an AST.
 

@@ -1,20 +1,16 @@
 //! K-Eps-Mu kernel rule — split per #198.
 //!
-
 //! Verifies the canonical 2-natural equivalence
 //!
-
 //! ```text
 //!  τ : ε ∘ M ≃ A ∘ ε
 //! ```
 //!
-
 //! from Diakrisis Proposition 5.1 / Corollary 5.10 (ν = e ∘ ε). The
 //! kernel uses this rule as a structural witness that articulation
 //! depth and enactment depth are connected by the canonical
 //! biadjunction's transferred unit/counit.
 //!
-
 //! staging is documented in
 //! `docs/architecture/foundational-extensions.md` §1.7.
 

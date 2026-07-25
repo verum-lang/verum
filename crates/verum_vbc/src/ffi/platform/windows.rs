@@ -1,6 +1,5 @@
 //! Windows FFI platform implementation.
 //!
-
 //! Uses the following system APIs:
 //! - `LoadLibraryW`/`GetProcAddress`/`FreeLibrary` for library loading
 //! - `GetLastError()` for error retrieval

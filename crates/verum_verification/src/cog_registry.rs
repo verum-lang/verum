@@ -1,15 +1,12 @@
 //! Cog distribution registry — reproducibility chain + multi-mirror
 //! trust model.
 //!
-
 //! ## Goal
 //!
-
 //! Make Verum's package manager production-grade so verified
 //! mathematics can be published, depended-on, and audit-traced
 //! like Cargo / npm but with **cryptographic proof-integrity**:
 //!
-
 //!  1. **Per-cog reproducibility hash chain**: every published
 //!  cog ships with a blake3 chain over (source files,
 //!  verum.lock, audit reports, certificates). Downstream
@@ -26,14 +23,11 @@
 //!  independent mirrors; a cog is trusted only when every
 //!  mirror agrees on its content hash.
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as the rest of the
 //! integration arc:
 //!
-
 //!  * [`CogManifest`] — typed metadata (name, version, deps,
 //!  content hash, attestations, framework lineage).
 //!  * [`CogReproEnvelope`] — typed reproducibility chain

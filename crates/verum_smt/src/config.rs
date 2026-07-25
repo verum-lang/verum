@@ -1,6 +1,5 @@
 //! SMT Configuration System - Unified Configuration for All Backends
 //!
-
 //! This module provides a comprehensive configuration system for SMT backends
 //! with support for:
 //! - Backend selection (Z3, CVC5, auto, portfolio)
@@ -10,26 +9,21 @@
 //! - Environment variables
 //! - TOML/JSON configuration files
 //!
-
 //! ## Configuration Hierarchy
 //!
-
 //! 1. Default values (hardcoded)
 //! 2. Configuration file (TOML/JSON)
 //! 3. Environment variables (override file)
 //! 4. Programmatic API (override all)
 //!
-
 //! ## Example Configuration File (TOML)
 //!
-
 //! ```toml
 //! [smt]
 //! backend = "auto"
 //! timeout_ms = 30000
 //! verbose = false
 //!
-
 //! [smt.fallback]
 //! enabled = true
 //! on_timeout = true
@@ -37,14 +31,12 @@
 //! on_error = true
 //! max_attempts = 2
 //!
-
 //! [smt.portfolio]
 //! enabled = false
 //! mode = "first"
 //! max_threads = 2
 //! timeout_per_solver = 30000
 //!
-
 //! [smt.validation]
 //! enabled = false
 //! cross_validate = false
@@ -52,7 +44,6 @@
 //! log_mismatches = true
 //! ```
 //!
-
 //! Configuration for SMT-based refinement type verification: solver selection,
 //! timeouts, caching, and strategy parameters for `@verify(proof)` compilation.
 

@@ -1,6 +1,5 @@
 //! Diagnostic conversion and publishing with incremental support
 //!
-
 //! Converts Verum compiler diagnostics to LSP format and publishes them to the client.
 //! This module provides comprehensive diagnostic conversion with:
 //! - Severity mapping (Error/Warning/Info/Hint)

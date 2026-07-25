@@ -1,18 +1,14 @@
 //! Integration layer for dependent types SMT verification
 //!
-
 //! This module defines the *interface* between verum_types type checking and
 //! an SMT-based dependent type verifier. The concrete SMT-backed
 //! implementation (`SmtDependentTypeChecker`) lives in the `verum_smt`
 //! crate (`verum_smt::dependent_backend`) to avoid a circular dependency.
 //!
-
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Dependent Types Extension (v2.0+)
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! TypeChecker (verum_types)
 //!  ↓ uses trait

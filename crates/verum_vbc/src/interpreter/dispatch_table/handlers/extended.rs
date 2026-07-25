@@ -1,12 +1,10 @@
 //! Generic Extended (`Opcode::Extended` = `0x1F`) opcode handler.
 //!
-
 //! Implements #167 Part A — the general-purpose extension-byte scheme.
 //! The dispatcher reads a single sub-op byte, then routes to the
 //! sub-op handler. Sub-op `0x00` is reserved as a forward-compat
 //! anchor; encoders must never emit it, decoders accept-and-skip it.
 //!
-
 //! Future #167 Part B work (and any later first-class instruction
 //! that doesn't fit an existing extension namespace) wires its
 //! handler here.

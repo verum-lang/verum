@@ -1,6 +1,5 @@
 //! Type parser for Verum using hand-written recursive descent.
 //!
-
 //! This module implements parsing for all Verum types, including:
 //! - Primitive types (Int, Float, Bool, Text, Char)
 //! - Compound types (tuples, arrays, functions)

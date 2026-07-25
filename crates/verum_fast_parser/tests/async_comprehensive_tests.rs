@@ -14,7 +14,6 @@
 )]
 //! Comprehensive async system tests for Verum parser
 //!
-
 //! Tests cover:
 //! - Async function declarations
 //! - Async blocks

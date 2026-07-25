@@ -1,20 +1,16 @@
 //! Code Metrics Collection for Transition Analysis
 //!
-
 //! This module implements comprehensive code metrics collection for the
 //! gradual verification transition system. It provides both static analysis
 //! metrics (from AST/CFG) and external data integration (git history,
 //! coverage, profiling).
 //!
-
 //! Metrics drive the gradual verification transition system: code with high
 //! cyclomatic complexity, frequent changes, or low coverage stays at runtime
 //! level, while stable, well-tested code is recommended for static/proof.
 //!
-
 //! # Features
 //!
-
 //! - Cyclomatic complexity calculation from CFG
 //! - Dependency analysis from imports/function calls
 //! - Invariant counting from contracts
@@ -24,19 +20,15 @@
 //! - Coverage data loading (lcov format)
 //! - Profiling data integration (perf/callgrind)
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_verification::metrics::{CodeMetricsCollector, EnhancedCodeMetrics};
 //! use verum_ast::decl::FunctionDecl;
 //!
-
 //! let mut collector = CodeMetricsCollector::new();
 //! collector.load_coverage(Path::new("coverage.lcov")).ok();
 //!
-
 //! let func: FunctionDecl = /* ... */;
 //! let metrics = collector.analyze_function(&func);
 //! println!("Complexity: {}", metrics.cyclomatic_complexity);

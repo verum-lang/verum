@@ -14,7 +14,6 @@
 )]
 //! Edge case and error path tests for verum_common semantic types
 //!
-
 //! Tests critical edge cases, boundary conditions, error paths, and concurrency
 
 use std::sync::Arc;

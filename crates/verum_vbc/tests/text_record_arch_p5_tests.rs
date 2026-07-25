@@ -1,6 +1,5 @@
 //! ARCH-P5 final leg — ONE canonical heap Text layout, Tier-0 tests.
 //!
-
 //! Every interpreter-side heap Text producer now allocates a SINGLE
 //! self-contained TEXT (4) record
 //! `[ObjectHeader(TEXT, size = 24 + len)]{ptr, len, cap}[bytes…]`

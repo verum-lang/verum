@@ -1,6 +1,5 @@
 //! Unified Hashing Infrastructure for the Verum Compiler
 //!
-
 //! This module provides Blake3-based hashing utilities used throughout the compiler.
 //! Blake3 is chosen for its:
 //! - Extreme speed (3-10x faster than SHA-256)
@@ -8,19 +7,15 @@
 //! - Parallelizable design (SIMD + multi-threaded)
 //! - Incremental hashing support
 //!
-
 //! # Usage
 //!
-
 //! ```rust
 //! use verum_compiler::hash::{ContentHash, hash_bytes, hash_str};
 //!
-
 //! // Simple hashing
 //! let hash = hash_bytes(b"hello world");
 //! let hash = hash_str("hello world");
 //!
-
 //! // Incremental hashing
 //! let mut hasher = ContentHash::new();
 //! hasher.update(b"part1");
@@ -28,17 +23,14 @@
 //! let hash = hasher.finalize();
 //! ```
 //!
-
 //! # Migration from SHA-256
 //!
-
 //! This module replaces SHA-256 usage in:
 //! - Incremental compilation hashes
 //! - Cache keys
 //! - Content-addressable storage
 //! - Module fingerprints
 //!
-
 //! Note: AWS signing (distributed_cache.rs) must continue using SHA-256
 //! as required by the AWS Signature V4 protocol.
 

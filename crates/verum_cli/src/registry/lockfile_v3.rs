@@ -1,23 +1,19 @@
 //! Verum lockfile v3 (P4.2).
 //!
-
 //! Successor to the legacy v1 [`super::lockfile::Lockfile`] (sha-256, no
 //! load-time verification). Three concrete improvements:
 //!
-
 //! 1. **Algorithm-tagged integrity strings.** Every entry's hash is
 //!  encoded as `"blake3:<64-hex>"` rather than a bare hex string.
 //!  A future migration to a stronger algorithm becomes a parser-side
 //!  discriminant rather than a silent re-interpretation.
 //!
-
 //! 2. **Lockfile self-integrity.** A blake3 digest over the
 //!  canonicalised lockfile body (entries + workspace + manifest hash,
 //!  in fixed sort order) is embedded at the top. Tampering with any
 //!  entry's `integrity` field — the most attack-relevant part — flips
 //!  the self-digest, surfaced by [`LockfileV3::verify_self_integrity`].
 //!
-
 //! 3. **Verify-on-every-load.** [`LockfileV3::from_file`] always
 //!  re-runs self-integrity. Callers who hold a [`ContentStore`] can
 //!  additionally call [`LockfileV3::verify_against_store`] to
@@ -25,10 +21,8 @@
 //!  integrity-clean — the same guarantee P5.1 provides per-blob, but
 //!  extended to the whole lock.
 //!
-
 //! # Layout
 //!
-
 //! ```toml
 //! version = 3
 //! root = "myapp"
@@ -38,7 +32,6 @@
 //! updated_at = 1714161005
 //! cli_version = "0.6.0"
 //!
-
 //! [[package]]
 //! name = "json"
 //! version = "1.4.0"
@@ -48,7 +41,6 @@
 //! features = ["std"]
 //! ```
 //!
-
 //! Sort order is canonical: packages by `(name, version)`, dependency
 //! pairs and features are also sorted, so byte-equal inputs produce
 //! byte-equal lockfiles independent of resolver traversal order.

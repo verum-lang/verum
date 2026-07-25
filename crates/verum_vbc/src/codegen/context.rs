@@ -1,6 +1,5 @@
 //! Lowering context for VBC codegen.
 //!
-
 //! Tracks compilation state including:
 //! - Current function being compiled
 //! - Register allocator

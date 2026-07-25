@@ -1,18 +1,14 @@
 //! Tier Analysis for VBC Integration
 //!
-
 //! This module provides the main tier analysis API that integrates:
 //! - Escape analysis (does reference escape?)
 //! - Dominance analysis (allocation dominates uses?)
 //! - Async/exception path analysis
 //!
-
 //! The output is consumed by VBC codegen to emit tier-appropriate instructions.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! CFG → TierAnalyzer → TierAnalysisResult
 //!  │
@@ -23,19 +19,15 @@
 //!  VBC Codegen (via to_vbc_tier())
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::tier_analysis::{TierAnalyzer, TierAnalysisResult};
 //! use verum_cbgr::tier_types::{ReferenceTier, Tier0Reason};
 //!
-
 //! let analyzer = TierAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
-
 //! for (ref_id, tier) in &result.decisions {
 //!  match tier {
 //!  ReferenceTier::Tier1 => {
@@ -51,7 +43,6 @@
 //! }
 //! ```
 //!
-
 //! Integrates escape analysis results into VBC codegen via a unified API. Escape
 //! analysis produces Map<ExprId, CbgrTier> decisions; VBC codegen uses these to emit
 //! tier-appropriate instructions: Ref (Tier 0, full CBGR ~15ns), RefChecked (Tier 1,

@@ -1,16 +1,13 @@
 //! Tensor runtime as LLVM IR — replaces verum_tensor.c (3,709 LOC, ~225 functions).
 //!
-
 //! Uses LLVM intrinsics for math (llvm.sqrt.f64, llvm.exp.f64, etc.) instead of
 //! software approximations, giving native hardware performance.
 //!
-
 //! Strategy:
 //!  - Core ~30 tensor functions: full LLVM IR bodies
 //!  - Math intrinsics: direct LLVM intrinsic calls
 //!  - Remaining ~195 functions: extern declarations (linked from C if needed)
 //!
-
 //! Tensor Handle System:
 //!  A tensor handle (i64) is a pointer to a heap-allocated header:
 //!  ```text

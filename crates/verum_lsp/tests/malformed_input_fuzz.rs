@@ -1,13 +1,11 @@
 //! Red-team Round-2 §8.1 — LSP responses to malformed source.
 //!
-
 //! Pins the no-panic contract for the user-reachable LSP entry points
 //! when fed adversarial source text. Every LSP request that ingests
 //! a `DocumentState` flows through the parser which MAY emit a
 //! diagnostic but MUST NOT panic the LSP worker — a panic kills the
 //! editor's language server connection and forces a manual restart.
 //!
-
 //! The test corpus covers the empirical failure modes from the parser
 //! red-team sweep:
 //!  - empty document
@@ -22,7 +20,6 @@
 //!  - 0-length string with various trigger characters at position 0
 //!  - very long single line (forces position_to_offset hot path)
 //!
-
 //! Every case asserts: (a) DocumentState construction succeeds; (b)
 //! `complete_at_position` returns without panicking; (c) the returned
 //! list is well-formed (the fuzzed input may legitimately yield zero

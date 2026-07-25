@@ -1,10 +1,8 @@
 //! Unsat Core Extraction Module
 //!
-
 //! This module provides functionality for extracting minimal unsatisfiable subsets
 //! from unsatisfiable constraint sets, crucial for debugging and error reporting.
 //!
-
 //! Based on experiments/z3.rs documentation
 //! When refinement type verification fails (e.g., cannot prove `Int{> 0}` for a value),
 //! unsat core extraction identifies the minimal set of conflicting constraints. This

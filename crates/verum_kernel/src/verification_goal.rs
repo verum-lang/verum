@@ -1,12 +1,9 @@
 //! Unified `VerificationGoal` type — the single verification surface.
 //!
-
 //! # The unification
 //!
-
 //! Verum has three notions of "the thing we verify":
 //!
-
 //!  1. **Function contracts** — `fn f(x: T) requires P ensures Q`
 //!  produces an obligation that the SMT-dispatch path discharges.
 //!  2. **Theorem propositions** — `theorem T(...) ensures Q { proof }`
@@ -15,7 +12,6 @@
 //!  3. **Refinement-type predicates** — `let x: Int{>= 0} = expr`
 //!  produces an obligation checked at type-application time.
 //!
-
 //! Without a shared representation, "what is Verum proving about
 //! this program?" has three different answers depending on the
 //! source, and the audit gate cannot enumerate the trust extension
@@ -23,10 +19,8 @@
 //! every source produces a `VerificationGoal { hypotheses,
 //! conclusion, source }`, and every dispatcher consumes one.
 //!
-
 //! # Architectural alignment with Verum philosophy
 //!
-
 //! - **Semantic honesty**: a goal IS what we're proving — not "the
 //!  thing the SMT layer wants" or "the thing the kernel checks".
 //!  One concept, one type.
@@ -36,10 +30,8 @@
 //!  `Term` values — they live in the same trust base as
 //!  `proof_checker`.
 //!
-
 //! # Surface
 //!
-
 //!  - [`VerificationGoal`] + [`GoalSource`].
 //!  - [`from_theorem_decl`] / [`from_fn_decl`] / [`from_refinement`]
 //!  — AST-to-goal converters for the three sources.
@@ -48,7 +40,6 @@
 //!  - [`VerificationGoal::audit_metadata`] — JSON-ready projection
 //!  for audit-gate dashboards.
 //!
-
 //! The SMT dispatch and refinement-check pathways still own their
 //! own internal pipelines; routing them through `VerificationGoal`
 //! is a separate migration. This module establishes the target

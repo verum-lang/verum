@@ -1,18 +1,15 @@
 //! K-Eps-Mu V1 shape-check tests.
 //!
-
 //! Naturality witness (incremental): tightens `check_eps_mu_coherence` from
 //! V0's permissive `(EpsilonOf(_), AlphaOf(_))` accept-anything
 //! skeleton to a structural shape check that:
 //!
-
 //!  • accepts the identity-naturality case (`lhs == rhs` structurally),
 //!  • accepts the canonical naturality-square shape
 //!  `(EpsilonOf(M_α), AlphaOf(EpsilonOf(α)))`,
 //!  • rejects malformed pairs like `(EpsilonOf(_), AlphaOf(t))`
 //!  where `t` is not itself an `EpsilonOf` constructor.
 //!
-
 //! The full τ-witness construction (σ_α from Code_S morphism + π_α
 //! from Perform_{ε_math} naturality through axiom A-3) is future work
 //! tracked under the multi-week K-Eps-Mu naturality witness item.

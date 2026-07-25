@@ -1,14 +1,11 @@
 //! CBGR Integration with Compiler Optimization Passes
 //!
-
 //! This module integrates CBGR tier analysis into the compiler's optimization pipeline.
 //! It runs after MIR lowering and applies automatic reference tier transformations
 //! based on proven safety properties from escape analysis.
 //!
-
 //! # Pipeline Integration
 //!
-
 //! ```text
 //! MIR Lowering → CBGR Tier Analysis → Other Optimizations → VBC Codegen
 //!  ↓
@@ -19,15 +16,12 @@
 //!  └─────────────────┘
 //! ```
 //!
-
 //! # Performance Impact
 //!
-
 //! - Analysis overhead: < 50ms per function
 //! - Promotion rate: 40-70% typical
 //! - Time saved: ~15ns per promoted reference dereference
 //!
-
 //! CBGR-VBC integration: inserts generation counter checks into VBC bytecode
 //! for memory safety validation. Three reference tiers:
 //!  - &T (managed): Runtime CBGR check ~15ns per dereference. ThinRef 16 bytes, FatRef 24 bytes.

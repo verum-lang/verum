@@ -1,46 +1,35 @@
 //! CVC5 SMT Backend - Optional Alternative to Z3
 //!
-
 //! This module provides CVC5 integration as an alternative to Z3 for SMT solving.
 //! CVC5 support is **optional** and requires the CVC5 library to be installed.
 //!
-
 //! ## Feature Flags
 //!
-
 //! - `cvc5`: Enables the CVC5 backend API (types and trait implementations)
 //! - `cvc5-ffi`: Enables actual FFI bindings to libcvc5 (requires CVC5 installed)
 //!
-
 //! ## Usage
 //!
-
 //! When `cvc5` feature is enabled but `cvc5-ffi` is not:
 //! - All types are available for API compatibility
 //! - `Cvc5Backend::new()` returns `Err(Cvc5Error::NotAvailable)`
 //! - Use Z3 as the primary solver (always available)
 //!
-
 //! When both `cvc5` and `cvc5-ffi` features are enabled:
 //! - Full CVC5 functionality is available
 //! - Requires libcvc5.so/dylib to be installed and accessible
 //!
-
 //! ## Installing CVC5
 //!
-
 //! CVC5 can be installed from:
 //! - <https://cvc5.github.io/downloads.html>
 //! - Package managers: `apt install cvc5`, `brew install cvc5`
 //!
-
 //! ## Example
 //!
-
 //! ```rust,no_run
 //! use verum_smt::cvc5_backend::{Cvc5Backend, Cvc5Config, Cvc5Error};
 //!
-
 //! let config = Cvc5Config::default();
 //! match Cvc5Backend::new(config) {
 //!  Ok(backend) => {
@@ -56,7 +45,6 @@
 //! }
 //! ```
 //!
-
 //! CVC5 backend for refinement type verification. CVC5 excels at string theory and
 //! nonlinear arithmetic. Refinement predicates are translated to SMT-LIB2 and checked
 //! for satisfiability. Supports all five refinement binding forms.

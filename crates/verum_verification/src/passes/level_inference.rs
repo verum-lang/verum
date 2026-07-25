@@ -1,6 +1,5 @@
 //! Level-inference verification pass.
 //!
-
 //! Walks every function declaration in the module and assigns the
 //! current verification level. Lightweight: no SMT, no kernel
 //! invocation. Records per-function `VerificationCost` entries.

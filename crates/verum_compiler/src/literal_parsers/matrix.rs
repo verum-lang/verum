@@ -1,10 +1,8 @@
 //! Matrix literal parser
 //!
-
 //! Tagged text literal parser: handles `tag#"content"` compile-time parsing
 //! and validation. Tags are registered via @tagged_literal attribute.
 //!
-
 //! Parses matrix literals in row-major order:
 //! - mat#"[[1, 2], [3, 4]]"
 //! - mat#"[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]"

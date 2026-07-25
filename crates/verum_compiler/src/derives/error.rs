@@ -1,22 +1,17 @@
 //! Error derive macro implementation
 //!
-
 //! Generates implementations for:
 //! - `implement Error for Type { fn description(&self) -> Text }`
 //! - `implement Display for Type { fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> }`
 //! - `From` implementations for wrapped error variants
 //!
-
 //! # Attribute Support
 //!
-
 //! - `@message("custom message")` - Custom display message for a variant
 //! - `@source` - Mark a field as the error source for chaining
 //!
-
 //! # Example
 //!
-
 //! ```verum
 //! @derive(Error)
 //! type MyError is
@@ -28,13 +23,11 @@
 //!  Timeout;
 //! ```
 //!
-
 //! Generates:
 //! - Error protocol implementation
 //! - Display protocol implementation
 //! - From<std.io.Error> for MyError
 //!
-
 //! The Error derive auto-generates Error protocol (description + source chaining),
 //! Display protocol (human-readable messages), and From conversions for @source-marked
 //! fields. This enables ergonomic error type hierarchies with ? operator support.

@@ -1,30 +1,23 @@
 //! HTT 5.1.4 ∞-Grothendieck construction — algorithmic kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! The Grothendieck construction is the load-bearing technical pivot
 //! of MSFS Lemma 3.4 (and therefore all of AFN-T):
 //!
-
 //! > Given an `S`-indexed diagram `D : λ → cF` of foundations, the
 //! > total Cartesian fibration `∫D = { (b, x) : b ∈ B, x ∈ D(b) }`
 //! > is itself an S-definable object in `S_S^global`.
 //!
-
 //! Lurie HTT §5.1.4 proves the result for ∞-categories. Pre-this-
 //! module this fact is admitted as `lurie_htt_5_1_4_syn_is_grothendieck`
 //! framework axiom — the kernel sees only an opaque assertion.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! This module ships the **algorithmic skeleton** of the Grothendieck
 //! construction:
 //!
-
 //!  1. [`SIndexedDiagram`] — input data carrying base category, fibre
 //!  function, and `S` accessibility witness.
 //!  2. [`GrothendieckConstruction`] — output structure carrying
@@ -33,29 +26,24 @@
 //!  it produces the construction in finite time, with explicit
 //!  Cartesian-fibration property witnessing.
 //!
-
 //! V0 doesn't yet derive the (∞,1)-categorical content of the
 //! construction — that requires native ∞-cat composition + coherence
 //! cells, which lands in #43 V1 promotion. V0 instead ships the
 //! 1-categorical skeleton + structural witnesses that everything
 //! AFN-T needs:
 //!
-
 //!  - The total category exists (kernel-checkable via `Some(_)` return).
 //!  - The projection `p : ∫D → B` is defined and well-typed.
 //!  - The Cartesian-lift property: for every `f : b → b'` and `x' ∈
 //!  D(b')`, there exists a unique-up-to-iso lift `f̄ : (b, f^*x') → (b', x')`.
 //!
-
 //! This is **enough for Lemma 3.4**: the lemma uses the construction
 //! to embed `Syn(F)` into the meta-classifier 2-stack, and the
 //! 1-categorical skeleton suffices for that embedding. Higher-cell
 //! coherence enters at Theorem 9.3 Step 1, which Future work will support.
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **Lemma 3.4** (`msfs_lemma_3_4_s_definability`) — currently a
 //!  framework axiom citing HTT 5.1.4. Promotion path: the
 //!  `lurie_htt_5_1_4_syn_is_grothendieck` axiom becomes a

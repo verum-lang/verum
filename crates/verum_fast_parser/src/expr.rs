@@ -1,6 +1,5 @@
 //! Expression parser for Verum using hand-written recursive descent with Pratt parsing.
 //!
-
 //! This module implements parsing for all Verum expressions, including:
 //! - Literals and paths
 //! - Binary and unary operators with proper precedence
@@ -11,10 +10,8 @@
 //! - Control flow (if, match, loops)
 //! - Closures and async blocks
 //!
-
 //! # Operator Precedence (Pratt Parsing)
 //!
-
 //! From lowest to highest binding power:
 //! 1. Pipeline `|>` (left-associative) - BP 1
 //! 2. Null coalescing `??` (right-associative) - BP 2

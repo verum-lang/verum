@@ -1,6 +1,5 @@
 //! Shared helpers for the `stdlib_*` integration tests.
 //!
-
 //! Each of `stdlib_lenient_skip_baseline`, `stdlib_simple_variant_alias_preservation`,
 //! and `stdlib_arity_disambiguation` runs the workspace's `vtest` binary
 //! against a `.vr` fixture and inspects the captured stderr/stdout for a
@@ -10,7 +9,6 @@
 //! it here removes ~60 lines of copy-paste and ensures every test agrees
 //! on the binary-discovery contract.
 //!
-
 //! Why a dedicated `tests/stdlib_support/mod.rs` rather than `tests/common/`:
 //! the helpers are tightly coupled to the stdlib-loading vtest invocation
 //! pattern (always `vtest run <spec>`, always `RUST_LOG=warn`, always
@@ -20,7 +18,6 @@
 //! abstractions. Scoping the module name to `stdlib_*` makes its surface
 //! and intended use site explicit.
 //!
-
 //! Visibility: every helper here is `pub(crate)`-equivalent (`pub`
 //! within this integration-test crate). Items are exposed even when
 //! a particular test file doesn't use all of them — `#[allow(dead_code)]`

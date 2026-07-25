@@ -1,18 +1,14 @@
 //! Interactive environment for Verum: REPL, Script Parser, and Playbook TUI
 //!
-
 //! This crate provides interactive programming features for Verum:
 //!
-
 //! - **Script Parser**: Specialized parsing for REPL/script environments
 //! - **Incremental Parsing**: Efficient re-parsing for changed regions
 //! - **Error Recovery**: Script-optimized error recovery with suggestions
 //! - **Playbook TUI**: Jupyter-like terminal-based notebook interface
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────┐
 //! │ verum_interactive │
@@ -36,20 +32,16 @@
 //! └─────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_interactive::{ScriptParser, ScriptContext, ParseMode};
 //! use verum_ast::FileId;
 //!
-
 //! let parser = ScriptParser::new();
 //! let mut context = ScriptContext::new();
 //! let file_id = FileId::new(1);
 //!
-
 //! // Parse a line
 //! match parser.parse_line("let x = 42", file_id, &mut context) {
 //!  Ok(result) => println!("Parsed: {:?}", result),

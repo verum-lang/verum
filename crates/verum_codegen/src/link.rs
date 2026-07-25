@@ -1,13 +1,10 @@
 //! Linking Infrastructure for Verum
 //!
-
 //! This module provides a unified API for linking Verum programs,
 //! supporting multiple output formats and link-time optimization.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────┐
 //! │ verum_codegen::link │
@@ -21,14 +18,11 @@
 //!  Object Files LLVM Bitcode Native Binary
 //! ```
 //!
-
 //! # Example
 //!
-
 //! ```no_run
 //! use verum_codegen::link::{LinkSession, OutputFormat};
 //!
-
 //! let session = LinkSession::new()
 //!  .output_format(OutputFormat::Executable)
 //!  .output("program")

@@ -1,39 +1,31 @@
 //! Craig Interpolation Module - Complete Z3 Implementation
 //!
-
 //! This module provides comprehensive Craig interpolation support using Z3's
 //! Model-Based Interpolation (MBI) engine through direct z3-sys FFI bindings.
 //!
-
 //! ## Interpolation Techniques
 //!
-
 //! 1. **Craig Interpolation**: Classical interpolation between A and B where A ∧ B is UNSAT
 //! 2. **Sequence Interpolation**: Generate interpolants for formula sequences (path interpolation)
 //! 3. **Tree Interpolation**: Hierarchical interpolation for modular verification
 //! 4. **Model-Based Interpolation**: Use models and quantifier elimination
 //! 5. **Proof-Based Interpolation**: Extract from resolution proofs
 //!
-
 //! ## Algorithms
 //!
-
 //! - **McMillan**: Resolution-proof based interpolation (strongest)
 //! - **Pudlák**: Dual to McMillan (weakest)
 //! - **Dual**: Combines both approaches
 //! - **Symmetric**: Balanced interpolation
 //! - **MBI**: Model-based with quantifier elimination
 //!
-
 //! ## Use Cases
 //!
-
 //! - **Compositional Verification**: Verify modules independently
 //! - **CEGAR**: Counter-Example Guided Abstraction Refinement
 //! - **Invariant Generation**: Synthesize loop invariants
 //! - **Modular Reasoning**: Hierarchical proof decomposition
 //!
-
 //! Compositional refinement verification: when verifying module A against specification B
 //! where A AND B is UNSAT, Craig interpolation produces a formula I over shared symbols
 //! such that A => I and I AND B is UNSAT. This enables modular verification of refinement

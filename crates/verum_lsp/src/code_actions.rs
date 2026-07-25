@@ -1,6 +1,5 @@
 //! Code actions (quick fixes) support
 //!
-
 //! Provides quick fixes for common errors and refactorings including:
 //! - Quick fixes for type errors, missing imports, CBGR issues
 //! - Refinement violation fixes (via quick_fixes module)

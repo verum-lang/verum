@@ -1,10 +1,8 @@
 //! Instantiation graph for tracking generic function instantiations.
 //!
-
 //! The instantiation graph is built during type checking and represents
 //! all generic function instantiations required in a compilation unit.
 //!
-
 //! Built during type checking: records each (function_id, type_args) pair and
 //! dependency edges between instantiations for topological specialization ordering.
 

@@ -1,34 +1,26 @@
 //! Context system types for Verum's dependency injection.
 //!
-
 //! This module defines types for the context system, which provides
 //! compile-time verified dependency injection.
 //!
-
 //! # Context System Overview
 //!
-
 //! Verum provides a two-level context model for dependency injection:
 //! - Level 1 (Static): `@injectable`/`@inject` for compile-time/startup resolution (0ns overhead)
 //! - Level 2 (Dynamic): `provide`/`using` keywords for runtime-varying dependencies (~5-30ns overhead)
 //!
-
 //! Contexts are NOT types -- they are declared with `context Name { }` syntax.
 //! Functions declare required contexts after the return type: `fn foo() -> T using [Ctx]`.
 //! Context groups bundle multiple contexts: `using WebContext = [Database, Logger, Auth]`.
 //! All contexts must be explicitly provided with `provide` statements in lexical scope.
 //!
-
 //! This is dependency injection, NOT algebraic effects. Context environment (theta) is stored
 //! in task-local storage and inherited on spawn.
 //!
-
 //! # Context Requirements
 //!
-
 //! Context requirements specify what contexts a function needs:
 //!
-
 //! ```verum
 //! fn query() using [Database, Logger] -> Data { ... }
 //! fn pure_fn() using [!IO, !State<_>] -> Int { ... } // Negative contexts

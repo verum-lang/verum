@@ -1,6 +1,5 @@
 //! MLIR context and codegen infrastructure.
 //!
-
 //! Provides the main entry points for MLIR-based code generation:
 //! - `MlirContext`: Wrapper around melior Context with dialect registration
 //! - `MlirCodegen`: High-level codegen interface (VBC → MLIR for GPU path)

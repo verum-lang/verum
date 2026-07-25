@@ -1,6 +1,5 @@
 //! Call stack management.
 //!
-
 //! The call stack tracks the execution context for nested function calls.
 //! Each call creates a new [`CallFrame`] that stores:
 //! - Function being executed
@@ -8,10 +7,8 @@
 //! - Register base offset
 //! - Return information
 //!
-
 //! # Stack Limits
 //!
-
 //! The default stack limit is 1024 frames, which is sufficient for most
 //! programs while preventing stack overflow attacks.
 

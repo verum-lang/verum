@@ -14,7 +14,6 @@
 )]
 //! Tests for script-mode parsing (P1.2).
 //!
-
 //! Verifies that [`FastParser::parse_module_script_str`] accepts top-
 //! level statements alongside items and folds every collected
 //! statement into a single synthesised `__verum_script_main`

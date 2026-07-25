@@ -1,16 +1,13 @@
 //! persistent certificate store.
 //!
-
 //! Bridges the gap between certificate **production** (the SMT
 //! verification phase emits an [`SmtCertificate`] per discharged
 //! obligation) and certificate **consumption** (the export
 //! pipeline calls a [`ProofReplayBackend`] that needs to find the
 //! cert for a given declaration).
 //!
-
 //! Architectural shape:
 //!
-
 //!  • [`CertificateStore`] — the trait every backing store
 //!  implements. Save / load / list / remove operations are
 //!  keyed by *declaration name*, mirroring the way the export
@@ -24,7 +21,6 @@
 //!  • [`InMemoryCertificateStore`] — test-only backing for unit
 //!  tests; identical contract.
 //!
-
 //! Per VVA semantic-honesty rule the public API surfaces use
 //! [`verum_common::Maybe`] and [`verum_common::Text`] so the API
 //! reads as a Verum-shaped store even though the implementation

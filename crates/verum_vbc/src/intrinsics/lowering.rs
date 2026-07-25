@@ -1,44 +1,34 @@
 //! # Industrial-Grade Intrinsic Lowering
 //!
-
 //! This module provides lowering for intrinsics to enable zero-overhead
 //! code generation. The lowering strategy depends on the target:
 //!
-
 //! ## ARCHITECTURE DECISION: MLIR for GPU only, LLVM for CPU
 //!
-
 //! **CRITICAL**: MLIR is used **ONLY** for GPU compilation paths.
 //! All CPU code, including math intrinsics, uses LLVM IR directly.
 //!
-
 //! | Target | Technology | Math Functions |
 //! |--------|------------|----------------|
 //! | CPU | LLVM IR (inkwell) | LLVM intrinsics (llvm.sin.f32, etc.) |
 //! | GPU | MLIR dialects | MLIR math dialect → GPU kernels |
 //!
-
 //! ## NO LIBC ARCHITECTURE
 //!
-
 //! Verum does **NOT** link against libc. All math functionality is provided by:
 //! - LLVM intrinsics (llvm.sin.f32, llvm.sqrt.f64, llvm.floor.f32, etc.)
 //! - Custom implementations in /core/ for functions without LLVM intrinsics
 //! - Platform syscalls via /core/sys/ for I/O and threading
 //!
-
 //! ## Design Principles
 //!
-
 //! 1. **LLVM Transparency**: CPU operations use LLVM intrinsics directly
 //! 2. **Optimization Friendly**: Patterns enable constant folding, inlining, vectorization
 //! 3. **Target Independence**: Platform-specific code selected during lowering
 //! 4. **Debug Info**: Source locations preserved for debugging
 //!
-
 //! ## LLVM Intrinsic Usage (CPU Path)
 //!
-
 //! | Category | LLVM Intrinsic | Verum Intrinsic |
 //! |----------|----------------|-----------------|
 //! | Basic Math | llvm.sqrt.f32/f64 | sqrt_f32, sqrt_f64 |
@@ -49,14 +39,11 @@
 //! | Power | llvm.pow.f64, llvm.powi.f64.i32 | pow_f64, powi_f64 |
 //! | FP Class | llvm.is.fpclass | is_inf, is_finite |
 //!
-
 //! ## ASCII Character Operations (Inline)
 //!
-
 //! Character classification and conversion are implemented inline using
 //! arithmetic comparisons, avoiding libc calls (isalpha, isupper, etc.):
 //!
-
 //! | Operation | Implementation |
 //! |-----------|---------------|
 //! | isalpha | (c >= 'A' && c <= 'Z') \|\| (c >= 'a' && c <= 'z') |
@@ -67,16 +54,12 @@
 //! | toupper | if islower(c) then c - 32 else c |
 //! | tolower | if isupper(c) then c + 32 else c |
 //!
-
 //! **Note**: These are ASCII-only. Unicode support is provided by /core/text.
 //!
-
 //! ## MLIR Dialect Usage (GPU Path Only)
 //!
-
 //! These dialects are reserved for GPU compilation via MLIR path:
 //!
-
 //! | Dialect | Usage | Example Operations |
 //! |---------|-------|-------------------|
 //! | arith | Arithmetic ops | arith.addi, arith.mulf |

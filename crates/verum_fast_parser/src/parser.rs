@@ -1,21 +1,16 @@
 //! Hand-written recursive descent parser infrastructure.
 //!
-
 //! This module provides the core infrastructure for a recursive descent parser,
 //! enabling significantly faster compile times (~3 seconds).
 //!
-
 //! # Architecture
 //!
-
 //! - [`TokenStream`]: Wrapper around token slice with lookahead and position tracking
 //! - [`Parser`]: Main parser struct with helper methods for common patterns
 //! - [`ParseResult`]: Type alias for parsing results
 //!
-
 //! # Design Principles
 //!
-
 //! 1. **Zero-cost abstractions**: No heap allocations in hot paths
 //! 2. **Error recovery**: Continue parsing after errors for better IDE support
 //! 3. **Lookahead**: Support arbitrary lookahead for disambiguation

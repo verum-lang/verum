@@ -1,12 +1,10 @@
 //! Integration with Type System, SMT, and Codegen
 //!
-
 //! Provides integration points for gradual verification with:
 //! - verum_types: Refinement type checking
 //! - verum_smt: SMT-based verification
 //! - verum_codegen: Code generation with verification info
 //!
-
 //! Integration points:
 //! - verum_types: refinement type constraints provide additional SMT assumptions
 //! - verum_smt: Z3/CVC5 backend for proving VCs and refinement subsumption

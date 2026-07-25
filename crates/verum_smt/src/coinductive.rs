@@ -1,6 +1,5 @@
 //! Coinductive Types Support
 //!
-
 //! This module provides support for coinductive types (infinite structures)
 //! with productivity checking as specified in:
 //! Coinductive types are dual to inductive types — defined by destructors (observations)
@@ -8,30 +7,24 @@
 //! `tail: Stream<A> -> Stream<A>`. Productivity checking ensures every path through
 //! a definition produces at least one constructor before making a recursive call.
 //!
-
 //! ## Features
 //!
-
 //! - **Stream types**: Infinite sequences with lazy evaluation
 //! - **Productivity checking**: Verify that streams produce values
 //! - **Coinductive reasoning**: Support for infinite data structures
 //! - **Bisimulation verification**: Z3-based observational equivalence
 //! - **Greatest fixpoint computation**: Using Z3 fixedpoint engine
 //!
-
 //! ## Implementation
 //!
-
 //! Coinductive types are dual to inductive types:
 //! - Inductive: defined by constructors (how to build them)
 //! - Coinductive: defined by destructors (how to observe them)
 //!
-
 //! Example: Stream<A> has destructors:
 //! - head : Stream<A> -> A
 //! - tail : Stream<A> -> Stream<A>
 //!
-
 //! Coinductive type syntax: `coinductive Stream<A: Type> : Type { head: Stream<A> -> A, tail: Stream<A> -> Stream<A> }`
 //! Productivity is verified by checking that every recursive call is guarded by a destructor application.
 

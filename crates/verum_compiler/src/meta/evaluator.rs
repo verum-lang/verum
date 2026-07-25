@@ -1,20 +1,16 @@
 //! Meta Expression Evaluator
 //!
-
 //! This module provides expression evaluation logic for meta-programming,
 //! including AST-to-MetaExpr conversion and MetaExpr evaluation.
 //!
-
 //! ## Responsibility
 //!
-
 //! The evaluator handles:
 //! - Converting AST expressions to MetaExpr (meta IR)
 //! - Evaluating MetaExpr to produce ConstValue
 //! - Pattern matching for meta match expressions
 //! - Type inference for meta values
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

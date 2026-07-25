@@ -1,14 +1,11 @@
 //! FFI runtime for VBC interpreter.
 //!
-
 //! This module provides the `FfiRuntime` which handles dynamic FFI calls
 //! using libffi. It manages library loading, symbol resolution, and
 //! call interface caching for optimal performance.
 //!
-
 //! # Performance
 //!
-
 //! - First call to a symbol: ~5μs (CIF preparation + symbol resolution)
 //! - Subsequent calls: ~150ns (cached CIF + direct call)
 //! - Memory: ~200 bytes per unique symbol

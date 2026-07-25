@@ -1,6 +1,5 @@
 //! Permission router for intrinsic gating (#12 / P3.2).
 //!
-
 //! Every `Syscall`-category intrinsic and any other intrinsic
 //! tagged with [`IntrinsicHint::RequiresPermission`](crate::intrinsics::IntrinsicHint::RequiresPermission)
 //! is the unconditional trust boundary of the interpreter: before
@@ -10,10 +9,8 @@
 //! into a `PermissionDenied` error instead of executing the
 //! syscall.
 //!
-
 //! ## Performance budget
 //!
-
 //! The warm-path target is **≤2ns** per check. The router caches
 //! the most-recent `(scope, target_id, decision)` triple in a
 //! single field; a repeated request for the same target hits the
@@ -22,27 +19,22 @@
 //! falls through to the user-supplied policy and back-fills the
 //! one-entry cache on the way out.
 //!
-
 //! A larger backing map (currently `std::collections::HashMap`
 //! keyed on `(scope, target_id)`) is reserved for the multi-loop
 //! case where the one-entry cache thrashes between two callers.
 //! It is consulted before the user policy and updated on every
 //! decision.
 //!
-
 //! ## Default policy
 //!
-
 //! With no [`PermissionRouter::set_policy`] configured the router
 //! is **allow-all**. Production deployments wire a policy
 //! callback that consults a host-supplied capability table; the
 //! callback is invoked *only* on cache misses, so the cost of an
 //! elaborate policy lookup is amortised across the loop.
 //!
-
 //! ## Why a runtime router
 //!
-
 //! The compile-time SMT verifier already discharges most
 //! capability obligations (a function annotated `using
 //! [Filesystem]` that escapes the obligation gets a verifier

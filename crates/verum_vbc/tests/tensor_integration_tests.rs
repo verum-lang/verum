@@ -1,6 +1,5 @@
 //! Comprehensive integration tests for the VBC tensor execution system.
 //!
-
 //! These tests verify end-to-end correctness of tensor operations,
 //! including dispatch, kernel execution, and memory management.
 

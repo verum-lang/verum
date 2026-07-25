@@ -1,15 +1,12 @@
 //! Content-Addressed Module Graph (CAMG) — fundamental rewrite of
 //! module loading.
 //!
-
 //! # Why CAMG
 //!
-
 //! The pre-CAMG `ModuleRegistry` (`crates/verum_modules`) is a flat
 //! `Map<ModuleId, Shared<ModuleInfo>>` keyed by an opaque, session-
 //! local `ModuleId`. That design has four documented limits:
 //!
-
 //!  1. **No content addressing.** Identical sources in two cogs get
 //!  different `ModuleId`s; the type-checker can't share work
 //!  across cogs even when the modules are byte-equal.
@@ -27,10 +24,8 @@
 //!  individual nodes — which means the *graph* must be lock-free
 //!  at the node-key level (DashMap), not just at the outer wrapper.
 //!
-
 //! CAMG addresses each of these:
 //!
-
 //!  * **Content-addressed.** Each module is identified by a
 //!  blake3 hash of its source. Two modules with byte-equal source
 //!  share the same `ModuleNodeId`, regardless of cog boundary or
@@ -46,10 +41,8 @@
 //!  `by_path` are all `DashMap`s. Reads never contend with reads;
 //!  writes shard by hash so independent insertions don't serialise.
 //!
-
 //! # Migration plan
 //!
-
 //! This commit lands the **foundational types and a no-op graph
 //! constructor**. Subsequent commits migrate the existing
 //! `ModuleRegistry` consumers one tier at a time, then delete the

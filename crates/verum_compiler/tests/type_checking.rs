@@ -14,7 +14,6 @@
 )]
 //! Type Checking Test Infrastructure
 //!
-
 //! Comprehensive tests for the type checking pipeline using CompilationPipeline.
 //! Tests cover:
 //! - Basic type inference (literals, functions, applications)
@@ -22,7 +21,6 @@
 //! - Refinement predicates (requires/ensures)
 //! - Context type checking (using [...] clauses)
 //!
-
 //! Verum type system: Hindley-Milner inference with refinement types, generics,
 //! protocol constraints (where clauses), and context system integration. Type
 //! inference targets < 100ms per 10K LOC. Refinement predicates are verified

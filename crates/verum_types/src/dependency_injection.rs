@@ -1,23 +1,18 @@
 //! Dependency Injection Type Checking
 //!
-
 //! Type-level string operations for compile-time text manipulation
 //!
-
 //! This module implements the complete 5-phase type-checking algorithm for
 //! injectable types in Verum's Two-Level Context Model:
 //!
-
 //! 1. **Registration**: Parse @injectable types, validate scopes
 //! 2. **Dependency Analysis**: Build dependency graph from @inject constructors
 //! 3. **Cycle Detection**: Verify acyclicity using DFS
 //! 4. **Protocol Resolution**: Resolve `&impl Protocol` dependencies
 //! 5. **Constructor Validation**: Verify @inject constructor constraints
 //!
-
 //! # Examples
 //!
-
 //! ```verum
 //! @injectable(Scope.Singleton)
 //! type DatabaseService is {
@@ -25,14 +20,12 @@
 //!  pool: ConnectionPool,
 //! };
 //!
-
 //! @injectable(Scope.Request)
 //! type UserService is {
 //!  db: &DatabaseService, // Dependency reference
 //!  cache: &CacheService,
 //! };
 //!
-
 //! implement UserService {
 //!  @inject
 //!  fn new(db: &DatabaseService, cache: &CacheService) -> Self {

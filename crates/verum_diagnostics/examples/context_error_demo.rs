@@ -1,6 +1,5 @@
 //! Demonstration of world-class context error messages.
 //!
-
 //! This example shows how the enhanced diagnostics system provides
 //! clear, actionable error messages for context-related issues.
 

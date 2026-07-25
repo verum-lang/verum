@@ -1,6 +1,5 @@
 //! Cubical type theory instruction handlers for the VBC interpreter.
 //!
-
 //! These handlers implement the runtime semantics of cubical type theory
 //! operations. At runtime:
 //! - Path values are represented as their computational content
@@ -9,7 +8,6 @@
 //! - Most cubical operations are erased by proof_erasure.rs before
 //!  reaching the interpreter
 //!
-
 //! The handlers support the computational residue that survives proof
 //! erasure (e.g., `transport(refl, x) → x`, `transport(ua(e), x) → e.forward(x)`).
 //! Complex cubical terms are normalized at the type-checking level by

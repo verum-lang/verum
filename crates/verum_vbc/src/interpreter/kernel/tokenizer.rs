@@ -1,34 +1,26 @@
 //! Tokenizer integration for VBC interpreter.
 //!
-
 //! This module provides tokenization support using the HuggingFace tokenizers library.
 //! When the `tokenizers` feature is disabled, stub implementations are provided that
 //! fall back to simple byte encoding/decoding.
 //!
-
 //! # Supported Tokenizers
 //!
-
 //! - **BPE (Byte-Pair Encoding)**: Load from vocab.json and merges.txt files
 //! - **Pretrained**: Load from model name (e.g., "gpt2", "llama", "bert-base-uncased")
 //! - **SentencePiece**: Load from .model files
 //!
-
 //! # Example
 //!
-
 //! ```ignore
 //! use verum_vbc::interpreter::kernel::tokenizer::*;
 //!
-
 //! // Load a pretrained tokenizer
 //! let handle = dispatch_tokenizer_load_pretrained("gpt2")?;
 //!
-
 //! // Encode text
 //! let tokens = dispatch_tokenizer_encode(&handle, "Hello, world!")?;
 //!
-
 //! // Decode back to text
 //! let text = dispatch_tokenizer_decode(&handle, &tokens)?;
 //! ```

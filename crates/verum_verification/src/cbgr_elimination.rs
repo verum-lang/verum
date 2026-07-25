@@ -1,14 +1,11 @@
 //! CBGR Check Elimination via Escape Analysis
 //!
-
 //! This module implements CBGR check elimination for the Verum verification system.
 //! CBGR checks are eliminated in AOT code only when escape analysis can prove
 //! references don't outlive their allocations.
 //!
-
 //! # Core Algorithm
 //!
-
 //! For `&T` -> `&checked T` promotion, ALL of these must be proven:
 //! 1. **Reference doesn't escape function scope**
 //!  - Not returned from the function
@@ -23,32 +20,25 @@
 //!  - Reference lifetime bounded by stack frame
 //!  - Deallocation occurs before function return
 //!
-
 //! # Safety Requirements
 //!
-
 //! - **NEVER** eliminate a check if escape status is Unknown
 //! - Conservative by default - only eliminate when proven safe
 //! - Must maintain 100% memory safety (zero false negatives)
 //!
-
 //! # Performance Impact
 //!
-
 //! - Automatic optimization: ~15ns -> 0ns per dereference
 //! - Zero developer effort (completely automatic)
 //! - Falls back to CBGR if cannot prove safety
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_verification::cbgr_elimination::{
 //!  EscapeStatus, EscapeAnalysisResult, CBGROptimizer, OptimizationConfig,
 //! };
 //!
-
 //! // Create optimizer with conservative settings
 //! let optimizer = CBGROptimizer::new(OptimizationConfig::conservative());
 //! ```

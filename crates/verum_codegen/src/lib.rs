@@ -6,20 +6,15 @@
 
 //! Verum Code Generation (Dual-Path: LLVM + MLIR)
 //!
-
 //! This crate provides code generation for the Verum compiler with dual-path compilation:
 //!
-
 //! - **CPU Path**: VBC → LLVM IR (via `llvm::VbcToLlvmLowering`)
 //! - **GPU Path**: VBC → MLIR (via `mlir::VbcToMlirGpuLowering`)
 //!
-
 //! Both paths use VBC (Verum Bytecode) as the intermediate representation.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ VERUM COMPILATION PIPELINE │
@@ -64,38 +59,29 @@
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # CPU Path (Recommended for General Code)
 //!
-
 //! ```rust,ignore
 //! use verum_codegen::llvm::VbcToLlvmLowering;
 //!
-
 //! // Create VBC from AST first (via verum_vbc)
 //! let vbc_module = verum_vbc::codegen::lower_module(&ast)?;
 //!
-
 //! // Lower VBC to LLVM IR
 //! let mut lowering = VbcToLlvmLowering::new(&llvm_ctx, &llvm_module)?;
 //! lowering.lower_module(&vbc_module)?;
 //!
-
 //! // JIT or AOT compile via LLVM
 //! ```
 //!
-
 //! # GPU Path (For Tensor/GPU Operations)
 //!
-
 //! ```rust,ignore
 //! use verum_codegen::mlir::{VbcToMlirGpuLowering, GpuLoweringConfig, GpuTarget};
 //!
-
 //! // Create VBC from AST first
 //! let vbc_module = verum_vbc::codegen::lower_module(&ast)?;
 //!
-
 //! // Lower VBC to MLIR for GPU
 //! let config = GpuLoweringConfig {
 //!  target: GpuTarget::Cuda,
@@ -107,7 +93,6 @@
 //! lowering.lower_module(&vbc_module)?;
 //! ```
 //!
-
 //! The compilation pipeline flows: Source -> Lexer -> Parser -> AST -> Type Check
 //! -> VBC Bytecode -> LLVM IR -> Native Code (for AOT), or VBC -> Interpreter.
 //! MLIR is used for the GPU compilation path. The VBC-first architecture ensures

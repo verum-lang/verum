@@ -1,15 +1,12 @@
 //! VBC-level CBGR escape analysis for reference tier promotion.
 //!
-
 //! This module implements a lightweight escape analysis pass that operates on
 //! decoded VBC instructions (between VBC codegen and LLVM lowering). It determines
 //! which `&T` references can be promoted from Tier 0 (full runtime CBGR checks,
 //! ~15ns overhead) to Tier 1 (`&checked T`, compiler-proven safe, zero overhead).
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC Codegen -> VbcEscapeAnalyzer -> Tier Decisions -> LLVM Lowering
 //!  |
@@ -17,19 +14,15 @@
 //!  Map<(FunctionId, usize), CbgrTier>
 //! ```
 //!
-
 //! # Promotion Rules (MVP)
 //!
-
 //! A `Ref`/`RefMut` instruction at offset `i` in function `f` is promoted to
 //! Tier 1 when ALL of the following hold:
 //!
-
 //! 1. **Local source**: The source register was defined by a local instruction
 //!  (LoadK, LoadI, LoadTrue/False, New with stack-local semantics, arithmetic,
 //!  or Mov from another local). References to function parameters stay Tier 0.
 //!
-
 //! 2. **Non-escaping**: The destination register of the Ref/RefMut is never:
 //!  - Passed as an argument to `Call`, `CallM`, `CallClosure`, `TailCall`
 //!  - Stored into a heap object (`SetF`, `SetE` where the object is heap-allocated)
@@ -37,27 +30,21 @@
 //!  - Sent to another thread (`Spawn`, `NurserySpawn`, channel send)
 //!  - Returned from the function (`Ret`)
 //!
-
 //! 3. **Bounded lifetime**: The reference does not outlive the function scope
 //!  (implied by non-escaping for this MVP).
 //!
-
 //! Everything else defaults to Tier 0.
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_vbc::cbgr_analysis::VbcEscapeAnalyzer;
 //! use verum_vbc::module::VbcFunction;
 //!
-
 //! let functions: Vec<VbcFunction> = /* decoded functions */;
 //! let analyzer = VbcEscapeAnalyzer::new();
 //! let result = analyzer.analyze(&functions);
 //!
-
 //! for ((func_id, offset), tier) in &result.decisions {
 //!  // Use tier decision during LLVM lowering
 //! }

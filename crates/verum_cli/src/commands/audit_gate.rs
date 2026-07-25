@@ -1,6 +1,5 @@
 //! Unified audit-gate trait.
 //!
-
 //! Pre-#169, `crates/verum_cli/src/commands/audit.rs` carried 45
 //! ad-hoc `audit_X_with_format(format: AuditFormat) -> Result<()>`
 //! free functions. Each gate had its own per-function entry point,
@@ -8,25 +7,20 @@
 //! Adding a new audit dimension meant editing audit.rs, main.rs,
 //! and the CLI argument parser — three coupled edit sites.
 //!
-
 //! Post-#169, every gate implements [`AuditGate`]. The CLI
 //! dispatch becomes a registry lookup; the JSON-emission contract
 //! is enforced by the trait; new gates plug in by registering an
 //! instance. The 45 free functions become trait implementations
 //! incrementally — the migration pattern is documented below.
 //!
-
 //! ## Migration pattern
 //!
-
 //! Each existing `audit_<name>_with_format(format)` function
 //! becomes a unit-struct implementing [`AuditGate`]:
 //!
-
 //! ```ignore
 //! pub struct FrameworkAxiomsGate;
 //!
-
 //! impl AuditGate for FrameworkAxiomsGate {
 //!  fn name(&self) -> &'static str { "framework-axioms" }
 //!  fn description(&self) -> &'static str {
@@ -38,14 +32,11 @@
 //! }
 //! ```
 //!
-
 //! Wrapping the existing function preserves all current behaviour;
 //! a future pass can inline the body and delete the free function.
 //!
-
 //! ## Dispatch
 //!
-
 //! [`AuditRegistry::default()`] returns a registry pre-populated
 //! with every migrated gate. `main.rs` resolves a `--gate <name>`
 //! argument via [`AuditRegistry::get`] and calls `run(format)`.

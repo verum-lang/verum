@@ -1,28 +1,22 @@
 //! # Industrial-Grade Intrinsic Registry
 //!
-
 //! This module defines the complete intrinsic registry for Verum, mapping intrinsic
 //! names to their optimal implementation strategies across the entire execution stack:
 //!
-
 //! - **VBC Interpreter**: Direct dispatch to specialized handlers (~5-20 cycles)
 //! - **JIT Compilation**: Inline VBC sequences for hotspot compilation
 //! - **MLIR Lowering**: Zero-overhead LLVM IR generation
 //! - **AOT Compilation**: Native instruction mapping
 //!
-
 //! ## Design Principles
 //!
-
 //! 1. **Complete Coverage**: All ~150+ intrinsics from core/sys/intrinsics.vr
 //! 2. **Optimal Dispatch**: Category-based lookup with O(1) hash access
 //! 3. **Zero Overhead**: Direct VBC opcode mapping where possible
 //! 4. **LLVM Transparency**: All operations visible to LLVM optimization passes
 //!
-
 //! ## Intrinsic Categories
 //!
-
 //! | Category | Count | Primary Opcode Range | Example |
 //! |----------|-------|---------------------|---------|
 //! | Arithmetic | 20+ | 0x10-0x2F | add_i64, mul_overflow |

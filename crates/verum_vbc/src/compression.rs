@@ -1,6 +1,5 @@
 //! VBC compression support.
 //!
-
 //! This module provides compression and decompression for VBC sections
 //! using zstd (default) or lz4 algorithms. Compression is optional and
 //! controlled by the `compression` feature flag.

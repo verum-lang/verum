@@ -1,6 +1,5 @@
 //! Attribute validation errors.
 //!
-
 //! This module defines error types for attribute validation,
 //! with rich diagnostic information for IDE and compiler integration.
 

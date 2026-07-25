@@ -1,7 +1,6 @@
 //! SMT certificate envelope — `SmtCertificate` + schema versioning.
 //! Split per #198 V7.
 //!
-
 //! The kernel consumes this via [`crate::replay_smt_cert`] and
 //! reconstructs a [`crate::CoreTerm`] witness. This is the primary
 //! mechanism that takes Z3 / CVC5 / E / Vampire / Alt-Ergo **out of

@@ -1,10 +1,8 @@
 //! Usefulness Algorithm
 //!
-
 //! This module implements the usefulness check from Maranget's algorithm.
 //! A pattern is "useful" if it covers at least one case not covered by previous patterns.
 //!
-
 //! The algorithm works by recursively analyzing the coverage matrix:
 //! 1. If the matrix is empty, the pattern is useful (covers new ground)
 //! 2. If the pattern starts with a wildcard, check each possible constructor

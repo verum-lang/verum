@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for GPU kernel verification using Z3
 //!
-
 //! This test suite validates:
 //! - GPU memory model encoding (global, shared, local)
 //! - Race condition detection between threads
@@ -22,7 +21,6 @@
 //! - Atomic operation semantics
 //! - Happens-before relationship tracking
 //!
-
 //! Tests GPU verification extensions to Verum type system
 
 use verum_common::List;

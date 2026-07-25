@@ -1,10 +1,8 @@
 //! Verified-compilation kernel-discharge manifest (#162 / CompCert-style
 //! per-pass simulation theorems).
 //!
-
 //! # Architectural role
 //!
-
 //! Verum compiles via VBC (bytecode) → LLVM IR for AOT. Currently every
 //! codegen pass is trusted by code-review only — there is no
 //! kernel-discharged correctness attestation. CompCert's contribution
@@ -12,14 +10,12 @@
 //! compiler phase preserves observable behaviour with a kernel-checked
 //! semantic-preservation proof.
 //!
-
 //! Task #162 wants the same for Verum. Each codegen pass should
 //! eventually emit a `@kernel_discharge("kernel_<pass>_preserves_semantics")`
 //! attestation that downstream tooling can audit. This module is the
 //! **foundation layer**: a static manifest of the canonical pass roster
 //! plus per-pass attestation slots that future passes can populate.
 //!
-
 //! ```text
 //!  Pre-#162: 6 codegen passes, 0 kernel-discharge attestations
 //!  (trusted by code-review only)
@@ -29,20 +25,16 @@
 //!  Goal : 6 passes, 6 attested (CompCert parity for Verum)
 //! ```
 //!
-
 //! # What this manifest is NOT
 //!
-
 //! It is not a codegen pass itself, and it does not change any actual
 //! lowering or transformation. This commit deliberately ships ONLY
 //! the data layer; per-pass discharge work lands in subsequent commits
 //! that flip individual entries from `NotYetAttested` to
 //! `Discharged` or `Admitted_with_IOU`.
 //!
-
 //! # Pattern reference
 //!
-
 //! Mirror of [`crate::soundness::kernel_v0_manifest`] — same layered
 //! shape (status enum → row record → manifest function → helper
 //! count fns → audit gate). Keeping the architectural shape uniform

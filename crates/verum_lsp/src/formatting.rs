@@ -1,10 +1,8 @@
 //! Code formatting support with trivia preservation
 //!
-
 //! Formats Verum code according to style guidelines.
 //! Uses the lossless syntax tree to preserve comments and meaningful whitespace.
 //!
-
 //! Features:
 //! - Trivia-preserving formatting (comments, doc comments)
 //! - Consistent indentation (4 spaces by default)

@@ -1,37 +1,28 @@
 //! Unified Type-Level Computation Traits
 //!
-
 //! Provides common traits and types for type-level computation across
 //! different backends (AST-based and SMT-backed).
 //!
-
 //! This module enables code sharing between:
 //! - `verum_types/src/type_level_computation.rs` (AST-based)
 //! - `verum_smt/src/type_level_computation.rs` (Z3-backed)
 //!
-
 //! ## Design
 //!
-
 //! The type-level computation system is split into two tiers:
 //!
-
 //! 1. **TypeLevelComputation**: Basic evaluation and simplification (AST-only)
 //! 2. **SmtCapableComputation**: Full SMT-backed constraint verification
 //!
-
 //! This allows choosing the appropriate backend based on requirements:
 //! - Use AST backend for fast evaluation of simple expressions
 //! - Use SMT backend for complex constraint verification
 //!
-
 //! ## Usage
 //!
-
 //! ```ignore
 //! use verum_common::type_level::{TypeLevelComputation, BackendCapabilities};
 //!
-
 //! fn evaluate<C: TypeLevelComputation>(ctx: &mut C, expr: &C::Expr) {
 //!  if ctx.capabilities().supports_const_eval {
 //!  let result = ctx.eval_to_const(expr)?;
@@ -40,7 +31,6 @@
 //! }
 //! ```
 //!
-
 //! Supports dependent type computation: type-level functions, refinement predicates,
 //! and SMT-backed constraint verification for compile-time type evaluation.
 

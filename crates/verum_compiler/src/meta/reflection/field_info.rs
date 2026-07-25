@@ -1,6 +1,5 @@
 //! Field information for compile-time reflection
 //!
-
 //! Provides detailed field metadata for struct types, matching core/meta/reflection.vr FieldInfo.
 
 use verum_ast::{MetaValue, ty::Type};

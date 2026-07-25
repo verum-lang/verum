@@ -1,19 +1,15 @@
 //! Ownership Analysis for Compile-Time Memory Safety Detection
 //!
-
 //! This module implements ownership tracking to detect memory safety issues
 //! at compile-time, including:
 //!
-
 //! - **Double-Free Detection**: Catches deallocations of already-freed memory
 //! - **Use-After-Free Detection**: Enhanced detection beyond escape analysis
 //! - **Ownership Transfer Tracking**: Monitors move semantics across boundaries
 //! - **Resource Leak Detection**: Identifies allocations without corresponding frees
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! CFG → OwnershipAnalyzer → OwnershipAnalysisResult
 //!  │
@@ -26,28 +22,22 @@
 //!  └───────────────────────┘
 //! ```
 //!
-
 //! # Algorithm Overview
 //!
-
 //! The analysis performs a forward dataflow analysis tracking:
 //! 1. **Allocation Sites**: Where memory is allocated (new, alloc, Heap::new)
 //! 2. **Deallocation Sites**: Where memory is freed (drop, free, explicit dealloc)
 //! 3. **Ownership State**: Current owner of each allocation
 //! 4. **Transfer Events**: Moves, borrows, and drops
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::ownership_analysis::OwnershipAnalyzer;
 //!
-
 //! let analyzer = OwnershipAnalyzer::new(cfg);
 //! let result = analyzer.analyze();
 //!
-
 //! for warning in &result.double_free_warnings {
 //!  println!("Double-free at {:?}: allocated at {:?}, first free at {:?}",
 //!  warning.second_free_site,
@@ -56,7 +46,6 @@
 //! }
 //! ```
 //!
-
 //! Phase 6 of the CBGR analysis pipeline: ownership tracking for memory safety.
 //! Detects double-free (deallocating already-freed memory), use-after-free
 //! (beyond what escape analysis catches), ownership transfer violations (move

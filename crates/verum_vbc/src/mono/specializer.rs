@@ -1,6 +1,5 @@
 //! Industrial-grade bytecode specialization for monomorphization.
 //!
-
 //! The VBC Specializer transforms generic bytecode into specialized bytecode by:
 //! 1. Substituting type parameters with concrete types
 //! 2. Rewriting CALL_G to CALL with specialized function IDs
@@ -9,7 +8,6 @@
 //! 5. Specializing generic comparison (EQ_G → EQ_I/EQ_F)
 //! 6. Computing concrete sizes/alignments for SIZE_OF_G/ALIGN_OF_G
 //!
-
 //! Part of the VBC monomorphization pipeline. Operates on the InstantiationGraph built
 //! during type checking to produce specialized bytecode with concrete type arguments.
 

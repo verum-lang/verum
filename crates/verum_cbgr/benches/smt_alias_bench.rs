@@ -1,6 +1,5 @@
 //! Benchmarks for SMT-based alias verification
 //!
-
 //! Performance target: <500μs per query with caching
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

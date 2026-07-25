@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for references module
 //!
-
 //! Tests the find-references functionality including:
 //! - Function references
 //! - Variable references

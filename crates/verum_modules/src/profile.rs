@@ -1,6 +1,5 @@
 //! Language profile system for module-level control.
 //!
-
 //! Implements the profile system from Section 13 of the specification:
 //! - Module-level profile declarations (@profile attribute)
 //! - Profile inheritance from parent modules
@@ -8,19 +7,15 @@
 //! - Profile compatibility validation
 //! - Profile-aware module resolution
 //!
-
 //! # Overview
 //!
-
 //! Verum supports three language profiles:
 //! - **Application**: Safe, productive, async-first (default)
 //! - **Systems**: Unsafe allowed, manual memory management
 //! - **Research**: Formal verification, dependent types, proofs
 //!
-
 //! # Profile Hierarchy
 //!
-
 //! ```text
 //! Research (most permissive)
 //!  ↓
@@ -29,12 +24,10 @@
 //! Application (most restrictive, default)
 //! ```
 //!
-
 //! Research profile can access everything.
 //! Systems profile can access Systems and Application modules.
 //! Application profile can only access Application modules.
 //!
-
 //! Profile hierarchy (most permissive to most restrictive):
 //! Research > Systems > Application (default)
 

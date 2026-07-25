@@ -1,6 +1,5 @@
 //! Benchmarks for recovery strategies (Level 3: Fault Tolerance)
 //!
-
 //! Verifies performance targets for Level 3 fault tolerance mechanisms:
 //! - Circuit Breaker state check: ~10-20ns
 //! - Health check: ~5-10μs (excluding check operation)

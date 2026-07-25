@@ -1,13 +1,10 @@
 //! Benchmark command — discover and execute `@bench` functions with
 //! time-budget–driven sampling and industry-standard statistics.
 //!
-
 //! # Tiers
 //!
-
 //! Matches the `verum run` / `verum test` convention:
 //!
-
 //! | Tier | How a sample is taken |
 //! |--------------|-----------------------------------------------------------------|
 //! | Interpreter | In-process: compile to VBC once, call `execute_function` |
@@ -16,14 +13,11 @@
 //! | | `fn main() { bench_fn(); }`), compile, spawn binary; each run |
 //! | | is a sample. Use when you need realistic native timings. |
 //!
-
 //! Default: **AOT** (consistent with `verum run` / `verum test`; use
 //! `--interp` or `--tier interpret` for the in-process path).
 //!
-
 //! # Sampling
 //!
-
 //! Following Criterion / hyperfine conventions, the harness runs a
 //! warm-up phase (`--warm-up-time`, default 3 s) and a measurement
 //! phase (`--measurement-time`, default 5 s). Within the measurement
@@ -32,10 +26,8 @@
 //! benches still terminate near the budget. Fixed iteration count is
 //! available via `--sample-size`.
 //!
-
 //! # Statistics
 //!
-
 //! * Mean, median, stddev, min, max, MAD (median absolute deviation).
 //! * Tukey IQR fences (1.5×IQR) for outlier classification — reported
 //!  but not silently dropped; slow outliers are usually legitimate
@@ -43,10 +35,8 @@
 //! * Bootstrap 95 % CI for the median (1 000 resamples) gives an
 //!  honest uncertainty band around the headline number.
 //!
-
 //! # Output
 //!
-
 //! `--format table` (default), `--format json`, `--format csv`,
 //! `--format markdown`. JSON output is stable across releases so CI
 //! can diff against baselines without scraping.

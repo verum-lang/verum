@@ -1,13 +1,10 @@
 //! Content-Addressed Storage (CAS) Layer
 //!
-
 //! Provides persistent, content-addressed storage for the semantic artifact cache.
 //! Artifacts are stored by their Blake3 hash, enabling deduplication across projects.
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
 //! │ Content-Addressed Storage (CAS) │
@@ -20,10 +17,8 @@
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! ## Directory Structure
 //!
-
 //! ```text
 //! .verum/cas/
 //! ├── objects/ # Content-addressed objects (2-level fanout)
@@ -40,17 +35,14 @@
 //! └── metadata.json # CAS metadata (version, stats)
 //! ```
 //!
-
 //! ## Features
 //!
-
 //! - **Two-level fanout**: Objects stored in `objects/XX/YYY...` for filesystem efficiency
 //! - **Zstd compression**: Artifacts compressed with zstd level 3 by default
 //! - **Atomic writes**: Write to temp file, then atomic rename
 //! - **LRU eviction**: Optional garbage collection based on access time
 //! - **Cross-project sharing**: Global cache directory option
 //!
-
 //! Semantic artifact cache: content-addressed storage using semantic hashes
 //! for deduplication and cross-project artifact reuse.
 

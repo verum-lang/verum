@@ -1,15 +1,12 @@
 //! Distribution metadata for distributed tensor operations.
 //!
-
 //! Supports Monarch-inspired single-controller semantics with:
 //! - N-dimensional mesh topology
 //! - Tensor sharding specifications
 //! - Collective operations
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │ DISTRIBUTION METADATA │

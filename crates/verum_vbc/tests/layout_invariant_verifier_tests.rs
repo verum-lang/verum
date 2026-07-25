@@ -1,6 +1,5 @@
 //! Tests for the type-layout invariant verifier (#146).
 //!
-
 //! Each test constructs a synthetic `TypeDescriptor` with a deliberate
 //! shape violation, pushes it into a fresh `VbcCodegen`'s type table,
 //! and asserts that `verify_type_layout_invariants` rejects it with

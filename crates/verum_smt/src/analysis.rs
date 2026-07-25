@@ -1,19 +1,15 @@
 //! Formal Analysis (Real Analysis) with SMT Verification
 //!
-
 //! Comprehensive implementation of real analysis concepts with Z3-based verification
 //! of fundamental theorems and properties.
 //!
-
 //! Implements formal real analysis verification: complete ordered fields with the
 //! completeness axiom (every bounded non-empty set has a supremum), epsilon-delta
 //! limits, continuity (point-wise and uniform), and key theorems (IVT, EVT).
 //! Uses Z3's nonlinear real arithmetic (NRA) theory for verification.
 //!
-
 //! ## Features
 //!
-
 //! - **Complete Ordered Fields**: Real numbers with completeness axiom
 //! - **Limits**: Epsilon-delta definition and verification
 //! - **Continuity**: Point-wise and uniform continuity
@@ -21,37 +17,29 @@
 //! - **Key Theorems**: Intermediate Value Theorem, Extreme Value Theorem
 //! - **Z3 Integration**: Non-linear real arithmetic (NRA) support
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Limit verification: < 200ms per property
 //! - Continuity check: < 150ms per function at point
 //! - Theorem verification: < 500ms per theorem
 //! - Sequence convergence: < 100ms per sequence
 //!
-
 //! ## Architecture
 //!
-
 //! All verification operations return `ProofTerm` evidence that can be:
 //! - Exported to proof assistants (Coq, Lean, Isabelle)
 //! - Used for gradual verification
 //! - Cached for incremental compilation
 //!
-
 //! ## Examples
 //!
-
 //! ```rust,no_run
 //! use verum_smt::analysis::{AnalysisVerifier, RealFunction};
 //! use verum_smt::Context;
 //!
-
 //! let ctx = Context::new();
 //! let mut verifier = AnalysisVerifier::new();
 //!
-
 //! // Verify continuity of f(x) = x^2 at x = 2
 //! let f = RealFunction::polynomial(vec![0.0, 0.0, 1.0].into()); // x^2
 //! let proof = verifier.verify_continuity_at(&ctx, &f, 2.0).unwrap();

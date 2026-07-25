@@ -2,43 +2,34 @@
 //! (Pronk 1996, "Etendues and Stacks as Bicategories of Fractions",
 //! *Compositio Mathematica* 102.3).
 //!
-
 //! ## What this delivers
 //!
-
 //! Given a 2-category `C` and a class `W` of 1-cells satisfying the
 //! **Pronk axioms** (BF1–BF5), Pronk's construction produces the
 //! **bicategory of fractions** `C[W^{-1}]` — the universal
 //! bicategory in which the 1-cells of `W` become equivalences:
 //!
-
 //!  * **Objects**: same as `C`.
 //!  * **1-cells** `X → Y`: equivalence classes of *spans*
 //!  `X ←w Y' → Y` with `w ∈ W` and a 2-cell.
 //!  * **2-cells**: zigzags between spans.
 //!
-
 //! The bicategory `C[W^{-1}]` has the universal property that any
 //! 2-functor `F : C → B` sending `W` to equivalences factors uniquely
 //! through `C → C[W^{-1}]`.
 //!
-
 //! ## Why this matters for Diakrisis
 //!
-
 //! Diakrisis §16 uses the bicategory of fractions on
 //! `(LegitimateAbstraction, S-pop equivalences)` to construct the
 //! AC/OC duality classifier — the central 16.10 bridge. The
 //! construction is admitted via the host-stdlib axiom
 //! `diakrisis_pronk_bicat_fractions` pre-this-module.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`PronkAxioms`] — the BF1–BF5 axiom-witness record.
 //!  2. [`BicatOfFractions`] — the resulting bicategory `C[W^{-1}]`
 //!  with universal-functor witness.
@@ -51,14 +42,11 @@
 //!  6. [`universal_2_functor`] — the universal `2-functor`
 //!  `C → C[W^{-1}]` exhibiting the localisation.
 //!
-
 //! Future work: explicit pentagonal coherence cells for span
 //! composition; full bicategorical 2-cell content.
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **Diakrisis 16.10** — the AC/OC duality classifier. Currently
 //!  admits via `diakrisis_pronk_bicat_fractions`; promotion via
 //!  [`build_bicat_of_fractions`].

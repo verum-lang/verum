@@ -1,6 +1,5 @@
 //! RSL (Refinement Specification Language) Parser
 //!
-
 //! Parses contract# literals into structured ContractSpec AST nodes.
 //! RSL syntax supports:
 //! - Preconditions: `requires <expr>`
@@ -8,7 +7,6 @@
 //! - Invariants: `invariant <expr>`
 //! - Special functions: `old(expr)`, `result`, `forall`, `exists`
 //!
-
 //! Contract literals use RSL embedded via `contract#"..."` syntax. Preconditions
 //! become caller proof obligations, postconditions become callee proof obligations.
 //! `old(expr)` refers to pre-state values; `result` refers to the return value.

@@ -1,6 +1,5 @@
 //! Call operation handlers for VBC interpreter dispatch.
 //!
-
 //! Handles: Call (0x5B), CallR (0x5F), CallG (0x80), CallV (0x81),
 //! CallC (0x82), CallClosure (0x5E), TailCall (0x5C), NewClosure (0x8A)
 

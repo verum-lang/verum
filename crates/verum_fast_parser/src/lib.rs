@@ -13,22 +13,17 @@
 #![allow(clippy::if_same_then_else)]
 //! Fast, direct-to-AST parser for Verum compiler.
 //!
-
 //! This is an optimized parser specifically designed for compilation use cases.
 //! It builds AST directly without intermediate lossless syntax trees, providing
 //! faster parsing with lower memory overhead.
 //!
-
 //! For IDE features (incremental parsing, lossless syntax trees, formatting),
 //! use `verum_parser` instead.
 //!
-
 //! # Architecture
 //!
-
 //! The parser is organized into several modules:
 //!
-
 //! - [`expr`]: Expression parsing (binary ops, pipelines, comprehensions, etc.)
 //! - [`ty`]: Type parsing (primitives, refinements, generics, references)
 //! - [`pattern`]: Pattern parsing (wildcards, tuples, records, variants, etc.)
@@ -37,16 +32,13 @@
 //! - [`error`]: Error recovery and reporting
 //! - [`parser`]: Core recursive descent infrastructure
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_fast_parser::FastParser;
 //! use verum_lexer::Lexer;
 //! use verum_ast::span::FileId;
 //!
-
 //! let source = r#"
 //!  fn factorial(n: Int{>= 0}) -> Int {
 //!  match n {
@@ -56,13 +48,11 @@
 //!  }
 //! "#;
 //!
-
 //! let file_id = FileId::new(0);
 //! let lexer = Lexer::new(source, file_id);
 //! let parser = FastParser::new();
 //! let result = parser.parse_module(lexer, file_id);
 //!
-
 //! match result {
 //!  Ok(module) => println!("Parsed successfully: {} items", module.items.len()),
 //!  Err(errors) => {
@@ -73,10 +63,8 @@
 //! }
 //! ```
 //!
-
 //! # Performance
 //!
-
 //! This parser is optimized for compilation speed:
 //! - Direct AST construction (no intermediate green tree)
 //! - No trivia preservation (comments/whitespace discarded)

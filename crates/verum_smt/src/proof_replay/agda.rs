@@ -1,13 +1,11 @@
 //! Agda proof-replay backend.
 //!
-
 //! Lowers an [`SmtCertificate`] into an Agda term-style proof.
 //! Unlike Coq/Lean, Agda is term-oriented — proofs are values
 //! constructed from the goal type's constructors. The V8.0
 //! baseline emits a small term-vocabulary recognising common
 //! shape-equivalents:
 //!
-
 //!  * `refl` for reflexivity.
 //!  * `cong` for congruence under a function.
 //!  * `sym` / `trans` for equality manipulation.

@@ -1,6 +1,5 @@
 //! Error explanation system for Verum compiler errors.
 //!
-
 //! Provides detailed explanations, examples, and solutions for error codes.
 //! Accessible via `verum --explain E0312` command.
 

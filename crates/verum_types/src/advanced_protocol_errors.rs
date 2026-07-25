@@ -1,11 +1,9 @@
 //! Enhanced Error Messages for GATs and Specialization
 //!
-
 //! Higher-kinded type (HKT) kind inference: infers kinds for type constructors
 //! (e.g., List has kind Type -> Type, Map has kind Type -> Type -> Type).
 //! Uses constraint-based kind inference with unification.
 //!
-
 //! This module provides detailed, actionable error messages for advanced protocol features:
 //! - GAT arity mismatches with suggestions
 //! - Specialization ambiguities with candidate listings
@@ -13,10 +11,8 @@
 //! - GAT where clause violations
 //! - Negative specialization errors
 //!
-
 //! # Design Philosophy
 //!
-
 //! All error messages follow these principles:
 //! 1. **Clear context**: What went wrong and where
 //! 2. **Actual vs Expected**: Show what was found vs what was needed
@@ -24,10 +20,8 @@
 //! 4. **Code examples**: Show correct usage patterns
 //! 5. **Rich formatting**: Use labels, notes, and help messages
 //!
-
 //! # Integration
 //!
-
 //! These error types integrate with verum_diagnostics for rich terminal output
 //! with colors, labels, and multi-line highlighting.
 

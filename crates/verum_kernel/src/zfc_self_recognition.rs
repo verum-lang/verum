@@ -1,15 +1,12 @@
 //! Kernel self-recognition vs. ZFC + 2 inaccessibles — V0
 //! algorithmic kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! Verum's trusted kernel is sound *relative* to a meta-theory; the
 //! conventional choice is **ZFC + 2 strongly inaccessible cardinals**
 //! (κ_1 < κ_2), the smallest fragment of set theory that:
 //!
-
 //!  1. Models every kernel-defining axiom (extensionality, pairing,
 //!  union, infinity, separation, replacement, foundation, choice).
 //!  2. Provides Grothendieck universes for the universe-tower
@@ -18,20 +15,16 @@
 //!  ZFC + 1 inaccessible; the second inaccessible is needed
 //!  for the *meta*-classifier of (∞,1)-categories).
 //!
-
 //! Pre-this-module the kernel's relative-consistency claim was
 //! folklore — there was no algorithmic surface that listed the seven
 //! kernel rules, decomposed each into its ZFC-axiom + universe-cardinal
 //! requirements, or decided whether a kernel-derivable judgement
 //! could be lifted into the meta-theory.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`ZfcAxiom`] — the eight ZFC axioms (one ZFC-extension flag
 //!  per axiom; see Kunen 2011 Ch. III).
 //!  2. [`InaccessibleLevel`] — `Kappa1` / `Kappa2` (the two
@@ -47,10 +40,8 @@
 //!  every kernel-rule citation and surfaces the union of
 //!  meta-theory requirements (the "trusted-base report").
 //!
-
 //! ## What this UNBLOCKS
 //!
-
 //!  - **VVA §16.5 Phase 5** ("Full MSFS self-recognition") — the
 //!  `core.math.foundations.self_recognition` corpus has the
 //!  .vr-level axiomatic surface; this module provides the

@@ -11,26 +11,21 @@
 //! This module contains error types used by this crate and provides additional
 //! error handling utilities for dependent crates.
 //!
-
 //! Disclaimer: this module may change significantly in the future.
 //!
-
 //! All different error types are defined in the [`TableGenError`] enum.
 //! However, most functions return a [`SourceError<TableGenError>`] (has alias
 //! [`Error`]). This error type includes a [`SourceLocation`], a reference to a
 //! line in a TableGen source file.
 //!
-
 //! To provide information about the source code at this location (e.g. code at
 //! location, file name, line and column), [`SourceInfo`] must be provided to
 //! the error. In this case, the error message will be formatted by LLVM's
 //! `SourceMgr` class.
 //!
-
 //! ```rust
 //! use verum_tblgen::{RecordKeeper, TableGenParser};
 //!
-
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let keeper: RecordKeeper = TableGenParser::new()
 //!  .add_source(
@@ -45,7 +40,6 @@
 //!  println!("{}", e);
 //!  // invalid conversion from Int to alloc::string::String
 //!
-
 //!  println!("{}", e.add_source_info(keeper.source_info()));
 //!  // error: invalid conversion from Int to alloc::string::String
 //!  // int a = test;
@@ -55,14 +49,12 @@
 //! # }
 //! ```
 //!
-
 //! Note that `add_source_info` should be called with the correct source info.
 //! This is not statically enforced, but runtime checks are implemented to check
 //! that the given [`SourceInfo`] matches the [`SourceLocation`] in the error.
 //! If it does not match, the error will be printed without information about
 //! the TableGen source file.
 //!
-
 //! Custom error types that implement [`std::error::Error`] also implement
 //! [`WithLocation`]. That way, a [`SourceLocation`] can be attached to any
 //! error by calling [`with_location`](`WithLocation::with_location`).

@@ -1,18 +1,14 @@
 //! Attribute conversion implementations for typed attributes.
 //!
-
 //! This module provides:
 //! - Helper functions for extracting values from `Expr` nodes
 //! - `FromAttribute` implementations for all typed attributes in `typed.rs`
 //!
-
 //! # Examples
 //!
-
 //! ```rust
 //! use verum_ast::attr::{Attribute, InlineAttr, FromAttribute};
 //!
-
 //! fn process_inline(attr: &Attribute) {
 //!  if let Ok(inline) = InlineAttr::from_attribute(attr) {
 //!  println!("Inline mode: {:?}", inline.mode);

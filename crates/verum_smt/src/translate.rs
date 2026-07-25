@@ -1,13 +1,10 @@
 //! Translation from Verum AST to Z3 expressions.
 //!
-
 //! This module handles the conversion of Verum expressions, types, and
 //! refinement predicates into Z3's internal representation for solving.
 //!
-
 //! ## Features
 //!
-
 //! - **Full type mapping**: All Verum primitive and compound types
 //! - **Expression translation**: Arithmetic, logical, comparison operations
 //! - **Refinement predicates**: Support for complex refinement constraints
@@ -16,17 +13,13 @@
 //! - **Field access**: Array length, vector size
 //! - **Tensor support**: Full Z3 Array theory implementation
 //!
-
 //! ## Translation Strategy
 //!
-
 //! The translator maintains a binding environment mapping variable names to Z3 AST nodes.
 //! Verum refinement predicates use the special variable `it` to refer to the value being constrained.
 //!
-
 //! ### Type Mapping
 //!
-
 //! | Verum Type | Z3 Sort | Notes |
 //! |------------|---------|-------|
 //! | `Int` | `Int` | Unbounded integers |
@@ -36,43 +29,32 @@
 //! | Refinement `T{p}` | Base type + constraint | Predicate becomes assertion |
 //! | `Tensor<T, [N, M]>` | `Array[Int -> Array[Int -> T]]` | Nested array theory |
 //!
-
 //! ### Tensor Support (Z3 Array Theory)
 //!
-
 //! Tensors are translated to nested Z3 Arrays:
 //!
-
 //! - **1D tensor**: `Tensor<i32, [N]>` → `Array[Int -> Int]`
 //! - **2D tensor**: `Tensor<f32, [N, M]>` → `Array[Int -> Array[Int -> Real]]`
 //! - **3D tensor**: `Tensor<bool, [N, M, K]>` → `Array[Int -> Array[Int -> Array[Int -> Bool]]]`
 //!
-
 //! #### Element Access
 //!
-
 //! - `tensor[i]` → `Array::select(tensor, i)`
 //! - `tensor[i][j]` → `Array::select(Array::select(tensor, i), j)`
 //! - `tensor[i][j][k]` → Nested select operations
 //!
-
 //! #### Dimension Constraints
 //!
-
 //! For each dimension, symbolic or concrete size constraints are generated:
 //! - Concrete: `let tensor: Tensor<i32, [10, 20]>` → sizes are `10` and `20`
 //! - Symbolic: `let tensor: Tensor<i32, [N, M]>` → `N` and `M` are Int constants
 //!
-
 //! #### Bounds Checking
 //!
-
 //! Index bounds are verified: `0 <= i && i < dimension_size`
 //!
-
 //! ### Supported Operations
 //!
-
 //! - **Arithmetic**: +, -, *, /, % (modulo)
 //! - **Comparison**: ==, !=, <, <=, >, >=
 //! - **Logical**: &&, ||, !

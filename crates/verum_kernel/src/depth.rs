@@ -1,9 +1,7 @@
 //! Depth functions for kernel rules — split .
 //!
-
 //! Two distinct depth notions live here:
 //!
-
 //!  • [`m_depth`] — finite-valued M-iteration depth (Diakrisis T-2f*).
 //!  Used by the baseline `K-Refine` rule.
 //!  • [`m_depth_omega`] — ordinal-valued modal-depth (Theorem 136.T
@@ -11,7 +9,6 @@
 //!  Encoded as Cantor-normal-form prefix below ε_0 via
 //!  [`OrdinalDepth`].
 //!
-
 //! Plus the [`check_refine_omega`] kernel-rule entry point that gates
 //! refinement-type formation on the strict ordinal inequality
 //! `md^ω(P) < md^ω(A) + 1`.

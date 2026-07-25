@@ -1,24 +1,19 @@
 //! Interrupt handler code generation for ISR (Interrupt Service Routine) support.
 //!
-
 //! This module provides LLVM IR generation for interrupt service routines,
 //! including prologue/epilogue generation, critical section handling, and
 //! proper return instructions for various architectures.
 //!
-
 //! # Overview
 //!
-
 //! Interrupt handlers require special treatment:
 //! - Saving/restoring all modified registers (not just callee-saved)
 //! - Using interrupt-specific return instructions (iret, rfi, eret, mret)
 //! - Proper stack alignment
 //! - Optional FPU state preservation
 //!
-
 //! # Generated Code Patterns
 //!
-
 //! ```llvm
 //! ; x86_64 interrupt handler
 //! define x86_intrcc void @timer_isr(ptr %frame) {
@@ -29,7 +24,6 @@
 //!  ret void ; with x86_intrcc, this becomes iretq
 //! }
 //!
-
 //! ; ARM interrupt handler
 //! define arm_aapcscc void @irq_handler() "interrupt"="IRQ" {
 //! entry:
@@ -38,10 +32,8 @@
 //! }
 //! ```
 //!
-
 //! # Interrupt Handler Codegen
 //!
-
 //! Verum uses `@interrupt(vector = N)` attribute for ISR declarations. Interrupt
 //! handlers require special codegen: saving/restoring ALL modified registers (not
 //! just callee-saved), using architecture-specific return instructions (x86: iret,

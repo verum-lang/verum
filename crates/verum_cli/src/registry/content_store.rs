@@ -1,16 +1,13 @@
 //! Content-addressed cog store (P5.1).
 //!
-
 //! Resolved cog blobs (tarballs, source trees, anything content-stable)
 //! live at `~/.verum/store/<blake3-hex>/`, deduplicated by content.
 //! Two `(name, version)` tuples that resolve to byte-identical blobs
 //! share one on-disk entry — saving space and giving the resolver a
 //! deterministic supply-chain integrity check.
 //!
-
 //! # Layout
 //!
-
 //! ```text
 //! ~/.verum/store/
 //! ├── <blake3-hex>/ — one per unique blob
@@ -24,10 +21,8 @@
 //! │ └── ...
 //! ```
 //!
-
 //! # Integrity contract
 //!
-
 //! Every [`ContentStore::lookup_by_digest`] call re-hashes the on-disk
 //! blob and compares against the directory name. A mismatch is treated
 //! as corruption: the entry is evicted, refs that pointed at it are
@@ -35,10 +30,8 @@
 //! There is no "trust on first use" — the cache cannot serve a
 //! tampered blob even silently.
 //!
-
 //! # Atomicity
 //!
-
 //! [`ContentStore::insert`] writes through a per-pid tempdir then
 //! renames into place; concurrent in-process inserts are serialised
 //! by a process-local store mutex (the cleanup+rename window is racy
@@ -46,10 +39,8 @@
 //! both writers produce byte-identical blobs because the digest is
 //! deterministic.
 //!
-
 //! # GC
 //!
-
 //! [`ContentStore::gc_to_size`] evicts orphaned digests (no ref points
 //! at them) first; if still over budget, evicts least-recently-accessed
 //! refs and their underlying blobs. This protects pinned dependencies

@@ -3,28 +3,22 @@
 //! / IDE / CI can inspect, list, clear, and probe the per-theorem
 //! closure-hash incremental verification cache.
 //!
-
 //! ## Why
 //!
-
 //! Pre-this-module the cache trait + reference impls existed in
 //! `verum_verification::closure_cache` but had no production CLI
 //! consumer. This module is the **transport-layer integration**:
 //! every cache operation IDE/CI needs is exposed via a typed
 //! subcommand.
 //!
-
 //! ## Cache root resolution
 //!
-
 //! The cache lives at `<manifest_dir>/target/.verum_cache/closure-hashes/`,
 //! mirroring Cargo's `target/` layout. Users can override via
 //! `--root <path>` for testing or non-standard project layouts.
 //!
-
 //! ## Subcommands
 //!
-
 //!  * `verum cache-closure stat` — summary stats (entries, size, hit-ratio).
 //!  * `verum cache-closure list` — every cached theorem name.
 //!  * `verum cache-closure get <theorem>` — show a single record.

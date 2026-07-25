@@ -1,19 +1,15 @@
 //! Meta Registry - Global registry for meta functions and macros
 //!
-
 //! This module implements the cross-file resolution system for meta functions
 //! and macro definitions during Pass 1 of the multi-pass compilation pipeline.
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
 //! registry, Pass 3+ performs semantic analysis. Sandboxed execution (no I/O).
 //!
-
 //! # Lock Poisoning Recovery
 //!
-
 //! This module uses mutexes that may become poisoned if a thread panics
 //! while holding a lock. Recovery strategy:
 //! - **meta_functions, macros, dependencies**: Compile-time data → recover with warning
@@ -22,7 +18,6 @@
 //!  because the data is being built incrementally and partial data is acceptable
 //!  (compilation will fail anyway if data is incomplete).
 //!
-
 //! See helper function for recovery rationale.
 
 use std::sync::{Arc, Mutex, MutexGuard};

@@ -1,23 +1,18 @@
 //! Advanced Protocol Features Implementation
 //!
-
 //! Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — Complete Advanced Protocol System
 //!
-
 //! This module implements sophisticated protocol features that enable advanced
 //! type-level programming while maintaining zero-cost guarantees:
 //!
-
 //! - **Generic Associated Types (GATs)**: Associated types with type parameters
 //! - **Specialization**: More specific implementations override general ones
 //! - **GenRef Wrapper**: Generation-aware references for lending iterators
 //! - **Refinement Integration**: Value-level constraints in protocol signatures
 //! - **Higher-Kinded Types**: Type constructors as protocol parameters
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────┐
 //! │ GAT System │
@@ -41,10 +36,8 @@
 //! └─────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Performance Guarantees
 //!
-
 //! - **GATs**: Zero-cost (compile to concrete types via monomorphization)
 //! - **Specialization**: Zero-cost (resolved at compile-time)
 //! - **GenRef**: ~20ns overhead (15ns CBGR + 5ns generation check)

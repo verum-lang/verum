@@ -1,6 +1,5 @@
 //! Debug adapter logic.
 //!
-
 //! Maps DAP requests to VBC interpreter operations: compiling the program,
 //! setting breakpoints, stepping, reading stack traces and variables.
 

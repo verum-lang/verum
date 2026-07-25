@@ -15,7 +15,6 @@
 )]
 //! Comprehensive Tests for Loop Unrolling
 //!
-
 //! Validates loop unrolling for CBGR escape analysis. Loops are unrolled up to
 //! a configurable bound to enable per-iteration escape analysis, which is more
 //! precise than treating the loop body as a single unit. Supports induction

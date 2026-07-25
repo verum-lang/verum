@@ -1,17 +1,13 @@
 //! Associated Type Projection Resolution
 //!
-
 //! This module implements resolution and normalization of associated type projections
 //! like `T.Item` where `T` implements `Iterator`.
 //!
-
 //! # Overview
 //!
-
 //! Associated type projections occur when accessing an associated type through a
 //! type parameter or concrete type. For example:
 //!
-
 //! ```verum
 //! fn process<I>(iter: I) -> List<I.Item>
 //!  where type I: Iterator,
@@ -21,15 +17,12 @@
 //! }
 //! ```
 //!
-
 //! In this example, `I.Item` is a projection that must be resolved:
 //! 1. When `I = List<Int>`, resolve `List<Int>.Item` to `Int`
 //! 2. When `I` is still a type variable, create a deferred projection constraint
 //!
-
 //! # Spec References
 //!
-
 //! - Associated type bounds: constraining associated types in where clauses (where T.Item: Display)
 //! - GATs: associated types with their own type parameters for lending iterators and monadic patterns
 //! - Protocol system: method resolution, default impls, associated types, protocol objects

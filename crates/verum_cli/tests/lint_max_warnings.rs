@@ -1,6 +1,5 @@
 //! Contract for `verum lint --max-warnings N`.
 //!
-
 //! Exit-code expectations:
 //! - `--max-warnings 0`: any warning fails. Equivalent to today's
 //!  `--deny-warnings`.

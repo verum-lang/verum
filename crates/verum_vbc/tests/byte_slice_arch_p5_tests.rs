@@ -1,6 +1,5 @@
 //! ARCH-P5 BYTE_SLICE (528) representation-tagged byte view — Tier-0 tests.
 //!
-
 //! `Text.as_bytes()` (TextExtended::AsBytes) produces a BYTE_SLICE heap
 //! object `[ObjectHeader(528)][ptr: i64][len: i64]` with RAW payload
 //! slots — bit-identical to the Tier-1 AsBytes slice Pack stamped by

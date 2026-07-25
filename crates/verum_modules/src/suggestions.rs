@@ -1,11 +1,9 @@
 //! Module name and item suggestion utilities.
 //!
-
 //! Provides fuzzy matching and suggestions for improved error diagnostics.
 //! Uses Levenshtein distance for string similarity with optimizations for
 //! common module naming patterns.
 //!
-
 //! Used by import resolution and name resolution error paths to provide
 //! "did you mean?" suggestions when items or modules are not found.
 

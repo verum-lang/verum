@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for specialization coherence verification
 //!
-
 //! Tests cover:
 //! - Specialization lattice construction
 //! - Cycle detection

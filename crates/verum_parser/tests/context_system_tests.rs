@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for the Verum context system.
 //!
-
 //! Tests cover:
 //! - Context declarations (sync and async)
 //! - Context groups
@@ -24,7 +23,6 @@
 //! - Sub-contexts
 //! - Generic contexts
 //!
-
 //! Tests for the Verum Context System (capability-based DI, NOT algebraic effects)
 
 use verum_ast::{FileId, ItemKind, Module, stmt::StmtKind, ty::PathSegment};

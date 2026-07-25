@@ -1,13 +1,11 @@
 //! Verification Context and Boundary Tracking
 //!
-
 //! Implements the verification context system that tracks:
 //! - Current verification level for each scope
 //! - Verification boundaries between trusted/untrusted code
 //! - Proof obligations at boundaries
 //! - Context propagation through function calls
 //!
-
 //! The verification context tracks per-scope verification levels, boundaries between
 //! trusted and untrusted code, and proof obligations that arise at those boundaries.
 //! Context propagates through function calls so callee verification levels are

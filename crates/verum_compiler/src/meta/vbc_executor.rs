@@ -1,14 +1,11 @@
 //! VBC Executor for Meta Functions
 //!
-
 //! This module provides VBC-based execution for meta functions during staged
 //! metaprogramming. It integrates the VBC codegen and interpreter to execute
 //! meta functions that generate code at compile-time.
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! MetaFunction (AST body)
 //!  ↓
@@ -23,15 +20,12 @@
 //! Parse → AST fragments
 //! ```
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Meta function startup: < 1ms (Tier 0 interpreter)
 //! - Token stream extraction: < 100μs
 //! - Code generation throughput: > 10K tokens/sec
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

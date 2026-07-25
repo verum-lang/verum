@@ -1,10 +1,8 @@
 //! Tests for @ construct validation
 //!
-
 //! Verifies that the parser correctly validates meta-function names
 //! and emits quality diagnostic messages for unknown @ constructs.
 //!
-
 //! Tests for meta-level functions: @const, @cfg, @file, @line, @type_name, etc.
 
 #![allow(unused_imports)]

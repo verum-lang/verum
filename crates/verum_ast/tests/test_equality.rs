@@ -15,7 +15,6 @@
 )]
 //! Tests for PartialEq implementations of all AST nodes.
 //!
-
 //! This module ensures that equality comparisons work correctly
 //! for all AST node types, considering all fields.
 

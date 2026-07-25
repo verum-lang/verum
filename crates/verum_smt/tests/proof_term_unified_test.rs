@@ -14,7 +14,6 @@
 )]
 //! Test suite for unified ProofTerm
 //!
-
 //! This test file demonstrates that the unified ProofTerm correctly:
 //! 1. Supports all variants from all three sources
 //! 2. Implements all required methods

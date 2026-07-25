@@ -1,29 +1,23 @@
 //! # Tensor Shape Verification
 //!
-
 //! This module implements compile-time tensor shape verification according to
 //! the Verum verification system's tensor shape verification subsystem.
 //!
-
 //! ## Features
 //!
-
 //! - **Compile-time shape inference**: Track tensor shapes using meta parameters
 //! - **Broadcasting rules**: NumPy-style broadcasting with compile-time verification
 //! - **Dimension compatibility**: Enforce dimension constraints at compile time
 //! - **Meta parameter tracking**: Resolve and validate meta parameter constraints
 //! - **SMT-based constraint solving**: Use Z3 to validate dimension constraints
 //!
-
 //! ## Architecture
 //!
-
 //! ```text
 //! TensorShape
 //!  ├── Dimensions (Static, Dynamic, Broadcast)
 //!  └── Meta Parameters (compile-time values)
 //!
-
 //! ShapeVerifier
 //!  ├── Shape Inference Engine
 //!  ├── Broadcasting Rules
@@ -32,20 +26,16 @@
 //!  └── Error Reporter
 //! ```
 //!
-
 //! ## Example
 //!
-
 //! ```no_run
 //! use verum_verification::tensor_shapes::*;
 //!
-
 //! // Matrix multiplication: [M, K] × [K, N] → [M, N]
 //! let shape_a = TensorShape::from_dims(vec![128, 256]);
 //! let shape_b = TensorShape::from_dims(vec![256, 512]);
 //! let verifier = ShapeVerifier::new();
 //!
-
 //! match verifier.verify_matmul(&shape_a, &shape_b) {
 //!  Ok(result_shape) => {
 //!  assert_eq!(result_shape.static_dims(), Some(verum_common::List::from(vec![128, 512])));
@@ -54,33 +44,25 @@
 //! }
 //! ```
 //!
-
 //! ## Dimension Constraint System
 //!
-
 //! The constraint system tracks relationships between dynamic dimensions:
 //!
-
 //! ```no_run
 //! use verum_verification::tensor_shapes::*;
 //!
-
 //! let mut constraints = DimensionConstraintSystem::new();
 //!
-
 //! // Track that n_batch equals m_batch
 //! constraints.add_equality("n_batch", "m_batch");
 //!
-
 //! // Track dimension ranges
 //! constraints.add_range("n", 1, 1024);
 //!
-
 //! // Verify constraints are satisfiable
 //! assert!(constraints.check_satisfiable().is_ok());
 //! ```
 //!
-
 //! Tensor shape verification uses meta parameters for compile-time dimension tracking
 //! and SMT-based verification for shape compatibility proofs. This enables type-safe
 //! linear algebra operations with zero runtime overhead in AOT mode. For matmul,

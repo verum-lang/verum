@@ -1,27 +1,21 @@
 //! Instruction bytecode encoding and decoding.
 //!
-
 //! This module provides functions to encode [`Instruction`] values to binary bytecode
 //! and decode them back. The encoding is designed for:
 //!
-
 //! - **Compactness**: Common operations use fewer bytes
 //! - **Determinism**: Same instruction always produces same bytes
 //! - **Roundtrip safety**: `decode(encode(instr)) == instr`
 //!
-
 //! # Encoding Format
 //!
-
 //! Each instruction is encoded as:
 //! ```text
 //! [opcode:u8] [operands...]
 //! ```
 //!
-
 //! ## Operand Encoding
 //!
-
 //! | Type | Encoding |
 //! |------|----------|
 //! | `Reg` | 1-2 bytes (r0-127 = 1 byte, r128+ = 2 bytes) |
@@ -36,21 +30,17 @@
 //! | `Option<T>` | 1 byte flag + optional value |
 //! | `Enum` | 1 byte discriminant |
 //!
-
 //! # Examples
 //!
-
 //! ```ignore
 //! use verum_vbc::bytecode::{encode_instruction, decode_instruction};
 //! use verum_vbc::instruction::{Instruction, Reg};
 //!
-
 //! // Encode an instruction
 //! let instr = Instruction::Mov { dst: Reg(0), src: Reg(1) };
 //! let mut bytes = Vec::new();
 //! encode_instruction(&instr, &mut bytes);
 //!
-
 //! // Decode it back
 //! let mut offset = 0;
 //! let decoded = decode_instruction(&bytes, &mut offset).unwrap();

@@ -1,13 +1,11 @@
 //! Proof-Carrying Code (PCC) — formal proofs as bytecode metadata.
 //!
-
 //! Necula's proof-carrying code (1997) attaches a *machine-checkable
 //! proof* of a safety property to compiled bytecode. The recipient
 //! verifies the proof rather than re-running the analysis,
 //! enabling third-party safety audits without trusting the
 //! compiler that produced the binary.
 //!
-
 //! This module provides the **bundle layer**: serializable proof
 //! certificates keyed by a content-addressed hash, attached to a
 //! VBC artifact, with audit-trail metadata (who proved it, when,
@@ -15,10 +13,8 @@
 //! objects live in `crate::certificates`; this module is concerned
 //! with bundling, lookup, and integrity.
 //!
-
 //! ## Bundle structure
 //!
-
 //! ```text
 //!  ProofBundle {
 //!  certificates: Map<GoalHash, ProofCertificate>,
@@ -26,24 +22,19 @@
 //!  }
 //! ```
 //!
-
 //! Each certificate is keyed by a stable hash of its goal so that
 //! the verifier can quickly check "do we have a proof of *this*
 //! goal?" without re-rendering the whole proof.
 //!
-
 //! ## Trust model
 //!
-
 //! A bundle is **only** as trustworthy as the proof certificates
 //! it contains. PCC does not avoid trust — it relocates trust from
 //! the compiler-pipeline to the proof-checker, which is small and
 //! auditable.
 //!
-
 //! ## Status
 //!
-
 //! Standalone bundle/serialisation core. Wiring `@verify(formal)`
 //! to populate the bundle during the verification phase, and
 //! adding a `verum verify-bundle` CLI command, are future

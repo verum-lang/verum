@@ -1,13 +1,11 @@
 //! Post-specialization bytecode optimization.
 //!
-
 //! Implements industrial-grade optimization passes for specialized bytecode:
 //! 1. Constant folding - evaluate compile-time constants
 //! 2. Dead code elimination - remove unreachable code
 //! 3. Peephole optimization - local instruction patterns
 //! 4. Copy propagation - eliminate redundant moves
 //!
-
 //! Runs after specialization to optimize the monomorphized bytecode before merging
 //! into the final module.
 

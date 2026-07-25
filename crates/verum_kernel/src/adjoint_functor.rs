@@ -1,32 +1,25 @@
 //! Adjoint Functor Theorem (HTT 5.5.2.9 / Special AFT) — V0
 //! algorithmic kernel rule.
 //!
-
 //! ## What this delivers
 //!
-
 //! The **Special Adjoint Functor Theorem** for ∞-categories
 //! (Lurie HTT 5.5.2.9) is one of the most load-bearing existence
 //! theorems in higher-category theory:
 //!
-
 //! > Let `L : C → D` be a functor between presentable ∞-categories.
 //! > If `L` preserves all small colimits, then `L` admits a right
 //! > adjoint `R : D → C`.
 //!
-
 //! Dually, if `R : D → C` is between presentable ∞-categories and
 //! preserves all small limits + filtered colimits, then `R` admits
 //! a left adjoint. Pre-this-module these existence claims are
 //! admitted via the host-stdlib axiom `msfs_aft_iota_r`.
 //!
-
 //! ## V0 algorithmic surface
 //!
-
 //! ships:
 //!
-
 //!  1. [`Adjunction`] — the data of an adjoint pair `L ⊣ R` with
 //!  unit `η : id_C ⇒ R ∘ L` and counit `ε : L ∘ R ⇒ id_D`.
 //!  2. [`left_adjoint_exists`] — decidable predicate certifying
@@ -40,15 +33,12 @@
 //!  triangle identities `(R ∘ ε) ∘ (η ∘ R) = id_R` and
 //!  `(ε ∘ L) ∘ (L ∘ η) = id_L` hold (HTT 5.2.2.8).
 //!
-
 //! V0 is the algorithmic skeleton; V1 promotion will produce the
 //! explicit unit/counit natural-transformation cells with full
 //! pentagonal coherence.
 //!
-
 //! ## What this UNBLOCKS in MSFS
 //!
-
 //!  - **Lemma 10.3** (`(ι, r)` construction) — currently admits via
 //!  `msfs_aft_iota_r` framework axiom. Promotion: the proof body
 //!  invokes [`build_adjunction`] with the inclusion `ι : S_S → cF`

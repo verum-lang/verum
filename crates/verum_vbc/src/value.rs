@@ -1,26 +1,21 @@
 //! NaN-boxed runtime values.
 //!
-
 //! VBC uses NaN-boxing to represent all values in a single 64-bit word.
 //! This technique exploits the IEEE 754 NaN representation to encode
 //! tagged pointers and small values.
 //!
-
 //! # Encoding
 //!
-
 //! IEEE 754 double-precision format:
 //! ```text
 //! [S][EEEEEEEEEEE][MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM]
 //!  63 62 52 51 0
 //! ```
 //!
-
 //! A quiet NaN has all exponent bits = 1 and the quiet bit (bit 51) = 1.
 //! We use a quiet NaN pattern (0x7FF8) and encode our tag in bits 48-50
 //! (3 bits, 8 possible tags) to avoid collision with the quiet bit.
 //!
-
 //! ```text
 //! Float (non-NaN): [sign][exponent=0x7FF][0][mantissa] - regular value
 //! Tagged value: 0x7FF8_TTPP_PPPP_PPPP
@@ -29,10 +24,8 @@
 //!  ^^^^^^^^^^^^ payload (48 bits)
 //! ```
 //!
-
 //! # Tags
 //!
-
 //! | Tag | Type | Payload |
 //! |-----|------|---------|
 //! | 0x0 | Pointer | 48-bit pointer |

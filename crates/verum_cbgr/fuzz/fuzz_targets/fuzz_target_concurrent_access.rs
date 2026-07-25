@@ -1,12 +1,10 @@
 //! Fuzz target for concurrent access patterns
 //!
-
 //! This fuzzer tests:
 //! - Multi-threaded allocation/deallocation
 //! - Random ThinRef operations across threads
 //! - Detection of: data races, deadlocks, atomicity violations
 //!
-
 //! The fuzzer spawns multiple threads that perform concurrent CBGR operations,
 //! verifying that all atomic operations maintain consistency.
 

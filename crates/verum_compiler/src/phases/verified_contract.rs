@@ -1,6 +1,5 @@
 //! Verified contract representation for Phase 3a → Phase 4 handoff
 //!
-
 //! This module defines the data structures for passing verified contracts
 //! from the Contract Verification phase to the Semantic Analysis phase.
 

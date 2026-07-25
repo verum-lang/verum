@@ -1,43 +1,35 @@
 //! Script mode parser for REPL and interactive sessions
 //!
-
 //! This module provides specialized parsing for script-like environments where:
 //! - Expressions can be evaluated standalone
 //! - Incremental parsing is essential for performance
 //! - Partial input needs graceful handling
 //! - Type inference should provide immediate feedback
 //!
-
 //! # Architecture
 //!
-
 //! The script parser wraps the main parser with additional features:
 //! - **Expression-first parsing**: Try expressions before statements
 //! - **Completion detection**: Identify incomplete vs. complete input
 //! - **Context preservation**: Maintain state across REPL sessions
 //! - **Smart recovery**: Handle common REPL errors gracefully
 //!
-
 //! # Example
 //!
-
 //! ```rust
 //! use verum_lsp::script::{ScriptParser, ScriptContext, ParseMode};
 //! use verum_ast::FileId;
 //!
-
 //! let mut parser = ScriptParser::new();
 //! let mut context = ScriptContext::new();
 //! let file_id = FileId::new(1);
 //!
-
 //! // Try parsing an expression
 //! match parser.parse_line("let x = 42", file_id, &mut context) {
 //!  Ok(result) => println!("Parsed: {:?}", result),
 //!  Err(e) => eprintln!("Error: {:?}", e),
 //! }
 //!
-
 //! // Check if input is complete
 //! if !parser.is_complete("fn add(a: Int, b: Int) {") {
 //!  println!("Waiting for more input...");

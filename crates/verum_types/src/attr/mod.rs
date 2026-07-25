@@ -1,39 +1,30 @@
 //! Attribute system for Verum type checking and validation.
 //!
-
 //! This module provides the infrastructure for validating attributes
 //! during type checking, including:
 //!
-
 //! - [`AttributeRegistry`]: Central registry of all known attributes
 //! - [`registry()`] / [`registry_mut()`]: Access to global registry
 //! - [`AttributeError`]: Validation error types with diagnostics
 //! - Standard attribute registration
 //!
-
 //! # Overview
 //!
-
 //! The attribute system works in conjunction with `verum_ast::attr` to provide:
 //!
-
 //! 1. **Compile-time validation** - Unknown attributes, invalid targets, bad arguments
 //! 2. **IDE support** - Completion, hover, diagnostics
 //! 3. **Documentation** - Generated from attribute metadata
 //!
-
 //! # Usage
 //!
-
 //! ```rust
 //! use verum_types::attr::{registry, AttributeRegistry};
 //! use verum_ast::attr::{Attribute, AttributeTarget};
 //!
-
 //! // Access global registry
 //! let reg = registry();
 //!
-
 //! // Validate an attribute
 //! let attr = Attribute::simple("inline".into(), Default::default());
 //! match reg.validate(&attr, AttributeTarget::Function) {
@@ -48,10 +39,8 @@
 //! }
 //! ```
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! verum_ast::attr verum_types::attr
 //! ┌────────────────┐ ┌──────────────────┐
@@ -63,10 +52,8 @@
 //!  └──────────────────┘
 //! ```
 //!
-
 //! # Specification
 //!
-
 //! Attribute registry: validation rules for @derive, @verify, @cfg, @repr and other compile-time attributes
 
 mod error;

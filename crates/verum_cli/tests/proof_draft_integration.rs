@@ -1,16 +1,13 @@
 //! End-to-end integration tests for `verum proof-draft`.
 //!
-
 //! Drives the actual CLI binary as a child process and checks the
 //! captured output. Validates the entire wiring chain:
 //!
-
 //!  `verum proof-draft` (CLI clap) →
 //!  `commands::proof_draft::run_proof_draft` →
 //!  `verum_verification::proof_drafting::SuggestionEngine` →
 //!  ranked output text / JSON
 //!
-
 //! These tests prove that the `proof_drafting` trait surface
 //! is actually consumable from a shell invocation, not just from
 //! Rust unit tests.

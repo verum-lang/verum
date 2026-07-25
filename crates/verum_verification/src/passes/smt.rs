@@ -1,6 +1,5 @@
 //! SMT-based verification pass.
 //!
-
 //! Generates verification conditions for each function and
 //! discharges them through the Z3 SMT backend. Includes a kernel-
 //! recheck preamble (#186) that runs the K-rules before SMT — a

@@ -2,7 +2,6 @@
 
 //! PROOF-TACTIC-ACCEPT-1 (T0105) regression gate.
 //!
-
 //! A `theorem` / `lemma` / `corollary` with a written proof body is a
 //! hard claim: if the proof does not discharge, compilation MUST fail
 //! (E0319), and if the proof is admitted (`admit` / `sorry` anywhere
@@ -11,7 +10,6 @@
 //! default log levels) and returned `Ok(())` — a false theorem with a
 //! nonsense proof compiled silently.
 //!
-
 //! Related code:
 //! - `crates/verum_compiler/src/pipeline/theorem_proofs.rs` — the
 //!  diagnostic gate (E0319 / W0319).

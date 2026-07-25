@@ -1,6 +1,5 @@
 //! Integration tests for affine type checking through the full pipeline
 //!
-
 //! These tests verify that affine type checking works correctly when
 //! going through parsing -> type registration -> type checking.
 

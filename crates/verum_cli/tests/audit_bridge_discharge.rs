@@ -1,6 +1,5 @@
 //! Integration tests for `verum audit --bridge-discharge` (#134 / MSFS-L4.1).
 //!
-
 //! Pin coverage:
 //!  - Empty project (no `.vr` proof bodies citing kernel bridges) →
 //!  report shows 0 callsites + 0 bridges + exit 0.

@@ -1,28 +1,22 @@
 //! Proof Certificate Generation and Validation
 //!
-
 //! Implements generation of machine-checkable proof certificates for external verification.
 //!
-
 //! Proof certificates are machine-checkable evidence of verification results.
 //! Supported formats: Dedukti (universal proof checker), OpenTheory (HOL family),
 //! Lean, Coq (proof terms), and Metamath. Each certificate contains axioms,
 //! definitions, the proof term, and an integrity checksum. Cross-verification
 //! generates certificates in multiple formats and checks each independently.
 //!
-
 //! ## Features
 //!
-
 //! - **Multi-Format Export**: Coq, Lean, Dedukti, OpenTheory, Metamath
 //! - **Certificate Validation**: Checksums and integrity verification
 //! - **Cross-Verification**: Generate certificates in multiple formats
 //! - **Independent Checking**: External proof checker integration
 //!
-
 //! ## Performance Targets
 //!
-
 //! - Certificate generation: < 100ms per proof
 //! - Checksum computation: < 10ms
 //! - Format conversion: < 50ms

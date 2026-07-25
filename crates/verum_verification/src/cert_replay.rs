@@ -1,10 +1,8 @@
 //! SMT certificate replay — backend-independent cert format +
 //! multi-backend cross-check.
 //!
-
 //! ## Goal
 //!
-
 //! Currently SMT certificates are replayed against a single
 //! kernel re-check. Task #81 strengthens this to **multi-backend
 //! cross-validation**: a cert produced by Z3 should be replayable
@@ -13,20 +11,16 @@
 //! solver becomes truly external — not part of the trusted
 //! computing base.
 //!
-
 //! Verum joins the small group of systems (Coq's SMTCoq, Lean's
 //! lean-smt) with this guarantee, but with **multi-backend +
 //! multi-format coverage**: a cert can be cross-checked by every
 //! available solver as a sanity gate.
 //!
-
 //! ## Architectural pattern
 //!
-
 //! Same single-trait-boundary pattern as the rest of the
 //! integration arc:
 //!
-
 //!  * [`CertFormat`] enum — backend-independent canonical format
 //!  plus the per-backend native formats Verum can ingest.
 //!  * [`SmtCertificate`] — typed certificate (format + theory +
@@ -44,10 +38,8 @@
 //!  report. Used by `@verify(certified)`-style multi-solver
 //!  gates.
 //!
-
 //! ## Trust contract
 //!
-
 //! `KernelOnlyReplayEngine` is what makes SMT solvers external to
 //! the TCB: it checks the certificate's structural invariants
 //! using only the kernel rules + the on-disk hash. If a solver

@@ -1,46 +1,37 @@
 //! Register Type Map — unified type tracking for VBC → LLVM lowering.
 //!
-
 //! This module replaces the 40+ `HashSet<u16>` register tracking fields in
 //! `FunctionContext` with a single `HashMap<u16, RegisterType>` that derives
 //! all type predicates from VBC TypeRef information.
 //!
-
 //! # Architecture
 //!
-
 //! The VBC bytecode already carries full type information via `TypeRef` on every
 //! instruction. The old approach discarded this information and rebuilt it
 //! through ad-hoc `mark_*_register()` / `is_*_register()` calls scattered
 //! across 19,000+ lines of instruction.rs. This led to:
 //!
-
 //! - 40+ HashSet<u16> fields for separate type categories
 //! - `set_register()` clearing 23 HashSets on every register write
 //! - Name-based type detection (`starts_with("Map.")`, etc.)
 //! - Chain-walking for type propagation through Mov/RefMut
 //!
-
 //! The new approach stores type information once per register assignment,
 //! using the same `TypeRef` that VBC already provides. All boolean predicates
 //! (is_list, is_map, is_float, etc.) are derived on demand via O(1) pattern
 //! matching on the stored TypeRef.
 //!
-
 //! # Migration Strategy
 //!
-
 //! Phase 1 (current): RegisterTypeMap coexists with legacy HashSets.
 //!  - Pre-pass populates RegisterTypeMap from VBC instructions
 //!  - Legacy HashSets continue to be maintained
 //!  - Debug assertions verify consistency
 //!
-
 //! Phase 2: Migrate `is_*_register()` call sites to use RegisterTypeMap
 //!  - One category at a time (float, bool, list, map, ...)
 //!  - Remove corresponding HashSet after each migration
 //!
-
 //! Phase 3: Remove all legacy HashSets and `mark_*` methods
 
 use std::collections::{HashMap, HashSet};

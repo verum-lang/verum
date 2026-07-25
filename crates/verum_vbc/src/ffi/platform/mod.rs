@@ -1,16 +1,13 @@
 //! Cross-platform FFI abstraction layer.
 //!
-
 //! This module provides a unified interface for platform-specific FFI operations:
 //! - Dynamic library loading (dlopen, LoadLibrary)
 //! - Symbol resolution (dlsym, GetProcAddress)
 //! - Errno/GetLastError access
 //! - Executable memory allocation for trampolines
 //!
-
 //! # Platform Support
 //!
-
 //! | Platform | Library Loading | Symbol Resolution | Errno |
 //! |----------|-----------------|-------------------|-------|
 //! | macOS | dlopen | dlsym | __error() |

@@ -1,36 +1,28 @@
 //! `verum check-proof <file.vproof>` — re-verify a proof-term
 //! certificate via the minimal kernel (#157).
 //!
-
 //! ## What this command does
 //!
-
 //! Reads a JSON `.vproof` file containing a [`Certificate`] —
 //! `{ term, claimed_type, metadata }` — and runs
 //! [`verum_kernel::proof_checker`]'s 6-rule kernel against it.
 //!
-
 //! ## Trust delegation
 //!
-
 //! After this command exits 0, the user has verified the proof
 //! against EXACTLY:
 //!
-
 //!  1. `verum_kernel::proof_checker` (633 LOC, hand-auditable).
 //!  2. The Rust compiler's correctness.
 //!  3. The serde-json deserialiser (the `.vproof` format).
 //!
-
 //! Nothing else in the Verum pipeline is relevant: no SMT, no
 //! cross-format gate, no foreign tools, no audit gates. The verdict
 //! is the smallest possible trusted base in the proof-assistant
 //! world.
 //!
-
 //! ## Example
 //!
-
 //! ```bash
 //! $ cat trivial.vproof
 //! {

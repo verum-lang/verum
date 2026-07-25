@@ -1,10 +1,8 @@
 //! Parallel Solving Module
 //!
-
 //! This module provides parallel solving capabilities using multiple Z3 contexts
 //! with different strategies, implementing portfolio solving for improved performance.
 //!
-
 //! Features:
 //! - Portfolio solving with multiple strategies
 //! - Cube-and-conquer search space partitioning
@@ -12,7 +10,6 @@
 //! - Early termination on first solution
 //! - Load balancing and resource limits
 //!
-
 //! Based on experiments/z3.rs documentation
 //! Parallel solving improves SMT verification throughput for `@verify(proof)` functions.
 //! Target: type inference <100ms per 10K LOC, compilation >50K LOC/sec.

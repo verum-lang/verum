@@ -1,21 +1,16 @@
 //! CBGR Profiling Command
 //!
-
 //! P0 Feature for v1.0: Profile CBGR overhead and suggest optimizations
 //!
-
 //! # Example Output
 //!
-
 //! ```text
 //! $ verum profile --memory app.vr
 //!
-
 //! Performance Report:
 //!  hot_loop(): 15% time in CBGR checks
 //!  → Convert to %T for zero-cost: `fn hot_loop(data: %List<Int>)`
 //!
-
 //!  safe_parse(): 0.1% CBGR overhead
 //!  → Keep &T, overhead negligible
 //! ```

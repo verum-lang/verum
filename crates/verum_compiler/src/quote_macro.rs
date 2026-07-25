@@ -1,21 +1,16 @@
 //! Quote Macro Implementation - quote! and unquote! procedural macros
 //!
-
 //! This module provides the implementation of the quote! and unquote! macros
 //! for generating Verum code at compile-time within meta functions.
 //!
-
 //! Procedural macro support: quote! macro for AST construction in meta functions.
 //! Meta functions use quote! to generate Verum code at compile-time.
 //!
-
 //! # Overview
 //!
-
 //! The quote! macro allows meta functions to generate Verum code using
 //! quasi-quotation syntax with interpolation support:
 //!
-
 //! ```verum
 //! meta fn generate_getter(field: Text) -> TokenStream {
 //!  quote! {
@@ -26,19 +21,15 @@
 //! }
 //! ```
 //!
-
 //! # Interpolation Syntax
 //!
-
 //! - `#ident` - Single interpolation (substitutes a variable)
 //! - `#(#items),*` - Repetition with comma separator
 //! - `#(#items)*` - Repetition without separator
 //! - `#(#items);+` - Repetition with semicolon (at least one)
 //!
-
 //! # Implementation Strategy
 //!
-
 //! Since Rust procedural macros cannot be used directly in the compiler,
 //! this module provides runtime equivalents that can be called from
 //! meta function execution.

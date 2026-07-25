@@ -1,9 +1,7 @@
 //! Sandboxed Execution for Meta Functions
 //!
-
 //! Executes meta expressions within the sandbox constraints.
 //!
-
 //! Verum unified meta-system: all compile-time computation uses `meta` (meta fn,
 //! @tagged_literal, @derive, @interpolation_handler). Multi-pass architecture:
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete

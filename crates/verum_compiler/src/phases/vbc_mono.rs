@@ -1,13 +1,10 @@
 //! VBC Monomorphization Phase
 //!
-
 //! This phase specializes generic VBC functions with concrete type arguments.
 //! It is Phase 6 in the VBC-first pipeline.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! VBC Module (with generics)
 //!  │
@@ -58,10 +55,8 @@
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-
 //! # Implementation
 //!
-
 //! This phase delegates to the industrial-grade monomorphization implementation
 //! in `verum_vbc::mono`, which provides:
 //! - `InstantiationGraph` - dependency tracking with topological ordering
@@ -70,7 +65,6 @@
 //! - `SpecializationOptimizer` - constant folding, DCE, peephole optimization
 //! - `ModuleMerger` - final module assembly
 //!
-
 //! VBC monomorphization: specializes generic functions for concrete type
 //! arguments, producing type-specific VBC bytecode for efficient execution.
 

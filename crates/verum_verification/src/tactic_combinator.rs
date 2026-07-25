@@ -1,10 +1,8 @@
 //! Industrial-grade tactic combinator catalogue — the single source
 //! of truth for Verum's tactical proof-construction surface.
 //!
-
 //! ## What this module is
 //!
-
 //! Verum has multiple tactic surfaces (parser-level `TacticExpr`, Z3
 //! `verum_smt::tactics::TacticCombinator`, .vr stdlib `tactic` decls
 //! in `core/proof/tactics/`). Each surface evolved independently —
@@ -12,10 +10,8 @@
 //! combinator set, its algebraic laws, or its semantics in a form
 //! consumable by IDE / CLI / documentation tooling.
 //!
-
 //! This module provides that **single trait boundary**:
 //!
-
 //!  * [`TacticCombinator`] — typed enum of the 15 canonical
 //!  combinator forms (sequencing / choice / iteration / focus /
 //!  forward-style / explicit instantiation / decision-procedure
@@ -30,13 +26,10 @@
 //!  (`skip ; t ≡ t`, `(t ; u) ; v ≡ t ; (u ; v)`, etc.) the
 //!  `verum_smt::tactic_laws` simplifier exploits.
 //!
-
 //! ## Why this is a fundamental refactor
 //!
-
 //! The pre-this-module situation:
 //!
-
 //!  * `core/proof/tactics/combinators.vr` carried prose-comment
 //!  algebraic laws but they were not machine-readable; the
 //!  `verum_smt::tactic_laws` Rust simplifier had its own copy.
@@ -49,10 +42,8 @@
 //!  combinators? what are their laws? what's the example for
 //!  `solve`?".
 //!
-
 //! After this module:
 //!
-
 //!  * Every Verum surface (LSP completion, docs generator,
 //!  `verum tactic` CLI) consumes [`DefaultTacticCatalog`] for
 //!  authoritative metadata.
@@ -60,10 +51,8 @@
 //!  specific catalogues (cubical, stochastic, MSFS) extend the
 //!  base set without forking.
 //!
-
 //! ## Foundation-neutral
 //!
-
 //! The catalogue carries semantics in human-readable text (not as
 //! executable code) — execution lives in
 //! `verum_smt::tactics::apply_combinator`. The catalogue is the

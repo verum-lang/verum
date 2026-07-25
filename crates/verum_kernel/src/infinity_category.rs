@@ -1,9 +1,7 @@
 //! Native (∞,n)-categorical kernel infrastructure — current surface.
 //!
-
 //! ## Why this is a novel contribution
 //!
-
 //! No mainstream proof assistant carries native first-class (∞,n)-cat
 //! reasoning in its kernel. Coq mathcomp / Lean mathlib4 / Agda
 //! cubical-stdlib all proxy ∞-categorical content through opaque
@@ -11,7 +9,6 @@
 //! treats them as black boxes and admits all higher-coherence content
 //! as user-level axioms.
 //!
-
 //! Verum's approach (this module): the kernel's [`CoreTerm`] gains
 //! native constructors for ∞-categorical objects, and the kernel
 //! itself ships decidable rules for the basic equivalence /
@@ -21,17 +18,14 @@
 //! axiom — becomes mechanically derivable inside the kernel for
 //! every concrete `n: Ordinal`.
 //!
-
 //! ## V0 design decisions
 //!
-
 //! 1. **Hybrid syntactic/semantic representation.** An
 //!  [`InfinityCategory`] carries both (a) a syntactic skeleton
 //!  naming objects + 1-morphisms + higher cells abstractly, and
 //!  (b) a semantic anchor — the universe level + accessibility
 //!  witness — so the kernel can dispatch on the algebraic shape.
 //!
-
 //! 2. **Levelled equivalence checker.** [`is_equivalence_at`]
 //!  decides whether `f: A → B` is an (∞,n)-equivalence by
 //!  checking the Whitehead criterion at every truncation level
@@ -39,7 +33,6 @@
 //!  `BridgeAudit` entry for limit `n` (e.g. `n = ω` requires
 //!  Theorem A.7 stabilisation).
 //!
-
 //! 3. **Identity is always an equivalence.** The fundamental
 //!  structural fact MSFS Theorem 5.1 needs is `id_X` is an
 //!  `(∞,n)`-equivalence onto its image for any `X` and any `n`.
@@ -48,16 +41,13 @@
 //!  rule discharges it constructively (the identity functor's
 //!  kernel-recheck is trivial — every cell pairs with itself).
 //!
-
 //! 4. **Composition + associator coherence.** Native composition
 //!  `compose(g, f)` with the kernel checking strict associativity
 //!  at level 0, weak associativity at higher levels via explicit
 //!  associator 2-morphisms.
 //!
-
 //! ## What this enables in MSFS
 //!
-
 //!  - Theorem 5.1's "id_X is (∞,n)-equivalence onto its image"
 //!  becomes derivable in-kernel rather than admitted.
 //!  - Theorem 7.4 lateral axis (alt orderings → (∞,n)-Cat Morita)
@@ -66,10 +56,8 @@
 //!  - Theorem 9.3 Step 5 (lift to (∞,∞) via Whitehead criterion)
 //!  gets a kernel-level discharge for Finite(n) levels.
 //!
-
 //! ## Future-work promotion paths
 //!
-
 //!  - V1: full composition coherence at ω-bounded levels via
 //!  explicit associator/pentagonal-coherence cells.
 //!  - V2: Cartesian fibration kernel rule + straightening (HTT 3.2).

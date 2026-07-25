@@ -1,6 +1,5 @@
 //! Hover support for showing type information and documentation
 //!
-
 //! When the user hovers over a symbol, we show:
 //! - Type information
 //! - Refinement constraints

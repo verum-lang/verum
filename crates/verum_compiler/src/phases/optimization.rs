@@ -1,12 +1,9 @@
 //! Phase 6: Optimization
 //!
-
 //! Profile-dependent optimization passes.
 //!
-
 //! ## Optimizations
 //!
-
 //! - Escape analysis → identify NoEscape references
 //! - Eliminate proven-safe CBGR checks (50-90% typical)
 //! - Eliminate proven-safe bounds checks
@@ -16,16 +13,13 @@
 //! - Dead code elimination
 //! - Devirtualization
 //!
-
 //! ## SBGL Optimization Restrictions
 //!
-
 //! Phase 6 optimization (profile-dependent):
 //! - SBGL optimization applies ONLY to NoEscape references
 //! - Escaping references cannot use SBGL (would violate memory safety)
 //! - Warnings emitted for attempted SBGL on escaping references
 //!
-
 //! Escape analysis promotes &T to &checked T (0ns) when the reference is proven safe.
 //! Phase 6 optimization passes include:
 //!  - Constant propagation: Forward dataflow analysis replaces known constants

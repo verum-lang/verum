@@ -1,16 +1,13 @@
 //! End-to-end integration tests for `verum verify --ladder`.
 //!
-
 //! Spawns the actual `verum` binary as a child process and validates
 //! the entire wiring chain:
 //!
-
 //!  `verum verify --ladder` (CLI clap) →
 //!  `commands::verify_ladder::run_verify_ladder` →
 //!  `verum_verification::ladder_dispatch::DefaultLadderDispatcher` →
 //!  per-theorem `LadderVerdict` (Closed / Open / DispatchPending / Timeout)
 //!
-
 //! Together with the 11 in-handler unit tests in
 //! `commands::verify_ladder::tests`, this proves the dispatcher is
 //! actually consumable from a shell, not just from Rust unit tests.

@@ -1,17 +1,13 @@
 //! Context Monomorphization Pass - Industrial-Grade Implementation.
 //!
-
 //! This pass specializes functions based on context types to eliminate
 //! dynamic context lookup overhead. It performs interprocedural analysis
 //! to identify monomorphization opportunities.
 //!
-
 //! # Algorithm Overview
 //!
-
 //! The pass operates in multiple phases:
 //!
-
 //! 1. **Discovery Phase**: Find all `context_get` operations and their types
 //! 2. **Call Graph Analysis**: Build call graph with context propagation
 //! 3. **Specialization Analysis**: Identify which call sites have known types
@@ -19,10 +15,8 @@
 //! 5. **Inlining Phase**: Inline context access where beneficial
 //! 6. **Cleanup Phase**: Remove unused generic versions
 //!
-
 //! # Context Resolution Strategies
 //!
-
 //! | Strategy | Description | Overhead |
 //! |----------|-------------|----------|
 //! | Direct | Compile-time known type | 0ns |
@@ -30,10 +24,8 @@
 //! | StackWalk | Dynamic lookup | ~20-50ns |
 //! | Dynamic | Runtime polymorphic | ~30-100ns |
 //!
-
 //! # Performance Impact
 //!
-
 //! - Expected overhead reduction: 60-80%
 //! - Eliminates virtual dispatch for known context types
 //! - Enables further optimizations (inlining, constant folding)

@@ -14,7 +14,6 @@
 )]
 //! Tests for compilation profiling and metrics infrastructure
 //!
-
 //! This test file validates the CompilationProfileReport, PhasePerformanceMetrics,
 //! and related types for tracking compilation performance.
 

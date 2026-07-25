@@ -1,29 +1,22 @@
 //! Verum dialect operations.
 //!
-
 //! Custom MLIR operations for Verum language constructs. These operations
 //! are built using MLIR's generic OperationBuilder with custom attributes.
 //!
-
 //! # CBGR Operations
 //!
-
 //! - `CbgrAllocOp`: Allocate CBGR-tracked memory
 //! - `CbgrCheckOp`: Validate CBGR reference (generation check)
 //! - `CbgrDerefOp`: Dereference with CBGR validation
 //! - `CbgrDropOp`: Drop CBGR-tracked allocation
 //!
-
 //! # Context Operations
 //!
-
 //! - `ContextGetOp`: Get context value from environment
 //! - `ContextProvideOp`: Provide context value
 //!
-
 //! # Async Operations
 //!
-
 //! - `SpawnOp`: Spawn async task
 //! - `AwaitOp`: Await future completion
 //! - `SelectOp`: Select on multiple futures

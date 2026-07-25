@@ -1,17 +1,13 @@
 //! Contract System: Precondition and Postcondition Validation
 //!
-
 //! Function contracts: "requires" for preconditions, "ensures" for postconditions, verified at compile-time (proof) or runtime
 //!
-
 //! This module implements compile-time validation of function contracts:
 //! - **Preconditions** (`requires`): Checked at call sites
 //! - **Postconditions** (`ensures`): Checked at function return
 //!
-
 //! # Architecture
 //!
-
 //! Contract validation uses the same SMT backend as refinement types,
 //! enabling verification of complex predicates involving:
 //! - Parameter values
@@ -19,10 +15,8 @@
 //! - Mathematical constraints
 //! - Relationships between parameters and return values
 //!
-
 //! # Performance Targets
 //!
-
 //! - Simple postconditions (syntactic): < 1ms
 //! - Complex postconditions (SMT): < 100ms
 //! - Precondition checking at call sites: < 10ms

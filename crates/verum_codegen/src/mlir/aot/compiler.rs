@@ -1,6 +1,5 @@
 //! AOT compiler implementation.
 //!
-
 //! Compiles MLIR modules to object files and executables.
 
 use crate::mlir::context::MlirContext;

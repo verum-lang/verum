@@ -4,13 +4,10 @@
 // parsing `mount` statements in .vr files.
 //! Stdlib Source Abstraction
 //!
-
 //! Provides a unified interface for accessing stdlib files from the local filesystem.
 //!
-
 //! # Architecture
 //!
-
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────┐
 //! │ CoreSourceTrait │
@@ -25,14 +22,11 @@
 //!  └────────────────────────────┘
 //! ```
 //!
-
 //! # Usage
 //!
-
 //! ```ignore
 //! let source = CoreSource::auto_detect();
 //!
-
 //! if let Some(content) = source.read_file("core/mod.vr") {
 //!  // Parse content...
 //! }

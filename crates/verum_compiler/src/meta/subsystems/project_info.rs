@@ -1,6 +1,5 @@
 //! Project information for meta functions
 //!
-
 //! Provides project metadata from Verum.toml for compile-time access.
 
 use verum_common::{List, Map, Text};

@@ -14,7 +14,6 @@
 )]
 //! Comprehensive coverage tests for verum_fast_parser.
 //!
-
 //! Tests grammar productions that may be undertested:
 //! - Empty input and minimal programs
 //! - Unicode identifiers

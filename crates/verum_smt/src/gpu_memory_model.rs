@@ -1,30 +1,24 @@
 //! GPU Memory Model for Z3 Verification
 //!
-
 //! This module encodes the GPU memory hierarchy for formal verification:
 //! - Global memory (shared across all thread blocks)
 //! - Shared memory (shared within a block)
 //! - Local memory (thread-private)
 //!
-
 //! ## Memory Model Properties
 //!
-
 //! - **Disjoint Address Spaces**: Global, shared, and local memory are distinct
 //! - **Sequential Consistency**: Within a thread, memory operations are ordered
 //! - **Relaxed Consistency**: Between threads, operations may be reordered
 //! - **Barrier Synchronization**: Barriers enforce ordering across threads
 //!
-
 //! ## Z3 Encoding Strategy
 //!
-
 //! - Arrays: ThreadID × Address → Value
 //! - Memory regions: Disjoint address ranges for each space
 //! - Happens-before: Partial order on memory operations
 //! - Synchronization: Barrier constraints
 //!
-
 //! GPU memory model verification for Verum's `@gpu` annotated kernels.
 //! Models GPU memory consistency (relaxed/acquire/release) with SMT constraints.
 //! Based on: GPU Memory Model (PTX ISA, CUDA Programming Guide)

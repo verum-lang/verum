@@ -1,55 +1,43 @@
 //! SMT-Based Alias Verification for CBGR
 //!
-
 //! This module provides production-grade SMT-based alias analysis using Z3 to prove
 //! no-alias relationships between references, enabling more precise escape analysis
 //! and reference promotion.
 //!
-
 //! # Overview
 //!
-
 //! Traditional alias analysis uses conservative heuristics that may produce false positives.
 //! SMT-based alias verification uses the Z3 solver to formally prove that two references
 //! cannot alias by encoding pointer constraints as logical formulas.
 //!
-
 //! # Key Features
 //!
-
 //! - **Precise no-alias proofs**: Use Z3 to formally verify pointer disjointness
 //! - **Pointer arithmetic encoding**: Model offset calculations and struct field access
 //! - **Array index analysis**: Encode array index constraints symbolically
 //! - **Query caching**: <500μs per query with LRU cache
 //! - **Integration**: Seamless integration with existing alias analysis and Z3 feasibility checker
 //!
-
 //! # Performance
 //!
-
 //! - Simple queries: ~50-200μs (no caching)
 //! - Complex queries: ~200-800μs (no caching)
 //! - Cache hits: <1μs
 //! - Cache hit rate: >85% in typical workloads
 //! - Target: <500μs per query (achieved)
 //!
-
 //! # Example
 //!
-
 //! ```rust,ignore
 //! use verum_cbgr::smt_alias_verification::{SmtAliasVerifier, PointerConstraint};
 //! use verum_cbgr::analysis::RefId;
 //!
-
 //! let mut verifier = SmtAliasVerifier::new();
 //!
-
 //! // Prove that two different stack allocations don't alias
 //! let alloc1 = PointerConstraint::StackAllocation { id: 1, offset: 0 };
 //! let alloc2 = PointerConstraint::StackAllocation { id: 2, offset: 0 };
 //!
-
 //! let result = verifier.verify_no_alias(RefId(1), RefId(2), &alloc1, &alloc2);
 //! assert!(result.is_no_alias());
 //! ```

@@ -14,18 +14,15 @@
 )]
 //! End-to-End Integration Tests: Parse -> Typecheck -> VBC Codegen -> Interpret
 //!
-
 //! These tests exercise the complete Verum compilation pipeline from source code
 //! to execution results. Each test compiles a Verum source program through:
 //!
-
 //! 1. Lexical analysis (verum_lexer)
 //! 2. Parsing (verum_fast_parser)
 //! 3. Type checking (verum_types)
 //! 4. VBC code generation (verum_vbc::codegen)
 //! 5. VBC interpretation (verum_vbc::interpreter)
 //!
-
 //! All test programs use valid Verum syntax as defined in grammar/verum.ebnf.
 
 use std::sync::Arc;

@@ -1,15 +1,12 @@
 //! SMT Solver Interface and Implementation
 //!
-
 //! This module provides a clean abstraction over SMT solvers with Z3 as the primary backend.
 //!
-
 //! Verum's refinement types (`Int{> 0}`, `Text{len(it) > 5}`, sigma-type `n: Int where n > 0`)
 //! are verified by translating predicates to SMT formulas and checking satisfiability.
 //! Five refinement binding forms are supported: inline `{pred}`, lambda `where |x| pred`,
 //! sigma-type `x: T where pred(x)`, named predicate `where pred_name`, and bare `where pred`.
 //!
-
 //! Performance targets:
 //! - SMT queries: < 10ms average
 //! - Refinement checking: < 50ms per function

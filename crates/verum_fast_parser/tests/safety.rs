@@ -14,7 +14,6 @@
 )]
 //! Safety tests for verum_fast_parser
 //!
-
 //! Tests memory safety, panic-free guarantees, and error recovery.
 
 use verum_ast::span::FileId;

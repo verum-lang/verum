@@ -1,9 +1,7 @@
 //! Thread-isolated SMT worker for the LSP server.
 //!
-
 //! # Why this exists
 //!
-
 //! `verum_smt::RefinementVerifier` transitively holds a Z3 context
 //! (`Rc<z3::ContextInternal>` plus `NonNull<_Z3_pattern>`) that is neither
 //! `Send` nor `Sync`. The LSP server's custom `verum/*` methods are
@@ -13,10 +11,8 @@
 //! captures that `!Send` state across an `.await` point, and the whole
 //! future becomes non-Send — so the method can't be registered.
 //!
-
 //! The fix is to isolate all Z3 work behind a dedicated OS thread:
 //!
-
 //! - [`SmtWorker`] owns the verifier and runs a loop on a thread it
 //!  spawns at startup. The verifier never leaves that thread.
 //! - [`SmtWorkerHandle`] is the `Send + Sync + Clone` handle the rest of
@@ -26,14 +22,11 @@
 //!  `Type` / `Expr`, `VerifyMode`, enums), so every step of the
 //!  round-trip is `Send`.
 //!
-
 //! After the async handler awaits the oneshot, the resulting future
 //! captures only Send types — tower-lsp's router accepts it.
 //!
-
 //! # Scope
 //!
-
 //! The worker is a compatibility shim today: one request type
 //! (`VerifyRefinement`) covers the validate / promote / infer flows that
 //! were previously inlined in `SmtRefinementChecker`. New SMT-backed

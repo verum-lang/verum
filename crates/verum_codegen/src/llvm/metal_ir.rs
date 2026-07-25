@@ -1,10 +1,8 @@
 //! Metal GPU runtime as LLVM IR — replaces verum_metal.m (563 LOC).
 //!
-
 //! All Objective-C calls compile to `objc_msgSend(receiver, selector, ...)`.
 //! This is a C function in `/usr/lib/libobjc.dylib` that LLVM IR can call directly.
 //!
-
 //! Key ObjC runtime functions:
 //!  - `objc_msgSend(ptr, ptr, ...) -> ptr` — message dispatch
 //!  - `sel_registerName(ptr) -> ptr` — get selector from C string
@@ -13,13 +11,11 @@
 //!  - `objc_release(ptr)` — decrement refcount (__bridge_transfer)
 //!  - `MTLCreateSystemDefaultDevice() -> ptr` — Metal framework entry point
 //!
-
 //! ARC bridging:
 //!  - `__bridge` = no-op cast (same pointer)
 //!  - `__bridge_retained` = objc_retain (increment refcount)
 //!  - `__bridge_transfer` = transfer ownership (no increment, will release)
 //!
-
 //! MTLSize struct: `{ NSUInteger, NSUInteger, NSUInteger }` = 24 bytes.
 //! On arm64, passed in registers (x0-x2 for each triple).
 

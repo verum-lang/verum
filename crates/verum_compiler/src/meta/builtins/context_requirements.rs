@@ -1,16 +1,12 @@
 //! Context Requirements for Meta Builtins
 //!
-
 //! This module defines the unified context model for meta-system builtins.
 //! All meta functions are categorized into tiers based on their context requirements.
 //!
-
 //! ## Tier Model
 //!
-
 //! ### Tier 0: Core Primitives (Always Available)
 //!
-
 //! Pure functions that work on values without accessing any external state:
 //! - Arithmetic: `abs`, `min`, `max`
 //! - Type conversions: `int_to_text`, `text_to_int`
@@ -19,13 +15,10 @@
 //! - Quote/Unquote: `quote`, `unquote`, `stringify`
 //! - Identity operations: `concat_idents`, `format_ident`
 //!
-
 //! ### Tier 1: Capability-Gated Functions (Require Context)
 //!
-
 //! Functions that access compiler state, build configuration, or have side effects:
 //!
-
 //! | Context | Functions | Purpose |
 //! |---------|-----------|---------|
 //! | MetaTypes | `type_name`, `fields_of`, `variants_of`, `is_struct`, `implements`, `size_of`, `align_of` | Type registry access |
@@ -33,22 +26,18 @@
 //! | CompileDiag | `compile_error`, `compile_warning` | Compiler diagnostics |
 //! | BuildAssets | `load_text`, `include_bytes` | File system access |
 //!
-
 //! ## Design Rationale
 //!
-
 //! The previous design had a "double standard" where:
 //! - Context system required explicit `using [...]` declarations
 //! - Builtins were implicitly available to all meta functions
 //!
-
 //! This unified model ensures:
 //! 1. **Consistency**: All capabilities require explicit declaration
 //! 2. **Security**: Can sandbox meta functions with restricted reflection
 //! 3. **Testability**: Can mock contexts for unit testing
 //! 4. **Composability**: Build higher-level contexts from lower-level ones
 //!
-
 //! Meta context unification: all compile-time features desugar to meta-system
 //! operations, providing one coherent model with convenient syntax sugar.
 

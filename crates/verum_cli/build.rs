@@ -2,7 +2,6 @@
 
 //! Build script for verum_cli.
 //!
-
 //! Sets up environment variables for the CLI.
 
 use std::env;

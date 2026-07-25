@@ -1,12 +1,10 @@
 //! The two judgments a refinement type admits, and the single solver
 //! routine that discharges them.
 //!
-
 //! A refinement type `T{P}` admits exactly two questions, and
 //! conflating them is what made every non-tautological parameter
 //! refinement report as "unsatisfiable" (T0457):
 //!
-
 //!  * **Inhabitation** — asked at a *declaration* site, where no value
 //!    is in hand (`fn f(max_level: Int{>= 0 && <= 5})`). The claim is
 //!    existential: `∃x:T. P(x)`. Discharged by asserting `P` and
@@ -14,14 +12,12 @@
 //!    declaration an error: the declared type has no inhabitants, so no
 //!    call can ever be well-typed.
 //!
-
 //!  * **Membership** — asked at a *use* site, where a concrete value
 //!    expression `e` is in hand. The claim is universal over the free
 //!    variables of `e`: `∀. P[it := e]`. Discharged by the repo-wide
 //!    negate-and-check-Unsat convention: assert `¬P[it := e]` and
 //!    require `Unsat`. A `Sat` here is a counterexample, never a proof.
 //!
-
 //! Before T0457 both call paths asked a third question that nobody
 //! wants — `∀x:T. P(x)`, "is *every* inhabitant of the base type inside
 //! the refinement" — and reported its `Sat` as "unsatisfiable
@@ -31,7 +27,6 @@
 //! question, but it belongs to [`crate::subsumption`], which already
 //! owns it.)
 //!
-
 //! This module is the ONE authority for discharging either judgment.
 //! [`crate::refinement::RefinementVerifier::verify_refinement`] (the
 //! compiler pipeline and LSP entry point) and

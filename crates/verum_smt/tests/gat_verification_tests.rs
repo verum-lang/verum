@@ -14,7 +14,6 @@
 )]
 //! Comprehensive tests for GAT verification
 //!
-
 //! Tests cover:
 //! - Simple GAT verification
 //! - GAT with type parameters

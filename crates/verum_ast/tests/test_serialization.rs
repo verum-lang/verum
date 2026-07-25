@@ -15,7 +15,6 @@
 )]
 //! Tests for serde serialization and deserialization of all AST nodes.
 //!
-
 //! This module ensures that all AST nodes can be correctly serialized
 //! and deserialized, preserving all information through the round-trip.
 

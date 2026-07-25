@@ -1,6 +1,5 @@
 //! Monomorphization phase for the compilation pipeline.
 //!
-
 //! This module provides the main entry point for monomorphization,
 //! integrating all components:
 //! - InstantiationGraph (from type checking)
@@ -8,7 +7,6 @@
 //! - BytecodeSpecializer (bytecode transformation)
 //! - ModuleMerger (final module assembly)
 //!
-
 //! Orchestrates the full monomorphization pipeline: graph -> resolver -> specializer
 //! -> optimizer -> merger, producing a final monomorphized VBC module.
 

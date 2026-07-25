@@ -1,6 +1,5 @@
 //! Method dispatch handlers for VBC interpreter.
 //!
-
 //! This module contains the CallM instruction handler and all supporting
 //! method dispatch functions, including:
 //! - handle_call_method: the main CallM opcode handler
