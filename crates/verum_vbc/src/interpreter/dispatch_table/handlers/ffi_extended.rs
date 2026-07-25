@@ -4253,6 +4253,21 @@ fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
     if !state.cbgr_allocations.remove(&header_addr) {
         return;
     }
+    // CBGR-MUTABLE-PTRS-DEALLOC-1 (T0299): drop this block's per-pointer
+    // lifecycle state too.  Every other removal from `cbgr_mutable_ptrs` is a
+    // CAPABILITY DOWNGRADE (RefCreate / CapAttenuate / CapTransfer /
+    // MakeShared) — nothing removed on free, so a freed address stayed in the
+    // set for the life of the interpreter and a later allocation reusing that
+    // address tested true at the membership check (`handlers/cbgr.rs`,
+    // "is this a tracked mutable interior pointer?").  Same argument for
+    // `cbgr_ref_creation_epoch`, which is inserted alongside and was likewise
+    // never cleaned: a stale entry makes `.epoch()` report the OLD reference's
+    // creation time for a new one at the same address.
+    //
+    // Keyed on the USER pointer (what the insert sites register), not the
+    // header address the allocation set is keyed on.
+    state.cbgr_mutable_ptrs.remove(&(user as usize));
+    state.cbgr_ref_creation_epoch.remove(&(user as usize));
     // SAFETY: liveness gated by the tracked-set removal above; the header
     // fields were written by `cbgr_user_allocate`.
     unsafe {
