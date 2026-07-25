@@ -115,90 +115,12 @@ pub(super) fn read_reg_range(state: &mut InterpreterState) -> InterpreterResult<
     Ok(RegRange { start, count })
 }
 
-/// Consume (skip) one serialized `TypeRef` from the bytecode stream.
-///
-/// `CallG` carries STATIC `TypeRef` type arguments (used by the AOT
-/// monomorphization pass).  The interpreter ignores them — it dispatches
-/// dynamically — but must advance the program counter past them.  This mirrors
-/// `crate::bytecode::encode_type_ref` byte-for-byte; keep the two in sync.
-pub(super) fn skip_type_ref(state: &mut InterpreterState) -> InterpreterResult<()> {
-    let tag = read_u8(state)?;
-    match tag {
-        0x00 | 0x01 => {
-            // Concrete(TypeId) / Generic(TypeParamId)
-            read_varint(state)?;
-        }
-        0x02 => {
-            // Instantiated { base, args }
-            read_varint(state)?;
-            let n = read_varint(state)?;
-            for _ in 0..n {
-                skip_type_ref(state)?;
-            }
-        }
-        0x03 | 0x08 => {
-            // Function / Rank2Function { [type_param_count,] params, return, contexts }
-            if tag == 0x08 {
-                read_varint(state)?; // type_param_count
-            }
-            let np = read_varint(state)?;
-            for _ in 0..np {
-                skip_type_ref(state)?;
-            }
-            skip_type_ref(state)?; // return type
-            let nc = read_varint(state)?;
-            for _ in 0..nc {
-                read_varint(state)?; // context ids
-            }
-        }
-        0x04 => {
-            // Reference { inner, mutability, tier }
-            skip_type_ref(state)?;
-            read_u8(state)?; // mutability
-            read_u8(state)?; // tier
-        }
-        0x05 => {
-            // Tuple(elems)
-            let n = read_varint(state)?;
-            for _ in 0..n {
-                skip_type_ref(state)?;
-            }
-        }
-        0x06 => {
-            // Array { element, length }
-            skip_type_ref(state)?;
-            read_varint(state)?;
-        }
-        0x07 => {
-            // Slice(inner)
-            skip_type_ref(state)?;
-        }
-        0x09 => {
-            // AssociatedProjection { base, assoc }
-            skip_type_ref(state)?;
-            let len = read_varint(state)? as usize;
-            for _ in 0..len {
-                read_u8(state)?;
-            }
-        }
-        0x0A => {
-            // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1
-            read_varint(state)?;
-        }
-        other => {
-            return Err(InterpreterError::InvalidBytecode {
-                pc: state.pc() as usize,
-                message: format!("invalid TypeRef tag {} in CallG type args", other),
-            });
-        }
-    }
-    Ok(())
-}
-
 /// Read (decode) one serialized `TypeRef` from the bytecode stream.
 ///
-/// Structural counterpart of [`skip_type_ref`] — same wire format as
-/// `crate::bytecode::encode_type_ref`; keep the three in sync.  Used by
+/// Same wire format as `crate::bytecode::encode_type_ref`; keep the two in
+/// sync.  (The former `skip_type_ref` twin — which advanced the PC without
+/// decoding — is gone: since #44-B every reader needs the VALUE, so a second
+/// decoder only added drift risk.)  Used by
 /// `handle_call_generic` to materialize CallG type args into the callee
 /// frame (#44-B generic-witness plumbing) and by `handle_loadt`, whose
 /// pre-fix varint read silently desynced the instruction stream on any

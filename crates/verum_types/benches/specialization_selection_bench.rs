@@ -13,7 +13,7 @@ use verum_ast::ty::{Ident, Path};
 use verum_common::{List, Map, Maybe, Set};
 
 use verum_types::advanced_protocols::{SpecializationInfo, SpecializationLattice};
-use verum_types::protocol::{Protocol, ProtocolImpl};
+use verum_types::protocol::ProtocolImpl;
 use verum_types::specialization_selection::{CoherenceChecker, SpecializationSelector};
 use verum_types::ty::Type;
 use verum_types::unify::Unifier;

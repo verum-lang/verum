@@ -1,5 +1,9 @@
-// Disabled: depends on PackageSigner type which doesn't exist yet
-#![cfg(feature = "package_signing")]
+// Disabled: depends on a `PackageSigner` type that does not exist yet.
+// `cfg(any())` is the idiomatic never-compile gate — the previous
+// `cfg(feature = "package_signing")` named a feature declared in no
+// Cargo.toml, which only produced an unexpected_cfgs warning while
+// hiding that these tests can never run. Tracked for implementation.
+#![cfg(any())]
 #![allow(
     dead_code,
     unused_imports,
