@@ -34,7 +34,12 @@
 // current implementation (dependent::*, type_level_computation::*, etc.). They
 // appear to be stubs for future dependent types implementation and are disabled
 // until the actual implementation is added.
-#![cfg(feature = "dependent_types_implementation_exists")]
+// DISABLED — does not compile: asserts a dependent-types implementation that
+// does not exist yet. 79 tests. Tracked by T0632.
+// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
+// named a feature declared in no Cargo.toml, so the file silently never
+// compiled while reading as an opt-in flag someone could turn on.
+#![cfg(any())]
 
 use verum_ast::{
     Pattern, PatternKind, Type, TypeKind,

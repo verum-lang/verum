@@ -19,8 +19,12 @@
 // proof extraction, SMT-LIB2 export, and enhanced counterexamples.
 //
 
-// REQUIRES API MIGRATION: ComplexityThresholds, TacticKind variants changed
-#![cfg(feature = "advanced_features_tests_disabled")]
+// DISABLED — does not compile: needs API migration (ComplexityThresholds,
+// TacticKind variants changed). 26 tests. Tracked by T0632.
+// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
+// named a feature declared in no Cargo.toml, so the file silently never
+// compiled while reading as an opt-in flag someone could turn on.
+#![cfg(any())]
 
 use verum_ast::{
     Expr, ExprKind,

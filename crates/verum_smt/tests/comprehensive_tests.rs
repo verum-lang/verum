@@ -50,7 +50,12 @@
 //! Tests require Z3 API migration: forall_const, exists_const, Context params (~20-30 hours).
 
 // REQUIRES Z3 API MIGRATION (~20-30 hours): forall_const, exists_const, Context params
-#![cfg(feature = "z3_old_api_tests_disabled")]
+// DISABLED — does not compile: written against the old Z3 API. 31 tests.
+// Tracked by T0632.
+// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
+// named a feature declared in no Cargo.toml, so the file silently never
+// compiled while reading as an opt-in flag someone could turn on.
+#![cfg(any())]
 
 use std::time::Duration;
 use verum_smt::*;

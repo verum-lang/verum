@@ -18,9 +18,12 @@
 //! Verum's refinement type system.
 //!
 
-// REQUIRES API MIGRATION: TensorSort.dimensions type changed to List<usize>
-
-#![cfg(feature = "tensor_refinement_tests_disabled")]
+// DISABLED — does not compile: needs API migration (TensorSort.dimensions is
+// now List<usize>). 11 tests. Tracked by T0632.
+// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
+// named a feature declared in no Cargo.toml, so the file silently never
+// compiled while reading as an opt-in flag someone could turn on.
+#![cfg(any())]
 
 use verum_ast::{Expr, ExprKind, IntLit, Literal, LiteralKind, Span, Type, TypeKind};
 use verum_common::Heap;

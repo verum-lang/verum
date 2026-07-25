@@ -27,7 +27,11 @@
 // - Use verum_std::core::Text instead of verum_common::Text (which is just String alias)
 // - Text::from() returns verum_std::core::Text, but dependent module expects this type
 
-#![cfg(feature = "dependent_types_v2_tests_disabled")]
+// DISABLED — does not compile. 23 tests. Tracked by T0632.
+// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
+// named a feature declared in no Cargo.toml, so the file silently never
+// compiled while reading as an opt-in flag someone could turn on.
+#![cfg(any())]
 
 use verum_ast::{
     Type, TypeKind,

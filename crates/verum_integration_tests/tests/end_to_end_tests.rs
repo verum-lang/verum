@@ -13,7 +13,12 @@
     unused_assignments
 )]
 #![cfg(test)]
-#![cfg(feature = "full-pipeline-tests")] // Requires complete API updates
+// DISABLED — does not compile: needs complete API updates. 26 tests.
+// Tracked by T0632.
+// `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
+// named a feature declared in no Cargo.toml, so the file silently never
+// compiled while reading as an opt-in flag someone could turn on.
+#![cfg(any())]
 // End-to-End Integration Tests for Complete Verum Pipeline
 //
 
