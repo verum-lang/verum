@@ -870,6 +870,32 @@ fn e2e_parse_error_invalid_syntax() {
 }
 
 #[test]
+fn e2e_type_error_parses_but_fails_typecheck() {
+    // Distinct from the parse-error cases either side of it: this source is
+    // syntactically valid, so a rejection can only come from type checking.
+    // Asserting both halves is the point — `compile_fail` alone would also
+    // pass if the source stopped parsing for an unrelated reason.
+    //
+    // Carried over from end_to_end_tests.rs (T0641), where the same intent
+    // existed only as a placeholder: it parsed the module, asserted
+    // `declarations.len() == 1`, and noted that checking the type error
+    // "would need type checker integration to verify". The property was
+    // never actually asserted.
+    let source = r#"
+        fn bad_add(x: Int, y: Bool) -> Int {
+            x + y
+        }
+
+        fn main() {
+            print(bad_add(1, true));
+        }
+    "#;
+
+    parse_ok(source);
+    compile_fail(source);
+}
+
+#[test]
 fn e2e_parse_error_unterminated_string() {
     compile_fail(
         r#"
