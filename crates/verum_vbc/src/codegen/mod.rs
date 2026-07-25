@@ -21767,10 +21767,7 @@ impl VbcCodegen {
                 // post-merge, and `static_init_functions` is a
                 // dedup-on-push by the comparison at line ~15067.
                 if name.starts_with("__tls_init_") {
-                    let already_registered = self
-                        .static_init_functions
-                        .iter()
-                        .any(|&fid| fid == user_fid);
+                    let already_registered = self.static_init_functions.contains(&user_fid);
                     if !already_registered {
                         self.static_init_functions.push(user_fid);
                     }

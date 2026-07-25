@@ -531,7 +531,7 @@ fn parse_invariant_list(expr: &Expr) -> Result<Vec<BoundaryInvariant>, ArchParse
 
 fn parse_invariant(expr: &Expr) -> Result<BoundaryInvariant, ArchParseError> {
     let path = parse_path_string(expr, "boundary_invariant")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "AllOrNothing" => BoundaryInvariant::AllOrNothing,
         "DeterministicSerialisation" => BoundaryInvariant::DeterministicSerialisation,
@@ -548,7 +548,7 @@ fn parse_tier(expr: &Expr) -> Result<Tier, ArchParseError> {
  // `Tier::MultiTier([...])` call.
     if let ExprKind::Call { func, args, .. } = &expr.kind {
         let path = parse_path_string(func, "tier")?;
-        let last = path.split('.').last().unwrap_or(&path);
+        let last = path.split('.').next_back().unwrap_or(&path);
         if last == "MultiTier" {
             let inner = args.iter().next().ok_or(ArchParseError::InvalidValue {
                 field: "at_tier".to_string(),
@@ -564,7 +564,7 @@ fn parse_tier(expr: &Expr) -> Result<Tier, ArchParseError> {
         });
     }
     let path = parse_path_string(expr, "at_tier")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "Interp" => Tier::Interp,
         "Aot" => Tier::Aot,
@@ -591,7 +591,7 @@ fn parse_tier_list(expr: &Expr) -> Result<Vec<Tier>, ArchParseError> {
 
 fn parse_foundation(expr: &Expr) -> Result<Foundation, ArchParseError> {
     let path = parse_path_string(expr, "foundation")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "ZfcTwoInacc" => Foundation::ZfcTwoInacc,
         "Hott" => Foundation::Hott,
@@ -610,7 +610,7 @@ fn parse_foundation(expr: &Expr) -> Result<Foundation, ArchParseError> {
 
 fn parse_stratum(expr: &Expr) -> Result<MsfsStratum, ArchParseError> {
     let path = parse_path_string(expr, "stratum")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "LFnd" => MsfsStratum::LFnd,
         "LCls" => MsfsStratum::LCls,
@@ -648,7 +648,7 @@ fn parse_lifecycle(expr: &Expr) -> Result<Lifecycle, ArchParseError> {
         _ => None,
     };
     if let Some((path, arg)) = call_view {
-        let last = path.split('.').last().unwrap_or(&path);
+        let last = path.split('.').next_back().unwrap_or(&path);
         return Ok(match (last, arg) {
             ("Theorem", Some(a)) => Lifecycle::Theorem {
                 since: parse_path_string(a, "since")?,
@@ -686,7 +686,7 @@ fn parse_lifecycle(expr: &Expr) -> Result<Lifecycle, ArchParseError> {
         });
     }
     let path = parse_path_string(expr, "lifecycle")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "Theorem" => Lifecycle::Theorem {
             since: "unspecified".to_string(),
@@ -726,7 +726,7 @@ fn parse_lifecycle(expr: &Expr) -> Result<Lifecycle, ArchParseError> {
 
 fn parse_verify_strategy(expr: &Expr) -> Result<VerifyStrategy, ArchParseError> {
     let path = parse_path_string(expr, "cve_closure_V_strategy")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "runtime" | "Runtime" => VerifyStrategy::Runtime,
         "static" | "Static" => VerifyStrategy::Static,
@@ -834,7 +834,7 @@ pub fn parse_mtac_decision(args: &[Expr]) -> Result<crate::arch::MtacDecisionAtt
 
 fn parse_time_point(expr: &Expr) -> Result<crate::arch_mtac::TimePoint, ArchParseError> {
     let path = parse_path_string(expr, "point")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "Now" => crate::arch_mtac::TimePoint::Now,
         // Past / Future / Counterfactual carry payloads — keep the
@@ -852,7 +852,7 @@ fn parse_time_point(expr: &Expr) -> Result<crate::arch_mtac::TimePoint, ArchPars
 
 fn parse_observer(expr: &Expr) -> Result<crate::arch_mtac::Observer, ArchParseError> {
     let path = parse_path_string(expr, "by_observer")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "EndUser" => crate::arch_mtac::Observer::EndUser {
             kind: "default".into(),
@@ -882,7 +882,7 @@ fn parse_arch_proposition(
     expr: &Expr,
 ) -> Result<crate::arch_mtac::ArchProposition, ArchParseError> {
     let path = parse_path_string(expr, "proposition")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "FoundationStable" => crate::arch_mtac::ArchProposition::FoundationStable,
         "PublicApiUnchanged" => crate::arch_mtac::ArchProposition::PublicApiUnchanged,
@@ -900,7 +900,7 @@ fn parse_arch_proposition(
 
 fn parse_mtac_modality(expr: &Expr) -> Result<crate::arch::MtacModality, ArchParseError> {
     let path = parse_path_string(expr, "modality")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "Necessity" => crate::arch::MtacModality::Necessity,
         "Possibility" => crate::arch::MtacModality::Possibility,
@@ -966,7 +966,7 @@ fn parse_corpus_invariant(
     expr: &Expr,
 ) -> Result<crate::arch_corpus::CorpusInvariant, ArchParseError> {
     let path = parse_path_string(expr, "invariants")?;
-    let last = path.split('.').last().unwrap_or(&path);
+    let last = path.split('.').next_back().unwrap_or(&path);
     Ok(match last {
         "NoCircularDependencies" => crate::arch_corpus::CorpusInvariant::NoCircularDependencies,
         "FoundationConsistency" => crate::arch_corpus::CorpusInvariant::FoundationConsistency,

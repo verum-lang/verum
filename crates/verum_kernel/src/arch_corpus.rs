@@ -259,7 +259,7 @@ pub fn check_foundation_consistency(corpus: &[(String, Shape)]) -> Option<Corpus
         .collect::<Vec<_>>()
         .into_iter()
         .fold(Vec::new(), |mut acc, f| {
-            if !acc.iter().any(|x: &&Foundation| *x == f) {
+            if !acc.contains(&f) {
                 acc.push(f);
             }
             acc

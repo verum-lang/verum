@@ -154,7 +154,7 @@ fn resolve_unit_receiver_protocol_impl(
             if !td
                 .protocols
                 .iter()
-                .any(|pi| proto_ids.iter().any(|p| *p == pi.protocol.0))
+                .any(|pi| proto_ids.contains(&pi.protocol.0))
             {
                 continue;
             }
@@ -166,7 +166,7 @@ fn resolve_unit_receiver_protocol_impl(
             let mut fid: Option<FunctionId> = None;
             let dotted_m = format!(".{}", method);
             for pi in td.protocols.iter() {
-                if !proto_ids.iter().any(|p| *p == pi.protocol.0) {
+                if !proto_ids.contains(&pi.protocol.0) {
                     continue;
                 }
                 for &raw in pi.methods.iter() {

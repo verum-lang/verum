@@ -2019,7 +2019,7 @@ fn consumes_entry_well_formed(entry: &str, valid_units: &[&str]) -> bool {
     if qty.chars().all(|c| c == '0') {
         return false;
     }
-    valid_units.iter().any(|u| *u == unit)
+    valid_units.contains(&unit)
 }
 
 // =============================================================================
