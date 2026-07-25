@@ -54,7 +54,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use verum_ast::decl::{ItemKind, MountTreeKind};
-use verum_ast::ty::Ident;
 use verum_common::Maybe;
 use verum_fast_parser::Parser;
 
@@ -500,7 +499,7 @@ fn validate_module_mounts(
 
 fn validate_mount_tree(
     tree: &verum_ast::decl::MountTree,
-    prefix: &[&Ident],
+    prefix: &[String],
     consumer_segs: &[&str],
     consumer: &ModuleSurface,
     by_path: &HashMap<&str, &ModuleSurface>,
@@ -511,16 +510,30 @@ fn validate_mount_tree(
             // The nested prefix carries every segment up to but not
             // including the leaf — `mount super.X.{a, b}` puts
             // [super, X] here.  Resolve it once and reuse.
-            let nested_idents: Vec<&Ident> = nested_prefix
+            let nested_names: Vec<String> = nested_prefix
                 .segments
                 .iter()
                 .filter_map(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(id) => Some(id),
+                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
                     _ => None,
                 })
                 .collect();
-            let mut combined: Vec<&Ident> = prefix.to_vec();
-            combined.extend(nested_idents);
+            // A leading `.` makes the path RELATIVE to the consumer's own
+            // module.  `public mount .core.{TheoryRegistry, ...}` in
+            // core/theory_interop/mod.vr names core.theory_interop.core (the
+            // sibling core.vr), NOT the crate root.  The marker is
+            // `PathSegment::Relative`, which the filter above drops — without
+            // splicing the consumer's path back in, the target resolved to
+            // bare `core` and every symbol looked missing from the root.
+            let mut combined: Vec<String> = if matches!(
+                nested_prefix.segments.first(),
+                Some(verum_ast::ty::PathSegment::Relative)
+            ) {
+                consumer_segs.iter().map(|s| s.to_string()).collect()
+            } else {
+                prefix.to_vec()
+            };
+            combined.extend(nested_names);
             for sub in trees.iter() {
                 validate_mount_tree(sub, &combined, consumer_segs, consumer, by_path, violations);
             }
@@ -528,26 +541,32 @@ fn validate_mount_tree(
         MountTreeKind::Path(path) => {
             // Simple-path mount: target is everything up to the last
             // segment; symbol is the last segment.
-            let segs: Vec<&Ident> = path
+            let segs: Vec<String> = path
                 .segments
                 .iter()
                 .filter_map(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(id) => Some(id),
+                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.to_string()),
                     _ => None,
                 })
                 .collect();
             if segs.is_empty() {
                 return;
             }
-            let mut full: Vec<&Ident> = prefix.to_vec();
+            // Same relative-marker handling as the Nested arm above.
+            let mut full: Vec<String> = if matches!(
+                path.segments.first(),
+                Some(verum_ast::ty::PathSegment::Relative)
+            ) {
+                consumer_segs.iter().map(|s| s.to_string()).collect()
+            } else {
+                prefix.to_vec()
+            };
             full.extend(segs);
             // Last segment is the symbol; everything before it is the
             // target module path.
-            let symbol = full.last().unwrap().name.to_string();
-            let target_segs: Vec<&str> = full[..full.len() - 1]
-                .iter()
-                .map(|id| id.name.as_str())
-                .collect();
+            let symbol = full.last().unwrap().clone();
+            let target_segs: Vec<&str> =
+                full[..full.len() - 1].iter().map(String::as_str).collect();
             check_mount(consumer, consumer_segs, &target_segs, &symbol, by_path, violations);
         }
         MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
