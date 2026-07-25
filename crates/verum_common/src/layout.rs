@@ -574,6 +574,52 @@ pub fn primitive_alignment_by_name(name: &str) -> Option<u64> {
     }
 }
 
+/// Heap-configuration invariants. Both interpreter heap impls and the AOT bump
+/// allocator MUST agree on these limits — a divergence would let one path
+/// accept allocations the other rejects.
+///
+/// Enforced at COMPILE time: every operand is a `const`, so a limit edit that
+/// breaks the relationship fails the build for every consumer instead of
+/// waiting for the test suite to run.
+const _: () = {
+    // Alignment: >= pointer width, power of two.
+    assert!(MIN_HEAP_ALIGNMENT == 8);
+    assert!(MIN_HEAP_ALIGNMENT == POINTER_SIZE as usize);
+    assert!(
+        MIN_HEAP_ALIGNMENT.is_power_of_two(),
+        "alignment must be power-of-two for Layout::from_size_align"
+    );
+
+    // Allocation ceiling: 1 GiB, with headroom for header overhead.
+    assert!(MAX_ALLOCATION_SIZE == 1 << 30);
+    assert!(
+        MAX_ALLOCATION_SIZE < usize::MAX / 2,
+        "ceiling must leave headroom for header overhead"
+    );
+
+    // Default heap: 16 MiB, below the per-allocation ceiling.
+    assert!(DEFAULT_HEAP_SIZE == 16 << 20);
+    assert!(
+        DEFAULT_HEAP_SIZE < MAX_ALLOCATION_SIZE,
+        "default heap fits below the per-allocation ceiling"
+    );
+
+    // Default collection capacity: power of two for the hash-probe scheme.
+    assert!(DEFAULT_COLLECTION_CAPACITY == 16);
+    assert!(
+        (DEFAULT_COLLECTION_CAPACITY as u128).is_power_of_two(),
+        "stdlib map probe scheme requires power-of-two cap"
+    );
+};
+
+/// Record-fallback sentinel sits above the synthetic-variant range so
+/// `is_synthetic_variant_type_id` cannot false-positive on records.
+/// Compile-time for the same reason as the heap limits above.
+const _: () = {
+    assert!(SYNTHETIC_RECORD_TYPE_ID == 0x9000);
+    assert!(SYNTHETIC_RECORD_TYPE_ID >= SYNTHETIC_VARIANT_TYPE_ID_BASE);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,41 +738,6 @@ mod tests {
             ALLOCATION_HEADER_RESERVED_OFFSET + 8,
             ALLOCATION_HEADER_SIZE,
             "reserved [u32; 2] fits exactly into the 32-byte total",
-        );
-    }
-
-    /// Heap-configuration invariants. Both interpreter heap impls and
-    /// the AOT bump allocator MUST agree on these limits — duplication
-    /// would let one path accept allocations the other rejects.
-    #[test]
-    fn heap_config_invariants() {
-        // Alignment: ≥ pointer width, power of two.
-        assert_eq!(MIN_HEAP_ALIGNMENT, 8);
-        assert_eq!(MIN_HEAP_ALIGNMENT, POINTER_SIZE as usize);
-        assert!(
-            MIN_HEAP_ALIGNMENT.is_power_of_two(),
-            "alignment must be power-of-two for Layout::from_size_align",
-        );
-
-        // Allocation ceiling: 1 GiB.
-        assert_eq!(MAX_ALLOCATION_SIZE, 1 << 30);
-        assert!(
-            MAX_ALLOCATION_SIZE < usize::MAX / 2,
-            "ceiling must leave headroom for header overhead",
-        );
-
-        // Default heap: 16 MiB, less than the per-allocation ceiling.
-        assert_eq!(DEFAULT_HEAP_SIZE, 16 << 20);
-        assert!(
-            DEFAULT_HEAP_SIZE < MAX_ALLOCATION_SIZE,
-            "default heap fits below the per-allocation ceiling",
-        );
-
-        // Default collection capacity: power of two for hash-probe.
-        assert_eq!(DEFAULT_COLLECTION_CAPACITY, 16);
-        assert!(
-            (DEFAULT_COLLECTION_CAPACITY as u128).is_power_of_two(),
-            "stdlib map probe scheme requires power-of-two cap",
         );
     }
 
@@ -856,14 +867,6 @@ mod tests {
     #[test]
     fn synthetic_variant_base_pinned() {
         assert_eq!(SYNTHETIC_VARIANT_TYPE_ID_BASE, 0x8000);
-    }
-
-    /// Record-fallback sentinel above the synthetic-variant range so
-    /// `is_synthetic_variant_type_id` doesn't false-positive on records.
-    #[test]
-    fn synthetic_record_above_variant_range() {
-        assert_eq!(SYNTHETIC_RECORD_TYPE_ID, 0x9000);
-        assert!(SYNTHETIC_RECORD_TYPE_ID >= SYNTHETIC_VARIANT_TYPE_ID_BASE);
     }
 
     /// `synthetic_variant_type_id(tag)` matches the canonical formula.
