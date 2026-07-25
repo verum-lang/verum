@@ -1160,7 +1160,7 @@ static SCRIPTING_HOOK_INIT: std::sync::Once = std::sync::Once::new();
 ///
 /// `verum_vbc`'s scripting engine lives *below* this crate and so cannot call
 /// the compiler directly; this inverts that dependency by installing
-/// [`compile_to_vbc`] as the engine's compiler.  Idempotent — the interpret
+/// [`compile_script_to_vbc`] as the engine's compiler.  Idempotent — the interpret
 /// entry points call it unconditionally before running user code, and only
 /// the first call installs the hook.
 pub fn ensure_scripting_compiler_installed() {
