@@ -39,15 +39,16 @@
 // `cfg(any())` is the never-true gate: the previous `cfg(feature = "...")`
 // named a feature declared in no Cargo.toml, so the file silently never
 // compiled while reading as an opt-in flag someone could turn on.
-#![cfg(any())]
+// [wip] gate lifted
 
 use verum_ast::{
     Pattern, PatternKind, Type, TypeKind,
+    ty::RefinementPredicate,
     expr::{BinOp, Expr, ExprKind},
     literal::{IntLit, Literal, LiteralKind},
     span::Span,
 };
-use verum_common::{Heap, Maybe, Text};
+use verum_common::{Heap, List, Maybe, Text};
 use verum_smt::{
     Context, Translator,
     dependent::{
@@ -84,10 +85,11 @@ fn make_int_lit(value: i64) -> Expr {
 fn make_var(name: &str) -> Expr {
     use verum_ast::ty::{Ident, Path, PathSegment};
 
-    let ident = Ident::new(name.into(), Span::dummy());
+    let ident = Ident::new(Text::from(name), Span::dummy());
     let segment = PathSegment::Name(ident);
     let path = Path {
         segments: vec![segment].into(),
+        span: Span::dummy(),
     };
     Expr::new(ExprKind::Path(path), Span::dummy())
 }
@@ -106,8 +108,14 @@ fn make_binary(op: BinOp, left: Expr, right: Expr) -> Expr {
 fn make_refined_type(base: Type, predicate: Expr) -> Type {
     Type::new(
         TypeKind::Refined {
-            base: Box::new(base),
-            predicate: Box::new(predicate),
+            base: Heap::new(base),
+            // `Refined.predicate` is a RefinementPredicate now, not a bare Expr.
+            // `binding: None` is the implicit `it` binding.
+            predicate: Heap::new(RefinementPredicate {
+                expr: predicate,
+                binding: Maybe::None,
+                span: Span::dummy(),
+            }),
         },
         Span::dummy(),
     )
@@ -162,9 +170,34 @@ fn test_pi_type_dependent_return() {
 
 #[test]
 fn test_pi_type_is_dependent() {
-    let pi = PiType::new("x".into(), make_int_type(), make_int_type());
+    use verum_ast::ty::{Ident, Path, PathSegment};
 
-    assert!(pi.is_dependent(), "Pi type should be marked as dependent");
+    // `is_dependent` asks whether the RETURN type references the parameter
+    // (dependent.rs: type_references_name). `(x: Int) -> Int` does not, so it
+    // is an ordinary function type — assert BOTH directions so the predicate
+    // cannot regress into a constant.
+    let non_dependent = PiType::new(Text::from("x"), make_int_type(), make_int_type());
+    assert!(
+        !non_dependent.is_dependent(),
+        "(x: Int) -> Int does not mention x, so it is not dependent"
+    );
+
+    let x_ty = Type::new(
+        TypeKind::Path(Path {
+            segments: vec![PathSegment::Name(Ident::new(
+                Text::from("x"),
+                Span::dummy(),
+            ))]
+            .into(),
+            span: Span::dummy(),
+        }),
+        Span::dummy(),
+    );
+    let dependent = PiType::new(Text::from("x"), make_int_type(), x_ty);
+    assert!(
+        dependent.is_dependent(),
+        "(x: Int) -> x mentions x, so it IS dependent"
+    );
 }
 
 // ==================== Sigma Type Tests ====================
@@ -288,11 +321,16 @@ fn test_equality_type_computed() {
 #[test]
 fn test_equality_is_reflexive_check() {
     let x = make_var("x");
-    let eq = EqualityType::new(make_int_type(), x.clone(), x.clone());
+    let y = make_var("y");
 
-    // The is_reflexive method would need expression equality
-    // For now, just test construction
-    assert!(!eq.is_reflexive()); // Currently always returns false
+    // This test used to pin a STUB ("currently always returns false").
+    // `is_reflexive` now really compares the two sides structurally
+    // (dependent.rs: exprs_equal), so assert the actual property.
+    let refl = EqualityType::new(make_int_type(), x.clone(), x.clone());
+    assert!(refl.is_reflexive(), "x == x is reflexive");
+
+    let not_refl = EqualityType::new(make_int_type(), x, y);
+    assert!(!not_refl.is_reflexive(), "x == y is not reflexive");
 }
 
 // ==================== Proof Term Tests ====================
@@ -316,14 +354,26 @@ fn test_proof_term_refl() {
 #[test]
 fn test_proof_term_assumption() {
     let prop = make_var("P");
-    let proof = ProofTerm::new(
+    let mut proof = ProofTerm::new(
         prop,
         ProofStructure::Assumption {
-            name: "axiom1".into(),
+            name: Text::from("axiom1"),
         },
     );
 
-    assert!(proof.check_well_formed());
+    // Soundness property, not a formality: an Assumption is well-formed ONLY
+    // if its name is a declared dependency, so a proof cannot silently cite an
+    // undeclared axiom. Assert the rejecting direction first.
+    assert!(
+        !proof.check_well_formed(),
+        "an undeclared assumption must NOT be well-formed"
+    );
+
+    proof.add_dependency(Text::from("axiom1"));
+    assert!(
+        proof.check_well_formed(),
+        "once declared, the assumption is well-formed"
+    );
 }
 
 #[test]
@@ -365,13 +415,17 @@ fn test_custom_theory_registration() {
 #[test]
 fn test_quantifier_handler_creation() {
     let handler = QuantifierHandler::new();
-    assert_eq!(handler.max_depth, 5);
+    // `max_depth` is not a field of this type any more — QuantifierHandler
+    // now carries only E-matching trigger patterns.  Assert the construction
+    // invariant that IS observable: a fresh handler has no patterns.
+    assert!(handler.get_patterns("forall").is_none());
 }
 
 #[test]
 fn test_quantifier_handler_default() {
     let handler = QuantifierHandler::default();
-    assert_eq!(handler.max_depth, 5);
+    // Same contract as `new()` — see test_quantifier_handler_creation.
+    assert!(handler.get_patterns("forall").is_none());
 }
 
 // ==================== Proof Certificate Tests ====================
@@ -416,21 +470,24 @@ fn test_certificate_formats() {
 
 #[test]
 fn test_universe_levels() {
-    assert_eq!(UniverseLevel::TYPE0.0, 0);
-    assert_eq!(UniverseLevel::TYPE1.0, 1);
+    // UniverseLevel is an enum (Concrete/Variable/Max/Succ), not a tuple
+    // struct — compare against the canonical concrete level instead of
+    // reaching for a `.0` field that no longer exists.
+    assert_eq!(UniverseLevel::TYPE0, UniverseLevel::concrete(0));
+    assert_eq!(UniverseLevel::TYPE1, UniverseLevel::concrete(1));
 
     let level2 = UniverseLevel::TYPE1.succ();
-    assert_eq!(level2.0, 2);
+    assert_eq!(level2, UniverseLevel::concrete(2));
 
     let level3 = level2.succ();
-    assert_eq!(level3.0, 3);
+    assert_eq!(level3, UniverseLevel::concrete(3));
 }
 
 #[test]
 fn test_universe_ordering() {
     assert!(UniverseLevel::TYPE0 < UniverseLevel::TYPE1);
     assert!(UniverseLevel::TYPE1 > UniverseLevel::TYPE0);
-    assert_eq!(UniverseLevel::TYPE0, UniverseLevel(0));
+    assert_eq!(UniverseLevel::TYPE0, UniverseLevel::concrete(0));
 }
 
 // ==================== Type-Level Computation Tests ====================
@@ -438,13 +495,13 @@ fn test_universe_ordering() {
 #[test]
 fn test_type_evaluator_creation() {
     let evaluator = TypeLevelEvaluator::new();
-    assert_eq!(evaluator.max_depth, 100);
+    assert_eq!(evaluator.max_depth(), 100);
 }
 
 #[test]
 fn test_type_evaluator_custom_depth() {
     let evaluator = TypeLevelEvaluator::with_max_depth(50);
-    assert_eq!(evaluator.max_depth, 50);
+    assert_eq!(evaluator.max_depth(), 50);
 }
 
 #[test]
@@ -508,13 +565,24 @@ fn test_fin_type_evaluation() {
 fn test_dependent_pattern_simple() {
     use verum_ast::ty::{Ident, Path, PathSegment};
 
-    let ident = Ident::new("x".into(), Span::dummy());
+    let ident = Ident::new(Text::from("x"), Span::dummy());
     let segment = PathSegment::Name(ident);
     let path = Path {
         segments: vec![segment].into(),
+        span: Span::dummy(),
     };
 
-    let pattern = Pattern::new(PatternKind::Path(path), Span::dummy());
+    // A single lowercase path pattern is a BINDING, not a unit variant:
+    // verify_dependent_pattern matches Ident / Tuple / Record only.
+    let pattern = Pattern::new(
+        PatternKind::Ident {
+            by_ref: false,
+            mutable: false,
+            name: Ident::new(Text::from("x"), Span::dummy()),
+            subpattern: Maybe::None,
+        },
+        Span::dummy(),
+    );
     let ty = make_int_type();
 
     let result = verify_dependent_pattern(&pattern, &ty);
@@ -820,19 +888,21 @@ fn test_pattern_match_list_cons() {
 
     // Pattern: Cons(x, xs)
     let cons_path = Path {
-        segments: vec![PathSegment::Name(Ident::new("Cons".into(), Span::dummy()))].into(),
+        segments: vec![PathSegment::Name(Ident::new(Text::from("Cons"), Span::dummy()))].into(),
+        span: Span::dummy(),
     };
 
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: cons_path,
-            inner: None,
+            data: Maybe::None,
         },
         Span::dummy(),
     );
 
     let list_path = Path {
-        segments: vec![PathSegment::Name(Ident::new("List".into(), Span::dummy()))].into(),
+        segments: vec![PathSegment::Name(Ident::new(Text::from("List"), Span::dummy()))].into(),
+        span: Span::dummy(),
     };
     let list_type = Type::new(TypeKind::Path(list_path), Span::dummy());
 
@@ -853,19 +923,21 @@ fn test_pattern_match_option_some() {
 
     // Pattern: Some(x)
     let some_path = Path {
-        segments: vec![PathSegment::Name(Ident::new("Some".into(), Span::dummy()))].into(),
+        segments: vec![PathSegment::Name(Ident::new(Text::from("Some"), Span::dummy()))].into(),
+        span: Span::dummy(),
     };
 
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: some_path,
-            inner: None,
+            data: Maybe::None,
         },
         Span::dummy(),
     );
 
     let maybe_path = Path {
-        segments: vec![PathSegment::Name(Ident::new("Maybe".into(), Span::dummy()))].into(),
+        segments: vec![PathSegment::Name(Ident::new(Text::from("Maybe"), Span::dummy()))].into(),
+        span: Span::dummy(),
     };
     let maybe_type = Type::new(TypeKind::Path(maybe_path), Span::dummy());
 
@@ -883,14 +955,32 @@ fn test_pattern_match_tuple() {
 
     // Pattern: (x, y)
     let x_path = Path {
-        segments: vec![PathSegment::Name(Ident::new("x".into(), Span::dummy()))].into(),
+        segments: vec![PathSegment::Name(Ident::new(Text::from("x"), Span::dummy()))].into(),
+        span: Span::dummy(),
     };
     let y_path = Path {
-        segments: vec![PathSegment::Name(Ident::new("y".into(), Span::dummy()))].into(),
+        segments: vec![PathSegment::Name(Ident::new(Text::from("y"), Span::dummy()))].into(),
+        span: Span::dummy(),
     };
 
-    let x_pat = Pattern::new(PatternKind::Path(x_path), Span::dummy());
-    let y_pat = Pattern::new(PatternKind::Path(y_path), Span::dummy());
+    let x_pat = Pattern::new(
+        PatternKind::Ident {
+            by_ref: false,
+            mutable: false,
+            name: Ident::new(Text::from("x"), Span::dummy()),
+            subpattern: Maybe::None,
+        },
+        Span::dummy(),
+    );
+    let y_pat = Pattern::new(
+        PatternKind::Ident {
+            by_ref: false,
+            mutable: false,
+            name: Ident::new(Text::from("y"), Span::dummy()),
+            subpattern: Maybe::None,
+        },
+        Span::dummy(),
+    );
 
     let pattern = Pattern::new(PatternKind::Tuple(vec![x_pat, y_pat].into()), Span::dummy());
 
@@ -950,8 +1040,21 @@ fn test_termination_structural_recursion() {
         ty: Heap::new(make_int_type()),
     };
 
-    // Recursive call on tail (structurally smaller)
-    let tail_var = make_var("tail");
+    // Recursive call on `list.tail` — structurally smaller.
+    //
+    // It must be a FIELD ACCESS on the parameter, not a free variable that
+    // merely happens to be named "tail": `is_structurally_smaller`
+    // (termination.rs) accepts `param.field` or a match binding, i.e. it
+    // demands syntactic evidence of subterm-ness.  Accepting a bare name
+    // would let `length(anything)` pass as structural recursion, which is
+    // exactly the soundness hole the checker exists to close.
+    let tail_var = Expr::new(
+        ExprKind::Field {
+            expr: Heap::new(make_var("list")),
+            field: verum_ast::ty::Ident::new(Text::from("tail"), Span::dummy()),
+        },
+        Span::dummy(),
+    );
     let length_call = Expr::new(
         ExprKind::Call {
             func: Box::new(make_var("length")),
@@ -1012,7 +1115,9 @@ fn test_full_dependent_types_workflow() {
     // 1. Type-level computation: Fin<5>
     let mut evaluator = TypeLevelEvaluator::new();
     let five = make_int_lit(5);
-    let fin_type = evaluator.eval_fin_type(&[five.clone()]);
+    // `eval_fin_type` is private; `evaluate_type_function` is the public
+    // entry that dispatches "Fin" to it (type_level_computation.rs:173).
+    let fin_type = evaluator.evaluate_type_function("Fin", &[five.clone()]);
     assert!(fin_type.is_ok());
 
     // 2. Verify Fin constraint
@@ -1064,9 +1169,12 @@ fn test_specification_compliance_coverage() {
     };
     use verum_smt::verify_dependent_pattern;
     let pattern = Pattern::new(
-        PatternKind::Path(Path {
-            segments: vec![PathSegment::Name(Ident::new("x".into(), Span::dummy()))].into(),
-        }),
+        PatternKind::Ident {
+            by_ref: false,
+            mutable: false,
+            name: Ident::new(Text::from("x"), Span::dummy()),
+            subpattern: Maybe::None,
+        },
         Span::dummy(),
     );
     let _bindings = verify_dependent_pattern(&pattern, &make_int_type());
@@ -1302,11 +1410,11 @@ fn test_quantity_zero() {
     let one = Quantity::One;
 
     // 0 * x = 0
-    assert_eq!(zero.mul(one), Quantity::Zero);
-    assert_eq!(one.mul(zero), Quantity::Zero);
+    assert_eq!(zero.mul(&one), Quantity::Zero);
+    assert_eq!(one.mul(&zero), Quantity::Zero);
 
     // 0 + x = x
-    assert_eq!(zero.add(one), Quantity::One);
+    assert_eq!(zero.add(&one), Quantity::One);
 }
 
 #[test]
@@ -1316,10 +1424,12 @@ fn test_quantity_linear() {
     let one = Quantity::One;
 
     // 1 * 1 = 1 (linear composition)
-    assert_eq!(one.mul(one), Quantity::One);
+    assert_eq!(one.mul(&one), Quantity::One);
 
-    // 1 + 1 = ω (used in both branches)
-    assert_eq!(one.add(one), Quantity::Omega);
+    // 1 + 1 = AtMost(2), NOT ω.  The lattice tracks bounded multiplicity
+    // rather than collapsing every repeated use to "unbounded", so this is
+    // strictly more precise than the ω this test originally expected.
+    assert_eq!(one.add(&one), Quantity::AtMost(2));
 }
 
 #[test]
@@ -1330,11 +1440,11 @@ fn test_quantity_omega() {
     let omega = Quantity::Omega;
 
     // ω * x = ω for x ≠ 0
-    assert_eq!(omega.mul(one), Quantity::Omega);
-    assert_eq!(one.mul(omega), Quantity::Omega);
+    assert_eq!(omega.mul(&one), Quantity::Omega);
+    assert_eq!(one.mul(&omega), Quantity::Omega);
 
     // ω + x = ω
-    assert_eq!(omega.add(one), Quantity::Omega);
+    assert_eq!(omega.add(&one), Quantity::Omega);
 }
 
 #[test]
@@ -1346,13 +1456,13 @@ fn test_quantity_subsumption() {
     let omega = Quantity::Omega;
 
     // 0 <: 1 <: ω
-    assert!(zero.subsumed_by(one));
-    assert!(zero.subsumed_by(omega));
-    assert!(one.subsumed_by(omega));
+    assert!(zero.subsumed_by(&one));
+    assert!(zero.subsumed_by(&omega));
+    assert!(one.subsumed_by(&omega));
 
     // 1 is not subsumed by 0
-    assert!(!one.subsumed_by(zero));
-    assert!(!omega.subsumed_by(one));
+    assert!(!one.subsumed_by(&zero));
+    assert!(!omega.subsumed_by(&one));
 }
 
 #[test]

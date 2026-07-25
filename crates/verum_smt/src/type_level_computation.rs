@@ -81,6 +81,15 @@ impl TypeLevelEvaluator {
     }
 
     /// Create with custom max depth
+    /// The recursion-depth ceiling this evaluator was built with.
+    ///
+    /// Read-only view of the value `with_max_depth` sets (and of the default
+    /// chosen by `new`); the field itself stays private so the ceiling cannot
+    /// be mutated behind the evaluator's back mid-evaluation.
+    pub fn max_depth(&self) -> usize {
+        self.max_depth
+    }
+
     pub fn with_max_depth(max_depth: usize) -> Self {
         Self {
             cache: Map::new(),
