@@ -41,3 +41,7 @@ check-stdlib-proofs: ## Gate (T0230): stdlib theorem-proof ratchet — clean fil
 
 check-internal-refs: ## Gate: no references to the internal/ directory in tracked files
 	bash scripts/ci/check_no_internal_refs.sh
+
+check-bake-prepass-parity: ## Gate (T0640): every collect_all_declarations pre-pass is classified for the stdlib bake
+	python3 scripts/ci/check_bake_prepass_parity.py
+
