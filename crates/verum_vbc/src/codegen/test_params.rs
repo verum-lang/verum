@@ -1953,7 +1953,12 @@ fn main() -> Int {
             vbc_module
                 .strings
                 .get(f.name)
-                .map(|s| s == "main")
+                // Names are MODULE-QUALIFIED: this test's config is
+                // `CodegenConfig::new("test_receiver_shadow")`, so `main` is
+                // emitted as `test_receiver_shadow.main`.  An exact `== "main"`
+                // therefore found nothing and the expect below fired — a test
+                // bug, not a missing function.
+                .map(|s| s == "main" || s.ends_with(".main"))
                 .unwrap_or(false)
         })
         .expect("main must be present in the module");

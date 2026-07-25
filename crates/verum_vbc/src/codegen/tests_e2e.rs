@@ -2795,9 +2795,15 @@ mod debug_assert_cfg_tests {
         "#;
         let module = parse_source(source).expect("parse");
         let vbc = compile_module(&module).expect("compile");
+        // Match the QUALIFIED name, not a substring.  Function names carry
+        // their module (`e2e_test.check`), and a `contains("check")` probe
+        // matches `Text.from_utf8_unchecked` first — a stdlib forward
+        // declaration with an EMPTY body, so the assertion below was reading
+        // a zero-length slice and could never see an Assert.  The compiler was
+        // emitting one correctly all along.
         let func = vbc.functions.iter().find(|f| {
             vbc.get_string(f.name)
-                .map(|n| n.contains("check"))
+                .map(|n| n == "check" || n.ends_with(".check"))
                 .unwrap_or(false)
         });
         let func = func.expect("check function not found");
