@@ -24,8 +24,6 @@ mod vec_value;
 // Operand bundles are always available in LLVM 21+
 pub(crate) mod operand_bundle;
 
-// Note: callable_value module was for LLVM < 15 and is no longer needed
-
 pub use crate::values::instruction_value::FastMathFlags;
 
 pub use crate::values::operand_bundle::OperandBundle;

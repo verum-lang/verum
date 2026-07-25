@@ -252,7 +252,7 @@ use std::collections::*;  // Use Map/Set
 
 | Crate | Purpose | Key Files |
 |-------|---------|-----------|
-| **verum_common** | Semantic types, no deps | `semantic_types.rs` (List, Text, Map), `maybe.rs`, `shared.rs` |
+| **verum_common** | Semantic types, no deps | `semantic_types.rs` (List, Text, Map), `types.rs`, `shared.rs`; `Maybe<T>` is a type alias in `lib.rs` |
 | **verum_cbgr** | Memory safety system | `escape_analysis.rs`, `ownership_analysis.rs`, `tier_analysis.rs` |
 | **verum_ast** | AST definitions | `expr.rs`, `ty.rs`, `pattern.rs`, `decl.rs` |
 | **verum_lexer** | Tokenization (logos) | `token.rs`, `lexer.rs` |
