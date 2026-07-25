@@ -1398,8 +1398,19 @@ impl TypeChecker {
                 Maybe::None => (verum_common::Map::new(), verum_common::Map::new(), 0),
             }
         };
-        // Skip when the hardcoded baseline is well-formed (≥2 methods).
-        if existing_method_count >= 2 {
+        // Skip when the hardcoded baseline is well-formed (≥2 methods), OR when
+        // the VBCA metadata carries NO method signatures to contribute yet the
+        // existing protocol (hardcoded stub / coercion marker) already has some
+        // — never ERASE real methods with an empty metadata entry. From/Default
+        // arrive with 1 real method (Default's hardcoded `default`; From's
+        // coercion-marker path) but `desc.required_methods + default_methods`=0,
+        // so this loader was silently emptying them, leaving the impl loader
+        // (`register_stdlib_impls_for_target`) to copy 0 methods onto every
+        // From/Default impl and making static `From`/`Default` dispatch on a
+        // concrete receiver unresolvable (T0402 L4).
+        let desc_total =
+            protocol_desc.required_methods.len() + protocol_desc.default_methods.len();
+        if existing_method_count >= 2 || (desc_total == 0 && existing_method_count > 0) {
             return;
         }
 

@@ -18214,6 +18214,17 @@ impl TypeChecker {
             return Ok(r);
         }
 
+        // Last resort before erroring: a protocol method (static or instance)
+        // provided by a protocol impl applicable to the concrete receiver —
+        // including a blanket `implement<T> P<..> for T`.  Resolves e.g.
+        // `Int.from(n)` from the reflexive `From<T> for T` (T0402).  Placed
+        // after every other arm so it only converts a would-be MethodNotFound
+        // into a resolution and never overrides existing dispatch.
+        if let Some(r) =
+            self.try_concrete_protocol_impl_method_dispatch(&recv_ty, method, args, span)?
+        {
+            return Ok(r);
+        }
 
         return self.emit_method_not_found(
             recv_ty, receiver, method, type_args, args, span, skip_static_lookup, specialization_rejected,
@@ -19644,6 +19655,96 @@ impl TypeChecker {
                     let resolved_return = self.unifier.apply(return_type);
                     return Ok(Some(InferResult::new(resolved_return)));
                 }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Last-resort protocol-method dispatch for a CONCRETE receiver type via
+    /// the protocol-impl table — including blanket `implement<T> P<..> for T`.
+    ///
+    /// No earlier cascade arm consults `protocol_checker`'s impl table for a
+    /// concrete receiver: `try_inherent_method_dispatch` reads only
+    /// `inherent_methods`, `try_blanket_and_ufcs_dispatch` reads only INHERENT
+    /// blanket impls (`implement<I: Iterator> I`, statics skipped) plus free
+    /// functions, and `resolve_method_via_protocol_search` handles only
+    /// BOUNDED type-vars.  So a *static* protocol method on a concrete type —
+    /// e.g. `Int.from(n)`, provided by the reflexive `implement<T> From<T> for
+    /// T` in core/base/protocols.vr — reaches the terminal error unresolved
+    /// and surfaces as E400 "no method `from` found for type `Int`" (T0402).
+    ///
+    /// Resolution mirrors the bounded-var path: find an applicable impl and
+    /// concretise its method signature with the SAME substitution that matched
+    /// the impl's `for_type` against `recv_ty` (a blanket impl's `for_type` is
+    /// a bare type-var/param, so it unifies with any type and binds it in the
+    /// substitution).  Stdlib-agnostic per CLAUDE.md: keyed purely by the
+    /// user-written method name and the receiver type, no per-type special
+    /// case.  Runs only after every other arm has missed, so it can turn a
+    /// MethodNotFound into a resolution but never overrides existing dispatch.
+    fn try_concrete_protocol_impl_method_dispatch(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<Option<InferResult>> {
+        // Bounded/unresolved type-vars have no concrete impl to match against
+        // (their protocol methods resolve via try_type_var_bound_dispatch).
+        if matches!(recv_ty, Type::Var(_)) {
+            return Ok(None);
+        }
+        let method_name: Text = method.name.as_str().into();
+
+        // Find a protocol that declares `method` AND has an impl applicable to
+        // the concrete receiver.  Resolve the concrete signature within the
+        // read guard, then drop it before the &mut-self arg checking below.
+        let concrete_method_ty: Option<Type> = {
+            let pc = self.protocol_checker.read();
+            let mut found: Option<Type> = None;
+            // Do NOT gate on proto.methods.contains_key — From/Default proto
+            // methods can be sparse; consult each applicable impl's own methods.
+            for proto in pc.all_protocols() {
+                let proto_path = Path::single(Ident::new(proto.name.clone(), span));
+                if let Maybe::Some((impl_, subst)) =
+                    pc.find_impl_with_substitution(recv_ty, &proto_path)
+                {
+                    // Prefer the impl's own method type; fall back to the
+                    // protocol's declared signature when the impl relies on a
+                    // default implementation (no explicit method entry).
+                    let raw_ty = impl_.methods.get(&method_name).cloned().or_else(|| {
+                        proto.methods.get(&method_name).map(|pm| pm.ty.clone())
+                    });
+                    if let Some(raw_ty) = raw_ty {
+                        found = Some(pc.substitute_type_params(&raw_ty, &subst));
+                        break;
+                    }
+                }
+            }
+            found
+        };
+
+        let Some(method_ty) = concrete_method_ty else {
+            return Ok(None);
+        };
+
+        // Apply arguments against the resolved signature, mirroring the
+        // blanket-dispatch arm.  A static method (`fn from(value: T) -> T`)
+        // has no `self` param, so `params` aligns 1:1 with the call args.
+        if let Type::Function {
+            params,
+            return_type,
+            ..
+        } = &method_ty
+        {
+            if args.len() == params.len() {
+                let params_cloned = params.clone();
+                for (arg, param_ty) in args.iter().zip(params_cloned.iter()) {
+                    let resolved_param = self.unifier.apply(param_ty);
+                    self.check_expr(arg, &resolved_param)?;
+                }
+                let subst_return = self.unifier.apply(return_type);
+                let normalized = self.normalize_type(&subst_return);
+                return Ok(Some(InferResult::new(normalized)));
             }
         }
         Ok(None)
