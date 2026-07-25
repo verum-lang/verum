@@ -70,8 +70,15 @@ COVERAGE = {
         "externs above `type PthreadMutex`.",
     ),
     "claim_user_type_name": (
-        "UNAUDITED",
-        "T0640: not yet checked against the bake path.",
+        "GAP",
+        "T0640, audited 2026-07-25: identical call-site pattern to "
+        "pregenerate_ffi_struct_layouts (compile_module / _with_mounts / "
+        "_additional_module / collect_all_declarations, none reached by the "
+        "bootstrap), and user_claimed_type_names has exactly one writer — "
+        "inside this function. So the OWN-DECL-LAYOUT-EVICT-1 fix (T0125) is "
+        "inert for the bake, even though its own comment describes a "
+        "bake-time simple-key layout squat as the scenario it exists to fix. "
+        "Candidate cause of T0408.",
     ),
 }
 
