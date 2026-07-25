@@ -1,4 +1,4 @@
-# T0230 stdlib proof-gate ratchet manifest — seeded 2026-07-17 from the full-corpus census
+# T0230 stdlib proof-gate ratchet manifest — regenerate with proof_gate.py --seed
 # file	status	proved	failed
 core/action/effects.vr	failures	4	9
 core/action/ludics.vr	failures	2	5
@@ -22,7 +22,7 @@ core/math/bits.vr	clean	44	0
 core/math/calculus.vr	unverifiable	0	0
 core/math/category.vr	clean	21	0
 core/math/checked.vr	clean	38	0
-core/math/coding.vr	clean	11	0
+core/math/coding.vr	clean	12	0
 core/math/cohesive.vr	failures	43	6
 core/math/complex.vr	clean	8	0
 core/math/concrete_accessible.vr	failures	0	1
@@ -30,7 +30,7 @@ core/math/constants.vr	clean	3	0
 core/math/cubical.vr	failures	11	8
 core/math/day_convolution.vr	failures	9	7
 core/math/diakrisis_primitive.vr	clean	7	0
-core/math/distributed.vr	unverifiable	0	0
+core/math/distributed.vr	clean	22	0
 core/math/dual_absolute_layer.vr	failures	0	1
 core/math/elementary.vr	clean	62	0
 core/math/epistemic.vr	failures	8	10
@@ -66,7 +66,7 @@ core/math/simplicial.vr	clean	38	0
 core/math/special.vr	clean	24	0
 core/math/ssm.vr	clean	22	0
 core/math/syn_mod.vr	failures	0	2
-core/math/tactics.vr	failures	51	9
+core/math/tactics.vr	clean	60	0
 core/math/tensor.vr	clean	262	0
 core/math/topology.vr	clean	30	0
 core/meta/oracle.vr	clean	9	0
