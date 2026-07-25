@@ -229,7 +229,7 @@ fn bench_10k_loc_target(c: &mut Criterion) {
         b.iter(|| {
             let mut checker = TypeChecker::new();
             let mut total_ok = 0;
-            let mut total_time = std::time::Duration::ZERO;
+            let total_time;
 
             let start = std::time::Instant::now();
 

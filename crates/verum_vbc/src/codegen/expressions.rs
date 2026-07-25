@@ -23829,6 +23829,8 @@ impl VbcCodegen {
         None
     }
 
+    /// Best-effort static type NAME of an expression, used for overload and
+    /// variant disambiguation. `None` when the shape carries no usable name.
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;

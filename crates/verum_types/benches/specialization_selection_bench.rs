@@ -20,21 +20,6 @@ use verum_types::unify::Unifier;
 
 // ==================== Helper Functions ====================
 
-fn make_protocol(name: &str) -> Protocol {
-    Protocol {
-        name: name.into(),
-        kind: verum_types::protocol::ProtocolKind::Constraint,
-        type_params: List::new(),
-        methods: Map::new(),
-        associated_types: Map::new(),
-        associated_consts: Map::new(),
-        super_protocols: List::new(),
-        specialization_info: Maybe::None,
-        defining_crate: Maybe::None,
-        span: Span::default(),
-    }
-}
-
 fn make_impl(protocol: &str, for_type: Type, rank: usize) -> ProtocolImpl {
     let path = Path::single(Ident::new(protocol, Span::default()));
 

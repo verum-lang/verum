@@ -409,7 +409,7 @@ fn jit_cache_persists_between_backend_instances() {
  .binop(&a, &b, TensorBinaryOp::Add)
  .unwrap();
  assert_eq!(read_f32(&r1, 8), read_f32(&r2, 8));
- drop(jit_backend); // suppress unused warning
+ let _ = jit_backend; // suppress unused warning (drop() on a fn item is a no-op)
 }
 
 // ============================================================================

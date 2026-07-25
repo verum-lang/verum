@@ -422,6 +422,10 @@ impl VbcCodegen {
     }
 }
 
+/// AST-to-VBC code generator: owns the module under construction (string /
+/// constant / type pools, function descriptors, bytecode) plus the resolution
+/// tables — mounts, protocol registry, blanket impls — consulted while
+/// lowering each declaration and expression.
 pub struct VbcCodegen {
     /// REFINE-FIELD-DYNAMIC-BYPASS-1 phase 2: deferred field-refinement
     /// stamps `(type_simple_name, field_name, predicate_src, binding)`.
@@ -754,11 +758,6 @@ pub struct VbcCodegen {
     /// we fall through to scan-all-types rather than failing.
     transparent_wrappers: std::collections::HashSet<String>,
 
-    /// Set of collection type names whose `.new()` constructor is intercepted and
-    /// emitted as a `CallM` with the type name as receiver, so the interpreter
-    /// creates a built-in heap object with the correct TypeId rather than a plain
-    /// record (e.g., Channel, List, Map, Set, Deque).
-    builtin_ctor_collections: std::collections::HashSet<String>,
 
     /// Protocol registry for default method inheritance.
     /// Maps protocol name → protocol info with default method implementations.
@@ -1261,10 +1260,10 @@ impl VbcCodegen {
     /// FUNDAMENTAL #7 — delegates to the centralised
     /// `WellKnownType::name_has_builtin_constructor_intercept` predicate
     /// instead of consulting an in-memory HashSet that had to be
-    /// hand-populated.  The HashSet field (`builtin_ctor_collections`)
-    /// is retained as a no-op for binary-compat with the construction
-    /// site but is no longer consulted on the hot path; future cleanup
-    /// can remove it once all reads are migrated.
+    /// hand-populated.  The superseded `builtin_ctor_collections` HashSet
+    /// (a hardcoded Channel/List/Map/Set/Deque list — exactly the stdlib
+    /// knowledge the compiler must not carry) is now removed: every read
+    /// had already migrated to the predicate.
     pub fn is_builtin_ctor_collection(&self, name: &str) -> bool {
         verum_common::well_known_types::WellKnownType::name_has_builtin_constructor_intercept(name)
     }
@@ -2011,17 +2010,6 @@ impl VbcCodegen {
                 s.insert("Heap".to_string());
                 s.insert("Shared".to_string());
                 s.insert("Maybe".to_string());
-                s
-            },
-            // Collection types whose `.new()` is intercepted as a CallM to the
-            // interpreter's built-in constructor handler.
-            builtin_ctor_collections: {
-                let mut s = std::collections::HashSet::new();
-                s.insert("Channel".to_string());
-                s.insert("List".to_string());
-                s.insert("Map".to_string());
-                s.insert("Set".to_string());
-                s.insert("Deque".to_string());
                 s
             },
             // Protocol registry for default method inheritance
@@ -4691,6 +4679,9 @@ impl VbcCodegen {
         }
     }
 
+    /// Finish code generation and produce the assembled [`VbcModule`]:
+    /// drains pending constants / TLS inits / default-method monomorphisations
+    /// and ensures every call target has a descriptor.
     pub fn finalize_module(&mut self) -> CodegenResult<VbcModule> {
         self.dump_vbc_if_requested();
         // Compile any pending constants (struct literals, etc.) before building
@@ -5043,6 +5034,8 @@ impl VbcCodegen {
         tid
     }
 
+    /// Register a type imported from a precompiled archive so its layout and
+    /// protocol impls participate in this module's resolution.
     pub fn register_archive_type(
         &mut self,
         ty: crate::types::TypeDescriptor,
@@ -5727,6 +5720,7 @@ impl VbcCodegen {
     /// `TypeDescriptor`s and the matching string table. Pulled out
     /// so unit tests can construct synthetic tables without going
     /// through the full codegen lifecycle.
+    #[cfg(test)]
     fn compute_type_table_health(
         types: &[crate::types::TypeDescriptor],
         strings: &[String],
