@@ -429,9 +429,10 @@ fn main() {
                         );
                     } else {
                         assert_last_good_schema_compatible(&checksum_path);
-                        println!(
-                            "cargo:warning=Stdlib precompile staging publish FAILED (missing or unrenameable staged artefacts at {}) — continuing with last-good artefacts (same wire schema)",
-                            staging_dir.display()
+                        reject_stale_stdlib_or_warn(
+                            "Stdlib precompile staging publish FAILED (missing \
+                             or unrenameable staged artefacts)",
+                            &staging_dir,
                         );
                     }
                     let _ = std::fs::remove_dir_all(&staging_dir);
@@ -439,19 +440,17 @@ fn main() {
                 Ok(s) => {
                     let _ = std::fs::remove_dir_all(&staging_dir);
                     assert_last_good_schema_compatible(&checksum_path);
-                    println!(
-                        "cargo:warning=verum_stdlib_precompiler exited with {} — \
-                         continuing with stale artefacts (same wire schema)",
-                        s
+                    reject_stale_stdlib_or_warn(
+                        &format!("verum_stdlib_precompiler exited with {s}"),
+                        &staging_dir,
                     );
                 }
                 Err(e) => {
                     let _ = std::fs::remove_dir_all(&staging_dir);
                     assert_last_good_schema_compatible(&checksum_path);
-                    println!(
-                        "cargo:warning=verum_stdlib_precompiler invocation failed: {} — \
-                         continuing with stale artefacts (same wire schema)",
-                        e
+                    reject_stale_stdlib_or_warn(
+                        &format!("verum_stdlib_precompiler invocation failed: {e}"),
+                        &staging_dir,
                     );
                 }
             }
@@ -1660,12 +1659,60 @@ fn is_target_triple_dir(name: &str) -> bool {
 /// tensor_broadcast wrapper then round-tripped corrupt and returned
 /// nil while locally-compiled code worked). Loud build failure beats
 /// a silently wrong stdlib.
+/// Whether a failed bake may silently fall back to the last-good archive.
+///
+/// Default: NO. A precompiler failure used to surface as a `cargo:warning`
+/// and a green build, so the resulting binary embedded a stdlib that did not
+/// correspond to `core/` — every downstream test then measured the OLD
+/// stdlib while reading as a pass. That is the expensive failure mode: a
+/// wrong green costs more than a red build, because it is not looked at.
+///
+/// `assert_last_good_schema_compatible` only rules out a *wire-format* skew.
+/// It cannot detect a same-schema stale archive, which is the common case —
+/// the stdlib source changed, the bake failed, and the previous archive is
+/// still perfectly loadable and perfectly wrong.
+///
+/// Set `VERUM_ALLOW_STALE_STDLIB=1` to opt back into the old behaviour when
+/// the staleness is understood and acceptable (e.g. iterating on Rust-side
+/// code while a known-broken `core/` change is parked in the tree).
+fn stale_stdlib_fallback_allowed() -> bool {
+    std::env::var("VERUM_ALLOW_STALE_STDLIB").is_ok_and(|v| v != "0")
+}
+
+/// Fail the build on a bake failure unless the fallback was explicitly
+/// requested. `what` describes the failure in one clause.
+fn reject_stale_stdlib_or_warn(what: &str, staging_dir: &Path) {
+    if stale_stdlib_fallback_allowed() {
+        println!(
+            "cargo:warning={what} — continuing with STALE artefacts because \
+             VERUM_ALLOW_STALE_STDLIB is set; the embedded stdlib does NOT \
+             correspond to core/"
+        );
+        return;
+    }
+    panic!(
+        "{what}.\n\n\
+         Refusing to embed the previous archive: it is loadable and \
+         same-wire-schema, but it was baked from a DIFFERENT core/ tree, so \
+         the build would be green while every stdlib-dependent test silently \
+         measured the old stdlib.\n\n\
+         Fix the bake failure reported above. Staging dir: {}\n\
+         To continue anyway with a knowingly stale stdlib, set \
+         VERUM_ALLOW_STALE_STDLIB=1.",
+        staging_dir.display()
+    );
+}
+
 fn assert_last_good_schema_compatible(checksum_path: &Path) {
     let schema_path = checksum_path.with_extension("schema");
     let last_good = std::fs::read_to_string(&schema_path).unwrap_or_default();
     let last_good = last_good.trim();
     if !last_good.is_empty() && last_good == PRECOMPILE_SCHEMA_VERSION {
-        return; // compatible — the stale-but-same-wire fallback is safe
+        // Wire-compatible, so the archive will LOAD. That is all this check
+        // establishes — it says nothing about whether the archive matches
+        // the current core/. Freshness is `reject_stale_stdlib_or_warn`'s
+        // job, and it is the one that decides whether to continue.
+        return;
     }
     panic!(
         "stdlib precompile FAILED and the last-good archive was baked under \

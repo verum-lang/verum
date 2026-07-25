@@ -771,6 +771,35 @@ stdlib source is modified mid-session and the embedded archive is stale.
 The compiler detects staleness automatically by hashing `core/` and
 comparing to the manifest.
 
+### Bake failure is a build failure
+
+When the `core/` hash moves, `build.rs` re-bakes. If that bake fails, the
+build **stops**. It does not fall back to the previous archive.
+
+The fallback used to happen: a precompiler failure emitted a
+`cargo:warning` and the build went green carrying the last-good archive.
+That archive loads perfectly and is perfectly wrong — it was baked from a
+different `core/`, so every stdlib-dependent test downstream measured the
+*old* stdlib while reporting a pass. A wrong green is more expensive than a
+red build precisely because nobody investigates it.
+
+Two distinct checks guard the two distinct hazards, and they are not
+interchangeable:
+
+| Check | Question it answers |
+|-------|--------------------|
+| `assert_last_good_schema_compatible` | Will the archive *load*? (wire-format skew) |
+| `reject_stale_stdlib_or_warn` | Does the archive *match `core/`*? (freshness) |
+
+Wire-schema compatibility says nothing about freshness, which is why the
+same-schema case — the common one — needs its own gate.
+
+`VERUM_ALLOW_STALE_STDLIB=1` restores the old lenient behaviour for the
+case where the staleness is understood: iterating on Rust-side code while a
+known-broken `core/` change sits in the tree. It downgrades the failure to a
+warning that states plainly that the embedded stdlib does not correspond to
+`core/`.
+
 ## Cross-compile — no separate cache, no per-target files
 
 The multi-variant archive **eliminates** the need for a per-target
