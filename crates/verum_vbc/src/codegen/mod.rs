@@ -3708,6 +3708,106 @@ impl VbcCodegen {
         self.type_field_layouts.len()
     }
 
+    /// Record every blanket impl (`implement<T: Base> Derived for T`) declared
+    /// in `module` into [`Self::blanket_impls`].  Idempotent and additive:
+    /// re-scanning a module, or scanning a module that redeclares a
+    /// `(base, derived)` pair already seen, is a no-op.
+    ///
+    /// This is the ONE authority for turning impl ASTs into [`BlanketImpl`]
+    /// records — `collect_all_declarations` runs it as its pre-pass, and the
+    /// stdlib bootstrap runs it across every file of a module (and imports
+    /// earlier modules' results via [`Self::import_blanket_impls`]) because
+    /// that path never calls `collect_all_declarations` at all.
+    ///
+    /// Ordering is the whole point (T0623 / T0625).  Blanket bodies
+    /// monomorphise onto concrete implementors when the CONCRETE impl is
+    /// collected, so a blanket must already be recorded by then.  Stdlib
+    /// modules are directory-scoped with files sorted alphabetically, which
+    /// puts `core/base/primitives.vr` (`implement Ord for Int`) BEFORE
+    /// `core/base/protocols.vr` (`implement<T: Ord> PartialOrd for T`) — so
+    /// without a pre-pass `Int` never receives `partial_cmp` and the method
+    /// panics "not found" at runtime.
+    pub fn collect_blanket_impls(&mut self, module: &Module) {
+        for item in module.items.iter() {
+            if !self.should_compile_item(item) {
+                continue;
+            }
+            if let ItemKind::Impl(impl_decl) = &item.kind
+                && let verum_ast::decl::ImplKind::Protocol {
+                    protocol, for_type, ..
+                } = &impl_decl.kind
+                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
+                })
+                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
+            {
+                for g in impl_decl.generics.iter() {
+                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
+                        && name.name.as_str() == param_name
+                    {
+                        for b in bounds.iter() {
+                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
+                                let body_methods: Vec<verum_ast::FunctionDecl> = impl_decl
+                                    .items
+                                    .iter()
+                                    .filter_map(|item| match &item.kind {
+                                        verum_ast::decl::ImplItemKind::Function(f) => {
+                                            Some(f.clone())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect();
+                                let explicit_methods: std::collections::HashSet<String> =
+                                    body_methods.iter().map(|f| f.name.name.to_string()).collect();
+                                let already_present = self.blanket_impls.iter().any(|b| {
+                                    b.base_protocol == base_name
+                                        && b.derived_protocol == derived_name
+                                });
+                                if !already_present {
+                                    self.blanket_impls.push(BlanketImpl {
+                                        base_protocol: base_name,
+                                        derived_protocol: derived_name.clone(),
+                                        explicit_methods,
+                                        body_methods,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The blanket impls recorded so far — harvested by the stdlib bootstrap
+    /// after each module so later, dependent modules can see them.
+    pub fn blanket_impls(&self) -> &[BlanketImpl] {
+        &self.blanket_impls
+    }
+
+    /// Seed blanket impls collected from previously compiled modules.
+    /// Additive / first-wins per `(base_protocol, derived_protocol)`, matching
+    /// [`Self::import_type_aliases`] — this module's own declarations, which
+    /// are collected afterwards, never displace an already-seeded pair (they
+    /// would be the same declaration observed twice).
+    ///
+    /// A blanket is only useful to a module that implements its BASE protocol,
+    /// and a module can only do that once the protocol is defined, so
+    /// dependency order already guarantees the blanket has been harvested by
+    /// the time an implementor module compiles.
+    pub fn import_blanket_impls(&mut self, impls: &[BlanketImpl]) {
+        for b in impls {
+            let already_present = self.blanket_impls.iter().any(|existing| {
+                existing.base_protocol == b.base_protocol
+                    && existing.derived_protocol == b.derived_protocol
+            });
+            if !already_present {
+                self.blanket_impls.push(b.clone());
+            }
+        }
+    }
+
     /// Import record field layouts from a global registry (built by the
     /// stdlib bootstrap from previously-compiled modules).  **Additive,
     /// first-wins**: an entry is inserted ONLY when this codegen has no
@@ -6317,56 +6417,7 @@ impl VbcCodegen {
         // is a generic type, not a bare param — so `for_type_generic_param_name`
         // returns `None` and the pre-pass skips them, preserving the
         // original collection order for the Poll dispatch path.
-        for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            if let ItemKind::Impl(impl_decl) = &item.kind
-                && let verum_ast::decl::ImplKind::Protocol {
-                    protocol, for_type, ..
-                } = &impl_decl.kind
-                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                    _ => None,
-                })
-                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
-            {
-                for g in impl_decl.generics.iter() {
-                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
-                        && name.name.as_str() == param_name
-                    {
-                        for b in bounds.iter() {
-                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
-                                let body_methods: Vec<verum_ast::FunctionDecl> = impl_decl
-                                    .items
-                                    .iter()
-                                    .filter_map(|item| match &item.kind {
-                                        verum_ast::decl::ImplItemKind::Function(f) => {
-                                            Some(f.clone())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect();
-                                let explicit_methods: std::collections::HashSet<String> =
-                                    body_methods.iter().map(|f| f.name.name.to_string()).collect();
-                                let already_present = self.blanket_impls.iter().any(|b| {
-                                    b.base_protocol == base_name
-                                        && b.derived_protocol == derived_name
-                                });
-                                if !already_present {
-                                    self.blanket_impls.push(BlanketImpl {
-                                        base_protocol: base_name,
-                                        derived_protocol: derived_name.clone(),
-                                        explicit_methods,
-                                        body_methods,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        self.collect_blanket_impls(module);
 
         // Pass 1.6 (#32): generate FFI struct layouts for record types
         // referenced in this module's extern signatures BEFORE the

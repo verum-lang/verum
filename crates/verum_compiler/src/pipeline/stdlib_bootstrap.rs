@@ -1861,6 +1861,12 @@ impl<'s> CompilationPipeline<'s> {
         // so a use of an imported alias as a namespace resolves. Additive
         // / first-wins — this module's own alias decls always win.
         codegen.import_type_aliases(&self.global_type_alias_registry);
+        // Seed blanket impls (`implement<T: Base> Derived for T`) harvested
+        // from previously compiled (dependency-ordered) modules, so a blanket
+        // declared in one module applies to implementors declared in another.
+        // This module's own blankets are collected by the Pass 1a.5 pre-pass
+        // below. Additive / first-wins.
+        codegen.import_blanket_impls(&self.global_blanket_impl_registry);
 
         // Register stdlib intrinsic shortcuts so callers in this module's
         // bodies emit InlineSequence opcodes instead of Calls to the body
@@ -1887,6 +1893,20 @@ impl<'s> CompilationPipeline<'s> {
         // impl blocks that implement them, regardless of file order.
         for ast_module in ast_modules {
             codegen.collect_protocol_definitions(ast_module);
+        }
+
+        // Pass 1a.5 (T0625): collect this module's blanket impls from ALL its
+        // files BEFORE any concrete impl is collected in Pass 1b.  Blanket
+        // bodies monomorphise onto a concrete implementor at the moment that
+        // implementor is collected, so a blanket recorded later never reaches
+        // it.  Module files are sorted alphabetically, which puts
+        // `core/base/primitives.vr` (`implement Ord for Int`) ahead of
+        // `core/base/protocols.vr` (`implement<T: Ord> PartialOrd for T`) —
+        // so `Int.partial_cmp` was never emitted and panicked "method not
+        // found" at runtime.  The single-module path gets this same pre-pass
+        // from `collect_all_declarations`, which this bootstrap never calls.
+        for ast_module in ast_modules {
+            codegen.collect_blanket_impls(ast_module);
         }
 
         // Pass 1b: Collect all other declarations from ALL files
@@ -2183,6 +2203,18 @@ impl<'s> CompilationPipeline<'s> {
         // a cross-module alias as a namespace stay lenient panic-stubs).
         for (name, target) in codegen.export_type_aliases() {
             self.global_type_alias_registry.entry(name).or_insert(target);
+        }
+        // Publish this module's blanket impls (T0625) so later, dependent
+        // modules apply them to their own implementors of the bound protocol.
+        // First-wins per (base, derived), matching the alias registry above.
+        for b in codegen.blanket_impls() {
+            let already_present = self.global_blanket_impl_registry.iter().any(|existing| {
+                existing.base_protocol == b.base_protocol
+                    && existing.derived_protocol == b.derived_protocol
+            });
+            if !already_present {
+                self.global_blanket_impl_registry.push(b.clone());
+            }
         }
 
         Ok((merged_vbc, total_func_count))

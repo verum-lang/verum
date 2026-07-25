@@ -958,6 +958,14 @@ pub struct CompilationPipeline<'s> {
     /// `global_type_layout_registry`.
     global_type_alias_registry: std::collections::HashMap<String, String>,
 
+    /// Global blanket-impl registry (`implement<T: Base> Derived for T`) for
+    /// cross-module blanket application (T0625).  Harvested from each module's
+    /// codegen after it compiles and seeded into the next module's codegen
+    /// (`import_blanket_impls`), so a blanket declared in one module reaches
+    /// implementors declared in another.  Only populated in StdlibBootstrap
+    /// mode.  Mirrors `global_type_alias_registry`.
+    global_blanket_impl_registry: Vec<verum_vbc::codegen::BlanketImpl>,
+
     /// Global protocol registry for cross-module protocol default method inheritance.
     /// Accumulates protocol info across modules (e.g., Eq's default ne method).
     /// Only populated in StdlibBootstrap mode.
@@ -1206,6 +1214,7 @@ impl<'s> CompilationPipeline<'s> {
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
+            global_blanket_impl_registry: Vec::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),
             stdlib_warnings: List::new(),
@@ -1317,6 +1326,7 @@ impl<'s> CompilationPipeline<'s> {
             global_function_registry: std::collections::HashMap::new(),
             global_type_layout_registry: std::collections::HashMap::new(),
             global_type_alias_registry: std::collections::HashMap::new(),
+            global_blanket_impl_registry: Vec::new(),
             global_protocol_registry: std::collections::HashMap::new(),
             compiled_stdlib_modules: std::collections::HashMap::new(),
             stdlib_warnings: List::new(),
