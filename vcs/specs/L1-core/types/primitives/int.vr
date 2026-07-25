@@ -15,8 +15,8 @@ fn main() {
     let zero: Int = 0;
 
     // Large integers (i64 range)
-    let big: Int = 9223372036854775807;             // i64::MAX
-    let negative_big: Int = -9223372036854775808;   // i64::MIN
+    let big: Int = 9223372036854775807;             // Int64.MAX
+    let negative_big: Int = -9223372036854775808;   // Int64.MIN
 
     // Different bases
     let hex: Int = 0xFF;        // 255
@@ -62,7 +62,7 @@ fn main() {
     let not_equal: Bool = 42 != 43;
 
     // i64 maximum boundary
-    let max_i64: Int = 9223372036854775807;   // i64::MAX
+    let max_i64: Int = 9223372036854775807;   // Int64.MAX
 
     // Negative number operations
     let neg_product: Int = -5 * -3;
