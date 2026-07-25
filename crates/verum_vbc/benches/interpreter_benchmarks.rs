@@ -142,6 +142,10 @@ fn create_loop_module(iterations: i64) -> Arc<VbcModule> {
         is_gpu_only: false,
         intrinsic_name: None,
         is_const: false,
+        // Future-proof: benches pin only the fields they exercise, so a new
+        // FunctionDescriptor field no longer breaks `cargo bench` /
+        // `cargo test --all-targets` compilation.
+        ..Default::default()
     };
 
     module.functions.push(func_desc);
@@ -275,6 +279,10 @@ fn create_arith_module(iterations: i64) -> Arc<VbcModule> {
         is_gpu_only: false,
         intrinsic_name: None,
         is_const: false,
+        // Future-proof: benches pin only the fields they exercise, so a new
+        // FunctionDescriptor field no longer breaks `cargo bench` /
+        // `cargo test --all-targets` compilation.
+        ..Default::default()
     };
 
     module.functions.push(func_desc);
