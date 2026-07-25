@@ -5,9 +5,9 @@
 //! compiled to suspend/resume state machines. From
 //! `crates/verum_vbc/src/codegen/expressions.rs:12778-12793`:
 //!
-//!     "Async fns in the current implementation are not compiled
-//!      to suspend-/resume state machines — calling `add(1, 2)`
-//!      runs the body inline and returns the value."
+//! > "Async fns in the current implementation are not compiled
+//! > to suspend-/resume state machines — calling `add(1, 2)`
+//! > runs the body inline and returns the value."
 //!
 //! Consequence: `rt.block_on(small_work())` receives the
 //! already-computed value of `small_work()` (e.g. `Int(42)`),
