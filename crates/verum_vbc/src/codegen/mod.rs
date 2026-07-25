@@ -106,6 +106,14 @@ pub struct BlanketImpl {
     /// Method names explicitly implemented in the blanket-impl body.
     /// These take priority over the derived protocol's default methods.
     pub explicit_methods: std::collections::HashSet<String>,
+    /// The blanket body's own method declarations.  Monomorphised onto every
+    /// concrete implementor of `base_protocol` by
+    /// [`VbcCodegen::generate_default_protocol_methods`] (T0623).  Without
+    /// these, a method supplied SOLELY by the blanket body — e.g.
+    /// `partial_cmp` from `implement<T: Ord> PartialOrd for T` — was emitted
+    /// for no type at all: `explicit_methods` suppressed the derived
+    /// protocol's default (when it had one) and nothing replayed the body.
+    pub body_methods: Vec<verum_ast::FunctionDecl>,
 }
 pub use error::{CodegenError, CodegenErrorKind, CodegenOptionExt, CodegenResult, SkipClass};
 pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnapshot};
@@ -2570,13 +2578,49 @@ impl VbcCodegen {
             // the one we're about to process. This is the monomorphization
             // step — `implement<B: Base> Derived for B {}` flows Derived's
             // default methods down to every concrete implementor of Base.
-            let pending_derivations: Vec<(String, std::collections::HashSet<String>)> = self
+            #[allow(clippy::type_complexity)]
+            let pending_derivations: Vec<(
+                String,
+                std::collections::HashSet<String>,
+                Vec<verum_ast::FunctionDecl>,
+            )> = self
                 .blanket_impls
                 .iter()
                 .filter(|b| b.base_protocol == proto_name)
-                .map(|b| (b.derived_protocol.clone(), b.explicit_methods.clone()))
+                .map(|b| {
+                    (
+                        b.derived_protocol.clone(),
+                        b.explicit_methods.clone(),
+                        b.body_methods.clone(),
+                    )
+                })
                 .collect();
-            for (derived, overrides) in pending_derivations {
+            for (derived, overrides, body_methods) in pending_derivations {
+                // T0623: monomorphise the blanket impl's OWN BODY onto this
+                // concrete implementor.  The loop further down replays only
+                // the DERIVED PROTOCOL's default bodies, and `overrides`
+                // (the blanket body's method names) actively skips them —
+                // so a method supplied SOLELY by the blanket body was emitted
+                // for no type at all.  `implement<T: Ord> PartialOrd for T`
+                // exists precisely so every `Ord` type satisfies `PartialOrd`
+                // "without 16+ repetitive impl blocks" (core/base/protocols.vr),
+                // yet `Int.partial_cmp` panicked "method not found" at runtime
+                // because `PartialOrd::partial_cmp` is a REQUIRED method (no
+                // default body) and the blanket body never reached `Int`.
+                // Emitting through the same register + pending-queue path as a
+                // default method binds `Self`/the type param to `type_name`,
+                // so the body's `self.cmp(other)` dispatches to `Int.cmp`.
+                for body_func in &body_methods {
+                    let full_method_name = format!("{}.{}", type_name, body_func.name.name);
+                    // An explicit `implement Derived for ThisType` block wins:
+                    // same guard the default-method replay uses below.
+                    if self.ctx.lookup_function(&full_method_name).is_some() {
+                        continue;
+                    }
+                    self.register_impl_function(body_func, type_name)?;
+                    self.pending_default_methods
+                        .push((body_func.clone(), type_name.to_string()));
+                }
                 per_proto_overrides
                     .entry(derived.clone())
                     .or_insert(overrides);
@@ -6400,20 +6444,18 @@ impl VbcCodegen {
                     {
                         for b in bounds.iter() {
                             if let Some(base_name) = Self::type_bound_protocol_name(b) {
+                                let body_methods: Vec<verum_ast::FunctionDecl> = impl_decl
+                                    .items
+                                    .iter()
+                                    .filter_map(|item| match &item.kind {
+                                        verum_ast::decl::ImplItemKind::Function(f) => {
+                                            Some(f.clone())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect();
                                 let explicit_methods: std::collections::HashSet<String> =
-                                    impl_decl
-                                        .items
-                                        .iter()
-                                        .filter_map(|item| {
-                                            if let verum_ast::decl::ImplItemKind::Function(f) =
-                                                &item.kind
-                                            {
-                                                Some(f.name.name.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect();
+                                    body_methods.iter().map(|f| f.name.name.to_string()).collect();
                                 let already_present = self.blanket_impls.iter().any(|b| {
                                     b.base_protocol == base_name
                                         && b.derived_protocol == derived_name
@@ -6423,6 +6465,7 @@ impl VbcCodegen {
                                         base_protocol: base_name,
                                         derived_protocol: derived_name.clone(),
                                         explicit_methods,
+                                        body_methods,
                                     });
                                 }
                             }
@@ -7510,20 +7553,21 @@ impl VbcCodegen {
                             {
                                 for b in bounds.iter() {
                                     if let Some(base_name) = Self::type_bound_protocol_name(b) {
-                                        let explicit_methods: std::collections::HashSet<String> =
+                                        let body_methods: Vec<verum_ast::FunctionDecl> =
                                             impl_decl
                                                 .items
                                                 .iter()
-                                                .filter_map(|item| {
-                                                    if let verum_ast::decl::ImplItemKind::Function(
-                                                        f,
-                                                    ) = &item.kind
-                                                    {
-                                                        Some(f.name.name.to_string())
-                                                    } else {
-                                                        None
+                                                .filter_map(|item| match &item.kind {
+                                                    verum_ast::decl::ImplItemKind::Function(f) => {
+                                                        Some(f.clone())
                                                     }
+                                                    _ => None,
                                                 })
+                                                .collect();
+                                        let explicit_methods: std::collections::HashSet<String> =
+                                            body_methods
+                                                .iter()
+                                                .map(|f| f.name.name.to_string())
                                                 .collect();
                                         // Skip if `collect_all_declarations`'s
                                         // blanket-impl pre-pass already
@@ -7540,6 +7584,7 @@ impl VbcCodegen {
                                                 base_protocol: base_name,
                                                 derived_protocol: derived_name.clone(),
                                                 explicit_methods,
+                                                body_methods,
                                             });
                                         }
                                     }
