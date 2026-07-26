@@ -202,6 +202,28 @@ cmd_new() {
       printf 'tp:   Add one:  tp accept T%s "..."\n' "$id" >&2
       ;;
   esac
+
+  # An archival survey of the whole open pool found five rows citing work
+  # products that no longer exist: two pointing at session files, one at a
+  # scratchpad reproducer, one at a commit on a reaped branch, and one — a
+  # SALVAGE row, created precisely to rescue work from ephemeral storage —
+  # all three of whose recovery routes were dead, taking two conformance
+  # suites with them.
+  #
+  # The pool outlives every scratchpad and every session by construction, so
+  # a citation into one is a pointer with an expiry date. Warn rather than
+  # refuse: the author may be describing where something WAS, which is
+  # legitimate. But say it while they can still land the artefact somewhere
+  # durable.
+  case "$body" in
+    *scratchpad/*|*/tmp/*)
+      printf 'tp: WARNING: T%s cites a scratchpad or /tmp path.\n' "$id" >&2
+      printf 'tp:   Those are per-session; the pool outlives them, so the\n' >&2
+      printf 'tp:   citation will dangle. Land the artefact under vcs/,\n' >&2
+      printf 'tp:   core-tests/ or docs/ and cite THAT path instead.\n' >&2
+      ;;
+  esac
+
   log_event "NEW T$id [$prio $area] by $owner: $title"
   printf 'T%s\n' "$id"
 }
