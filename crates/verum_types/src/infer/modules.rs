@@ -8132,32 +8132,40 @@ impl TypeChecker {
         use verum_ast::ItemKind;
         use verum_ast::decl::ImplKind;
 
-        // Mapping of core protocol names to their canonical stdlib module paths
-        // These are protocols that have hardcoded fallbacks which may have incorrect signatures
-        let protocol_modules: &[(&str, &str)] = &[
-            ("Iterator", "core.base.iterator"),
-            ("DoubleEndedIterator", "core.base.iterator"),
-            ("IntoIterator", "core.base.iterator"),
-            ("FromIterator", "core.base.iterator"),
-            ("Extend", "core.base.iterator"),
-            ("AsyncIterator", "std.async.iterator"),
-            // Add more as needed
-        ];
+        use verum_common::well_known_types::WellKnownProtocol;
 
-        // Collect protocols used in impl blocks
-        let mut protocols_to_load: std::collections::HashSet<&str> =
+        // Which stdlib module declares a given protocol is answered by
+        // `WellKnownProtocol::canonical_archive_modules` in verum_common —
+        // the single authority for that mapping. This function used to
+        // carry its own six-entry table, which was open-ended by
+        // construction ("Add more as needed"), mixed the `core.` and
+        // `std.` namespaces, and had AsyncIterator wrong on both counts:
+        // it said `std.async.iterator` where the declaration is
+        // `core/async/async_iterator.vr`.
+        //
+        // The first entry is the source-declared module, which is what is
+        // loaded here; the second is the archive-bundle fallback and is
+        // the loader's concern, not this pass's. Protocols with no
+        // declaration in core/ answer with an empty slice and are skipped.
+        //
+        // Deduplicating by MODULE rather than by protocol name also drops
+        // a redundant second pass: Iterator, IntoIterator, FromIterator,
+        // DoubleEndedIterator and Extend all resolve to one module, and it
+        // is now visited once.
+        let mut modules_to_load: std::collections::HashSet<&'static str> =
             std::collections::HashSet::new();
 
         for item in &ast.items {
             if let ItemKind::Impl(impl_decl) = &item.kind {
                 if let ImplKind::Protocol { protocol, .. } = &impl_decl.kind {
                     if let Some(ident) = protocol.as_ident() {
-                        let protocol_name = ident.name.as_str();
-                        // Check if this protocol has a known stdlib module
-                        for (name, _module_path) in protocol_modules {
-                            if *name == protocol_name {
-                                protocols_to_load.insert(protocol_name);
-                                break;
+                        if let Some(known) =
+                            WellKnownProtocol::from_name(ident.name.as_str())
+                        {
+                            if let Some(module_path) =
+                                known.canonical_archive_modules().first()
+                            {
+                                modules_to_load.insert(module_path);
                             }
                         }
                     }
@@ -8165,15 +8173,10 @@ impl TypeChecker {
             }
         }
 
-        // Load the modules for each protocol
-        for protocol_name in protocols_to_load {
-            for (name, module_path) in protocol_modules {
-                if *name == protocol_name {
-                    // Try to load and process the protocol's source module
-                    self.try_load_protocol_module(module_path);
-                    break;
-                }
-            }
+        // Load and process each protocol's source module. `try_load_protocol_module`
+        // is idempotent — it early-returns on an already-processed module.
+        for module_path in modules_to_load {
+            self.try_load_protocol_module(module_path);
         }
     }
 
