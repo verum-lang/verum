@@ -432,7 +432,7 @@ pub fn truncate_with_ellipsis(text: &str, max_len: usize) -> Text {
 ///
 /// let text = "line1\nline2\nline3";
 /// let indented = indent(text, 4);
-/// assert_eq!(indented, " line1\n line2\n line3");
+/// assert_eq!(indented, "    line1\n    line2\n    line3");
 /// ```
 pub fn indent(text: &str, spaces: usize) -> Text {
     let indent_str = " ".repeat(spaces);
