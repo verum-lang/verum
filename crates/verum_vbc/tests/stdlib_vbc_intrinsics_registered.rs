@@ -73,8 +73,6 @@ const KNOWN_UNREGISTERED: &[&str] = &[
     "MEM_DEALLOC",                       // math/advanced.vr
     "MEM_SET_RAW",                       // math/internal.vr
     "PTR_ALIGNMENT",                     // math/internal.vr
-    "REGEX_FIND_ALL",                    // math/guardrails.vr
-    "REGEX_REPLACE_ALL",                 // math/guardrails.vr
     "STREAM_POP",                        // math/advanced.vr
     "STREAM_PUSH",                       // math/advanced.vr
     "STREAM_SYNC",                       // math/advanced.vr
@@ -129,7 +127,19 @@ fn collect_vbc_names(dir: &Path, out: &mut Vec<(String, String)>) {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            let mut rest = text.as_str();
+            // Strip `//` comments before scanning. Prose that SPELLS an
+            // intrinsic — "this previously called `@vbc(REGEX_FIND_ALL, ..)`"
+            // — is not a call site, and counting it made this gate fail on a
+            // comment explaining a fix it had just prompted. A `//` inside a
+            // string literal on the same line as a real `@vbc(` would hide
+            // that call; no such line exists, and the alternative is a gate
+            // that forbids documenting an intrinsic by name.
+            let code: String = text
+                .lines()
+                .map(|l| l.split_once("//").map_or(l, |(before, _)| before))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut rest = code.as_str();
             while let Some(at) = rest.find("@vbc(") {
                 rest = &rest[at + 5..];
                 let name: String = rest
@@ -198,4 +208,27 @@ fn the_known_unregistered_list_has_no_stale_entries() {
     for n in KNOWN_UNREGISTERED {
         assert!(seen.insert(*n), "duplicate entry in KNOWN_UNREGISTERED: {n}");
     }
+}
+
+#[test]
+fn the_known_unregistered_list_has_no_unused_entries() {
+    let mut names = Vec::new();
+    collect_vbc_names(&core_dir(), &mut names);
+    let used: BTreeSet<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
+    assert!(!used.is_empty(), "the walk did not run");
+
+    let unused: Vec<&str> = KNOWN_UNREGISTERED
+        .iter()
+        .copied()
+        .filter(|n| !used.contains(n))
+        .collect();
+    assert!(
+        unused.is_empty(),
+        "{} name(s) are no longer called from the stdlib and must be deleted \
+         from KNOWN_UNREGISTERED: {:?}\n\nThe list tracks live silent-nil call \
+         sites; a stale entry overstates the remaining debt and hides the fact \
+         that one was retired.",
+        unused.len(),
+        unused
+    );
 }

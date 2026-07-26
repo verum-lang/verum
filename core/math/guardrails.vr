@@ -29,6 +29,7 @@ mount core.math.tensor;
 mount core.math.nn;
 mount core.math.agent;
 mount core.sync.mutex.{Mutex};
+mount core.text.regex.{Regex};
 
 // =============================================================================
 // Guardrail Result Types
@@ -226,14 +227,33 @@ implement GuardrailPattern {
         GuardrailPattern { name, regex_str }
     }
 
-    // Find all matches in text
+    // Find all matches in text.
+    //
+    // Delegates to `core.text.regex.Regex`, which is the authoritative regex
+    // surface. These two methods previously called `@vbc(REGEX_FIND_ALL, ..)`
+    // and `@vbc(REGEX_REPLACE_ALL, ..)` directly — a second path to the same
+    // interpreter handlers, and a dead one: neither name is in the intrinsic
+    // registry, and an unregistered `@vbc` compiles to a silent `LoadNil`.
+    // So `find_all` returned nil and `PIIFilter.redact` below redacted
+    // nothing while reporting success.
+    //
+    // An unparseable pattern matches nothing rather than raising: a
+    // guardrail is a filter, and the caller of `redact` has no channel to
+    // report a bad pattern through.
     public fn find_all(&self, text: &Text) -> List<Text> {
-        @vbc(REGEX_FIND_ALL, &self.regex_str, text)
+        match Regex.new(self.regex_str.clone()) {
+            Result.Ok(re) => re.find_all(text.clone()),
+            Result.Err(_) => List.new(),
+        }
     }
 
-    // Replace all matches in text
+    // Replace all matches in text. An unparseable pattern leaves the text
+    // untouched, mirroring the handler's own documented failure mode.
     public fn replace_all(&self, text: &Text, replacement: &Text) -> Text {
-        @vbc(REGEX_REPLACE_ALL, &self.regex_str, text, replacement)
+        match Regex.new(self.regex_str.clone()) {
+            Result.Ok(re) => re.replace_all(text.clone(), replacement.clone()),
+            Result.Err(_) => text.clone(),
+        }
     }
 }
 
