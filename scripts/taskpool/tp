@@ -190,6 +190,18 @@ cmd_new() {
     printf '## Acceptance\n%s\n\n' "$acceptance"
     printf '## Journal\n- %s %s: created\n' "$(now)" "$owner"
   } > "$f"
+  case "$acceptance" in
+    ''|TBD|tbd|Tbd)
+      # T0636: 47% of the open pool was filed without a closure criterion, and
+      # until `tp accept` existed there was no way to add one afterwards. Warn
+      # rather than refuse — a task worth filing mid-investigation should not
+      # be blocked on wording — but surface it while the author still has the
+      # context to write it.
+      printf 'tp: WARNING: T%s filed with no acceptance criterion.\n' "$id" >&2
+      printf 'tp:   A task with no stated "done" gets closed on a feeling.\n' >&2
+      printf 'tp:   Add one:  tp accept T%s "..."\n' "$id" >&2
+      ;;
+  esac
   log_event "NEW T$id [$prio $area] by $owner: $title"
   printf 'T%s\n' "$id"
 }
