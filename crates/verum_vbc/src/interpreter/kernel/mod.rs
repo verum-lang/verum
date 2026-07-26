@@ -2491,19 +2491,30 @@ pub fn dispatch_reduce_scatter(
     group: &ProcessGroupHandle,
     _op: ReduceOp,
 ) -> Option<TensorHandle> {
-    // Stub: in single-process mode, return slice of tensor
-    // Assume first dimension is the one to scatter
-    let tensor_shape = &tensor.shape[..tensor.ndim as usize];
-    if tensor_shape.is_empty() {
+    // Reduce-scatter reduces ACROSS RANKS and then scatters the result. With
+    // a world of one there is nothing to reduce across — the reduction is the
+    // identity — and scattering to a single rank hands back the whole thing.
+    // So the answer is the input unchanged, exactly as `dispatch_all_reduce`
+    // returns it.
+    //
+    // The previous code agreed on the SHAPE and disagreed on the values: at
+    // world_size == 1 its scatter_dim was `shape[0] / 1`, i.e. the input
+    // shape, and it then filled that shape with `TensorHandle::zeros`. The
+    // arithmetic was right and the data was invented — see T0184 and the
+    // matching defect in `dispatch_all_gather` above.
+    //
+    // Above one rank this process holds only its own contribution, so the
+    // reduced result does not exist here. `None` is routed to `Value::nil()`
+    // by the caller and is detectable; zeros of the right shape are not.
+    if tensor.ndim == 0 {
         return None;
     }
 
-    let scatter_dim = tensor_shape[0] / group.world_size.max(1);
-    let mut new_shape = tensor_shape.to_vec();
-    new_shape[0] = scatter_dim;
-
-    // Create output tensor with reduced first dimension using zeros
-    TensorHandle::zeros(&new_shape, tensor.dtype)
+    if group.world_size == 1 {
+        Some(tensor.clone())
+    } else {
+        None
+    }
 }
 
 /// Barrier operation: synchronize all ranks.
