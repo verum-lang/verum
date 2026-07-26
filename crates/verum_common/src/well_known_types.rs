@@ -501,7 +501,7 @@ impl WellKnownType {
             Self::Barrier => &["core.sync.barrier", "core.sync"],
             Self::WaitGroup => &["core.sync.waitgroup", "core.sync"],
             Self::Once => &["core.sync.once", "core.sync"],
-            Self::Semaphore => &["core.async.semaphore", "core.async"],
+            Self::Semaphore => &["core.sync.semaphore", "core.async"],
             Self::Task => &["core.async.task", "core.async"],
             Self::Nursery => &["core.async.nursery", "core.async"],
             Self::AtomicInt => &["core.sync.atomic", "core.sync"],
