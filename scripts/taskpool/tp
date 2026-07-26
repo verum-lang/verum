@@ -122,6 +122,7 @@ tp — Verum multi-session task pool
   tp note T0123 -m TEXT                append a journal/progress line (heartbeat)
   tp prio T0123 P2                     re-triage: rewrite the Priority field + journal it
   tp retitle T0123 NEW TITLE...        rewrite the heading; old title preserved in the journal
+  tp accept T0123 CRITERIA...          set the Acceptance section (what would close this)
   tp done T0123 [-m RESOLUTION] [-c COMMIT]
   tp release T0123 [-m REASON]         put a claimed task back into open
   tp dead T0123 -m REASON              cancel a task (kept for the ID history)
@@ -295,6 +296,30 @@ cmd_retitle() {
   echo "$id retitled"
 }
 
+cmd_accept() {
+  ensure_pool
+  id="${1:-}"; [ -n "$id" ] || die 'accept: task ID required'
+  shift
+  new="${*:-}"
+  [ -n "$new" ] || die 'accept: acceptance text required'
+  res="$(find_task "$id")" || die "accept: unknown task $id"
+  file="${res#* }"
+  grep -q '^## Acceptance' "$file" || die "accept: $id has no '## Acceptance' section"
+  # Replace everything between the Acceptance heading and the next section.
+  # Nearly half the pool was filed with an empty or TBD acceptance and there
+  # was no way to supply one afterwards, so "what would close this?" could
+  # only ever be answered in prose that no reader was pointed at.
+  tmp="$file.accept.$$"
+  awk -v new="$new" '
+    /^## Acceptance/ { print; print ""; print new; skip=1; next }
+    /^## / && skip   { skip=0; print "" }
+    !skip            { print }
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  append_note "$file" "ACCEPTANCE set by $(owner_id): $new"
+  log_event "ACCEPT $id by $(owner_id)"
+  echo "$id: acceptance set"
+}
+
 move_task() { # $1 id, $2 from-state, $3 to-state, $4 journal text, $5 event verb
   set -- "$1" "$2" "$3" "$4" "$5" "$POOL/$2/$1.md" "$POOL/$3/$1.md"
   mv "$6" "$7" 2>/dev/null || return 1
@@ -430,6 +455,7 @@ case "$cmd" in
   note)    cmd_note "$@" ;;
   prio)    cmd_prio "$@" ;;
   retitle) cmd_retitle "$@" ;;
+  accept)  cmd_accept "$@" ;;
   done)    cmd_done "$@" ;;
   release) cmd_release "$@" ;;
   dead)    cmd_dead "$@" ;;
