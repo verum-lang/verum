@@ -1864,13 +1864,21 @@ impl ArchiveCtxCache {
                 // (`core.base` when the precompiler bundles
                 // `core/base/maybe.vr`'s impl methods under the
                 // parent module's archive entry).
-                wanted_module_prefixes.insert("core.base.maybe".to_string());
-                wanted_module_prefixes.insert("core.base".to_string());
+                wanted_module_prefixes.extend(
+                    verum_common::well_known_types::WellKnownType::Maybe
+                        .canonical_archive_modules()
+                        .iter()
+                        .map(|m| (*m).to_string()),
+                );
                 to_add.push("Maybe");
             }
             if verum_common::well_known_types::variant_tags::is_result_constructor(name) {
-                wanted_module_prefixes.insert("core.base.result".to_string());
-                wanted_module_prefixes.insert("core.base".to_string());
+                wanted_module_prefixes.extend(
+                    verum_common::well_known_types::WellKnownType::Result
+                        .canonical_archive_modules()
+                        .iter()
+                        .map(|m| (*m).to_string()),
+                );
                 to_add.push("Result");
             }
         }
@@ -1916,9 +1924,10 @@ impl ArchiveCtxCache {
             .iter()
             .any(|n| MAYBE_RESULT_TRANSITIVE_CARRIERS.iter().any(|c| *c == n));
         if needs_maybe_result {
-            wanted_module_prefixes.insert("core.base.maybe".to_string());
-            wanted_module_prefixes.insert("core.base.result".to_string());
-            wanted_module_prefixes.insert("core.base".to_string());
+            for wk in [verum_common::well_known_types::WellKnownType::Maybe, verum_common::well_known_types::WellKnownType::Result] {
+                wanted_module_prefixes
+                    .extend(wk.canonical_archive_modules().iter().map(|m| (*m).to_string()));
+            }
             if !wanted.contains("Maybe") {
                 to_add.push("Maybe");
             }
