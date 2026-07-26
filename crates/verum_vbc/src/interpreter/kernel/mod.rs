@@ -3037,6 +3037,65 @@ pub fn dispatch_regex_captures(pattern: &str, text: &str) -> Option<Vec<String>>
 mod tests {
     use super::*;
 
+    fn group_of(world_size: usize) -> ProcessGroupHandle {
+        ProcessGroupHandle {
+            ranks: (0..world_size).collect(),
+            world_size,
+            current_rank: 0,
+        }
+    }
+
+    /// These four pin T0184: `dispatch_all_gather` and
+    /// `dispatch_reduce_scatter` used to return `TensorHandle::zeros` of the
+    /// CORRECT output shape, so every downstream shape check passed while the
+    /// values were fabricated — silent corruption in a training path.
+    ///
+    /// A shape-only assertion would NOT have caught that: at `world_size == 1`
+    /// the old code produced `[1, ..dims]` for all-gather, which is the same
+    /// shape the correct answer has. These therefore assert the DATA.
+    #[test]
+    fn all_gather_single_process_preserves_data() {
+        let t = TensorHandle::full(&[2, 3], DType::F64, 7.0).expect("alloc");
+        let out = dispatch_all_gather(&t, &group_of(1)).expect("world of one has an answer");
+        assert_eq!(out.ndim, 3, "gathering adds a unit leading dimension");
+        assert_eq!(
+            out.get_element_f64(0),
+            Some(7.0),
+            "the input data must survive; zeros here is the T0184 defect"
+        );
+    }
+
+    #[test]
+    fn all_gather_multi_process_returns_nothing() {
+        let t = TensorHandle::full(&[2, 3], DType::F64, 7.0).expect("alloc");
+        assert!(
+            dispatch_all_gather(&t, &group_of(4)).is_none(),
+            "this process holds no other rank's data — None, never fabricated zeros"
+        );
+    }
+
+    #[test]
+    fn reduce_scatter_single_process_preserves_data() {
+        let t = TensorHandle::full(&[4, 2], DType::F64, 3.5).expect("alloc");
+        let out = dispatch_reduce_scatter(&t, &group_of(1), ReduceOp::Sum)
+            .expect("world of one has an answer");
+        assert_eq!(out.ndim, 2, "scattering to one rank returns the whole result");
+        assert_eq!(
+            out.get_element_f64(0),
+            Some(3.5),
+            "reducing across one rank is the identity; zeros here is the T0184 defect"
+        );
+    }
+
+    #[test]
+    fn reduce_scatter_multi_process_returns_nothing() {
+        let t = TensorHandle::full(&[4, 2], DType::F64, 3.5).expect("alloc");
+        assert!(
+            dispatch_reduce_scatter(&t, &group_of(4), ReduceOp::Sum).is_none(),
+            "the reduced result does not exist locally — None, never fabricated zeros"
+        );
+    }
+
     #[test]
     fn test_broadcast_shapes() {
         // Same shapes
