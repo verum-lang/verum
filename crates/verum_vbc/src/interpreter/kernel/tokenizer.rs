@@ -256,27 +256,39 @@ mod real_impl {
 mod stub_impl {
     use super::*;
 
-    /// Stub: Load BPE tokenizer (returns dummy handle).
+    /// The vocabulary this fallback actually implements.
+    ///
+    /// `encode` below maps text through `str::bytes`, so every id it can
+    /// produce lies in `0..=255` — a vocabulary of exactly 256.  The loaders
+    /// previously reported 50257 (GPT-2) and 32000 (LLaMA): sizes of
+    /// vocabularies they never read, since none of them opens its path.  That
+    /// is a false statement a caller acts on rather than a harmless placeholder
+    /// — an embedding table or logits row sized from it is ~200x wider than
+    /// anything this tokenizer can index, and no id above 255 ever arrives to
+    /// contradict it.
+    const STUB_VOCAB_SIZE: usize = 256;
+
+    /// Stub: byte-level fallback; the vocab and merges files are not read.
     pub fn load_bpe(_vocab_path: &str, _merges_path: &str) -> Option<TokenizerHandle> {
         Some(TokenizerHandle {
             tokenizer_type: TokenizerType::Bpe,
-            vocab_size: 50257, // GPT-2 default
+            vocab_size: STUB_VOCAB_SIZE,
         })
     }
 
-    /// Stub: Load pretrained tokenizer (returns dummy handle).
+    /// Stub: byte-level fallback; the model name selects nothing.
     pub fn load_pretrained(_model_name: &str) -> Option<TokenizerHandle> {
         Some(TokenizerHandle {
             tokenizer_type: TokenizerType::Pretrained,
-            vocab_size: 32000, // LLaMA default
+            vocab_size: STUB_VOCAB_SIZE,
         })
     }
 
-    /// Stub: Load SentencePiece tokenizer (returns dummy handle).
+    /// Stub: byte-level fallback; the model file is not read.
     pub fn load_spm(_model_path: &str) -> Option<TokenizerHandle> {
         Some(TokenizerHandle {
             tokenizer_type: TokenizerType::SentencePiece,
-            vocab_size: 32000,
+            vocab_size: STUB_VOCAB_SIZE,
         })
     }
 
@@ -462,6 +474,29 @@ mod tests {
             // Decode should roundtrip for ASCII
             let decoded = dispatch_tokenizer_decode(&handle, &tokens).unwrap();
             assert_eq!(decoded, "hello");
+        }
+
+        /// The loaders report a vocabulary without reading any file, so the
+        /// number they give must describe the tokenizer that actually runs.
+        /// They previously reported GPT-2's 50257 and LLaMA's 32000 while
+        /// encoding through `str::bytes`, which can only ever index 256.
+        #[test]
+        fn stub_reports_the_vocabulary_it_can_actually_index() {
+            for handle in [
+                dispatch_tokenizer_load_bpe("vocab.json", "merges.txt").unwrap(),
+                dispatch_tokenizer_load_pretrained("gpt2").unwrap(),
+                dispatch_tokenizer_load_spm("model.spm").unwrap(),
+            ] {
+                assert_eq!(
+                    handle.vocab_size, 256,
+                    "a byte-level fallback has a byte vocabulary, whatever file it was pointed at"
+                );
+                let tokens = dispatch_tokenizer_encode(&handle, "hello, мир").unwrap();
+                assert!(
+                    tokens.iter().all(|t| (*t as usize) < handle.vocab_size),
+                    "every id encode emits must be indexable by the reported size: {tokens:?}"
+                );
+            }
         }
 
         #[test]
