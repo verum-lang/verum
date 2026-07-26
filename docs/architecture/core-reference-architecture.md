@@ -48,10 +48,18 @@
 `core/encoding/varint.vr` объявляет себя «Unified home for variable-length
 integer codings used across the stdlib». Он таковым не является:
 
-* `core/encoding/varint.vr` — SQLite-style varint;
-* `core/database/sqlite/native/varint_encode_api/` — **отдельный модуль**
-  того же кодирования;
-* `core/net/weft/metrics_otlp.vr` — третья реализация.
+* `core/encoding/varint.vr` (440 строк) — SQLite-варинт формата записи,
+  функции `sqlite_encode` / `sqlite_decode` / `sqlite_skip` и прочие;
+* `core/database/sqlite/native/varint_encode_api/` (85 строк) — **то же
+  самое** кодирование: старший бит-продолжение, 7 бит на байт для первых
+  восьми и 8 для девятого.
+
+**ПОПРАВКА (проверено чтением).** В первой редакции я записал третьей
+реализацией `core/net/weft/metrics_otlp.vr`. Это **неверно**: там
+`write_varint(UInt64)` для OTLP, то есть protobuf/LEB128 — кодирование,
+которое `encoding/varint.vr` в своём же комментарии объявляет намеренно
+НЕ дублируемым. Оно законно отдельно, и «устранение» этого различия было
+бы дефектом. Дублирование здесь ДВОЙНОЕ, а не тройное.
 
 То же с JSONB: `core/encoding/jsonb.vr` и
 `core/database/sqlite/native/jsonb_binary_format/` (3 файла).
@@ -182,11 +190,12 @@ duplicated here». Политика верна и записана — и нар
 
 Немедленно применимо, не дожидаясь переезда:
 
-* **varint.** Канон — `core/encoding/varint.vr`. Модуль
-  `database/sqlite/native/varint_encode_api/` и реализация в
-  `net/weft/metrics_otlp.vr` заменяются вызовами канона. Файл уже
-  объявляет себя единым домом — надо привести реальность в соответствие с
-  объявлением.
+* **varint.** Канон — `core/encoding/varint.vr`. Заменяется вызовами
+  канона ТОЛЬКО `database/sqlite/native/varint_encode_api/` — то же
+  кодирование в 85 строках. `net/weft/metrics_otlp.vr` НЕ трогать: это
+  LEB128, законно отдельное (см. поправку в §1.2). Файл уже объявляет
+  себя единым домом — надо привести реальность в соответствие, не
+  расширяя охват сверх заявленного.
 * **JSONB.** Канон — `core/encoding/jsonb.vr`;
   `database/sqlite/native/jsonb_binary_format/` становится потребителем.
 * **Правило впредь:** реализация кодирования, разделяемая двумя и более
