@@ -2098,6 +2098,71 @@ impl WellKnownProtocol {
     pub fn is_fat_ref_protocol(name: &str) -> bool {
         Self::from_name(name).is_some_and(|p| p.requires_fat_ref())
     }
+
+    /// Candidate archive-entry names for the module declaring this
+    /// protocol — the protocol-side mirror of
+    /// [`WellKnownType::canonical_archive_modules`].
+    ///
+    /// Types have always known where they live; protocols did not, and
+    /// that asymmetry is why consumers grew their own tables. The one in
+    /// `verum_types::infer::modules` lists six protocols against a
+    /// hand-written path each, admits in its own comment that it exists
+    /// to paper over "hardcoded fallbacks which may have incorrect
+    /// signatures", mixes the `core.` and `std.` namespaces, and ends in
+    /// "Add more as needed" — open-ended by construction. This method is
+    /// the single place that knowledge belongs; that table should be
+    /// deleted in favour of it.
+    ///
+    /// Like the type-side method, each arm lists the source-declared
+    /// module first and the grandparent bundle second: the precompiler
+    /// picks one or the other depending on hierarchy shape, and the
+    /// loader's `wanted_module_prefixes` accepts whichever resolves.
+    ///
+    /// Five variants return an EMPTY slice because they are not declared
+    /// anywhere in `core/` — verified by scanning every `.vr` file for
+    /// `type <Name> is protocol`, tolerating a generic parameter list.
+    /// An empty answer is deliberate: a guessed path would resolve to
+    /// nothing at load time and blame the loader instead of the gap.
+    /// `Hashable` and `Comparable` additionally look like duplicates of
+    /// the live `Hash` and `Ord`, so the gap may want closing by removing
+    /// the variants rather than by declaring the protocols.
+    pub const fn canonical_archive_modules(self) -> &'static [&'static str] {
+        match self {
+            // `core/base/protocols.vr` — the bulk of the derivable set.
+            Self::Copy
+            | Self::Clone
+            | Self::Eq
+            | Self::Ord
+            | Self::Hash
+            | Self::Default
+            | Self::Debug
+            | Self::Display
+            | Self::Drop
+            | Self::Send
+            | Self::Sync
+            | Self::From
+            | Self::Into => &["core.base.protocols", "core.base"],
+
+            // `core/base/iterator.vr`
+            Self::Iterator | Self::IntoIterator => {
+                &["core.base.iterator", "core.base"]
+            }
+
+            // `core/async/future.vr` and `core/async/stream.vr`
+            Self::Future => &["core.async.future", "core.async"],
+            Self::Stream => &["core.async.stream", "core.async"],
+
+            // `core/io/protocols.vr`
+            Self::Write | Self::Read => &["core.io.protocols", "core.io"],
+
+            // Not declared in `core/` — see the doc comment above.
+            Self::Error
+            | Self::Drawable
+            | Self::Printable
+            | Self::Hashable
+            | Self::Comparable => &[],
+        }
+    }
 }
 
 // =============================================================================
