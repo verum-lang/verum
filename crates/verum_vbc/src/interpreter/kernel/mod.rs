@@ -2456,13 +2456,25 @@ impl ReduceOp {
 }
 
 /// All-reduce operation: reduce tensor across all ranks and distribute result.
+///
+/// Reducing across a world of ONE is the identity for every `ReduceOp` — sum,
+/// product, min, max and mean over a single contributor all yield that
+/// contributor — so `op` is genuinely unused here rather than ignored.
+///
+/// With `world_size > 1` this process does not hold the other ranks'
+/// contributions and no local arrangement substitutes for them.  Returning
+/// the local tensor would be shape-correct fabrication, which is the one
+/// failure mode a caller cannot detect; `None` reaches it as `Value::nil()`.
 pub fn dispatch_all_reduce(
     tensor: &TensorHandle,
-    _group: &ProcessGroupHandle,
+    group: &ProcessGroupHandle,
     _op: ReduceOp,
 ) -> Option<TensorHandle> {
-    // Stub: in single-process mode, just return a copy of the tensor
-    Some(tensor.clone())
+    if group.world_size == 1 {
+        Some(tensor.clone())
+    } else {
+        None
+    }
 }
 
 /// All-gather operation: gather tensors from all ranks to all ranks.
@@ -2494,13 +2506,24 @@ pub fn dispatch_all_gather(
 }
 
 /// Broadcast operation: send tensor from src rank to all ranks.
+///
+/// In a world of ONE the sole rank already holds the value, so the broadcast
+/// is the identity.  A `src` naming any other rank addresses a process that
+/// does not exist, and answering it would confirm a distribution that never
+/// happened.
+///
+/// With `world_size > 1` the local tensor is the right answer only on the
+/// source rank, and this process cannot obtain it otherwise.
 pub fn dispatch_broadcast(
     tensor: &TensorHandle,
-    _src: usize,
-    _group: &ProcessGroupHandle,
+    src: usize,
+    group: &ProcessGroupHandle,
 ) -> Option<TensorHandle> {
-    // Stub: in single-process mode, just return a copy
-    Some(tensor.clone())
+    if group.world_size == 1 && group.ranks.contains(&src) {
+        Some(tensor.clone())
+    } else {
+        None
+    }
 }
 
 /// Reduce-scatter operation: reduce then scatter result.
@@ -2559,14 +2582,19 @@ pub fn dispatch_pmap_pmax(tensor: &TensorHandle, _axis_name: &str) -> Option<Ten
 }
 
 /// Pmap all-gather collective.
+///
+/// Gathering over a mapped axis of ONE device is the input carrying a unit
+/// leading dimension — a reshape, not a fabrication.  `axis_name` is unused
+/// because a single-device pmap has exactly one axis to gather over.
+///
+/// This previously built the correct output SHAPE with `TensorHandle::zeros`
+/// and dropped the data, so every downstream shape check passed while the
+/// values were invented.  It is the same defect, and the same repair, as
+/// `dispatch_all_gather` (T0184) — that one was found and fixed while this
+/// twin, reached through the pmap surface rather than the collective one,
+/// was not.
 pub fn dispatch_pmap_all_gather(tensor: &TensorHandle, _axis_name: &str) -> Option<TensorHandle> {
-    // Stub: in single-process mode, add a leading dimension of size 1
-    let tensor_shape = &tensor.shape[..tensor.ndim as usize];
-    let mut new_shape = vec![1usize];
-    new_shape.extend(tensor_shape.iter());
-
-    // Create output tensor with expanded shape using zeros
-    TensorHandle::zeros(&new_shape, tensor.dtype)
+    super::tensor::tensor_unsqueeze(tensor, 0)
 }
 
 /// Vmap transformation stub: vectorize a function over a batch dimension.
@@ -2704,14 +2732,23 @@ pub fn dispatch_collective_gather(
 }
 
 /// Scatter: distribute tensor chunks from one rank to all ranks.
-/// Stub: In single-process mode, return the first chunk (the entire tensor).
+///
+/// With a world of ONE there is a single chunk and it is the whole tensor, so
+/// the scatter is the identity.
+///
+/// With `world_size > 1` this process is entitled only to its own chunk.
+/// Handing back the undivided tensor would give every rank the full data
+/// while reporting success, so there is nothing to return instead.
 pub fn dispatch_collective_scatter(
     tensor: &TensorHandle,
-    _src_rank: usize,
-    _group: &ProcessGroupHandle,
+    src_rank: usize,
+    group: &ProcessGroupHandle,
 ) -> Option<TensorHandle> {
-    // In single-process mode, return a copy of the tensor
-    Some(tensor.clone())
+    if group.world_size == 1 && group.ranks.contains(&src_rank) {
+        Some(tensor.clone())
+    } else {
+        None
+    }
 }
 
 // ============================================================================
@@ -4438,6 +4475,72 @@ mod tests {
         assert!(
             dispatch_sample_top_k(&row(&[800.0, 799.0, 1.0]), 2).is_some(),
             "the softmax must be shifted by the row maximum"
+        );
+    }
+
+    /// `dispatch_pmap_all_gather` carried the SAME fabricated-zeros defect as
+    /// `dispatch_all_gather`, reached through the pmap surface instead of the
+    /// collective one, and was missed when that one was repaired.  It built
+    /// the correct output shape and filled it with zeros, so a shape-only
+    /// assertion would pass against the defect — this asserts the data.
+    #[test]
+    fn pmap_all_gather_preserves_data() {
+        let t = TensorHandle::full(&[2, 3], DType::F64, 7.0).expect("alloc");
+        let out = dispatch_pmap_all_gather(&t, "devices").expect("one device has an answer");
+        assert_eq!(out.ndim, 3, "gathering adds a unit leading dimension");
+        assert_eq!(
+            out.get_element_f64(0),
+            Some(7.0),
+            "the input data must survive; zeros here is the T0184 defect"
+        );
+    }
+
+    /// The three remaining single-process collectives returned the local
+    /// tensor without consulting the group, so in a multi-rank world they
+    /// answered with data they do not hold — and reported success.  Their
+    /// repaired siblings `all_gather` and `reduce_scatter` already refused.
+    #[test]
+    fn all_reduce_is_the_identity_for_one_rank_and_refuses_more() {
+        let t = TensorHandle::full(&[2], DType::F64, 3.5).expect("alloc");
+        let out = dispatch_all_reduce(&t, &group_of(1), ReduceOp::Sum).expect("identity");
+        assert_eq!(
+            out.get_element_f64(0),
+            Some(3.5),
+            "reducing across one contributor yields that contributor"
+        );
+        assert!(
+            dispatch_all_reduce(&t, &group_of(4), ReduceOp::Sum).is_none(),
+            "this process does not hold the other three ranks' contributions"
+        );
+    }
+
+    #[test]
+    fn broadcast_is_the_identity_for_one_rank_and_refuses_more() {
+        let t = TensorHandle::full(&[2], DType::F64, 3.5).expect("alloc");
+        assert!(
+            dispatch_broadcast(&t, 0, &group_of(1)).is_some(),
+            "the sole rank already holds the value"
+        );
+        assert!(
+            dispatch_broadcast(&t, 0, &group_of(4)).is_none(),
+            "the local tensor is the answer only on the source rank"
+        );
+        assert!(
+            dispatch_broadcast(&t, 3, &group_of(1)).is_none(),
+            "a src outside the group addresses a process that does not exist"
+        );
+    }
+
+    #[test]
+    fn collective_scatter_is_the_identity_for_one_rank_and_refuses_more() {
+        let t = TensorHandle::full(&[4], DType::F64, 3.5).expect("alloc");
+        assert!(
+            dispatch_collective_scatter(&t, 0, &group_of(1)).is_some(),
+            "one chunk, and it is the whole tensor"
+        );
+        assert!(
+            dispatch_collective_scatter(&t, 0, &group_of(4)).is_none(),
+            "each rank is entitled only to its own chunk, not the undivided tensor"
         );
     }
 }
