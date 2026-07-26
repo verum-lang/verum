@@ -5403,7 +5403,21 @@ mod tests {
             }
         };
         // Records — must carry their declared field counts.
-        probe("Formatter", Some(1));
+        //
+        // These numbers are RESTATED from the source declaration, so they go
+        // stale silently when the type gains a field: the archive then reports
+        // the new count, the test reports the old one, and the message blames
+        // the precompiler for "stripping fields" when nothing was stripped.
+        // That is what happened here — `Formatter` is declared with two fields
+        // in core/base/protocols.vr:611 (`buffer: &mut Text`, `spec:
+        // FormatSpec`) and this said one.
+        //
+        // The fundamental fix is to derive the expectation from the `.vr`
+        // declaration rather than restate it, the way
+        // verum_common/tests/{type,protocol}_archive_modules_pin.rs read their
+        // arms out of the source. Until then, these must be updated whenever
+        // the record changes shape.
+        probe("Formatter", Some(2));
         probe("FormatError", Some(0));
         // Protocol types — no `fields` (their methods live on the
         // monomorphised impl side); just assert presence.
