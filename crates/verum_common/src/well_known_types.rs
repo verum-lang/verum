@@ -2002,8 +2002,12 @@ pub enum WellKnownProtocol {
     Into,
     Iterator,
     IntoIterator,
+    DoubleEndedIterator,
+    FromIterator,
+    Extend,
     Future,
     Stream,
+    AsyncIterator,
     Error,
     Send,
     Sync,
@@ -2033,8 +2037,12 @@ impl WellKnownProtocol {
             Self::Into => "Into",
             Self::Iterator => "Iterator",
             Self::IntoIterator => "IntoIterator",
+            Self::DoubleEndedIterator => "DoubleEndedIterator",
+            Self::FromIterator => "FromIterator",
+            Self::Extend => "Extend",
             Self::Future => "Future",
             Self::Stream => "Stream",
+            Self::AsyncIterator => "AsyncIterator",
             Self::Error => "Error",
             Self::Send => "Send",
             Self::Sync => "Sync",
@@ -2063,8 +2071,12 @@ impl WellKnownProtocol {
             "Into" => Some(Self::Into),
             "Iterator" => Some(Self::Iterator),
             "IntoIterator" => Some(Self::IntoIterator),
+            "DoubleEndedIterator" => Some(Self::DoubleEndedIterator),
+            "FromIterator" => Some(Self::FromIterator),
+            "Extend" => Some(Self::Extend),
             "Future" => Some(Self::Future),
             "Stream" => Some(Self::Stream),
+            "AsyncIterator" => Some(Self::AsyncIterator),
             "Error" => Some(Self::Error),
             "Send" => Some(Self::Send),
             "Sync" => Some(Self::Sync),
@@ -2144,13 +2156,21 @@ impl WellKnownProtocol {
             | Self::Into => &["core.base.protocols", "core.base"],
 
             // `core/base/iterator.vr`
-            Self::Iterator | Self::IntoIterator => {
-                &["core.base.iterator", "core.base"]
-            }
+            Self::Iterator
+            | Self::IntoIterator
+            | Self::DoubleEndedIterator
+            | Self::FromIterator
+            | Self::Extend => &["core.base.iterator", "core.base"],
 
             // `core/async/future.vr` and `core/async/stream.vr`
             Self::Future => &["core.async.future", "core.async"],
             Self::Stream => &["core.async.stream", "core.async"],
+            // `core/async/async_iterator.vr`. The private table this
+            // method replaces spelled this `std.async.iterator` — wrong
+            // namespace AND wrong module name.
+            Self::AsyncIterator => {
+                &["core.async.async_iterator", "core.async"]
+            }
 
             // `core/io/protocols.vr`
             Self::Write | Self::Read => &["core.io.protocols", "core.io"],

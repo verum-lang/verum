@@ -29,8 +29,12 @@ const ALL: &[P] = &[
     P::Into,
     P::Iterator,
     P::IntoIterator,
+    P::DoubleEndedIterator,
+    P::FromIterator,
+    P::Extend,
     P::Future,
     P::Stream,
+    P::AsyncIterator,
     P::Error,
     P::Send,
     P::Sync,
@@ -111,5 +115,5 @@ fn the_variant_list_is_complete() {
             p.as_str()
         );
     }
-    assert_eq!(ALL.len(), 24, "WellKnownProtocol variant count changed");
+    assert_eq!(ALL.len(), 28, "WellKnownProtocol variant count changed");
 }
