@@ -161,9 +161,7 @@ fn test_batch_honours_global_timeout() {
         variables: vec![].into(),
         description: Text::from("b"),
     };
-    let start = std::time::Instant::now();
     let results = verifier.verify_batch(&[c1, c2]);
-    let elapsed = start.elapsed();
     assert_eq!(results.len(), 2, "every constraint accounted for");
     // Every result is Timeout — the global budget was zero.
     let all_timeout = results
@@ -173,10 +171,18 @@ fn test_batch_honours_global_timeout() {
         all_timeout,
         "zero-budget batch must short-circuit every constraint to Timeout"
     );
-    // The whole batch should finish near-instantly because no real
-    // verification work happens.
-    assert!(
-        elapsed < Duration::from_secs(1),
-        "batch should bail near-instantly under zero budget"
-    );
+    // NO wall-clock assertion here, deliberately. There used to be
+    // `elapsed < 1s`, and it was both flaky and useless:
+    //
+    //   * flaky — wall-clock under a loaded machine can exceed a second even
+    //     for a pure short-circuit, purely from scheduling. Observed failing
+    //     once and passing on three immediate re-runs.
+    //   * useless — it could not catch the regression it named. The default
+    //     constraint_timeout_ms is 100, so two constraints actually verifying
+    //     would cost about 200ms, comfortably INSIDE the one-second bound.
+    //
+    // The short-circuit is already proven, load-independently, by the two
+    // assertions above: a batch that really ran verification would return
+    // Proved/Unproved, not Timeout for every constraint. That is the property;
+    // the clock never was.
 }
