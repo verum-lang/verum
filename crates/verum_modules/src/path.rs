@@ -220,8 +220,13 @@ impl ModulePath {
     /// let resolved = ModulePath::resolve_import("self.utils", &current).unwrap();
     /// assert_eq!(resolved.to_string(), "handlers.utils");
     ///
+    /// // `super` names a SIBLING — it resolves through the parent, so from
+    /// // `handlers.search` it yields `handlers.contexts`, not `contexts`.
+    /// // This matches how the stdlib uses it: `core/sys/darwin/time.vr` says
+    /// // `mount super.libsystem.{…}` and `libsystem.vr` sits beside it in
+    /// // `core/sys/darwin/`.
     /// let resolved = ModulePath::resolve_import("super.contexts", &current).unwrap();
-    /// assert_eq!(resolved.to_string(), "contexts");
+    /// assert_eq!(resolved.to_string(), "handlers.contexts");
     /// ```
     pub fn resolve_import(
         import_path: &str,
