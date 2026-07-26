@@ -486,11 +486,13 @@ pub enum Term {
     Refl(Box<Term>),
     /// Paulin-Mohring J eliminator (path induction).
     ///
-    ///     motive    : Π(_ : A). Universe(n)
-    ///     base      : motive(a)                — proof at the lhs
-    ///     scrutinee : Id(A, a, b)
-    ///   ──────────────────────────────────────────────────────
-    ///     J(motive, base, scrutinee) : motive(b)
+    /// ```text
+    /// motive    : Π(_ : A). Universe(n)
+    /// base      : motive(a)                — proof at the lhs
+    /// scrutinee : Id(A, a, b)
+    /// ──────────────────────────────────────────────────────
+    /// J(motive, base, scrutinee) : motive(b)
+    /// ```
     ///
     /// This is the simplified J that every dependent type theory
     /// admits.  The β-rule is `J(_, base, Refl(_)) → base`,
