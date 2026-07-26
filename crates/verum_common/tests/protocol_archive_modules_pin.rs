@@ -103,6 +103,75 @@ fn undeclared_protocols_answer_empty_not_guessed() {
     }
 }
 
+/// `core.base.iterator` -> `<repo>/core/base/iterator.vr`
+fn source_file_for(module_path: &str) -> std::path::PathBuf {
+    let rel = module_path.strip_prefix("core.").unwrap_or(module_path);
+    let mut p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("core");
+    for seg in rel.split('.') {
+        p = p.join(seg);
+    }
+    p.set_extension("vr");
+    p
+}
+
+/// The paths were established by scanning `core/` by hand. Nothing kept them
+/// honest afterwards: renaming `core/io/protocols.vr` would leave the shape
+/// assertions above perfectly green while the path silently rotted, and a
+/// path that resolves to nothing fails at load time and blames the loader.
+///
+/// This is the protocol-side analogue of
+/// `canonical_archive_modules_match_source` in
+/// `verum_compiler::archive_ctx_loader`, which enforces the same property
+/// for the type-side method.
+#[test]
+fn every_path_points_at_a_file_that_declares_the_protocol() {
+    for &p in ALL {
+        let Some(&module_path) = p.canonical_archive_modules().first() else {
+            continue; // undeclared — covered by the test above
+        };
+        let file = source_file_for(module_path);
+        let src = std::fs::read_to_string(&file).unwrap_or_else(|e| {
+            panic!(
+                "{} claims {module_path}, which maps to {} — unreadable: {e}. \
+                 If the module moved, update the arm in well_known_types.rs.",
+                p.as_str(),
+                file.display()
+            )
+        });
+
+        // `type Name is protocol` / `public type Name is protocol`, tolerating
+        // a generic parameter list — `From` is declared as `From<T>`.
+        let declared = src.lines().any(|line| {
+            let t = line.trim_start();
+            let rest = t
+                .strip_prefix("public type ")
+                .or_else(|| t.strip_prefix("type "));
+            rest.is_some_and(|rest| {
+                rest.strip_prefix(p.as_str()).is_some_and(|after| {
+                    let after = match after.find('>') {
+                        Some(i) if after.starts_with('<') => &after[i + 1..],
+                        _ => after,
+                    };
+                    after.trim_start().starts_with("is protocol")
+                })
+            })
+        });
+
+        assert!(
+            declared,
+            "{} claims {module_path}, but {} does not declare it. The authority \
+             must name the file that actually holds the declaration — a path \
+             that resolves to nothing fails at load time and misdirects the \
+             blame to the loader.",
+            p.as_str(),
+            file.display()
+        );
+    }
+}
+
 #[test]
 fn the_variant_list_is_complete() {
     // from_name round-trips every variant, so a variant added to the enum
