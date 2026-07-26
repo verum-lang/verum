@@ -1,0 +1,327 @@
+// =============================================================================
+// core/database/sqlite/native/builtins/dispatch.vr
+// =============================================================================
+// Layer: 4 (VDBE callee)
+// Spec: sqlite-native.md §15 (Built-in Functions)
+//
+// The single catalogue-dispatch entry the VDBE interpreter calls for every
+// `ScalarFn` opcode. `builtins/mod.vr` states the contract this file
+// discharges: the catalogue is exercised "indirectly by the VDBE interpreter
+// once the interpreter switches from the inline `match kind` table to a
+// catalogue-dispatched call." This is that call.
+//
+// `eval_scalar` maps a semantic `ScalarKind` (resolved from the opcode's wire
+// code by `registry.kind_from_code`) to the one reference implementation in
+// `string_fns` / `numeric_fns` / `math_fns` / `meta_fns` / `datetime_fns` /
+// `json_fns`. Every call here is MODULE-QUALIFIED (`string_fns.length(...)`,
+// never a bare `length(...)`): 30 of these names collide with free functions
+// in `core/math` and elsewhere (task T0538), and the bake's bare-call lookup
+// degrades to last-registration-wins. Qualification removes the ambiguity at
+// the source.
+//
+// # Connection-scoped inputs
+//
+// Three families need per-connection state the L4 VDBE frame does not carry:
+//
+//   * date/time — the "now" clock (only consulted when arguments imply now;
+//     an explicit date such as DATE('2020-01-01') ignores it)
+//   * changes() / total_changes() / last_insert_rowid() — the connection's
+//     mutation counters
+//   * random() / randomblob() — the per-connection PRNG stream
+//
+// Until the L6 connection threads those down, this dispatcher feeds each a
+// well-defined connection-less default (epoch clock, zeroed counters, a
+// fixed-seed PRNG). That is strictly more defined than the pre-wiring inline
+// table, which returned NULL for every one of these kinds. Threading the real
+// per-connection values is the follow-up wiring task noted at the seam below.
+// =============================================================================
+
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LFnd,
+    lifecycle: Lifecycle.Theorem("v0.1")
+)
+module core.database.sqlite.native.builtins.dispatch;
+
+mount core.*;
+mount base.{Int, Int64};
+mount collections.List;
+
+// Register value type + the constructors this file names directly. The
+// per-kind implementations live in the sibling modules, mounted below as
+// qualifiers so their (colliding) bare names never enter scope.
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt};
+mount core.database.sqlite.native.l4_vdbe.register;
+
+// ScalarKind + every variant, for the dispatch match.
+mount core.database.sqlite.native.builtins.registry.{
+    ScalarKind,
+    KLength, KLower, KUpper, KConcat, KSubstr, KTrim, KLtrim, KRtrim,
+    KReplace, KInstr, KHex, KUnicode, KChar, KQuote, KConcatWs, KGlob,
+    KLike, KNotLike, KSoundex, KUnhex,
+    KAbs, KRound, KCoalesce, KIfnull, KNullif, KMin, KMax, KIif, KSign,
+    KRandom, KRandomBlob, KZeroBlob, KLikely, KUnlikely, KLikelihood,
+    KPi, KSqrt, KPow, KMod, KCeil, KFloor, KExp, KLn, KLog, KLog2, KLog10,
+    KSin, KCos, KTan, KAsin, KAcos, KAtan, KAtan2, KSinh, KCosh, KTanh,
+    KAsinh, KAcosh, KAtanh, KDegrees, KRadians, KTrunc,
+    KTypeof, KSqliteVersion, KSqliteSourceId, KChanges, KTotalChanges,
+    KLastInsertRowid,
+    KDate, KTime, KDatetime, KJulianday, KUnixepoch, KStrftime, KTimediff,
+};
+
+// Per-kind implementations — mounted as modules, called qualified.
+mount core.database.sqlite.native.builtins.string_fns;
+mount core.database.sqlite.native.builtins.numeric_fns;
+mount core.database.sqlite.native.builtins.math_fns;
+mount core.database.sqlite.native.builtins.meta_fns;
+mount core.database.sqlite.native.builtins.datetime_fns;
+mount core.database.sqlite.native.builtins.json_fns;
+
+// Fixed seed for the connection-less PRNG default (see header). Replaced by
+// the connection's live stream when L6 threading lands.
+const DEFAULT_RNG_SEED: Int64 = 0x2545F4914F6CDD1D_i64;
+
+// -----------------------------------------------------------------------------
+// Argument access
+// -----------------------------------------------------------------------------
+
+// `args` holds exactly the call's evaluated arguments (the interpreter fills
+// it from the register window). `arg` returns a by-value clone so callers can
+// borrow it; out-of-range (an absent trailing optional such as SUBSTR's length
+// or ROUND's digits) yields RNull, which every reference implementation already
+// interprets as "argument omitted".
+fn arg(args: &List<Register>, i: Int) -> Register {
+    if i >= 0 && i < args.len() {
+        register.register_clone(&args[i])
+    } else {
+        RNull
+    }
+}
+
+// Sub-list from index `start` to the end — for the (sep, rest...) shape of
+// CONCAT_WS, whose separator is arg 0 and values are args 1..n.
+fn rest_from(args: &List<Register>, start: Int) -> List<Register> {
+    let mut out: List<Register> = List.new();
+    let mut i: Int = start;
+    while i < args.len() {
+        out.push(register.register_clone(&args[i]));
+        i = i + 1;
+    }
+    out
+}
+
+// NOT LIKE is the boolean inverse of LIKE. `string_fns.like` yields RInt(1) or
+// RInt(0); invert those and pass anything else through unchanged.
+fn invert_bool(r: Register) -> Register {
+    match r {
+        RInt(x) => { if x == 0_i64 { RInt(1_i64) } else { RInt(0_i64) } }
+        other   => other,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Dispatch
+// -----------------------------------------------------------------------------
+
+/// Evaluate one built-in scalar call. `k` is the semantic kind the interpreter
+/// resolved from the opcode's wire code; `args` are its evaluated arguments.
+public fn eval_scalar(k: &ScalarKind, args: &List<Register>) -> Register {
+    match k {
+        // ---- String -------------------------------------------------------
+        KLength   => { let a0 = arg(args, 0); string_fns.length(&a0) }
+        KLower    => { let a0 = arg(args, 0); string_fns.lower(&a0) }
+        KUpper    => { let a0 = arg(args, 0); string_fns.upper(&a0) }
+        KConcat   => string_fns.concat(args),
+        KConcatWs => {
+            let sep = arg(args, 0);
+            let rest = rest_from(args, 1);
+            string_fns.concat_ws(&sep, &rest)
+        }
+        KSubstr => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            let a2 = arg(args, 2);
+            string_fns.substr(&a0, &a1, &a2)
+        }
+        KTrim => {
+            let a0 = arg(args, 0);
+            if args.len() >= 2 { let a1 = arg(args, 1); string_fns.trim2(&a0, &a1) }
+            else { string_fns.trim(&a0) }
+        }
+        KLtrim => {
+            let a0 = arg(args, 0);
+            if args.len() >= 2 { let a1 = arg(args, 1); string_fns.ltrim2(&a0, &a1) }
+            else { string_fns.ltrim(&a0) }
+        }
+        KRtrim => {
+            let a0 = arg(args, 0);
+            if args.len() >= 2 { let a1 = arg(args, 1); string_fns.rtrim2(&a0, &a1) }
+            else { string_fns.rtrim(&a0) }
+        }
+        KReplace => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            let a2 = arg(args, 2);
+            string_fns.replace(&a0, &a1, &a2)
+        }
+        KInstr => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            string_fns.instr(&a0, &a1)
+        }
+        KHex     => { let a0 = arg(args, 0); string_fns.hex(&a0) }
+        KUnhex   => { let a0 = arg(args, 0); string_fns.unhex(&a0) }
+        KUnicode => { let a0 = arg(args, 0); string_fns.unicode(&a0) }
+        KChar    => string_fns.char_from_codepoints(args),
+        KQuote   => { let a0 = arg(args, 0); string_fns.sql_quote(&a0) }
+        KGlob    => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            string_fns.glob(&a0, &a1)
+        }
+        KLike => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            let a2 = arg(args, 2);           // ESCAPE, RNull when omitted
+            string_fns.like(&a0, &a1, &a2)
+        }
+        KNotLike => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            let a2 = arg(args, 2);
+            invert_bool(string_fns.like(&a0, &a1, &a2))
+        }
+        KSoundex => { let a0 = arg(args, 0); string_fns.soundex(&a0) }
+
+        // ---- Numeric / generic --------------------------------------------
+        KAbs   => { let a0 = arg(args, 0); numeric_fns.abs(&a0) }
+        KRound => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);           // digits, RNull → 0
+            numeric_fns.round(&a0, &a1)
+        }
+        KCoalesce => numeric_fns.coalesce(args),
+        KIfnull => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            numeric_fns.ifnull(&a0, &a1)
+        }
+        KNullif => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            numeric_fns.nullif(&a0, &a1)
+        }
+        KMin => numeric_fns.min_var(args),
+        KMax => numeric_fns.max_var(args),
+        KIif => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            let a2 = arg(args, 2);
+            numeric_fns.iif(&a0, &a1, &a2)
+        }
+        KSign  => { let a0 = arg(args, 0); numeric_fns.sign(&a0) }
+        // Connection-less PRNG default — see header. L6 threading is follow-up.
+        KRandom => {
+            let mut rng = numeric_fns.rng_new(DEFAULT_RNG_SEED);
+            numeric_fns.random(&mut rng)
+        }
+        KRandomBlob => {
+            let a0 = arg(args, 0);
+            let mut rng = numeric_fns.rng_new(DEFAULT_RNG_SEED);
+            numeric_fns.random_blob(&a0, &mut rng)
+        }
+        KZeroBlob   => { let a0 = arg(args, 0); numeric_fns.zero_blob(&a0) }
+        KLikely     => { let a0 = arg(args, 0); numeric_fns.likely(&a0) }
+        KUnlikely   => { let a0 = arg(args, 0); numeric_fns.unlikely(&a0) }
+        KLikelihood => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            numeric_fns.likelihood(&a0, &a1)
+        }
+
+        // ---- Math ----------------------------------------------------------
+        KPi    => math_fns.pi(),
+        KSqrt  => { let a0 = arg(args, 0); math_fns.sqrt(&a0) }
+        KPow   => { let a0 = arg(args, 0); let a1 = arg(args, 1); math_fns.pow(&a0, &a1) }
+        KMod   => { let a0 = arg(args, 0); let a1 = arg(args, 1); math_fns.modulo(&a0, &a1) }
+        KCeil  => { let a0 = arg(args, 0); math_fns.ceil(&a0) }
+        KFloor => { let a0 = arg(args, 0); math_fns.floor(&a0) }
+        KExp   => { let a0 = arg(args, 0); math_fns.exp(&a0) }
+        KLn    => { let a0 = arg(args, 0); math_fns.ln(&a0) }
+        KLog   => {
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);           // base, RNull → base-10 per impl
+            math_fns.log(&a0, &a1)
+        }
+        KLog2  => { let a0 = arg(args, 0); math_fns.log2(&a0) }
+        KLog10 => { let a0 = arg(args, 0); math_fns.log10(&a0) }
+        KSin   => { let a0 = arg(args, 0); math_fns.sin(&a0) }
+        KCos   => { let a0 = arg(args, 0); math_fns.cos(&a0) }
+        KTan   => { let a0 = arg(args, 0); math_fns.tan(&a0) }
+        KAsin  => { let a0 = arg(args, 0); math_fns.asin(&a0) }
+        KAcos  => { let a0 = arg(args, 0); math_fns.acos(&a0) }
+        KAtan  => { let a0 = arg(args, 0); math_fns.atan(&a0) }
+        KAtan2 => { let a0 = arg(args, 0); let a1 = arg(args, 1); math_fns.atan2(&a0, &a1) }
+        KSinh  => { let a0 = arg(args, 0); math_fns.sinh(&a0) }
+        KCosh  => { let a0 = arg(args, 0); math_fns.cosh(&a0) }
+        KTanh  => { let a0 = arg(args, 0); math_fns.tanh(&a0) }
+        KAsinh => { let a0 = arg(args, 0); math_fns.asinh(&a0) }
+        KAcosh => { let a0 = arg(args, 0); math_fns.acosh(&a0) }
+        KAtanh => { let a0 = arg(args, 0); math_fns.atanh(&a0) }
+        KDegrees => { let a0 = arg(args, 0); math_fns.degrees(&a0) }
+        KRadians => { let a0 = arg(args, 0); math_fns.radians(&a0) }
+        KTrunc   => { let a0 = arg(args, 0); math_fns.trunc(&a0) }
+
+        // ---- Metadata ------------------------------------------------------
+        KTypeof         => { let a0 = arg(args, 0); meta_fns.typeof_value(&a0) }
+        KSqliteVersion  => meta_fns.sqlite_version(),
+        KSqliteSourceId => meta_fns.sqlite_source_id(),
+        // Connection-less counters default to zero — see header.
+        KChanges => {
+            let ctx = meta_fns.meta_ctx_new();
+            meta_fns.changes(&ctx)
+        }
+        KTotalChanges => {
+            let ctx = meta_fns.meta_ctx_new();
+            meta_fns.total_changes(&ctx)
+        }
+        KLastInsertRowid => {
+            let ctx = meta_fns.meta_ctx_new();
+            meta_fns.last_insert_rowid(&ctx)
+        }
+
+        // ---- Date / time ---------------------------------------------------
+        // Epoch clock default — an explicit date argument ignores it; only a
+        // 'now'-relative call consults it. Real "now" is follow-up threading.
+        KDate => {
+            let clock = datetime_fns.clock_unix_epoch();
+            datetime_fns.date_fn(args, &clock)
+        }
+        KTime => {
+            let clock = datetime_fns.clock_unix_epoch();
+            datetime_fns.time_fn(args, &clock)
+        }
+        KDatetime => {
+            let clock = datetime_fns.clock_unix_epoch();
+            datetime_fns.datetime_fn(args, &clock)
+        }
+        KJulianday => {
+            let clock = datetime_fns.clock_unix_epoch();
+            datetime_fns.julianday(args, &clock)
+        }
+        KUnixepoch => {
+            let clock = datetime_fns.clock_unix_epoch();
+            datetime_fns.unixepoch(args, &clock)
+        }
+        KStrftime => {
+            let clock = datetime_fns.clock_unix_epoch();
+            datetime_fns.strftime(args, &clock)
+        }
+        KTimediff => {
+            let clock = datetime_fns.clock_unix_epoch();
+            let a0 = arg(args, 0);
+            let a1 = arg(args, 1);
+            datetime_fns.timediff(&a0, &a1, &clock)
+        }
+    }
+}

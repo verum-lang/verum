@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @description: Hardware register examples demonstrating bitfield syntax
 //
-// Spec: docs/architecture/low-level-features.md - MMIO/Register Abstractions
+// Spec: low-level-features §MMIO/Register Abstractions
 
 /// x86 CPU flags register (EFLAGS).
 @bitfield

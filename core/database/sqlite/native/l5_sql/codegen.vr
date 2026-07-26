@@ -45,6 +45,12 @@ module core.database.sqlite.native.l5_sql.codegen;
 mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
+// Built-in scalar catalogue — the single name→kind→code authority. codegen
+// resolves a parsed function name through `registry.kind_from_name` +
+// `registry.kind_code` and checks arity via `registry.arity_of`; it keeps no
+// local name→code table of its own.
+mount core.database.sqlite.native.builtins.registry;
+mount core.database.sqlite.native.builtins.registry.{KLike, KNotLike};
 mount core.database.sqlite.native.l5_sql.ast.{
     Expr, SqlLiteral, BinOp, UnOp,
     TableRef, OrderTerm, UpdateAssignment, SqlOnConflict,
@@ -2771,9 +2777,14 @@ fn emit_like(
     let pr = st.regs.alloc();
     match emit_expr(st, x, xr) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
     match emit_expr(st, pat, pr) { Result.Ok(_) => {}, Result.Err(e) => { return Result.Err(e); } }
-    // Kind 10 = LIKE in ScalarFn dispatch (not yet wired — extend).
-    let n = if negated { 1 } else { 0 };
-    let _ = st.program.emit(ScalarFn(10 + n, 2, xr, dst));
+    // LIKE / NOT LIKE resolve their wire code through the catalogue — the one
+    // code authority — rather than hard-coding 10 here.
+    let code = if negated {
+        registry.kind_code(&KNotLike)
+    } else {
+        registry.kind_code(&KLike)
+    };
+    let _ = st.program.emit(ScalarFn(code, 2, xr, dst));
     Result.Ok(())
 }
 
@@ -2787,35 +2798,6 @@ fn cast_target_kind(ty: &Text) -> Int {
     if n == "varchar".clone() { return 2; }
     if n == "blob".clone()    { return 3; }
     if n == "numeric".clone() { return 4; }
-    -1
-}
-
-fn scalar_fn_kind(name: &Text) -> Int {
-    let n = ascii_lower(name);
-    if n == "length".clone() { return 0; }
-    if n == "abs".clone()    { return 1; }
-    if n == "lower".clone()  { return 2; }
-    if n == "upper".clone()  { return 3; }
-    if n == "coalesce".clone() { return 4; }
-    if n == "ifnull".clone() { return 5; }
-    if n == "nullif".clone() { return 6; }
-    if n == "concat".clone() { return 12; }
-    if n == "substr".clone() { return 13; }
-    if n == "substring".clone() { return 13; }
-    if n == "trim".clone()   { return 14; }
-    if n == "ltrim".clone()  { return 15; }
-    if n == "rtrim".clone()  { return 16; }
-    if n == "replace".clone() { return 17; }
-    if n == "instr".clone()  { return 18; }
-    if n == "round".clone()  { return 19; }
-    if n == "min".clone()    { return 20; }
-    if n == "max".clone()    { return 21; }
-    if n == "hex".clone()    { return 22; }
-    if n == "typeof".clone() { return 23; }
-    if n == "iif".clone()    { return 24; }
-    if n == "unicode".clone() { return 25; }
-    if n == "char".clone()   { return 26; }
-    if n == "sign".clone()   { return 27; }
     -1
 }
 
@@ -2833,11 +2815,24 @@ fn emit_scalar_call(
     if akind >= 0 && !(is_minmax && args.len() >= 2) {
         return Result.Err(unsupported("aggregate call in non-aggregate context".clone()));
     }
-    let kind = scalar_fn_kind(name);
-    if kind < 0 {
-        return Result.Err(unsupported("scalar function not in builtin registry".clone()));
-    }
     let n_args = args.len();
+    // Resolve name → ScalarKind → wire code through the catalogue (the single
+    // authority the interpreter reads back via registry.kind_from_code).
+    let sk = match registry.kind_from_name(name) {
+        Maybe.Some(k) => k,
+        Maybe.None    => {
+            return Result.Err(unsupported("scalar function not in builtin registry".clone()));
+        }
+    };
+    // Parser-time arity check falls straight out of the catalogue.
+    let ar = registry.arity_of(&sk);
+    if n_args < ar.min {
+        return Result.Err(unsupported("too few arguments to scalar function".clone()));
+    }
+    if ar.max >= 0 && n_args > ar.max {
+        return Result.Err(unsupported("too many arguments to scalar function".clone()));
+    }
+    let kind = registry.kind_code(&sk);
     // Evaluate every arg into a contiguous register window.
     let first_arg = if n_args == 0 { 0 } else { st.regs.alloc_n(n_args) };
     let mut i: Int = 0;

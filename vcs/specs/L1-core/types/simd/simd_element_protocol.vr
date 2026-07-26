@@ -5,7 +5,7 @@
 // @description: Test SimdElement marker protocol for SIMD lane types
 
 /// SimdElement is a marker protocol indicating types that can be SIMD lanes.
-/// Spec: low-level-features.md Section 5.1
+/// Spec: low-level-features §5.1
 
 /// Test that Int implements SimdElement
 fn test_int_simd_element() {

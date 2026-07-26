@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @description: Test bitfield accessor method call syntax
 //
-// Spec: docs/architecture/low-level-features.md - Bitfield Semantics
+// Spec: low-level-features §Bitfield Semantics
 
 /// Simple 8-bit flags with accessor calls.
 @bitfield

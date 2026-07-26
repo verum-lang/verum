@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @description: Basic bitfield type parsing with @bits attribute
 //
-// Spec: docs/architecture/low-level-features.md - Bitfield System
+// Spec: low-level-features §Bitfield System
 
 /// Basic 8-bit flags register using bitfield syntax.
 @bitfield

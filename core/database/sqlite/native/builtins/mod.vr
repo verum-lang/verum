@@ -49,3 +49,5 @@ public module window_fns;
 public module json_fns;
 // JSON path grammar + json_set/insert/replace/remove/patch.
 public module json_path;
+// Catalogue dispatch — the single `eval_scalar` seam the VDBE calls.
+public module dispatch;

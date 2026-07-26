@@ -7,20 +7,26 @@
 
 // `ScalarKind` enumerates every scalar function the engine recognises.
 // The numeric `kind_code(ScalarKind) -> Int` is the wire-level identifier
-// that the codegen embeds into the `ScalarFn` opcode and the interpreter
-// dispatches on.
+// this module is the SOLE authority for. It is consumed in exactly two
+// places, both of which read it here rather than keeping a copy:
+//
+//   * codegen — `l5_sql/codegen.vr` resolves a parsed name with
+//     `kind_from_name` then embeds `kind_code(k)` in the `ScalarFn` opcode.
+//   * interpreter — `l4_vdbe/interpreter.vr` turns the opcode's wire code back
+//     into a `ScalarKind` with `kind_from_code` and dispatches through
+//     `builtins/dispatch.eval_scalar`.
 //
 
-// The ranges 0..27 are **stable** — they match the historic inline table
-// in `l5_sql/codegen.vr.scalar_fn_kind` and `l4_vdbe/interpreter.vr.ScalarFn`.
-// New functions extend upward; the wire codes are fixed forever.
+// Wire codes are fixed forever; new functions extend upward, never reorder.
 //
 
 // To add a new built-in:
 //  1. Add a variant here (preserve existing kind codes).
-//  2. Add it to `kind_code` and `kind_from_name`.
+//  2. Add it to `kind_code` AND `kind_from_code` (they are inverse) and to
+//     `kind_from_name`.
 //  3. Add an entry to `arity_of`.
-//  4. Implement the semantics in the matching `*_fns.vr` module.
+//  4. Implement the semantics in the matching `*_fns.vr` module and route it
+//     in `builtins/dispatch.eval_scalar`.
 //  5. Register a unit test under
 //  `vcs/specs/L2-standard/database/sqlite/builtins/`.
 // =============================================================================
@@ -210,6 +216,98 @@ public fn kind_code(k: &ScalarKind) -> Int {
         KUnixepoch      => 94,
         KStrftime       => 95,
         KTimediff       => 96,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Inverse of `kind_code` — resolve a wire code back to its ScalarKind.
+// -----------------------------------------------------------------------------
+//
+// The VDBE interpreter carries the wire code (an `Int`) in the `ScalarFn`
+// opcode; it converts back to the semantic `ScalarKind` through this function
+// before dispatching, so no layer re-derives the name→code or code→name
+// mapping on its own. This inverse is deliberately co-located with
+// `kind_code` above: the two are a single mapping stated in one module, so
+// there is exactly one place a wire code is ever assigned or read.
+
+public fn kind_from_code(c: Int) -> Maybe<ScalarKind> {
+    match c {
+        0  => Maybe.Some(KLength),
+        1  => Maybe.Some(KAbs),
+        2  => Maybe.Some(KLower),
+        3  => Maybe.Some(KUpper),
+        4  => Maybe.Some(KCoalesce),
+        5  => Maybe.Some(KIfnull),
+        6  => Maybe.Some(KNullif),
+        10 => Maybe.Some(KLike),
+        11 => Maybe.Some(KNotLike),
+        12 => Maybe.Some(KConcat),
+        13 => Maybe.Some(KSubstr),
+        14 => Maybe.Some(KTrim),
+        15 => Maybe.Some(KLtrim),
+        16 => Maybe.Some(KRtrim),
+        17 => Maybe.Some(KReplace),
+        18 => Maybe.Some(KInstr),
+        19 => Maybe.Some(KRound),
+        20 => Maybe.Some(KMin),
+        21 => Maybe.Some(KMax),
+        22 => Maybe.Some(KHex),
+        23 => Maybe.Some(KTypeof),
+        24 => Maybe.Some(KIif),
+        25 => Maybe.Some(KUnicode),
+        26 => Maybe.Some(KChar),
+        27 => Maybe.Some(KSign),
+        30 => Maybe.Some(KQuote),
+        31 => Maybe.Some(KConcatWs),
+        32 => Maybe.Some(KGlob),
+        33 => Maybe.Some(KSoundex),
+        34 => Maybe.Some(KUnhex),
+        35 => Maybe.Some(KRandom),
+        36 => Maybe.Some(KRandomBlob),
+        37 => Maybe.Some(KZeroBlob),
+        38 => Maybe.Some(KLikely),
+        39 => Maybe.Some(KUnlikely),
+        40 => Maybe.Some(KLikelihood),
+        50 => Maybe.Some(KPi),
+        51 => Maybe.Some(KSqrt),
+        52 => Maybe.Some(KPow),
+        53 => Maybe.Some(KMod),
+        54 => Maybe.Some(KCeil),
+        55 => Maybe.Some(KFloor),
+        56 => Maybe.Some(KExp),
+        57 => Maybe.Some(KLn),
+        58 => Maybe.Some(KLog),
+        59 => Maybe.Some(KLog2),
+        60 => Maybe.Some(KLog10),
+        61 => Maybe.Some(KSin),
+        62 => Maybe.Some(KCos),
+        63 => Maybe.Some(KTan),
+        64 => Maybe.Some(KAsin),
+        65 => Maybe.Some(KAcos),
+        66 => Maybe.Some(KAtan),
+        67 => Maybe.Some(KAtan2),
+        68 => Maybe.Some(KSinh),
+        69 => Maybe.Some(KCosh),
+        70 => Maybe.Some(KTanh),
+        71 => Maybe.Some(KAsinh),
+        72 => Maybe.Some(KAcosh),
+        73 => Maybe.Some(KAtanh),
+        74 => Maybe.Some(KDegrees),
+        75 => Maybe.Some(KRadians),
+        76 => Maybe.Some(KTrunc),
+        80 => Maybe.Some(KSqliteVersion),
+        81 => Maybe.Some(KSqliteSourceId),
+        82 => Maybe.Some(KChanges),
+        83 => Maybe.Some(KTotalChanges),
+        84 => Maybe.Some(KLastInsertRowid),
+        90 => Maybe.Some(KDate),
+        91 => Maybe.Some(KTime),
+        92 => Maybe.Some(KDatetime),
+        93 => Maybe.Some(KJulianday),
+        94 => Maybe.Some(KUnixepoch),
+        95 => Maybe.Some(KStrftime),
+        96 => Maybe.Some(KTimediff),
+        _  => Maybe.None,
     }
 }
 

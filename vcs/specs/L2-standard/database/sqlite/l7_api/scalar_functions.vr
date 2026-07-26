@@ -3,9 +3,17 @@
 // @tier: 0
 // @tags: sqlite, native, l7, scalar, builtin
 // @timeout: 15000
-// @description: Built-in scalar functions — LENGTH / ABS / LOWER / UPPER / COALESCE / IFNULL / NULLIF
+// @description: Built-in scalar functions — LENGTH / ABS / LOWER / UPPER / COALESCE / IFNULL / NULLIF,
+//   plus catalogue-dispatch coverage (SQRT / DATE / SQLITE_VERSION) unlocked by routing ScalarFn
+//   through builtins/dispatch (T0537). The pre-T0537 codegen name table knew only ~24 functions and
+//   rejected SQRT/DATE/SQLITE_VERSION outright; they are now resolvable via registry.kind_from_name.
 //
 // Spec: sqlite-native spec §14.2 (scalar functions)
+//
+// NOTE: runtime green is gated on T0557 (the RefField language defect that fails three l7_api e2e
+// specs) AND on a stdlib bake picking up the new builtins/dispatch module. This file is kept at
+// @test: typecheck-pass until both land; the assertions below are written to be runtime-correct so
+// it flips to a `run` spec unchanged once unblocked.
 
 mount core.*;
 mount collections.List;
@@ -84,10 +92,76 @@ fn coalesce_ifnull() {
     }
 }
 
+// --- Catalogue-dispatch coverage: functions the pre-T0537 codegen rejected ---
+
+fn sqrt_math() {
+    // SQRT lives in the math band (kind 51); the old codegen name table did not
+    // know it, so this SELECT failed to compile before T0537.
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v REAL)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (9.0)".clone());
+    match db.query_all(&"SELECT SQRT(v) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RReal(x) => { assert(x > 2.999 && x < 3.001); }
+                _ => panic("SQRT should be RReal"),
+            }
+        }
+        Err(_) => panic("query_all SQRT"),
+    }
+}
+
+fn date_explicit() {
+    // DATE (kind 90) — an explicit date argument is independent of the clock.
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    match db.query_all(&"SELECT DATE('2020-01-01') FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RText(s) => { assert_eq(s, "2020-01-01".clone()); }
+                _ => panic("DATE should be RText"),
+            }
+        }
+        Err(_) => panic("query_all DATE"),
+    }
+}
+
+fn version_const() {
+    // SQLITE_VERSION (kind 80) — a no-argument metadata function.
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    match db.query_all(&"SELECT SQLITE_VERSION() FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RText(_) => {}
+                _ => panic("SQLITE_VERSION should be RText"),
+            }
+        }
+        Err(_) => panic("query_all SQLITE_VERSION"),
+    }
+}
+
 fn main() {
     length_text();
     abs_int();
     upper_lower();
     coalesce_ifnull();
+    sqrt_math();
+    date_explicit();
+    version_const();
     print("scalar_functions typecheck ok");
 }

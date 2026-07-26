@@ -5,7 +5,7 @@
 // @description: Test @repr(simd) attribute for SIMD vector types
 
 /// @repr(simd) marks types as SIMD vectors requiring special alignment.
-/// Spec: low-level-features.md Section 5.1
+/// Spec: low-level-features §5.1
 
 /// A 4-element float vector type with SIMD layout
 @repr(simd)
