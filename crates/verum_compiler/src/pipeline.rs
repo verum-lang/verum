@@ -200,20 +200,27 @@ fn install_canonical_module_aliases(registry: &mut ModuleRegistry) {
     registry.register_path_alias("std", "core");
     registry.register_path_alias("std.prelude", "core.prelude");
     registry.register_path_alias("std.base", "core.base");
-    registry.register_path_alias("std.maybe", "core.base.maybe");
-    registry.register_path_alias("std.result", "core.base.result");
+    // The RIGHT-hand side of these aliases is not free text — it is the
+    // canonical home of the type, so it is taken from
+    // `verum_common::well_known_types::WellKnownType` rather than
+    // restated. The LEFT-hand side is the user-facing spelling and belongs
+    // to this table. If `Maybe` ever moves module, every alias below
+    // follows without an edit here.
+    let canon = |w: verum_common::well_known_types::WellKnownType| w.canonical_archive_modules()[0];
+    registry.register_path_alias("std.maybe", canon(verum_common::well_known_types::WellKnownType::Maybe));
+    registry.register_path_alias("std.result", canon(verum_common::well_known_types::WellKnownType::Result));
     registry.register_path_alias("std.collections", "core.collections");
     registry.register_path_alias("std.io", "core.io");
     registry.register_path_alias("std.sync", "core.sync");
     registry.register_path_alias("std.time", "core.time");
     registry.register_path_alias("std.math", "core.math");
-    registry.register_path_alias("core.memory", "core.base.memory");
-    registry.register_path_alias("core.maybe", "core.base.maybe");
-    registry.register_path_alias("core.result", "core.base.result");
+    registry.register_path_alias("core.memory", canon(verum_common::well_known_types::WellKnownType::Heap));
+    registry.register_path_alias("core.maybe", canon(verum_common::well_known_types::WellKnownType::Maybe));
+    registry.register_path_alias("core.result", canon(verum_common::well_known_types::WellKnownType::Result));
     registry.register_path_alias("core.process", "core.io.process");
-    registry.register_path_alias("core.string", "core.text.text");
-    registry.register_path_alias("core.text", "core.text.text");
-    registry.register_path_alias("core.list", "core.collections.list");
+    registry.register_path_alias("core.string", canon(verum_common::well_known_types::WellKnownType::Text));
+    registry.register_path_alias("core.text", canon(verum_common::well_known_types::WellKnownType::Text));
+    registry.register_path_alias("core.list", canon(verum_common::well_known_types::WellKnownType::List));
     registry.register_path_alias("core.map", "core.collections.map");
     registry.register_path_alias("core.set", "core.collections.set");
     // Channel module alias (tests use core.sync.mpsc but it's
