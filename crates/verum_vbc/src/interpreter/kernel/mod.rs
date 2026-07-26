@@ -1661,90 +1661,108 @@ pub use tokenizer::{
 // Sampling Operations
 // =============================================================================
 
-/// Top-p (nucleus) sampling from logits.
-pub fn dispatch_sample_top_p(logits: &TensorHandle, p: f64) -> Option<u32> {
-    if logits.numel == 0 {
-        return None;
-    }
-
-    // Simple implementation: softmax then cumulative sum
-    let ptr = logits.data_ptr_f32();
-    if ptr.is_null() {
-        return None;
-    }
-
+/// Softmax over the flat logit row, as `(index, probability)` pairs sorted by
+/// descending probability.
+///
+/// THE distribution authority for the `dispatch_sample_*` family.  Every
+/// sampler draws its candidates from this one function, so they cannot drift
+/// apart on dtype handling, numerical conditioning or normalisation — which
+/// they previously had: `sample_top_p` and `sample_temperature` read through
+/// `data_ptr_f32()` while `sample_top_k` read through `data_ptr_f64()`, and
+/// both accessors return null for every other dtype.  Each sampler therefore
+/// answered `None` for exactly the logits its siblings accepted.
+///
+/// Element access goes through `get_element_f64`, which is dtype-aware and
+/// honours the view's offset and strides.
+///
+/// `temperature` divides the logits before the softmax; pass `1.0` to leave
+/// the distribution unscaled.
+fn sampling_distribution(logits: &TensorHandle, temperature: f64) -> Option<Vec<(u32, f64)>> {
     let n = logits.numel;
-    let mut probs: Vec<(usize, f32)> = Vec::with_capacity(n);
-
-    // Softmax
-    let max_val = unsafe {
-        (0..n)
-            .map(|i| *ptr.add(i))
-            .fold(f32::NEG_INFINITY, f32::max)
-    };
-
-    let sum: f32 = unsafe { (0..n).map(|i| (*ptr.add(i) - max_val).exp()).sum() };
-
-    unsafe {
-        for i in 0..n {
-            let prob = (*ptr.add(i) - max_val).exp() / sum;
-            probs.push((i, prob));
-        }
+    if n == 0 || temperature <= 0.0 {
+        return None;
     }
 
-    // Sort by probability descending
+    // Shift by the maximum before exponentiating: a logit row of a few
+    // hundred overflows to inf otherwise, and the whole row becomes NaN.
+    let mut max_val = f64::NEG_INFINITY;
+    for i in 0..n {
+        let v = logits.get_element_f64(i)? / temperature;
+        if v > max_val {
+            max_val = v;
+        }
+    }
+    if !max_val.is_finite() {
+        return None;
+    }
+
+    let mut probs: Vec<(u32, f64)> = Vec::with_capacity(n);
+    let mut sum = 0.0;
+    for i in 0..n {
+        let weight = (logits.get_element_f64(i)? / temperature - max_val).exp();
+        sum += weight;
+        probs.push((i as u32, weight));
+    }
+    if !(sum > 0.0) || !sum.is_finite() {
+        return None;
+    }
+    for entry in &mut probs {
+        entry.1 /= sum;
+    }
+
     probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Cumulative sum until p
-    let mut cum_prob = 0.0;
-    for (idx, prob) in &probs {
-        cum_prob += *prob as f64;
-        if cum_prob >= p {
-            return Some(*idx as u32);
-        }
-    }
-
-    probs.first().map(|(idx, _)| *idx as u32)
+    Some(probs)
 }
 
-/// Temperature-scaled sampling from logits.
-pub fn dispatch_sample_temperature(logits: &TensorHandle, temperature: f64) -> Option<u32> {
-    if logits.numel == 0 || temperature <= 0.0 {
-        return None;
-    }
-
-    let ptr = logits.data_ptr_f32();
-    if ptr.is_null() {
-        return None;
-    }
-
-    let n = logits.numel;
-    let temp = temperature as f32;
-
-    // Apply temperature and softmax
-    let max_val = unsafe {
-        (0..n)
-            .map(|i| *ptr.add(i) / temp)
-            .fold(f32::NEG_INFINITY, f32::max)
-    };
-
-    let sum: f32 = unsafe { (0..n).map(|i| ((*ptr.add(i) / temp) - max_val).exp()).sum() };
-
-    // Sample from distribution
-    let random_val = dispatch_random_float_01() as f32;
-    let mut cum_prob = 0.0f32;
-
-    unsafe {
-        for i in 0..n {
-            let prob = ((*ptr.add(i) / temp) - max_val).exp() / sum;
-            cum_prob += prob;
-            if cum_prob >= random_val {
-                return Some(i as u32);
-            }
+/// The nucleus of an already-sorted distribution: the shortest prefix whose
+/// cumulative probability reaches `p`, together with that prefix's mass.
+fn nucleus(probs: &[(u32, f64)], p: f64) -> (&[(u32, f64)], f64) {
+    let mut cumulative = 0.0;
+    for (i, (_, prob)) in probs.iter().enumerate() {
+        cumulative += *prob;
+        if cumulative >= p {
+            return (&probs[..i + 1], cumulative);
         }
     }
+    (probs, cumulative)
+}
 
-    Some((n - 1) as u32)
+/// Draws one index from `candidates` with probability proportional to its
+/// weight, renormalised against `mass` so that a truncated candidate set is
+/// still a proper distribution.
+fn draw_from(candidates: &[(u32, f64)], mass: f64) -> Option<u32> {
+    if candidates.is_empty() || !(mass > 0.0) {
+        return None;
+    }
+    let target = dispatch_random_float_01() * mass;
+    let mut cumulative = 0.0;
+    for (index, prob) in candidates {
+        cumulative += *prob;
+        if cumulative >= target {
+            return Some(*index);
+        }
+    }
+    // Reachable only through floating-point drift in the final comparison.
+    candidates.last().map(|(index, _)| *index)
+}
+
+/// Top-p (nucleus) sampling: draws from the shortest set of most-likely
+/// tokens whose probabilities sum to at least `p`.
+///
+/// It DRAWS.  The previous implementation walked the cumulative sum and
+/// returned the token that crossed `p` — deterministically the LEAST likely
+/// member of the nucleus, which inverts the intent of the operator.
+pub fn dispatch_sample_top_p(logits: &TensorHandle, p: f64) -> Option<u32> {
+    let probs = sampling_distribution(logits, 1.0)?;
+    let (candidates, mass) = nucleus(&probs, p);
+    draw_from(candidates, mass)
+}
+
+/// Temperature-scaled sampling: softmax over `logits / temperature`, then an
+/// inverse-CDF draw across the whole vocabulary.
+pub fn dispatch_sample_temperature(logits: &TensorHandle, temperature: f64) -> Option<u32> {
+    let probs = sampling_distribution(logits, temperature)?;
+    draw_from(&probs, 1.0)
 }
 
 /// Paged attention for efficient KV cache.
@@ -2823,34 +2841,35 @@ pub fn dispatch_rdma_check_valid(rdma_ref: &RdmaRefHandle) -> bool {
 // Additional Sampling Operations (CPU Stubs)
 // ============================================================================
 
-/// Top-k sampling: select from top k most likely tokens.
-/// Stub: Returns the argmax token.
-pub fn dispatch_sample_top_k(logits: &TensorHandle, _k: usize) -> Option<u32> {
-    // Stub: return argmax
-    let n = logits.shape[0];
-    if n == 0 {
+/// Top-k sampling: draws from the `k` most likely tokens.
+///
+/// It DRAWS, and it reads `k`.  The previous implementation ignored `k`
+/// entirely and returned the argmax, which is `dispatch_sample_greedy` under
+/// another name — a caller asking for k = 50 got no sampling at all.  It also
+/// scanned `shape[0]` rather than `numel`, so a `[1, vocab]` logit row was
+/// searched one element deep.
+pub fn dispatch_sample_top_k(logits: &TensorHandle, k: usize) -> Option<u32> {
+    if k == 0 {
         return None;
     }
-    let ptr = logits.data_ptr_f64();
-    if ptr.is_null() {
-        return None;
-    }
-    let mut best_idx = 0u32;
-    let mut best_val = f64::NEG_INFINITY;
-    for i in 0..n {
-        let v = unsafe { *ptr.add(i) };
-        if v > best_val {
-            best_val = v;
-            best_idx = i as u32;
-        }
-    }
-    Some(best_idx)
+    let probs = sampling_distribution(logits, 1.0)?;
+    let candidates = &probs[..k.min(probs.len())];
+    let mass: f64 = candidates.iter().map(|(_, prob)| *prob).sum();
+    draw_from(candidates, mass)
 }
 
-/// Combined top-k + top-p sampling.
-/// Stub: Returns the argmax token.
-pub fn dispatch_sample_top_k_top_p(logits: &TensorHandle, _k: usize, _p: f64) -> Option<u32> {
-    dispatch_sample_top_k(logits, _k)
+/// Combined top-k + top-p: restricts to the `k` most likely tokens, then to
+/// the nucleus of mass `p` WITHIN that set, then draws.
+///
+/// `p` was previously discarded — the function forwarded to `top_k` alone.
+pub fn dispatch_sample_top_k_top_p(logits: &TensorHandle, k: usize, p: f64) -> Option<u32> {
+    if k == 0 {
+        return None;
+    }
+    let probs = sampling_distribution(logits, 1.0)?;
+    let head = &probs[..k.min(probs.len())];
+    let (candidates, mass) = nucleus(head, p);
+    draw_from(candidates, mass)
 }
 
 /// Repetition penalty: suppresses tokens that have already been generated.
@@ -4306,5 +4325,119 @@ mod tests {
             .expect("ids outside the row are skipped, not fatal");
         assert_eq!(out.get_element_f64(0), Some(1.0), "no unrelated token is penalised");
         assert_eq!(out.get_element_f64(1), Some(4.0), "no unrelated token is penalised");
+    }
+
+    /// The indices a sampler actually visits over many draws.  A sampler that
+    /// draws visits several; one that returns a fixed token visits exactly one.
+    fn distinct_draws(
+        mut sample: impl FnMut() -> Option<u32>,
+    ) -> std::collections::BTreeSet<u32> {
+        (0..200).filter_map(|_| sample()).collect()
+    }
+
+    /// These pin the sampler half of T0184.  The four samplers shared no code
+    /// and had drifted apart on dtype: `top_p` and `temperature` read through
+    /// `data_ptr_f32()`, `top_k` through `data_ptr_f64()`, and both accessors
+    /// return null for every other dtype — so each answered `None` for exactly
+    /// the logits its siblings accepted.  The two dtype pins are deterministic
+    /// and are the sharpest of the set.
+    #[test]
+    fn sample_top_k_accepts_f32_logits() {
+        let mut t = TensorHandle::zeros(&[3], DType::F32).expect("alloc");
+        for (i, v) in [1.0, 5.0, 2.0].iter().enumerate() {
+            assert!(t.set_element_f64(i, *v));
+        }
+        assert!(
+            dispatch_sample_top_k(&t, 2).is_some(),
+            "F32 is the ordinary logits dtype; `data_ptr_f64()` returned null for it"
+        );
+    }
+
+    #[test]
+    fn sample_top_p_and_temperature_accept_f64_logits() {
+        let logits = row(&[1.0, 5.0, 2.0]);
+        assert!(
+            dispatch_sample_top_p(&logits, 0.9).is_some(),
+            "`data_ptr_f32()` returned null for F64 logits"
+        );
+        assert!(
+            dispatch_sample_temperature(&logits, 1.0).is_some(),
+            "`data_ptr_f32()` returned null for F64 logits"
+        );
+    }
+
+    #[test]
+    fn sample_top_k_draws_from_the_whole_k_set() {
+        // Uniform over four, so the top three are interchangeable candidates.
+        let logits = row(&[1.0, 1.0, 1.0, 1.0]);
+        let seen = distinct_draws(|| dispatch_sample_top_k(&logits, 3));
+        assert!(
+            seen.len() >= 2,
+            "top-k must sample among its k candidates; the old code ignored k \
+             and returned the argmax. saw {seen:?}"
+        );
+        assert!(seen.iter().all(|i| *i < 3), "a draw escaped the top-3 set: {seen:?}");
+    }
+
+    #[test]
+    fn sample_top_k_of_one_is_deterministic() {
+        let logits = row(&[1.0, 9.0, 2.0]);
+        let seen = distinct_draws(|| dispatch_sample_top_k(&logits, 1));
+        assert_eq!(
+            seen.into_iter().collect::<Vec<_>>(),
+            vec![1],
+            "k = 1 leaves one candidate, so every draw is the argmax"
+        );
+    }
+
+    #[test]
+    fn sample_top_p_draws_inside_the_nucleus() {
+        // Uniform over four: the nucleus of mass 0.75 is the first three.
+        let logits = row(&[1.0, 1.0, 1.0, 1.0]);
+        let seen = distinct_draws(|| dispatch_sample_top_p(&logits, 0.75));
+        assert!(
+            seen.len() >= 2,
+            "top-p must DRAW from the nucleus; the old code returned the token \
+             that crossed p — deterministically its least likely member. saw {seen:?}"
+        );
+        assert!(seen.iter().all(|i| *i < 3), "a draw escaped the nucleus: {seen:?}");
+    }
+
+    #[test]
+    fn sample_top_k_top_p_honours_p() {
+        // k admits all four; p narrows that to the first two.
+        let logits = row(&[1.0, 1.0, 1.0, 1.0]);
+        let seen = distinct_draws(|| dispatch_sample_top_k_top_p(&logits, 4, 0.5));
+        assert!(
+            seen.iter().all(|i| *i < 2),
+            "p was discarded — the combined sampler forwarded to top-k alone. saw {seen:?}"
+        );
+        assert!(seen.len() >= 2, "and it must draw within that pair; saw {seen:?}");
+    }
+
+    #[test]
+    fn sample_top_k_rejects_a_zero_k() {
+        assert!(
+            dispatch_sample_top_k(&row(&[1.0, 2.0]), 0).is_none(),
+            "an empty candidate set has no answer"
+        );
+    }
+
+    #[test]
+    fn sample_top_k_clamps_k_above_the_vocabulary() {
+        assert!(
+            dispatch_sample_top_k(&row(&[1.0, 9.0]), 500).is_some(),
+            "a k larger than the row is the whole row, not an error"
+        );
+    }
+
+    #[test]
+    fn sampling_distribution_survives_large_logits() {
+        // Without the shift by the row maximum these exponentiate to inf and
+        // every probability becomes NaN.
+        assert!(
+            dispatch_sample_top_k(&row(&[800.0, 799.0, 1.0]), 2).is_some(),
+            "the softmax must be shifted by the row maximum"
+        );
     }
 }
