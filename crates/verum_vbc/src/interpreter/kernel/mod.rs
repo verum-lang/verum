@@ -2691,9 +2691,14 @@ pub fn dispatch_dist_new_group(ranks: &[usize]) -> ProcessGroupHandle {
 }
 
 /// Get the rank of current process in a group.
-/// Stub: Always returns 0 in single-process mode.
-pub fn dispatch_dist_get_rank(_group: &ProcessGroupHandle) -> usize {
-    0
+///
+/// The handle already carries this; the previous hardcoded `0` discarded it.
+/// Rank is what every collective and every sharding decision branches on, so
+/// a process in a group whose ranks do not begin at it reported the wrong
+/// identity and then acted on it — with no error anywhere, because 0 is a
+/// perfectly valid rank.
+pub fn dispatch_dist_get_rank(group: &ProcessGroupHandle) -> usize {
+    group.current_rank
 }
 
 // ============================================================================
@@ -2718,17 +2723,29 @@ pub fn dispatch_p2p_recv(_src_rank: usize, _group: &ProcessGroupHandle) -> Optio
 // ============================================================================
 
 /// Gather: collect tensors from all ranks to one rank.
-/// Stub: In single-process mode, return a copy wrapped in a leading dimension.
+///
+/// With a world of ONE the gathered result is the input carrying a unit
+/// leading dimension — a reshape, not a fabrication.
+///
+/// This is the THIRD site with the defect repaired in `dispatch_all_gather`
+/// and `dispatch_pmap_all_gather` (T0184), and the most deceptive of the
+/// three: it consulted `group.world_size` to build the correct output shape
+/// and then filled that shape with `TensorHandle::zeros`, discarding the
+/// input.  Reading the group made it look like a real implementation while
+/// every value it produced was invented.
+///
+/// With `world_size > 1` this process holds only its own contribution, and a
+/// `dst_rank` outside the group names a destination that does not exist.
 pub fn dispatch_collective_gather(
     tensor: &TensorHandle,
-    _dst_rank: usize,
+    dst_rank: usize,
     group: &ProcessGroupHandle,
 ) -> Option<TensorHandle> {
-    // In single-process mode, add a leading dimension of size world_size (1)
-    let tensor_shape = &tensor.shape[..tensor.ndim as usize];
-    let mut new_shape = vec![group.world_size];
-    new_shape.extend(tensor_shape.iter());
-    TensorHandle::zeros(&new_shape, tensor.dtype)
+    if group.world_size == 1 && group.ranks.contains(&dst_rank) {
+        super::tensor::tensor_unsqueeze(tensor, 0)
+    } else {
+        None
+    }
 }
 
 /// Scatter: distribute tensor chunks from one rank to all ranks.
@@ -4541,6 +4558,39 @@ mod tests {
         assert!(
             dispatch_collective_scatter(&t, 0, &group_of(4)).is_none(),
             "each rank is entitled only to its own chunk, not the undivided tensor"
+        );
+    }
+
+    /// The third fabricated-zeros site, and the most deceptive: it consulted
+    /// `group.world_size` to build the correct output shape and then filled
+    /// that shape with zeros, so reading the group made it look implemented.
+    #[test]
+    fn collective_gather_preserves_data_and_refuses_a_multi_rank_world() {
+        let t = TensorHandle::full(&[2, 3], DType::F64, 7.0).expect("alloc");
+        let out = dispatch_collective_gather(&t, 0, &group_of(1)).expect("one rank has an answer");
+        assert_eq!(out.ndim, 3, "gathering adds a unit leading dimension");
+        assert_eq!(
+            out.get_element_f64(0),
+            Some(7.0),
+            "the input data must survive; zeros here is the T0184 defect"
+        );
+        assert!(
+            dispatch_collective_gather(&t, 0, &group_of(4)).is_none(),
+            "this process holds only its own contribution"
+        );
+    }
+
+    #[test]
+    fn dist_get_rank_reports_the_handle_rank() {
+        let group = ProcessGroupHandle {
+            ranks: vec![0, 1, 2, 3],
+            world_size: 4,
+            current_rank: 2,
+        };
+        assert_eq!(
+            dispatch_dist_get_rank(&group),
+            2,
+            "rank comes from the handle; a hardcoded 0 is a valid-looking wrong identity"
         );
     }
 }
