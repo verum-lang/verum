@@ -30430,6 +30430,9 @@ impl VbcCodegen {
             CodegenStrategy::TensorExtExtendedOpcode(sub_op) => {
                 self.emit_intrinsic_tensor_ext_extended(*sub_op, args, dest);
             }
+            CodegenStrategy::MlExtendedOpcode(sub_op) => {
+                self.emit_intrinsic_ml_extended(*sub_op, args, dest);
+            }
             CodegenStrategy::GpuExtendedOpcode(sub_op) => {
                 self.emit_intrinsic_gpu_extended(*sub_op, args, dest, intrinsic.return_count as usize);
             }
@@ -35098,6 +35101,45 @@ impl VbcCodegen {
         self.ctx.emit(Instruction::TensorExtended {
             sub_op: sub_op as u8,
             operands: encode_tensor_operands(dest, args),
+        });
+    }
+
+    /// Emits an MlExtended (0xFD) operation — the LLM-serving carrier.
+    ///
+    /// Wire: `[sub_op][varint operand_len][operands]`, the same envelope as
+    /// every other extended carrier (T0419), so the interpreter routes through
+    /// the envelope authority and the structural decoder advances past the
+    /// operands without knowing per-sub-op arity.  Registers use the canonical
+    /// variable-width form via `write_reg`; a raw `reg.0 as u8` truncates any
+    /// register >= 128, which `read_reg` then mis-reads as a two-byte index.
+    ///
+    /// 0xFD travels as `Instruction::Raw` rather than a typed variant: the
+    /// carrier has a decode arm (`bytecode.rs`, `Opcode::MlExtended`) and a
+    /// dispatch handler, but no `Instruction::MlExtended`.  The gradient
+    /// sub-ops in `compile_extern_call` already emit it exactly this way — this
+    /// is the same emission reached from the intrinsic registry instead of from
+    /// a `verum_*` extern name, so both surfaces produce identical bytes.
+    fn emit_intrinsic_ml_extended(
+        &mut self,
+        sub_op: crate::instruction::MlSubOpcode,
+        args: &[Reg],
+        dest: Reg,
+    ) {
+        use crate::instruction::Opcode;
+
+        let mut operands = Vec::<u8>::new();
+        Self::write_reg(&mut operands, dest.0);
+        for &arg in args {
+            Self::write_reg(&mut operands, arg.0);
+        }
+
+        let mut data = vec![sub_op as u8];
+        crate::encoding::encode_varint(operands.len() as u64, &mut data);
+        data.extend_from_slice(&operands);
+
+        self.ctx.emit(Instruction::Raw {
+            opcode: Opcode::MlExtended,
+            data,
         });
     }
 

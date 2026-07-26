@@ -340,6 +340,19 @@ impl IntrinsicLowering {
                 // AOT. No SSA value to return — divergent.
                 None
             }
+            CodegenStrategy::MlExtendedOpcode(_sub_op) => {
+                // LLM-serving operations (samplers, repetition penalty,
+                // KV cache) are host-side control logic over a logit row:
+                // sorting, cumulative mass, an RNG draw. There is no
+                // linalg/tensor op that expresses "draw one index in
+                // proportion to probability", so unlike the tensor
+                // sub-ops above these have no MLIR image and carry
+                // `mlir_op: None` in the registry. The VBC expression
+                // codegen emits the 0xFD envelope and the interpreter's
+                // ml_extended handler runs them. Returning an invented
+                // op name here would put a lie in the MLIR module.
+                None
+            }
         };
 
         LoweringResult {

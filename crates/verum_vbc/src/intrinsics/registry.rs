@@ -33,7 +33,8 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::instruction::{
-    ArithSubOpcode, GpuSubOpcode, MathSubOpcode, Opcode, TensorExtSubOpcode, TensorSubOpcode,
+    ArithSubOpcode, GpuSubOpcode, MathSubOpcode, MlSubOpcode, Opcode, TensorExtSubOpcode,
+    TensorSubOpcode,
 };
 
 /// Global intrinsic registry singleton.
@@ -233,6 +234,23 @@ pub enum CodegenStrategy {
     /// Maps to TensorExtExtended opcode (0xFC 0x00) with an ext sub-opcode.
     /// Used for extended tensor operations: RmsNorm, FlashAttention, Fft, Scatter.
     TensorExtExtendedOpcode(TensorExtSubOpcode),
+
+    /// Maps to MlExtended opcode (0xFD) with a sub-opcode.
+    /// Used for LLM-serving operations: samplers, repetition penalty, KV cache.
+    ///
+    /// The 0xFD carrier already had a dispatch handler, a decode arm and wire
+    /// pins, and the codegen already emitted it for the gradient sub-ops — but
+    /// only from the `verum_*` extern-name path, never from an intrinsic.  So
+    /// `@vbc(SAMPLE_TOP_K, …)` had nothing to resolve to, and `lookup_intrinsic`
+    /// answers a miss with a silent `LoadNil`.  This variant is what lets the
+    /// registry name a 0xFD sub-op, putting `sample_top_k` on the same surface
+    /// its sibling `sample_top_p` already uses.
+    ///
+    /// No new `Instruction` variant is involved: 0xFD travels as
+    /// `Instruction::Raw` carrying the standard envelope
+    /// `[sub_op][varint operand_len][operands]` (T0419), which the existing
+    /// decoder round-trips.
+    MlExtendedOpcode(MlSubOpcode),
 
     /// Maps to the generic Extended opcode (0x1F) with a sub-opcode.
     /// Used for first-class control-flow extensions whose handler lives
@@ -10925,6 +10943,42 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::SampleTemperature),
         mlir_op: Some("verum.sample_temperature"),
         doc: "Temperature-scaled sampling from logits",
+    },
+    // The three below ride the MlExtended (0xFD) carrier rather than the
+    // tensor tree, because that is where their sub-opcodes and handlers
+    // already live.  `mlir_op` is None for all three and that is not an
+    // omission: sampling is host-side control logic over a logit row — sort,
+    // cumulative mass, an RNG draw — with no linalg image, so naming an MLIR
+    // op would put a lie in the module.
+    Intrinsic {
+        name: "SAMPLE_TOP_K",
+        category: IntrinsicCategory::Tensor,
+        hints: &[],
+        param_count: 2, // logits, k
+        return_count: 1,
+        strategy: CodegenStrategy::MlExtendedOpcode(MlSubOpcode::SampleTopK),
+        mlir_op: None,
+        doc: "Top-k sampling: draw from the k most likely tokens",
+    },
+    Intrinsic {
+        name: "SAMPLE_TOP_K_TOP_P",
+        category: IntrinsicCategory::Tensor,
+        hints: &[],
+        param_count: 3, // logits, k, p
+        return_count: 1,
+        strategy: CodegenStrategy::MlExtendedOpcode(MlSubOpcode::SampleTopKTopP),
+        mlir_op: None,
+        doc: "Top-k then nucleus-p sampling: draw within the top k",
+    },
+    Intrinsic {
+        name: "REPETITION_PENALTY",
+        category: IntrinsicCategory::Tensor,
+        hints: &[],
+        param_count: 3, // logits, past_tokens, penalty
+        return_count: 1,
+        strategy: CodegenStrategy::MlExtendedOpcode(MlSubOpcode::RepetitionPenalty),
+        mlir_op: None,
+        doc: "Penalise the logits of already-generated tokens",
     },
     Intrinsic {
         name: "TENSOR_PAGED_ATTENTION",

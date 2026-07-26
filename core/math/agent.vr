@@ -958,6 +958,26 @@ public fn sample_temperature(logits: &DynTensor<Float>, temperature: Float) -> U
     @vbc(SAMPLE_TEMPERATURE, logits, temperature)
 }
 
+// Sample tokens using top-k: draw from the k most likely tokens
+public fn sample_top_k(logits: &DynTensor<Float>, k: USize) -> U32 {
+    @vbc(SAMPLE_TOP_K, logits, k)
+}
+
+// Sample tokens using top-k narrowed to a nucleus of mass p within that set
+public fn sample_top_k_top_p(logits: &DynTensor<Float>, k: USize, p: Float) -> U32 {
+    @vbc(SAMPLE_TOP_K_TOP_P, logits, k, p)
+}
+
+// Suppress already-generated tokens before sampling. Returns a new logit row;
+// the input is not written through.
+public fn repetition_penalty(
+    logits: &DynTensor<Float>,
+    past_tokens: &DynTensor<USize>,
+    penalty: Float,
+) -> DynTensor<Float> {
+    @vbc(REPETITION_PENALTY, logits, past_tokens, penalty)
+}
+
 // Greedy sampling (argmax)
 public fn sample_greedy(logits: &DynTensor<Float>) -> U32 {
     argmax(logits).item() as U32

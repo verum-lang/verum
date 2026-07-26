@@ -360,6 +360,49 @@ mod tests {
         assert!(!info.is_pure); // Atomics have side effects
     }
 
+    /// T0184 — the MlExtended (0xFD) carrier is reachable from the registry,
+    /// not only from the `verum_*` extern-name path in the expression codegen.
+    ///
+    /// Until `CodegenStrategy::MlExtendedOpcode` existed, nothing here could
+    /// name a 0xFD sub-op, so `@vbc(SAMPLE_TOP_K, …)` missed this lookup — and
+    /// a miss is answered by emitting `LoadNil` and returning `Ok`. The call
+    /// compiled cleanly, produced nil at runtime, and reported nothing
+    /// anywhere. This pins the route rather than the symptom: the sub-op each
+    /// name resolves to is the one its interpreter handler reads, and the
+    /// parameter count is the number of registers that handler consumes after
+    /// the destination.
+    #[test]
+    fn ml_serving_intrinsics_route_to_their_handler_sub_opcodes() {
+        use crate::instruction::MlSubOpcode;
+        use crate::intrinsics::registry::CodegenStrategy;
+
+        for (name, sub_op, params) in [
+            ("SAMPLE_TOP_K", MlSubOpcode::SampleTopK, 2usize),
+            ("SAMPLE_TOP_K_TOP_P", MlSubOpcode::SampleTopKTopP, 3),
+            ("REPETITION_PENALTY", MlSubOpcode::RepetitionPenalty, 3),
+        ] {
+            let info = lookup_intrinsic(name).unwrap_or_else(|| {
+                panic!("{name} is unregistered — `@vbc` would emit a silent LoadNil")
+            });
+            assert!(
+                matches!(
+                    info.intrinsic.strategy,
+                    CodegenStrategy::MlExtendedOpcode(s) if s as u8 == sub_op as u8
+                ),
+                "{name} must target the 0xFD sub-op its handler reads, got {:?}",
+                info.intrinsic.strategy
+            );
+            assert_eq!(
+                info.intrinsic.param_count as usize, params,
+                "{name} param count must match the registers its handler reads after dst"
+            );
+            assert_eq!(
+                info.intrinsic.return_count, 1,
+                "{name} produces exactly one value"
+            );
+        }
+    }
+
     #[test]
     fn test_unknown_intrinsic() {
         assert!(lookup_intrinsic("nonexistent").is_none());
