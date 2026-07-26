@@ -17,6 +17,29 @@
 //! growing.  Fixing one means deleting its line here: the second test fails if
 //! a listed name becomes registered, so the list can only shrink deliberately.
 //!
+//! DO NOT "fix" one of these by adding a registry entry without reading its
+//! handler first.  A triage of all 72 names against the interpreter's dispatch
+//! arms found that NONE of them is one registry entry away from working:
+//!
+//!   * 68 have no handler at all — they need a real implementation.
+//!   * `TENSOR_FLIP` and `TENSOR_POOL` have handlers that read IMMEDIATES from
+//!     the bytecode (`read_varint`, then one `u8` per axis).  The generic
+//!     emitter writes `[dst][args as registers]`, so registering them would
+//!     make the handler read a register byte as a length and then consume
+//!     arbitrary bytes as axes — a wire mismatch, which is worse than the nil
+//!     they return today because it produces a plausible wrong tensor.
+//!   * `EVENT_RECORD`'s handler reads THREE registers (dst, event, stream)
+//!     while `core/math/advanced.vr` passes one argument.  Registering it
+//!     would leave a `read_reg` consuming the NEXT instruction's bytes and
+//!     desynchronise the stream.
+//!   * `TENSOR_DEBUG_INFO` resolves to `LogSubOpcode::Info` and
+//!     `VALUE_FROM_BOOL` to `TensorDType::Bool` — a different opcode family
+//!     and a dtype variant respectively.  Short CamelCase names make that
+//!     heuristic lie; check which enum the variant actually belongs to.
+//!
+//! `SAMPLE_TOP_K` (14a2c1d41) was a genuine registry-only fix, which is what
+//! makes this warning necessary: it is the exception, not the pattern.
+//!
 //! The predicate is `lookup_intrinsic` itself rather than a regex over the
 //! registry source.  That matters: while this census was being built, a
 //! pattern reading `name: "…"` literals under-reported the registry by four
