@@ -2452,13 +2452,27 @@ pub fn dispatch_all_gather(
     tensor: &TensorHandle,
     group: &ProcessGroupHandle,
 ) -> Option<TensorHandle> {
-    // Stub: in single-process mode, add a leading dimension for world_size
-    let tensor_shape = &tensor.shape[..tensor.ndim as usize];
-    let mut new_shape = vec![group.world_size];
-    new_shape.extend(tensor_shape.iter());
-
-    // Create output tensor with expanded shape using zeros
-    TensorHandle::zeros(&new_shape, tensor.dtype)
+    // Gathering from a world of ONE is the input carrying a unit leading
+    // dimension — a reshape, not a fabrication. This mirrors
+    // `dispatch_all_reduce` and `dispatch_broadcast` above, which return the
+    // input unchanged because that IS the correct answer at world_size == 1.
+    //
+    // With world_size > 1 this process does not hold the other ranks' data,
+    // and no arrangement of local values substitutes for it — there is no
+    // answer to give. `None` is routed to `Value::nil()` by the caller in
+    // `dispatch_table/handlers/ml_extended.rs`, which is detectable.
+    //
+    // The previous code built the correct output SHAPE and filled it with
+    // zeros. Every downstream shape check therefore passed while the values
+    // were invented, and a single-process training run consumed them with no
+    // diagnostic — silent corruption rather than a degraded answer (T0184).
+    // Shape-correct fabrication is the one failure mode a caller cannot
+    // detect, which is why this returns nothing instead.
+    if group.world_size == 1 {
+        super::tensor::tensor_unsqueeze(tensor, 0)
+    } else {
+        None
+    }
 }
 
 /// Broadcast operation: send tensor from src rank to all ranks.
