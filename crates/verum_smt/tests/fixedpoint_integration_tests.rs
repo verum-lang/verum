@@ -308,11 +308,19 @@ fn test_well_founded_check() {
 // ==================== Performance Tests ====================
 
 #[test]
-fn test_datalog_rule_performance() {
-    use std::time::Instant;
-
-    let start = Instant::now();
-
+fn test_datalog_rule_construction() {
+    // Renamed from test_datalog_rule_performance, which it never was. The
+    // body times a struct literal with empty vectors — no computation
+    // happens, so there is nothing here that could regress and no
+    // measurement worth taking. The old `elapsed.as_millis() < 10` was
+    // therefore doubly wrong: 10ms is inside scheduling noise on a loaded
+    // machine (flaky), and no change to this crate could ever push a struct
+    // literal past it (unable to catch anything).
+    //
+    // What the test can honestly assert is that the rule is constructible
+    // and its fields survive construction — which is what the surviving
+    // assertions do. A genuine performance guard belongs in benches/, where
+    // criterion handles variance, not in a unit test.
     let rule = DatalogRule {
         head: Atom {
             predicate: Text::from("test"),
@@ -322,10 +330,10 @@ fn test_datalog_rule_performance() {
         constraints: vec![].into_iter().collect(),
     };
 
-    let elapsed = start.elapsed();
-
     assert!(rule.head.predicate == "test");
-    assert!(elapsed.as_millis() < 10);
+    assert!(rule.head.args.is_empty());
+    assert!(rule.body.is_empty());
+    assert!(rule.constraints.is_empty());
 }
 
 #[test]
