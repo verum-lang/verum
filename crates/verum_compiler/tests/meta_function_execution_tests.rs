@@ -21,7 +21,14 @@
 //! The MetaContext functions now expect Vec<ConstValue> instead of List<ConstValue>.
 //! Also, ConstValue variants like Array and Tuple now expect Vec instead of List.
 
-#![cfg(feature = "meta_tests_disabled")]
+// DISABLED — 35 test(s) that have never compiled. The gate was
+// `cfg(feature = "meta_tests_disabled")`, naming a feature declared in NO Cargo.toml, so it
+// was never true and the file was silently dropped from the build while
+// presenting as an opt-in flag someone could turn on. `cfg(any())` is the
+// idiomatic never-true form: the exclusion is now explicit rather than
+// masquerading, and it no longer emits unexpected_cfgs. Revive-or-delete is
+// tracked under T0632.
+#![cfg(any())]
 
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::literal::{IntLit, Literal, LiteralKind, StringLit};
