@@ -464,13 +464,13 @@ impl WellKnownType {
             Self::Set => &["core.collections.set", "core.collections"],
             Self::Deque => &["core.collections.deque", "core.collections"],
             Self::BTreeMap => {
-                &["core.collections.btree_map", "core.collections"]
+                &["core.collections.btree", "core.collections"]
             }
             Self::BTreeSet => {
-                &["core.collections.btree_set", "core.collections"]
+                &["core.collections.btree", "core.collections"]
             }
             Self::BinaryHeap => {
-                &["core.collections.binary_heap", "core.collections"]
+                &["core.collections.heap", "core.collections"]
             }
             // Wrappers — `core/base/<name>.vr`.
             Self::Maybe => &["core.base.maybe", "core.base"],
@@ -499,7 +499,7 @@ impl WellKnownType {
             Self::Mutex => &["core.sync.mutex", "core.sync"],
             Self::RwLock => &["core.sync.rwlock", "core.sync"],
             Self::Barrier => &["core.sync.barrier", "core.sync"],
-            Self::WaitGroup => &["core.sync.wait_group", "core.sync"],
+            Self::WaitGroup => &["core.sync.waitgroup", "core.sync"],
             Self::Once => &["core.sync.once", "core.sync"],
             Self::Semaphore => &["core.async.semaphore", "core.async"],
             Self::Task => &["core.async.task", "core.async"],
@@ -512,7 +512,7 @@ impl WellKnownType {
             // Misc — `core/base/<name>.vr` for Never/Ordering/Range.
             Self::Never => &["core.base"],
             Self::Ordering => &["core.base.ordering", "core.base"],
-            Self::Range => &["core.base.range", "core.base"],
+            Self::Range => &["core.base.iterator", "core.base"],
             // Primitives — arithmetic / bitwise are interpreter
             // intrinsics, but Verum-defined methods (e.g. Bool.cmp,
             // Float.partial_cmp, Float.total_cmp) live in
