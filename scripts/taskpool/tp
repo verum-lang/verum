@@ -211,6 +211,18 @@ try_claim() { # $1 = bare id (T0123)
   mv "$src" "$dst" 2>/dev/null || return 1
   o="$(owner_id)"
   printf -- '- %s %s: CLAIMED pid=%s\n' "$(now)" "$o" "$$" >> "$dst"
+  # T0636: the claimer is the person who knows what they are about to do, so
+  # this is the cheapest moment to notice a missing closure criterion. Warn
+  # only — refusing here would block picking up a task mid-session over
+  # wording, and the pool's job is to be used.
+  acc="$(awk '/^## Acceptance/{f=1;next} /^## /{f=0} f' "$dst" | tr -d '[:space:]')"
+  case "$acc" in
+    ''|TBD|tbd|Tbd)
+      printf 'tp: NOTE: %s has no acceptance criterion.\n' "$1" >&2
+      printf 'tp:   You are about to do the work — write what would close it:\n' >&2
+      printf 'tp:     tp accept %s "..."\n' "$1" >&2
+      ;;
+  esac
   log_event "CLAIM $1 by $o"
   printf '%s\n' "$dst"
 }
