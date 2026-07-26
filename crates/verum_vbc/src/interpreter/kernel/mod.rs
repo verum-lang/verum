@@ -2853,14 +2853,72 @@ pub fn dispatch_sample_top_k_top_p(logits: &TensorHandle, _k: usize, _p: f64) ->
     dispatch_sample_top_k(logits, _k)
 }
 
-/// Repetition penalty: penalize repeated tokens.
-/// Stub: Returns the logits unchanged (as a new tensor).
+/// Repetition penalty: suppresses tokens that have already been generated.
+///
+/// The logit of every seen token is *divided* by `penalty` when positive and
+/// *multiplied* when negative — the standard two-branch formulation (Keskar
+/// et al., CTRL §4.1).  The sign test is not incidental: dividing a negative
+/// logit would move it toward zero, i.e. *raise* the probability of the very
+/// token being suppressed.
+///
+/// The penalty is applied **once per distinct token**, not once per
+/// occurrence: each write is computed from the original `logits`, so a token
+/// repeated three times is penalised exactly as one repeated once.  This
+/// matches the reference gather/scatter semantics; compounding by repeat
+/// count is a different operator.
+///
+/// `logits` is never written through.  The result is built element-wise into
+/// a fresh allocation rather than via `TensorHandle::clone`, which is a
+/// refcounted *alias* of the same buffer — and element-wise copying is also
+/// correct for a non-contiguous `logits` view, which a raw byte copy of the
+/// backing buffer would not be.
+///
+/// Logits are addressed flat, as in the `dispatch_sample_*` family above.
 pub fn dispatch_repetition_penalty(
     logits: &TensorHandle,
-    _past_tokens: &TensorHandle,
-    _penalty: f64,
+    past_tokens: &TensorHandle,
+    penalty: f64,
 ) -> Option<TensorHandle> {
-    Some(logits.clone())
+    // A non-positive penalty has no defined meaning: zero erases every seen
+    // logit, and a negative one flips its sign, turning suppression into
+    // preference.  Reject rather than return something plausible.
+    if penalty <= 0.0 {
+        return None;
+    }
+
+    let mut result = TensorHandle::zeros(&logits.shape[..logits.ndim as usize], logits.dtype)?;
+    for i in 0..logits.numel {
+        result.set_element_f64(i, logits.get_element_f64(i)?);
+    }
+
+    // 1.0 is the identity by definition and an empty history has nothing to
+    // penalise; both leave the copy untouched.
+    if penalty == 1.0 || past_tokens.numel == 0 {
+        return Some(result);
+    }
+
+    for i in 0..past_tokens.numel {
+        let token = past_tokens.get_element_f64(i)?;
+        // Token ids index the logit row.  A negative or out-of-range id
+        // addresses nothing, and truncating it would penalise an unrelated
+        // token, so skip it.
+        if token < 0.0 {
+            continue;
+        }
+        let idx = token as usize;
+        if idx >= result.numel {
+            continue;
+        }
+        let logit = logits.get_element_f64(idx)?;
+        let penalised = if logit > 0.0 {
+            logit / penalty
+        } else {
+            logit * penalty
+        };
+        result.set_element_f64(idx, penalised);
+    }
+
+    Some(result)
 }
 
 /// KV cache operation.
@@ -4143,5 +4201,110 @@ mod tests {
     fn test_parse_tool_call_empty_string() {
         let result = dispatch_parse_tool_call("");
         assert!(result.is_none());
+    }
+
+    /// An F64 row, so a repetition-penalty pin can state its logits literally.
+    fn row(values: &[f64]) -> TensorHandle {
+        let mut t = TensorHandle::zeros(&[values.len()], DType::F64).expect("alloc");
+        for (i, v) in values.iter().enumerate() {
+            assert!(t.set_element_f64(i, *v), "seeding element {i}");
+        }
+        t
+    }
+
+    /// These pin the other half of T0184: `dispatch_repetition_penalty` used
+    /// to discard both the token history and the penalty and return the input
+    /// unchanged.  That defect was UNDETECTABLE downstream — unpenalised
+    /// logits carry the same shape, dtype and plausible magnitudes as
+    /// penalised ones, so nothing was malformed and the only symptom was
+    /// repetitive text, which reads as model quality, not a runtime fault.
+    #[test]
+    fn repetition_penalty_divides_a_positive_seen_logit() {
+        let out = dispatch_repetition_penalty(&row(&[1.0, 4.0]), &row(&[1.0]), 2.0)
+            .expect("penalised");
+        assert_eq!(
+            out.get_element_f64(1),
+            Some(2.0),
+            "a seen positive logit is divided by the penalty"
+        );
+    }
+
+    #[test]
+    fn repetition_penalty_multiplies_a_negative_seen_logit() {
+        let out = dispatch_repetition_penalty(&row(&[-2.0, 1.0]), &row(&[0.0]), 2.0)
+            .expect("penalised");
+        // Dividing here would yield -1.0 — RAISING the logit toward zero, and
+        // so rewarding the very repetition this operator exists to suppress.
+        assert_eq!(
+            out.get_element_f64(0),
+            Some(-4.0),
+            "a seen negative logit is multiplied, not divided"
+        );
+    }
+
+    #[test]
+    fn repetition_penalty_leaves_unseen_tokens_alone() {
+        let out = dispatch_repetition_penalty(&row(&[1.0, 4.0]), &row(&[1.0]), 2.0)
+            .expect("penalised");
+        assert_eq!(
+            out.get_element_f64(0),
+            Some(1.0),
+            "token 0 was never generated, so it is not penalised"
+        );
+    }
+
+    #[test]
+    fn repetition_penalty_applies_once_per_distinct_token() {
+        let out = dispatch_repetition_penalty(&row(&[1.0, 4.0]), &row(&[1.0, 1.0, 1.0]), 2.0)
+            .expect("penalised");
+        assert_eq!(
+            out.get_element_f64(1),
+            Some(2.0),
+            "repeat count must not compound the penalty; 0.5 would be three applications"
+        );
+    }
+
+    #[test]
+    fn repetition_penalty_does_not_write_through_to_the_input() {
+        let logits = row(&[1.0, 4.0]);
+        let out = dispatch_repetition_penalty(&logits, &row(&[1.0]), 2.0).expect("penalised");
+        assert_eq!(out.get_element_f64(1), Some(2.0), "the result is penalised");
+        assert_eq!(
+            logits.get_element_f64(1),
+            Some(4.0),
+            "the caller's logits must be untouched; `TensorHandle::clone` is a \
+             refcounted alias of the same buffer and would have corrupted them here"
+        );
+    }
+
+    #[test]
+    fn repetition_penalty_of_one_is_the_identity() {
+        let out = dispatch_repetition_penalty(&row(&[1.0, 4.0]), &row(&[1.0]), 1.0)
+            .expect("identity");
+        assert_eq!(
+            out.get_element_f64(1),
+            Some(4.0),
+            "a penalty of one is defined to change nothing"
+        );
+    }
+
+    #[test]
+    fn repetition_penalty_rejects_a_non_positive_penalty() {
+        assert!(
+            dispatch_repetition_penalty(&row(&[1.0, 4.0]), &row(&[1.0]), 0.0).is_none(),
+            "zero would erase every seen logit"
+        );
+        assert!(
+            dispatch_repetition_penalty(&row(&[1.0, 4.0]), &row(&[1.0]), -1.0).is_none(),
+            "a negative penalty flips suppression into preference"
+        );
+    }
+
+    #[test]
+    fn repetition_penalty_skips_an_unaddressable_token_id() {
+        let out = dispatch_repetition_penalty(&row(&[1.0, 4.0]), &row(&[99.0, -3.0]), 2.0)
+            .expect("ids outside the row are skipped, not fatal");
+        assert_eq!(out.get_element_f64(0), Some(1.0), "no unrelated token is penalised");
+        assert_eq!(out.get_element_f64(1), Some(4.0), "no unrelated token is penalised");
     }
 }
