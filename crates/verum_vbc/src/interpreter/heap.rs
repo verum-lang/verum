@@ -58,6 +58,20 @@ use crate::value::Value;
 /// against the actual `#[repr(C)] ObjectHeader` Rust struct.
 pub const OBJECT_HEADER_SIZE: usize = verum_common::layout::OBJECT_HEADER_SIZE as usize;
 
+/// Re-exports the canonical [`verum_common::layout::LIST_PTR_OFFSET`] — the
+/// byte offset of a `List`'s slot 2, which holds the backing-object pointer.
+///
+/// Same single-source-of-truth rule as `OBJECT_HEADER_SIZE` above, and for a
+/// sharper reason: the Tier-1 codegen names `LIST_PTR_OFFSET` 28 times while
+/// the interpreter historically spelled the same address by hand, in more
+/// than one way — `OBJECT_HEADER_SIZE + 16` in some places and
+/// `OBJECT_HEADER_SIZE + 2 * size_of::<Value>()` in others. Those disagree
+/// the moment `Value` changes width: the computed form adapts, the literal
+/// does not, and nothing would fail to compile. Reach slot 2 through this
+/// constant so a layout realign (T0293) is a one-line change rather than a
+/// census of hand-written offsets.
+pub const LIST_PTR_OFFSET: usize = verum_common::layout::LIST_PTR_OFFSET as usize;
+
 /// Default heap size (16 MB).
 ///
 /// Re-exports the canonical [`verum_common::layout::DEFAULT_HEAP_SIZE`].

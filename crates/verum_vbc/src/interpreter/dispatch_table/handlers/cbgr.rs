@@ -1074,7 +1074,7 @@ pub(in super::super) fn container_to_slice_fat_ref(
             let len =
                 unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) }.as_i64();
             let backing_val = unsafe {
-                *(base_ptr.add(heap::OBJECT_HEADER_SIZE + 16) as *const Value)
+                *(base_ptr.add(heap::LIST_PTR_OFFSET) as *const Value)
             };
             let data_ptr = if backing_val.is_ptr() && !backing_val.is_nil() {
                 unsafe { backing_val.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) }
@@ -1669,7 +1669,7 @@ fn cbgr_extended_body(
                     // List layout: [ObjectHeader][len: Value][cap: Value][backing_ptr: Value]
                     // backing_ptr points to another array object with the actual elements
                     let backing_ptr_val =
-                        unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE + 16) as *const Value) };
+                        unsafe { *(base_ptr.add(heap::LIST_PTR_OFFSET) as *const Value) };
                     if backing_ptr_val.is_ptr() && !backing_ptr_val.is_nil() {
                         let backing_array = backing_ptr_val.as_ptr::<u8>();
                         // The backing array also has an ObjectHeader, skip it to get elements
