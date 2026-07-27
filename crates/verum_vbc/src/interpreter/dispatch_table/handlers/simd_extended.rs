@@ -29,42 +29,50 @@ use crate::value::Value;
 /// source-level `Vec<T, N>`. AOT does NOT emit LLVM vector intrinsics: the
 /// typed `SimdLowering` API in `verum_codegen`'s `llvm/simd.rs` has no
 /// callers, and `lower_simd_extended` mirrors these arms one for one.
-/// The store family is the exception both tiers share — see
-/// [`simd_store_unimplemented`].
+/// The MEMORY family is the exception both tiers share — see
+/// [`simd_memory_op_unimplemented`].
 pub(in super::super) fn handle_simd_extended(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
     dispatch_enveloped(state, simd_extended_body)
 }
 
-/// The SIMD store family — `StoreAligned` / `StoreUnaligned` / `MaskedStore` /
-/// `Scatter` — has no honest scalar fallback, so it refuses loudly instead of
-/// reporting a write that never happens (T0112).
+/// The SIMD MEMORY family — the four stores `StoreAligned` / `StoreUnaligned`
+/// / `MaskedStore` / `Scatter` (T0112) and the four loads `LoadAligned` /
+/// `LoadUnaligned` / `MaskedLoad` / `Gather` (T0184) — has no honest scalar
+/// fallback, so it refuses loudly rather than inventing an answer.
 ///
-/// Every one of these arms used to read its operands and return
-/// `Ok(DispatchResult::Continue)`: the store ran, the destination was never
-/// touched, and the caller saw success.  A dropped write is worse than a wrong
-/// value — the destination keeps STALE DATA, which is neither uniform nor
-/// implausible, so there is no signature for anything downstream to detect.
-/// It hit the ORDINARY aligned store, not only the exotic masked/scatter forms.
+/// Both halves were silently wrong, in the two different ways this class
+/// takes:
 ///
-/// A real scalar store is not available as a fallback either.  The wire is
-/// `[dst][src][ptr]` — `encode_operands` prefixes the destination register
+/// * every STORE arm read its operands and returned
+///   `Ok(DispatchResult::Continue)`.  The store ran, the destination was never
+///   touched, and the caller saw success.  A dropped write is worse than a
+///   wrong value — the destination keeps STALE DATA, which is neither uniform
+///   nor implausible, so nothing downstream can detect it.  It hit the
+///   ORDINARY aligned store, not only the exotic masked/scatter forms.
+/// * every LOAD arm answered `dst = ptr` — the ADDRESS ITSELF as the loaded
+///   value, never a dereference.  That is fabricated data: a plausible number
+///   that flows onward indistinguishable from a real lane.
+///
+/// Neither has a correct scalar form, for one shared reason.  The wire is
+/// `[dst][…]` — `encode_operands` prefixes the destination register
 /// unconditionally, regardless of `return_count` — with both the element type
-/// `T` and the lane count `N` erased, so writing the one register value would
+/// `T` and the lane count `N` erased.  A store of the one register value would
 /// leave `N - 1` lanes stale AND, for any `T` narrower than the 8-byte
-/// register, clobber the neighbouring element.  Refusing is the only answer
-/// that does not corrupt memory.
+/// register, clobber the neighbouring element; a load has no width to read and
+/// no way to fill lanes `1..N`.  Refusing is the only answer that neither
+/// corrupts memory nor fabricates a value.
 ///
 /// The AOT twin (`lower_simd_extended` in `verum_codegen`) aborts on exactly
-/// these four sub-ops, so the tiers stay coherent.  The neighbouring load /
-/// shuffle / mask arms keep their scalar fallbacks: those produce a value, and
-/// a width-1 shuffle really is the identity — it is the writes that have no
-/// correct form.
+/// these eight sub-ops, so the tiers stay coherent.  The neighbouring
+/// shuffle / cast / mask arms KEEP their scalar fallbacks: those are honest at
+/// width 1, because a one-lane shuffle really is the identity.  It is the
+/// memory ops that have no correct form.
 ///
-/// ONE constructor so every store reports identically, naming the sub-op that
-/// refused.
-fn simd_store_unimplemented(feature: &'static str) -> InterpreterError {
+/// ONE constructor so every memory op reports identically, naming the sub-op
+/// that refused.
+fn simd_memory_op_unimplemented(feature: &'static str) -> InterpreterError {
     InterpreterError::NotImplemented {
         feature,
         opcode: Some(Opcode::SimdExtended),
@@ -407,50 +415,30 @@ fn simd_extended_body(
         // ================================================================
         // Memory Operations (0x50-0x5F)
         //
-        // Loads keep their scalar fallback; the store family refuses via
-        // [`simd_store_unimplemented`] — see that function for why no scalar
-        // store is correct. The store arms deliberately read NO operands:
-        // `dispatch_enveloped` owns the pc reposition and applies it on the
-        // `Err` path too, so there is nothing to consume for alignment.
+        // The WHOLE memory family refuses via
+        // [`simd_memory_op_unimplemented`] — see that function for why neither
+        // a scalar load nor a scalar store is correct. These arms deliberately
+        // read NO operands: `dispatch_enveloped` owns the pc reposition and
+        // applies it on the `Err` path too, so there is nothing to consume for
+        // alignment.
         // ================================================================
-        Some(SimdSubOpcode::LoadAligned) | Some(SimdSubOpcode::LoadUnaligned) => {
-            // Vector load from memory
-            let dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-            // Scalar fallback: load single value
-            let ptr_val = state.get_reg(ptr_reg);
-            state.set_reg(dst, ptr_val);
-            Ok(DispatchResult::Continue)
+        Some(SimdSubOpcode::LoadAligned) => Err(simd_memory_op_unimplemented("simd_load_aligned")),
+        Some(SimdSubOpcode::LoadUnaligned) => {
+            Err(simd_memory_op_unimplemented("simd_load_unaligned"))
         }
 
-        Some(SimdSubOpcode::StoreAligned) => Err(simd_store_unimplemented("simd_store_aligned")),
+        Some(SimdSubOpcode::StoreAligned) => Err(simd_memory_op_unimplemented("simd_store_aligned")),
         Some(SimdSubOpcode::StoreUnaligned) => {
-            Err(simd_store_unimplemented("simd_store_unaligned"))
+            Err(simd_memory_op_unimplemented("simd_store_unaligned"))
         }
 
-        Some(SimdSubOpcode::MaskedLoad) => {
-            let dst = read_reg(state)?;
-            let ptr_reg = read_reg(state)?;
-            let _mask_reg = read_reg(state)?;
-            let ptr_val = state.get_reg(ptr_reg);
-            state.set_reg(dst, ptr_val);
-            Ok(DispatchResult::Continue)
-        }
+        Some(SimdSubOpcode::MaskedLoad) => Err(simd_memory_op_unimplemented("simd_masked_load")),
 
-        Some(SimdSubOpcode::MaskedStore) => Err(simd_store_unimplemented("simd_masked_store")),
+        Some(SimdSubOpcode::MaskedStore) => Err(simd_memory_op_unimplemented("simd_masked_store")),
 
-        Some(SimdSubOpcode::Gather) => {
-            // Gather from indices
-            let dst = read_reg(state)?;
-            let base_reg = read_reg(state)?;
-            let _indices_reg = read_reg(state)?;
-            // Scalar fallback: just use base
-            let base = state.get_reg(base_reg);
-            state.set_reg(dst, base);
-            Ok(DispatchResult::Continue)
-        }
+        Some(SimdSubOpcode::Gather) => Err(simd_memory_op_unimplemented("simd_gather")),
 
-        Some(SimdSubOpcode::Scatter) => Err(simd_store_unimplemented("simd_scatter")),
+        Some(SimdSubOpcode::Scatter) => Err(simd_memory_op_unimplemented("simd_scatter")),
 
         // ================================================================
         // Shuffle/Permute (0x60-0x6F)
@@ -825,16 +813,57 @@ mod simd_store_never_silently_drops_tests {
         );
     }
 
-    /// A load is NOT a store: the load arms keep their scalar fallback, so a
-    /// program containing one still runs to completion. Pinning this stops a
-    /// future widening of the refusal from being mistaken for T0112's fix.
+    /// Every SIMD LOAD sub-op refuses too (T0184). Pre-fix all four returned
+    /// `Ok(SENTINEL)` having set `dst = ptr` — the ADDRESS ITSELF as the
+    /// loaded value, never a dereference. That is the fabricated-data half of
+    /// the same class: a plausible number that flows onward indistinguishable
+    /// from a real lane.
+    ///
+    /// This became safe to land only after `core/simd/bytes.vr::find_byte` was
+    /// rerouted off the SIMD path (70e988843): before that, `find_byte` was
+    /// the single live caller and a loud load would have aborted a shipped
+    /// stdlib function on every call.
     #[test]
-    fn simd_load_still_completes() {
+    fn every_simd_load_sub_op_refuses_instead_of_answering_with_the_pointer() {
+        for sub_op in [
+            SimdSubOpcode::LoadAligned,
+            SimdSubOpcode::LoadUnaligned,
+            SimdSubOpcode::MaskedLoad,
+            SimdSubOpcode::Gather,
+        ] {
+            let result = run_carrier_then_sentinel(Instruction::SimdExtended {
+                sub_op: sub_op as u8,
+                operands: vec![1, 2, 3],
+            });
+            match result {
+                Err(InterpreterError::NotImplemented { feature, opcode }) => {
+                    assert!(
+                        feature.starts_with("simd_"),
+                        "{sub_op:?} must name itself in the diagnostic; got {feature:?}",
+                    );
+                    assert_eq!(opcode, Some(Opcode::SimdExtended));
+                }
+                Err(other) => panic!("{sub_op:?}: expected NotImplemented, got {other:?}"),
+                Ok(value) => panic!(
+                    "{sub_op:?} completed and returned {}: the load answered with the POINTER \
+                     as data rather than reading memory (T0184).",
+                    value.as_i64()
+                ),
+            }
+        }
+    }
+
+    /// The refusal covers memory ops ONLY. A width-1 shuffle really is the
+    /// identity, so it keeps its scalar fallback and a program containing one
+    /// still runs to completion. Pinning this stops a future widening of the
+    /// refusal from swallowing the arms that are honest at width 1.
+    #[test]
+    fn simd_shuffle_still_completes() {
         let value = run_carrier_then_sentinel(Instruction::SimdExtended {
-            sub_op: SimdSubOpcode::LoadAligned as u8,
-            operands: vec![1, 2],
+            sub_op: SimdSubOpcode::Shuffle as u8,
+            operands: vec![1, 2, 3],
         })
-        .expect("SimdExtended{LoadAligned} must still execute");
+        .expect("SimdExtended{Shuffle} must still execute");
         assert_eq!(value.as_i64(), SENTINEL as i64);
     }
 }

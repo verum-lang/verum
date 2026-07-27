@@ -26269,16 +26269,55 @@ fn lower_simd_extended<'ctx>(
         }),
 
         // ====================================================================
-        // Memory, Shuffle, Mask, Cast — passthrough or no-op for scalar fallback
+        // Memory, Shuffle, Mask, Cast — loads abort; the rest pass through
         // ====================================================================
         Some(SimdSubOpcode::LoadAligned)
         | Some(SimdSubOpcode::LoadUnaligned)
         | Some(SimdSubOpcode::MaskedLoad)
-        | Some(SimdSubOpcode::Gather)
-        | Some(SimdSubOpcode::Shuffle)
-        | Some(SimdSubOpcode::Cast)
-        | Some(SimdSubOpcode::Bitcast) => {
-            // Scalar passthrough: dst = src
+        | Some(SimdSubOpcode::Gather) => {
+            // The SIMD load family aborts loudly for the same reason the store
+            // family does, and it is the same wire erasure behind both (T0184).
+            //
+            // What these arms USED to do was worse than a missing lowering:
+            // they shared the passthrough arm below and set `dst = src`, where
+            // operand 1 is the POINTER. So a load answered with the ADDRESS
+            // ITSELF as the loaded value — never a dereference, never a read of
+            // the memory the caller named. That is fabricated data of the
+            // T0184 class: it is a number, it flows onward, and nothing
+            // downstream can tell it apart from a real lane.
+            //
+            // A correct scalar load is no more available than a correct scalar
+            // store: the wire is `[dst][ptr](…)` with both the element type `T`
+            // and the lane count `N` erased, so there is no width to read and
+            // no way to fill lanes 1..N.
+            //
+            // Unlike a store, a load DEFINES a register, so `dst` is parked
+            // with a null pointer after the abort. `verum_panic` never returns,
+            // making that value dead at run time, but the rest of the block —
+            // and any later instruction reading `dst` — must still lower into
+            // well-formed IR. This mirrors the FFI `CreateCallback` arm.
+            let sub_op = sub.or_internal("missing SIMD sub-opcode")?;
+            let message = format!(
+                "SIMD load `{:?}` has no Tier-1 lowering: the scalar fallback \
+                 carries one lane and the wire erases element type and lane \
+                 count, so the read cannot be performed. Aborting rather than \
+                 answering with the pointer itself (T0184).",
+                sub_op
+            );
+            emit_runtime_abort(ctx, &message, "simd_load_unimplemented_msg")?;
+            if !operands.is_empty() {
+                let dst = op_reg(operands, 0);
+                let parked = ctx.types().ptr_type().const_null();
+                ctx.set_register(dst, parked.into());
+            }
+            Ok(())
+        }
+
+        Some(SimdSubOpcode::Shuffle) | Some(SimdSubOpcode::Cast) | Some(SimdSubOpcode::Bitcast) => {
+            // Scalar passthrough: dst = src. Unlike the loads above, these are
+            // honest at width 1 — a one-lane shuffle IS the identity, and a
+            // cast/bitcast of a single lane is the value itself. They keep the
+            // fallback.
             if operands.len() < 2 {
                 return Ok(());
             }
@@ -41329,6 +41368,94 @@ mod simd_store_never_lowers_to_nothing {
             panic_fn.count_params(),
             4,
             "verum_panic must keep its canonical void(ptr msg, i64 len, ptr file, i32 line) ABI",
+        );
+    }
+
+    /// Every SIMD LOAD sub-op lowers to a diagnosable abort (T0184). Pre-fix
+    /// all four shared the passthrough arm and emitted `dst = src` where
+    /// operand 1 is the POINTER — so the load answered with the ADDRESS ITSELF
+    /// as the loaded value, never a dereference. Fabricated data, the other
+    /// half of this class.
+    ///
+    /// Safe to land only because `core/simd/bytes.vr::find_byte` was rerouted
+    /// off the SIMD path first (70e988843), removing the single live caller.
+    #[test]
+    fn every_simd_load_sub_op_emits_a_runtime_abort() {
+        for sub_op in [
+            SimdSubOpcode::LoadAligned,
+            SimdSubOpcode::LoadUnaligned,
+            SimdSubOpcode::MaskedLoad,
+            SimdSubOpcode::Gather,
+        ] {
+            let (empty, ir) = lower_in_fresh_function(sub_op, &[1, 2, 3]);
+            assert!(!empty, "{sub_op:?} lowered to an EMPTY basic block");
+            assert!(
+                ir.contains("@verum_panic"),
+                "{sub_op:?} must lower to a `verum_panic` call rather than answering with \
+                 the pointer as data; emitted IR was:\n{ir}",
+            );
+            assert!(
+                ir.contains(&format!("{sub_op:?}")),
+                "the abort message must name the sub-op that refused; emitted IR was:\n{ir}",
+            );
+        }
+    }
+
+    /// A load DEFINES a register, so the abort must still park a value in
+    /// `dst`: `verum_panic` never returns, but any later instruction reading
+    /// `dst` has to lower into well-formed IR. Without this the whole function
+    /// would fail to lower — a compile-time break for merely CONTAINING a
+    /// load, which is worse than the defect being fixed.
+    #[test]
+    fn an_aborting_load_still_defines_its_destination_register() {
+        let context = Context::create();
+        let module = context.create_module("simd_load_dst_pin");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("simd_load_probe", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "simd_load_probe");
+        ctx.builder().position_at_end(entry);
+        lower_simd_extended(&mut ctx, SimdSubOpcode::LoadAligned as u8, &[0, 1])
+            .expect("lowering must succeed");
+        assert!(
+            ctx.get_register(0).is_ok(),
+            "an aborting load must still define dst so later instructions lower",
+        );
+        ctx.builder().build_return(None).expect("terminator");
+        assert!(
+            module.verify().is_ok(),
+            "module must verify after an aborting load; emitted IR was:\n{}",
+            module.print_to_string().to_string(),
+        );
+    }
+
+    /// The refusal covers memory ops ONLY. `Shuffle` is honest at width 1 — a
+    /// one-lane shuffle IS the identity — so it keeps its scalar passthrough
+    /// and must NOT abort.
+    #[test]
+    fn simd_shuffle_still_passes_through() {
+        let context = Context::create();
+        let module = context.create_module("simd_shuffle_control");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("simd_shuffle_probe", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "simd_shuffle_probe");
+        ctx.builder().position_at_end(entry);
+        let f64_ty = context.f64_type();
+        ctx.set_register(1, f64_ty.const_float(7.0).into());
+        lower_simd_extended(&mut ctx, SimdSubOpcode::Shuffle as u8, &[0, 1, 2])
+            .expect("lowering must succeed");
+
+        let ir = module.print_to_string().to_string();
+        assert!(
+            !ir.contains("@verum_panic"),
+            "SimdExtended{{Shuffle}} must NOT abort; emitted IR was:\n{ir}",
+        );
+        assert!(
+            ctx.get_register(0).is_ok(),
+            "Shuffle must still define its destination register",
         );
     }
 
