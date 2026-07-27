@@ -71,7 +71,7 @@ mount core.async.cancellation.{CancellationToken};
 mount core.async.task;
 mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.net.weft.handler.{WeftRequest, Handler};
-mount core.net.weft.error.{WeftError, IntoResponse};
+mount core.net.weft.error.{WeftError};
 
 // =============================================================================
 // WarpQuicConfig — §6.11 PQ-hybrid defaults wrapped over warp ServerOptions
@@ -307,10 +307,23 @@ fn weft_to_h3_response(resp: Response) -> H3Response {
     h3.bytes(resp.body)
 }
 
-// IntoResponse extension — every WeftError gets a non-degenerate H3
-// response. Mirrors the existing WeftError → Response surface used
-// by the legacy http3.vr adapter.
-implement IntoResponse for WeftError {
+// INHERENT extension — every WeftError gets a non-degenerate H3 response.
+// Mirrors the existing WeftError → Response surface used by the legacy
+// http3.vr adapter.
+//
+// This block used to read `implement IntoResponse for WeftError`, which was
+// a false protocol claim on two counts (T0327). `IntoResponse`
+// (core/net/weft/error.vr:24) requires `into_response(self) -> Response`;
+// this block defines `into_h3_response(self) -> H3Response` — a different
+// method with a different return type — so it never implemented the protocol
+// it named. And `implement IntoResponse for WeftError` ALREADY exists at
+// core/net/weft/error.vr:189, so the tree carried two impls of one protocol
+// for one type.
+//
+// Nothing moves: the five `.into_response()` call sites were always resolving
+// to the error.vr impl, never to this one, and `into_h3_response` keeps its
+// single caller at :248. An inherent impl is what the author wanted.
+implement WeftError {
     public fn into_h3_response(self) -> H3Response {
         // Maps every real WeftError variant (see core.net.weft.error) to its
         // HTTP/3 status, mirroring the canonical WeftError.status() surface.
