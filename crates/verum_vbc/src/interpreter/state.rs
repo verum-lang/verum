@@ -700,6 +700,35 @@ pub struct InterpreterState {
     /// to detect CBGR header pointers and use raw u32 field access instead of
     /// the normal ObjectHeader + Value-sized field layout.
     pub cbgr_allocations: HashSet<usize>,
+
+    /// Interval index over the live **bridge allocations** — the packed byte
+    /// blocks `cbgr_allocate` / `cbgr_alloc_zeroed` hand to Verum code
+    /// (`user_ptr → payload length`).
+    ///
+    /// Scope note: `os_alloc` buffers are NOT in this index.  On macOS
+    /// `os_alloc` reaches a real `mmap` through libSystem rather than the
+    /// name-keyed intercept in `ffi_extended.rs`, so there is no interpreter
+    /// site that sees both the address and the length — indexing them needs
+    /// the FFI return path, which is a separate piece of work.  `ptr_write`
+    /// through an `os_alloc` buffer is therefore still the Tier-0 no-op
+    /// described in T0108; it is recorded, not silently covered.
+    ///
+    /// `cbgr_allocations` cannot answer "which allocation contains this
+    /// interior address?": it is a hash set (no ordered lookup) and it
+    /// deliberately mixes two key kinds — the T0451 header-model entries
+    /// key on the HEADER address, while the `mmap` intercept and the
+    /// `VERUM_CBGR_LEGACY_ALLOC` kill-switch register headerless DATA
+    /// addresses.  A nearest-below scan over that set would read a
+    /// "size" field out of user data for the headerless entries, so the
+    /// extents are indexed explicitly instead of re-derived.
+    ///
+    /// Written at every place a bridge block comes into existence, alongside
+    /// the `cbgr_allocations` entry for the same block, so the two indexes
+    /// cannot drift.  Consumed by `handle_deref` / `handle_deref_mut` to tell
+    /// an Int-tagged **bridge address** (raw packed bytes) from an Int-tagged
+    /// plain integer — the two worlds a single `*const T` fronts (T0108).
+    pub cbgr_bridge_extents: std::collections::BTreeMap<usize, usize>,
+
     /// Flat user-visible TLS slots backing the `tls_slot_get/set/has/clear`
     /// stdlib quartet (FfiExtended 0x59-0x5C).  DELIBERATELY separate from
     /// the context system's internal TLS table — the runtime populates that
@@ -2640,6 +2669,7 @@ impl InterpreterState {
             cbgr_epoch: 1,
             cbgr_bypass_depth: 0,
             cbgr_allocations: HashSet::new(),
+            cbgr_bridge_extents: std::collections::BTreeMap::new(),
             user_tls_slots: std::collections::HashMap::new(),
             cbgr_deref_source: None,
             cbgr_mutable_ptrs: HashSet::new(),
@@ -3086,6 +3116,7 @@ impl InterpreterState {
         self.cbgr_epoch = 1;
         self.cbgr_bypass_depth = 0;
         self.cbgr_allocations.clear();
+        self.cbgr_bridge_extents.clear();
         self.cbgr_deref_source = None;
         self.cbgr_mutable_ptrs.clear();
         self.stats = ExecutionStats::default();

@@ -201,6 +201,111 @@ fn shared_inner_cell(state: &InterpreterState, base_ptr: *mut u8) -> Option<*mut
     Some(unsafe { (base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value).add(1) })
 }
 
+/// Width of one packed scalar slot in a bridge allocation, in bytes.
+///
+/// `ptr_read<T>` / `ptr_write<T>` reach Tier 0 through ONE baked, fully
+/// type-erased body (`core.intrinsics.memory.ptr_read` carries
+/// `type_params = 0` in the archive and lowers to a single `Deref`), so `T`
+/// is not recoverable at the instruction — 8 is the only width the opcode
+/// can honestly name, and it is the width the AOT `Deref`/`DerefMut`
+/// lowering uses for the same call.  Narrower typed access has its own
+/// opcodes (`DerefRaw` / `DerefMutRaw` carry an explicit `size`).
+const BRIDGE_SLOT_BYTES: usize = 8;
+
+/// T0108 — resolve a raw address to a slot inside a live **bridge
+/// allocation**, the packed byte block `cbgr_allocate` hands to Verum code.
+///
+/// One `*const T` fronts two physically different layouts: a packed bridge
+/// buffer (raw bytes, shared verbatim with FFI and with AOT) and an array of
+/// 8-byte NaN-boxed `Value` slots (List / slice backings).  They are not
+/// distinguishable from the static type, so provenance is decided here, at
+/// runtime, from the allocation index.
+///
+/// Returns `Ok(None)` when `addr` is not inside any live bridge payload —
+/// the caller then keeps its existing behaviour for that value.  An address
+/// that IS inside one but has fewer than [`BRIDGE_SLOT_BYTES`] bytes left is
+/// an out-of-bounds access and reports rather than silently truncating.
+fn bridge_scalar_slot(
+    state: &InterpreterState,
+    addr: usize,
+    op: &'static str,
+) -> InterpreterResult<Option<*mut u64>> {
+    let Some((&user, &len)) = state.cbgr_bridge_extents.range(..=addr).next_back() else {
+        return Ok(None);
+    };
+    let offset = addr - user;
+    if offset >= len {
+        // The nearest block below `addr` ends before it: `addr` belongs to
+        // no live bridge allocation.
+        return Ok(None);
+    }
+    if len - offset < BRIDGE_SLOT_BYTES {
+        return Err(InterpreterError::InvalidOperand {
+            message: format!(
+                "{op}: {BRIDGE_SLOT_BYTES}-byte access at offset {offset} of a \
+                 {len}-byte bridge allocation reads past its end",
+            ),
+        });
+    }
+    Ok(Some(addr as *mut u64))
+}
+
+/// The raw 8-byte pattern a scalar `Value` occupies in packed memory.
+///
+/// Bridge allocations are byte-addressable storage shared with `memcpy` /
+/// `memset` / `load_byte` and with AOT-compiled code, so a scalar is stored
+/// FLAT — `42` occupies the bytes of `42`, not the bytes of its NaN box.
+/// That is what makes a Tier-0 `ptr_write` byte-observable through the
+/// `mem_raw` intrinsics and byte-identical to the AOT store.
+///
+/// `None` for a non-scalar (heap object, `Text`, reference, boxed carrier):
+/// its NaN box is a tagged pointer into interpreter-private storage, and the
+/// flat/boxed ambiguity is not decidable on the way back out — `i64::MAX`
+/// stored flat has the same bit pattern as a NaN-boxed header.  The caller
+/// reports instead of storing something it could not read back.
+///
+/// `Int128` is `None` for the same reason in the other direction: 128 bits
+/// do not fit a [`BRIDGE_SLOT_BYTES`] slot, and narrowing to the low 64
+/// would be a silent half-store.
+fn packed_scalar_bits(value: Value) -> Option<u64> {
+    if value.is_boxed_i128() {
+        None
+    } else if value.is_int() {
+        Some(value.as_i64() as u64)
+    } else if value.is_float() {
+        Some(value.as_f64().to_bits())
+    } else if value.is_bool() {
+        Some(value.as_bool() as u64)
+    } else if value.is_unit() || value.is_nil() {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+/// T0108 — the bridge slot an Int-tagged reference value addresses, if any.
+///
+/// Shared by the `Deref` and `DerefMut` arms so read and write agree
+/// exactly on which values count as bridge addresses.  Only an Int-tagged
+/// value is considered: CBGR register-refs are Int-tagged too but are
+/// recognised earlier by `is_cbgr_ref`, and every other tag (pointer,
+/// ThinRef, FatRef, nil) has its own arm above.  A non-positive payload is
+/// not an address, so it never reaches the index.
+fn int_tagged_bridge_slot(
+    state: &InterpreterState,
+    ref_val: Value,
+    op: &'static str,
+) -> InterpreterResult<Option<*mut u64>> {
+    if !ref_val.is_int() {
+        return Ok(None);
+    }
+    let addr = ref_val.as_i64();
+    if addr <= 0 {
+        return Ok(None);
+    }
+    bridge_scalar_slot(state, addr as usize, op)
+}
+
 /// Deref (0x72) - Dereference with CBGR validation (Tier 0).
 ///
 /// Reads the value at the absolute register index stored in the reference.
@@ -315,6 +420,22 @@ pub(in super::super) fn handle_deref(
         validate_cbgr_generation(state, abs_index, generation)?;
         let value = state.registers.get_absolute(abs_index);
         state.set_reg(dst, value);
+    } else if let Some(slot) = int_tagged_bridge_slot(state, ref_val, "ptr_read")? {
+        // **T0108 — Int-tagged BRIDGE address.**  `cbgr_allocate` returns
+        // its user pointer Int-tagged (`Value::from_i64`), so a
+        // `ptr_read(p)` over bridge memory arrives here, not in the
+        // pointer-tagged arm above.  Without this the address fell through
+        // to the identity fallback and `ptr_read` handed back the POINTER
+        // instead of the pointee — an identity stub that reported success.
+        //
+        // Packed storage, so the read is the flat 8-byte scalar the write
+        // side laid down (and the same bytes the AOT `Deref` loads), never
+        // a NaN box.
+        //
+        // SAFETY: `bridge_scalar_slot` proved the full 8 bytes lie inside a
+        // live bridge payload (the extent leaves the index on free).
+        let raw = unsafe { std::ptr::read_unaligned(slot) };
+        state.set_reg(dst, Value::from_i64(raw as i64));
     } else {
         // Fallback: return the value as-is (e.g., for unit types, nil, or plain integers)
         state.set_reg(dst, ref_val);
@@ -403,6 +524,49 @@ pub(in super::super) fn handle_deref_mut(
         let header_addr = (base_ptr as usize)
             .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
         if state.cbgr_allocations.contains(&header_addr) {
+            unsafe {
+                let epoch_ptr = (header_addr
+                    + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
+                    as *mut u16;
+                *epoch_ptr = state.cbgr_epoch as u16;
+            }
+        }
+    } else if let Some(slot) = int_tagged_bridge_slot(state, ref_val, "ptr_write")? {
+        // **T0108 — Int-tagged BRIDGE address (the silent-no-op leg).**
+        // `cbgr_allocate` returns its user pointer Int-tagged, so every
+        // `ptr_write` over bridge memory landed here — where, before this
+        // arm existed, the `if/else if` chain simply ENDED.  The handler
+        // returned `Continue` having written nothing: the store vanished
+        // and the program reported success.
+        //
+        // Packed storage: the scalar goes in FLAT, so `load_byte` /
+        // `memcpy` observe the value's own bytes and the AOT store of the
+        // same program produces the same memory.
+        let Some(bits) = packed_scalar_bits(value) else {
+            return Err(InterpreterError::InvalidOperand {
+                message: format!(
+                    "ptr_write: cannot store a non-scalar value ({:?}) into a packed \
+                     bridge allocation — its NaN box is a tag into interpreter-private \
+                     storage and is not recoverable by the matching ptr_read",
+                    value.tag()
+                ),
+            });
+        };
+        // SAFETY: `bridge_scalar_slot` proved the full 8 bytes lie inside a
+        // live bridge payload (the extent leaves the index on free).
+        unsafe {
+            std::ptr::write_unaligned(slot, bits);
+        }
+        // Epoch advancement + header epoch stamp, exactly as the
+        // pointer-tagged arm above does for the same allocations — the
+        // tag a bridge address happens to carry must not change whether a
+        // mutation is temporally observable.
+        state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+        let header_addr = (ref_val.as_i64() as usize)
+            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+        if state.cbgr_allocations.contains(&header_addr) {
+            // SAFETY: membership proves a live 32-byte AllocationHeader at
+            // `header_addr`; the offset is the canonical layout constant.
             unsafe {
                 let epoch_ptr = (header_addr
                     + verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize)
@@ -2646,5 +2810,266 @@ fn cbgr_extended_body(
             feature: "cbgr_extended sub-opcode",
             opcode: Some(Opcode::CbgrExtended),
         }),
+    }
+}
+
+// ============================================================================
+// T0108 — Tier-0 typed-pointer provenance regression pins
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FunctionId;
+    use crate::instruction::Instruction;
+    use crate::module::{FunctionDescriptor, VbcModule};
+    use std::sync::Arc;
+
+    const REGS: u16 = 16;
+
+    /// **End-to-end pin.**  Real bytecode, real allocator, real interpreter
+    /// loop: `cbgr_allocate` (`CbgrAllocateUser`, which hands back an
+    /// Int-tagged user pointer) then `DerefMut` then `Deref`, and the
+    /// returned value must be the one that was written.
+    ///
+    /// The unit pins below register an extent by hand, which encodes an
+    /// assumption about what the allocator does; this one holds the
+    /// allocator and the handlers to the same story.  Pre-fix the `DerefMut`
+    /// wrote nothing and the `Deref` returned the pointer, so this returns
+    /// an address rather than 12345 — the assertion reads the value back,
+    /// which is the only way to tell a working store from a no-op.
+    ///
+    /// It lives here rather than in `codegen/tests_execution.rs` (whose
+    /// helpers this mirrors) because `codegen` is an optional feature and
+    /// `interpreter/` is compiled under every feature set.
+    #[test]
+    fn end_to_end_cbgr_alloc_then_ptr_write_then_ptr_read_returns_the_written_value() {
+        let mut module = VbcModule::new("t0108_end_to_end".to_string());
+        let mut bytecode = Vec::new();
+        for instr in &[
+            Instruction::LoadI {
+                dst: Reg(1),
+                value: 32,
+            },
+            Instruction::LoadI {
+                dst: Reg(2),
+                value: 8,
+            },
+            // r0 = cbgr_allocate(32, 8) — Int-tagged user pointer.
+            Instruction::FfiExtended {
+                sub_op: crate::instruction::SystemSubOpcode::CbgrAllocateUser as u8,
+                operands: vec![0, 1, 2],
+            },
+            Instruction::LoadI {
+                dst: Reg(3),
+                value: 12345,
+            },
+            // *r0 = 12345   (this is the store that used to vanish)
+            Instruction::DerefMut {
+                ref_reg: Reg(0),
+                value: Reg(3),
+            },
+            // r4 = *r0
+            Instruction::Deref {
+                dst: Reg(4),
+                ref_reg: Reg(0),
+            },
+            Instruction::Ret { value: Reg(4) },
+        ] {
+            crate::bytecode::encode_instruction(instr, &mut bytecode);
+        }
+        let bytecode_offset = module.bytecode.len() as u32;
+        let bytecode_length = bytecode.len() as u32;
+        module.bytecode.extend(bytecode);
+
+        let name = module.intern_string("main");
+        let mut desc = FunctionDescriptor::new(name);
+        desc.register_count = REGS;
+        desc.bytecode_offset = bytecode_offset;
+        desc.bytecode_length = bytecode_length;
+        module.add_function(desc);
+
+        let result = crate::interpreter::Interpreter::new(Arc::new(module))
+            .run_main()
+            .expect("execution failed");
+        assert_eq!(
+            result.try_as_i64(),
+            Some(12345),
+            "ptr_read must return the value ptr_write stored, not the pointer",
+        );
+    }
+
+    /// A state whose current frame's bytecode IS `operands`, so the handler
+    /// under test decodes exactly those register bytes off the instruction
+    /// stream — the real operand path, not a hand-fed shortcut.
+    fn state_over_operands(operands: &[u8]) -> InterpreterState {
+        let mut module = VbcModule::new("t0108_bridge_provenance".to_string());
+        let offset = module.append_bytecode(operands);
+        let name = module.intern_string("t0108_probe");
+        let desc = FunctionDescriptor {
+            id: FunctionId(0),
+            name,
+            bytecode_offset: offset,
+            bytecode_length: operands.len() as u32,
+            register_count: REGS,
+            ..FunctionDescriptor::default()
+        };
+        module.add_function(desc);
+
+        let mut state = InterpreterState::new(Arc::new(module));
+        state.registers.push_frame(REGS);
+        state
+            .call_stack
+            .push_frame(FunctionId(0), REGS, 0, Reg(0))
+            .expect("frame");
+        state.set_pc(0);
+        state
+    }
+
+    /// A live bridge allocation, registered exactly the way
+    /// `cbgr_user_allocate` registers one: the header address in
+    /// `cbgr_allocations`, the payload extent in `cbgr_bridge_extents`.
+    /// Returns the user pointer.
+    ///
+    /// The block is deliberately leaked for the test's lifetime — the
+    /// assertions read the payload after the handler has run, so freeing it
+    /// would be the use-after-free these pins exist to rule out.
+    fn register_bridge_block(state: &mut InterpreterState, size: usize) -> usize {
+        let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
+        let layout = std::alloc::Layout::from_size_align(hdr + size, 8).unwrap();
+        // SAFETY: non-zero size, valid alignment.
+        let base = unsafe { std::alloc::alloc_zeroed(layout) } as usize;
+        assert!(base != 0, "allocation failed");
+        let user = base + hdr;
+        state.cbgr_allocations.insert(base);
+        state.cbgr_bridge_extents.insert(user, size);
+        user
+    }
+
+    /// **The defect this task closes.**  `ptr_write` over a `cbgr_allocate`
+    /// bridge block lowers to `DerefMut` with the user pointer Int-tagged.
+    /// Before the bridge arm existed the handler's `if/else if` chain simply
+    /// ended for that shape: nothing was written, no error was raised, and
+    /// the following `ptr_read` (`Deref`) returned the POINTER — a program
+    /// that stored nothing and reported success.
+    #[test]
+    fn ptr_write_then_ptr_read_observes_the_store_over_a_bridge_allocation() {
+        // DerefMut: [ref_reg=1, value_reg=2]; Deref: [dst_reg=3, src_reg=1].
+        let mut state = state_over_operands(&[1, 2, 3, 1]);
+        let user = register_bridge_block(&mut state, 32);
+        state.set_reg(Reg(1), Value::from_i64(user as i64));
+        state.set_reg(Reg(2), Value::from_i64(12345));
+
+        handle_deref_mut(&mut state).expect("write");
+
+        // The store is REAL memory, observable as flat bytes — the same
+        // bytes an AOT `DerefMut` of this program lays down (probed:
+        // `load_byte(a)` == 57 == 12345 & 0xFF under both tiers). Pre-fix
+        // these bytes stayed zero.
+        // SAFETY: `user` addresses a live 32-byte payload from
+        // `register_bridge_block`.
+        let raw = unsafe { std::ptr::read_unaligned(user as *const u64) };
+        assert_eq!(raw, 12345, "ptr_write must land flat bytes in the payload");
+
+        handle_deref(&mut state).expect("read");
+        assert_eq!(
+            state.get_reg(Reg(3)).as_i64(),
+            12345,
+            "ptr_read must observe the store, not echo the pointer",
+        );
+    }
+
+    /// The pin's own domain: `law_ptr_write_read_round_trip_over_extremes`
+    /// samples the signed-64 boundary set, and every value beyond 2^47 leaves
+    /// `Value`'s inline payload (`from_i64` boxes it).  Storing flat bits and
+    /// rebuilding with `from_i64` round-trips all of them exactly; storing the
+    /// NaN box would not have been readable back (`i64::MAX` has the same bit
+    /// pattern as a box header).
+    #[test]
+    fn bridge_round_trip_is_exact_over_the_signed_64_extremes() {
+        for v in [
+            0_i64,
+            1,
+            -1,
+            6148914691236517205,
+            -6148914691236517206,
+            i64::MAX,
+            i64::MIN,
+        ] {
+            let mut state = state_over_operands(&[1, 2, 3, 1]);
+            let user = register_bridge_block(&mut state, 32);
+            state.set_reg(Reg(1), Value::from_i64(user as i64));
+            state.set_reg(Reg(2), Value::from_i64(v));
+            handle_deref_mut(&mut state).expect("write");
+            handle_deref(&mut state).expect("read");
+            assert_eq!(state.get_reg(Reg(3)).as_i64(), v, "round trip of {v}");
+        }
+    }
+
+    /// Interior slots, not just the base pointer: `ptr_write(ptr_offset(p, i))`
+    /// is the ordinary buffer idiom, and it reaches the handler as an address
+    /// that is not a key of any allocation table.  The extent index is what
+    /// makes it resolvable; a base-pointer-only membership test would leave
+    /// every interior write a silent no-op.
+    #[test]
+    fn interior_bridge_slots_are_writable_and_independent() {
+        // DerefMut [r1<-r2]; DerefMut [r4<-r5]; Deref [r3 <- *r4].
+        let mut state = state_over_operands(&[1, 2, 4, 5, 3, 4]);
+        let user = register_bridge_block(&mut state, 32);
+        state.set_reg(Reg(1), Value::from_i64(user as i64));
+        state.set_reg(Reg(2), Value::from_i64(111));
+        state.set_reg(Reg(4), Value::from_i64((user + 8) as i64));
+        state.set_reg(Reg(5), Value::from_i64(222));
+
+        handle_deref_mut(&mut state).expect("write base");
+        handle_deref_mut(&mut state).expect("write interior");
+        handle_deref(&mut state).expect("read interior");
+
+        assert_eq!(state.get_reg(Reg(3)).as_i64(), 222, "interior slot");
+        // SAFETY: slot 0 lies inside the live 32-byte payload.
+        let base = unsafe { std::ptr::read_unaligned(user as *const u64) };
+        assert_eq!(base, 111, "the interior write must not disturb slot 0");
+    }
+
+    /// An Int-tagged value that is NOT a bridge address keeps its historical
+    /// meaning — the identity fallback for plain integers/unit is load-bearing
+    /// and the provenance arm must not capture it.
+    #[test]
+    fn plain_integers_keep_the_identity_deref() {
+        let mut state = state_over_operands(&[3, 1]);
+        let _ = register_bridge_block(&mut state, 32);
+        state.set_reg(Reg(1), Value::from_i64(42));
+        handle_deref(&mut state).expect("read");
+        assert_eq!(state.get_reg(Reg(3)).as_i64(), 42);
+    }
+
+    /// A non-scalar payload has no honest packed representation: its NaN box
+    /// is a tag into interpreter-private storage and the flat/boxed ambiguity
+    /// is undecidable on read-back.  Reporting beats storing something the
+    /// matching `ptr_read` would decode as garbage — and beats the silent
+    /// no-op this replaced.
+    #[test]
+    fn non_scalar_bridge_store_reports_instead_of_corrupting() {
+        let mut state = state_over_operands(&[1, 2]);
+        let user = register_bridge_block(&mut state, 32);
+        state.set_reg(Reg(1), Value::from_i64(user as i64));
+        state.set_reg(Reg(2), Value::from_ptr(0x1000_usize as *mut u8));
+        let err = handle_deref_mut(&mut state).expect_err("non-scalar store must report");
+        assert!(
+            matches!(err, InterpreterError::InvalidOperand { .. }),
+            "expected InvalidOperand, got {err:?}",
+        );
+    }
+
+    /// An 8-byte access whose tail leaves the block is out of bounds, not a
+    /// truncated write.
+    #[test]
+    fn bridge_access_past_the_payload_end_reports() {
+        let mut state = state_over_operands(&[1, 2]);
+        let user = register_bridge_block(&mut state, 12);
+        state.set_reg(Reg(1), Value::from_i64((user + 8) as i64));
+        state.set_reg(Reg(2), Value::from_i64(1));
+        let err = handle_deref_mut(&mut state).expect_err("must report");
+        assert!(matches!(err, InterpreterError::InvalidOperand { .. }));
     }
 }

@@ -8,7 +8,6 @@ use super::super::DispatchResult;
 use super::bytecode_io::*;
 use super::envelope::dispatch_enveloped;
 use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
-use super::string_helpers::*;
 #[allow(unused_imports)]
 use crate::instruction::{SystemSubOpcode, Reg};
 #[allow(unused_imports)]
@@ -4250,6 +4249,11 @@ fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, raw_align: i6
             total as u32;
     }
     state.cbgr_allocations.insert(header_addr);
+    // T0108 — record the payload extent alongside the header entry.  This
+    // is the ONLY place a header-model bridge block comes into existence,
+    // so indexing here (and dropping it in `cbgr_user_deallocate`) keeps
+    // `cbgr_bridge_extents` in lockstep with `cbgr_allocations`.
+    state.cbgr_bridge_extents.insert(user, size);
     user as i64
 }
 
@@ -4334,6 +4338,10 @@ fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
     if !state.cbgr_allocations.remove(&header_addr) {
         return;
     }
+    // T0108 — the payload extent dies with the header entry; leaving it
+    // behind would let a freed interval keep answering the bridge-address
+    // provenance query in `handle_deref`/`handle_deref_mut`.
+    state.cbgr_bridge_extents.remove(&(user as usize));
     // CBGR-MUTABLE-PTRS-DEALLOC-1 (T0299): drop this block's per-pointer
     // lifecycle state too.  Every other removal from `cbgr_mutable_ptrs` is a
     // CAPABILITY DOWNGRADE (RefCreate / CapAttenuate / CapTransfer /

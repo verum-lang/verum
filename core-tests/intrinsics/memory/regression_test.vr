@@ -135,17 +135,20 @@ fn regression_memcmp_compares_contents_not_addresses() {
 }
 
 // =============================================================================
-// MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — OPEN, pinned
+// MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — FIXED T0108, live pin
 // =============================================================================
 // Registry binds ptr_read → DirectOpcode(Deref 0x72) / ptr_write →
 // DirectOpcode(DerefMut 0x73).  A raw Int-tagged address is the FOURTH
-// reference shape those CBGR handlers never dereference: handle_deref falls
-// to the identity fallback (returns the ADDRESS), handle_deref_mut silently
-// does nothing.  AOT lowers both correctly → cross-tier kernel incident.
-// Fix design: call-site width channel → SystemSubOpcode DerefRaw/
-// DerefRawSigned/DerefMutRaw {size} (task #16).
+// reference shape those CBGR handlers never dereferenced: handle_deref fell
+// to the identity fallback (returned the ADDRESS), handle_deref_mut ran off
+// the end of its if/else chain and silently did nothing.  AOT lowered both
+// correctly → cross-tier kernel incident.
+//
+// Fixed by giving both handlers a bridge-provenance arm: an Int-tagged
+// address resolved against the live `cbgr_allocate` payload extents reads and
+// writes the flat 8-byte scalar there, byte-identical to the AOT store (probe:
+// `load_byte` sees 12345 & 0xFF = 57 under BOTH tiers).
 
-@ignore("MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — interp ptr_write no-op / ptr_read identity; AOT correct. Acceptance pin for the width-channel rerouting.")
 @test
 fn regression_ptr_write_then_read_round_trips() {
     let a = cbgr_allocate(16, 8);

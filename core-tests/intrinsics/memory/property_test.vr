@@ -143,7 +143,8 @@ fn law_live_allocation_is_not_null() {
 //
 //   NOTE ON STRIDE: ptr arithmetic today advances count × 8 (the Value-slot
 //   width) for EVERY pointee type; the honest `count × T.size` law is the
-//   @ignore'd byte-stride case below (task #16 MEM-PTR-DEREF-TIER0-1).  The
+//   @ignore'd byte-stride case below (T0108, stride leg — still open; the
+//   read/write leg of that task is fixed and its laws are live).  The
 //   algebra laws (inverse / accumulation / monotonicity) are stride-agnostic
 //   and run live.
 // =============================================================================
@@ -184,7 +185,7 @@ fn law_ptr_add_is_strictly_monotonic() {
     cbgr_deallocate(a);
 }
 
-@ignore("MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — ptr arithmetic is Value-slot-strided (×8) for every T; the declared contract is count × T.size (Byte stride must be 1). Flips live with the call-site width channel.")
+@ignore("T0108 — ptr arithmetic is Value-slot-strided (×8) for every T; the contract is count × T.size. NOT a call-site width channel: the archive bakes `core.intrinsics.memory.ptr_add` with type_params=0 and ONE shared body (a single FfiExtended 0x63) for every T, and the call site emits `Call func_id` rather than inlining @intrinsic — so no site sees a concrete pointee. Blocked on the erased generic, plus `ptr_add(bp, 1)` not type-checking (Int literal vs USize param).")
 @test
 fn law_ptr_add_byte_stride_is_one() {
     let a = cbgr_allocate(16, 8);
@@ -331,7 +332,10 @@ fn law_zeroed_int_deterministic() {
 // Section 8: OPEN width-channel laws — acceptance tests for task #16/#17
 // =============================================================================
 
-@ignore("MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — interp ptr_write is a silent no-op / ptr_read an identity stub (AOT correct: cross-tier kernel incident). Flips live with the DerefRaw width-channel rerouting.")
+// Live since T0108: the bridge-provenance arm in `handle_deref`/
+// `handle_deref_mut` stores the extremes as FLAT 8-byte scalars, so every
+// value beyond `Value`'s 48-bit inline payload round-trips exactly and the
+// bytes match the AOT store of the same program.
 @test
 fn law_ptr_write_read_round_trip_over_extremes() {
     let a = cbgr_allocate(16, 8);
@@ -362,7 +366,7 @@ fn law_alignment_ladder_downward_closed() {
     cbgr_deallocate(a);
 }
 
-@ignore("MEM-PTR-DEREF-TIER0-1 (task #16, 2026-07-15) — generic ptr_is_aligned<T> derives the alignment from T and needs the call-site width channel; ptr_is_aligned_to (explicit alignment) is live above.")
+@ignore("T0108 — generic ptr_is_aligned<T> derives the alignment from T, which the archive erases (type_params=0 on the baked intrinsic wrapper, one shared body per intrinsic); same blocker as law_ptr_add_byte_stride_is_one. ptr_is_aligned_to (explicit alignment) is live above.")
 @test
 fn law_ptr_is_aligned_generic_matches_explicit() {
     let a = cbgr_allocate(16, 8);
