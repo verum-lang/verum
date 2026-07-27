@@ -1798,6 +1798,18 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         // saw the scanner change).
         "crates/verum_compiler/src/precompile.rs",
         "crates/verum_compiler/src/archive_metadata.rs",
+        // `TypeId::well_known_name` (T0190) — the reserved-TypeId →
+        // canonical-surface-name table `archive_metadata` renders every
+        // descriptor through.  Naming one more reserved id changes the
+        // BAKED metadata (a concrete `UInt32` where the sidecar used to
+        // carry the existential `__opaque_type_8`) without touching a
+        // single `.vr` file or any path already listed above, so without
+        // this entry the extension would land in the binary and be
+        // invisible in the artefact — the same silent-staleness the
+        // archive_metadata.rs entry above exists to prevent.  types.rs
+        // also owns the TypeId constants and the TypeRef wire shape, both
+        // of which the precompiler emits directly.
+        "crates/verum_vbc/src/types.rs",
     ];
     hasher.update(b"codegen:");
     for rel in codegen_paths {

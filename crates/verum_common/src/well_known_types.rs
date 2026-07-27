@@ -1702,6 +1702,10 @@ pub mod type_names {
     pub const HEAP: &str = "Heap";
     pub const SHARED: &str = "Shared";
 
+    /// The three-way comparison result (`Less | Equal | Greater`) whose
+    /// canonical variant layout is [`super::ORDERING_VARIANT_LAYOUT`].
+    pub const ORDERING: &str = "Ordering";
+
     // Concurrency
     pub const CHANNEL: &str = "Channel";
     pub const MUTEX: &str = "Mutex";

@@ -359,6 +359,100 @@ impl TypeId {
     pub fn is_float(self) -> bool {
         matches!(self.0, 3 | 13)
     }
+
+    /// The canonical **Verum surface name** of a reserved TypeId, or
+    /// `None` when the id carries no single source-level spelling.
+    ///
+    /// This is the canonical inverse of codegen's `type_name_to_id` table
+    /// (`codegen/mod.rs`, seeded from
+    /// `verum_common::well_known_types::NUMERIC_ALIAS_MATRIX`).  That map is
+    /// many-to-one — `UInt8` / `U8` / `u8` / `Byte` all resolve to
+    /// [`TypeId::U8`] — so the reverse direction has to pick ONE spelling per
+    /// identity.  The choice is not invented here: it follows
+    /// `verum_common::well_known_types::type_names::canonical_identity_name`,
+    /// the repo's existing authority on which spelling names an alias class
+    /// (`Byte` | `UInt8` | `u8` | `U8` → `UInt8`).  Every name returned below
+    /// is a `type_names` constant for that reason.
+    ///
+    /// **Why this exists** (T0190): descriptor renderers need a name for a
+    /// reserved id because reserved ids never appear in a module's own type
+    /// table.  Primitives are built into the VM, so `implement UInt8 { … }`
+    /// emits no `TypeDescriptor` and the per-module `TypeId → name` index has
+    /// nothing to find.  Without this table `verum_compiler::archive_metadata`
+    /// rendered `UInt8.wrapping_add`'s return type as the placeholder
+    /// `__opaque_type_6`, which the typechecker interns as an existential
+    /// type variable — a concrete 8-bit unsigned return degraded into
+    /// "unifies with anything".
+    ///
+    /// **Deliberately unnamed.**  Each of these would inject a WRONG rigid
+    /// name where the placeholder at least degrades honestly:
+    ///
+    /// * [`TypeId::PTR`] (14) — three-way aliased (`USize` / `ISize` / `Ptr`)
+    ///   AND doubling as codegen's shared unknown-carrier sentinel, so the id
+    ///   does not identify one surface type at all.
+    /// * [`TypeId::RESERVED`] (15) — no type.
+    /// * [`TypeId::TUPLE`] (521) — tuples are structural (`(A, B)`); `Tuple`
+    ///   is not a source-level nominal.  Real tuples travel as
+    ///   [`TypeRef::Tuple`], which renders structurally.
+    /// * [`TypeId::PI`] / [`TypeId::SIGMA`] / [`TypeId::WITNESS`] (524-526) —
+    ///   runtime packaging for dependent types, no surface spelling.
+    /// * [`TypeId::BYTE_LIST`] (527) / [`TypeId::BYTE_SLICE`] (528) —
+    ///   representation-specialised layouts whose surface spellings are
+    ///   PARAMETERISED (`List<Byte>`, `[Byte]`), not bare nominals; a bare
+    ///   name would render `List<Byte><Byte>` on the instantiated path.
+    /// * The meta band (256-259) and [`TypeId::TENSOR`] (530) — these are
+    ///   runtime HEAP-OBJECT stamps (`token_stream.rs`, `alloc_tensor_value`),
+    ///   not descriptor ids.  The source-level `TokenStream` / `Token` /
+    ///   `Span` declared in `core/meta/` are ordinary user types with
+    ///   ordinary user ids, so naming the stamp would hand a descriptor
+    ///   consumer a name that resolves to a DIFFERENT id.
+    ///
+    /// Drift-pinned by `well_known_names_pinned` in this module's tests.
+    pub fn well_known_name(self) -> Option<&'static str> {
+        use verum_common::well_known_types::type_names as n;
+        // Scalars.  Bare `Int` / `Float` are the canonical 64-bit spellings
+        // (`Int64` / `Float64` alias the same id), matching
+        // `canonical_identity_name`'s alias collapse.
+        match self {
+            Self::UNIT => return Some(n::UNIT),
+            Self::BOOL => return Some(n::BOOL),
+            Self::INT => return Some(n::INT),
+            Self::FLOAT => return Some(n::FLOAT),
+            Self::TEXT => return Some(n::TEXT),
+            Self::NEVER => return Some(n::NEVER),
+            Self::U8 => return Some(n::UINT8),
+            Self::U16 => return Some(n::UINT16),
+            Self::U32 => return Some(n::UINT32),
+            Self::U64 => return Some(n::UINT64),
+            Self::I8 => return Some(n::INT8),
+            Self::I16 => return Some(n::INT16),
+            Self::I32 => return Some(n::INT32),
+            Self::F32 => return Some(n::FLOAT32),
+            Self::CHAR => return Some(n::CHAR),
+            Self::I128 => return Some(n::INT128),
+            Self::U128 => return Some(n::UINT128),
+            _ => {}
+        }
+        // Semantic band (512-1023).  `alloc_user_type_id` skips it, so no
+        // user type can collide with an id named here.  Generic carriers
+        // reach a renderer through `TypeRef::Instantiated`, which supplies
+        // the args — `Heap<TaskEntry>`, not a bare arity-0 `Heap`.
+        match self {
+            Self::LIST => Some(n::LIST),
+            Self::MAP => Some(n::MAP),
+            Self::SET => Some(n::SET),
+            Self::MAYBE => Some(n::MAYBE),
+            Self::RESULT => Some(n::RESULT),
+            Self::RANGE => Some(n::RANGE),
+            Self::ARRAY => Some(n::ARRAY),
+            Self::HEAP => Some(n::HEAP),
+            Self::SHARED => Some(n::SHARED),
+            Self::DEQUE => Some(n::DEQUE),
+            Self::CHANNEL => Some(n::CHANNEL),
+            Self::ORDERING => Some(n::ORDERING),
+            _ => None,
+        }
+    }
 }
 
 /// Type parameter identifier - unique within a function or type definition.
@@ -2765,6 +2859,126 @@ mod tests {
         // User-record range (FIRST_USER..LIST.0).
         assert!(!TypeId(TypeId::FIRST_USER).is_array_dispatchable());
         assert!(!TypeId(TypeId::LIST.0 - 1).is_array_dispatchable());
+    }
+
+    /// T0190 — `well_known_name` is the canonical inverse of codegen's
+    /// many-to-one `type_name_to_id` map, and its output is BAKED into
+    /// descriptor metadata that the typechecker parses back into rigid
+    /// `Type::Named` nodes.  Two failure modes it guards:
+    ///
+    /// 1. **Spelling drift** — a name that is not the alias class's
+    ///    canonical identity (`Byte` instead of `UInt8`) silently splits one
+    ///    type into two nominal identities downstream.  Asserted by round-
+    ///    tripping every returned name through
+    ///    `type_names::canonical_identity_name`, the authority that decides
+    ///    which spelling names an alias class.
+    /// 2. **Naming an unnameable id** — `PTR` doubles as the unknown-carrier
+    ///    sentinel and `TUPLE` has no nominal spelling, so a name for either
+    ///    would replace an honest existential with a WRONG rigid type.
+    #[test]
+    fn well_known_names_pinned() {
+        use verum_common::well_known_types::type_names;
+
+        // Scalars: name AND identity canon.
+        for (tid, expect) in [
+            (TypeId::UNIT, "Unit"),
+            (TypeId::BOOL, "Bool"),
+            (TypeId::INT, "Int"),
+            (TypeId::FLOAT, "Float"),
+            (TypeId::TEXT, "Text"),
+            (TypeId::NEVER, "Never"),
+            (TypeId::U8, "UInt8"),
+            (TypeId::U16, "UInt16"),
+            (TypeId::U32, "UInt32"),
+            (TypeId::U64, "UInt64"),
+            (TypeId::I8, "Int8"),
+            (TypeId::I16, "Int16"),
+            (TypeId::I32, "Int32"),
+            (TypeId::F32, "Float32"),
+            (TypeId::CHAR, "Char"),
+            (TypeId::I128, "Int128"),
+            (TypeId::U128, "UInt128"),
+            (TypeId::LIST, "List"),
+            (TypeId::MAP, "Map"),
+            (TypeId::SET, "Set"),
+            (TypeId::MAYBE, "Maybe"),
+            (TypeId::RESULT, "Result"),
+            (TypeId::RANGE, "Range"),
+            (TypeId::ARRAY, "Array"),
+            (TypeId::HEAP, "Heap"),
+            (TypeId::SHARED, "Shared"),
+            (TypeId::DEQUE, "Deque"),
+            (TypeId::CHANNEL, "Channel"),
+            (TypeId::ORDERING, "Ordering"),
+        ] {
+            assert_eq!(
+                tid.well_known_name(),
+                Some(expect),
+                "TypeId({}) surface name drifted",
+                tid.0
+            );
+        }
+
+        // `Byte` is the spelling that must NOT win TypeId(6): the archive
+        // renders one name per id, and `canonical_identity_name` collapses
+        // the whole 8-bit-unsigned alias class onto `UInt8`.
+        assert_eq!(
+            type_names::canonical_identity_name("Byte"),
+            TypeId::U8.well_known_name().unwrap(),
+            "TypeId(6) must render the alias class's canonical identity"
+        );
+        // Every named numeric id agrees with the identity authority, so a
+        // future rename in either place cannot pass silently.
+        for tid in [
+            TypeId::U8,
+            TypeId::U16,
+            TypeId::U32,
+            TypeId::U64,
+            TypeId::I8,
+            TypeId::I16,
+            TypeId::I32,
+            TypeId::F32,
+            TypeId::I128,
+            TypeId::U128,
+        ] {
+            let name = tid.well_known_name().expect("numeric id must be nameable");
+            assert_eq!(
+                type_names::canonical_identity_name(name),
+                name,
+                "{name} is not its own canonical identity — spelling drift"
+            );
+            assert!(
+                type_names::is_numeric_type(name),
+                "{name} must be recognised as numeric by the shared registry"
+            );
+        }
+
+        // Deliberately unnamed — see `well_known_name`'s doc for each.
+        for tid in [
+            TypeId::PTR,
+            TypeId::RESERVED,
+            TypeId::TUPLE,
+            TypeId::PI,
+            TypeId::SIGMA,
+            TypeId::WITNESS,
+            TypeId::BYTE_LIST,
+            TypeId::BYTE_SLICE,
+            TypeId::TOKEN_STREAM,
+            TypeId::TOKEN,
+            TypeId::TOKEN_KIND,
+            TypeId::SPAN,
+            TypeId::TENSOR,
+        ] {
+            assert_eq!(
+                tid.well_known_name(),
+                None,
+                "TypeId({}) must stay unnamed — naming it bakes a WRONG rigid type",
+                tid.0
+            );
+        }
+        // User ids are named by their owning module's type table, never here.
+        assert_eq!(TypeId(TypeId::FIRST_USER).well_known_name(), None);
+        assert_eq!(TypeId(0x8000).well_known_name(), None);
     }
 
     #[test]

@@ -1522,28 +1522,65 @@ fn type_ref_to_text_with_params(
         // as its literal so `StackAllocator<256>` round-trips through the
         // metadata text form instead of degrading to `__opaque_typeref`.
         TypeRef::ConstValue(v) => v.to_string(),
+        // T0190 (same root as the TypeId table below, structural half):
+        // these three shapes have exact spellings that
+        // `parse_descriptor_type_string` already parses back — `(A, B)` to
+        // `Type::Tuple`, `[T]` / `[T; N]` to `Type::Slice` — yet they fell
+        // through to `__opaque_typeref`, which that parser interns as a
+        // FRESH TYPE VARIABLE.  3567 descriptor slots in the baked stdlib
+        // were affected (Slice 1574, Tuple 1453, Array 540): `VERSION_INFO`
+        // returned an existential instead of `(Int, Int, Int)`, and
+        // `from_be_bytes(bytes: [Byte; 8])` took one instead of a byte array.
+        TypeRef::Tuple(elems) => {
+            let rendered: Vec<String> = elems
+                .iter()
+                .map(|e| type_ref_to_text_with_params(e, type_id_to_name, param_id_to_name))
+                .collect();
+            format!("({})", rendered.join(", "))
+        }
+        // Length is rendered even though the parser drops it (metadata keeps
+        // no array length): the spelling stays faithful to the descriptor,
+        // and a future length-aware parser needs no re-bake to read it.
+        TypeRef::Array { element, length } => format!(
+            "[{}; {}]",
+            type_ref_to_text_with_params(element, type_id_to_name, param_id_to_name),
+            length
+        ),
+        TypeRef::Slice(inner) => format!(
+            "[{}]",
+            type_ref_to_text_with_params(inner, type_id_to_name, param_id_to_name)
+        ),
+        // `TypeRef::Rank2Function` deliberately keeps the placeholder: its
+        // spelling `fn<N>(…) -> R` does NOT round-trip — the parser's
+        // function arm matches the `fn(` prefix only, so `fn<` would fall
+        // through to the generic-instantiation arm and land as a rigid
+        // `Type::Named { "fn<2>(A) -> B" }`, which is strictly worse than an
+        // honest existential.  Rendering it as a rank-1 `fn(…)` instead
+        // would silently drop the universal quantifier.  Zero occurrences in
+        // the shipped archive, so the placeholder costs nothing today;
+        // giving it a real spelling is a parser-side change first.
         _ => "__opaque_typeref".to_string(),
     }
 }
 
+/// Canonical Verum surface name for a reserved VBC `TypeId`.
+///
+/// T0190: this used to be an 11-entry table local to this file, which named
+/// `Int`/`Float`/`Text`/`List`/… but NOT the width-tagged integers, `Float32`,
+/// or the semantic carriers — so `UInt8.wrapping_add`'s `TypeId(6)` return
+/// fell through to `__opaque_type_6` (4348 sites in the baked stdlib
+/// metadata; 11963 across all nameable ids).  A `__opaque_type_N` string is
+/// interned by `parse_descriptor_type_string` as an EXISTENTIAL type
+/// variable, so every one of those concrete signatures reached the
+/// typechecker as "unifies with anything".
+///
+/// The table now lives with the ids it names — `TypeId::well_known_name`,
+/// the canonical inverse of codegen's `type_name_to_id` map — so a new
+/// reserved id is named once, for every consumer, at the point of
+/// declaration.  See that method for the ids that stay deliberately unnamed
+/// (`PTR` above all: it is the shared unknown-carrier sentinel).
 fn builtin_type_name(tid: &verum_vbc::types::TypeId) -> Option<&'static str> {
-    use verum_vbc::types::TypeId;
-    match *tid {
-        TypeId::UNIT => Some("Unit"),
-        TypeId::BOOL => Some("Bool"),
-        TypeId::INT => Some("Int"),
-        TypeId::FLOAT => Some("Float"),
-        TypeId::TEXT => Some("Text"),
-        TypeId::NEVER => Some("Never"),
-        TypeId::CHAR => Some("Char"),
-        TypeId::LIST => Some("List"),
-        TypeId::MAP => Some("Map"),
-        TypeId::MAYBE => Some("Maybe"),
-        TypeId::RESULT => Some("Result"),
-        // PTR (TypeId::14) intentionally NOT named — VBC uses it
-        // as a generic carrier for "unknown / opaque" type refs.
-        _ => None,
-    }
+    tid.well_known_name()
 }
 
 #[cfg(test)]
