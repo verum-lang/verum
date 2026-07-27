@@ -1145,8 +1145,15 @@ implement<I: Iterator> FusedIterator for FuseIter<I> {}
 /// Empty iterator always returns Maybe.None.
 implement<T> FusedIterator for Empty<T> {}
 
-/// Once returns Maybe.None after the first element.
-implement<T> FusedIterator for Once<T> {}
+/// OnceIter returns Maybe.None after the first element: its `next` is
+/// `self.value.take()`, which empties the slot (see the Iterator impl).
+///
+/// Retargeted from a phantom `Once<T>` (T0327). `Once` is
+/// core/sync/once.vr:123 — a synchronisation primitive with NO type
+/// parameter — so `Once<T>` named a type that does not exist, and a
+/// `<T>` had been invented to make the name fit. The fused iterator is
+/// `OnceIter<T>`, which is what every sibling in this block refers to.
+implement<T> FusedIterator for OnceIter<T> {}
 
 /// RepeatN returns Maybe.None after N elements.
 implement<T: Clone> FusedIterator for RepeatN<T> {}
@@ -4662,10 +4669,12 @@ implement<T: Clone> IntoIterator for RepeatN<T> {
     fn into_iter(self) -> RepeatN<T> { self }
 }
 
-implement<T> IntoIterator for Once<T> {
+// Retargeted from the same phantom `Once<T>` as the FusedIterator impl
+// above (T0327) — one authoring slip produced both sites.
+implement<T> IntoIterator for OnceIter<T> {
     type Item = T;
-    type IntoIter = Once<T>;
-    fn into_iter(self) -> Once<T> { self }
+    type IntoIter = OnceIter<T>;
+    fn into_iter(self) -> OnceIter<T> { self }
 }
 
 implement<T> IntoIterator for Empty<T> {
