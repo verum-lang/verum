@@ -133,8 +133,6 @@ pub struct VerificationContext {
     /// All proof obligations
     obligations: Arc<RwLock<Map<ProofObligationId, ProofObligation>>>,
 
-    /// Next obligation ID to allocate
-    next_obligation_id: Arc<RwLock<u64>>,
 }
 
 impl VerificationContext {
@@ -153,7 +151,6 @@ impl VerificationContext {
             boundaries: Arc::new(RwLock::new(Map::new())),
             next_boundary_id: Arc::new(RwLock::new(0)),
             obligations: Arc::new(RwLock::new(Map::new())),
-            next_obligation_id: Arc::new(RwLock::new(0)),
         }
     }
 
