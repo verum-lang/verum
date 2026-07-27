@@ -874,6 +874,8 @@ pub enum InlineSequenceId {
     CbgrValidateBool,
     /// cbgr_current_epoch: read the live CBGR epoch → UInt64
     CbgrCurrentEpoch,
+    /// cbgr_advance_epoch: bump the live CBGR epoch (no operands, no result)
+    CbgrAdvanceEpoch,
     /// memcmp_bytes: compare memory regions byte-by-byte
     MemcmpBytes,
     /// get_header_from_ptr: get CBGR allocation header from pointer
@@ -5205,7 +5207,17 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[IntrinsicHint::SyncBarrier],
         param_count: 0,
         return_count: 0,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::Nop),
+        // Same defect as `cbgr_current_epoch` above, one opcode over: bound to
+        // `DirectOpcode(Opcode::Nop)`, for which `emit_intrinsic_direct_opcode`
+        // has NO arm at all, so it fell to the default `_ => LoadNil` and the
+        // epoch was never advanced.  Probed before the fix: the epoch read 1
+        // both before and after a `cbgr_advance_epoch()` call.
+        //
+        // `CbgrSubOpcode::AdvanceEpoch` (0x23) already carried the real
+        // operation on BOTH tiers — Tier-0 increments `state.cbgr_epoch`, and
+        // the AOT arm lowers it — so this is a binding correction, not a new
+        // capability.  The sub-op takes no operands and yields no value.
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrAdvanceEpoch),
         mlir_op: Some("verum.cbgr.advance_epoch"),
         doc: "Advance CBGR epoch",
     },
@@ -12851,6 +12863,40 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **T0220 binding pins.**  Both of these intrinsics take ZERO arguments
+    /// and were bound to a `DirectOpcode` whose emission arm they could never
+    /// reach: `cbgr_current_epoch` to `Opcode::TlsGet`, whose arm is guarded
+    /// `if !args.is_empty()`, and `cbgr_advance_epoch` to `Opcode::Nop`, which
+    /// has no arm at all.  Both therefore fell through
+    /// `emit_intrinsic_direct_opcode` to its default `_ => LoadNil`, so
+    /// `cbgr_current_epoch()` returned nil and `cbgr_advance_epoch()` did
+    /// nothing — probed, the epoch read 1 both before and after a call.
+    ///
+    /// The dedicated sub-opcodes (`CurrentEpoch` 0x24, `AdvanceEpoch` 0x23)
+    /// already carried the real behaviour on BOTH tiers; only the binding was
+    /// missing.  This pins the BINDING rather than the handlers: the handlers
+    /// were always correct, so a handler-level test passes with or without the
+    /// fix and proves nothing.
+    ///
+    /// A zero-argument intrinsic must never be bound to `DirectOpcode` — there
+    /// is no arm in that emitter it can satisfy.
+    #[test]
+    fn zero_arg_cbgr_epoch_intrinsics_are_not_bound_to_a_direct_opcode() {
+        for name in ["cbgr_current_epoch", "cbgr_advance_epoch"] {
+            let intrinsic = INTRINSIC_REGISTRY
+                .lookup(name)
+                .unwrap_or_else(|| panic!("{name} missing from the registry"));
+            assert_eq!(intrinsic.param_count, 0, "{name} takes no arguments");
+            assert!(
+                !matches!(intrinsic.strategy, CodegenStrategy::DirectOpcode(_)),
+                "{name} is bound to {:?} — a zero-argument intrinsic cannot \
+                 satisfy any arm of emit_intrinsic_direct_opcode, so it will \
+                 silently lower to LoadNil",
+                intrinsic.strategy,
+            );
+        }
+    }
 
     #[test]
     fn test_registry_initialization() {

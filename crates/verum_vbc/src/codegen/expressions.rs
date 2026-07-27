@@ -34449,6 +34449,18 @@ impl VbcCodegen {
                     operands,
                 });
             }
+
+            // `cbgr_advance_epoch()`.  The 0x23 handler reads NO operands and
+            // produces no value, so the envelope carries none; `dest` is left
+            // as the caller found it (the intrinsic's return_count is 0).
+            // Previously bound to `Opcode::Nop`, which has no emission arm, so
+            // the whole call collapsed to `LoadNil` and the epoch never moved.
+            InlineSequenceId::CbgrAdvanceEpoch => {
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: crate::instruction::CbgrSubOpcode::AdvanceEpoch as u8,
+                    operands: Vec::new(),
+                });
+            }
             InlineSequenceId::MemcmpBytes => {
                 // Compare memory regions byte-by-byte
                 let mut operands = Vec::<u8>::new();

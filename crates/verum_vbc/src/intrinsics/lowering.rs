@@ -3721,6 +3721,13 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            InlineSequenceId::CbgrAdvanceEpoch => self.emit(MlirOp {
+                name: "verum.cbgr.advance_epoch".to_string(),
+                attrs: vec![],
+                result_types: vec![],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::MemcmpBytes => self.emit(MlirOp {
                 name: "llvm.intr.memcmp".to_string(),
                 attrs: vec![],
