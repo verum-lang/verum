@@ -1,7 +1,22 @@
 # CI Status (2026-04-18, local validation)
 
+> **This is a dated snapshot, not a live gate.** The figures below were
+> measured on 2026-04-18 against the `main` of that day. Treat every
+> percentage as a claim about then, and re-measure before citing one.
+>
+> **It also under-reports the pipeline.** `.github/workflows/ci.yml`
+> defines `vr-syntax`, `unit`, `vcs-l0-l1`, `differential`,
+> `strict-gates`, `lint` and `arch-guards`; the table below covers a
+> subset. In particular the `vcs-l0-l1` job runs **both** `make test-l0`
+> and `make test-l1` as 100%-required gates, while only L0 rows appear
+> here — L1 is gated in CI but unrecorded in this file.
+>
+> **L2, L3 and L4 are not run by the workflow at all.** Any acceptance
+> phrased "measured in CI baseline" is unreachable for those three until
+> the workflow covers them.
+
 The local pipeline that the GitHub Actions `.github/workflows/ci.yml`
-runs has been validated against the current `main`.
+runs was validated against `main` as of the date above.
 
 | Job                              | Status            |
 |---|---|
