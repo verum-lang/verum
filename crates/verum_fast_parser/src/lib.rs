@@ -311,9 +311,50 @@ impl FastParser {
         Ok(tokens)
     }
 
-    /// Parse a single expression from a string (useful for testing).
+    /// Reject input the parser stopped short of consuming.
     ///
-    /// Lex errors are reported, not silently dropped; see [`Self::lex_all`].
+    /// The whole-string entry points below promise something the token-slice
+    /// entry points do not: that *this text* is an expression, or a type.
+    /// The caller hands over a string and gets back a node -- it has no
+    /// stream to inspect, so a parse that stopped halfway is indistinguishable
+    /// from one that succeeded. Without this check `parse_expr_str` returns
+    /// `Ok` for `mat#[[1, 2]]` having read only the composite `mat#[[1, 2]`
+    /// -- a literal whose content is the unbalanced `[1, 2` -- and the caller
+    /// silently proceeds on a fragment of what it supplied.
+    ///
+    /// That is a correctness hazard, not a testing nicety. The archived
+    /// refinement predicate re-parsed in `verum_vbc::codegen` becomes the
+    /// runtime check emitted for a field, so a predicate truncated here used
+    /// to emit a *weaker* check with no diagnostic; it now fails to parse and
+    /// the field ships unrefined, which is that site's documented fail-open
+    /// policy rather than a silently wrong check. `${...}` interpolation in
+    /// `sh#"..."` lost part of the interpolated expression the same way.
+    ///
+    /// The error names the first unconsumed token, which is where the
+    /// accepted prefix ended -- the one position that explains the refusal.
+    fn require_input_consumed(parser: &RecursiveParser<'_>) -> ParseResult<()> {
+        if parser.stream.at_end() {
+            return Ok(());
+        }
+
+        let trailing = parser.stream.current_span();
+        let err = match parser.stream.peek() {
+            Some(token) => ParseError::unexpected(&[TokenKind::Eof], token.clone()),
+            // `at_end()` is false, so `peek()` is `Some`; this arm is
+            // unreachable and kept only to avoid an unwrap.
+            None => ParseError::unexpected_eof(&[TokenKind::Eof], trailing),
+        }
+        .with_help("this entry point parses the whole string; the text after this point is not part of the construct");
+
+        Err(List::from(vec![err]))
+    }
+
+    /// Parse a single expression from a string.
+    ///
+    /// The **entire** string must be an expression: input the parser does not
+    /// consume is rejected rather than discarded (see
+    /// [`Self::require_input_consumed`]). Lex errors are reported, not
+    /// silently dropped; see [`Self::lex_all`].
     pub fn parse_expr_str(&self, source: &str, file_id: FileId) -> ParseResult<verum_ast::Expr> {
         let tokens = Self::lex_all(source, file_id)?;
 
@@ -323,13 +364,17 @@ impl FastParser {
         if !parser.errors.is_empty() {
             return Err(parser.errors.into());
         }
+        Self::require_input_consumed(&parser)?;
 
         Ok(expr)
     }
 
-    /// Parse a single type from a string (useful for testing).
+    /// Parse a single type from a string.
     ///
-    /// Lex errors are reported, not silently dropped; see [`Self::lex_all`].
+    /// The **entire** string must be a type: input the parser does not consume
+    /// is rejected rather than discarded (see
+    /// [`Self::require_input_consumed`]). Lex errors are reported, not
+    /// silently dropped; see [`Self::lex_all`].
     pub fn parse_type_str(&self, source: &str, file_id: FileId) -> ParseResult<verum_ast::Type> {
         let tokens = Self::lex_all(source, file_id)?;
 
@@ -339,6 +384,7 @@ impl FastParser {
         if !parser.errors.is_empty() {
             return Err(parser.errors.into());
         }
+        Self::require_input_consumed(&parser)?;
 
         Ok(ty)
     }
@@ -888,5 +934,89 @@ mod lex_error_reporting {
 
         assert!(parser.parse_expr_str("1 + 2", file_id).is_ok());
         assert!(parser.parse_type_str("Int", file_id).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod input_exhaustion {
+    use super::*;
+
+    /// Trailing tokens must FAIL the parse, not be discarded.
+    ///
+    /// `parse_expr_str` / `parse_type_str` never checked the stream was
+    /// exhausted, so a parse that stopped halfway returned `Ok` and the
+    /// caller — holding only a string and a node — had no way to tell.
+    ///
+    /// Inline rather than in `tests/` for the same reason as
+    /// [`lex_error_reporting`]: CI runs `cargo test --workspace --lib
+    /// --bins`, which does not execute `tests/`.
+    ///
+    /// The demonstrator is deliberately `mat#[[1, 2]]`. A composite body is
+    /// a flat character run — `grammar/verum.ebnf` `composite_char` excludes
+    /// `)`, `]` and `}` — so the lexer ends the composite at the first `]`
+    /// and the remainder is genuinely unparsed input. (`1 ++ 2` does *not*
+    /// work as a demonstrator: `++` is the `Concat` operator, so that input
+    /// parses in full.)
+    #[test]
+    fn trailing_tokens_are_an_error_not_a_silent_truncation() {
+        let parser = FastParser::new();
+        let file_id = FileId::new(0);
+
+        let result = parser.parse_expr_str("mat#[[1, 2]]", file_id);
+        assert!(
+            result.is_err(),
+            "nested composite body parsed as `Ok` — the unconsumed tail was discarded"
+        );
+    }
+
+    #[test]
+    fn trailing_tokens_after_a_type_are_an_error() {
+        let parser = FastParser::new();
+        let file_id = FileId::new(0);
+
+        let result = parser.parse_type_str("Int Text", file_id);
+        assert!(
+            result.is_err(),
+            "`Int Text` parsed as `Ok` — the trailing type name was discarded"
+        );
+    }
+
+    /// The guard must not reject input that legitimately parses whole: a
+    /// check that failed everything would satisfy the tests above and be
+    /// useless. Each of these exercises a construct whose parse ends on a
+    /// closing token rather than running off the end of the stream.
+    #[test]
+    fn fully_consumed_input_still_parses() {
+        let parser = FastParser::new();
+        let file_id = FileId::new(0);
+
+        for source in [
+            "1 + 2",
+            "foo(1, 2)",
+            "vec#[1, 2, 3]",
+            "[1, 2, 3]",
+            "if x { 1 } else { 2 }",
+            "|x| x + 1",
+            "match x { 0 => 1, n => n }",
+        ] {
+            assert!(
+                parser.parse_expr_str(source, file_id).is_ok(),
+                "expression `{source}` was rejected as incompletely consumed"
+            );
+        }
+
+        for source in [
+            "Int",
+            "List<Int>",
+            "Map<Text, List<Int>>",
+            "Int{> 0}",
+            "fn(Int) -> Text",
+            "(Int, Text)",
+        ] {
+            assert!(
+                parser.parse_type_str(source, file_id).is_ok(),
+                "type `{source}` was rejected as incompletely consumed"
+            );
+        }
     }
 }

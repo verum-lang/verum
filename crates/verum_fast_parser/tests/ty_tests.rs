@@ -619,10 +619,25 @@ fn test_lambda_refinement_array() {
     assert_parses("[Int; 10] where |arr| arr.len() == 10");
 }
 
+/// The inline and lambda refinement forms cannot be combined: a type takes
+/// AT MOST ONE refinement.
+///
+/// `grammar/verum.ebnf:1190` is `type_expr = simple_type , [ type_refinement ]`
+/// and `:555` is `type_refinement = inline_refinement | value_where_clause`,
+/// an alternation — so `Int{> 0} where |x| x < 100` ends at `Int{> 0}` and
+/// `where ...` is left over. The old assertion (that it parses) held only
+/// because `parse_type_str` discarded the leftovers. Matches the parse-fail
+/// spec at `vcs/specs/L1-core/refinement/errors/refinement_parse_error.vr:97`.
 #[test]
-fn test_mixed_lambda_and_inline_refinements() {
-    // Inline refinement on base type
-    assert_parses("Int{> 0} where |x| x < 100");
+fn test_mixed_lambda_and_inline_refinements_are_rejected() {
+    assert_parses("Int{> 0}");
+
+    let err = parse_type("Int{> 0} where |x| x < 100")
+        .expect_err("a type may carry only one refinement");
+    assert!(
+        err.contains("Where"),
+        "expected the parse to stop at `where`, got: {err}"
+    );
 }
 
 #[test]

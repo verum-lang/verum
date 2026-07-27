@@ -378,9 +378,18 @@ mod lexical_tests {
             assert_expr_parses("spawn { do_work() }");
         }
 
+        /// `spawn_expr` puts the forwarded contexts BEFORE the spawned
+        /// expression: `'spawn' , [ 'using' , '[' , identifier_list , ']' ] ,
+        /// expression` (grammar/verum.ebnf:1781).
+        ///
+        /// This test used the postfix spelling `spawn work() using [...]`,
+        /// which the grammar does not define and the corpus never uses. It
+        /// passed only because `parse_expr_str` parsed `spawn work()` and
+        /// discarded the trailing `using [IO, Network]` — so it asserted
+        /// nothing about context forwarding at all.
         #[test]
         fn test_spawn_with_contexts() {
-            assert_expr_parses("spawn work() using [IO, Network]");
+            assert_expr_parses("spawn using [IO, Network] work()");
         }
 
         #[test]

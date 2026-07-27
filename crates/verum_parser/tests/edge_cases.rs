@@ -462,16 +462,34 @@ fn test_expression_final_statement() {
 // LITERAL PARSING EDGE CASES
 // ============================================================================
 
-/// Test raw strings with hash delimiters
+/// Test raw multiline strings (triple-quoted)
+/// Note: The old r#"..."# syntax has been removed. Use """...""" instead.
+///
+/// This is the corrected form already carried by the canonical copy of this
+/// suite in `verum_fast_parser/tests/edge_cases.rs`; only this clone was
+/// left stale. `grammar/verum.ebnf:182` records the removal explicitly
+/// ("REMOVED: r#\"...\"# syntax - use \"\"\"...\"\"\" instead") and
+/// `:194` defines `string_lit = plain_string | raw_multiline`, with no
+/// `r"..."` form. The old assertion passed only because `r"simple raw"`
+/// lexes as the identifier `r` followed by a string, and `parse_expr_str`
+/// returned the identifier while discarding the rest.
 #[test]
-fn test_raw_string_literals() {
-    let cases = [r#"r"simple raw""#, r##"r#"raw with # inside"#"##];
+fn test_raw_multiline_string_literals() {
+    let cases = [
+        r#""""simple raw""""#,
+        r#""""raw with "quotes" inside""""#,
+        r#""""raw with # and "mixed" content""""#,
+    ];
 
     for input in cases {
         let file_id = FileId::new(0);
         let parser = VerumParser::new();
         let result = parser.parse_expr_str(input, file_id);
-        assert!(result.is_ok(), "Raw string '{}' should parse", input);
+        assert!(
+            result.is_ok(),
+            "Raw multiline string '{}' should parse",
+            input
+        );
     }
 }
 

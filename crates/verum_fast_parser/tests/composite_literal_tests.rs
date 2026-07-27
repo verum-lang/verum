@@ -113,9 +113,27 @@ fn test_matrix_literal_with_parentheses() {
     assert_parses("mat#([[1, 2], [3, 4]])");
 }
 
+/// A bracket-delimited composite body is a FLAT character run, so the
+/// bracket form cannot carry a nested matrix.
+///
+/// `grammar/verum.ebnf:318-320` gives
+/// `composite_bracket = '[' , { composite_char } , ']'` with
+/// `composite_char = char_except_newline - ( ')' | ']' | '}' )`; the lexer
+/// enforces it with `#\[[^\]]*\]`. `mat#[[1, 2], [3, 4]]` therefore ends at
+/// the FIRST `]` — it lexes as the composite `mat#[[1, 2]` plus the stray
+/// text `, [3, 4]]`. This test asserted that string parses, and passed only
+/// because `parse_expr_str` discarded everything after the composite; the
+/// literal it actually built held the unbalanced content `[1, 2`.
+///
+/// Nested rows belong to the quote delimiter — see
+/// `test_matrix_literal_basic`. What is unique to this test is the bracket
+/// delimiter itself, so it keeps that and drops the invalid nesting.
 #[test]
 fn test_matrix_literal_with_brackets() {
-    assert_parses("mat#[[1, 2], [3, 4]]");
+    let expr = parse_expr("mat#[1, 2, 3, 4]").unwrap();
+    let comp = extract_composite(&expr);
+    assert_eq!(comp.tag.as_str(), "mat");
+    assert_eq!(comp.content.as_str(), "1, 2, 3, 4");
 }
 
 #[test]
@@ -600,10 +618,17 @@ fn test_composite_delimiter_paren() {
     );
 }
 
+/// The body is flat for the same reason as `test_matrix_literal_with_brackets`.
+///
+/// The old input `mat#[[1, 2]]` lexed as `mat#[[1, 2]` with a stray `]`, so
+/// this test reported `Bracket` for a literal whose content was the
+/// unbalanced `[1, 2`. Asserting the content alongside the delimiter pins
+/// that the whole body was read, not just its first token.
 #[test]
 fn test_composite_delimiter_bracket() {
-    let expr = parse_expr("mat#[[1, 2]]").unwrap();
+    let expr = parse_expr("mat#[1, 2]").unwrap();
     let comp = extract_composite(&expr);
+    assert_eq!(comp.content.as_str(), "1, 2");
     assert_eq!(
         comp.delimiter,
         verum_ast::literal::CompositeDelimiter::Bracket

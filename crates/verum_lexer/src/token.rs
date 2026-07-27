@@ -2902,7 +2902,16 @@ fn parse_composite_paren(lex: &mut logos::Lexer<TokenKind>) -> Option<TaggedLite
 /// Parse composite literal with brackets: `tag#[...]`
 /// Grammar: `composite_bracket = '[' { composite_char } ']'`
 /// Domain-specific structured data with bracket delimiters.
-/// Examples: `interval#[0, 100)`, `mat#[[1,2],[3,4]]`
+/// Examples: `interval#[0, 100]`, `mat#[1, 2, 3, 4]`
+///
+/// The body is a FLAT character run: `composite_char` excludes `]`, and the
+/// `#[regex(...)]` that routes here matches `#\[[^\]]*\]` accordingly, so the
+/// literal ends at the first `]`. Neither `interval#[0, 100)` nor
+/// `mat#[[1,2],[3,4]]` — both previously advertised here — is a bracket
+/// composite: the first never matches at all (no closing `]`), and the
+/// second matches only through `mat#[[1,2]`, leaving `,[3,4]]` behind as
+/// separate tokens. Nested rows use the quote delimiter:
+/// `mat#"[[1,2],[3,4]]"`.
 fn parse_composite_bracket(lex: &mut logos::Lexer<TokenKind>) -> Option<TaggedLiteralData> {
     let s = lex.slice();
     // Find the #[ sequence

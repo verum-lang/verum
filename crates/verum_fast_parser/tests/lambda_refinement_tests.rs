@@ -456,14 +456,34 @@ fn test_inline_and_lambda_distinct() {
     assert_parses("Int where |x| x > 0"); // Lambda form
 }
 
-/// Test combination of inline and lambda (should this parse?).
-/// This is an edge case that might or might not be supported.
+/// A type carries AT MOST ONE refinement, so the inline and lambda forms
+/// cannot be combined.
+///
+/// `grammar/verum.ebnf:1190` is `type_expr = simple_type , [ type_refinement ]`
+/// — one optional refinement — and `:555` is
+/// `type_refinement = inline_refinement | value_where_clause`, an
+/// alternation. `Int{> 0} where |x| x < 100` therefore ends at `Int{> 0}`,
+/// with `where ...` left over.
+///
+/// This test previously asserted the combined form PARSES, and passed only
+/// because `parse_type_str` discarded the leftover `where` clause — it was
+/// really asserting that `Int{> 0}` parses. `vcs/specs/L1-core/refinement/
+/// errors/refinement_parse_error.vr:97` already lists this shape as a
+/// parse error ("where and braces mixed incorrectly"), so the two sources
+/// now agree.
+///
+/// The error is pinned to the `where` token so this cannot pass for an
+/// unrelated reason.
 #[test]
-fn test_combined_inline_and_lambda() {
-    // This is a tricky case: Int{> 0} where |x| x < 100
-    // This should work if the parser supports chaining refinements
-    // If not, it's ok to remove this test
-    assert_parses("Int{> 0} where |x| x < 100");
+fn test_combined_inline_and_lambda_is_rejected() {
+    assert_parses("Int{> 0}");
+
+    let err = parse_type("Int{> 0} where |x| x < 100")
+        .expect_err("a type may carry only one refinement");
+    assert!(
+        err.contains("Where"),
+        "expected the parse to stop at `where`, got: {err}"
+    );
 }
 
 // ============================================================================
