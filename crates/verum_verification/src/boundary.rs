@@ -1325,21 +1325,15 @@ fn extract_function_name(expr: &Expr) -> Text {
 
 /// Proof obligation generator for boundaries
 #[derive(Debug)]
-pub struct ObligationGenerator {
-    next_id: u64,
-}
+/// Holds no state: obligation identifiers come from the global
+/// `OBLIGATION_COUNTER` in `proof_validator.rs`, which superseded this
+/// type's own `next_id` counter and its `allocate_id` allocator (T0132).
+pub struct ObligationGenerator {}
 
 impl ObligationGenerator {
     /// Create a new obligation generator
     pub fn new() -> Self {
-        Self { next_id: 0 }
-    }
-
-    /// Allocate a new obligation ID
-    fn allocate_id(&mut self) -> ProofObligationId {
-        let id = ProofObligationId::new(self.next_id);
-        self.next_id += 1;
-        id
+        Self {}
     }
 
     /// Generate obligations for a boundary
