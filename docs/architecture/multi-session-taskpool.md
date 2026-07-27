@@ -132,6 +132,26 @@ P3 nice-to-have.
 6. **Task files are append-mostly**: fix typos freely in your own
    claimed task, but never rewrite another session's journal; never
    delete task files (the ID space depends on them).
+7. **Anchor on stable keys, not line numbers.** A bare `file:line`
+   decays: the file grows and the number silently points somewhere else.
+   Name the thing — `tensor_matmul` in `interpreter/tensor.rs`, the
+   `net/addr` row in `core-tests/INVENTORY.md`, the `SampleTopK` match
+   arm — and give a line only as a convenience beside it. Two failure
+   modes seen in practice, each of which cost a session:
+   * **The number drifts onto unrelated code.** A row citing
+     `tensor.rs:2155` for matmul now lands inside a `reduce_f64` helper;
+     the reader finds a reduction and concludes the anchor is nonsense
+     rather than stale.
+   * **The number lands past the data.** `INVENTORY.md` grows by
+     appending module rows, so its table end moves. Three rows cite
+     lines in the 740s, which are now the file's appendix — one an
+     instructional paragraph, one a session summary. The module rows
+     they meant are in the 200s.
+   Relative fragments need their root for the same reason:
+   `intrinsics/memory/property_test.vr` exists under `core-tests/` and
+   not under `vcs/specs/`, and the two trees mirror each other's
+   directory names, so the wrong root returns empty and reads exactly
+   like a deleted file.
 
 ## Roles
 
