@@ -3,6 +3,13 @@ internal/
 .taskpool/
 # Build artifacts
 target/
+
+# Verum CLI per-project state: build/verify caches AND secrets.
+# `verum` writes .verum/{cache,verify-cache} here, and cog signing puts
+# .verum/signing.key + .verum/enterprise.toml alongside them
+# (crates/verum_cli/src/cog.rs, cog_manager.rs). Untracked but unignored,
+# a signing key was one `git add -A` away from being published.
+.verum/
 **/target/
 
 # LLVM/MLIR (built locally via llvm/build.sh)
