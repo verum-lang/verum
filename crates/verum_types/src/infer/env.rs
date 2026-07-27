@@ -12279,18 +12279,15 @@ with .to_float() or .to_int() (at {:?})",
         // Handle type variables for generic type parameters
         // These will be resolved at monomorphization time
         if matches!(&resolved_ty, Type::Var(_)) {
-            match property {
-                // These properties always return Int (including Id which is u64)
-                TypeProperty::Size
-                | TypeProperty::Alignment
-                | TypeProperty::Stride
-                | TypeProperty::Bits
-                | TypeProperty::Id => Ok(InferResult::new(Type::int())),
-                // min/max return the type itself
-                TypeProperty::Min | TypeProperty::Max => Ok(InferResult::new(resolved_ty)),
-                // name returns Text
-                TypeProperty::Name => Ok(InferResult::new(Type::text())),
-            }
+            // T0216: a type variable resolves at monomorphization, so the
+            // result type is all that can be given here — and it comes from
+            // the same authority the field-access route uses rather than a
+            // second copy of the property→type mapping, which is how `id`
+            // and `is_signed` came to be spelled differently in each.
+            Ok(InferResult::new(Self::type_property_result_type(
+                *property,
+                &resolved_ty,
+            )))
         } else {
             // Concrete type - validate and return appropriate result type
             match property {
@@ -12357,6 +12354,14 @@ with .to_float() or .to_int() (at {:?})",
 
                 // Id returns u64 hash of type name, valid for any type
                 TypeProperty::Id => Ok(InferResult::new(Type::int())),
+
+                // T0216: is_signed is valid for any type — signed integers
+                // and floats answer true, everything else false. It is NOT
+                // restricted to numerics the way Bits is: the long-standing
+                // codegen behaviour is to answer false rather than reject,
+                // and a checker that rejected what codegen answers would be
+                // the same checker/codegen split this task exists to close.
+                TypeProperty::IsSigned => Ok(InferResult::new(Type::bool())),
             }
         }
     }

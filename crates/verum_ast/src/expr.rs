@@ -559,6 +559,19 @@ pub enum TypeProperty {
     /// Unique type identifier (hash of canonical name)
     /// Example: `Int.id` -> 0x1234567890ABCDEF
     Id,
+
+    /// Whether the type is signed (signed integers and floats are;
+    /// unsigned integers and non-numerics are not).
+    /// Example: `Int.is_signed` -> true, `UInt.is_signed` -> false
+    ///
+    /// T0216: this variant exists so that *every* built-in type property
+    /// is named in exactly one place. `is_signed` was previously absent
+    /// here, which forced it down the field-access route and left two
+    /// hand-maintained string tables (the checker's
+    /// `builtin_type_property_result_type` and codegen's
+    /// `resolve_type_property`) as its only definition — the drift this
+    /// enum is meant to make impossible.
+    IsSigned,
 }
 
 impl TypeProperty {
@@ -574,8 +587,38 @@ impl TypeProperty {
             "bits" => Some(TypeProperty::Bits),
             "name" => Some(TypeProperty::Name),
             "id" => Some(TypeProperty::Id),
+            "is_signed" => Some(TypeProperty::IsSigned),
             _ => None,
         }
+    }
+
+    /// Every built-in type property, in declaration order.
+    ///
+    /// T0216 — the shared authority for the property NAME SET. The
+    /// typechecker and both codegen surfaces derive their notion of
+    /// "is this a built-in property?" from here rather than from private
+    /// match arms, so a property added to one can never be missing from
+    /// another. `ALL` is exhaustive by construction: adding a variant
+    /// without adding it here fails `as_str`'s exhaustive match first,
+    /// and the round-trip test below pins the two against each other.
+    pub const ALL: &'static [TypeProperty] = &[
+        TypeProperty::Size,
+        TypeProperty::Alignment,
+        TypeProperty::Stride,
+        TypeProperty::Min,
+        TypeProperty::Max,
+        TypeProperty::Bits,
+        TypeProperty::Name,
+        TypeProperty::Id,
+        TypeProperty::IsSigned,
+    ];
+
+    /// Whether `name` is a built-in type property.
+    ///
+    /// Prefer this over an ad-hoc `matches!` over string literals: it is
+    /// the one membership test, and it stays correct when `ALL` grows.
+    pub fn is_builtin_property_name(name: &str) -> bool {
+        Self::from_str(name).is_some()
     }
 
     /// Get the string representation of this type property.
@@ -589,6 +632,7 @@ impl TypeProperty {
             TypeProperty::Bits => "bits",
             TypeProperty::Name => "name",
             TypeProperty::Id => "id",
+            TypeProperty::IsSigned => "is_signed",
         }
     }
 }
@@ -3097,6 +3141,91 @@ mod binop_meta_drift_pins {
 // =========================================================================
 // Capability meta() drift-pin tests
 // =========================================================================
+
+#[cfg(test)]
+mod type_property_drift_pins {
+    use super::*;
+
+    /// T0216 — the drift gate.
+    ///
+    /// `TypeProperty` is the single authority for which built-in type
+    /// properties exist. Five surfaces consume it — the typechecker
+    /// (`type_property_result_type`), VBC codegen (`compile_type_property`),
+    /// the meta evaluator, MIR lowering, and the parser's classification —
+    /// and each does so with a match that has NO wildcard arm, so adding a
+    /// variant fails their compilation rather than silently taking a
+    /// default. That is the real gate; these tests hold the parts the
+    /// compiler cannot check.
+    ///
+    /// History: `is_signed` was a type property that was NOT in this enum.
+    /// Because of that it could only travel the field-access route, where
+    /// the checker and codegen each kept a private string list for it —
+    /// two definitions that merely happened to agree. `id` was in the enum
+    /// but absent from codegen's string list. Both are gone now: every
+    /// property is named here exactly once.
+    #[test]
+    fn all_lists_every_variant_exactly_once() {
+        // If a variant is added without extending ALL, `as_str` below
+        // still compiles, so ALL is the piece needing an explicit check.
+        // Comparing against the round-trip of every name keeps the two in
+        // step without hardcoding a count that reads as a target.
+        let names: Vec<&str> = TypeProperty::ALL.iter().map(|p| p.as_str()).collect();
+
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            names.len(),
+            "TypeProperty::ALL lists a property twice: {names:?}"
+        );
+
+        for name in &names {
+            assert_eq!(
+                TypeProperty::from_str(name).map(|p| p.as_str()),
+                Some(*name),
+                "`{name}` does not round-trip through from_str/as_str"
+            );
+        }
+    }
+
+    /// Every name `from_str` accepts must be one `ALL` lists. Without this,
+    /// `from_str` could accept a spelling that no consumer handles — which
+    /// is precisely how a property becomes reachable from source while
+    /// being invisible to the surfaces that must implement it.
+    #[test]
+    fn from_str_accepts_nothing_outside_all() {
+        let known: Vec<&str> = TypeProperty::ALL.iter().map(|p| p.as_str()).collect();
+
+        // Names that are NOT properties must be rejected, or a user field
+        // called e.g. `signed` would be hijacked into a type property.
+        for name in [
+            "signed", "unsigned", "is_float", "sizeof", "align", "Size", "", "is_signedx",
+        ] {
+            assert!(
+                TypeProperty::from_str(name).is_none(),
+                "`{name}` is not a type property but from_str accepted it"
+            );
+        }
+
+        for p in TypeProperty::ALL {
+            assert!(
+                known.contains(&p.as_str()),
+                "{p:?} is reachable but missing from ALL"
+            );
+        }
+    }
+
+    /// `is_builtin_property_name` is the one membership test; it must agree
+    /// with `from_str` rather than carry a second list.
+    #[test]
+    fn membership_test_agrees_with_from_str() {
+        for p in TypeProperty::ALL {
+            assert!(TypeProperty::is_builtin_property_name(p.as_str()));
+        }
+        assert!(!TypeProperty::is_builtin_property_name("definitely_not_a_property"));
+    }
+}
 
 #[cfg(test)]
 mod capability_meta_drift_pins {

@@ -5122,6 +5122,17 @@ impl LoweringContext {
                         hasher.update_str(key);
                         MirConstant::Int(hasher.finalize().to_u64() as i64)
                     }
+                    TypeProperty::IsSigned => {
+                        // T0216: signedness from the canonical registry, the
+                        // same authority the VBC and meta surfaces use — a
+                        // local name list here is how the three would drift.
+                        use verum_common::well_known_types::type_names;
+                        let name = self.compute_type_name(ty);
+                        MirConstant::Bool(
+                            type_names::is_signed_integer_type(name.as_str())
+                                || type_names::is_float_type(name.as_str()),
+                        )
+                    }
                 };
 
                 self.push_statement(

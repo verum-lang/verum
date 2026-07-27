@@ -736,6 +736,21 @@ pub fn compute_type_name(ty: &TypeKind) -> Text {
     }
 }
 
+/// Whether the type is signed: signed integers and floats are, everything
+/// else — unsigned integers, and non-numerics — is not.
+///
+/// T0216: signedness is decided by the canonical
+/// `verum_common::well_known_types::type_names` registry, which is the same
+/// authority the VBC codegen surface consults. Deciding it from a local list
+/// of type names here is how the meta layer and codegen would come to
+/// disagree about `Byte` or `USize`, since only one of the two lists would
+/// be updated when an alias is added.
+pub fn compute_type_is_signed(ty: &TypeKind) -> bool {
+    use verum_common::well_known_types::type_names;
+    let name = compute_type_name(ty);
+    type_names::is_signed_integer_type(name.as_str()) || type_names::is_float_type(name.as_str())
+}
+
 /// Compute a unique type ID based on type structure using Blake3.
 pub fn compute_type_id(ty: &TypeKind) -> u64 {
     // TYPEINFO-ID-CANON-1 (task #2): canonicalise aliases so the meta

@@ -93,6 +93,9 @@ enum TypePropertyValue {
     Int(i64),
     UInt(u64),
     Str(String),
+    /// T0216 — `is_signed` is typed Bool by the checker, so it must arrive
+    /// as a Bool here too rather than as Int(1)/Int(0).
+    Bool(bool),
 }
 
 /// Resolve compile-time type properties like `Int32.bits`,
@@ -104,6 +107,15 @@ enum TypePropertyValue {
 /// type lists 4× in this single function; consolidating eliminated
 /// ~80 lines of duplicate match arms.
 fn resolve_type_property(type_name: &str, property: &str) -> Option<TypePropertyValue> {
+    use verum_ast::TypeProperty as P;
+
+    // T0216: membership comes from the ONE authority, never from this
+    // function's own list of string literals. The match below is total over
+    // `TypeProperty`, so a property added to the enum fails to compile here
+    // instead of silently falling into a `_ => None` and answering "not a
+    // property" on this route while the type-property route answers it.
+    let property = P::from_str(property)?;
+
     let bits: Option<i64> = type_names::numeric_bit_width(type_name)
         .map(|b| b as i64)
         .or_else(|| match type_name {
@@ -116,16 +128,24 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
         });
 
     match property {
-        "bits" => bits.map(TypePropertyValue::Int),
-        "size" => bits.map(|b| TypePropertyValue::Int(b / 8)),
-        "alignment" => bits.map(|b| {
+        P::Bits => bits.map(TypePropertyValue::Int),
+        P::Size => bits.map(|b| TypePropertyValue::Int(b / 8)),
+        P::Alignment => bits.map(|b| {
             let size = b / 8;
             // Alignment is min(size, 16) for most types.
             TypePropertyValue::Int(size.min(16))
         }),
-        "stride" => bits.map(|b| TypePropertyValue::Int(b / 8)),
-        "name" => Some(TypePropertyValue::Str(type_name.to_string())),
-        "min" => {
+        P::Stride => bits.map(|b| TypePropertyValue::Int(b / 8)),
+        P::Name => Some(TypePropertyValue::Str(type_name.to_string())),
+        // `T.id` is served by `compile_type_property`, which hashes the
+        // CANONICAL identity name so aliases agree (`Int.id == Int64.id`).
+        // Answering it here from a bare type name would produce a second,
+        // non-canonical id for the same type. Returning None lets normal
+        // field resolution continue, which is also what `value.id` — a
+        // genuine user field — needs. Declining is a decision, so it is
+        // written down rather than left to a wildcard.
+        P::Id => None,
+        P::Min => {
             if type_names::is_unsigned_integer_type(type_name) {
                 return Some(TypePropertyValue::Int(0));
             }
@@ -135,7 +155,7 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
             }
             None
         }
-        "max" => {
+        P::Max => {
             if type_names::is_signed_integer_type(type_name) {
                 let b = bits?;
                 return Some(TypePropertyValue::Int((1i64 << (b - 1)) - 1));
@@ -149,19 +169,16 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
             }
             None
         }
-        "is_signed" => {
+        P::IsSigned => {
             // Signed = signed-integer OR float; everything else is
-            // unsigned (or non-numeric, in which case `is_signed = 0`
-            // is the long-standing fallback).
-            if type_names::is_signed_integer_type(type_name)
-                || type_names::is_float_type(type_name)
-            {
-                Some(TypePropertyValue::Int(1))
-            } else {
-                Some(TypePropertyValue::Int(0))
-            }
+            // unsigned, or non-numeric, and answers false rather than
+            // being rejected. Bool, not Int(1)/Int(0): the checker types
+            // this property Bool, and the two must not disagree.
+            Some(TypePropertyValue::Bool(
+                type_names::is_signed_integer_type(type_name)
+                    || type_names::is_float_type(type_name),
+            ))
         }
-        _ => None,
     }
 }
 
@@ -19894,6 +19911,15 @@ impl VbcCodegen {
         {
             let result = self.ctx.alloc_temp();
             match value {
+                // T0216: `is_signed` is Bool-typed by the checker, so this
+                // route emits a Bool rather than Int(1)/Int(0).
+                TypePropertyValue::Bool(b) => {
+                    if b {
+                        self.ctx.emit(Instruction::LoadTrue { dst: result });
+                    } else {
+                        self.ctx.emit(Instruction::LoadFalse { dst: result });
+                    }
+                }
                 TypePropertyValue::Int(v) => {
                     self.ctx.emit(Instruction::LoadI {
                         dst: result,
@@ -20669,6 +20695,15 @@ impl VbcCodegen {
             {
                 let result = self.ctx.alloc_temp();
                 match value {
+                    // T0216: `is_signed` is Bool-typed by the checker, so this
+                    // route emits a Bool rather than Int(1)/Int(0).
+                    TypePropertyValue::Bool(b) => {
+                        if b {
+                            self.ctx.emit(Instruction::LoadTrue { dst: result });
+                        } else {
+                            self.ctx.emit(Instruction::LoadFalse { dst: result });
+                        }
+                    }
                     TypePropertyValue::Int(v) => {
                         self.ctx.emit(Instruction::LoadI {
                             dst: result,
@@ -20719,6 +20754,15 @@ impl VbcCodegen {
             {
                 let result = self.ctx.alloc_temp();
                 match value {
+                    // T0216: `is_signed` is Bool-typed by the checker, so this
+                    // route emits a Bool rather than Int(1)/Int(0).
+                    TypePropertyValue::Bool(b) => {
+                        if b {
+                            self.ctx.emit(Instruction::LoadTrue { dst: result });
+                        } else {
+                            self.ctx.emit(Instruction::LoadFalse { dst: result });
+                        }
+                    }
                     TypePropertyValue::Int(v) => {
                         self.ctx.emit(Instruction::LoadI {
                             dst: result,
@@ -38665,6 +38709,28 @@ impl VbcCodegen {
                     dst: dest,
                     value: type_id,
                 });
+            }
+            TypeProperty::IsSigned => {
+                // T0216: signed = signed integer OR float; everything else,
+                // numeric or not, answers false rather than being rejected.
+                //
+                // This loads a BOOL, not 1/0. The typechecker has always
+                // typed `is_signed` as Bool, while the field-access route it
+                // used to take emitted Int(1)/Int(0) — a value whose NaN-box
+                // tag did not match its own declared type.
+                //
+                // Measured, not assumed: the pre-change binary DOES satisfy
+                // `Int8.is_signed == (Int8.min < 0)`, so no law was failing;
+                // the interpreter's equality accepts Int(1) against a Bool.
+                // What is fixed here is the declared-type/emitted-value
+                // disagreement itself, which any consumer comparing tags
+                // rather than values — Tier-1 lowering, a stricter equality,
+                // a `match` on Bool — would have been entitled to trip over.
+                if is_signed || is_float {
+                    self.ctx.emit(Instruction::LoadTrue { dst: dest });
+                } else {
+                    self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                }
             }
         }
 

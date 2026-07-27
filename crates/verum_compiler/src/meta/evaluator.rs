@@ -1737,8 +1737,8 @@ impl MetaContext {
         property: TypeProperty,
     ) -> Result<ConstValue, MetaError> {
         use super::builtins::type_props::{
-            compute_type_alignment, compute_type_id, compute_type_max, compute_type_min,
-            compute_type_name, compute_type_size, compute_type_stride,
+            compute_type_alignment, compute_type_id, compute_type_is_signed, compute_type_max,
+            compute_type_min, compute_type_name, compute_type_size, compute_type_stride,
         };
 
         match property {
@@ -1768,6 +1768,7 @@ impl MetaContext {
                 let id = compute_type_id(&ty.kind);
                 Ok(ConstValue::UInt(id.into()))
             }
+            TypeProperty::IsSigned => Ok(ConstValue::Bool(compute_type_is_signed(&ty.kind))),
         }
     }
 

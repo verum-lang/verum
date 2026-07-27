@@ -7480,12 +7480,29 @@ impl TypeChecker {
     /// is not a built-in property (the caller then continues its normal
     /// resolution). Mirrors the codegen surface (compile_type_property).
     fn builtin_type_property_result_type(prop: &str, self_ty: &Type) -> Option<Type> {
+        verum_ast::TypeProperty::from_str(prop)
+            .map(|p| Self::type_property_result_type(p, self_ty))
+    }
+
+    /// T0216 — property → result type, TOTAL over `TypeProperty`.
+    ///
+    /// Taking the enum rather than a string is what makes this the single
+    /// authority: adding a property to `TypeProperty` fails this match to
+    /// compile, whereas the previous `&str` signature returned `None` for
+    /// an unknown name and so accepted silently-diverging spellings. The
+    /// string-keyed wrapper above exists only for the field-access route,
+    /// where the member name has not yet been classified; it decides
+    /// membership with `TypeProperty::from_str`, never with its own list.
+    pub(super) fn type_property_result_type(
+        prop: verum_ast::TypeProperty,
+        self_ty: &Type,
+    ) -> Type {
+        use verum_ast::TypeProperty as P;
         match prop {
-            "size" | "alignment" | "stride" | "bits" | "id" => Some(Type::int()),
-            "is_signed" => Some(Type::bool()),
-            "min" | "max" => Some(self_ty.clone()),
-            "name" => Some(Type::text()),
-            _ => None,
+            P::Size | P::Alignment | P::Stride | P::Bits | P::Id => Type::int(),
+            P::IsSigned => Type::bool(),
+            P::Min | P::Max => self_ty.clone(),
+            P::Name => Type::text(),
         }
     }
 
