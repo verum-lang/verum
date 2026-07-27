@@ -7,14 +7,22 @@
 // parser the way an accept-loop does: bytes arrive in arbitrary splits,
 // the parser must not care.
 //
-// GATE (re-scoped T0149): the original HTTPPARSE-1 "precompile-cascade
-// SIGSEGV" is CLOSED — `feed()` now COMPILES and RUNS. The 7 laws below
-// stay `@ignore`'d on a DIFFERENT, narrower blocker: `feed()` reaches
-// `core.simd.bytes.find_byte` / `find_header_terminator`, whose SIMD
-// path dispatches `Mask.any` (receiver kind `()`) and `Vec.cmp_eq`
-// (receiver kind `List`) to methods that are not found at runtime — an
-// intrinsic/SIMD method-dispatch gap in the T0116 family, NOT a codegen
-// crash. Un-`@ignore` when that SIMD dispatch lands.
+// GATE: NONE. All 7 laws below are LIVE and green under `--interp`
+// (7 passed / 0 failed, 2026-07-27).
+//
+// History, because both gates that held these laws are now closed and a
+// reader should not go looking for either: the original HTTPPARSE-1
+// "precompile-cascade SIGSEGV" closed under T0149, after which the laws
+// stayed `@ignore`'d on a narrower blocker — `feed()` reaches
+// `core.simd.bytes.find_byte` / `find_header_terminator`, whose SIMD path
+// dispatched `Mask.any` to a method not found at runtime. That aborted
+// every scan of 16 bytes or more, which is every header line.
+//
+// It was never fixed by making SIMD dispatch land. `find_byte`'s SIMD
+// block-scan was REMOVED under T0184: it could not have worked, because
+// `Vec16b.load_unaligned` answers `dst = ptr` — the address as data — and
+// `first_set_lane` was declared nowhere in `core/` at all. The function
+// now runs the scalar scan it previously used only for its tail.
 //
 // Laws:
 //   L1  one-shot completion: full canonical request → Done with
@@ -100,7 +108,6 @@ fn bytes_equal_text(got: &[Byte], want: &Text) -> Bool {
 // Section 1: L1 one-shot completion + framing
 // =============================================================================
 
-@ignore("HTTPPARSE-FEED-SIMD-1: feed() gated on core.simd.bytes SIMD dispatch (Mask.any/Vec.cmp_eq not found at runtime) — T0116 family; the compile-SIGSEGV is closed. See file header + audit.md section 3.1.")
 @test
 fn law_one_shot_request_completes() {
     let buf = simple_request();
@@ -124,7 +131,6 @@ fn law_one_shot_request_completes() {
 // Section 2: L2 prefix safety — NeedMore on every strict prefix
 // =============================================================================
 
-@ignore("HTTPPARSE-FEED-SIMD-1: feed() gated on core.simd.bytes SIMD dispatch (Mask.any/Vec.cmp_eq not found at runtime) — T0116 family; the compile-SIGSEGV is closed. See file header + audit.md section 3.1.")
 @test
 fn law_every_strict_prefix_is_need_more() {
     let buf = simple_request();
@@ -146,7 +152,6 @@ fn law_every_strict_prefix_is_need_more() {
 // Section 3: L3 split invariance — resume equals one-shot
 // =============================================================================
 
-@ignore("HTTPPARSE-FEED-SIMD-1: feed() gated on core.simd.bytes SIMD dispatch (Mask.any/Vec.cmp_eq not found at runtime) — T0116 family; the compile-SIGSEGV is closed. See file header + audit.md section 3.1.")
 @test
 fn law_split_feed_equals_one_shot() {
     let buf = simple_request();
@@ -196,7 +201,6 @@ fn law_split_feed_equals_one_shot() {
 // Section 4: L4 Done idempotence
 // =============================================================================
 
-@ignore("HTTPPARSE-FEED-SIMD-1: feed() gated on core.simd.bytes SIMD dispatch (Mask.any/Vec.cmp_eq not found at runtime) — T0116 family; the compile-SIGSEGV is closed. See file header + audit.md section 3.1.")
 @test
 fn law_feed_after_done_is_stable() {
     let buf = simple_request();
@@ -220,7 +224,6 @@ fn law_feed_after_done_is_stable() {
 // Section 5: L5 zero-copy views decode the wire bytes
 // =============================================================================
 
-@ignore("HTTPPARSE-FEED-SIMD-1: feed() gated on core.simd.bytes SIMD dispatch (Mask.any/Vec.cmp_eq not found at runtime) — T0116 family; the compile-SIGSEGV is closed. See file header + audit.md section 3.1.")
 @test
 fn law_views_decode_wire_bytes() {
     let buf = simple_request();
@@ -254,7 +257,6 @@ fn law_views_decode_wire_bytes() {
 // Section 6: L6 response mode — status line
 // =============================================================================
 
-@ignore("HTTPPARSE-FEED-SIMD-1: feed() gated on core.simd.bytes SIMD dispatch (Mask.any/Vec.cmp_eq not found at runtime) — T0116 family; the compile-SIGSEGV is closed. See file header + audit.md section 3.1.")
 @test
 fn law_response_status_line_views() {
     let buf = simple_response();
@@ -272,7 +274,6 @@ fn law_response_status_line_views() {
 // Section 7: L7 garbage start-line errors out
 // =============================================================================
 
-@ignore("HTTPPARSE-FEED-SIMD-1: feed() gated on core.simd.bytes SIMD dispatch (Mask.any/Vec.cmp_eq not found at runtime) — T0116 family; the compile-SIGSEGV is closed. See file header + audit.md section 3.1.")
 @test
 fn law_garbage_start_line_is_error() {
     let mut out: List<Byte> = [];

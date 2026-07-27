@@ -1,9 +1,13 @@
 # `net/http_parser` audit
 
 Module: `core/net/http_parser.vr` (~931 LOC) — zero-copy,
-resumable, SIMD-accelerated HTTP/1.1 wire-parser. The hot-path
-of HTTP servers and clients. Target latency budget < 150 ns
-per request on modern x86_64.
+resumable HTTP/1.1 wire-parser. The hot-path of HTTP servers and
+clients. Target latency budget < 150 ns per request on modern
+x86_64.
+
+NOT SIMD-accelerated, despite the byte scans living in
+`core/simd/bytes.vr`: `find_byte` is a scalar loop (T0184, §3.1) and
+no primitive in that file vectorises today.
 
 Tests cover the algebraic data-surface:
 
@@ -21,9 +25,9 @@ Tests cover the algebraic data-surface:
   ChunkEnd / ChunkErr(HttpParseError).
 
 The `feed(&mut self, buf: &[Byte])` runtime path on both
-`HttpParser` and `ChunkedDecoder` is locked-in behind
-HTTPPARSE-1 (precompile-cascade SIGSEGV class shared with
-CIDR-1 family) — see §3.1 below.
+`HttpParser` and `ChunkedDecoder` is LIVE and covered by the 7
+property laws — the HTTPPARSE-1 gate and the SIMD-dispatch gate that
+succeeded it are both closed. See §3.1.
 
 ## 1. Cross-stdlib usage
 
@@ -43,19 +47,34 @@ SSE2 / AVX2 / NEON / scalar fallback. Pinned externally in
 
 ## 3. Language-implementation gaps
 
-### §3.1 HTTPPARSE-1 — `HttpParser.feed` / `ChunkedDecoder.feed` SIGSEGV
+### §3.1 HTTPPARSE-1 — CLOSED (both gates)
 
-**Stable trigger**: invoking `parser.feed(buf.as_slice())` from a
-USER test module triggers the precompile-cascade SIGSEGV class
-shared with CIDR-1 / URL-1 / URITPL-1 / HTTPRNG-1 / CONNEG-1 /
-LINKHDR-1 / HTTPCACHE-1.
+**Status 2026-07-27: no gate. `feed` is live and tested** — the module
+runs 43 passed / 0 failed / 0 ignored under `--interp`, including all
+7 property laws over the wire-parsing path.
 
-The construction surface (HttpParser.request/.response,
-ChunkedDecoder.new, accessor methods method/status/version/
-content_length/is_chunked/headers/trailers) compiles and tests
-pass. The wire-parsing functional surface (feed) is gated.
+Two DIFFERENT blockers held this surface in sequence, and neither is
+the one this section used to name. Recorded so nobody re-opens a
+closed bug:
 
-Same likely root cause as CIDR-1 family.
+1. The original **precompile-cascade SIGSEGV** (the CIDR-1 / URL-1 /
+   URITPL-1 / HTTPRNG-1 / CONNEG-1 / LINKHDR-1 / HTTPCACHE-1 class)
+   closed under T0149. `feed()` compiled and ran after it.
+2. The laws then stayed `@ignore`'d on a narrower, unrelated blocker:
+   `feed()` calls `core.simd.bytes.find_byte` /
+   `find_header_terminator`, whose SIMD block-scan dispatched
+   `Mask.any` to a method not found at runtime. Measured with a needle
+   at index 3: `Some(3)` for an 8-byte haystack (below the 16-byte
+   lane, so only the scalar tail ran) and an **abort** at 16 and 32
+   bytes — i.e. every real header line.
+
+Blocker 2 closed under **T0184**, and not by making SIMD dispatch
+work. `find_byte`'s SIMD loop was REMOVED, because it could never have
+worked: `Vec16b.load_unaligned` answers `dst = ptr` (the address as
+data, never a dereference) on both tiers, and `first_set_lane` — which
+the loop called to turn a match into an index — was declared nowhere
+in `core/`. The function now runs, for its whole length, the scalar
+scan it previously used only for the trailing `n % 16` bytes.
 
 ### §3.2 Private DoS-guard constants
 

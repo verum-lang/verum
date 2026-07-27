@@ -15,20 +15,31 @@
 // # Design
 //
 
-// Each primitive works in SIMD-width chunks (SSE2 default = 16 bytes, AVX2
-// = 32, AVX-512 = 64). A scalar tail-loop handles the remainder past the
-// last aligned SIMD boundary. `@multiversion` selects the optimal width
-// at startup based on runtime CPU-feature detection.
+// The intended design is SIMD-width chunks (SSE2 default = 16 bytes, AVX2
+// = 32, AVX-512 = 64) with a scalar tail-loop for the remainder past the
+// last aligned boundary, `@multiversion` selecting the width at startup
+// from runtime CPU-feature detection.
+//
+// NO PRIMITIVE IN THIS FILE DOES THAT TODAY — every one is a plain scalar
+// loop. See § Status.
 //
 
 // # Status
 //
 
-// API is complete. Backend codegen for `@intrinsic("simd_*")` lowering
-// to LLVM `<N x T>` vector ops is in progress at the compiler level.
-// Until then, helpers fall back to scalar-equivalent implementations
-// via SWAR and a portable fallback path. Users see the same API shape
-// regardless of backend completeness.
+// API is complete. Backend codegen for `@intrinsic("simd_*")` lowering to
+// LLVM `<N x T>` vector ops does NOT exist: `lower_simd_extended` is the
+// only SimdExtended lowering and it is a width-1 scalar fallback, so no
+// path in the tree produces an LLVM vector type.
+//
+// The helpers here therefore do NOT "fall back" to scalar — they ARE
+// scalar, by construction. That wording used to be wrong in a way that
+// mattered: `find_byte` really did run a SIMD block-scan, and it did not
+// degrade gracefully, it ABORTED for any input of 16 bytes or more
+// (`Mask.any` not found at runtime) while answering correctly below the
+// lane width. Its SIMD loop was removed under T0184 rather than left to
+// abort. Restoring one needs the element type and lane count back on the
+// VBC wire plus real `Mask` lowering — see `find_byte`'s own comment.
 //
 
 // # Examples
@@ -57,7 +68,6 @@
 )
 module core.simd.bytes;
 mount core.*;
-mount core.simd.{Vec, Mask, Vec16b, Vec32b, Vec64b};
 
 // =============================================================================
 // SINGLE-BYTE SEARCH
@@ -67,28 +77,35 @@ mount core.simd.{Vec, Mask, Vec16b, Vec32b, Vec64b};
 /// index, or Maybe.None if not found.
 ///
 
-/// Performance: O(N/W) where W = SIMD lane count (16/32/64).
-/// Lowers to `pcmpeqb` + `pmovmskb` on SSE2, `vpcmpeqb` + `vpmovmskb` on
-/// AVX2.
+/// Performance: O(N), one byte per iteration.
+///
+
+/// The SIMD block-scan this function used to run is REMOVED, not disabled,
+/// because it never worked at any tier (T0184). `Vec16b.load_unaligned`
+/// answers `dst = ptr` — the ADDRESS as data, never a dereference — and the
+/// loop then died at `matches.any()` with
+/// `method 'Mask.any' not found on receiver of runtime kind ()` before the
+/// fabricated address could reach a comparison. Measured on Tier 0, needle at
+/// index 3:
+///
+/// | haystack | result  |
+/// |----------|---------|
+/// | 8 bytes  | Some(3) | below the 16-byte lane, so the scalar tail ran
+/// | 16 bytes | ABORT   | one lane, SIMD loop entered
+/// | 32 bytes | ABORT   | two lanes
+///
+/// So the scan was correct only below the lane width and aborted at and above
+/// it — which is every HTTP header line. `first_set_lane`, which the loop
+/// called to turn a match into an index, is declared NOWHERE in `core/`.
+///
+/// Restoring a SIMD path needs the element type and lane count back on the VBC
+/// wire (`encode_operands` packs register indices only, so `T` and `N` are
+/// erased) AND real `Mask` lowering. Until both exist, the scalar scan is the
+/// whole function rather than its tail.
 @multiversion
 public fn find_byte(haystack: &[Byte], needle: Byte) -> Maybe<Int> {
     let n = haystack.len();
-    let lane_w = 16;    // SSE2 default; multiversion picks wider on newer CPUs
-    let splat = Vec16b.splat(needle);
-
     let mut i = 0;
-    while i + lane_w <= n {
-        let chunk = Vec16b.load_unaligned((&haystack[i..i+lane_w]).as_ptr());
-        let matches = chunk.cmp_eq(splat);
-        if matches.any() {
-            // Bit-scan forward for the first set lane — position within chunk.
-            let offset = matches.first_set_lane();
-            return Maybe.Some(i + offset);
-        }
-        i = i + lane_w;
-    }
-
-    // Scalar tail
     while i < n {
         if haystack[i] == needle {
             return Maybe.Some(i);
