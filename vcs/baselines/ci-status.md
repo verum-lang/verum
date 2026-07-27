@@ -26,7 +26,17 @@ runs was validated against `main` as of the date above.
 | `vcs-l0-l1` — L0 lexer/parser/types/builtin-syntax                | ✅ 100% (subset measured) |
 | `vcs-l0-l1` — L0 across 9 of 10 categories (587 specs)            | ⚠️ 98.7% (8 known stdlib-API + interpreter static-mut gaps) |
 | `differential` — Tier 0 vs Tier **3** (`make test-differential`, `--tier 0,3`) | ⚠️ 64.9% (24/37 — 13 tier-consistency gaps; baseline locked). **24/37, not 24/259**: `@tier:` is an intersection filter, so the 253 specs declaring `@tier: 0` run single-tier and are never compared; only the 6 declaring `@tier: all` cross tiers. |
-| `differential-tiers` — Tier 0 vs Tier 1 (interp vs AOT)           | not run in CI — `vcs/scripts/differential-tiers.sh` is wired into `vcs/Makefile` only, against `differential-tiers-baseline.txt` |
+| `differential-tiers` — interp vs AOT                              | not run in CI — `vcs/scripts/differential-tiers.sh` is wired into `vcs/Makefile` only, against `differential-tiers-baseline.txt` |
+
+> **The repo numbers the AOT tier two different ways, so do not read a
+> tier number as identifying a comparison.** `CLAUDE.md` states "VBC
+> interpreter (Tier 0) and AOT-compiled binaries (**Tier 1**)";
+> `vcs/differential/README.md` states "the interpreter (Tier 0) and AOT
+> compiler (**Tier 3**)"; and `vcs/Makefile` invokes `--tier 0,3`. The
+> two differential entries above may therefore be the same comparison
+> under different numbering — what distinguishes them is that one runs
+> in CI and one does not. Reconciling the numbering is a separate
+> question and is not settled here.
 | `bench` — micro                                                   | ⚠️ 28/35 = 80% (perf-target misses, pre-existing) |
 
 ## What "ready to merge" means right now
