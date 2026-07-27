@@ -797,10 +797,6 @@ impl VerificationPhase {
         let blocks: Vec<BasicBlock> = func.blocks.iter().cloned().collect();
         let dom_tree = DominatorTree::compute(&blocks, func.entry_block);
 
-        // Build EscapeCFG with full def/use information (reserved for full optimization)
-        let _escape_cfg = self.build_escape_cfg_with_analysis(func, &dom_tree);
-        let _optimizer = CBGROptimizer::new(OptimizationConfig::conservative());
-
         // Track reference locals
         for local in func.locals.iter() {
             if self.is_reference_type(&local.ty) {
