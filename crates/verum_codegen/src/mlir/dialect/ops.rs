@@ -487,12 +487,6 @@ impl AssertOp {
 mod tests {
     use super::*;
 
-    fn create_test_context() -> Context {
-        let ctx = Context::new();
-        ctx.load_all_available_dialects();
-        ctx
-    }
-
     #[test]
     fn test_cbgr_alloc_op_name() {
         assert_eq!(op_names::CBGR_ALLOC, "verum.cbgr_alloc");

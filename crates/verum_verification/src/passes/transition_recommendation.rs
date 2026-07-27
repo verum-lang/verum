@@ -2,8 +2,14 @@
 //!
 //! Analyses each function's metrics (complexity, test coverage,
 //! change frequency) and recommends a transition between
-//! verification levels (e.g., runtime → static → proof) per the
-//! configured `TransitionStrategy`.
+//! verification levels (e.g., runtime → static → proof).
+//!
+//! The pass applies no `TransitionStrategy` threshold of its own: it
+//! reports every analysed function and leaves acceptance to the
+//! consumer, which is what
+//! `crate::transition::TransitionDecision::passes_threshold` takes a
+//! strategy for. A strategy used to be threaded through this pass
+//! into a field nothing read (T0132).
 
 use std::time::Instant;
 
@@ -12,7 +18,7 @@ use verum_common::{List, Text};
 
 use crate::context::VerificationContext;
 use crate::level::VerificationLevel;
-use crate::transition::{CodeMetrics, TransitionAnalyzer, TransitionStrategy};
+use crate::transition::{CodeMetrics, TransitionAnalyzer};
 
 use super::{VerificationError, VerificationPass, VerificationResult};
 
@@ -22,7 +28,7 @@ use super::{VerificationError, VerificationPass, VerificationResult};
 /// verification levels using real code metrics collection.
 #[derive(Debug)]
 pub struct TransitionRecommendationPass {
-    /// Transition analyzer with strategy
+    /// Transition analyzer
     analyzer: TransitionAnalyzer,
     /// Metrics collector for real metrics
     metrics_collector: crate::metrics::CodeMetricsCollector,
@@ -53,9 +59,13 @@ pub struct TransitionRecommendation {
 
 impl TransitionRecommendationPass {
     /// Create a new transition recommendation pass.
-    pub fn new(strategy: TransitionStrategy) -> Self {
+    ///
+    /// Takes no `TransitionStrategy`: the only thing this pass ever
+    /// did with one was hand it to `TransitionAnalyzer::new`, which
+    /// stored it in a field nothing read (T0132).
+    pub fn new() -> Self {
         Self {
-            analyzer: TransitionAnalyzer::new(strategy),
+            analyzer: TransitionAnalyzer::new(),
             metrics_collector: crate::metrics::CodeMetricsCollector::new(),
             recommendations: List::new(),
         }

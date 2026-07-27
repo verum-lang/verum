@@ -28,7 +28,7 @@
 use std::path::Path;
 use verum_verification::metrics::*;
 use verum_verification::transition::CodeMetrics;
-use verum_verification::{TransitionAnalyzer, TransitionStrategy, VerificationLevel};
+use verum_verification::{TransitionAnalyzer, VerificationLevel};
 
 // =============================================================================
 // EnhancedCodeMetrics Tests
@@ -372,7 +372,7 @@ fn test_collector_change_frequency() {
 
 #[test]
 fn test_transition_analyzer_with_metrics() {
-    let analyzer = TransitionAnalyzer::new(TransitionStrategy::Balanced);
+    let analyzer = TransitionAnalyzer::new();
 
     // Create well-tested, stable code metrics
     let mut metrics = CodeMetrics::default();
@@ -398,7 +398,7 @@ fn test_transition_analyzer_with_metrics() {
 
 #[test]
 fn test_transition_analyzer_with_poor_metrics() {
-    let analyzer = TransitionAnalyzer::new(TransitionStrategy::Conservative);
+    let analyzer = TransitionAnalyzer::new();
 
     // Create unstable code with poor tests
     let mut metrics = CodeMetrics::default();

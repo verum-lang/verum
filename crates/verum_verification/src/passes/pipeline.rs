@@ -21,7 +21,6 @@ use verum_common::List;
 
 use crate::context::VerificationContext;
 use crate::level::VerificationLevel;
-use crate::transition::TransitionStrategy;
 
 use super::{
     BoundaryDetectionPass, KernelRecheckPass, LevelInferencePass, PassClassification,
@@ -209,9 +208,7 @@ impl VerificationPipeline {
         // precedence in the diagnostic stream.
         pipeline.add_pass(Box::new(crate::framework_hygiene::HygieneRecheckPass::new()));
         pipeline.add_pass(Box::new(BoundaryDetectionPass::new()));
-        pipeline.add_pass(Box::new(TransitionRecommendationPass::new(
-            TransitionStrategy::Balanced,
-        )));
+        pipeline.add_pass(Box::new(TransitionRecommendationPass::new()));
 
         pipeline
     }

@@ -16492,6 +16492,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Offset of the atomic `generation` u32 field. (First field —
     /// the generation lives at the user pointer's `-32` baseline.)
+    ///
+    /// Unused only incidentally: being offset 0, the emitters reach
+    /// this field through the raw header pointer (`let gen_ptr = raw`)
+    /// instead of a GEP, so nothing names the constant. It stays
+    /// because the field table above is this section's drift contract
+    /// — a partial mirror would make whoever adds the next field
+    /// re-derive an offset by hand (T0132).
+    #[allow(dead_code)]
     const AOT_HDR_GENERATION_OFFSET: u64 = 0;
 
     /// Offset of the `size` u32 field.
@@ -16511,6 +16519,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
     const AOT_HDR_FLAGS_OFFSET: u64 = 16;
 
     /// Offset of the `next_free` pointer (allocator free-list link).
+    ///
+    /// Unused only incidentally: `emit_cbgr_allocate` leaves the field
+    /// NULL from the header-wide `memset` rather than storing through
+    /// a GEP. Kept for the same reason as `AOT_HDR_GENERATION_OFFSET`
+    /// — the seven offsets are one layout mirror (T0132).
+    #[allow(dead_code)]
     const AOT_HDR_NEXT_FREE_OFFSET: u64 = 24;
 
     /// Emit all CBGR LLVM IR functions.

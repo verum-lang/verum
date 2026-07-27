@@ -54,9 +54,11 @@ fn verified_withdraw(
 The system supports seamless migration between verification levels:
 
 ```rust
-use verum_verification::{TransitionAnalyzer, TransitionStrategy, CodeMetrics};
+use verum_verification::{TransitionAnalyzer, CodeMetrics};
 
-let analyzer = TransitionAnalyzer::new(TransitionStrategy::Balanced);
+// The analyzer takes no strategy: strategy thresholds are applied
+// to the resulting decision via `passes_threshold` (see below).
+let analyzer = TransitionAnalyzer::new();
 
 // Analyze code for transition opportunity
 let mut metrics = CodeMetrics::default();
@@ -270,7 +272,7 @@ metrics.test_coverage = 0.95;
 metrics.change_frequency_per_week = 0.1;
 
 // 4. Analyze for transition
-let analyzer = TransitionAnalyzer::new(TransitionStrategy::Balanced);
+let analyzer = TransitionAnalyzer::new();
 let decision = analyzer.analyze_function(
     &"user_function".into(),
     VerificationLevel::Runtime,

@@ -63,7 +63,7 @@ fn test_transition_decision_threshold() {
 
 #[test]
 fn test_transition_analyzer() {
-    let analyzer = TransitionAnalyzer::new(TransitionStrategy::Balanced);
+    let analyzer = TransitionAnalyzer::new();
 
     let mut metrics = CodeMetrics::default();
     metrics.test_coverage = 0.95;

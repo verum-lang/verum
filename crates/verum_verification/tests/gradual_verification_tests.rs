@@ -87,7 +87,7 @@ fn test_verification_boundary_detection() {
 
 #[test]
 fn test_transition_analyzer() {
-    let analyzer = TransitionAnalyzer::new(TransitionStrategy::Balanced);
+    let analyzer = TransitionAnalyzer::new();
 
     // Create stable, well-tested code metrics
     let mut metrics = CodeMetrics::default();
@@ -598,7 +598,7 @@ fn test_end_to_end_gradual_verification() {
     assert_eq!(ctx.current_level(), VerificationLevel::Runtime);
 
     // 2. Analyze for transition
-    let analyzer = TransitionAnalyzer::new(TransitionStrategy::Balanced);
+    let analyzer = TransitionAnalyzer::new();
     let mut metrics = CodeMetrics::default();
     metrics.test_coverage = 0.95;
     metrics.change_frequency_per_week = 0.1;

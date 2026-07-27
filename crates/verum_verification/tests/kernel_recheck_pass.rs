@@ -877,9 +877,7 @@ fn b7_boundary_detection_marked_informational() {
     let bd = verum_verification::passes::boundary_detection::BoundaryDetectionPass::new();
     assert_eq!(bd.classification(), PassClassification::Informational);
     let tr =
-        verum_verification::passes::transition_recommendation::TransitionRecommendationPass::new(
-            verum_verification::transition::TransitionStrategy::Balanced,
-        );
+        verum_verification::passes::transition_recommendation::TransitionRecommendationPass::new();
     assert_eq!(tr.classification(), PassClassification::Informational);
 }
 

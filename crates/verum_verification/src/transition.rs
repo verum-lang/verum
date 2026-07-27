@@ -15,7 +15,7 @@
 //! requirements. Transitions are recommended based on code stability metrics,
 //! change frequency, test coverage, and cyclomatic complexity.
 
-use crate::cost::{CostModel, VerificationCost};
+use crate::cost::VerificationCost;
 use crate::level::VerificationLevel;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -194,22 +194,20 @@ impl TransitionStep {
 /// - Proof complexity
 #[derive(Debug)]
 pub struct TransitionAnalyzer {
-    /// Transition strategy
-    strategy: TransitionStrategy,
-
-    /// Cost model for verification
-    cost_model: CostModel,
-
     /// Historical verification costs
     history: Map<Text, List<VerificationCost>>,
 }
 
 impl TransitionAnalyzer {
-    /// Create a new transition analyzer
-    pub fn new(strategy: TransitionStrategy) -> Self {
+    /// Create a new transition analyzer.
+    ///
+    /// The analyzer holds no `TransitionStrategy` and no `CostModel`:
+    /// strategy thresholds are applied by
+    /// [`TransitionDecision::passes_threshold`], which takes the
+    /// strategy as an argument. Callers previously threaded a strategy
+    /// in to populate a field nothing read (T0132).
+    pub fn new() -> Self {
         Self {
-            strategy,
-            cost_model: CostModel::default(),
             history: Map::new(),
         }
     }
