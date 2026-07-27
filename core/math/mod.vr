@@ -911,7 +911,6 @@ public mount .nn.{
     // Positional encoding
     sinusoidal_encoding,
     RoPE,
-    apply_rope,
     // Optimizers
     Optimizer,
     SGD,
