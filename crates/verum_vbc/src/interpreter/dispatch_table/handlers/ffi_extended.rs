@@ -3368,26 +3368,60 @@ fn ffi_extended_body(
         }
 
         // ==============================================================
-        // Mach Kernel Operations (0x90-0x98) — macOS stubs
+        // Mach Kernel Operations (0x90-0x98)
+        //
+        // T0110: all nine were stubs that reported success, in three
+        // flavours, none of which a caller could tell from a real answer.
+        //
+        //   * `MachVmAllocate` returned a `std::alloc` block — real
+        //     memory, but not Mach memory, and `MachVmDeallocate` was a
+        //     no-op, so every allocation leaked and no `vm_protect` ever
+        //     applied to it.
+        //   * `MachSemCreate` returned an incrementing FAKE handle whose
+        //     signal / wait / destroy were no-ops, so a program that
+        //     believed it held a semaphore had no synchronisation at all
+        //     — a wait that returns without waiting is indistinguishable
+        //     from a real acquisition at the call site.
+        //   * The remaining six wrote NOTHING to their destination
+        //     register, so the caller read whatever the previous
+        //     instruction had left there and interpreted it as a
+        //     KernReturn. Worst of the set was `MachErrorString`, which
+        //     answered the string "success" for EVERY code including
+        //     failures: not skipping the work but reporting the opposite
+        //     of what happened.
+        //
+        // They are not implemented here, and that is a decision rather
+        // than a deferral. `core/sys/darwin/mach.vr` already binds these
+        // kernel calls through an `@ffi("libSystem.B.dylib")` extern
+        // block — the sanctioned macOS boundary — and the interpreter
+        // runs that path through its ordinary FFI runtime, so the
+        // capability EXISTS and works. A second implementation in Rust
+        // here would duplicate a working one, and it would have to
+        // settle a question neither tier answers today: the sub-opcodes
+        // document a `Result<_, KernReturn>` return shape that Tier 0
+        // and Tier 1 both ignore in favour of raw values.
+        //
+        // The AOT twin of this decision is the Mach arm of
+        // `lower_ffi_extended` (verum_codegen, same task). Both tiers now
+        // refuse the same instruction and name the same alternative, so a
+        // program behaves the same way whichever tier runs it.
+        //
+        // Every arm still CONSUMES its operands before failing, exactly
+        // as `LoadSymbol` / `GetLibrary` above do: the operand cursor
+        // must end where the encoder said the instruction ends, whatever
+        // the caller does with the error.
         // ==============================================================
         Some(SystemSubOpcode::MachVmAllocate) => {
             // Format: dst:reg, size:reg, anywhere:reg
-            let dst = read_reg(state)?;
-            let size_reg = read_reg(state)?;
+            let _dst = read_reg(state)?;
+            let _size_reg = read_reg(state)?;
             let _anywhere_reg = read_reg(state)?;
-            let size = state.get_reg(size_reg).as_i64() as usize;
-            if size > 0 {
-                let layout = std::alloc::Layout::from_size_align(size, 4096)
-                    .unwrap_or(std::alloc::Layout::new::<u8>());
-                // SAFETY: `size > 0` is checked above; the layout has a
-                // valid alignment (4096 or `Layout::new::<u8>()`). Null
-                // returns are tolerated by `Value::from_ptr`.
-                let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-                state.set_reg(dst, Value::from_ptr(ptr));
-            } else {
-                state.set_reg(dst, Value::nil());
-            }
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_vm_allocate: the interpreter has no Mach kernel binding — call \
+                          vm_allocate through core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") \
+                          extern block), not the mach_vm_allocate intrinsic",
+                opcode: None,
+            })
         }
 
         Some(SystemSubOpcode::MachVmDeallocate) => {
@@ -3395,8 +3429,12 @@ fn ffi_extended_body(
             let _dst = read_reg(state)?;
             let _addr_reg = read_reg(state)?;
             let _size_reg = read_reg(state)?;
-            // No-op: cannot safely deallocate without knowing exact layout
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_vm_deallocate: the interpreter has no Mach kernel binding — call \
+                          vm_deallocate through core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") \
+                          extern block), not the mach_vm_deallocate intrinsic",
+                opcode: None,
+            })
         }
 
         Some(SystemSubOpcode::MachVmProtect) => {
@@ -3405,47 +3443,90 @@ fn ffi_extended_body(
             let _addr_reg = read_reg(state)?;
             let _size_reg = read_reg(state)?;
             let _prot_reg = read_reg(state)?;
-            // No-op: memory protection stubs in interpreter
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_vm_protect: the interpreter has no Mach kernel binding — call \
+                          vm_protect through core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") \
+                          extern block), not the mach_vm_protect intrinsic",
+                opcode: None,
+            })
         }
 
         Some(SystemSubOpcode::MachSemCreate) => {
             // Format: dst:reg, initial_value:reg
-            let dst = read_reg(state)?;
+            let _dst = read_reg(state)?;
             let _value_reg = read_reg(state)?;
-            // Return a fake semaphore handle (incrementing ID)
-            static NEXT_SEM: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
-            let id = NEXT_SEM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            state.set_reg(dst, Value::from_i64(id));
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_sem_create: the interpreter has no Mach kernel binding — call \
+                          semaphore_create through core.sys.darwin.mach (an \
+                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_create \
+                          intrinsic",
+                opcode: None,
+            })
         }
 
-        Some(SystemSubOpcode::MachSemDestroy)
-        | Some(SystemSubOpcode::MachSemSignal)
-        | Some(SystemSubOpcode::MachSemWait) => {
+        Some(SystemSubOpcode::MachSemDestroy) => {
             // Format: dst:reg, sem:reg
             let _dst = read_reg(state)?;
             let _sem_reg = read_reg(state)?;
-            // No-op: semaphore operations are stubs in interpreter
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_sem_destroy: the interpreter has no Mach kernel binding — call \
+                          semaphore_destroy through core.sys.darwin.mach (an \
+                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_destroy \
+                          intrinsic",
+                opcode: None,
+            })
+        }
+
+        Some(SystemSubOpcode::MachSemSignal) => {
+            // Format: dst:reg, sem:reg
+            let _dst = read_reg(state)?;
+            let _sem_reg = read_reg(state)?;
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_sem_signal: the interpreter has no Mach kernel binding — call \
+                          semaphore_signal through core.sys.darwin.mach (an \
+                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_signal \
+                          intrinsic",
+                opcode: None,
+            })
+        }
+
+        Some(SystemSubOpcode::MachSemWait) => {
+            // Format: dst:reg, sem:reg
+            let _dst = read_reg(state)?;
+            let _sem_reg = read_reg(state)?;
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_sem_wait: the interpreter has no Mach kernel binding — call \
+                          semaphore_wait through core.sys.darwin.mach (an \
+                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sem_wait \
+                          intrinsic",
+                opcode: None,
+            })
         }
 
         Some(SystemSubOpcode::MachErrorString) => {
             // Format: dst:reg, kern_return:reg
-            let dst = read_reg(state)?;
+            let _dst = read_reg(state)?;
             let _err_reg = read_reg(state)?;
-            // Return "success" string for any error code
-            let val = alloc_string_value(state, "success")?;
-            state.set_reg(dst, val);
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_error_string: the interpreter has no Mach kernel binding and will \
+                          not guess a description — call error_string through \
+                          core.sys.darwin.mach (an @ffi(\"libSystem.B.dylib\") extern block), not \
+                          the mach_error_string intrinsic",
+                opcode: None,
+            })
         }
 
         Some(SystemSubOpcode::MachSleepUntil) => {
             // Format: dst:reg, deadline:reg
             let _dst = read_reg(state)?;
             let _deadline_reg = read_reg(state)?;
-            // No-op: sleep stubs in interpreter
-            Ok(DispatchResult::Continue)
+            Err(InterpreterError::NotImplemented {
+                feature: "mach_sleep_until: the interpreter has no Mach kernel binding — call \
+                          mach_wait_until through core.sys.darwin.mach (an \
+                          @ffi(\"libSystem.B.dylib\") extern block), not the mach_sleep_until \
+                          intrinsic",
+                opcode: None,
+            })
         }
 
         // =================================================================
@@ -4850,5 +4931,161 @@ mod futex_park {
         // counter under the park mutex and re-park if nothing's left.
         slot.cv.notify_all();
         to_wake as i64
+    }
+}
+
+/// T0110 — the Tier-0 Mach arms must never fake success.
+///
+/// Every test asserts an OBSERVED behaviour of `ffi_extended_body`: what the
+/// handler returns, and what it leaves in the destination register. All of
+/// them failed against the pre-fix arms, which reported `Continue` after
+/// fabricating a value (a `std::alloc` block for `mach_vm_allocate`, an
+/// incrementing fake handle for `mach_sem_create`, the string "success" for
+/// EVERY code from `mach_error_string`) or after writing nothing at all.
+#[cfg(test)]
+mod mach_arms_never_fake_success {
+    use super::*;
+    use crate::instruction::Reg;
+    use crate::module::{FunctionDescriptor, FunctionId, VbcModule};
+    use std::sync::Arc;
+
+    const MACH_SUB_OPCODES: &[SystemSubOpcode] = &[
+        SystemSubOpcode::MachVmAllocate,
+        SystemSubOpcode::MachVmDeallocate,
+        SystemSubOpcode::MachVmProtect,
+        SystemSubOpcode::MachSemCreate,
+        SystemSubOpcode::MachSemDestroy,
+        SystemSubOpcode::MachSemSignal,
+        SystemSubOpcode::MachSemWait,
+        SystemSubOpcode::MachErrorString,
+        SystemSubOpcode::MachSleepUntil,
+    ];
+
+    /// An interpreter positioned at `operands`, with one frame of 16
+    /// registers, ready for `ffi_extended_body` to decode from.
+    ///
+    /// The operand registers hold plausible INTEGER arguments (a size, a
+    /// flag, a protection mask) rather than the uninitialised nil a fresh
+    /// frame starts with. That matters for the before/after measurement:
+    /// with nil arguments the pre-fix `MachVmAllocate` panicked inside
+    /// `Value::as_i64` and the tests would have "failed" on a crash instead
+    /// of on the fabricated answer they exist to catch.
+    fn state_reading(operands: &[u8]) -> InterpreterState {
+        let mut module = VbcModule::new("t0110_mach".to_string());
+        let name = module.strings.intern("t0110_mach_probe");
+        module.bytecode.extend_from_slice(operands);
+        module.add_function(FunctionDescriptor::new(name));
+
+        let mut state = InterpreterState::new(Arc::new(module));
+        state
+            .call_stack
+            .push_frame(FunctionId(0), 16, 0, Reg(0))
+            .expect("probe frame");
+        state.registers.push_frame(16);
+        for (reg, arg) in [(2u16, 4096i64), (3, 1), (4, 3)] {
+            state.set_reg(Reg(reg), Value::from_i64(arg));
+        }
+        state
+    }
+
+    /// Four operand bytes cover the widest arm (`MachVmProtect`); the
+    /// narrower ones simply stop earlier.
+    fn run(sub_op: SystemSubOpcode) -> (InterpreterState, InterpreterResult<DispatchResult>) {
+        let mut state = state_reading(&[1u8, 2, 3, 4]);
+        let result = ffi_extended_body(&mut state, sub_op as u8);
+        (state, result)
+    }
+
+    /// The whole family refuses, and each refusal names ITSELF — a caller
+    /// that gets "not implemented" has to know which of the nine failed.
+    #[test]
+    fn every_mach_sub_opcode_reports_not_implemented_naming_itself() {
+        for &sub_op in MACH_SUB_OPCODES {
+            let (_state, result) = run(sub_op);
+            let err = result.expect_err("a Mach op with no binding must not report success");
+            let text = err.to_string();
+            let intrinsic = sub_op.meta().mnemonic.to_lowercase();
+            assert!(
+                text.contains(&intrinsic),
+                "the diagnostic must name the operation that failed; {:?} said: {text}",
+                sub_op
+            );
+            assert!(
+                text.contains("core.sys.darwin.mach"),
+                "the diagnostic must name the binding that works; {:?} said: {text}",
+                sub_op
+            );
+        }
+    }
+
+    /// `mach_error_string` answered the string "success" for every code,
+    /// including failures — the one arm that reported the OPPOSITE of what
+    /// happened rather than merely skipping work.
+    #[test]
+    fn mach_error_string_never_answers_success_for_a_failure_code() {
+        let (state, result) = run(SystemSubOpcode::MachErrorString);
+        assert!(
+            result.is_err(),
+            "mach_error_string must not describe an unknown KernReturn"
+        );
+        let dst = state.get_reg(Reg(1));
+        assert!(
+            !dst.is_small_string() && !dst.is_ptr(),
+            "no description may reach the destination register; it holds {dst:?}"
+        );
+    }
+
+    /// The destination register must be left ALONE. Pre-fix, two arms wrote
+    /// a fabricated value into it (a heap pointer, a fake semaphore handle)
+    /// that the caller would have used as a Mach result.
+    #[test]
+    fn no_mach_arm_writes_a_fabricated_value_to_its_destination() {
+        for &sub_op in MACH_SUB_OPCODES {
+            let mut state = state_reading(&[1u8, 2, 3, 4]);
+            let sentinel = Value::from_i64(0x5EED);
+            state.set_reg(Reg(1), sentinel);
+            let _ = ffi_extended_body(&mut state, sub_op as u8);
+            // Read the value WITHOUT `as_i64`: pre-fix, three of these arms
+            // left a pointer or a string here, and the panicking accessor
+            // would have hidden what was actually written.
+            let after = state.get_reg(Reg(1));
+            assert!(
+                after.is_int() && after.as_i64() == 0x5EED,
+                "{:?} wrote to the destination register instead of failing; it now holds {after:?}",
+                sub_op
+            );
+        }
+    }
+
+    /// The operand cursor must end where the encoder said the instruction
+    /// ends, whatever the caller does with the error — otherwise a caught
+    /// error would leave the decoder mid-instruction.
+    ///
+    /// Unlike its siblings this one also held BEFORE the fix (the stub arms
+    /// consumed their operands too). It is here to guard the new failure
+    /// path, where returning `Err` early — the obvious way to write these
+    /// arms — would silently break the invariant.
+    #[test]
+    fn every_mach_arm_consumes_exactly_its_operands_before_failing() {
+        for (sub_op, operand_count) in [
+            (SystemSubOpcode::MachVmAllocate, 3u32),
+            (SystemSubOpcode::MachVmDeallocate, 3),
+            (SystemSubOpcode::MachVmProtect, 4),
+            (SystemSubOpcode::MachSemCreate, 2),
+            (SystemSubOpcode::MachSemDestroy, 2),
+            (SystemSubOpcode::MachSemSignal, 2),
+            (SystemSubOpcode::MachSemWait, 2),
+            (SystemSubOpcode::MachErrorString, 2),
+            (SystemSubOpcode::MachSleepUntil, 2),
+        ] {
+            let mut state = state_reading(&[1u8, 2, 3, 4]);
+            let _ = ffi_extended_body(&mut state, sub_op as u8);
+            assert_eq!(
+                state.pc(),
+                operand_count,
+                "{:?} must consume exactly {operand_count} operand bytes before failing",
+                sub_op
+            );
+        }
     }
 }
