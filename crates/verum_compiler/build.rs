@@ -316,8 +316,41 @@ fn main() {
     let auto_precompile_disabled =
         std::env::var("VERUM_NO_AUTO_PRECOMPILE").is_ok()
             || std::env::var("DOCS_RS").is_ok();
+
+    // COMPUTED UNCONDITIONALLY, and it must stay that way.
+    //
+    // `compute_core_blake3` does two things: it derives the cache key, and it
+    // emits the `cargo:rerun-if-changed` line for every path in the curated
+    // list. The second is not part of the work the flag skips — it is the
+    // CONTRACT stating when this script must run again.
+    //
+    // While this call sat inside the `if` below, a build with
+    // `VERUM_NO_AUTO_PRECOMPILE=1` completed without ever declaring those
+    // paths, cargo recorded the TRUNCATED dependency set as this script's
+    // fingerprint, and the NEXT build — flag unset, and intended as real
+    // verification — did not re-run the script at all. It replayed cached
+    // output and reported success in 5.58s against ~12 minutes for a genuine
+    // bake, having verified nothing. Measured: the archive checksum was
+    // 31 minutes older than the compiler source it supposedly covered.
+    //
+    // The general shape, worth recognising elsewhere: a cache-invalidation
+    // input registered INSIDE the work it guards stops being registered
+    // whenever that work is skipped. Hashing when disabled costs a blake3
+    // pass over already-read bytes; getting this wrong costs a false green.
+    //
+    // Measured against cargo's own record of the contract
+    // (`target/debug/build/verum_compiler-*/output`): a normal run declared
+    // 2564 paths, a run with the flag declared 2550 — the 13 curated codegen
+    // paths plus the checksum file below, gone.
+    let current_hash = compute_core_blake3(&core_dir, &files);
+
+    // Same reasoning as above, for the same reason: a build that skipped the
+    // refresh must still be re-run when a PEER build publishes a new archive,
+    // and that is signalled by the checksum changing. This sat at the foot of
+    // the block below, so the skip dropped it too.
+    println!("cargo:rerun-if-changed={}", checksum_path.display());
+
     if !auto_precompile_disabled {
-        let current_hash = compute_core_blake3(&core_dir, &files);
         let stored_hash = std::fs::read_to_string(&checksum_path)
             .ok()
             .map(|s| s.trim().to_string());
@@ -464,7 +497,6 @@ fn main() {
                 &current_hash[..16]
             );
         }
-        println!("cargo:rerun-if-changed={}", checksum_path.display());
     }
     let precompile_metadata = precompile_dir.join("runtime.core_metadata");
     let runtime_vbc_path = Path::new(&out_dir).join("stdlib_runtime.vbca");
@@ -1796,6 +1828,17 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         // (discovered via the prelude-reexport canonicalisation fix:
         // `format_display` stayed unbound because the cache key never
         // saw the scanner change).
+        // `refinement_verify.rs` decides whether a refinement is discharged
+        // STATICALLY or degraded to a runtime check, and that decision is
+        // applied to every `core/` function as the archive is built. A change
+        // here therefore changes what the precompiled stdlib means, so it MUST
+        // invalidate `runtime.vbca` like the other sources in this list.
+        //
+        // Its absence was measured: after fixing the refinement binder, a
+        // rebuild reported "Stdlib precompile cache HIT" and finished in 1m05s
+        // against 36 and 50 minutes for real bakes — the compiler changed, the
+        // archive did not, and the "green" bake had verified nothing.
+        "crates/verum_compiler/src/pipeline/refinement_verify.rs",
         "crates/verum_compiler/src/precompile.rs",
         "crates/verum_compiler/src/archive_metadata.rs",
         // `TypeId::well_known_name` (T0190) — the reserved-TypeId →
