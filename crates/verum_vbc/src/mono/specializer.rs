@@ -1319,23 +1319,17 @@ impl<'a> BytecodeSpecializer<'a> {
     }
 
     /// Writes a varint to bytecode.
-    fn write_varint(&self, output: &mut Vec<u8>, mut value: u64) {
-        loop {
-            let byte = (value & 0x7F) as u8;
-            value >>= 7;
-            if value == 0 {
-                output.push(byte);
-                break;
-            } else {
-                output.push(byte | 0x80);
-            }
-        }
+    /// Delegates to the crate's encoding authority.  This carried its own
+    /// copy of the LEB128 loop; the two agreed byte for byte, but a private
+    /// re-implementation of a wire format is a divergence waiting to happen
+    /// — the bytes it writes are read by `decode_varint` (T0132).
+    fn write_varint(&self, output: &mut Vec<u8>, value: u64) {
+        crate::encoding::encode_varint(value, output);
     }
 
     /// Writes a signed varint (ZigZag encoded).
     fn write_signed_varint(&self, output: &mut Vec<u8>, value: i64) {
-        let encoded = ((value << 1) ^ (value >> 63)) as u64;
-        self.write_varint(output, encoded);
+        crate::encoding::encode_signed_varint(value, output);
     }
 
     /// Writes a TypeRef to bytecode.
