@@ -396,6 +396,45 @@ fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
 /// (with `@repr(...)` / `@align(...)` / etc. allowed in between) are
 /// captured and attached to the site, so the uniqueness check can
 /// treat mutually-exclusive cfg variants as non-colliding.
+/// A module's OWN file-level `@cfg(...)` — the gate written directly above
+/// the module header (`@arch_module` / `@module`) inside the module file,
+/// as opposed to the parent `mod.vr`'s mount-site gate that
+/// `parse_module_cfg_gates` already handles.
+///
+/// Such a gate constrains EVERY declaration in the file, so it must not go
+/// through `scan_file`'s pending-attribute path: that path resets on the
+/// first non-attribute line (see `intervening_non_attribute_resets_pending_cfg`),
+/// and arbitrary code sits between a module header and its declarations.
+/// It is a separate per-file constraint, merged once.
+///
+/// Returns the default (unconstrained) if the file has no header gate, or
+/// if real code appears before any module header — the conservative answer,
+/// since treating a file as gated when it is not would HIDE real collisions.
+fn parse_file_level_cfg(contents: &str) -> CfgConstraint {
+    let mut pending = CfgConstraint::default();
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+        if trimmed.starts_with("@cfg(") {
+            pending = parse_cfg_attr(trimmed);
+            continue;
+        }
+        // The module header the pending gate applies to.
+        if trimmed.starts_with("@arch_module") || trimmed.starts_with("@module") {
+            return pending;
+        }
+        // Any other attribute keeps the pending gate in scope.
+        if trimmed.starts_with('@') {
+            continue;
+        }
+        // Real code before a module header: there is no file-level gate.
+        return CfgConstraint::default();
+    }
+    CfgConstraint::default()
+}
+
 fn scan_file(
     repo_core_root: &Path,
     file: &Path,
@@ -407,6 +446,16 @@ fn scan_file(
         Err(_) => return,
     };
     let module_path = file_to_module_path(repo_core_root, file);
+    // A module may gate ITSELF, in its own header, rather than being gated
+    // at the parent's mount site. That form fell between the two mechanisms
+    // this scanner had: `parse_module_cfg_gates` reads only the parent
+    // `mod.vr`, and the per-declaration capture below only sees attributes
+    // adjacent to a type. So `core/intrinsics/lowlevel/{aarch64,x86_64}.vr`
+    // — each `@cfg(target_arch = …)` above its `@arch_module`, with the
+    // colliding `CpuFeatures` alias declared ~35 lines further down — were
+    // reported as co-active and their deliberate per-arch alias counted as
+    // a duplicate. Over-reporting, not under: the gate flagged correct code.
+    let effective_inherited = merge_cfg(inherited_cfg, &parse_file_level_cfg(&contents));
     let mut pending_cfg = CfgConstraint::default();
     for (lineno, line) in contents.lines().enumerate() {
         let trimmed = line.trim_start();
@@ -484,7 +533,7 @@ fn scan_file(
         // gated by `@cfg(target_arch = "x86_64")` inside a module
         // gated by `@cfg(target_os = "linux")` is active only on
         // linux+x86_64.
-        let combined = merge_cfg(inherited_cfg, &std::mem::take(&mut pending_cfg));
+        let combined = merge_cfg(&effective_inherited, &std::mem::take(&mut pending_cfg));
         sink.entry(name.to_string()).or_default().push((
             module_path.clone(),
             file.to_path_buf(),
@@ -698,6 +747,30 @@ mod cfg_parsing_tests {
     }
 
     // ---- merge_cfg contract ------------------------------------------
+
+    #[test]
+    fn file_level_cfg_gate_above_the_module_header_is_seen() {
+        // The shape that was missed: the module gates ITSELF, and the
+        // gated declarations sit far below the header rather than
+        // adjacent to it.
+        let src = "// comment\n@cfg(target_arch = \"aarch64\")\n@arch_module(\n  name = \"x\"\n)\n\npublic type CpuFeatures is Aarch64CpuFeatures;\n";
+        let cfg = parse_file_level_cfg(src);
+        assert_eq!(cfg.constraints, vec![("target_arch".to_string(), "aarch64".to_string())]);
+        assert!(!cfg.conservative);
+    }
+
+    #[test]
+    fn a_file_without_a_header_gate_is_unconstrained() {
+        // Must return the DEFAULT, not something conservative-but-set:
+        // claiming a gate that is not there would HIDE real collisions,
+        // which is the opposite of this test file's purpose.
+        let src = "// header\n@arch_module(\n  name = \"x\"\n)\npublic type Foo is Bar;\n";
+        assert!(parse_file_level_cfg(src).constraints.is_empty());
+
+        // Real code before any module header: also unconstrained.
+        let src2 = "mount core.base;\n@cfg(target_os = \"linux\")\npublic type Foo is Bar;\n";
+        assert!(parse_file_level_cfg(src2).constraints.is_empty());
+    }
 
     #[test]
     fn merge_combines_disjoint_constraints() {
