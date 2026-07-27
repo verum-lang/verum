@@ -56,7 +56,6 @@ use dashmap::DashMap;
 use libloading::{Library, Symbol as LibSymbol};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

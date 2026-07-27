@@ -25,17 +25,16 @@
 //! - verum_verification::vcgen - Loop invariant extraction
 //! - verum_codegen - Code generation with eliminated checks
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use serde::{Deserialize, Serialize};
 
-use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::span::Span;
-use verum_common::{List, Map, Maybe, Set, Text};
+use verum_common::{List, Map, Maybe, Text};
 
-use crate::cbgr_elimination::{BlockId, ControlFlowGraph, RefVariable};
+use crate::cbgr_elimination::{BlockId, ControlFlowGraph};
 
 // =============================================================================
 // Core Types
@@ -519,8 +518,8 @@ impl ValueRange {
     /// For symbolic expressions, uses Z3 to determine which bound is larger.
     /// Falls back to conservative choice (first argument) if SMT is inconclusive.
     fn narrow_lower_smt(a: &Expression, b: &Expression) -> Expression {
-        use z3::ast::Ast;
-        use z3::{Params, SatResult, Solver};
+        
+        
 
         // Fast path: both are constants
         if let (Expression::Int(x), Expression::Int(y)) = (a, b) {
@@ -548,8 +547,8 @@ impl ValueRange {
     /// For symbolic expressions, uses Z3 to determine which bound is smaller.
     /// Falls back to conservative choice (first argument) if SMT is inconclusive.
     fn narrow_upper_smt(a: &Expression, b: &Expression) -> Expression {
-        use z3::ast::Ast;
-        use z3::{Params, SatResult, Solver};
+        
+        
 
         // Fast path: both are constants
         if let (Expression::Int(x), Expression::Int(y)) = (a, b) {
@@ -575,7 +574,7 @@ impl ValueRange {
     /// Returns true if a >= b holds for all possible values.
     /// Uses Z3 to check if NOT(a >= b) is UNSAT.
     fn smt_check_ge(a: &Expression, b: &Expression) -> bool {
-        use z3::ast::Ast;
+        
         use z3::{Params, SatResult, Solver};
 
         let solver = Solver::new();
@@ -607,7 +606,7 @@ impl ValueRange {
     ///
     /// Returns true if a <= b holds for all possible values.
     fn smt_check_le(a: &Expression, b: &Expression) -> bool {
-        use z3::ast::Ast;
+        
         use z3::{Params, SatResult, Solver};
 
         let solver = Solver::new();
@@ -1199,7 +1198,7 @@ impl BoundsCheckEliminator {
         constraint: &(Expression, Expression),
         array_len: &Expression,
     ) -> Result<bool, BoundsError> {
-        use z3::ast::{Ast, Int};
+        use z3::ast::Int;
         use z3::{SatResult, Solver};
 
         let (lower, upper) = constraint;

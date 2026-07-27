@@ -29,9 +29,9 @@ use verum_llvm::AddressSpace;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
-use verum_llvm::types::{BasicMetadataTypeEnum, BasicTypeEnum};
+use verum_llvm::types::BasicMetadataTypeEnum;
 use verum_llvm::values::{
-    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+    BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
 
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};

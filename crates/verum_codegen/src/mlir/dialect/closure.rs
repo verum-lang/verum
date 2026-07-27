@@ -32,18 +32,18 @@
 //! | ByMove | `move` | Move value into closure |
 
 use crate::mlir::dialect::types::VerumType;
-use crate::mlir::error::{MlirError, OptionExt, Result};
-use verum_common::{List, Text};
+use crate::mlir::error::{MlirError, Result};
+use verum_common::Text;
 use verum_mlir::{
     Context,
     ir::{
-        Attribute, Block, Identifier, Location, Operation, Region, Type, Value,
+        Attribute, Identifier, Location, Operation, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, IntegerAttribute, StringAttribute,
+            ArrayAttribute, IntegerAttribute, StringAttribute,
             TypeAttribute,
         },
-        operation::{OperationBuilder, OperationLike},
-        r#type::{FunctionType, IntegerType},
+        operation::OperationBuilder,
+        r#type::IntegerType,
     },
 };
 

@@ -1596,7 +1596,7 @@ mod tests {
     use verum_ast::Ident;
     use verum_ast::Span;
     use verum_ast::expr::{Expr, ExprKind};
-    use verum_ast::ty::{Path, RefinementPredicate as AstRefinementPredicate, Type as AstType};
+    use verum_ast::ty::{RefinementPredicate as AstRefinementPredicate, Type as AstType};
     use verum_common::List;
 
     fn span() -> Span {
@@ -1700,9 +1700,7 @@ mod tests {
 
     // ---- V2 verum_types-IR lifter ----
 
-    use verum_types::refinement::{
-        RefinementBinding, RefinementPredicate as TypesRefinementPredicate,
-    };
+    use verum_types::refinement::RefinementPredicate as TypesRefinementPredicate;
     use verum_types::ty::Type as TypesType;
 
     #[test]

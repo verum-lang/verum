@@ -47,7 +47,7 @@ use verum_llvm::types::IntType;
 use verum_llvm::values::{BasicValue, IntValue, PointerValue};
 use verum_llvm::{AtomicOrdering, AtomicRMWBinOp};
 
-use super::error::{BuildExt, LlvmLoweringError, Result};
+use super::error::{BuildExt, Result};
 use super::types::TypeLowering;
 
 /// Memory ordering for volatile operations.

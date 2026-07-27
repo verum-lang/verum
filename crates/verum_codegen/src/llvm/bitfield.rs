@@ -50,7 +50,7 @@ use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::IntType;
-use verum_llvm::values::{BasicValueEnum, IntValue, PointerValue};
+use verum_llvm::values::{IntValue, PointerValue};
 
 use verum_ast::bitfield::{ByteOrder, ResolvedBitField, ResolvedBitLayout};
 

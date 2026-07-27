@@ -42,7 +42,7 @@
 use verum_llvm::IntPredicate;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
-use verum_llvm::types::{BasicTypeEnum, VectorType};
+use verum_llvm::types::VectorType;
 use verum_llvm::values::{BasicValue, BasicValueEnum, IntValue, PointerValue, VectorValue};
 
 use super::error::{BuildExt, LlvmLoweringError, Result};

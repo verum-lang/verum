@@ -62,12 +62,11 @@
 //! ```
 
 use crate::mlir::error::{MlirError, Result};
-use crate::mlir::jit::engine::{JitCompiler, JitConfig, JitEngine};
+use crate::mlir::jit::engine::JitConfig;
 use crate::mlir::jit::incremental::{CacheConfig, IncrementalCache};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use verum_common::Text;

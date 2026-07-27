@@ -48,12 +48,11 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 use verum_ast::decl::{
-    CalcRelation, CalculationStep, ProofCase, TacticBody, TacticDecl, TacticExpr, TacticParam,
+    TacticBody, TacticDecl, TacticExpr,
     TacticParamKind,
 };
 use verum_ast::{BinOp, Expr, ExprKind, Ident, LiteralKind, Pattern, Span};
 use verum_common::{Heap, List, Map, Maybe, Text};
-use verum_diagnostics::Diagnostic;
 use verum_smt::tactics::{StrategyBuilder, TacticCombinator, TacticKind};
 use verum_types::Type;
 
@@ -582,8 +581,8 @@ impl Goal {
 /// if we encounter `forall x. P(x)` and `forall y. P(y)`, we track
 /// that x maps to y and check P(x) = P(y) under that mapping.
 fn expr_structural_equal(e1: &Expr, e2: &Expr, bindings: &mut HashMap<Text, Text>) -> bool {
-    use verum_ast::literal::{Literal, LiteralKind};
-    use verum_ast::{Path, ty::PathSegment};
+    
+    
 
     match (&e1.kind, &e2.kind) {
         // Literal equality - compare literal values
@@ -3149,7 +3148,7 @@ impl TacticEvaluator {
         name: &Text,
         def_body: &Expr,
     ) -> verum_ast::expr::Block {
-        use verum_ast::pattern::PatternKind;
+        
         use verum_ast::stmt::{Stmt, StmtKind};
 
         let mut new_stmts: List<Stmt> = List::new();
@@ -4297,7 +4296,7 @@ impl TacticEvaluator {
         goal_expr: &Expr,
         hypotheses: &List<Hypothesis>,
     ) -> TacticResult<Z3TacticResult> {
-        use z3::ast::{Ast, Bool, Dynamic};
+        use z3::ast::Dynamic;
 
         // Create Z3 Goal
         let z3_goal = z3::Goal::new(true, false, false);
@@ -4411,7 +4410,7 @@ impl TacticEvaluator {
         strategy: &Z3TacticStrategy,
         tactic_name: &str,
     ) -> TacticResult<()> {
-        use z3::ast::{Ast, Bool, Dynamic};
+        use z3::ast::Dynamic;
 
         let goal = self.state.current_goal()?;
 
@@ -4795,7 +4794,7 @@ impl TacticEvaluator {
         expr: &Expr,
         var_map: &mut HashMap<Text, z3::ast::Dynamic>,
     ) -> Result<z3::ast::Dynamic, Text> {
-        use z3::ast::{Ast, Bool, Dynamic, Int};
+        use z3::ast::{Bool, Dynamic, Int};
 
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {

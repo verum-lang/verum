@@ -58,21 +58,20 @@
 //! ```
 
 use crate::vcgen::{
-    ContractContext, Formula, SmtBinOp, SmtExpr, SmtUnOp, SourceLocation, VarType, Variable,
+    Formula, SmtBinOp, SmtExpr, SmtUnOp, SourceLocation, VarType, Variable,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use verum_ast::decl::FunctionDecl;
 use verum_ast::expr::{BinOp, Block, Expr, ExprKind, UnOp};
 use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::stmt::{Stmt, StmtKind};
 use verum_ast::ty::PathSegment;
 use verum_smt::counterexample::{CounterExample, CounterExampleExtractor};
 // Use verum_common types to match verum_ast (List = Vec, Heap = Box, Maybe = Option)
-use verum_common::{Heap, List, Map, Maybe, Text};
+use verum_common::{Heap, List, Maybe, Text};
 use z3::ast::{Array, Ast, BV, Bool, Dynamic, Int, Real};
 use z3::{SatResult, Solver, Sort};
 

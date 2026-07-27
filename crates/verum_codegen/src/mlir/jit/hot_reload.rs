@@ -56,16 +56,13 @@
 //! }
 //! ```
 
-use crate::mlir::error::{MlirError, OptionExt, Result};
-use crate::mlir::jit::{CompiledFunction, JitConfig, JitEngine};
+use crate::mlir::error::{MlirError, Result};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use verum_common::Text;
-use verum_mlir::ir::Module;
 
 // ============================================================================
 // Hot Reload Configuration
@@ -920,7 +917,7 @@ pub struct SignatureHasher {
 impl SignatureHasher {
     /// Create new signature hasher.
     pub fn new() -> Self {
-        use std::hash::Hasher;
+        
         Self {
             hasher: std::collections::hash_map::DefaultHasher::new(),
         }

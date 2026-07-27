@@ -56,10 +56,9 @@
 //! unsafe { engine.invoke_packed("add", &mut args, &mut result)?; }
 //! ```
 
-use crate::mlir::error::{MlirError, OptionExt, Result};
+use crate::mlir::error::{MlirError, Result};
 use crate::mlir::jit::symbol_resolver::SymbolResolver;
 use dashmap::DashMap;
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::any::TypeId;
 use std::path::Path;

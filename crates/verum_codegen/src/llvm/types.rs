@@ -5,8 +5,7 @@
 
 use verum_llvm::context::Context;
 use verum_llvm::types::{
-    ArrayType, BasicMetadataTypeEnum, BasicTypeEnum, FloatType, FunctionType, IntType, PointerType,
-    ScalableVectorType, StructType, VectorType, VoidType,
+    ArrayType, BasicMetadataTypeEnum, BasicTypeEnum, FloatType, FunctionType, IntType, PointerType, VoidType,
 };
 use verum_vbc::types::{TypeId, TypeRef};
 

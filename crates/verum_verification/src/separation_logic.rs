@@ -73,7 +73,7 @@ use crate::vcgen::{Formula, SmtBinOp, SmtExpr, SmtUnOp, SourceLocation, VarType,
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use verum_common::{List, Map, Maybe, Text, ToText};
+use verum_common::{List, Text};
 
 // =============================================================================
 // Address and Value Model
@@ -1038,7 +1038,7 @@ impl SymbolicState {
     /// In separation logic, P * Q requires dom(P) and dom(Q) to be disjoint.
     /// We encode this as: for all addresses in P and Q, they must be distinct.
     fn encode_separation_constraints(&self, solver: &z3::Solver) -> Result<(), Text> {
-        use z3::ast::{Bool, Int};
+        use z3::ast::Int;
 
         // Collect all addresses mentioned in the spatial assertion
         let addresses = self.collect_spatial_addresses(&self.spatial);

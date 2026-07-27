@@ -65,7 +65,7 @@ use verum_ast::{BinOp, Expr, ExprKind};
 use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 // Import the unified ProofTerm from verum_smt
-use verum_smt::proof_term_unified::{ProofError, ProofTerm};
+use verum_smt::proof_term_unified::ProofTerm;
 
 // =============================================================================
 // Proof Cache System
@@ -1758,7 +1758,7 @@ impl ProofValidator {
     /// # Timeout
     /// Uses `config.smt_timeout_ms` for solver timeout to prevent unbounded proving attempts.
     fn prove_with_smt(&self, proposition: &Expr) -> ValidationResult<()> {
-        use z3::{Config, SatResult, Solver, ast::Bool};
+        use z3::{Config, SatResult, Solver};
 
         // Set up Z3 configuration with timeout and proof generation
         let mut cfg = Config::new();
@@ -7086,7 +7086,7 @@ impl ProofValidator {
     /// An expression representing the derived type, or a type variable expression
     /// if the type cannot be immediately determined.
     fn derive_element_type(&mut self, scrutinee: &Expr, idx: usize) -> Expr {
-        use verum_ast::{Path, ty::Ident};
+        
 
         let span = scrutinee.span;
 
@@ -8995,7 +8995,7 @@ impl SmtProver {
         left: &Expr,
         right: &Expr,
     ) -> Result<z3::ast::Bool, SmtConversionError> {
-        use z3::ast::{Bool, Int};
+        use z3::ast::Bool;
 
         match op {
             // Logical operations

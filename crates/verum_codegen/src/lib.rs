@@ -1,9 +1,3 @@
-#![allow(unexpected_cfgs)]
-#![allow(clippy::all)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
-
 //! Verum Code Generation (Dual-Path: LLVM + MLIR)
 //!
 //! This crate provides code generation for the Verum compiler with dual-path compilation:
@@ -98,9 +92,7 @@
 //! MLIR is used for the GPU compilation path. The VBC-first architecture ensures
 //! all code goes through bytecode before native lowering.
 
-use verum_common::{List, Text};
 
-use std::path::Path;
 
 // MLIR infrastructure (integrated from verum_mlir)
 // Used primarily for GPU compilation path

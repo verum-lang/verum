@@ -31,18 +31,17 @@ use super::{PassResult, PassStats, VerumPass};
 use crate::mlir::dialect::{attr_names, op_names};
 use crate::mlir::error::{MlirError, Result};
 
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use parking_lot::RwLock;
 use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use verum_common::Text;
-use verum_mlir::ir::attribute::{IntegerAttribute, StringAttribute};
 use verum_mlir::ir::operation::OperationLike;
 use verum_mlir::ir::{
-    Attribute, Block, BlockLike, Identifier, Location, Module, Operation, OperationRef, Region,
-    RegionLike, Type, Value, ValueLike,
+    BlockLike, Module, OperationRef,
+    RegionLike, Value, ValueLike,
 };
 
 // ============================================================================

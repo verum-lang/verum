@@ -4,11 +4,10 @@
 
 use crate::mlir::context::MlirContext;
 use crate::mlir::error::{MlirError, Result};
-use crate::mlir::passes::{PassConfig, PassPipeline};
 
 use std::path::Path;
-use verum_common::{List, Text};
-use verum_mlir::{ExecutionEngine, ir::Module, pass::PassManager};
+use verum_common::Text;
+use verum_mlir::{ExecutionEngine, ir::Module};
 
 /// AOT compilation configuration.
 #[derive(Debug, Clone)]

@@ -29,10 +29,10 @@
 //! - Lemma lookup: < 1ms
 //! - Theorem proving: < 5s for standard theorems
 
-use verum_ast::{BinOp, Expr, ExprKind, Ident, UnOp};
+use verum_ast::{BinOp, Expr, ExprKind, Ident};
 use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
-use crate::tactic_evaluation::{Goal, Hypothesis, ProofState, TacticResult};
+use crate::tactic_evaluation::{Goal, ProofState};
 
 // ==================== Core Mathematical Structures ====================
 
@@ -524,7 +524,7 @@ impl GroupBuilder {
 
     /// Associativity axiom: (a • b) • c = a • (b • c)
     fn associativity_axiom() -> Axiom {
-        use verum_ast::Path;
+        
         use verum_ast::span::Span;
 
         let span = Span::dummy();
@@ -1903,7 +1903,7 @@ fn create_const_expr(name: &str) -> Expr {
 /// # Returns
 /// A properly constructed Axiom with parsed formula and quantified variables
 fn create_axiom(name: &str, description: &str) -> Axiom {
-    use verum_ast::{Path, span::Span};
+    use verum_ast::span::Span;
 
     let span = Span::dummy();
 
@@ -1937,7 +1937,7 @@ fn parse_axiom_description(
     description: &str,
     span: verum_ast::span::Span,
 ) -> (List<Text>, Expr) {
-    use verum_ast::{Path, ty::Ident};
+    
 
     // Extract quantified variables from "forall a, b, c:" prefix
     let mut quantified_vars = List::new();

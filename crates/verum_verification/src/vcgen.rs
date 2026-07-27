@@ -52,7 +52,7 @@ use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::span::Span;
 use verum_ast::stmt::{Stmt, StmtKind};
 use verum_ast::ty::PathSegment;
-use verum_common::{List, Map, Maybe, Text, ToText};
+use verum_common::{List, Map, Maybe, Text};
 
 /// Helper to extract string from PathSegment
 fn path_segment_to_str(seg: &PathSegment) -> &str {

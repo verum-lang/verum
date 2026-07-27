@@ -1,6 +1,3 @@
-#![allow(clippy::all)]
-#![allow(clippy::pedantic)]
-#![allow(unexpected_cfgs)]
 //! # Verum Gradual Verification System
 //!
 //! This crate implements Verum's gradual verification system, providing a smooth
@@ -63,10 +60,6 @@
 
 #![deny(missing_debug_implementations)]
 #![deny(rust_2018_idioms)]
-#![allow(missing_docs)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
 /// Continuous benchmarking (#83) — head-to-head vs Coq / Lean4 /
 /// Isabelle / Agda. Single trait boundary

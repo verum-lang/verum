@@ -37,20 +37,17 @@
 //! - memcpy intrinsic: optimal SIMD on supported platforms
 //! - Pointer arithmetic: single instruction
 
-use verum_common::Text;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
-use verum_llvm::types::{BasicTypeEnum, FunctionType};
+use verum_llvm::types::FunctionType;
 use verum_llvm::values::{
-    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+    BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
 use verum_llvm::{AddressSpace, IntPredicate};
 use verum_vbc::instruction::SystemSubOpcode;
 
-use super::context::FunctionContext;
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
-use super::types::TypeLowering;
 
 /// LLVM calling convention constants.
 /// Reference: llvm-c/Core.h LLVMCallConv enum

@@ -10,11 +10,9 @@
 //! - verum_smt: Z3/CVC5 backend for proving VCs and refinement subsumption
 //! - verum_codegen: verification results guide check elimination in AOT code
 
-use crate::Error;
-use crate::context::VerificationContext;
-use crate::level::{VerificationLevel, VerificationMode};
-use verum_smt::{VerifyMode, verify_refinement};
-use verum_types::{RefinementChecker, Type};
+use crate::level::VerificationLevel;
+use verum_smt::VerifyMode;
+use verum_types::Type;
 
 /// Integration with verum_types type system
 #[derive(Debug)]
@@ -219,9 +217,8 @@ impl CodegenIntegration {
 // Hoare Logic Z3 Integration
 // =============================================================================
 
-use crate::hoare_logic::{Command, HoareTriple, WPError};
-use crate::vcgen::{Formula, SmtBinOp, SmtExpr, SmtUnOp, Variable};
-use crate::vcgen::{VCResult, VerificationCondition};
+use crate::hoare_logic::{HoareTriple, WPError};
+use crate::vcgen::{Formula, SmtBinOp, SmtExpr, SmtUnOp};
 use verum_common::{Map, Text};
 use verum_smt::context::Context as SmtContext;
 
@@ -884,7 +881,7 @@ impl HoareVerificationResult {
 // Separation Logic Z3 Integration
 // =============================================================================
 
-use crate::separation_logic::{Address, Heap as SepHeap, HeapCommand, SepProp, Value};
+use crate::separation_logic::{Address, HeapCommand, SepProp, Value};
 
 /// Separation logic verification using Z3 with array theory
 ///

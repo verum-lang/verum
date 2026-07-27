@@ -39,15 +39,14 @@
 //! * `offset_from_base`: subslice view offset from the base allocation.
 //! * `reserved`: padding for future extensions.
 
-use verum_common::Text;
 use verum_llvm::IntPredicate;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
-use verum_llvm::types::{BasicTypeEnum, IntType, PointerType, StructType};
-use verum_llvm::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue, StructValue};
+use verum_llvm::types::StructType;
+use verum_llvm::values::{FunctionValue, IntValue, PointerValue, StructValue};
 
-use super::error::{BuildExt, LlvmLoweringError, Result};
+use super::error::{BuildExt, Result};
 use super::types::RefTier;
 
 /// CBGR lowering context.

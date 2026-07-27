@@ -445,7 +445,7 @@ mod tests {
     use crate::tactic_evaluation::{Goal, Hypothesis};
     use verum_ast::Span;
     use verum_ast::expr::{BinOp, Expr, ExprKind};
-    use verum_ast::literal::{Literal, LiteralKind};
+    use verum_ast::literal::Literal;
     use verum_common::Heap;
 
     fn int_lit(n: i64) -> Expr {

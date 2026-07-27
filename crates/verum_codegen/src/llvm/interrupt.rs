@@ -47,10 +47,9 @@ use verum_llvm::attributes::{Attribute, AttributeLoc};
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::intrinsics::Intrinsic;
-use verum_llvm::types::FunctionType;
 use verum_llvm::values::{FunctionValue, PointerValue};
 
-use super::error::{BuildExt, LlvmLoweringError, Result};
+use super::error::{BuildExt, Result};
 use super::types::TypeLowering;
 
 /// Target architecture for interrupt handling.

@@ -23,12 +23,11 @@
 
 use crate::mlir::dialect::{attr_names, op_names, types::RefTier};
 use crate::mlir::error::{MlirError, Result};
-use verum_common::Text;
 use verum_mlir::{
     Context,
     ir::{
-        Block, Location, Module, Operation, OperationRef, Region, Type, Value,
-        attribute::{Attribute, IntegerAttribute, StringAttribute, TypeAttribute},
+        Location, Operation, Type, Value,
+        attribute::{IntegerAttribute, StringAttribute},
         operation::OperationBuilder,
     },
 };
@@ -487,7 +486,6 @@ impl AssertOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_mlir::ir::r#type::IntegerType;
 
     fn create_test_context() -> Context {
         let ctx = Context::new();

@@ -59,4 +59,3 @@ pub use compiler::{AotCompiler, AotConfig, CompilationResult, OutputFormat};
 #[cfg(feature = "aot-llvm")]
 pub use llvm_backend::{LlvmBackend, lto_compile};
 
-use crate::mlir::error::Result;

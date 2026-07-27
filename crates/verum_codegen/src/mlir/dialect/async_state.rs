@@ -37,18 +37,16 @@
 //! 4. Generate poll function with switch on state
 
 use crate::mlir::dialect::types::VerumType;
-use crate::mlir::error::{MlirError, OptionExt, Result};
-use verum_common::{List, Text};
+use crate::mlir::error::{MlirError, Result};
+use verum_common::Text;
 use verum_mlir::{
     Context,
-    dialect::{arith, scf},
     ir::{
-        Attribute, Block, Identifier, Location, Operation, Region, Type, Value,
+        Identifier, Location, Operation, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute, IntegerAttribute,
-            StringAttribute, TypeAttribute,
+            DenseI64ArrayAttribute, IntegerAttribute, TypeAttribute,
         },
-        operation::{OperationBuilder, OperationLike},
+        operation::OperationBuilder,
         r#type::IntegerType,
     },
 };

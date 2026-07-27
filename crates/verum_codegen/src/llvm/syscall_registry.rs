@@ -52,7 +52,7 @@ use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
 use verum_llvm::values::{FunctionValue, IntValue};
 
-use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result as LlvmResult};
+use super::error::{BuildExt, CallSiteExt, Result as LlvmResult};
 
 /// Argument or return-value classification under Verum's uniform-i64
 /// AOT ABI. Concrete `FunctionType` values are constructed lazily from

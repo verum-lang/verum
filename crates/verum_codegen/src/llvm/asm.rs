@@ -35,10 +35,10 @@ use verum_ast::expr::{AsmOperand, AsmOperandKind, AsmOptions};
 use verum_common::{List, Text};
 use verum_llvm::InlineAsmDialect;
 use verum_llvm::context::Context;
-use verum_llvm::types::{BasicType, BasicTypeEnum, FunctionType};
-use verum_llvm::values::{BasicValue, BasicValueEnum, PointerValue};
+use verum_llvm::types::{BasicTypeEnum, FunctionType};
+use verum_llvm::values::{BasicValueEnum, PointerValue};
 
-use super::error::{LlvmLoweringError, Result};
+use super::error::Result;
 
 /// Inline assembly code generator.
 ///

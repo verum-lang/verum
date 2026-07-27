@@ -8,7 +8,6 @@
 //! obligations are generated to ensure safety is maintained: the callee's
 //! preconditions must be verified at the caller's level or above.
 
-use crate::context::ProofObligationId;
 use crate::level::VerificationLevel;
 use serde::{Deserialize, Serialize};
 use verum_ast::decl::{FunctionBody, FunctionDecl, ImplDecl, ImplItemKind};

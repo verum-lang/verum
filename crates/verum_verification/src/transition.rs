@@ -15,12 +15,11 @@
 //! requirements. Transitions are recommended based on code stability metrics,
 //! change frequency, test coverage, and cyclomatic complexity.
 
-use crate::Error;
 use crate::cost::{CostModel, VerificationCost};
-use crate::level::{VerificationLevel, VerificationMode};
+use crate::level::VerificationLevel;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use verum_common::{List, Map, Maybe, Text, ToText};
+use verum_common::{List, Map, Text, ToText};
 
 /// Strategy for transitioning between verification levels
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -37,8 +37,8 @@ use std::time::Instant;
 use verum_ast::expr::{BinOp, Expr, ExprKind, UnOp};
 use verum_ast::literal::{IntLit, Literal, LiteralKind};
 use verum_ast::span::Span;
-use verum_common::{Heap, List, Map, Maybe, Set, Text};
-use verum_types::refinement::{RefinementPredicate, RefinementType};
+use verum_common::{Heap, List, Map, Set, Text};
+use verum_types::refinement::RefinementType;
 
 // Re-export verum_smt types for integration
 use verum_smt::{

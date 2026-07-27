@@ -24,18 +24,16 @@
 
 use super::types::RefTier;
 use crate::mlir::dialect::{attr_names, op_names};
-use crate::mlir::error::{MlirError, OptionExt, Result};
-use verum_common::Text;
+use crate::mlir::error::{MlirError, Result};
 use verum_mlir::{
     Context,
-    dialect::llvm,
     ir::{
-        Attribute, Block, Identifier, Location, Module, Operation, Region, Type, Value,
+        Identifier, Location, Operation, Region, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute, IntegerAttribute,
-            StringAttribute, TypeAttribute,
+            IntegerAttribute,
+            StringAttribute,
         },
-        operation::{OperationBuilder, OperationLike},
+        operation::OperationBuilder,
         r#type::IntegerType,
     },
 };

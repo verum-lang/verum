@@ -2,7 +2,6 @@
 //!
 //! Error types for MLIR-based code generation.
 
-use std::fmt::Display;
 use thiserror::Error;
 use verum_common::Text;
 

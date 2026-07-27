@@ -6,12 +6,11 @@
 
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
-use verum_llvm::types::BasicType;
 use verum_llvm::values::{FunctionValue, GlobalValue, IntValue, PointerValue};
 use verum_llvm::{AddressSpace, IntPredicate};
 
 use super::context::FunctionContext;
-use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, OptionExt, Result};
 
 // ---------------------------------------------------------------------------
 // Table data — Unicode character classification tables

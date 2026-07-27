@@ -30,22 +30,20 @@
 
 use super::{PassResult, PassStats, VerumPass};
 use crate::mlir::dialect::{
-    EscapeCategory as DialectEscapeCategory, RefTier, attr_names, op_names,
+    RefTier, attr_names, op_names,
 };
-use crate::mlir::error::{MlirError, Result};
+use crate::mlir::error::Result;
 
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use parking_lot::RwLock;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use verum_common::Text;
-use verum_mlir::ir::attribute::IntegerAttribute;
-use verum_mlir::ir::operation::{OperationLike, OperationRefMut};
-use verum_mlir::ir::r#type::IntegerType;
+use verum_mlir::ir::operation::OperationLike;
 use verum_mlir::ir::{
-    Attribute, Block, BlockLike, Identifier, Location, Module, Operation, OperationRef, Region,
+    BlockLike, Module, OperationRef,
     RegionLike, Value, ValueLike,
 };
 

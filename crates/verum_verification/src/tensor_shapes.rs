@@ -70,11 +70,11 @@
 //! require matching shapes. NumPy-style broadcasting is verified at compile time.
 //! Performance: shape checks add +5-20% compile time but are fully eliminated at runtime.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use thiserror::Error;
 use verum_common::{List, Map, Maybe, Set, Text};
-use z3::ast::{Ast, Bool, Int};
+use z3::ast::{Bool, Int};
 use z3::{SatResult, Solver};
 
 /// Errors that can occur during tensor shape verification

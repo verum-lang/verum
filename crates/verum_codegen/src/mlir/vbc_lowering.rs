@@ -27,7 +27,7 @@ use verum_mlir::{
     ir::{
         Block, BlockLike, Location, Module, Region, RegionLike, Type, Value,
         attribute::{
-            DenseI64ArrayAttribute, FloatAttribute, IntegerAttribute, StringAttribute,
+            FloatAttribute, IntegerAttribute, StringAttribute,
             TypeAttribute,
         },
         operation::{Operation, OperationBuilder, OperationLike},
@@ -37,8 +37,7 @@ use verum_mlir::{
 
 use verum_vbc::{
     instruction::{
-        BinaryFloatOp, BinaryIntOp, Instruction, Reg, TensorBinaryOp, TensorDType, TensorReduceOp,
-        TensorUnaryOp,
+        BinaryFloatOp, BinaryIntOp, Instruction, Reg, TensorDType,
     },
     module::VbcModule,
 };

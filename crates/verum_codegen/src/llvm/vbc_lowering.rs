@@ -44,24 +44,23 @@ use verum_llvm::AddressSpace;
 use verum_llvm::attributes::{Attribute, AttributeLoc};
 use verum_llvm::context::Context;
 use verum_llvm::debug_info::{
-    AsDIScope, DICompileUnit, DIFile, DIFlags, DIFlagsConstants, DILocalVariable, DIScope,
-    DISubprogram, DIType, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder,
+    AsDIScope, DICompileUnit, DIFile, DIFlags, DIFlagsConstants, DIScope, DIType, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder,
 };
 use verum_llvm::builder::Builder;
 use verum_llvm::module::{Linkage, Module};
 use verum_llvm::values::{BasicValueEnum, FunctionValue};
 use verum_vbc::instruction::Instruction;
 use verum_vbc::module::{
-    CallingConvention, FunctionDescriptor, InlineHint, OptLevel, OptimizationHints, VbcFunction,
+    CallingConvention, InlineHint, OptLevel, OptimizationHints, VbcFunction,
     VbcModule,
 };
 use verum_vbc::types::{TypeId, TypeRef};
 
 use super::context::{CaptureKind, FunctionContext};
-use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, Result};
 use super::instruction::lower_instruction;
 use super::types::{RefTier, TypeLowering};
-use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt as _};
+use super::well_known_types::WellKnownType as WKT;
 use verum_common::well_known_types::type_names as tn;
 
 /// Panic-handling strategy for the AOT runtime.

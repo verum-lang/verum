@@ -30,17 +30,17 @@
 //! - `context_with`: Transform context value
 
 use crate::mlir::dialect::{attr_names, op_names};
-use crate::mlir::error::{MlirError, OptionExt, Result};
+use crate::mlir::error::{MlirError, Result};
 use verum_common::Text;
 use verum_mlir::{
     Context,
     ir::{
-        Attribute, Block, Identifier, Location, Module, Operation, Region, Type, Value,
+        Attribute, Identifier, Location, Operation, Region, Type, Value,
         attribute::{
-            ArrayAttribute, DenseI32ArrayAttribute, DenseI64ArrayAttribute, IntegerAttribute,
+            ArrayAttribute, IntegerAttribute,
             StringAttribute, TypeAttribute,
         },
-        operation::{OperationBuilder, OperationLike},
+        operation::OperationBuilder,
         r#type::IntegerType,
     },
 };

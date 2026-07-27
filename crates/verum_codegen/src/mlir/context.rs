@@ -5,7 +5,6 @@
 //! - `MlirCodegen`: High-level codegen interface (VBC → MLIR for GPU path)
 //! - `MlirConfig`: Configuration options
 
-use crate::mlir::dialect::VerumDialect;
 use crate::mlir::error::{MlirError, OptionExt, Result};
 use crate::mlir::passes::{
     GpuPassConfig, GpuPassPipeline, GpuPipelineResult, PassConfig, PassPipeline,
@@ -14,21 +13,18 @@ use crate::mlir::vbc_lowering::{
     GpuLoweringConfig, GpuLoweringStats, GpuTarget, VbcToMlirGpuLowering,
 };
 
-use verum_common::{List, Map, Text};
+use verum_common::{List, Text};
 use verum_mlir::{
     Context,
     dialect::DialectRegistry,
     ir::operation::OperationLike,
-    ir::{Block, Location, Module, Region, Type, Value},
-    pass::PassManager,
+    ir::{Location, Module, Type},
     utility::{register_all_llvm_translations, register_used_dialects},
 };
 use verum_types::TypeRegistry;
 use verum_vbc::module::VbcModule;
 
 use indexmap::IndexMap;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Configuration for MLIR codegen.
 #[derive(Debug, Clone)]

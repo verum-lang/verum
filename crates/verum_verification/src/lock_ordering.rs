@@ -32,7 +32,7 @@
 //! 5. **Runtime Detection (dev mode)**: `@deadlock_detection(enabled: true, timeout: T)`
 //!  enables runtime monitoring that reports potential deadlocks with full traces.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use verum_common::{List, Maybe, Text};
 

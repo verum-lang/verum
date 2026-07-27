@@ -4,9 +4,8 @@
 //! convenient APIs and proper error handling.
 
 use crate::mlir::dialect::ops::*;
-use crate::mlir::dialect::types::{RefTier, VerumType};
-use crate::mlir::error::{MlirError, OptionExt, Result};
-use verum_common::Text;
+use crate::mlir::dialect::types::RefTier;
+use crate::mlir::error::{MlirError, Result};
 use verum_mlir::{
     Context,
     dialect::{arith, cf, func, llvm, memref, scf},
@@ -14,10 +13,9 @@ use verum_mlir::{
         DenseI32ArrayAttribute, DenseI64ArrayAttribute, FlatSymbolRefAttribute, FloatAttribute,
         IntegerAttribute, StringAttribute, TypeAttribute,
     },
-    ir::operation::OperationBuilder,
     ir::r#type::{FunctionType, IntegerType, MemRefType},
     ir::{
-        Block, BlockLike, Identifier, Location, Module, Operation, Region, RegionLike, Type, Value,
+        Block, Identifier, Location, Operation, Region, RegionLike, Type, Value,
     },
 };
 
@@ -1204,8 +1202,6 @@ pub fn build_region_with_block<'c>(block: Block<'c>) -> Region<'c> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_mlir::ir::operation::OperationLike;
-    use verum_mlir::ir::{Block, BlockLike};
 
     fn create_test_context() -> Context {
         let ctx = Context::new();

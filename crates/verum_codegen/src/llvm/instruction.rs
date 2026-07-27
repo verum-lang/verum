@@ -13,9 +13,9 @@ use verum_vbc::instruction::{
     SimdSubOpcode, UnaryFloatOp, UnaryIntOp,
 };
 use verum_vbc::module::{CType, ConstId, Constant, FfiSymbolId, FunctionId};
-use verum_vbc::types::{StringId, TypeId, TypeParamId, TypeRef};
+use verum_vbc::types::{StringId, TypeId, TypeRef};
 
-use super::context::{CaptureKind, FunctionContext, ReferenceInfo, ReferenceSource};
+use super::context::{CaptureKind, FunctionContext, ReferenceInfo};
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::ffi::{FfiLowering, ffi_subop_to_calling_convention};
 use super::runtime::RuntimeLowering;

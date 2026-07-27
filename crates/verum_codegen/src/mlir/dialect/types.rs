@@ -22,8 +22,7 @@ use crate::mlir::error::{MlirError, Result};
 use verum_common::Text;
 use verum_mlir::{
     Context,
-    ir::attribute::{IntegerAttribute, StringAttribute, TypeAttribute},
-    ir::{Type, TypeLike},
+    ir::Type,
 };
 
 /// Reference tier for CBGR three-tier system.

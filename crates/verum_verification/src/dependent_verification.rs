@@ -31,7 +31,7 @@ use verum_common::{List, Text};
 use verum_types::cubical::CubicalTerm;
 use verum_types::instance_search::{CoherenceReport, InstanceRegistry};
 use verum_types::universe_solver::{
-    UniverseConstraint, UniverseSubstitution, solve_universe_constraints,
+    UniverseConstraint, solve_universe_constraints,
 };
 
 // SMT domain encodings are wired via their concrete types.
