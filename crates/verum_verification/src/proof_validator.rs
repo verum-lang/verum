@@ -8819,8 +8819,6 @@ struct SmtProver {
     int_vars: Map<Text, z3::ast::Int>,
     /// Assumptions to be added to the solver
     assumptions: List<z3::ast::Bool>,
-    /// Counter for generating fresh variable names
-    fresh_counter: u64,
 }
 
 /// Error type for SMT conversion
@@ -8842,7 +8840,6 @@ impl SmtProver {
             bool_vars: Map::new(),
             int_vars: Map::new(),
             assumptions: List::new(),
-            fresh_counter: 0,
         }
     }
 
@@ -8854,12 +8851,6 @@ impl SmtProver {
     /// Get all assumptions
     fn assumptions(&self) -> &[z3::ast::Bool] {
         &self.assumptions
-    }
-
-    /// Generate a fresh variable name
-    fn fresh_name(&mut self, prefix: &str) -> Text {
-        self.fresh_counter += 1;
-        Text::from(format!("{}_{}", prefix, self.fresh_counter))
     }
 
     /// Get or create a boolean variable
