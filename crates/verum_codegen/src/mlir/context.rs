@@ -165,9 +165,6 @@ impl MlirConfig {
 pub struct MlirContext {
     /// Underlying melior context.
     context: Context,
-
-    /// Registered dialects.
-    dialects_loaded: bool,
 }
 
 impl MlirContext {
@@ -194,7 +191,6 @@ impl MlirContext {
 
         Ok(Self {
             context,
-            dialects_loaded: true,
         })
     }
 
@@ -619,8 +615,13 @@ mod tests {
 
     #[test]
     fn test_mlir_context_creation() {
-        let ctx = MlirContext::new().unwrap();
-        assert!(ctx.dialects_loaded);
+        // Dialect registration is unconditional in `new` —
+        // `append_dialect_registry` followed by
+        // `load_all_available_dialects` — so what there is to check here is
+        // that construction reports success. The assertion this replaces,
+        // `assert!(ctx.dialects_loaded)`, read a field the constructor set to
+        // a literal `true` and could never fail (T0132).
+        assert!(MlirContext::new().is_ok());
     }
 
     #[test]
