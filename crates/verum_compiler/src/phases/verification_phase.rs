@@ -27,20 +27,14 @@ use verum_ast::expr::BinOp;
 use verum_ast::span::Span;
 use verum_common::{List, Text};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
-use verum_verification::cbgr_elimination::{
-    BasicBlock as EscapeBasicBlock, BlockId as EscapeBlockId, DefSite, Scope, ScopeId, UseSite,
-};
+use verum_verification::cbgr_elimination::BlockId as EscapeBlockId;
 use verum_verification::{
     // Bounds elimination
     ArrayAccess,
     BoundsCheckEliminator,
-    // CBGR escape analysis
-    CBGROptimizer,
     CheckDecision,
-    EscapeCFG,
     EscapeStatus,
     Expression as BoundsExpression,
-    OptimizationConfig,
     RefVariable,
     // Verification passes
     TransitionRecommendation,
