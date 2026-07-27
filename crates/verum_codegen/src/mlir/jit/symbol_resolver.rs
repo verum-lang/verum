@@ -181,8 +181,6 @@ struct LoadedLibrary {
     /// Path to the library.
     path: PathBuf,
 
-    /// Symbols resolved from this library.
-    symbols: Vec<Text>,
 }
 
 // SAFETY: LoadedLibrary can be sent/shared across threads because:
@@ -190,7 +188,7 @@ struct LoadedLibrary {
 //  are thread-safe on all supported platforms (dlsym is thread-safe per POSIX)
 // - Libraries are never unloaded while the SymbolResolver is alive, so all
 //  symbol pointers derived from them remain valid
-// - `path` and `symbols` are plain data with no thread-safety concerns
+// - `path` is plain data with no thread-safety concerns
 unsafe impl Send for LoadedLibrary {}
 unsafe impl Sync for LoadedLibrary {}
 
@@ -408,7 +406,6 @@ impl SymbolResolver {
         let loaded = LoadedLibrary {
             library,
             path: full_path.clone(),
-            symbols: Vec::new(),
         };
 
         self.libraries.write().push(loaded);
