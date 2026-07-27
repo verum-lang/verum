@@ -1712,15 +1712,12 @@ impl BoundsCheckEliminator {
 pub struct DataflowAnalyzer {
     /// Reaching definitions: block -> var -> definition
     reaching_definitions: HashMap<BlockId, HashMap<Text, Definition>>,
-    /// Available expressions: block -> set of expressions
-    available_expressions: HashMap<BlockId, HashSet<Expression>>,
 }
 
 impl DataflowAnalyzer {
     pub fn new() -> Self {
         Self {
             reaching_definitions: HashMap::new(),
-            available_expressions: HashMap::new(),
         }
     }
 
