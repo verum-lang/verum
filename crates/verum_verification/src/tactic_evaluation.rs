@@ -54,7 +54,7 @@ use verum_ast::decl::{
 use verum_ast::{BinOp, Expr, ExprKind, Ident, LiteralKind, Pattern, Span};
 use verum_common::{Heap, List, Map, Maybe, Text};
 use verum_diagnostics::Diagnostic;
-use verum_smt::tactics::{StrategyBuilder, TacticCombinator, TacticExecutor, TacticKind};
+use verum_smt::tactics::{StrategyBuilder, TacticCombinator, TacticKind};
 use verum_types::Type;
 
 use z3::ast::Ast;
@@ -1478,9 +1478,6 @@ pub struct TacticEvaluator {
     /// Current proof state
     state: ProofState,
 
-    /// SMT tactic executor
-    smt_executor: TacticExecutor,
-
     /// Evaluation statistics
     stats: EvaluationStats,
 
@@ -1500,7 +1497,6 @@ impl TacticEvaluator {
     pub fn new() -> Self {
         Self {
             state: ProofState::empty(),
-            smt_executor: TacticExecutor::new(),
             stats: EvaluationStats::default(),
             config: TacticConfig::default(),
             tactic_registry: Map::new(),
