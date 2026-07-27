@@ -32,7 +32,7 @@
 use verum_ast::{BinOp, Expr, ExprKind, Ident, UnOp};
 use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
-use crate::tactic_evaluation::{Goal, Hypothesis, ProofState, TacticEvaluator, TacticResult};
+use crate::tactic_evaluation::{Goal, Hypothesis, ProofState, TacticResult};
 
 // ==================== Core Mathematical Structures ====================
 
@@ -1783,9 +1783,6 @@ impl Default for LemmaDatabase {
 pub struct MathStructureVerifier {
     /// Lemma database
     lemma_db: LemmaDatabase,
-
-    /// Tactic evaluator
-    tactic_eval: TacticEvaluator,
 }
 
 impl MathStructureVerifier {
@@ -1793,7 +1790,6 @@ impl MathStructureVerifier {
     pub fn new() -> Self {
         Self {
             lemma_db: LemmaDatabase::with_core(),
-            tactic_eval: TacticEvaluator::new(),
         }
     }
 
