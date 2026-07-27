@@ -191,7 +191,7 @@ pub struct VbcModule {
     // Context System
     // ========================================================================
     /// Context name table: maps ContextRef(id) → StringId for name resolution.
-    /// Enables core_loader to recover context names from opaque ContextRef IDs.
+    /// Enables metadata builders to recover context names from opaque ContextRef IDs.
     #[serde(default)]
     pub context_names: Vec<StringId>,
 

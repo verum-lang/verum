@@ -2867,7 +2867,7 @@ impl TypeChecker {
     /// (which records insertion order: archive layer → .vr declaration order),
     /// then any orphan types not present in that list appended in alphabetical
     /// (BTreeMap) order. The orphan tail is defensive — every type inserted via
-    /// `core_loader::extract_module_metadata` or `pipeline::cached → metadata`
+    /// `archive_metadata::register_module_metadata` or `pipeline::cached → metadata`
     /// is already pushed to `type_declaration_order`.
     ///
     /// First-registered-wins iteration is the architectural alternative to
@@ -2898,7 +2898,7 @@ impl TypeChecker {
             // constructors / consts / static methods under dotted
             // parent names.  Skip them here; qualified entries that
             // a producer DELIBERATELY put into
-            // `type_declaration_order` (core_loader) still flow
+            // `type_declaration_order` (archive_metadata) still flow
             // through the ordered loop above.
             if name.as_str().contains('.') {
                 continue;

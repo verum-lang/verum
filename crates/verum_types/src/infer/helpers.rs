@@ -1915,7 +1915,7 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
                 .map(|s| parse_descriptor_type_string(s.trim()))
                 .collect();
             // Associated-type projection spelling `::Assoc<Base>` (emitted by
-            // `core_loader::type_ref_to_text` for `TypeRef::AssociatedProjection`).
+            // `archive_metadata::type_ref_to_text` for `TypeRef::AssociatedProjection`).
             // Reconstruct the unifier's internal projection form
             // `Type::Generic { name: "::Assoc", args: [Base] }` so a bound base
             // (the `F` in `F.Output`) still resolves the associated type — the

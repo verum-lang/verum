@@ -236,7 +236,6 @@ pub mod content_addressed_storage; // Persistent content-addressed storage (CAS)
 pub mod contract_integration;
 pub mod core_cache; // Industrial-grade stdlib compilation caching
 pub mod core_compiler;
-pub mod core_loader;
 pub mod core_source; // Unified stdlib source abstraction (embedded VFS / local FS)
 pub mod diagnostics_engine;
 pub mod embedded_prelude_seeds; // #102 — precomputed prelude seed list (replaces source-archive parse at runtime)
@@ -394,12 +393,6 @@ pub use phases::{
     PhaseMetrics, PhaseOutput, VerifyMode as PhaseVerifyMode,
 };
 pub use profile_system::{Feature, Profile, ProfileManager};
-
-// Re-export stdlib loader types
-pub use core_loader::{
-    CoreLoadError, convert_archive_to_metadata, load_archive, load_archive_from_bytes,
-    load_core_metadata, load_core_metadata_from_bytes,
-};
 
 // Re-export stdlib compiler types (for unified pipeline)
 pub use core_compiler::{CoreConfig, StdlibCompilationResult};

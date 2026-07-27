@@ -1378,12 +1378,11 @@ impl<'s> CompilationPipeline<'s> {
     /// # Example
     ///
     /// ```ignore
-    /// use verum_compiler::core_loader;
+    /// use verum_compiler::embedded_stdlib_metadata;
     ///
-    /// let stdlib_bytes = embedded_stdlib::get_embedded_stdlib().unwrap();
-    /// let metadata = core_loader::load_core_metadata_from_bytes(stdlib_bytes)?;
+    /// let metadata = embedded_stdlib_metadata::get_runtime_metadata().unwrap();
     /// let mut pipeline = CompilationPipeline::new(&mut session);
-    /// pipeline.set_stdlib_metadata(std::sync::Arc::new(metadata));
+    /// pipeline.set_stdlib_metadata(metadata);
     /// ```
     pub fn set_stdlib_metadata(
         &mut self,

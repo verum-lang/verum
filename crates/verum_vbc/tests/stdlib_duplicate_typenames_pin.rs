@@ -6,10 +6,16 @@
 //! 61958 descriptor names, none containing a dot). Loading two same-named
 //! declarations therefore lets the later one displace the earlier.
 //!
-//! The type side has a partial guard — `core_loader.rs` qualifies the second
-//! declaration, but only when `matches!(vbc_type.kind, TypeKind::Sum)`. The
-//! protocol side has no guard whatsoever: `metadata.protocols.insert(..)`
-//! overwrites unconditionally.
+//! The mechanism described here used to be attributed to `core_loader.rs`,
+//! which was deleted as unreachable (T0190) — every public entry point had
+//! zero callers, so its policy never ran. The live emitter is
+//! `verum_compiler::archive_metadata`, and its policy is NOT the same: the
+//! type side applies a ranked collision policy plus a qualified
+//! `<module>.<Name>` key (MOUNT-TYPE-AUTHORITY-1), and the protocol side is
+//! FIRST-wins (`meta.protocols.entry(..).or_insert_with(..)`), not the
+//! unconditional overwrite the old note claimed. Which declaration survives a
+//! duplicate is therefore still load-order dependent, which is what T0327
+//! tracks; the exact live policy is T0327's to characterise, not this pin's.
 //!
 //! This pin does not fix that. It bounds it: a new duplicate cannot be
 //! introduced without someone seeing this test fail and deciding whether the
@@ -91,8 +97,8 @@ fn duplicated_protocol_names_are_the_known_set() {
         dupes,
         expected,
         "the set of duplicated stdlib PROTOCOL names changed.\n\
-         protocols.insert() in core_loader.rs overwrites unconditionally, so \
-         each of these is resolved by load order (T0327).\n\
+         the protocol slot in archive_metadata.rs is first-wins, so each of \
+         these is resolved by load order (T0327).\n\
          If you ADDED one, give it a distinct name or fix the merge first. \
          If you REMOVED one, shrink this list."
     );
