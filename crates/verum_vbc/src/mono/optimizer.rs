@@ -253,24 +253,6 @@ impl SpecializationOptimizer {
         }
     }
 
-    /// Constant folding pass.
-    ///
-    /// Writes a signed varint (ZigZag encoded) to output.
-    fn write_signed_varint(&self, output: &mut Vec<u8>, value: i64) {
-        let encoded = ((value << 1) ^ (value >> 63)) as u64;
-        let mut v = encoded;
-        loop {
-            let byte = (v & 0x7F) as u8;
-            v >>= 7;
-            if v == 0 {
-                output.push(byte);
-                break;
-            } else {
-                output.push(byte | 0x80);
-            }
-        }
-    }
-
     /// Dead code elimination pass.
     ///
     /// Peephole optimization pass.
