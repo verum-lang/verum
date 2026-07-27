@@ -425,6 +425,7 @@ public mount .constants.{
     UnitInterval,
     MathProbability,
     Angle,
+    Dim,
 };
 
 // IEEE 754 utilities
@@ -681,7 +682,6 @@ public mount .tensor.{
     // Data types
     DType,
     // Shape types
-    Dim,
     Shape,
     StaticShape,
     DynShape,
