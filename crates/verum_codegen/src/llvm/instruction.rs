@@ -20327,36 +20327,6 @@ fn read_reg_varlen(operands: &[u8], pos: &mut usize) -> Result<u16> {
     }
 }
 
-/// Decode the operand stream into a flat `Vec<u16>` of register
-/// indexes.  Used by extended-op LLVM lowering handlers that
-/// previously indexed `operands[i] as u16` positionally — after
-/// this call, `regs[i]` is the i-th register, regardless of
-/// whether registers are 1-byte or 2-byte encoded.
-///
-/// **Lenient on truncation**: stops decoding at the first byte
-/// that would require a non-existent successor (truncated 2-byte
-/// register).  The caller may receive fewer regs than the operand
-/// stream's byte count — that's correct because (a) some sub-ops
-/// mix raw-byte payloads (counts, offsets) after the register
-/// list, and (b) early-returning Err here would propagate failure
-/// out of the entire match before any arm runs, breaking arms
-/// that rely on the raw-byte tail.  Each match arm reads the
-/// regs it needs from the head of the returned vec; raw bytes
-/// are still indexed via `operands[i]` directly at the known
-/// position.
-#[inline]
-fn decode_reg_operands(operands: &[u8]) -> Vec<u16> {
-    let mut regs = Vec::with_capacity(operands.len());
-    let mut pos = 0usize;
-    while pos < operands.len() {
-        match read_reg_varlen(operands, &mut pos) {
-            Ok(r) => regs.push(r),
-            Err(_) => break,
-        }
-    }
-    regs
-}
-
 /// Read the i-th register-encoded operand from a varint-encoded
 /// stream.  Returns `0` on out-of-range, matching the historical
 /// graceful-degradation behaviour of the pre-fix
@@ -23073,24 +23043,6 @@ fn emit_slice_cell_probe<'ctx>(
         heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
     };
     env.probe(ctx.builder(), base_ptr, tag)
-}
-
-/// #48 — thin wrapper over `slice_cell::CellEnv::elem_width` +
-/// `elem_addr` for cell base pointers (word0 IS the data pointer).
-fn emit_slice_cell_elem_addr<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    base_ptr: PointerValue<'ctx>,
-    word0: IntValue<'ctx>,
-    index: IntValue<'ctx>,
-    tag: &str,
-) -> Result<(IntValue<'ctx>, PointerValue<'ctx>)> {
-    let env = super::slice_cell::CellEnv {
-        llvm: ctx.llvm_context(),
-        heap_floor: super::target_triple::heap_floor(&ctx.get_module()),
-    };
-    let elem = env.elem_width(ctx.builder(), base_ptr, tag)?;
-    let (_addr, eptr) = env.elem_addr(ctx.builder(), word0, elem, index, tag)?;
-    Ok((elem, eptr))
 }
 
 /// #48 — thin wrapper over `slice_cell::CellEnv::elem_load`.
