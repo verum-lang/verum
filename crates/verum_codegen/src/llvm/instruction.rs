@@ -16159,25 +16159,6 @@ fn lower_call_method<'ctx>(
     // in text.vr but expected as raw values by user code use C stubs.
     //
 
-    // Internal stdlib calls are detected two ways:
-    // 1. VBC resolved the method with a type prefix (e.g., "Text.find")
-    // 2. The calling function is itself a compiled Text method (e.g.,
-    //  Text.replace calling .find() on a slice result — VBC can't
-    //  type-prefix chained calls on intermediate values)
-    let caller_is_text_method = ctx.function_name().as_str().starts_with("Text.");
-    // Internal stdlib call: caller is a compiled text.vr method AND
-    // receiver is known to be Text (via type prefix or register tracking).
-    // This must NOT trigger for user code calling text methods, because
-    // excluded methods (byte_at, find, etc.) have ABI mismatches.
-    let is_internal_stdlib_call = caller_is_text_method
-        && (method_name_str.starts_with("Text.")
-            || ctx.is_text_register(receiver.0)
-            || ctx.is_string_register(receiver.0));
-    let caller_is_text_method = ctx.function_name().as_str().starts_with("Text.");
-    let is_internal_stdlib_call = caller_is_text_method
-        && (method_name_str.starts_with("Text.")
-            || ctx.is_text_register(receiver.0)
-            || ctx.is_string_register(receiver.0));
     // Text methods now return canonical Maybe<T> — no auto-unwrap needed.
     // User code pattern-matches on Some/None directly.
     let needs_maybe_unwrap = false;
