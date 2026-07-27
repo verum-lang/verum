@@ -34434,6 +34434,21 @@ impl VbcCodegen {
                     operands,
                 });
             }
+            // `cbgr_current_epoch() -> UInt64`.  Emits the dedicated
+            // `CbgrSubOpcode::CurrentEpoch` (0x24), whose Tier-0 handler
+            // reads `state.cbgr_epoch` and whose AOT arm reads the real
+            // epoch — the two tiers already agreed, only the registry
+            // binding was missing (it pointed at `Opcode::TlsGet`, whose
+            // emission arm requires at least one argument, so this
+            // zero-argument intrinsic fell through to `LoadNil`).
+            InlineSequenceId::CbgrCurrentEpoch => {
+                let mut operands = Vec::<u8>::new();
+                Self::write_reg(&mut operands, dest.0);
+                self.ctx.emit(Instruction::CbgrExtended {
+                    sub_op: crate::instruction::CbgrSubOpcode::CurrentEpoch as u8,
+                    operands,
+                });
+            }
             InlineSequenceId::MemcmpBytes => {
                 // Compare memory regions byte-by-byte
                 let mut operands = Vec::<u8>::new();

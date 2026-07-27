@@ -575,8 +575,17 @@ pub(in super::super) fn handle_cmp_extended(
         return Ok(DispatchResult::Continue);
     }
 
-    let va = vao.as_i64() as u64;
-    let vb = vbo.as_i64() as u64;
+    // ONE extraction authority with the SIGNED orderings above, which have
+    // always used `as_integer_compatible`.  This arm used `as_i64`, whose
+    // `debug_assert!(is_int())` made a non-integer operand behave in two
+    // incompatible ways: an interpreter ICE in a debug build ("Expected int,
+    // got Some(0)"), and — because `debug_assert` compiles out — a silent
+    // mis-decode of the tagged payload in release.  The same operand reaching
+    // `Lt`/`Ge` was handled totally and quietly.  That split is what turned a
+    // nil-returning intrinsic into an unexplained batch crash on the unsigned
+    // comparison alone while its signed twin passed vacuously.
+    let va = vao.as_integer_compatible() as u64;
+    let vb = vbo.as_integer_compatible() as u64;
 
     let result = match sub_op_byte {
         0x00 => va < vb,  // LtU
@@ -593,4 +602,85 @@ pub(in super::super) fn handle_cmp_extended(
 
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
+}
+
+// ============================================================================
+// T0220 — unsigned/signed extraction coherence
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FunctionId;
+    use crate::module::{FunctionDescriptor, VbcModule};
+    use std::sync::Arc;
+
+    const REGS: u16 = 8;
+
+    /// A state whose current frame's bytecode IS `operands`, so the handler
+    /// decodes those bytes off the real instruction stream.
+    fn state_over_operands(operands: &[u8]) -> InterpreterState {
+        let mut module = VbcModule::new("t0220_cmp_extraction".to_string());
+        let offset = module.append_bytecode(operands);
+        let name = module.intern_string("t0220_probe");
+        let desc = FunctionDescriptor {
+            id: FunctionId(0),
+            name,
+            bytecode_offset: offset,
+            bytecode_length: operands.len() as u32,
+            register_count: REGS,
+            ..FunctionDescriptor::default()
+        };
+        module.add_function(desc);
+
+        let mut state = InterpreterState::new(Arc::new(module));
+        state.registers.push_frame(REGS);
+        state
+            .call_stack
+            .push_frame(FunctionId(0), REGS, 0, crate::instruction::Reg(0))
+            .expect("frame");
+        state.set_pc(0);
+        state
+    }
+
+    /// **The crash this closes.**  An unsigned comparison whose operand is not
+    /// integer-tagged used to reach `as_i64`, whose `debug_assert!(is_int())`
+    /// aborted the interpreter — one nil-returning intrinsic took a whole test
+    /// batch down with "Expected int, got Some(0)".  The signed orderings had
+    /// always handled the same operand totally via `as_integer_compatible`;
+    /// the unsigned arm now uses that one authority too.
+    ///
+    /// Pre-fix this test PANICS rather than fails.
+    #[test]
+    fn unsigned_compare_of_a_non_integer_operand_does_not_abort() {
+        // CmpExtended: [sub_op=0x03 GeU][dst=3][a=1][b=2]
+        let mut state = state_over_operands(&[0x03, 3, 1, 2]);
+        state.set_reg(crate::instruction::Reg(1), Value::nil());
+        state.set_reg(crate::instruction::Reg(2), Value::from_i64(0));
+
+        handle_cmp_extended(&mut state).expect("unsigned compare must not abort");
+        // nil carries a zero payload, so `nil >= 0` is true — the same verdict
+        // the signed `Ge` handler has always produced for this operand pair.
+        assert!(state.get_reg(crate::instruction::Reg(3)).as_bool());
+    }
+
+    /// The unsigned arm and the signed arm must agree on how an operand is
+    /// read.  Two extraction policies for one operand class is what let a
+    /// defect pass vacuously through `Ge` while aborting on `GeU`.
+    #[test]
+    fn unsigned_and_signed_orderings_read_operands_the_same_way() {
+        for v in [Value::nil(), Value::unit(), Value::from_bool(true)] {
+            let mut state = state_over_operands(&[0x03, 3, 1, 2]);
+            state.set_reg(crate::instruction::Reg(1), v);
+            state.set_reg(crate::instruction::Reg(2), Value::from_i64(0));
+            handle_cmp_extended(&mut state).expect("no abort");
+            let unsigned = state.get_reg(crate::instruction::Reg(3)).as_bool();
+
+            let signed = v.as_integer_compatible() >= 0_i64;
+            assert_eq!(
+                unsigned, signed,
+                "GeU and Ge disagree on operand {v:?}",
+            );
+        }
+    }
 }

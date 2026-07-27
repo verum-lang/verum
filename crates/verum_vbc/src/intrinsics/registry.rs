@@ -872,6 +872,8 @@ pub enum InlineSequenceId {
     CbgrReallocUser,
     /// cbgr_validate: non-trapping reference validation → Bool
     CbgrValidateBool,
+    /// cbgr_current_epoch: read the live CBGR epoch → UInt64
+    CbgrCurrentEpoch,
     /// memcmp_bytes: compare memory regions byte-by-byte
     MemcmpBytes,
     /// get_header_from_ptr: get CBGR allocation header from pointer
@@ -5180,7 +5182,20 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         hints: &[],
         param_count: 0,
         return_count: 1,
-        strategy: CodegenStrategy::DirectOpcode(Opcode::TlsGet), // reads global epoch
+        // Was `DirectOpcode(Opcode::TlsGet)` with the comment "reads global
+        // epoch".  It never did: the TlsGet emission arm is guarded on
+        // `!args.is_empty()` and this intrinsic takes NO arguments, so the
+        // match fell through to the default `_ => LoadNil` and every call
+        // returned nil.  Nil is pointer-tagged, so `epoch >= 0` — an
+        // unsigned compare — reached `CmpExtended` with a tagged pointer
+        // and tripped `as_i64`'s debug assertion ("Expected int, got
+        // Some(0)"), taking the whole batch down with it.  AOT was never
+        // affected: it lowers 0x24 to a real epoch read.
+        //
+        // `CbgrSubOpcode::CurrentEpoch` (0x24) already existed with a live
+        // Tier-0 handler reading `state.cbgr_epoch` and a live AOT
+        // lowering; only the binding was missing.
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrCurrentEpoch),
         mlir_op: Some("verum.cbgr.epoch"),
         doc: "Get current CBGR epoch",
     },
