@@ -25,7 +25,8 @@ runs was validated against `main` as of the date above.
 | `lint` — `cargo clippy --workspace --bins --lib`                  | ✅ green (0 warnings outside upstream noise) |
 | `vcs-l0-l1` — L0 lexer/parser/types/builtin-syntax                | ✅ 100% (subset measured) |
 | `vcs-l0-l1` — L0 across 9 of 10 categories (587 specs)            | ⚠️ 98.7% (8 known stdlib-API + interpreter static-mut gaps) |
-| `differential` — Tier 0 vs Tier 1 cross-impl                      | ⚠️ 64.9% (24/37 — 13 tier-consistency gaps; baseline locked) |
+| `differential` — Tier 0 vs Tier **3** (`make test-differential`, `--tier 0,3`) | ⚠️ 64.9% (24/37 — 13 tier-consistency gaps; baseline locked). **24/37, not 24/259**: `@tier:` is an intersection filter, so the 253 specs declaring `@tier: 0` run single-tier and are never compared; only the 6 declaring `@tier: all` cross tiers. |
+| `differential-tiers` — Tier 0 vs Tier 1 (interp vs AOT)           | not run in CI — `vcs/scripts/differential-tiers.sh` is wired into `vcs/Makefile` only, against `differential-tiers-baseline.txt` |
 | `bench` — micro                                                   | ⚠️ 28/35 = 80% (perf-target misses, pre-existing) |
 
 ## What "ready to merge" means right now
