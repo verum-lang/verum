@@ -272,10 +272,50 @@ impl FastParser {
         }
     }
 
+    /// Lex an entire string, REPORTING lex errors instead of discarding them.
+    ///
+    /// The whole-string entry points below used `filter_map(|r| r.ok())`,
+    /// which drops every `Err` on the floor: an unlexable character simply
+    /// vanished and parsing continued on the surviving tokens, so the
+    /// function could return `Ok` for source it had failed to read. Module
+    /// parsing never had this hole -- `parse_module_internal_with_script_mode`
+    /// stops at the first lex error and reports it -- so this reuses that
+    /// same authority (`analyze_lexer_error` over the located span) rather
+    /// than inventing a second, weaker diagnosis for the same condition.
+    fn lex_all(source: &str, file_id: FileId) -> ParseResult<List<Token>> {
+        let mut tokens = List::new();
+        let mut last_end: u32 = 0;
+
+        for result in Lexer::new(source, file_id) {
+            match result {
+                Ok(token) => {
+                    last_end = token.span.end;
+                    tokens.push(token);
+                }
+                Err(_) => {
+                    // Same position recovery as the module path: the lexer
+                    // stops before the offending text, so scan forward from
+                    // the last good token past whitespace and comments.
+                    let error_start = Self::find_error_position(source, last_end as usize) as u32;
+                    let error_end = Self::find_error_end(source, error_start as usize) as u32;
+                    let span = Span::new(error_start, error_end, file_id);
+                    return Err(List::from(vec![Self::analyze_lexer_error(
+                        source,
+                        error_start as usize,
+                        span,
+                    )]));
+                }
+            }
+        }
+
+        Ok(tokens)
+    }
+
     /// Parse a single expression from a string (useful for testing).
+    ///
+    /// Lex errors are reported, not silently dropped; see [`Self::lex_all`].
     pub fn parse_expr_str(&self, source: &str, file_id: FileId) -> ParseResult<verum_ast::Expr> {
-        let lexer = Lexer::new(source, file_id);
-        let tokens: List<Token> = lexer.filter_map(|r| r.ok()).collect();
+        let tokens = Self::lex_all(source, file_id)?;
 
         let mut parser = RecursiveParser::new(&tokens, file_id);
         let expr = parser.parse_expr().map_err(|e| List::from(vec![e]))?;
@@ -288,9 +328,10 @@ impl FastParser {
     }
 
     /// Parse a single type from a string (useful for testing).
+    ///
+    /// Lex errors are reported, not silently dropped; see [`Self::lex_all`].
     pub fn parse_type_str(&self, source: &str, file_id: FileId) -> ParseResult<verum_ast::Type> {
-        let lexer = Lexer::new(source, file_id);
-        let tokens: List<Token> = lexer.filter_map(|r| r.ok()).collect();
+        let tokens = Self::lex_all(source, file_id)?;
 
         let mut parser = RecursiveParser::new(&tokens, file_id);
         let ty = parser.parse_type().map_err(|e| List::from(vec![e]))?;
@@ -805,5 +846,47 @@ impl Parser {
     pub fn parse_type(&mut self) -> ParseResult<verum_ast::Type> {
         let parser = FastParser::new();
         parser.parse_type_str(&self.source, self.file_id)
+    }
+}
+
+#[cfg(test)]
+mod lex_error_reporting {
+    use super::*;
+
+    /// A lex error must FAIL the parse, not disappear.
+    ///
+    /// `parse_expr_str` / `parse_type_str` used `filter_map(|r| r.ok())`,
+    /// which discarded every lexer `Err`. An unlexable character was
+    /// dropped and parsing continued on whatever tokens survived, so the
+    /// function could report success on source it had failed to read —
+    /// the worst shape of failure, since the caller sees a well-formed AST
+    /// built from a subset of the input.
+    ///
+    /// These are inline rather than in `tests/` deliberately: CI runs
+    /// `cargo test --workspace --lib --bins`, which does not execute
+    /// `tests/`, so a gate placed there would not run.
+    #[test]
+    fn unlexable_input_is_an_error_not_a_silent_drop() {
+        let parser = FastParser::new();
+        let file_id = FileId::new(0);
+
+        // An unterminated string cannot be lexed. Before the fix the bad
+        // token vanished and `1 +` (or whatever remained) was parsed.
+        let result = parser.parse_expr_str("1 + \"unterminated", file_id);
+        assert!(
+            result.is_err(),
+            "unterminated string literal lexed cleanly — the lex error was dropped"
+        );
+    }
+
+    #[test]
+    fn well_formed_input_still_parses() {
+        // The guard above must not reject valid source: a fix that fails
+        // everything would satisfy the test above and be useless.
+        let parser = FastParser::new();
+        let file_id = FileId::new(0);
+
+        assert!(parser.parse_expr_str("1 + 2", file_id).is_ok());
+        assert!(parser.parse_type_str("Int", file_id).is_ok());
     }
 }
