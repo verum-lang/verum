@@ -25,6 +25,62 @@ use super::vbc_lowering::is_primitive_type_name;
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt};
 use verum_common::well_known_types::type_names as tn;
 
+/// Emit a diagnosable runtime abort for an operation that has no honest
+/// Tier-1 lowering.
+///
+/// For a lowering arm, the alternative to this is `Ok(())` — which compiles
+/// the operation to nothing while every caller reads success.  Where the
+/// operation was a WRITE, that leaves the destination holding stale data with
+/// no signature to look for, so the loud abort is the only reportable answer
+/// until real lowering lands.
+///
+/// `verum_panic`'s canonical ABI is the 4-param
+/// `void(ptr msg, i64 len, ptr file, i32 line)` defined by `emit_panic_ir`; a
+/// 1-param `void(ptr)` declaration is a same-name impostor that ABI-mismatches
+/// every real call site (the AOT panic-crash class), so the canonical shape is
+/// declared here too.
+///
+/// The block is deliberately left UNTERMINATED: `verum_panic` never returns,
+/// so the fallthrough is dead code, and not emitting `unreachable` keeps the
+/// rest of the enclosing VBC basic block lowerable into well-formed IR.
+fn emit_runtime_abort(ctx: &FunctionContext<'_, '_>, message: &str, name: &str) -> Result<()> {
+    let llvm_ctx = ctx.llvm_context();
+    let module = ctx.get_module();
+    let builder = ctx.builder();
+
+    let void_type = llvm_ctx.void_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+    let i64_type = llvm_ctx.i64_type();
+    let i32_type = llvm_ctx.i32_type();
+    let fn_type = void_type.fn_type(
+        &[
+            ptr_type.into(),
+            i64_type.into(),
+            ptr_type.into(),
+            i32_type.into(),
+        ],
+        false,
+    );
+    let panic_fn = super::error::get_or_declare_function(module, "verum_panic", fn_type);
+
+    let msg = builder
+        .build_global_string_ptr(message, name)
+        .or_llvm_err()?;
+    builder
+        .build_call(
+            panic_fn,
+            &[
+                msg.as_pointer_value().into(),
+                i64_type.const_int(message.len() as u64, false).into(),
+                ptr_type.const_null().into(),
+                i32_type.const_zero().into(),
+            ],
+            "",
+        )
+        .or_llvm_err()?;
+    Ok(())
+}
+
 /// Emit a malloc call with null check and OOM abort.
 /// If malloc returns null, branches to an OOM block that calls `_exit(1)`.
 fn checked_malloc_instr<'ctx>(
@@ -25917,9 +25973,21 @@ fn lower_char_extended<'ctx>(
 /// Lower SimdExtended instruction to LLVM IR.
 ///
 /// Implements scalar fallback operations matching the interpreter behavior.
-/// These operate on f64 register values (NaN-boxed representation).
-/// When LLVM vector type information is available (via typed SIMD API),
-/// the SimdLowering in simd.rs provides vectorized implementations.
+/// These operate on f64 register values (NaN-boxed representation): a "vector"
+/// register carries ONE lane, because the wire (`[dst][operands…]`) erases
+/// both the element type `T` and the lane count `N` of the source-level
+/// `Vec<T, N>`.
+///
+/// This is the ONLY `SimdExtended` lowering. `simd.rs` defines a typed
+/// vector-lowering API (`SimdLowering`), but nothing calls it — it is
+/// re-exported from `llvm/mod.rs` and referenced nowhere else, so no path
+/// through this function ever produces an LLVM vector type. Real vector
+/// lowering needs the element type and lane count on the wire first.
+///
+/// Consequence, and the reason the store family aborts below: an operation
+/// that cannot be expressed at width 1 has no fallback to degrade to. Value
+/// ops degrade honestly (a width-1 shuffle is the identity); WRITES do not,
+/// so they abort rather than silently drop (T0112).
 fn lower_simd_extended<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     sub_op: u8,
@@ -26225,8 +26293,36 @@ fn lower_simd_extended<'ctx>(
         | Some(SimdSubOpcode::StoreUnaligned)
         | Some(SimdSubOpcode::MaskedStore)
         | Some(SimdSubOpcode::Scatter) => {
-            // Store operations — no-op in scalar fallback mode
-            Ok(())
+            // The SIMD store family has no honest scalar fallback, so it
+            // aborts loudly instead of reporting a write that never happens
+            // (T0112).
+            //
+            // Returning `Ok(())` here — the previous behaviour — compiled
+            // `Vec<T, N>.store_aligned(ptr)` to NOTHING while the call
+            // reported success.  That is worse than a wrong value: the
+            // destination keeps STALE DATA, so the result is neither uniform
+            // nor implausible and there is no signature to grep for.  It hit
+            // the ORDINARY aligned store, not just the exotic
+            // masked/scatter forms.
+            //
+            // A "real" scalar store is not available as a fallback: the wire
+            // is `[dst][src][ptr]` with both the element type `T` and the
+            // lane count `N` erased, so storing the one register value would
+            // leave N-1 lanes stale AND, for any `T` narrower than the 8-byte
+            // register, clobber the neighbouring element.  Refusing is the
+            // only answer that does not corrupt memory.  The neighbouring
+            // load/shuffle/mask arms keep their scalar fallbacks — those
+            // produce a value and a width-1 shuffle really is the identity;
+            // it is the writes that have no correct form.
+            let sub_op = sub.or_internal("missing SIMD sub-opcode")?;
+            let message = format!(
+                "SIMD store `{:?}` has no Tier-1 lowering: the scalar fallback \
+                 carries one lane and the wire erases element type and lane \
+                 count, so the write cannot be performed. Aborting rather than \
+                 silently dropping it (T0112).",
+                sub_op
+            );
+            emit_runtime_abort(ctx, &message, "simd_store_unimplemented_msg")
         }
 
         // Mask operations
@@ -41031,5 +41127,156 @@ mod phantom_math_intrinsic_guard {
                  GENERIC_MATH_F64_INTRINSICS (it would re-open T0250)."
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod simd_store_never_lowers_to_nothing {
+    use super::*;
+    use verum_llvm::context::Context;
+
+    /// Lower one `SimdExtended` sub-op into a fresh `void()` function and
+    /// return `(entry_block_is_empty, module_ir)`.
+    ///
+    /// `entry_block_is_empty` is the direct observation this pin exists for:
+    /// a lowering arm that returns `Ok(())` without building anything leaves
+    /// the block EMPTY — the operation compiled to nothing while the compiler
+    /// reported success.
+    fn lower_in_fresh_function(sub_op: SimdSubOpcode, operands: &[u8]) -> (bool, String) {
+        let context = Context::create();
+        let module = context.create_module("simd_store_pin");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("simd_store_probe", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "simd_store_probe");
+        ctx.builder().position_at_end(entry);
+        lower_simd_extended(&mut ctx, sub_op as u8, operands).expect("lowering must succeed");
+
+        let empty = entry.get_first_instruction().is_none();
+        (empty, module.print_to_string().to_string())
+    }
+
+    /// Every SIMD store sub-op lowers to a diagnosable abort. Pre-fix all four
+    /// lowered to LITERALLY NOTHING — an empty basic block — so a Tier-1
+    /// binary ran past `Vec<T, N>.store_aligned(ptr)` reporting success while
+    /// the destination kept whatever stale bytes it already held (T0112).
+    ///
+    /// `StoreAligned`/`StoreUnaligned` are the ordinary case, not just the
+    /// exotic masked/scatter forms named in the original report.
+    #[test]
+    fn every_simd_store_sub_op_emits_a_runtime_abort() {
+        for sub_op in [
+            SimdSubOpcode::StoreAligned,
+            SimdSubOpcode::StoreUnaligned,
+            SimdSubOpcode::MaskedStore,
+            SimdSubOpcode::Scatter,
+        ] {
+            let (empty, ir) = lower_in_fresh_function(sub_op, &[1, 2, 3, 4]);
+            assert!(
+                !empty,
+                "{sub_op:?} lowered to an EMPTY basic block: the store compiled to nothing \
+                 while reporting success (T0112)",
+            );
+            assert!(
+                ir.contains("@verum_panic"),
+                "{sub_op:?} must lower to a `verum_panic` call so a dropped write is \
+                 diagnosable at the call site; emitted IR was:\n{ir}",
+            );
+            assert!(
+                ir.contains(&format!("{sub_op:?}")),
+                "the abort message must name the sub-op that refused; emitted IR was:\n{ir}",
+            );
+        }
+    }
+
+    /// `verum_panic` is declared with its CANONICAL 4-param ABI
+    /// `void(ptr, i64, ptr, i32)`. A 1-param `void(ptr)` declaration is a
+    /// same-name impostor that ABI-mismatches every real call site and makes
+    /// `emit_panic_ir` skip defining the body — the AOT panic-crash class.
+    #[test]
+    fn abort_declares_the_canonical_four_param_verum_panic() {
+        let context = Context::create();
+        let module = context.create_module("simd_store_abi_pin");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("simd_store_probe", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "simd_store_probe");
+        ctx.builder().position_at_end(entry);
+        lower_simd_extended(&mut ctx, SimdSubOpcode::StoreAligned as u8, &[1, 2, 3])
+            .expect("lowering must succeed");
+
+        let panic_fn = module
+            .get_function("verum_panic")
+            .expect("verum_panic must be declared");
+        assert_eq!(
+            panic_fn.count_params(),
+            4,
+            "verum_panic must keep its canonical void(ptr msg, i64 len, ptr file, i32 line) ABI",
+        );
+    }
+
+    /// The abort leaves the block UNTERMINATED on purpose: `verum_panic` never
+    /// returns, so the fallthrough is dead, and the rest of the enclosing VBC
+    /// basic block must still lower into well-formed IR. Emitting `unreachable`
+    /// instead would terminate the block mid-way and every following
+    /// instruction would build after a terminator. Pinned by verifying a
+    /// module whose function continues past the store.
+    #[test]
+    fn abort_leaves_the_block_lowerable_and_the_module_verifiable() {
+        let context = Context::create();
+        let module = context.create_module("simd_store_verify_pin");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("simd_store_probe", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "simd_store_probe");
+        ctx.builder().position_at_end(entry);
+        lower_simd_extended(&mut ctx, SimdSubOpcode::StoreAligned as u8, &[1, 2, 3])
+            .expect("lowering must succeed");
+        // A following instruction of the same VBC block still lowers.
+        let f64_ty = context.f64_type();
+        ctx.set_register(1, f64_ty.const_float(2.0).into());
+        ctx.set_register(2, f64_ty.const_float(3.0).into());
+        lower_simd_extended(&mut ctx, SimdSubOpcode::Add as u8, &[0, 1, 2])
+            .expect("the instruction after an aborting store must still lower");
+        ctx.builder().build_return(None).expect("terminator");
+
+        assert!(
+            module.verify().is_ok(),
+            "module must verify after an aborting store; emitted IR was:\n{}",
+            module.print_to_string().to_string(),
+        );
+    }
+
+    /// The refusal must be narrow: value ops of the same family still lower to
+    /// real arithmetic, and the block is not left empty either. This is the
+    /// control that stops the pin above from passing for the wrong reason.
+    #[test]
+    fn simd_add_still_lowers_to_arithmetic() {
+        let context = Context::create();
+        let module = context.create_module("simd_add_control");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("simd_add_probe", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "simd_add_probe");
+        ctx.builder().position_at_end(entry);
+        let f64_ty = context.f64_type();
+        ctx.set_register(1, f64_ty.const_float(2.0).into());
+        ctx.set_register(2, f64_ty.const_float(3.0).into());
+        lower_simd_extended(&mut ctx, SimdSubOpcode::Add as u8, &[0, 1, 2])
+            .expect("lowering must succeed");
+
+        let ir = module.print_to_string().to_string();
+        assert!(
+            !ir.contains("@verum_panic"),
+            "SimdExtended{{Add}} must NOT abort; emitted IR was:\n{ir}",
+        );
+        assert!(
+            ctx.get_register(0).is_ok(),
+            "SimdExtended{{Add}} must still define its destination register",
+        );
     }
 }

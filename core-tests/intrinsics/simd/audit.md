@@ -32,7 +32,18 @@ vector constructor and (b) generic instantiation.  Both premises fell:
 Both tiers implement the raw layer as a scalar fallback (interp
 `handlers/simd_extended.rs`; AOT `lower_simd_extended`): a "vector"
 register carries ONE lane; splat/extract are identity, reductions are
-identity, element-wise ops are the scalar op.  The suite pins:
+identity, element-wise ops are the scalar op.
+
+**The store family is the documented exception.**  `StoreAligned` /
+`StoreUnaligned` / `MaskedStore` / `Scatter` have no scalar fallback at
+all and ABORT on both tiers (T0112).  There is no width at which they
+could be right: the wire erases both `T` and `N`, so writing the one
+register value would leave `N-1` lanes stale and, for `T` narrower than
+the 8-byte register, clobber the neighbouring element.  Until then a
+refusal is the only non-corrupting answer — and it is the reason the
+memory-op sub-suite still cannot be written against a round trip.
+
+The suite pins:
 
 * lane-count-INVARIANT laws in unit/property (survive future true
   vectors): splat∘extract=id, insert-read-back, per-lane arithmetic
@@ -68,18 +79,36 @@ across tiers.
   "library call" layer is an indirection, not an FFI symbol; adding a
   simd intrinsic requires BOTH the registry row and the name-map arm.
 * AOT scalar fallback: `lower_simd_extended`
-  (verum_codegen/llvm/instruction.rs ~25181); vectorized lowering for
-  the typed `core.simd.Vec<T,N>` API lives in llvm/simd.rs.
-* T0112 (A10): 30+ scalar arms + MaskedStore/Scatter silent no-op
-  stores — the true-vector upgrade umbrella; this suite's regression
-  pins are the contract witnesses that must flip with it.
+  (verum_codegen/llvm/instruction.rs).  It is the ONLY `SimdExtended`
+  lowering: `llvm/simd.rs` defines a typed vector API (`SimdLowering`)
+  that is re-exported from `llvm/mod.rs` and called from NOWHERE, so no
+  path ever produces an LLVM vector type.
+* T0112 (A10): the silent no-op stores are CLOSED — all four store
+  sub-ops now abort on both tiers (interp
+  `simd_store_unimplemented`; AOT `emit_runtime_abort`), pinned by
+  `simd_store_never_silently_drops_tests` (verum_vbc) and
+  `simd_store_never_lowers_to_nothing` (verum_codegen).  The 30+ scalar
+  value arms remain the true-vector upgrade umbrella; this suite's
+  regression pins are the contract witnesses that must flip with it.
 
 ## 5. Coverage decisions
 
 * Memory ops (load/store/masked/gather/scatter) are NOT suite-driven:
-  raw-pointer surface with silent-no-op AOT stores (T0112) — pinning
-  "writes are dropped" as a contract would bless a defect. They join
-  the suite when T0112 lands.
+  a raw-pointer surface with no round trip to assert.  Stores now abort
+  rather than drop (T0112), so there is nothing for a store to write
+  and nothing for a load to read back; pinning "writes are dropped" as
+  a contract would have blessed a defect, and pinning "stores abort"
+  belongs with the crate-side pins, not here.  They join the suite when
+  real vector lowering lands.
+* **Loads are the remaining silent-wrong sibling, unfixed.**  Both
+  tiers answer `LoadAligned` / `LoadUnaligned` / `MaskedLoad` /
+  `Gather` with `dst = ptr` — the ADDRESS as data, never a
+  dereference (interp `handlers/simd_extended.rs`, AOT's shared
+  passthrough arm).  It is the T0184 fabricated-data class, not the
+  dropped-write class, and it has a live stdlib caller:
+  `core/simd/bytes.vr:81` (`find_byte` → `Vec16b.load_unaligned`), so
+  making it loud is a behaviour change with real blast radius and needs
+  its own decision.
 * `simd_shuffle`/`simd_cast`/`from_scalars` deferred: AOT groups them
   in a passthrough arm whose dst semantics differ from interp's
   (first-element vs passthrough) — needs the T0112 pass anyway.
@@ -93,6 +122,12 @@ wiring; this suite.  (The T0175 scheme-builder fix in `verum_types`
 that unblocked mounted-generic instantiation landed independently,
 82569ce38.)
 
-**Deferred (tracked)** — T0112 true vector lowering (+ interp twin so
-the fallback pins flip tier-coherently); memory-op sub-suite after it;
+**Landed (T0112, 2026-07-27)** — the four SIMD store sub-ops abort on
+both tiers instead of reporting success for a write that never
+happened.  The acceptance floor "never silently drop writes" is met;
+true vector lowering is NOT part of it.
+
+**Deferred** — true vector lowering (wire the element type and lane
+count first, then the fallback pins flip tier-coherently); the
+fabricated-address load family (§5); memory-op sub-suite after both;
 typed `Vec<T,N>` conformance under `core-tests/simd/`.
