@@ -26855,47 +26855,16 @@ fn lower_field_named_dynamic<'ctx>(
         (fname.to_string(), cands)
     };
 
-    // Loud-panic emitter shared by the default arms.
+    // Loud-panic emitter shared by the default arms — routed through the ONE
+    // in-file abort emitter [`emit_runtime_abort`], which owns the canonical
+    // 4-param `verum_panic` ABI.
     let emit_panic = |ctx: &mut FunctionContext<'_, 'ctx>| -> Result<()> {
-        let void_type = ctx.llvm_context().void_type();
-        let i64_type = ctx.llvm_context().i64_type();
-        let i32_type = ctx.llvm_context().i32_type();
-        // verum_panic's canonical ABI is 4-param `void(ptr msg, i64 len,
-        // ptr file, i32 line)` (emit_panic_ir); a 1-param declaration/call
-        // was a same-name impostor (task #22, the AOT panic-crash class).
-        let fn_type = void_type.fn_type(
-            &[
-                ptr_type.into(),
-                i64_type.into(),
-                ptr_type.into(),
-                i32_type.into(),
-            ],
-            false,
-        );
-        let panic_fn =
-            super::error::get_or_declare_function(ctx.get_module(), "verum_panic", fn_type);
         let panic_text = format!(
             "field '{}' not found on receiver's runtime type (by-name closed-world \
              dispatch miss) — FIELD-ACCESS-BYNAME-1 / task #42",
             fname
         );
-        let msg = ctx
-            .builder()
-            .build_global_string_ptr(&panic_text, "byname_field_panic_msg")
-            .or_llvm_err()?;
-        ctx.builder()
-            .build_call(
-                panic_fn,
-                &[
-                    msg.as_pointer_value().into(),
-                    i64_type.const_int(panic_text.len() as u64, false).into(),
-                    ptr_type.const_null().into(),
-                    i32_type.const_int(0, false).into(),
-                ],
-                "",
-            )
-            .or_llvm_err()?;
-        Ok(())
+        emit_runtime_abort(ctx, &panic_text, "byname_field_panic_msg")
     };
 
     if candidates.is_empty() {
@@ -31024,19 +30993,6 @@ fn lower_ffi_extended<'ctx>(
                 operands[pos + 3],
             ]);
 
-            let void_type = ctx.llvm_context().void_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let i64_ty = ctx.llvm_context().i64_type();
-            let i32_ty = ctx.llvm_context().i32_type();
-            // verum_panic's canonical ABI is 4-param `void(ptr,i64,ptr,i32)`
-            // (emit_panic_ir); a 1-param same-name declaration was the AOT
-            // panic-crash class.
-            let panic_ty = void_type.fn_type(
-                &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i32_ty.into()],
-                false,
-            );
-            let panic_fn =
-                super::error::get_or_declare_function(ctx.get_module(), "verum_panic", panic_ty);
             let panic_text = format!(
                 "FFI CreateCallback (Verum function #{fn_id}): the AOT backend cannot \
                  build a C-callable trampoline for a Verum function — adapting the \
@@ -31045,22 +31001,11 @@ fn lower_ffi_extended<'ctx>(
                  through libffi), or pass a C function pointer obtained from an \
                  `extern` declaration (T0110)."
             );
-            let msg = ctx
-                .builder()
-                .build_global_string_ptr(&panic_text, "ffi_create_callback_panic_msg")
-                .or_llvm_err()?;
-            ctx.builder()
-                .build_call(
-                    panic_fn,
-                    &[
-                        msg.as_pointer_value().into(),
-                        i64_ty.const_int(panic_text.len() as u64, false).into(),
-                        ptr_ty.const_null().into(),
-                        i32_ty.const_int(0, false).into(),
-                    ],
-                    "",
-                )
-                .or_llvm_err()?;
+            // Emitted through the shared [`emit_runtime_abort`] (T0112): ONE
+            // emitter for the canonical 4-param `verum_panic` call, so the
+            // same-name-impostor ABI hazard has a single place to be got right
+            // rather than one per unimplemented arm.
+            emit_runtime_abort(ctx, &panic_text, "ffi_create_callback_panic_msg")?;
             let unreachable_result = ctx.types().ptr_type().const_null();
             ctx.set_register(dst_reg, unreachable_result.into());
             Ok(())
@@ -35689,43 +35634,14 @@ fn lower_tensor_extended<'ctx>(
     // instead of a silent wrong answer (DYN-MISS-LOUD discipline).
     if sub_op == 0xFF {
         let ext_op = operands[0];
-        let void_type = ctx.llvm_context().void_type();
-        let ptr_ty = ctx.types().ptr_type();
-        let i64_ty = ctx.llvm_context().i64_type();
-        let i32_ty = ctx.llvm_context().i32_type();
-        // verum_panic's canonical ABI is 4-param `void(ptr,i64,ptr,i32)`
-        // (emit_panic_ir); a 1-param declaration/call was a same-name
-        // impostor (task #22, the AOT panic-crash class).
-        let fn_type = void_type.fn_type(
-            &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i32_ty.into()],
-            false,
-        );
-        let panic_fn = super::error::get_or_declare_function(
-            ctx.get_module(),
-            "verum_panic",
-            fn_type,
-        );
         let panic_text = format!(
             "Tier-1 unimplemented ext-op intrinsic 0x{:02X} (TensorExtSubOpcode envelope) — \
              see AOT-TENSOREXT-ENVELOPE-1 / task #46",
             ext_op
         );
-        let msg = ctx
-            .builder()
-            .build_global_string_ptr(&panic_text, "tensor_ext_env_panic_msg")
-            .or_llvm_err()?;
-        ctx.builder()
-            .build_call(
-                panic_fn,
-                &[
-                    msg.as_pointer_value().into(),
-                    i64_ty.const_int(panic_text.len() as u64, false).into(),
-                    ptr_ty.const_null().into(),
-                    i32_ty.const_int(0, false).into(),
-                ],
-                "",
-            )
-            .or_llvm_err()?;
+        // ONE in-file abort emitter owns the canonical 4-param `verum_panic`
+        // ABI — see [`emit_runtime_abort`].
+        emit_runtime_abort(ctx, &panic_text, "tensor_ext_env_panic_msg")?;
         // Keep IR well-formed: the panic does not return, but the block
         // continues — park a zero in dst (operands[1] per the envelope).
         if operands.len() > 1 {
