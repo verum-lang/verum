@@ -336,6 +336,21 @@ impl LlvmLoweringError {
     pub fn internal(msg: impl Into<Text>) -> Self {
         LlvmLoweringError::Internal(msg.into())
     }
+
+    /// Create an "unsupported at Tier 1" error.
+    ///
+    /// This is the loud-failure constructor: use it when an operation has
+    /// no AOT lowering. It exists so an arm that cannot do the job says so
+    /// instead of storing a plausible constant (a null handle, a `true`, a
+    /// `KERN_SUCCESS`) into the destination register and returning `Ok` —
+    /// a fabricated answer is indistinguishable from a real one at every
+    /// site downstream, which is how such an arm survives (T0110).
+    ///
+    /// The message must name the operation AND the alternative that works,
+    /// because the reader of a lowering error cannot see this file.
+    pub fn unsupported(msg: impl Into<Text>) -> Self {
+        LlvmLoweringError::UnsupportedInstruction(msg.into())
+    }
 }
 
 // =============================================================================

@@ -20,7 +20,7 @@ use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::ffi::{FfiLowering, ffi_subop_to_calling_convention};
 use super::runtime::RuntimeLowering;
 use super::types::RefTier;
-use super::target_triple::{target_is_aarch64, target_is_x86_64};
+use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_x86_64};
 use super::vbc_lowering::is_primitive_type_name;
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt};
 use verum_common::well_known_types::type_names as tn;
@@ -30254,31 +30254,111 @@ fn lower_ffi_extended<'ctx>(
         }
 
         Some(SystemSubOpcode::GetLibrary) => {
-            // In AOT compilation, libraries are linked statically
-            // Return a placeholder (null) for now
-            if operands.len() < 2 {
-                return Err(LlvmLoweringError::internal(
-                    "GetLibrary: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-
-            let null_ptr = ctx.types().ptr_type().const_null();
-            ctx.set_register(dst_reg, null_ptr.into());
-            Ok(())
+            // T0110: this arm used to store `ptr null` into the destination
+            // and report success, under the comment "libraries are linked
+            // statically / return a placeholder (null) for now".
+            //
+            // Tier 1 has no dynamic loader: FFI symbols are bound by the
+            // linker, so there is no library handle to hand back. A null
+            // handle is exactly what a FAILED `dlopen` returns, and the very
+            // next opcode in this family — `IsSymbolResolved`, fifteen lines
+            // below — used to certify every symbol of that null handle as
+            // resolved. The pair gave opposite answers about the same
+            // library and the one that said "fine" was the one that let
+            // execution continue, so a recoverable load failure became a
+            // null call.
+            //
+            // Nothing in the compiler emits this sub-opcode today; the
+            // Tier-0 interpreter reports the same condition as
+            // `NotImplemented`. AOT knows it statically, so say it at
+            // compile time rather than inventing a value.
+            Err(LlvmLoweringError::unsupported(
+                "FFI GetLibrary: the AOT backend has no dynamic loader — Tier-1 \
+                 FFI symbols are bound by the linker, so there is no library \
+                 handle to return. Declare the symbol in an `extern` block \
+                 (lowered through LoadSymbol / CallFfiC) instead of opening the \
+                 library at run time (T0110).",
+            ))
         }
 
         Some(SystemSubOpcode::IsSymbolResolved) => {
-            // In AOT compilation, symbols are always resolved at link time
-            if operands.is_empty() {
+            // Format: dst:reg, symbol_idx:u32 — the same operand shape as
+            // `LoadSymbol` above. The query names an entry in THIS module's
+            // FFI symbol table; there is no library handle in it.
+            //
+            // T0110: this arm used to ignore `symbol_idx` entirely and store
+            // a constant `true`, i.e. it reported success for a check it
+            // never performed — including for a symbol index that does not
+            // exist in the table at all.
+            //
+            // The answer is now DERIVED rather than asserted: look the symbol
+            // up (an unknown index is a hard error, not a cheerful yes),
+            // declare it exactly as `LoadSymbol` does, and test the address
+            // the linker will bind. Under the default strong external linkage
+            // that address is never null and LLVM folds the test to `true` —
+            // the same claim as before, except it now follows from the
+            // declaration we emit instead of from a hardcoded `1`, and it
+            // tracks the declaration automatically if a weak-linkage FFI mode
+            // is ever added.
+            let mut pos = 0usize;
+            let dst_reg = read_reg_varlen(operands, &mut pos)?;
+            if operands.len() < pos + 4 {
                 return Err(LlvmLoweringError::internal(
                     "IsSymbolResolved: insufficient operands",
                 ));
             }
-            let dst_reg = op_reg(operands, 0);
+            let symbol_idx = u32::from_le_bytes([
+                operands[pos],
+                operands[pos + 1],
+                operands[pos + 2],
+                operands[pos + 3],
+            ]);
 
-            let true_val = ctx.types().bool_type().const_int(1, false);
-            ctx.set_register(dst_reg, true_val.into());
+            let vbc_module = ctx
+                .vbc_module()
+                .or_internal("IsSymbolResolved requires VBC module")?;
+            let ffi_symbol = vbc_module
+                .get_ffi_symbol(FfiSymbolId(symbol_idx))
+                .or_internal_else(|| {
+                    format!(
+                        "IsSymbolResolved: FFI symbol {} not found — the query \
+                         cannot be answered for a symbol this module does not \
+                         declare (T0110)",
+                        symbol_idx
+                    )
+                })?;
+            let symbol_name = vbc_module
+                .strings
+                .get(ffi_symbol.name)
+                .or_internal("FFI symbol name not in string table")?;
+
+            let llvm_ctx = ctx.llvm_context();
+            let ret_type = ctype_to_llvm_type(llvm_ctx, ffi_symbol.signature.return_type);
+            let param_types: Vec<BasicMetadataTypeEnum> = ffi_symbol
+                .signature
+                .param_types
+                .iter()
+                .filter_map(|ct| ctype_to_llvm_type(llvm_ctx, *ct))
+                .map(|ty| ty.into())
+                .collect();
+            let fn_type = match ret_type {
+                Some(ret) => ret.fn_type(&param_types, ffi_symbol.signature.is_variadic),
+                None => llvm_ctx
+                    .void_type()
+                    .fn_type(&param_types, ffi_symbol.signature.is_variadic),
+            };
+
+            let llvm_module = ctx.get_module();
+            let llvm_fn = match llvm_module.get_function(symbol_name) {
+                Some(existing) => existing,
+                None => llvm_module.add_function(symbol_name, fn_type, None),
+            };
+            let fn_ptr = llvm_fn.as_global_value().as_pointer_value();
+            let resolved = ctx
+                .builder()
+                .build_is_not_null(fn_ptr, "ffi_symbol_resolved")
+                .or_llvm_err()?;
+            ctx.set_register(dst_reg, resolved.into());
             Ok(())
         }
 
@@ -30900,21 +30980,103 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        Some(SystemSubOpcode::CreateCallback) | Some(SystemSubOpcode::FreeCallback) => {
-            // Callback trampolines: pass through function pointer as-is for now
-            if operands.is_empty() {
+        Some(SystemSubOpcode::CreateCallback) => {
+            // Format: dst:reg, fn_id:u32, signature_idx:u32 — emitted by
+            // `compile_ffi_callback` (verum_vbc/src/codegen/expressions.rs)
+            // whenever a Verum function is passed where a C function pointer
+            // is expected.
+            //
+            // T0110: the arm that used to cover this case called itself a
+            // "pass through function pointer as-is" and read
+            // `op_reg(operands, 1)`. Operand slot 1 is NOT a register — it is
+            // the first byte of the u32 `fn_id` — so the value handed to C as
+            // the callback address was the contents of register
+            // `fn_id & 0xFF`: an unrelated register chosen by the function's
+            // id. C then CALLS that value.
+            //
+            // A real Tier-1 trampoline is a C-ABI thunk that adapts the Verum
+            // calling convention (NaN-boxed values, CBGR-tiered references)
+            // to the callback's C signature. That is a feature, not a line
+            // edit, and it is not written.
+            //
+            // It is lowered to a LOUD `verum_panic` rather than a lowering
+            // error because the baked stdlib CONTAINS this instruction:
+            // `DarwinThread.spawn` hands the Verum function `thread_entry` to
+            // the `pthread_create` extern (core/sys/darwin/thread.vr), so the
+            // archive carries `FfiExtended{sub_op: 0x50}` whether or not a
+            // given program calls it. Failing the lowering would break every
+            // AOT build instead of only the programs that create a callback.
+            // This is the in-file DYN-MISS-LOUD pattern used by the
+            // TensorExtended envelope arm: call the noreturn panic, then park
+            // a value in dst so the IR stays well-formed for the instructions
+            // the block continues with (they are unreachable at run time).
+            let mut pos = 0usize;
+            let dst_reg = read_reg_varlen(operands, &mut pos)?;
+            if operands.len() < pos + 4 {
                 return Err(LlvmLoweringError::internal(
-                    "Callback: insufficient operands",
+                    "CreateCallback: insufficient operands",
                 ));
             }
-            let dst_reg = op_reg(operands, 0);
-            if operands.len() >= 2 {
-                let val = ctx.get_register(op_reg(operands, 1))?;
-                ctx.set_register(dst_reg, val);
-            } else {
-                let null = ctx.types().ptr_type().const_null();
-                ctx.set_register(dst_reg, null.into());
-            }
+            let fn_id = u32::from_le_bytes([
+                operands[pos],
+                operands[pos + 1],
+                operands[pos + 2],
+                operands[pos + 3],
+            ]);
+
+            let void_type = ctx.llvm_context().void_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let i64_ty = ctx.llvm_context().i64_type();
+            let i32_ty = ctx.llvm_context().i32_type();
+            // verum_panic's canonical ABI is 4-param `void(ptr,i64,ptr,i32)`
+            // (emit_panic_ir); a 1-param same-name declaration was the AOT
+            // panic-crash class.
+            let panic_ty = void_type.fn_type(
+                &[ptr_ty.into(), i64_ty.into(), ptr_ty.into(), i32_ty.into()],
+                false,
+            );
+            let panic_fn =
+                super::error::get_or_declare_function(ctx.get_module(), "verum_panic", panic_ty);
+            let panic_text = format!(
+                "FFI CreateCallback (Verum function #{fn_id}): the AOT backend cannot \
+                 build a C-callable trampoline for a Verum function — adapting the \
+                 Verum calling convention to a C function pointer is not implemented \
+                 at Tier 1. Run on Tier 0 (the interpreter builds the trampoline \
+                 through libffi), or pass a C function pointer obtained from an \
+                 `extern` declaration (T0110)."
+            );
+            let msg = ctx
+                .builder()
+                .build_global_string_ptr(&panic_text, "ffi_create_callback_panic_msg")
+                .or_llvm_err()?;
+            ctx.builder()
+                .build_call(
+                    panic_fn,
+                    &[
+                        msg.as_pointer_value().into(),
+                        i64_ty.const_int(panic_text.len() as u64, false).into(),
+                        ptr_ty.const_null().into(),
+                        i32_ty.const_int(0, false).into(),
+                    ],
+                    "",
+                )
+                .or_llvm_err()?;
+            let unreachable_result = ctx.types().ptr_type().const_null();
+            ctx.set_register(dst_reg, unreachable_result.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::FreeCallback) => {
+            // Format: trampoline:reg — there is NO destination register.
+            //
+            // Releasing a trampoline is a no-op at Tier 1 (nothing allocates
+            // one: `CreateCallback` above fails the lowering), which matches
+            // the Tier-0 handler's documented no-op.
+            //
+            // T0110: this used to share the `CreateCallback` arm, which read
+            // operand 0 as a DESTINATION and stored null into it — clobbering
+            // the caller's live trampoline register on the way past. Consuming
+            // no register is the whole behaviour.
             Ok(())
         }
 
@@ -31829,7 +31991,7 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
-        // Mach Kernel Operations (0x90-0x98) — macOS-specific, stub for portability
+        // Mach Kernel Operations (0x90-0x98) — macOS kernel API surface.
         Some(SystemSubOpcode::MachVmAllocate)
         | Some(SystemSubOpcode::MachVmDeallocate)
         | Some(SystemSubOpcode::MachVmProtect)
@@ -31839,14 +32001,51 @@ fn lower_ffi_extended<'ctx>(
         | Some(SystemSubOpcode::MachSemWait)
         | Some(SystemSubOpcode::MachErrorString)
         | Some(SystemSubOpcode::MachSleepUntil) => {
-            // Mach kernel ops: return 0/null on non-macOS, delegate to runtime on macOS
-            if operands.is_empty() {
-                return Ok(());
+            // T0110: all nine used to collapse into one arm that stored
+            // `i64 0` into the destination and returned Ok, under the comment
+            // "return 0/null on non-macOS, delegate to runtime on macOS". The
+            // delegation was described and never written — the body had no
+            // macOS branch and read no triple at all.
+            //
+            // Zero is not a neutral placeholder here: zero is KERN_SUCCESS.
+            // Every one of these therefore reported SUCCESS on every target,
+            // macOS included — `mach_vm_allocate` succeeding without
+            // allocating and leaving its address untouched, `mach_sem_wait`
+            // succeeding without waiting, `mach_sem_signal` succeeding
+            // without signalling. A semaphore wait that returns success
+            // without blocking is not a degraded answer; it is undetectable
+            // at the call site.
+            //
+            // Both branches are now loud, and the branch is chosen by the
+            // TARGET triple (per the standing rule that per-platform
+            // decisions in emitted IR never read a host `cfg`) because the
+            // two situations need different diagnoses. Nothing in `core/`
+            // reaches these sub-opcodes: `core/sys/darwin/mach.vr` binds the
+            // same kernel calls through an `@ffi("libSystem.B.dylib")`
+            // `extern` block, which the AOT backend already lowers correctly
+            // — that is the path to use, and implementing a second one here
+            // would also have to settle the documented `Result<_, KernReturn>`
+            // return shape, which NEITHER tier currently produces.
+            let module = ctx.get_module();
+            let mnemonic = sub_opcode.map(|op| op.meta().mnemonic).unwrap_or("MACH_*");
+            if target_is_darwin(module) {
+                Err(LlvmLoweringError::unsupported(format!(
+                    "{mnemonic}: the AOT backend has no Tier-1 lowering for the \
+                     Mach kernel sub-opcodes. Call the Mach API through \
+                     `core.sys.darwin.mach` (an `@ffi(\"libSystem.B.dylib\")` \
+                     `extern` block, lowered as an ordinary FFI call) instead \
+                     of the `mach_*` intrinsic (T0110)."
+                )))
+            } else {
+                let triple = module.get_triple();
+                let triple = triple.as_str().to_string_lossy();
+                Err(LlvmLoweringError::unsupported(format!(
+                    "{mnemonic}: Mach is the macOS/Darwin kernel interface and \
+                     target `{triple}` does not provide it. This call cannot \
+                     succeed on this target — guard it behind a Darwin-only \
+                     path rather than compiling it for `{triple}` (T0110)."
+                )))
             }
-            let dst_reg = op_reg(operands, 0);
-            let zero = ctx.types().i64_type().const_zero();
-            ctx.set_register(dst_reg, zero.into());
-            Ok(())
         }
 
         // CBGR Memory Operations (0xA0-0xA2) — tracked allocation for
@@ -41280,3 +41479,232 @@ mod simd_store_never_lowers_to_nothing {
         );
     }
 }
+
+/// T0110 — the AOT FFI placeholder arms must never fake success.
+///
+/// Every test here pins an OBSERVED behaviour of `lower_ffi_extended`, and
+/// every one of them failed before the fix because the arm under test
+/// returned `Ok` after storing a plausible constant into the destination
+/// register: a null library handle, a constant `true`, an arbitrary
+/// register's contents as a C function pointer, or `i64 0` — which for the
+/// Mach family is KERN_SUCCESS.
+#[cfg(test)]
+mod ffi_placeholder_arms_never_fake_success {
+    use super::*;
+    use verum_llvm::context::Context;
+    use verum_llvm::targets::TargetTriple;
+    use verum_vbc::module::{FfiSignature, FfiSymbol, VbcModule};
+
+    const MACH_SUB_OPCODES: &[SystemSubOpcode] = &[
+        SystemSubOpcode::MachVmAllocate,
+        SystemSubOpcode::MachVmDeallocate,
+        SystemSubOpcode::MachVmProtect,
+        SystemSubOpcode::MachSemCreate,
+        SystemSubOpcode::MachSemDestroy,
+        SystemSubOpcode::MachSemSignal,
+        SystemSubOpcode::MachSemWait,
+        SystemSubOpcode::MachErrorString,
+        SystemSubOpcode::MachSleepUntil,
+    ];
+
+    /// Lower one `FfiExtended` sub-op into a fresh `void()` function on a
+    /// module carrying `triple`, and return the lowering outcome as text
+    /// (`Ok` or the error's `Display` form).
+    fn lower_outcome(sub_op: SystemSubOpcode, operands: &[u8], triple: &str) -> std::result::Result<(), String> {
+        let context = Context::create();
+        let module = context.create_module("t0110_probe");
+        module.set_triple(&TargetTriple::create(triple));
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("t0110_probe_fn", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+
+        let mut ctx = FunctionContext::new(&context, &module, function, "t0110_probe_fn");
+        ctx.builder().position_at_end(entry);
+        lower_ffi_extended(&mut ctx, sub_op as u8, operands).map_err(|e| e.to_string())
+    }
+
+    /// `GetLibrary` used to store `ptr null` into the destination and report
+    /// success — a value indistinguishable from a failed `dlopen`, which the
+    /// sibling `IsSymbolResolved` arm then certified as resolved.
+    #[test]
+    fn get_library_fails_the_lowering_instead_of_handing_back_a_null_handle() {
+        let err = lower_outcome(SystemSubOpcode::GetLibrary, &[0, 0], "arm64-apple-darwin")
+            .expect_err("GetLibrary must not lower to a null handle reported as success");
+        assert!(
+            err.contains("GetLibrary") && err.contains("no dynamic loader"),
+            "the diagnostic must name the operation and why it cannot be answered, got: {err}"
+        );
+    }
+
+    /// `CreateCallback`'s operands are `dst:reg, fn_id:u32, signature_idx:u32`.
+    /// The old arm read `op_reg(operands, 1)` — the first byte of `fn_id`, not
+    /// a register — and passed that register's contents to C as the callback
+    /// address. With `fn_id = 0x01020304` that is register 4, so r4's decoy
+    /// value below is precisely what C would have been asked to CALL.
+    ///
+    /// The lowering still succeeds: the baked stdlib carries this instruction
+    /// (`DarwinThread.spawn` → `pthread_create`), so failing it would break
+    /// every AOT build rather than the programs that create a callback. What
+    /// must not survive is the fabricated function pointer.
+    #[test]
+    fn create_callback_aborts_instead_of_passing_an_arbitrary_register_to_c() {
+        let context = Context::create();
+        let module = context.create_module("t0110_create_cb");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("t0110_create_cb_fn", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+        let mut ctx = FunctionContext::new(&context, &module, function, "t0110_create_cb_fn");
+        ctx.builder().position_at_end(entry);
+
+        let decoy = context.i64_type().const_int(0xDEAD, false);
+        ctx.set_register(4, decoy.into());
+
+        let mut operands = vec![3u8];
+        operands.extend_from_slice(&0x0102_0304u32.to_le_bytes());
+        operands.extend_from_slice(&5u32.to_le_bytes());
+        lower_ffi_extended(&mut ctx, SystemSubOpcode::CreateCallback as u8, &operands)
+            .expect("CreateCallback lowers to a runtime abort, not a lowering failure");
+
+        let ir = module.print_to_string().to_string();
+        assert!(
+            ir.contains("verum_panic") && ir.contains("CreateCallback") && ir.contains("16909060"),
+            "CreateCallback must emit a panic naming the operation and the Verum \
+             function id; IR was:\n{ir}"
+        );
+        let dst = ctx.get_register(3).expect("destination register is defined");
+        assert!(
+            !(dst.is_int_value()
+                && dst.into_int_value().get_zero_extended_constant() == Some(0xDEAD)),
+            "the destination must not receive the contents of r4 — that is the \
+             operand misread this pin exists for"
+        );
+    }
+
+    /// `FreeCallback`'s single operand is the trampoline register — there is
+    /// no destination. Sharing `CreateCallback`'s arm made the lowering treat
+    /// it as one and store null over the caller's live value.
+    #[test]
+    fn free_callback_does_not_clobber_the_trampoline_register() {
+        let context = Context::create();
+        let module = context.create_module("t0110_free_cb");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("t0110_free_cb_fn", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+        let mut ctx = FunctionContext::new(&context, &module, function, "t0110_free_cb_fn");
+        ctx.builder().position_at_end(entry);
+
+        let sentinel = context.i64_type().const_int(0xABCD, false);
+        ctx.set_register(7, sentinel.into());
+
+        lower_ffi_extended(&mut ctx, SystemSubOpcode::FreeCallback as u8, &[7])
+            .expect("FreeCallback lowers as a no-op");
+
+        let after = ctx.get_register(7).expect("register 7 still holds a value");
+        assert!(
+            after.is_int_value()
+                && after.into_int_value().get_zero_extended_constant() == Some(0xABCD),
+            "FreeCallback must not write the trampoline register; it now holds {after:?}"
+        );
+    }
+
+    /// Build a module whose FFI symbol table declares exactly `getpid` at
+    /// index 0, then lower `IsSymbolResolved` for `symbol_idx`.
+    fn lower_is_symbol_resolved(symbol_idx: u32) -> std::result::Result<String, String> {
+        let mut vbc = VbcModule::new("t0110_syms".to_string());
+        let name = vbc.strings.intern("getpid");
+        vbc.add_ffi_symbol(FfiSymbol::new(name, FfiSignature::default()));
+
+        let context = Context::create();
+        let module = context.create_module("t0110_is_resolved");
+        let fn_type = context.void_type().fn_type(&[], false);
+        let function = module.add_function("t0110_is_resolved_fn", fn_type, None);
+        let entry = context.append_basic_block(function, "entry");
+        let mut ctx =
+            FunctionContext::with_vbc_module(&context, &module, &vbc, function, "t0110_is_resolved_fn");
+        ctx.builder().position_at_end(entry);
+
+        let mut operands = vec![1u8];
+        operands.extend_from_slice(&symbol_idx.to_le_bytes());
+        lower_ffi_extended(&mut ctx, SystemSubOpcode::IsSymbolResolved as u8, &operands)
+            .map_err(|e| e.to_string())?;
+        Ok(module.print_to_string().to_string())
+    }
+
+    /// The old arm ignored `symbol_idx` and answered `true` unconditionally —
+    /// including for an index the module's FFI table does not contain.
+    #[test]
+    fn is_symbol_resolved_rejects_a_symbol_the_module_never_declared() {
+        let err = lower_is_symbol_resolved(7)
+            .expect_err("an unknown FFI symbol index must not be answered `resolved`");
+        assert!(
+            err.contains("IsSymbolResolved") && err.contains("7"),
+            "the diagnostic must name the operation and the missing index, got: {err}"
+        );
+    }
+
+    /// The answer must be DERIVED from the symbol, not asserted: lowering a
+    /// resolved-query now declares the symbol it is asked about, so the claim
+    /// "the linker binds it" is about something the module actually names.
+    /// The old constant `true` emitted no reference of any kind.
+    #[test]
+    fn is_symbol_resolved_declares_the_symbol_it_answers_about() {
+        let ir = lower_is_symbol_resolved(0).expect("a declared FFI symbol lowers");
+        assert!(
+            ir.contains("@getpid"),
+            "IsSymbolResolved must reference the symbol it reports on; IR was:\n{ir}"
+        );
+    }
+
+    /// Zero is KERN_SUCCESS, so the old shared arm reported that every Mach
+    /// operation had succeeded — on every target, macOS included.
+    #[test]
+    fn every_mach_sub_opcode_fails_loudly_on_darwin() {
+        for &sub_op in MACH_SUB_OPCODES {
+            let err = lower_outcome(sub_op, &[0, 1, 2], "arm64-apple-darwin").expect_err(
+                "a Mach op with no Tier-1 lowering must not report KERN_SUCCESS on Darwin",
+            );
+            assert!(
+                err.contains(sub_op.meta().mnemonic) && err.contains("core.sys.darwin.mach"),
+                "the Darwin diagnostic must name the op and the path that works, got: {err}"
+            );
+        }
+    }
+
+    /// The same nine on a non-Darwin target: the kernel interface does not
+    /// exist there at all, which is a different diagnosis — and the branch
+    /// between them must be taken on the TARGET triple, never a host `cfg`.
+    /// Running this on a macOS host is itself the cross-compilation check.
+    #[test]
+    fn every_mach_sub_opcode_fails_loudly_on_a_non_darwin_target() {
+        for &sub_op in MACH_SUB_OPCODES {
+            let err = lower_outcome(sub_op, &[0, 1, 2], "x86_64-unknown-linux-gnu").expect_err(
+                "a Mach op must not report KERN_SUCCESS on a target with no Mach kernel",
+            );
+            assert!(
+                err.contains(sub_op.meta().mnemonic) && err.contains("x86_64-unknown-linux-gnu"),
+                "the non-Darwin diagnostic must name the op and the target, got: {err}"
+            );
+        }
+    }
+
+    /// Defence in depth for the rule above: identical messages on both
+    /// branches would mean the triple is not being read at all, which is the
+    /// state this arm was in (a comment promising a macOS branch over a body
+    /// that had none).
+    #[test]
+    fn mach_diagnostics_differ_by_target_triple() {
+        let darwin = lower_outcome(SystemSubOpcode::MachSemWait, &[0, 1], "arm64-apple-darwin")
+            .expect_err("Darwin branch is loud");
+        let linux = lower_outcome(
+            SystemSubOpcode::MachSemWait,
+            &[0, 1],
+            "x86_64-unknown-linux-gnu",
+        )
+        .expect_err("non-Darwin branch is loud");
+        assert_ne!(
+            darwin, linux,
+            "the Mach arm must diagnose per TARGET triple; identical text means no triple is read"
+        );
+    }
+}
+
