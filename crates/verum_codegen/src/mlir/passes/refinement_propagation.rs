@@ -444,10 +444,6 @@ impl ValuePredicates {
         }
     }
 
-    /// Check if a predicate is implied by known predicates.
-    fn implies(&self, pred: &Predicate) -> bool {
-        self.predicates.iter().any(|p| p.implies(pred))
-    }
 }
 
 /// Information about a refinement check operation.
