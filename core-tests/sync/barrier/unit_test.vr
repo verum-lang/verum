@@ -19,10 +19,9 @@ mount core.sync.barrier.{
 // =============================================================================
 //
 // `Barrier.waiting_count()` and `Barrier.generation()` both acquire the
-// internal `state: Mutex<BarrierState>`, which routes through the Tier-0
-// futex FFI gap (audit § 3.1).  Gated tests cover those accessors;
-// tests below stick to `num_threads()` which reads the unprotected
-// `Int` field directly.
+// internal `state: Mutex<BarrierState>`.  That acquisition used to trip
+// the Tier-0 futex FFI gap (audit § 3.1); the futex routing landed
+// 2026-07-12, so the accessors are live at Tier-0 and their tests run.
 
 @test
 fn test_barrier_new_one_thread_constructs() {
@@ -43,10 +42,12 @@ fn test_barrier_num_threads_preserves_constructor_arg() {
 }
 
 @test
-@ignore
 fn test_barrier_one_thread_initial_state_consistent() {
-    // Gated: waiting_count() and generation() acquire state.lock() →
-    // futex FFI gap.  Pinned for future FFI symbol stub landing.
+    // waiting_count() / generation() acquire state.lock() — live since
+    // the futex routing landed.  Both observe real mutable state: a
+    // 1-thread wait() takes the leader path and moves generation 0→1→2
+    // through this same accessor, so `== 0` here is an observation of a
+    // fresh barrier, not a constant.
     let b = Barrier.new(1);
     assert_eq(b.num_threads(), 1);
     assert_eq(b.waiting_count(), 0);
@@ -102,20 +103,17 @@ fn test_phaser_new_some_parties_constructs() {
 // =============================================================================
 //
 // Phaser.register() acquires Phaser.mutex (Mutex<Bool>) before bumping
-// `state`.  The Tier-0 interpreter has a stub for `__mutex_lock_raw`
-// that always succeeds, but the underlying FutexLock.lock() body in
-// core/sync/atomic.vr calls into `sys.{darwin,linux,windows}.thread.{futex_wait,futex_wake}`
-// which routes through an FFI symbol — FfiSymbolId(61) is currently
-// not bound in the Tier-0 FFI symbol table, so any test that exercises
-// register() / arrive_and_await() / arrive_and_deregister() / terminate()
-// trips "FFI symbol not found".  Gated until the FFI symbol gap closes
-// (separate from the round 14b sync defects).  See audit §3.1.
+// `state`.  That path used to trip "FFI symbol not found: FfiSymbolId(61)"
+// at Tier-0; the futex routing landed 2026-07-12, so register() is live
+// and its party-count progression is observable (0→1→2).
 //
-// Phaser.terminate() also calls condvar.notify_all() which routes
-// through futex_wake — same FFI gap.
+// Phaser.terminate() is a DIFFERENT matter and stays gated: it packs
+// TERMINATED_BIT at bit 62 (barrier.vr:298), and the Tier-0 8-byte
+// atomic handlers NaN-box the cell through a 48-bit payload mask, so
+// every bit above 47 is dropped — terminate() is a silent no-op at
+// Tier-0.  Tracked as T0620; the pins below stay @ignore until it lands.
 
 @test
-@ignore
 fn test_phaser_register_increments_parties() {
     let p = Phaser.new(0);
     assert_eq(p.get_registered_parties(), 0);
@@ -134,7 +132,7 @@ fn test_phaser_register_returns_current_phase() {
 }
 
 @test
-@ignore
+@ignore  // T0620: terminate() bit-62 write is masked away at Tier-0 — RED (is_terminated stays false)
 fn test_phaser_terminate_flips_is_terminated() {
     let p = Phaser.new(2);
     assert(!p.is_terminated());
@@ -143,13 +141,20 @@ fn test_phaser_terminate_flips_is_terminated() {
 }
 
 @test
-@ignore
+@ignore  // T0620: PASSES BUT VACUOUS — terminate() is a no-op at Tier-0, so "preserved" is trivially true
 fn test_phaser_terminate_preserves_party_count() {
     let p = Phaser.new(2);
     assert_eq(p.get_registered_parties(), 2);
     p.terminate();
     // The terminate-bit preservation contract: party-count survives
     // (audit §3.2 + barrier.vr:262-288 doc-comment).
+    //
+    // Held @ignore even though it currently PASSES: under T0620 the
+    // bit-62 write never lands, so the state word is bit-identical
+    // before and after terminate() and this assertion cannot tell a
+    // working terminate from a no-op — exactly the invariant it exists
+    // to lock.  Un-ignore together with the RED terminate pins once
+    // T0620 lands.
     assert_eq(p.get_registered_parties(), 2);
 }
 
@@ -172,12 +177,11 @@ fn test_count_down_latch_new_n_observable_count() {
 }
 
 // CountDownLatch.count_down() triggers `condvar.notify_all()` when the
-// counter reaches zero — that path routes through futex_wake (FfiSymbolId
-// gap at Tier-0).  Tests that drain to zero are gated on the FFI symbol
-// stub; the static-shape + above-zero decrement path stays live.
+// counter reaches zero — that path routes through futex_wake, which used
+// to be the FfiSymbolId gap at Tier-0.  Routing landed 2026-07-12: the
+// zero-crossing count_down now completes and the drain is observable.
 
 @test
-@ignore
 fn test_count_down_latch_count_down_decrements() {
     let l = CountDownLatch.new(3);
     l.count_down();
@@ -189,7 +193,6 @@ fn test_count_down_latch_count_down_decrements() {
 }
 
 @test
-@ignore
 fn test_count_down_latch_drain_then_wait_for_zero_immediate() {
     let l = CountDownLatch.new(2);
     l.count_down();
@@ -230,9 +233,11 @@ fn test_two_phasers_independent_initial_state() {
 }
 
 @test
-@ignore
+@ignore  // T0620: terminate() bit-62 write is masked away at Tier-0 — RED (p1.is_terminated stays false)
 fn test_two_phasers_independent() {
-    // GATED: terminate() → condvar.notify_all() → futex_wake FFI gap.
+    // GATED on T0620, not the (closed) futex gap: terminate() sets
+    // TERMINATED_BIT at bit 62, which the Tier-0 48-bit atomic payload
+    // mask drops, so p1.is_terminated() never flips.
     let p1 = Phaser.new(2);
     let p2 = Phaser.new(3);
     p1.terminate();

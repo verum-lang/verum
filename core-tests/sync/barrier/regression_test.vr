@@ -19,12 +19,22 @@ mount core.sync.barrier.{
 // terminated state.  This pin LOCKs the invariant that after
 // terminate(), the party count survives the bit-layout decode.
 //
-// **GATED**: Phaser.terminate() calls `condvar.notify_all()` which
-// routes through futex_wake — FfiSymbolId gap at Tier-0.  Tests pinned
-// here for AOT validation + future interpreter FFI stub landing.
+// **GATED on T0620** (not the futex gap, which closed 2026-07-12).
+// The Tier-0 8-byte atomic handlers NaN-box the cell through a 48-bit
+// payload mask, so TERMINATED_BIT at bit 62 is dropped and terminate()
+// is a silent no-op.  Two consequences, both of which keep all four
+// pins below @ignore'd:
+//
+//   * the two that assert `is_terminated()` are RED;
+//   * the two that only assert preservation (arrived / phase) PASS,
+//     but VACUOUSLY — terminate() leaves the state word bit-identical,
+//     so "preserved" is trivially true and the pin cannot distinguish
+//     a working terminate from a no-op.  That is precisely the §3.2
+//     invariant they exist to lock, so banking them green would be a
+//     false green.  Un-ignore all four together when T0620 lands.
 
 @test
-@ignore
+@ignore  // T0620: terminate() bit-62 write is masked away at Tier-0 — RED (is_terminated stays false)
 fn regression_phaser_terminate_preserves_party_count_one() {
     let p = Phaser.new(1);
     assert_eq(p.get_registered_parties(), 1);
@@ -34,7 +44,7 @@ fn regression_phaser_terminate_preserves_party_count_one() {
 }
 
 @test
-@ignore
+@ignore  // T0620: terminate() bit-62 write is masked away at Tier-0 — RED (is_terminated stays false)
 fn regression_phaser_terminate_preserves_party_count_many() {
     let p = Phaser.new(7);
     p.terminate();
@@ -43,7 +53,7 @@ fn regression_phaser_terminate_preserves_party_count_many() {
 }
 
 @test
-@ignore
+@ignore  // T0620: PASSES BUT VACUOUS — terminate() is a no-op at Tier-0, so "preserved" is trivially true
 fn regression_phaser_terminate_preserves_arrived_zero() {
     let p = Phaser.new(3);
     assert_eq(p.get_arrived_parties(), 0);
@@ -52,7 +62,7 @@ fn regression_phaser_terminate_preserves_arrived_zero() {
 }
 
 @test
-@ignore
+@ignore  // T0620: PASSES BUT VACUOUS — terminate() is a no-op at Tier-0, so "preserved" is trivially true
 fn regression_phaser_terminate_preserves_phase_zero() {
     let p = Phaser.new(3);
     assert_eq(p.get_phase(), 0);
@@ -75,10 +85,10 @@ fn regression_count_down_latch_zero_counter_drained_immediate() {
 }
 
 // CountDownLatch.count_down() triggers `condvar.notify_all()` when the
-// counter reaches zero — futex_wake FFI gap at Tier-0.  Gated.
+// counter reaches zero — the futex_wake path, live since the 2026-07-12
+// routing landed.
 
 @test
-@ignore
 fn regression_count_down_latch_drained_after_count_down_immediate() {
     let l = CountDownLatch.new(1);
     l.count_down();
