@@ -1131,36 +1131,17 @@ impl<'a> BytecodeSpecializer<'a> {
         }
     }
 
-    /// Reads a varint from bytecode.
+    /// Delegates to the crate's decoding authority.  This carried a private
+    /// LEB128 reader mirroring the private writers retired in 076db4d70 — a
+    /// matched pair of re-implementations is how a wire-format divergence
+    /// stays invisible to a round-trip test (T0132).
     fn read_varint(&self, bytecode: &[u8], pc: &mut usize) -> Result<u64, SpecializationError> {
-        let mut result: u64 = 0;
-        let mut shift = 0;
-
-        loop {
-            if *pc >= bytecode.len() {
-                return Err(SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Unexpected end of bytecode reading varint".to_string(),
-                });
+        crate::encoding::decode_varint(bytecode, pc).map_err(|e| {
+            SpecializationError::InvalidBytecode {
+                offset: *pc,
+                message: e.to_string(),
             }
-
-            let byte = bytecode[*pc];
-            *pc += 1;
-
-            result |= ((byte & 0x7F) as u64) << shift;
-            if byte < 128 {
-                break;
-            }
-            shift += 7;
-            if shift >= 64 {
-                return Err(SpecializationError::InvalidBytecode {
-                    offset: *pc,
-                    message: "Varint overflow".to_string(),
-                });
-            }
-        }
-
-        Ok(result)
+        })
     }
 
     /// Reads a TypeRef from bytecode.
