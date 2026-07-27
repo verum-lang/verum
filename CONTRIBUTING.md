@@ -60,7 +60,10 @@ make test-differential  # Tier 0 interpreter vs Tier 3 AOT
 make test-quick
 ```
 
-Baseline pass rates: see `vcs/baselines/l0-baseline.md`.
+Baseline pass rates: see `vcs/baselines/l0-baseline-final.md` — the
+later of the two L0 snapshots, and the one `ci-status.md` cites
+(587/595 = 98.7%). `l0-baseline.md` is the earlier capture and reports
+a different figure.
 
 ### Fuzzing
 
