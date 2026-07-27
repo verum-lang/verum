@@ -103,8 +103,16 @@ public mount .stream.{
     stream_lines, stream_lines_bounded,
 };
 
+// The transducer *algebra* is owned by `core.base.iterator`; `.transducer`
+// only supplies shell-flavoured factories over it.  Re-export the types from
+// their declaring module rather than through `.transducer`, so this stays a
+// one-hop re-export.  `ReduceResult` joins them because a caller writing its
+// own sink for `transduce_into` has to name it.
+public mount core.base.iterator.{
+    Reducer, ReduceResult, Transducer, StatefulTransducer,
+};
+
 public mount .transducer.{
-    Reducer, Transducer, StatefulTransducer,
     mapping, filtering, taking, dropping,
     taking_while, dropping_while, dedup_consecutive,
     flat_mapping, tap,
