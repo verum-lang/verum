@@ -57,8 +57,6 @@ use verum_diagnostics::Diagnostic;
 use verum_smt::tactics::{StrategyBuilder, TacticCombinator, TacticExecutor, TacticKind};
 use verum_types::Type;
 
-// Type alias for type-level lists to match verum_types expectations
-type TypeList = List<Type>;
 use z3::ast::Ast;
 
 use thiserror::Error;

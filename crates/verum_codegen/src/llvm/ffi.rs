@@ -54,6 +54,16 @@ use super::types::TypeLowering;
 
 /// LLVM calling convention constants.
 /// Reference: llvm-c/Core.h LLVMCallConv enum
+///
+/// `AARCH64_AAPCS_VFP` and `AARCH64_AAPCS_SVE` have no caller yet.  They are
+/// kept, and exempted here rather than deleted, because this module is a
+/// MIRROR of a cited upstream enum: dropping two of its members would leave
+/// an incomplete mirror, and whoever wires SVE support would have to
+/// re-derive the value 83 from the LLVM headers.  The exemption is scoped to
+/// this module and carries its reason — which is the shape the crate-level
+/// `#![allow(dead_code)]` should be replaced by (T0132), not a licence to
+/// keep genuinely dead code.
+#[allow(dead_code)]
 mod calling_conventions {
     pub const C: u32 = 0;
     pub const X86_STDCALL: u32 = 64;
