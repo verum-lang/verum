@@ -7349,11 +7349,6 @@ impl ProofValidator {
         }
     }
 
-    /// Generate a fresh unique identifier for type variables (legacy compatibility)
-    fn generate_fresh_id(&self) -> u64 {
-        TypeVarId::fresh().id()
-    }
-
     /// Apply variable instantiation to an expression
     ///
     /// Recursively substitutes all occurrences of variables in `instantiation`
