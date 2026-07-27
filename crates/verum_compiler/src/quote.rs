@@ -91,8 +91,11 @@ impl TokenStream {
     /// # Errors
     ///
     /// Returns `ParseError::EmptyTokenStream` if the token stream is empty.
-    /// Returns `ParseError::ParseFailed` if the tokens don't form a valid expression.
-    /// Returns `ParseError::UnconsumedTokens` if tokens remain after parsing.
+    /// Returns `ParseError::ParseFailed` if the tokens don't form a valid expression,
+    /// INCLUDING the case where the stream carries more than one expression: the
+    /// whole slice must be consumed, and the leftover is named by the parser's own
+    /// diagnostic rather than discarded (T0643). See [`ParseError::UnconsumedTokens`]
+    /// for why that case is not yet reported under its own variant.
     ///
     /// # Example
     ///
@@ -123,8 +126,9 @@ impl TokenStream {
     /// # Errors
     ///
     /// Returns `ParseError::EmptyTokenStream` if the token stream is empty.
-    /// Returns `ParseError::ParseFailed` if the tokens don't form a valid type.
-    /// Returns `ParseError::UnconsumedTokens` if tokens remain after parsing.
+    /// Returns `ParseError::ParseFailed` if the tokens don't form a valid type,
+    /// including a stream that carries a type followed by anything else — the whole
+    /// slice must be consumed (T0643). See [`ParseError::UnconsumedTokens`].
     ///
     /// # Example
     ///
@@ -154,8 +158,10 @@ impl TokenStream {
     /// # Errors
     ///
     /// Returns `ParseError::EmptyTokenStream` if the token stream is empty.
-    /// Returns `ParseError::ParseFailed` if the tokens don't form a valid item.
-    /// Returns `ParseError::UnconsumedTokens` if tokens remain after parsing.
+    /// Returns `ParseError::ParseFailed` if the tokens don't form a valid item —
+    /// which now INCLUDES a stream carrying two items. That case used to return the
+    /// first item and drop the rest silently; use [`Self::parse_as_items`] when a
+    /// stream may hold more than one (T0643). See [`ParseError::UnconsumedTokens`].
     ///
     /// # Example
     ///
@@ -4135,7 +4141,22 @@ pub enum ParseError {
     /// Feature not yet implemented
     NotImplemented(Text),
 
-    /// Tokens remain after parsing completed
+    /// Tokens remain after parsing completed.
+    ///
+    /// NOT CONSTRUCTED TODAY, and the three `parse_as_*` doc comments no longer
+    /// claim otherwise. The condition it names IS now detected — the token entry
+    /// points in `verum_fast_parser` refuse a slice they did not consume — but they
+    /// report through `Result<_, Text>`, so the refusal reaches this module as
+    /// [`ParseError::ParseFailed`] carrying the parser's diagnostic, which names the
+    /// first unconsumed token.
+    ///
+    /// Reporting it under this variant needs the count and that token as DATA, which
+    /// means a typed error across the `verum_fast_parser` boundary — an API-shape
+    /// change reaching `verum_cli`'s REPL and `verum_lsp`'s script parser as well.
+    /// Detecting it by matching the message text is explicitly not the answer, and
+    /// re-parsing here to recover the count would make this module a second parsing
+    /// authority for a question the parser already answers. Left in place as the
+    /// translation target for that change rather than deleted (T0643).
     UnconsumedTokens {
         /// Number of unconsumed tokens
         count: usize,

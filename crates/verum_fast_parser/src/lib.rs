@@ -389,7 +389,29 @@ impl FastParser {
         Ok(ty)
     }
 
+    /// [`Self::require_input_consumed`] adapted to the token entry points'
+    /// error channel.
+    ///
+    /// The token entry points report through `Result<_, Text>` while the
+    /// string ones report a `List<ParseError>`, so the refusal is joined the
+    /// same way each of them already joins `parser.errors`. The EXHAUSTION
+    /// RULE ITSELF lives in one place for both families: a second predicate
+    /// here would be free to drift from the string entry points, and "did
+    /// this parse consume its input" must not have two answers (T0643).
+    fn require_tokens_consumed(parser: &RecursiveParser<'_>) -> Result<(), Text> {
+        Self::require_input_consumed(parser).map_err(|errors| {
+            let joined: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
+            Text::from(joined.join("; "))
+        })
+    }
+
     /// Parse an expression directly from tokens (for meta-programming).
+    ///
+    /// The **entire** token slice must be the expression: tokens the parser
+    /// does not consume are rejected rather than discarded. Before T0643 a
+    /// `quote!` stream carrying trailing tokens returned `Ok` on the prefix,
+    /// and the caller — which holds no parser and cannot see the cursor —
+    /// could not tell a partial parse from a complete one.
     pub fn parse_expr_tokens(&self, tokens: &List<Token>) -> Result<verum_ast::Expr, Text> {
         if tokens.is_empty() {
             return Err(Text::from("Cannot parse empty token list"));
@@ -405,6 +427,7 @@ impl FastParser {
         match parser.parse_expr() {
             Ok(expr) => {
                 if parser.errors.is_empty() {
+                    Self::require_tokens_consumed(&parser)?;
                     Ok(expr)
                 } else {
                     let errors: Vec<String> =
@@ -417,6 +440,9 @@ impl FastParser {
     }
 
     /// Parse a type directly from tokens (for meta-programming).
+    ///
+    /// The **entire** token slice must be the type; see
+    /// [`Self::parse_expr_tokens`] for why a prefix parse is refused.
     pub fn parse_type_tokens(&self, tokens: &List<Token>) -> Result<verum_ast::Type, Text> {
         if tokens.is_empty() {
             return Err(Text::from("Cannot parse empty token list"));
@@ -432,6 +458,7 @@ impl FastParser {
         match parser.parse_type() {
             Ok(ty) => {
                 if parser.errors.is_empty() {
+                    Self::require_tokens_consumed(&parser)?;
                     Ok(ty)
                 } else {
                     let errors: Vec<String> =
@@ -443,7 +470,13 @@ impl FastParser {
         }
     }
 
-    /// Parse an item directly from tokens (for meta-programming).
+    /// Parse a SINGLE item directly from tokens (for meta-programming).
+    ///
+    /// The **entire** token slice must be that one item. A slice carrying two
+    /// items used to return the FIRST and drop the rest silently, which is
+    /// how a macro expansion could lose half its output with no diagnostic
+    /// anywhere; [`Self::parse_items_tokens`] is the multi-item entry point
+    /// and is what such a caller wants (T0643).
     pub fn parse_item_tokens(&self, tokens: &List<Token>) -> Result<Item, Text> {
         if tokens.is_empty() {
             return Err(Text::from("Cannot parse empty token list"));
@@ -459,6 +492,7 @@ impl FastParser {
         match parser.parse_item() {
             Ok(item) => {
                 if parser.errors.is_empty() {
+                    Self::require_tokens_consumed(&parser)?;
                     Ok(item)
                 } else {
                     let errors: Vec<String> =
@@ -498,6 +532,12 @@ impl FastParser {
         match parser.parse_module() {
             Ok(items) => {
                 if parser.errors.is_empty() {
+                    // `parse_module` runs to EOF, so this normally holds — it
+                    // is asserted anyway so that "the whole slice was
+                    // consumed" is guaranteed by the SAME rule for every
+                    // token entry point rather than by one of them happening
+                    // to loop (T0643).
+                    Self::require_tokens_consumed(&parser)?;
                     Ok(items.into_iter().collect())
                 } else {
                     let errors: Vec<String> =
@@ -1016,6 +1056,101 @@ mod input_exhaustion {
             assert!(
                 parser.parse_type_str(source, file_id).is_ok(),
                 "type `{source}` was rejected as incompletely consumed"
+            );
+        }
+    }
+}
+
+/// T0643 — the TOKEN-slice entry points enforce the same exhaustion rule.
+///
+/// `parse_expr_str` / `parse_type_str` gained the rule first (see
+/// [`input_exhaustion`]); the `*_tokens` family did not, so every
+/// meta-programming caller kept the silent truncation. The caller there is
+/// worse off than a string caller: `quote::TokenStream` hands over a slice
+/// and gets back a node, holds no parser, and the entry point drops the
+/// parser on return — so the consumed count is not observable to it by any
+/// route. It cannot detect what it is not told.
+#[cfg(test)]
+mod token_input_exhaustion {
+    use super::*;
+    use verum_lexer::Lexer;
+
+    fn lex(source: &str) -> List<Token> {
+        Lexer::new(source, FileId::new(0)).filter_map(|r| r.ok()).collect()
+    }
+
+    /// Two items in one slice returned the FIRST and dropped the second.
+    ///
+    /// This is the live macro path: `pipeline/macros.rs` parses each
+    /// expansion result with `parse_as_item` -> `parse_item_tokens`, so a
+    /// macro that generated a function AND a type used to contribute only
+    /// the function, with no diagnostic anywhere. `parse_items_tokens` is
+    /// the entry point for that case and it still accepts both.
+    #[test]
+    fn a_second_item_is_refused_rather_than_dropped() {
+        let parser = FastParser::new();
+        let tokens = lex("fn a() -> Int { 1 } fn b() -> Int { 2 }");
+
+        let single = parser.parse_item_tokens(&tokens);
+        assert!(
+            single.is_err(),
+            "two items parsed as one `Ok` — the second item was discarded"
+        );
+
+        let both = parser
+            .parse_items_tokens(&tokens)
+            .expect("the multi-item entry point accepts both");
+        assert_eq!(both.len(), 2, "parse_items_tokens must return both items");
+    }
+
+    /// The expression case, which is what `quote!{...}.parse_as_expr()` runs.
+    #[test]
+    fn trailing_tokens_after_an_expression_are_refused() {
+        let parser = FastParser::new();
+
+        let result = parser.parse_expr_tokens(&lex("1 + 2 fn f() {}"));
+        assert!(
+            result.is_err(),
+            "an expression followed by an item parsed as `Ok` — the tail was discarded"
+        );
+    }
+
+    /// The type case, which is what `quote!{...}.parse_as_type()` runs.
+    #[test]
+    fn trailing_tokens_after_a_type_are_refused() {
+        let parser = FastParser::new();
+
+        let result = parser.parse_type_tokens(&lex("Int Text"));
+        assert!(
+            result.is_err(),
+            "`Int Text` parsed as `Ok` — the trailing type name was discarded"
+        );
+    }
+
+    /// A rule that rejected everything would satisfy the three tests above
+    /// and be useless, so pin the other direction on each entry point.
+    #[test]
+    fn fully_consumed_token_slices_still_parse() {
+        let parser = FastParser::new();
+
+        for source in ["1 + 2", "foo(1, 2)", "[1, 2, 3]", "if x { 1 } else { 2 }"] {
+            assert!(
+                parser.parse_expr_tokens(&lex(source)).is_ok(),
+                "expression `{source}` was rejected as incompletely consumed"
+            );
+        }
+
+        for source in ["Int", "List<Int>", "Map<Text, List<Int>>"] {
+            assert!(
+                parser.parse_type_tokens(&lex(source)).is_ok(),
+                "type `{source}` was rejected as incompletely consumed"
+            );
+        }
+
+        for source in ["fn a() -> Int { 1 }", "type P is { x: Int };"] {
+            assert!(
+                parser.parse_item_tokens(&lex(source)).is_ok(),
+                "item `{source}` was rejected as incompletely consumed"
             );
         }
     }
