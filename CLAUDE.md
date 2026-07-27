@@ -312,6 +312,13 @@ Memory overhead:   < 5%
 
 ### File Organization
 - Tests in `tests/`, not inline `#[cfg(test)]`
+  - **But know that `tests/` does not gate today.** CI's only test run is
+    `cargo test --workspace --lib --bins` (`.github/workflows/ci.yml`),
+    and `--lib --bins` excludes integration tests. 849 files under
+    `crates/*/tests/` are therefore never run on a PR, while the 751
+    files carrying inline `#[cfg(test)]` are. A gate you land in
+    `tests/` guards nothing until CI runs `--tests` — put it there
+    anyway, and say in the commit that it is currently inert.
 - Benchmarks in `benches/` (criterion)
 - One implementation per feature
 
