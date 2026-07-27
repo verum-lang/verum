@@ -51,8 +51,7 @@ fn test_static_bounds_elimination() {
     // array: [T; 10], index: i where 0 <= i < 10
     // Expected: Check eliminated
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     // Add array bounds: static length 10
     let array_bounds = ArrayBounds::new("array".into()).with_static_length(10);
@@ -88,8 +87,7 @@ fn test_refinement_type_elimination() {
     // array: List<T> where len(array) >= 100
     // Expected: Check eliminated
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     // Add array bounds: length >= 100
     let array_bounds = ArrayBounds::new("array".into()).with_static_length(100);
@@ -124,8 +122,7 @@ fn test_refinement_out_of_bounds() {
     // array: List<T> where len(array) == 100
     // Expected: Check kept (bounds don't match)
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     // Array length: 100
     let array_bounds = ArrayBounds::new("array".into()).with_static_length(100);
@@ -163,8 +160,7 @@ fn test_loop_invariant_elimination() {
     // for i in 0..array.len() { array[i] }
     // Expected: Check eliminated
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     let loop_id = LoopId::new(1);
 
@@ -212,8 +208,7 @@ fn test_loop_invariant_mismatch() {
     // for i in 0..10 { array[i] } // array.len() != 10
     // Expected: Check kept
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     let loop_id = LoopId::new(1);
 
@@ -253,8 +248,7 @@ fn test_meta_parameter_elimination() {
     // fn access<const N: usize>(array: [T; N], i: usize where i < N)
     // Expected: Check eliminated
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     // Array with meta parameter N=10
     let array_bounds = ArrayBounds::new("array".into()).with_static_length(10);
@@ -307,8 +301,7 @@ fn test_dataflow_propagation() {
     // if index < array.len() { array[index] }
     // Expected: Check eliminated in then-branch
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     // Add array bounds
     let array_bounds = ArrayBounds::new("array".into()).with_static_length(100);
@@ -350,8 +343,7 @@ fn test_check_hoisting() {
     // for i in 0..n { array[i*2] }
     // Expected: Hoist check: n*2 < array.len()
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     let loop_id = LoopId::new(1);
 
@@ -385,8 +377,7 @@ fn test_no_hoisting_for_simple_index() {
     // for i in 0..array.len() { array[i] }
     // Expected: Eliminate (not hoist) - induction variable matches bounds
 
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     let loop_id = LoopId::new(1);
 
@@ -425,8 +416,7 @@ fn test_no_hoisting_for_simple_index() {
 #[test]
 fn test_batch_analysis() {
     // Multiple array accesses in one function
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     // Setup bounds
     let array_bounds = ArrayBounds::new("array".into()).with_static_length(10);
@@ -534,8 +524,7 @@ fn test_compute_elimination_stats() {
 
 #[test]
 fn test_empty_access_list() {
-    let cfg = make_cfg();
-    let eliminator = BoundsCheckEliminator::new(cfg);
+    let eliminator = BoundsCheckEliminator::new();
 
     let stats = eliminator.stats();
     assert_eq!(stats.total_checks, 0);
@@ -545,8 +534,7 @@ fn test_empty_access_list() {
 #[test]
 fn test_unknown_array() {
     // Access to array without bounds information
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     let access = ArrayAccess::new(
         Expression::var("unknown"),
@@ -564,8 +552,7 @@ fn test_unknown_array() {
 #[test]
 fn test_complex_index_expression() {
     // array[(i + j) * 2]
-    let cfg = make_cfg();
-    let mut eliminator = BoundsCheckEliminator::new(cfg);
+    let mut eliminator = BoundsCheckEliminator::new();
 
     let array_bounds = ArrayBounds::new("array".into()).with_static_length(100);
     eliminator.add_array_bounds(array_bounds);

@@ -405,9 +405,7 @@ impl VerificationPhase {
         let dom_tree = DominatorTree::compute(&blocks, func.entry_block);
         let loop_info = LoopInfo::compute(&blocks, func.entry_block, &dom_tree);
 
-        // Build EscapeCFG for verum_verification's BoundsCheckEliminator
-        let escape_cfg = self.build_escape_cfg(func);
-        let mut eliminator = BoundsCheckEliminator::new(escape_cfg);
+        let mut eliminator = BoundsCheckEliminator::new();
 
         // Analyze each BoundsCheck statement
         for (block_idx, block) in func.blocks.iter().enumerate() {

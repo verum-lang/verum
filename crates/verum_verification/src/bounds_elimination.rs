@@ -691,8 +691,6 @@ pub struct BoundsCheckEliminator {
     array_bounds: Map<Text, ArrayBounds>,
     /// Loop invariants
     loop_invariants: Map<LoopId, LoopInvariant>,
-    /// Control flow graph
-    cfg: ControlFlowGraph,
     /// Dataflow analyzer
     dataflow: DataflowAnalyzer,
     /// Statistics
@@ -701,13 +699,16 @@ pub struct BoundsCheckEliminator {
 
 impl BoundsCheckEliminator {
     /// Create a new bounds check eliminator
-    pub fn new(cfg: ControlFlowGraph) -> Self {
+    /// The eliminator holds no control-flow graph: the paths that need one
+    /// take it as a free-function argument.  Callers previously built or
+    /// cloned a `ControlFlowGraph` solely to feed a field nothing read
+    /// (T0132).
+    pub fn new() -> Self {
         Self {
             refinements: Map::new(),
             array_bounds: Map::new(),
             loop_invariants: Map::new(),
             dataflow: DataflowAnalyzer::new(),
-            cfg,
             stats: EliminationStats::default(),
         }
     }
@@ -2358,7 +2359,7 @@ pub fn analyze_bounds_check(
     access: &ArrayAccess,
     cfg: &ControlFlowGraph,
 ) -> Result<CheckDecision, BoundsError> {
-    let mut eliminator = BoundsCheckEliminator::new(cfg.clone());
+    let mut eliminator = BoundsCheckEliminator::new();
     eliminator.analyze_array_access(access)
 }
 
@@ -2367,7 +2368,7 @@ pub fn analyze_function_bounds(
     accesses: &List<ArrayAccess>,
     cfg: &ControlFlowGraph,
 ) -> Result<List<CheckDecision>, BoundsError> {
-    let mut eliminator = BoundsCheckEliminator::new(cfg.clone());
+    let mut eliminator = BoundsCheckEliminator::new();
 
     let mut decisions = List::new();
     for access in accesses.iter() {
