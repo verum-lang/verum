@@ -12,15 +12,50 @@
 //! and forces any new stdlib bug that introduces a SKIP to land its
 //! own task / fix before the PR can merge.
 //!
+//! WHAT THE ZERO DOES NOT COVER — read this before treating a green
+//! run as evidence of stdlib hygiene. The count is bounded by what
+//! the fixtures below actually compile, not by the stdlib: a real
+//! full bake emits 33 `[lenient] SKIP` warnings that no fixture here
+//! reaches. So a green run means "the compiled fixtures are clean",
+//! never "the stdlib is clean", and the two are easy to confuse
+//! because the count is pinned at zero either way.
+//!
+//! Second, narrower gap: the matcher below keys on the bracketed
+//! `[lenient]` spelling emitted by `verum_vbc::codegen`. A second
+//! emitter, `pipeline/stdlib_bootstrap.rs`, spells it `lenient SKIP`
+//! WITHOUT brackets and is therefore invisible here. It has not fired
+//! on a measured bake (0 occurrences), so nothing is being miscounted
+//! today — but it reports WHOLE-MODULE PARSE FAILURE, a coarser event
+//! than any per-function skip, so the blind spot sits over the worst
+//! case. Widen the predicate before relying on this as a parse gate.
+//!
 //! When this fails, look at the warning text:
 //!  * `undefined function: <name>` → real missing function or
 //!  mount-alias not propagating; add the function or de-alias the
 //!  mount (#159 pattern).
-//!  * `undefined variable: <Variant>` → cross-type variant collision
-//!  dropping the simple-name alias. Either ensure the colliding
-//!  types have unique simple names (#160 / `stdlib_unique_type_names`)
-//!  or check `register_type_constructors` (#158 `prefer_existing`
-//!  save/restore guard).
+//!  * `undefined variable: <name>` → THREE different causes; read the
+//!  name before choosing one, because the dominant case is not the
+//!  one this guide used to name.
+//!    - The name is a `meta` CONST-GENERIC PARAMETER of the enclosing
+//!    type → the const-generic witness class, NOT a variant problem.
+//!    This is the common case: of the 14 `undefined variable` skips
+//!    emitted by a real full bake, 12 are const-generic parameters,
+//!    verified against their declarations — `N` (`StateSpaceKernel`,
+//!    `S4Layer`, `MambaBlock`, all `<… N: meta USize{N > 0}>`),
+//!    `DIMS` (`MeshTopology<DIMS: meta MeshDims>`), `k`
+//!    (`ClosedSubspaceLattice<k: meta USize{k > 0}>`), `H`
+//!    (`Expert<… H: meta USize{H > 0}>`), `B`. Note `k` is lowercase:
+//!    the predicate is "names a `meta` type parameter", not "is a
+//!    single capital". Chasing variant collisions here wastes the
+//!    session — the parameter never reaches codegen as a value.
+//!    - The name is a VARIANT constructor (capitalised, and the type
+//!    really has such a variant) → cross-type variant collision
+//!    dropping the simple-name alias. Ensure the colliding types have
+//!    unique simple names (#160 / `stdlib_unique_type_names`) or check
+//!    `register_type_constructors` (#158 `prefer_existing`
+//!    save/restore guard).
+//!    - The name is an ordinary lowercase local → a genuine
+//!    binding/scope loss in the function body; read the body.
 //!  * `wrong number of arguments for <name>` → arity-suffix
 //!  registration regression; check
 //!  `crates/verum_vbc/src/codegen/context.rs::register_function`
