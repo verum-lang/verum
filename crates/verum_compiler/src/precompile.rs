@@ -2490,6 +2490,15 @@ fn inject_declared_module_free_fn_keys(
                 let simple = fd.name.name.as_str();
                 let qualified: Text = format!("{}.{}", source_module, simple).into();
                 if metadata.functions.contains_key(&qualified) {
+                    // Diagnostic (VERUM_TRACE_DESCSKIP): this guard is
+                    // FIRST-WINS, so a thinner descriptor written by an
+                    // earlier pass permanently shadows the real one. Under
+                    // investigation as the cause of five core.math
+                    // functions registering once where their 47 siblings
+                    // register three times (T0665).
+                    if std::env::var("VERUM_TRACE_DESCSKIP").is_ok() {
+                        eprintln!("[descskip] {}", qualified.as_str());
+                    }
                     continue;
                 }
                 let params: List<ParamDescriptor> = fd

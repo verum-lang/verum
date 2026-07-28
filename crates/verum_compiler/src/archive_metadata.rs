@@ -862,6 +862,15 @@ fn register_module_metadata(
             Some(s) => Text::from(s),
             None => continue,
         };
+        // Diagnostic (VERUM_TRACE_ITERFN, T0665): every function descriptor
+        // this loop actually sees, with the module it arrives under. Five
+        // PUBLIC core.math.elementary fns carry only one metadata
+        // registration where their siblings carry two; the one they lack is
+        // written from this loop. If they never appear here they are absent
+        // from the archive's function table altogether.
+        if std::env::var("VERUM_TRACE_ITERFN").is_ok() {
+            eprintln!("[iterfn] {}|{}", module_name, simple_name.as_str());
+        }
         let simple_already_registered = meta.functions.contains_key(&simple_name);
 
         // Task #21 — name-prefix takes precedence over TypeId map.
