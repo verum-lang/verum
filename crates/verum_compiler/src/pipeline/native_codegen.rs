@@ -559,6 +559,15 @@ impl<'s> CompilationPipeline<'s> {
         // `Verum.toml` was present.
         apply_strip_options_to_linker_config(self.session.options(), &mut linker_config);
 
+        // Wire the CLI/manifest-resolved --target into the linking
+        // config, keeping `no_libc_config` in lock-step with it
+        // (T0123). Must run before the windows-subsystem block below,
+        // which detects the target platform via
+        // `linker_config.no_libc_config`. See
+        // `apply_target_triple_to_linker_config` doc for the defect
+        // this closes.
+        apply_target_triple_to_linker_config(self.session.options(), &mut linker_config);
+
         // Wire Windows subsystem (console / GUI) into linker config.
         // The CLI (`--windows-subsystem`) and manifest
         // (`[build].windows_subsystem`) get resolved into
@@ -1680,6 +1689,52 @@ fn apply_strip_options_to_linker_config(
         linker_config.strip_debug_only || options.strip_debug;
 }
 
+/// Wire the resolved target triple (`CompilerOptions.target_triple` —
+/// already CLI `--target` > `[llvm].target_triple` manifest precedence,
+/// see `verum_cli::commands::build`) into the LINKING config, and keep
+/// `no_libc_config` in lock-step with it (T0123).
+///
+/// Pre-fix, `LinkingConfig.target_triple` on the config this function
+/// receives was populated ONLY from a *different*, linker-only
+/// manifest key (`[linker].target`, via
+/// `ProjectConfig::to_linking_config`) or left `None` by
+/// `LinkingConfig::default()` — never from `--target`, even though
+/// `--target` already drives the LLVM module triple (the T0123
+/// module-triple fix, `a03717cf5`) and the Metal-framework gate a few
+/// lines below `phase_generate_native`'s call site. A CLI-only cross
+/// build — no `Verum.toml`, or one that doesn't set `[linker].target`,
+/// which is the common case — therefore reached `system_link_direct`
+/// (phases/linking.rs) with `target_triple: None` (so `--target=`
+/// never reached `cc`) and `no_libc_config:
+/// Some(NoLibcConfig::for_host())` (so the no-libc entry point,
+/// `-nostdlib` flags and allowed libraries were the HOST's, not the
+/// requested target's). That is exactly the host-gate miscompile
+/// CLAUDE.md's no-libc invariant forbids, at the linking boundary
+/// rather than codegen.
+///
+/// Mirrors `LinkerTomlConfig::to_linking_config` (linker_config.rs)
+/// exactly — the same `Platform::from_triple(..).unwrap_or_else(
+/// Platform::host)` derivation — so a CLI `--target` and a manifest
+/// `[linker].target` agree on `no_libc_config` for the same triple.
+/// The CLI value wins when both are present, consistent with how
+/// `link_executable` and the Metal-framework gate (both a few lines
+/// below the call site) already treat `options.target_triple` as
+/// authoritative over any manifest linker setting. A no-op when
+/// `--target` is absent: `linker_config` is left exactly as
+/// `load_linker_config` and the LTO/strip wiring above produced it.
+fn apply_target_triple_to_linker_config(
+    options: &crate::options::CompilerOptions,
+    linker_config: &mut LinkingConfig,
+) {
+    use verum_codegen::link::{NoLibcConfig, Platform};
+
+    if let Some(ref triple) = options.target_triple {
+        linker_config.target_triple = Some(triple.clone());
+        let platform = Platform::from_triple(triple.as_str()).unwrap_or_else(Platform::host);
+        linker_config.no_libc_config = Some(NoLibcConfig::for_platform(platform));
+    }
+}
+
 #[cfg(test)]
 mod strip_wiring_tests {
     use super::*;
@@ -1739,6 +1794,115 @@ mod strip_wiring_tests {
         assert!(
             !linker.strip,
             "neither CLI nor manifest set strip — must remain false"
+        );
+    }
+}
+
+#[cfg(test)]
+mod target_triple_wiring_tests {
+    use super::*;
+    use crate::options::CompilerOptions;
+    use verum_codegen::link::Platform;
+    use verum_common::Text;
+
+    /// Pin: a CLI `--target` for a NON-host platform sets BOTH
+    /// `LinkingConfig.target_triple` and `no_libc_config.platform` —
+    /// driven through the exact wiring function `phase_generate_native`
+    /// calls, not by constructing `NoLibcConfig::for_platform` in
+    /// isolation (T0123's own acceptance text: an isolated constructor
+    /// test "cannot detect an override that is never reached").
+    ///
+    /// Covers all three desktop platforms so the result cannot be a
+    /// coincidental match with whatever OS is running this test.
+    #[test]
+    fn cli_target_triple_couples_no_libc_platform() {
+        let cases: &[(&str, Platform)] = &[
+            ("x86_64-unknown-linux-gnu", Platform::Linux),
+            ("aarch64-apple-darwin", Platform::MacOS),
+            ("x86_64-pc-windows-msvc", Platform::Windows),
+        ];
+        for (triple, expected_platform) in cases {
+            // Start from the host-derived default — the exact starting
+            // point `load_linker_config` returns when no Verum.toml is
+            // present, which is the common CLI-only cross-build case.
+            let mut linker = LinkingConfig::default();
+            let mut opts = CompilerOptions::default();
+            opts.target_triple = Some(Text::from(*triple));
+
+            apply_target_triple_to_linker_config(&opts, &mut linker);
+
+            assert_eq!(
+                linker.target_triple.as_ref().map(|t| t.as_str()),
+                Some(*triple),
+                "target_triple must be set to the requested triple {triple}"
+            );
+            let no_libc = linker
+                .no_libc_config
+                .as_ref()
+                .expect("no_libc_config must remain Some after wiring");
+            assert_eq!(
+                no_libc.platform, *expected_platform,
+                "no_libc_config.platform for {triple} must be {expected_platform:?}, \
+                 not a host-derived value"
+            );
+        }
+    }
+
+    /// Pin: absent `--target`, wiring is a total no-op — the CLI
+    /// control the team asked for. Proves the fix cannot regress a
+    /// same-host / no-flag build.
+    #[test]
+    fn no_cli_target_triple_is_inert() {
+        let baseline = LinkingConfig::default();
+        let mut linker = LinkingConfig::default();
+        let opts = CompilerOptions::default();
+        assert!(
+            opts.target_triple.is_none(),
+            "precondition: default CompilerOptions has no --target"
+        );
+
+        apply_target_triple_to_linker_config(&opts, &mut linker);
+
+        assert_eq!(
+            linker.target_triple.as_ref().map(|t| t.as_str()),
+            baseline.target_triple.as_ref().map(|t| t.as_str()),
+            "target_triple must be untouched when --target is absent"
+        );
+        assert_eq!(
+            linker.no_libc_config.as_ref().map(|c| c.platform),
+            baseline.no_libc_config.as_ref().map(|c| c.platform),
+            "no_libc_config must be untouched when --target is absent"
+        );
+    }
+
+    /// Pin: a CLI `--target` overrides a manifest-derived config that
+    /// was already coupled to a DIFFERENT platform — CLI wins, matching
+    /// how `link_executable` and the Metal-framework gate already treat
+    /// `options.target_triple` as authoritative over `[linker].target`.
+    #[test]
+    fn cli_target_triple_overrides_manifest_derived_config() {
+        use verum_codegen::link::NoLibcConfig;
+
+        // Simulate what `ProjectConfig::to_linking_config` would have
+        // produced from a manifest `[linker].target = "aarch64-apple-darwin"`.
+        let mut linker = LinkingConfig::default();
+        linker.target_triple = Some(Text::from("aarch64-apple-darwin"));
+        linker.no_libc_config = Some(NoLibcConfig::for_platform(Platform::MacOS));
+
+        let mut opts = CompilerOptions::default();
+        opts.target_triple = Some(Text::from("x86_64-unknown-linux-gnu"));
+
+        apply_target_triple_to_linker_config(&opts, &mut linker);
+
+        assert_eq!(
+            linker.target_triple.as_ref().map(|t| t.as_str()),
+            Some("x86_64-unknown-linux-gnu"),
+            "CLI --target must override a manifest-derived target_triple"
+        );
+        assert_eq!(
+            linker.no_libc_config.as_ref().map(|c| c.platform),
+            Some(Platform::Linux),
+            "CLI --target must override a manifest-derived no_libc_config platform"
         );
     }
 }
