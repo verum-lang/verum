@@ -80,13 +80,27 @@ fn horner_rev(x: Float, coeffs: &[Float]) -> Float {
 // Reduce angle to [-π/4, π/4] for trig functions
 // Returns (reduced_angle, quadrant)
 fn reduce_trig_arg(x: Float) -> (Float, Int) {
-    // Use Payne-Hanek reduction for large arguments
-    let pi_4 = FRAC_PI_4;
-    let inv_pi_4 = 4.0 / PI;
+    // Reduce modulo π/2 and return the QUADRANT index.
+    //
+    // THE UNIT IS LOAD-BEARING AND WAS PREVIOUSLY WRONG. All three
+    // consumers — sin, cos and sincos — apply `quadrant & 3` against a
+    // four-entry table of the π/2 rotations (sin → cos → -sin → -cos).
+    // This function used to count π/4 intervals, so it fed OCTANT
+    // counts into a QUADRANT table. Both functions were individually
+    // correct and the contract between them was not, which is why a
+    // per-function audit found nothing. Every argument came back wrong
+    // except x = 0, where k = 0 under either convention — so tan(0.0)
+    // was right while tan(1.0) returned -4.588 instead of 1.5574.
+    let pi_2 = FRAC_PI_2;
+    let inv_pi_2 = 2.0 / PI;
 
-    // Number of π/4 intervals
-    let k = (x * inv_pi_4 + 0.5).floor() as Int;
-    let reduced = x - (k as Float) * pi_4;
+    // Number of π/2 intervals, rounded to nearest, so |reduced| ≤ π/4
+    // — exactly the domain sin_kernel and cos_kernel document. This is
+    // the standard reduce-mod-π/2 / four-quadrant structure; an octant
+    // reduction cannot be paired with a sign-and-swap table, because
+    // the odd octants need (sin r ± cos r)·√2/2 rather than a swap.
+    let k = (x * inv_pi_2 + 0.5).floor() as Int;
+    let reduced = x - (k as Float) * pi_2;
 
     (reduced, k)
 }
