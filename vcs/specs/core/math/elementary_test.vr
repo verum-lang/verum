@@ -837,6 +837,77 @@ fn test_cbrt_cube_identity() {
 }
 
 // =============================================================================
+// SECTION 17: Bit-exact ULP verification (T0646 sin_kernel/cos_kernel refit)
+// =============================================================================
+//
+// The tolerance-based checks above (1e-10) are far looser than a
+// double's ULP (~2.2e-16 near 1.0) and would not have caught the
+// sin_kernel/cos_kernel under-fit that T0646 fixed: cos_kernel(pi/4)
+// was off by ~3500 ULP and still passed every test above. These pin
+// the exact f64 bit pattern sin()/cos() must produce at three
+// specification anchors (pi/8, 0.6, pi/4) plus the two points found to
+// be the fitted kernels' worst case over a ~650K-point sweep of the
+// full reduced domain, so a future coefficient change is honest about
+// what it costs. Expected bit patterns were computed independently in
+// Python (mpmath high-precision reference, double-checked bit-for-bit
+// against the literal coefficients in sin_kernel/cos_kernel) and are
+// not re-derived here — this is a pinned regression gate, not a
+// specification of correctness.
+
+@test
+fn test_sin_pi_8_bit_exact() {
+    let x = PI / 8.0;
+    assert_eq(sin(x).to_bits(), 4600565431771507043_u64);
+}
+
+@test
+fn test_cos_pi_8_bit_exact() {
+    let x = PI / 8.0;
+    assert_eq(cos(x).to_bits(), 4606496786581982534_u64);
+}
+
+@test
+fn test_sin_0_6_bit_exact() {
+    assert_eq(sin(0.6).to_bits(), 4603261066810835289_u64);
+}
+
+@test
+fn test_cos_0_6_bit_exact() {
+    assert_eq(cos(0.6).to_bits(), 4605609181880802069_u64);
+}
+
+@test
+fn test_sin_pi_4_bit_exact() {
+    // reduce_trig_arg's round-to-nearest tie-break routes the exact
+    // double FRAC_PI_4 into quadrant 1 (x*inv_pi_2+0.5 == 1.0 exactly),
+    // so this actually evaluates cos_kernel(-FRAC_PI_4); still the
+    // value the T0646 acceptance test names.
+    assert_eq(sin(FRAC_PI_4).to_bits(), 4604544271217802189_u64);
+}
+
+@test
+fn test_cos_pi_4_bit_exact() {
+    // Same tie-break, mirrored: evaluates sin_kernel(-FRAC_PI_4).
+    assert_eq(cos(FRAC_PI_4).to_bits(), 4604544271217802188_u64);
+}
+
+@test
+fn test_sin_kernel_worst_case_bit_exact() {
+    // Worst observed sin_kernel error over the T0646 sweep (~1.05 ULP,
+    // double-rounding noise in the Horner evaluation, not a fit
+    // defect — see T0646 journal for the isolation).
+    let x = 0.5079300822385198;
+    assert_eq(sin(x).to_bits(), 4602433277390604418_u64);
+}
+
+@test
+fn test_cos_kernel_worst_case_bit_exact() {
+    // Worst observed cos_kernel error over the T0646 sweep (~1.09 ULP).
+    let x = 0.7652527005063038;
+    assert_eq(cos(x).to_bits(), 4604671277670164834_u64);
+}
+
+// =============================================================================
 // Main function
 // =============================================================================
 
