@@ -67,12 +67,17 @@ impl<'s> CompilationPipeline<'s> {
             .with_debug_info(self.session.options().debug_info)
             .with_coverage(self.session.options().coverage);
 
-        // Set target triple for the host
-        let config = config.with_target(
-            verum_codegen::llvm::verum_llvm::targets::TargetMachine::get_default_triple()
-                .as_str()
-                .to_string_lossy(),
-        );
+        // Set the target triple from `--target`, falling back to the
+        // host. This field is what `target_triple::target_is_*(module)`
+        // reads for every per-platform decision in verum_codegen, so
+        // hardcoding the host here silently made a cross build emit
+        // host-shaped bodies. The absent case is handled once, by
+        // LoweringConfig's own `get_default_triple()` fallback — do
+        // not re-derive it here, or the two consumers diverge again.
+        let config = match self.session.options().target_triple {
+            Some(ref triple) => config.with_target(triple.clone()),
+            None => config,
+        };
 
         // Wire the AOT permission policy into lowering. `None` is the
         // trusted-application default — `PermissionAssert` is elided.

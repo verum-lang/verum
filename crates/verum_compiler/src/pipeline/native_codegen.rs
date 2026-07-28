@@ -776,6 +776,21 @@ impl<'s> CompilationPipeline<'s> {
             .with_futures_enabled(rt.futures)
             .with_nurseries_enabled(rt.nurseries);
 
+        // Cross-compilation: the module's own triple is what every
+        // per-platform decision in verum_codegen reads back through
+        // `target_triple::target_is_*(module)` (83 call sites across
+        // vbc_lowering / runtime / ffi / platform_ir / instruction).
+        // Leaving it unset pinned all of them to the HOST while the
+        // TargetMachine below honours `--target`, so a cross build
+        // selected the right target machine, frameworks and
+        // compiler-rt and then emitted host-shaped bodies into it.
+        // Absent option → LoweringConfig's own `get_default_triple()`
+        // fallback; the fallback stays in one place.
+        let lowering_config = match self.session.options().target_triple {
+            Some(ref triple) => lowering_config.with_target(triple.clone()),
+            None => lowering_config,
+        };
+
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(&llvm_ctx, lowering_config);
 
         // Apply CBGR escape analysis results to LLVM lowering.

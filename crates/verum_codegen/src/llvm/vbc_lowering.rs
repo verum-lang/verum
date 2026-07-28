@@ -745,13 +745,22 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         };
         module.set_triple(&triple);
 
-        // Initialize native target ONCE per process.
-        // LLVM's target initialization is NOT idempotent — calling it multiple
-        // times can corrupt internal state, causing intermittent SIGSEGV in
-        // module verification or code generation.
+        // Initialize ALL targets ONCE per process — not just the native
+        // one. `from_triple` below resolves through the registered-target
+        // table, so a native-only registration makes every FOREIGN triple
+        // fail there, silently skipping `set_data_layout` and leaving the
+        // module with no data layout at all — the exact condition the
+        // comment above warns about. `native_codegen.rs` already states
+        // this policy for the emit-side TargetMachine ("verum supports
+        // cross-compilation by default (#82)"); the lowering side must
+        // match it or `--target` produces a layout-less module.
+        //
+        // LLVM's target initialization is NOT idempotent — calling it
+        // multiple times can corrupt internal state, causing intermittent
+        // SIGSEGV in module verification or code generation.
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| {
-            let _ = verum_llvm::targets::Target::initialize_native(
+            verum_llvm::targets::Target::initialize_all(
                 &verum_llvm::targets::InitializationConfig::default(),
             );
             // SIMPLIFYCFG-SINK-NULL-1 (task #21 layer 2) is fixed AT THE
@@ -4912,6 +4921,58 @@ mod tests {
         let config = LoweringConfig::release("test");
         assert_eq!(config.opt_level, 2);
         assert!(config.cbgr_elimination);
+    }
+
+    /// A foreign `--target` must reach the LLVM module — BOTH its
+    /// triple and its data layout.
+    ///
+    /// The triple is the field every per-platform decision in this
+    /// crate reads back through `target_triple::target_is_*(module)`
+    /// (83 call sites). It used to be pinned to the host on every
+    /// cross build, so a Linux target emitted `declare @socket` —
+    /// the Darwin/libSystem shape — instead of the `syscall`
+    /// sequence, putting 10 undefined libc symbols into a Linux
+    /// object and breaking the no-libc invariant.
+    ///
+    /// The data layout is the second half, and it only became
+    /// reachable once the triple was honoured: this constructor
+    /// registered the NATIVE target alone, so `Target::from_triple`
+    /// failed for any foreign triple and the `set_data_layout` call
+    /// was silently skipped — leaving the module with no layout at
+    /// all, the condition the comment on that block warns causes
+    /// non-deterministic SIGSEGV.
+    ///
+    /// Both halves are asserted together deliberately: fixing the
+    /// triple alone reintroduces the layout hole.
+    #[test]
+    fn foreign_target_triple_sets_both_triple_and_data_layout() {
+        for triple in [
+            "x86_64-unknown-linux-gnu",
+            "x86_64-pc-windows-msvc",
+            "aarch64-unknown-linux-gnu",
+        ] {
+            let context = Context::create();
+            let lowering = VbcToLlvmLowering::new(
+                &context,
+                LoweringConfig::new("triple_probe").with_target(triple),
+            );
+            let module = lowering.module();
+
+            assert_eq!(
+                module.get_triple().as_str().to_string_lossy(),
+                triple,
+                "module triple must be the REQUESTED target, not the host",
+            );
+            assert!(
+                !module
+                    .get_data_layout()
+                    .as_str()
+                    .to_string_lossy()
+                    .is_empty(),
+                "foreign target {triple} produced a module with NO data layout — \
+                 Target::from_triple failed because only the native target was registered",
+            );
+        }
     }
 
     #[test]
