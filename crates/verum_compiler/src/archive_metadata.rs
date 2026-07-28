@@ -247,6 +247,42 @@ fn substitute_opaque_type_ids(
     if changed { Some(out) } else { None }
 }
 
+/// Join a module path and a (possibly already-qualified) item name into ONE
+/// canonical dotted key, merging any overlapping segment run.
+///
+/// The archive's string table stores some item names already qualified —
+/// `sys.linux.syscall.TCGETS` — while the module they arrive under is
+/// `core.sys.linux`. A plain `format!("{module}.{name}")` then produced
+/// `core.sys.linux.sys.linux.syscall.TCGETS`, doubling the shared
+/// `sys.linux` run. The canonical key was therefore never registered and
+/// every lookup of `core.sys.linux.syscall.TCGETS` missed. 720 keys in the
+/// baked archive carried that shape (T0669).
+///
+/// Merging on the longest suffix-of-module / prefix-of-name segment run
+/// yields `core.sys.linux.syscall.TCGETS`. With no overlap this is exactly
+/// the old concatenation, so unqualified names are unaffected.
+fn join_module_path(module_path: &str, item_name: &str) -> String {
+    if module_path.is_empty() {
+        return item_name.to_string();
+    }
+    let m: Vec<&str> = module_path.split('.').collect();
+    let n: Vec<&str> = item_name.split('.').collect();
+    // Longest k where the last k segments of the module path equal the
+    // first k segments of the item name. Never consume the whole item name
+    // (k < n.len()), or the simple name itself would be swallowed.
+    let max_k = m.len().min(n.len().saturating_sub(1));
+    let mut overlap = 0;
+    for k in (1..=max_k).rev() {
+        if m[m.len() - k..] == n[..k] {
+            overlap = k;
+            break;
+        }
+    }
+    let mut out: Vec<&str> = m;
+    out.extend_from_slice(&n[overlap..]);
+    out.join(".")
+}
+
 fn register_module_metadata(
     module: &VbcModule,
     module_name: &str,
@@ -1067,10 +1103,25 @@ fn register_module_metadata(
             // walking the user's mount tree's prefix to construct
             // the right qualified key.
             let qualified_key: Text =
-                format!("{}.{}", module_path, simple_name).into();
+                join_module_path(module_path.as_str(), simple_name.as_str()).into();
             if !meta.functions.contains_key(&qualified_key) {
                 meta.functions.insert(qualified_key, descriptor.clone());
+            } else if std::env::var("VERUM_TRACE_QKEYSKIP").is_ok() {
+                // Diagnostic (T0665): this module-qualified slot is
+                // first-wins too. If an earlier, thinner descriptor already
+                // claimed the key, the real one is dropped here — which
+                // would match the measured 1-versus-3 writer count for the
+                // five core.math names whose qualified calls return nil.
+                eprintln!("[qkeyskip] {}", qualified_key.as_str());
             }
+        } else if std::env::var("VERUM_TRACE_NOMODPATH").is_ok() {
+            // Diagnostic (T0665): a FREE function (no parent_type) whose
+            // descriptor carries an EMPTY module_path takes neither branch
+            // above, so it never receives a module-qualified key and is
+            // left with only precompile.rs's single registration. That is
+            // the measured signature of the five core.math names whose
+            // qualified calls return nil.
+            eprintln!("[nomodpath] {}", simple_name.as_str());
         }
 
         // Simple-name slot is first-wins (preserves the existing
