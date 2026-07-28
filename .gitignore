@@ -44,3 +44,9 @@ z3/*
 .env
 .env.*
 .z3-trace
+# Python bytecode from the vcs/scripts gates (check_no_double_colon,
+# check_no_str_alias, check_op_byte_docs, vr_gate_scan). These run from
+# `make` and from CI, so the cache regenerates in every checkout and
+# would otherwise sit untracked in everyone's `git status`.
+__pycache__/
+*.pyc
