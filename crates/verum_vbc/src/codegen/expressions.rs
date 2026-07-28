@@ -6310,11 +6310,28 @@ impl VbcCodegen {
             && !func_name.contains("::")
         {
             if self.ctx.unit_declared_fns.contains(&func_name) {
-                // Live registration only — the user-phase decl registered
-                // LAST, so the bare key holds the unit's own fn.
+                // Live registration only — reading a cached FunctionInfo
+                // goes stale when ids renumber after declaration.
+                //
+                // SCOPE-AWARE (the rule stated on `scoped_functions`):
+                // resolve through `lookup_function_in_scope`, not the bare
+                // `functions` slot. The old comment here assumed "the
+                // user-phase decl registered LAST, so the bare key holds
+                // the unit's own fn" — true for a single user compilation
+                // unit, FALSE when many modules compile into one context,
+                // as during the stdlib bake: the bare key then holds
+                // whichever module registered last. A traced bake measured
+                // 76 cross-module captures that way, e.g. `trim_ws` /
+                // `is_ws` / `split_commas` each declared by
+                // net.content_negotiation, net.http_cache AND
+                // net.http_range yet all three bound to one id, so two of
+                // every three executed another module's body.
+                //
+                // `lookup_function_in_scope` falls back to the bare table
+                // when no scope is active or the module has no scoped
+                // entry, so single-unit user compiles are unchanged.
                 self.ctx
-                    .functions
-                    .get(&func_name)
+                    .lookup_function_in_scope(&func_name)
                     .cloned()
                     .filter(|info| info.param_count == args.len() && is_free_fn(info))
                     .map(|info| (func_name.clone(), info))
