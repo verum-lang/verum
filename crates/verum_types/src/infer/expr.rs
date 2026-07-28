@@ -1845,6 +1845,15 @@ impl TypeChecker {
 
     fn synth_and_check(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         let result = self.synth_expr(expr)?;
+        if std::env::var("VERUM_TRACE_QUALPATH").is_ok()
+            && matches!(&expr.kind, ExprKind::MethodCall { .. })
+        {
+            eprintln!(
+                "[qualpath] synth_and_check: synth={:?} expected={:?}",
+                self.unifier.apply(&result.ty),
+                self.unifier.apply(expected)
+            );
+        }
 
         // CRITICAL FIX: Never type (bottom type) is a subtype of ALL types.
         // panic(), return, break, continue all return Never.

@@ -21201,6 +21201,13 @@ impl TypeChecker {
                 });
             if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
                 eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());
+                if let Some(s) = &scheme {
+                    eprintln!(
+                        "[qualpath]     instantiated={:?} args={}",
+                        self.unifier.apply(&s.clone().instantiate()),
+                        args.len()
+                    );
+                }
             }
             if let Some(scheme) = scheme {
                 let func_type = self.unifier.apply(&scheme.instantiate());

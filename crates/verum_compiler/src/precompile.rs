@@ -2411,8 +2411,25 @@ fn inject_declared_module_free_fn_keys(
                 format!("({})", rendered.join(", "))
             }
             K::Slice(inner) => format!("List<{}>", render_type(inner)),
-            // Exotic shapes degrade to an opaque head — same class as
-            // the archive's `__opaque_type_N` strings.
+            // A refinement is a RESTRICTION on its base, so the base is
+            // the honest widening: `Float{>= 0.0}` renders `Float`.
+            // Degrading it to `__opaque_src` instead made every call
+            // site of a refined stdlib signature UNCHECKED — the reader
+            // parses that placeholder as a fresh existential var, so the
+            // return unified with any expected type and a refined
+            // parameter accepted any argument.  `core.math.elementary
+            // .sin(1.0)` typechecked against `Text` and evaluated to
+            // nil; `sqrt`, whose param AND return are both refined, lost
+            // both.  The predicate itself is still not carried — that is
+            // a descriptor-format question — but the base type is, and
+            // losing only the refinement beats losing the type.
+            K::Refined { base, .. } => render_type(base),
+            // Genuinely un-renderable shapes still degrade to an opaque
+            // head — same class as the archive's `__opaque_type_N`.
+            // Note `[T; N]` is deliberately NOT rendered as `List<T>`:
+            // a packed array and a NaN-boxed list are different
+            // representations (see the FFI byte-buffer contract), and
+            // conflating them would be worse than staying opaque.
             _ => "__opaque_src".to_string(),
         }
     }
