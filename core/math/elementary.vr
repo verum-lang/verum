@@ -20,6 +20,13 @@
 // Implementations use range reduction, polynomial approximation,
 // and careful reconstruction.
 //
+// AIM, not guarantee — and the gap is measured, not suspected. The
+// trigonometric kernels miss it near the edge of their reduced
+// interval: sin_kernel(π/4) is off by ~370 ULP and cos_kernel(π/4) by
+// ~3500, against a documented domain of |x| ≤ π/4. Accuracy is ~1 ULP
+// over most of the range. Treat the target as an aspiration for any
+// function whose error you have not measured yourself.
+//
 
 // # Refinement Types
 //
@@ -140,7 +147,15 @@ fn cos_kernel(x: Float) -> Float {
 
 // Sine function
 // Domain: (-∞, ∞), Range: [-1, 1]
-// Precision: < 1 ULP error
+// Precision: ~1 ULP over most of the reduced range, degrading toward
+// the interval edge — sin_kernel(π/4) is 4.2e-14 off (~370 ULP) and
+// cos_kernel(π/4) is 3.9e-13 (~3500 ULP), measured. The kernels are
+// documented for |x| ≤ π/4 but their Chebyshev coefficients are fitted
+// tighter than that; refitting over the full ±π/4 would restore the
+// sub-ULP claim this comment used to make unconditionally. The claim
+// was previously unfalsifiable rather than true: reduce_trig_arg fed
+// the kernels half their domain AND the wrong quadrant unit, so the
+// function returned wrong values and its precision was unobservable.
 public fn sin(x: Float) -> Float{it >= -1.0 && it <= 1.0} {
     if is_nan(x) || is_infinite(x) { return NAN; }
     if x == 0.0 { return x; }  // Preserve signed zero
