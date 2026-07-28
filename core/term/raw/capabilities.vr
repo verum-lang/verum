@@ -17,6 +17,7 @@
 module capabilities;
 
 mount core.sys.{FileDesc, OSError};
+mount core.base.env.{var_opt};
 
 // =============================================================================
 // Types
@@ -84,12 +85,12 @@ public type QueryRgb is {
 /// Checks $TERM, $COLORTERM, $TERM_PROGRAM, $TMUX, $STY, $NO_COLOR,
 /// and common terminal emulator patterns.
 public fn detect_capabilities(fd: FileDesc) -> TermCapabilities {
-    let term = env_get("TERM").unwrap_or("");
-    let colorterm = env_get("COLORTERM").unwrap_or("");
-    let term_program = env_get("TERM_PROGRAM");
-    let no_color = env_get("NO_COLOR");
-    let tmux = env_get("TMUX");
-    let screen = env_get("STY");
+    let term = var_opt("TERM").unwrap_or("");
+    let colorterm = var_opt("COLORTERM").unwrap_or("");
+    let term_program = var_opt("TERM_PROGRAM");
+    let no_color = var_opt("NO_COLOR");
+    let tmux = var_opt("TMUX");
+    let screen = var_opt("STY");
 
     let is_tmux = tmux.is_some();
     let is_screen = screen.is_some();
@@ -118,7 +119,7 @@ public fn detect_capabilities(fd: FileDesc) -> TermCapabilities {
         UnicodeSupport.Full
     } else {
         // Check $LANG / $LC_ALL for UTF-8
-        let lang = env_get("LANG").unwrap_or("");
+        let lang = var_opt("LANG").unwrap_or("");
         if lang.contains("UTF-8") || lang.contains("utf-8") {
             UnicodeSupport.Full
         } else {
@@ -247,9 +248,5 @@ fn check_sixel_support(term: &Text, program: &Text) -> Bool {
     program == "foot"
         || program == "contour"
         || program == "WezTerm"
-        || term.contains("xterm") && env_get("XTERM_VERSION").is_some()
+        || term.contains("xterm") && var_opt("XTERM_VERSION").is_some()
 }
-
-/// Get an environment variable value. Returns None if not set.
-@intrinsic("verum.env.get")
-fn env_get(name: &Text) -> Maybe<Text>;
