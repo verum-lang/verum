@@ -43,6 +43,15 @@ resolves context.
 `iter_vr_files(root, roots)` — yields absolute paths to every `.vr`
 file under `root/roots[i]`, skipping the same build/vcs housekeeping
 directories `check_no_double_colon.py` skips.
+
+`extract_markdown_fences(text, lang="verum")` — yields (content,
+first_line) for every fenced code block matching a given fence
+language in a markdown document. Combine with `scan_matches` to gate
+Rust-syntax artefacts inside ```verum blocks in the docs the same way
+`.vr` files already are — see its own docstring for what this is and
+is NOT (a feasibility probe, not a wired gate).
+
+Pin tests for all of the above: `test_vr_gate_scan.py`.
 """
 import os
 import re
@@ -182,5 +191,50 @@ def scan_matches(text, pattern):
         if m:
             yield (i, "code", line, m)
             i = m.end()
+            continue
+        i += 1
+
+
+# A fenced code block opener/closer: ```verum (or ```verum plus trailing
+# whitespace) opens, a bare ``` (optionally trailing whitespace) closes.
+# Markdown fences don't nest, so this two-line-pattern walk is the whole
+# algorithm — no relation to the code/comment/string state machine above,
+# which only starts once we're already inside a fence's content.
+_FENCE_OPEN = re.compile(r"^```verum[ \t]*$")
+_FENCE_CLOSE = re.compile(r"^```[ \t]*$")
+
+
+def extract_markdown_fences(text, lang="verum"):
+    """
+    Yield (content, first_line) for every ```verum ... ``` fenced block in
+    a markdown document. `first_line` is the 1-indexed line number of the
+    fence's first content line, so a caller combining this with
+    `scan_matches(content, pattern)` can report `first_line + local_line`
+    for a violation's real position in the source `.md` file.
+
+    Deliberately narrow: matches the exact fence-info-string `lang`
+    (default `verum`) so a ```rust or ```text block — genuinely NOT
+    Verum source — is never mistaken for one. Feasibility probe for
+    gating fenced code blocks in the docs the same way `.vr` files
+    already are (T0652 follow-up) — nothing in this module wires the
+    result into a gate; that needs the false-positive-domain design
+    decisions the pool row for this discusses (docs deliberately show
+    wrong code sometimes), not just the extraction mechanism.
+    """
+    if lang != "verum":
+        open_pat = re.compile(r"^```" + re.escape(lang) + r"[ \t]*$")
+    else:
+        open_pat = _FENCE_OPEN
+    lines = text.split("\n")
+    n = len(lines)
+    i = 0
+    while i < n:
+        if open_pat.match(lines[i]):
+            start = i + 1
+            j = start
+            while j < n and not _FENCE_CLOSE.match(lines[j]):
+                j += 1
+            yield ("\n".join(lines[start:j]), start + 1)
+            i = j + 1
             continue
         i += 1
