@@ -49,6 +49,27 @@ ROOTS = ["core", "core-tests", "vcs"]
 # by hand while sizing T0652.
 PATTERN = re.compile(r"&str\b")
 
+# Scope the enforced gate covers.  `core/` is clean as of T0663; `core-tests/`
+# and `vcs/` still hold real violations and are reported by --check/--report
+# as a census, not gated.
+GATE_SCOPE = "core" + os.sep
+
+# The remainder inside GATE_SCOPE, frozen so the gate can pass while still
+# naming what is left.  These are NOT correct: `core/database/sqlite/` is the
+# bundled-SQLite port and another session's live territory, so the rename that
+# cleared the rest of core/ stopped at its boundary rather than edit files it
+# does not own.  Expected to reach zero — a shrinking remainder, never a
+# statement that `&str` is acceptable here.
+GATE_ALLOWLIST = {
+    "core/database/sqlite/introspect.vr",
+    "core/database/sqlite/native/l0_vfs/registry.vr",
+    "core/database/sqlite/native/l1_pager/wal_writer.vr",
+    "core/database/sqlite/native/l2_record/affinity.vr",
+    "core/database/sqlite/native/l2_record/strict.vr",
+    "core/database/sqlite/native/l5_sql/lexer.vr",
+    "core/database/sqlite/native/l5_sql/parser/ddl.vr",
+}
+
 
 def find_hits():
     """Return (code_hits, other_hits) — each a list of (rel, line, ctx, snippet)."""
@@ -78,14 +99,39 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "--check"
     code_hits, other_hits = find_hits()
 
+    if mode == "--gate":
+        scoped = [h for h in code_hits if h[0].startswith(GATE_SCOPE)]
+        unexpected = [h for h in scoped if h[0] not in GATE_ALLOWLIST]
+        if unexpected:
+            print(
+                f"FAIL: {len(unexpected)} new `&str` in {GATE_SCOPE} code "
+                f"positions — Verum has no `str` type; use `Text` (T0663)."
+            )
+            for rel, line, _ctx, snip in unexpected:
+                print(f"  {rel}:{line}  {snip}")
+            sys.exit(1)
+        # A cleared allowlist entry is good news, so it must not fail the build
+        # of whoever cleared it — but it has to be loud, or the list silently
+        # outlives the violations it names.
+        cleared = GATE_ALLOWLIST - {h[0] for h in scoped}
+        for rel in sorted(cleared):
+            print(f"NOTE: {rel} is clean — drop it from GATE_ALLOWLIST.")
+        print(
+            f"OK: no `&str` in {GATE_SCOPE} code outside the "
+            f"{len(GATE_ALLOWLIST)}-file shrinking remainder."
+        )
+        sys.exit(0)
+
     if mode == "--check":
         if code_hits:
             print(
-                f"GATE CANDIDATE (not yet enforced): {len(code_hits)} `&str` in "
-                f"real .vr code positions — semantic types require `Text`, never "
-                f"`str` (T0652)."
+                f"CENSUS: {len(code_hits)} `&str` in real .vr code positions — "
+                f"semantic types require `Text`, never `str` (T0663)."
             )
-            print("This is informational only; not wired into make/CI.")
+            print(
+                "Whole-repo census, informational. The enforced subset is "
+                "`--gate` (core/ only), which make/CI runs."
+            )
             for rel, line, _ctx, snip in code_hits[:100]:
                 print(f"  {rel}:{line}  …{snip}…")
             if len(code_hits) > 100:
