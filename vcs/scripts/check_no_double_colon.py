@@ -21,9 +21,22 @@ It converts (or, in --check mode, flags) `::` -> `.` (turbofish `::<T>` ->
   * quasiquote corpus        vcs/**/quote_hygiene/**  (author-owned tokens)
   * negative-syntax tests    vcs/**/fail/**  (`::` IS the thing under test)
 
-Context (code / comment / string) is resolved with a real state machine that
-understands line + block comments, plain / multiline / raw strings, and f/b
-prefixes, so string and comment DATA is never mistaken for code.
+Context (code / comment / string) is resolved via the shared state machine
+in `vr_gate_scan.py` (T0652), which understands line + block comments,
+plain / multiline / raw strings, f/b prefixes, AND char literals — so
+string and comment DATA is never mistaken for code, and a char literal
+whose content is a quote (`'"'`) can't desync the string-boundary tracking
+for everything after it.  That desync was a real, if lucky, gap: it
+reproduces on `core/text/text.vr` (a `'"'` in `f.write_char('"')?` swallows
+the next ~20 lines into what the old inline scanner thought was a string),
+and this script's own former inline copy of the scanner had it too — the
+gate `classify()`s ambiguous non-code context as `keep`, so a `::` caught
+in a desynced span would have been silently passed rather than flagged.
+Checked the corpus for a live victim (any `.vr` file pairing a `'"'`-style
+char literal with a genuine, non-data `::`): none exists today — only one
+file, `core/shell/permissions.vr`, has both, and its `::` are all IPv6
+documentation, correctly excluded either way.  So the gate has been lucky
+rather than correct; this closes the gap before luck runs out.
 
 MODES
   --check   (default) CI gate: exit 1 if any `::` is a violation, else 0
@@ -34,10 +47,13 @@ Pure Python, no build required.  Runs over core/, core-tests/, vcs/.
 """
 import os, re, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from vr_gate_scan import iter_vr_files, scan_matches  # noqa: E402
+
 # Repo root = two levels up from vcs/scripts/.
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOTS = ["core", "core-tests", "vcs"]
-SKIP_DIRS = {"target", ".claude", ".git", "node_modules"}
+DOUBLE_COLON = re.compile("::")
 
 # Whole-file force-keep: foreign-script generators and author-owned quasiquote
 # token corpora — the `::` there is DATA, not Verum path syntax.
@@ -133,67 +149,15 @@ def classify(ctx, path, text, pos):
 
 
 def scan(text):
-    """Yield (pos, ctx, line) for each '::'. ctx in code|line|block|string."""
-    i, n, line = 0, len(text), 1
-    while i < n:
-        c = text[i]
-        if c == "\n":
-            line += 1; i += 1; continue
-        two = text[i:i+2]
-        if two == "//":
-            j = i
-            while j < n and text[j] != "\n":
-                if text[j:j+2] == "::":
-                    yield (j, "line", line)
-                j += 1
-            i = j; continue
-        if two == "/*":
-            j = i + 2
-            while j < n and text[j:j+2] != "*/":
-                if text[j] == "\n":
-                    line += 1
-                if text[j:j+2] == "::":
-                    yield (j, "block", line)
-                j += 1
-            i = (j + 2) if j < n else n; continue
-        m = re.match(r'r(#{0,4})"', text[i:])          # raw string r"..." / r#"..."#
-        if m:
-            close = '"' + m.group(1)
-            start = i + m.end()
-            j = text.find(close, start)
-            end = (j + len(close)) if j != -1 else n
-            for k in range(start, min(end, n) - 1):
-                if text[k] == "\n":
-                    line += 1
-                if text[k:k+2] == "::":
-                    yield (k, "string", line)
-            i = end; continue
-        if text[i:i+3] == '"""':                       # multiline string
-            start = i + 3
-            j = text.find('"""', start)
-            end = (j + 3) if j != -1 else n
-            for k in range(start, min(end, n)):
-                if text[k] == "\n":
-                    line += 1
-                if text[k:k+2] == "::":
-                    yield (k, "string", line)
-            i = end; continue
-        if c == '"':                                   # plain / f / b string
-            j = i + 1
-            while j < n:
-                if text[j] == "\\":
-                    j += 2; continue
-                if text[j] == "\n":
-                    line += 1; j += 1; continue
-                if text[j] == '"':
-                    break
-                if text[j:j+2] == "::":
-                    yield (j, "string", line)
-                j += 1
-            i = j + 1; continue
-        if two == "::":
-            yield (i, "code", line); i += 2; continue
-        i += 1
+    """Yield (pos, ctx, line) for each '::'. ctx in code|line|block|string.
+
+    Thin wrapper over the shared `vr_gate_scan.scan_matches` state machine
+    (T0652) — see that module and the file docstring above for what
+    changed and why (char-literal awareness, so `'"'` can't desync string
+    tracking for the rest of the file).
+    """
+    for pos, ctx, line, _match in scan_matches(text, DOUBLE_COLON):
+        yield (pos, ctx, line)
 
 
 def rewrite(text, path):
@@ -212,12 +176,8 @@ def rewrite(text, path):
 
 
 def iter_vr():
-    for root in ROOTS:
-        for dp, dns, fns in os.walk(os.path.join(ROOT, root)):
-            dns[:] = [d for d in dns if d not in SKIP_DIRS]
-            for fn in fns:
-                if fn.endswith(".vr"):
-                    yield os.path.join(dp, fn)
+    """Thin wrapper over the shared `vr_gate_scan.iter_vr_files` (T0652)."""
+    return iter_vr_files(ROOT, ROOTS)
 
 
 def main():
