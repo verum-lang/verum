@@ -69,6 +69,42 @@ pub struct IntrinsicInfo {
     pub is_const_eval: bool,
 }
 
+/// Intrinsics whose NAME carries an operand-width suffix (`_f32` / `_f64`)
+/// but whose RESULT is a `Bool`, not a float.
+///
+/// The suffix describes the ARGUMENT width. Codegen's return-type-kind
+/// inference used to read it as the RETURN type, so every call site of
+/// these was typed `Float`: the `Bool` result was decoded as a double and
+/// rendered `NaN`. That broke them silently AND took their callers with
+/// them — `core/math/hyperbolic.vr` opens `sinh`/`cosh` with
+/// `if is_nan(x) { return NAN; }`, so a `NaN`-valued predicate sent every
+/// call down the NaN branch: `sinh(1.0)` returned the NaN sentinel and
+/// `cosh(1.0)` aborted on its own `-> Float{>= 1.0}` return refinement —
+/// the refinement was RIGHT, it caught a genuinely bad value.
+///
+/// Same class as the `exp` prefix capturing `expect`
+/// (CONTROL-EXPECT-GENERIC-ARITH #30, noted in `codegen/expressions.rs`):
+/// a name-shaped guess about a type.
+///
+/// ONE authority: the inference consults this list rather than re-deriving
+/// the answer from spelling. The real fix is a declared return type on
+/// `Intrinsic` itself — it carries `param_count` and `return_count` but no
+/// return TYPE, which is why a name heuristic exists at all. That is 933
+/// entries and belongs in its own change; until then this list is the
+/// exhaustive exception set, and it is colocated with the alias table that
+/// creates the `_f64` spellings so the two stay in step.
+pub const BOOL_RESULT_WIDTH_SUFFIXED_INTRINSICS: &[&str] = &[
+    "is_nan_f32",
+    "is_nan_f64",
+    "is_infinite_f32",
+    "is_infinite_f64",
+    "is_finite_f32",
+    "is_finite_f64",
+    "is_subnormal_f64",
+    "is_sign_negative_f64",
+    "is_sign_positive_f64",
+];
+
 /// Lookup an intrinsic by name.
 ///
 /// Returns None if the intrinsic is not registered.

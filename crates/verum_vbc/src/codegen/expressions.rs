@@ -6367,6 +6367,27 @@ impl VbcCodegen {
         } else {
             None
         };
+        // CALL-BIND arm attribution: which layer of the chain below
+        // actually produced the binding.  Reported beside the resolved
+        // key so a misbinding names the responsible arm instead of
+        // requiring a bisect (T0559).  Read-only; computed before the
+        // options are moved into the chain.
+        let callbind_arm: &str = if std::env::var("VERUM_TRACE_CALLBIND").is_ok() {
+            if lexical_scoped_lookup
+                .as_ref()
+                .is_some_and(|(_, info)| is_free_fn(info))
+            {
+                "lexical"
+            } else if unit_decl_lookup.is_some() {
+                "unit_decl"
+            } else if mount_scoped_lookup.is_some() {
+                "mount_scoped"
+            } else {
+                "later-arm"
+            }
+        } else {
+            ""
+        };
         let (resolved_name, func_info) = match lexical_scoped_lookup
             .filter(|(_, info)| is_free_fn(info))
             // Lexical scope outranks EVERYTHING: the call site sits
@@ -6445,11 +6466,12 @@ impl VbcCodegen {
                     && func_name.contains(&filter)
                 {
                     eprintln!(
-                        "[callbind] call '{}' (argc={}) → bound '{}' id={} | scope={:?}",
+                        "[callbind] call '{}' (argc={}) → bound '{}' id={} | arm={} scope={:?}",
                         func_name,
                         args.len(),
                         result.0,
                         result.1.id.0,
+                        callbind_arm,
                         self.ctx.current_source_module
                     );
                 }
@@ -26577,6 +26599,19 @@ impl VbcCodegen {
                             // Infer return type from intrinsic name suffix
                             // _f64 or _f32 suffix indicates float return type
                             let name = intrinsic_info.intrinsic.name;
+                            // …EXCEPT where the width suffix describes the
+                            // ARGUMENT, not the result. `is_nan_f64` and its
+                            // family take an f64 and return a Bool; typing
+                            // them Float decoded the Bool as a double and
+                            // rendered `NaN`, which also sent every caller
+                            // of `if is_nan(x)` down the NaN branch. The
+                            // exception set is declared beside the alias
+                            // table that mints these spellings.
+                            if crate::intrinsics::BOOL_RESULT_WIDTH_SUFFIXED_INTRINSICS
+                                .contains(&name)
+                            {
+                                return Some(TypeKind::Bool);
+                            }
                             if name.ends_with("_f64")
                                 || name.ends_with("_f32")
                                 || name.starts_with("sqrt")
