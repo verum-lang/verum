@@ -86,7 +86,7 @@ public type JwtAlgorithm is
     | ES256 | ES384 | ES512
     | None;
 
-fn algo_name(a: &JwtAlgorithm) -> &str {
+fn algo_name(a: &JwtAlgorithm) -> &Text {
     match a {
         JwtAlgorithm.HS256 => "HS256",
         JwtAlgorithm.HS384 => "HS384",

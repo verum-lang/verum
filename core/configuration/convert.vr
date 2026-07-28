@@ -201,7 +201,7 @@ fn walk_for_loss(v: &ConfigValue, caps: &FormatCapabilities, path: &Text, report
     }
 }
 
-fn path_with_kind(path: &Text, kind: &str) -> Text {
+fn path_with_kind(path: &Text, kind: &Text) -> Text {
     let mut out = path.clone();
     if out.is_empty() { out.push_text(&"<root>".to_text()); }
     out.push_text(&": ".to_text());

@@ -176,7 +176,7 @@ public const PEM_MAX_LABEL_BYTES: Int = 256;
 ///  -----BEGIN <label>-----\n
 ///  <base64> \n (line-wrapped at 64 chars)
 ///  -----END <label>-----\n
-public fn encode_block(label: &str, contents: &[Byte]) -> Text {
+public fn encode_block(label: &Text, contents: &[Byte]) -> Text {
     let b64 = b64_encode(contents);
     let b64b = b64.as_bytes();
     // Output: 22 (BEGIN/END markers) + 2*label.len + b64b.len + ceil(b64b.len/64) (newlines).
@@ -368,7 +368,7 @@ fn text_eq(a: &Text, b: &Text) -> Bool {
     a.as_bytes() == b.as_bytes()
 }
 
-fn text_as_str(t: &Text) -> &str {
+fn text_as_str(t: &Text) -> &Text {
     // Zero-cost — Verum's `Text` wraps a UTF-8 slice and exposes
     // a borrow to the underlying `&str` via `as_str()`. Wrapped
     // here so callers don't have to import `Text` API alongside

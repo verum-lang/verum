@@ -169,7 +169,7 @@ public async fn rollback_to_savepoint_async(
     }
 }
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "ACTOR_CLOSED".clone(),

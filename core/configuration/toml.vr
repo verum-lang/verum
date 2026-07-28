@@ -1514,7 +1514,7 @@ public fn from_config_value(v: &ConfigValue) -> Result<TomlValue, ConfigError> {
     }
 }
 
-fn unsupported(feature: &str) -> ConfigError {
+fn unsupported(feature: &Text) -> ConfigError {
     ConfigError {
         format_id:   format_id_toml(),
         kind:        ConfigErrorKind.UnsupportedFeature,

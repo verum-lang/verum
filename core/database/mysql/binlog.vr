@@ -917,7 +917,7 @@ fn bytes_to_text(b: &List<Byte>) -> Text {
     }
 }
 
-fn stream_state_error(what: &str) -> DbError {
+fn stream_state_error(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "BINLOG_BAD_STATE".clone(),
@@ -926,7 +926,7 @@ fn stream_state_error(what: &str) -> DbError {
     })
 }
 
-fn bad_binlog(what: &str) -> DbError {
+fn bad_binlog(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "BINLOG_PROTOCOL".clone(),

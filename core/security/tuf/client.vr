@@ -842,7 +842,7 @@ fn lift_root_roles(obj: &JsonObject) -> Result<RootRoles, TufClientError> {
     })
 }
 
-fn lift_role_def(obj: &JsonObject, name: &str) -> Result<RoleDef, TufClientError> {
+fn lift_role_def(obj: &JsonObject, name: &Text) -> Result<RoleDef, TufClientError> {
     let r = obj.get(name).and_then(|v| v.as_object())
         .ok_or_else(|| InvalidJson(f"roles.{name} missing"))?;
     let keyids_arr = r.get("keyids").and_then(|v| v.as_array())
@@ -878,17 +878,17 @@ fn lift_metafile_map(obj: &JsonObject) -> Result<Map<Text, MetafileSpec>, TufCli
 
 // ----- JSON helpers -----
 
-fn get_string(obj: &JsonObject, key: &str) -> Result<Text, TufClientError> {
+fn get_string(obj: &JsonObject, key: &Text) -> Result<Text, TufClientError> {
     obj.get(key).and_then(|v| v.as_string())
         .ok_or_else(|| InvalidJson(f"missing/non-string field: {key}"))
 }
 
-fn get_int(obj: &JsonObject, key: &str) -> Result<Int, TufClientError> {
+fn get_int(obj: &JsonObject, key: &Text) -> Result<Int, TufClientError> {
     obj.get(key).and_then(|v| v.as_int())
         .ok_or_else(|| InvalidJson(f"missing/non-int field: {key}"))
 }
 
-fn get_rfc3339(obj: &JsonObject, key: &str) -> Result<core.time.rfc3339.Rfc3339Time, TufClientError> {
+fn get_rfc3339(obj: &JsonObject, key: &Text) -> Result<core.time.rfc3339.Rfc3339Time, TufClientError> {
     let s = get_string(obj, key)?;
     core.time.rfc3339.parse(&s)
         .map_err(|e| InvalidJson(f"{key} parse: {e}"))

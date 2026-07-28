@@ -246,7 +246,7 @@ implement Attribute {
 }
 
 /// Built-in attribute names
-const BUILTIN_ATTRIBUTES: &[&str] = &[
+const BUILTIN_ATTRIBUTES: &[&Text] = &[
     "cfg", "cfg_attr",
     "derive",
     "repr", "align", "packed",
@@ -611,7 +611,7 @@ implement ReprInfo {
     }
 }
 
-fn is_int_repr(s: &str) -> Bool {
+fn is_int_repr(s: &Text) -> Bool {
     match s {
         "Int8" | "Int16" | "Int32" | "Int64" |
         "UInt8" | "UInt16" | "UInt32" | "UInt64" |

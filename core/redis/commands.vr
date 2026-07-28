@@ -542,7 +542,7 @@ pub async fn dbsize(client: &RedisClient) -> Result<Int, RedisError> {
 // Reply decoders
 // =============================================================================
 
-fn expect_simple_ok(v: RespValue, cmd: &str) -> Result<(), RedisError> {
+fn expect_simple_ok(v: RespValue, cmd: &Text) -> Result<(), RedisError> {
     match v {
         RespValue.SimpleString(_) => Result.Ok(()),
         RespValue.NullBulk | RespValue.Nil_ => Result.Ok(()),
@@ -551,7 +551,7 @@ fn expect_simple_ok(v: RespValue, cmd: &str) -> Result<(), RedisError> {
     }
 }
 
-fn expect_int(v: RespValue, cmd: &str) -> Result<Int, RedisError> {
+fn expect_int(v: RespValue, cmd: &Text) -> Result<Int, RedisError> {
     match v {
         RespValue.Integer(n) => Result.Ok(n),
         RespValue.Error_(m)  => Result.Err(RedisError.Backend(m)),
@@ -559,11 +559,11 @@ fn expect_int(v: RespValue, cmd: &str) -> Result<Int, RedisError> {
     }
 }
 
-fn expect_int_bool(v: RespValue, cmd: &str) -> Result<Bool, RedisError> {
+fn expect_int_bool(v: RespValue, cmd: &Text) -> Result<Bool, RedisError> {
     expect_int(v, cmd).map(|n| n == 1)
 }
 
-fn expect_optional_bulk(v: RespValue, cmd: &str) -> Result<Maybe<List<Byte>>, RedisError> {
+fn expect_optional_bulk(v: RespValue, cmd: &Text) -> Result<Maybe<List<Byte>>, RedisError> {
     match v {
         RespValue.NullBulk | RespValue.Nil_ => Result.Ok(Maybe.None),
         RespValue.BulkString(b) => Result.Ok(Maybe.Some(b)),

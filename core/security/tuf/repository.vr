@@ -212,7 +212,7 @@ async fn http_get<C: HttpClient>(
     client: &C,
     url: &Text,
     max_size: Int,
-    label: &str,
+    label: &Text,
 ) -> Result<List<Byte>, RepoError> {
     let mut headers: Map<Text, Text> = Map.new();
     headers.insert("user-agent".to_text(), "verum-tuf/0.1".to_text());

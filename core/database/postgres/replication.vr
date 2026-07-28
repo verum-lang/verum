@@ -726,7 +726,7 @@ public fn connect_replication(cfg: &PgReplicationConfig)
 // Helpers
 // =============================================================================
 
-fn streaming_state_error(what: &str) -> DbError {
+fn streaming_state_error(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "REPL_BAD_STATE".clone(),
@@ -735,7 +735,7 @@ fn streaming_state_error(what: &str) -> DbError {
     })
 }
 
-fn bad_replication(what: &str) -> DbError {
+fn bad_replication(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "REPL_PROTOCOL".clone(),

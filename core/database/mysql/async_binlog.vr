@@ -279,7 +279,7 @@ fn run_actor(
 // Helpers
 // =============================================================================
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "BINLOG_ACTOR_CLOSED".clone(),

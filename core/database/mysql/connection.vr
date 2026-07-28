@@ -1601,7 +1601,7 @@ fn itoa(n: Int) -> Text {
     Text.from_bytes(&out).unwrap_or("0".clone())
 }
 
-fn bad_decode(label: &str) -> DbError {
+fn bad_decode(label: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "BAD_DECODE".clone(),

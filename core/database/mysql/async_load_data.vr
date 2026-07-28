@@ -203,7 +203,7 @@ public async fn load_data_local_async_with_token(
     })
 }
 
-fn cancelled_err(what: &str) -> DbError {
+fn cancelled_err(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "CANCELLED".clone(),
@@ -216,7 +216,7 @@ fn cancelled_err(what: &str) -> DbError {
 // Helpers
 // =============================================================================
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "ACTOR_CLOSED".clone(),

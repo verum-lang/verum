@@ -206,7 +206,7 @@ public fn async_readonly_database_from_pool(pool: AsyncPgPool)
 // Helpers
 // =============================================================================
 
-fn scope_used(what: &str) -> DbError {
+fn scope_used(what: &Text) -> DbError {
     DbError.Adapter(core.database.common.error.AdapterSpecific {
         adapter: AdPostgres,
         code: "TX_SCOPE_USED".clone(),

@@ -307,7 +307,7 @@ public async fn copy_out_async(
     })
 }
 
-fn cancelled_err(what: &str) -> DbError {
+fn cancelled_err(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "CANCELLED".clone(),
@@ -316,7 +316,7 @@ fn cancelled_err(what: &str) -> DbError {
     })
 }
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "ACTOR_CLOSED".clone(),

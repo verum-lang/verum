@@ -200,7 +200,7 @@ implement Drop for AsyncMysqlPoolGuard {
     }
 }
 
-fn pool_err(what: &str) -> DbError {
+fn pool_err(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "ASYNC_POOL".clone(),

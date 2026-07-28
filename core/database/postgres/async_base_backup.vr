@@ -270,7 +270,7 @@ fn run_drain(
 // Helpers
 // =============================================================================
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "BB_ACTOR_CLOSED".clone(),

@@ -609,7 +609,7 @@ fn run_actor(
 // Helpers
 // =============================================================================
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "REPL_ACTOR_CLOSED".clone(),
@@ -618,7 +618,7 @@ fn actor_dropped(what: &str) -> DbError {
     })
 }
 
-fn bad_state(what: &str) -> DbError {
+fn bad_state(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "REPL_BAD_STATE".clone(),

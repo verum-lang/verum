@@ -252,7 +252,7 @@ fn write_command_compact(b: &mut TextBuilder, cmd: &CommandSpec) {
 // Field helpers
 // =============================================================================
 
-fn write_str_field(b: &mut TextBuilder, key: &str, val: &Text, depth: Int, last: Bool) {
+fn write_str_field(b: &mut TextBuilder, key: &Text, val: &Text, depth: Int, last: Bool) {
     indent(b, depth);
     b.push("\"");
     b.push(key);
@@ -262,7 +262,7 @@ fn write_str_field(b: &mut TextBuilder, key: &str, val: &Text, depth: Int, last:
     b.push("\n");
 }
 
-fn write_bool_field(b: &mut TextBuilder, key: &str, val: Bool, depth: Int, last: Bool) {
+fn write_bool_field(b: &mut TextBuilder, key: &Text, val: Bool, depth: Int, last: Bool) {
     indent(b, depth);
     b.push("\"");
     b.push(key);
@@ -272,7 +272,7 @@ fn write_bool_field(b: &mut TextBuilder, key: &str, val: Bool, depth: Int, last:
     b.push("\n");
 }
 
-fn write_str_array(b: &mut TextBuilder, key: &str, vs: &List<Text>, depth: Int) {
+fn write_str_array(b: &mut TextBuilder, key: &Text, vs: &List<Text>, depth: Int) {
     indent(b, depth);
     b.push("\"");
     b.push(key);

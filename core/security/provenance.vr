@@ -475,7 +475,7 @@ public fn dsse_pae(payload_type: &Text, payload: &List<Byte>) -> List<Byte> {
     out
 }
 
-fn push_ascii(out: &mut List<Byte>, s: &str) {
+fn push_ascii(out: &mut List<Byte>, s: &Text) {
     let bytes = s.as_bytes();
     let mut i: Int = 0;
     while i < bytes.len() { out.push(bytes[i]); i = i + 1; }

@@ -227,7 +227,7 @@ fn encode_into(v: &RespValue, out: &mut List<Byte>) {
     }
 }
 
-fn push_ascii(out: &mut List<Byte>, s: &str) {
+fn push_ascii(out: &mut List<Byte>, s: &Text) {
     let bs = s.as_bytes();
     let mut i: Int = 0;
     while i < bs.len() { out.push(bs[i]); i = i + 1; }

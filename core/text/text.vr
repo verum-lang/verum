@@ -3764,7 +3764,7 @@ implement AsRef<[Byte]> for Text {
     }
 }
 
-implement From<&str> for Text {
+implement From<&Text> for Text {
     fn from(s: &Text) -> Text {
         unsafe { Text.from_utf8_unchecked(s.as_bytes()) }
     }

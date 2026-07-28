@@ -303,7 +303,7 @@ fn decode_value_entry(
 // Read primitives
 // =============================================================================
 
-fn read_size(buf: &[Byte], off: Int, large: Bool, what: &str) -> Result<(Int, Int), DbError> {
+fn read_size(buf: &[Byte], off: Int, large: Bool, what: &Text) -> Result<(Int, Int), DbError> {
     if large {
         let v = read_u32_le(buf, off, what)?;
         Result.Ok((v, 4))
@@ -313,21 +313,21 @@ fn read_size(buf: &[Byte], off: Int, large: Bool, what: &str) -> Result<(Int, In
     }
 }
 
-fn read_u8(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+fn read_u8(buf: &[Byte], off: Int, what: &Text) -> Result<Int, DbError> {
     if (buf.len() as Int) <= off {
         return Result.Err(bad_json(&f"{what}: u8 truncated"));
     }
     Result.Ok((buf[off] as Int) & 0xFF)
 }
 
-fn read_u16_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+fn read_u16_le(buf: &[Byte], off: Int, what: &Text) -> Result<Int, DbError> {
     if (buf.len() as Int) < off + 2 {
         return Result.Err(bad_json(&f"{what}: u16 truncated"));
     }
     Result.Ok(((buf[off] as Int) & 0xFF) | (((buf[off + 1] as Int) & 0xFF) << 8))
 }
 
-fn read_u32_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+fn read_u32_le(buf: &[Byte], off: Int, what: &Text) -> Result<Int, DbError> {
     if (buf.len() as Int) < off + 4 {
         return Result.Err(bad_json(&f"{what}: u32 truncated"));
     }
@@ -340,7 +340,7 @@ fn read_u32_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
     Result.Ok(v)
 }
 
-fn read_u64_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
+fn read_u64_le(buf: &[Byte], off: Int, what: &Text) -> Result<Int, DbError> {
     if (buf.len() as Int) < off + 8 {
         return Result.Err(bad_json(&f"{what}: u64 truncated"));
     }
@@ -353,7 +353,7 @@ fn read_u64_le(buf: &[Byte], off: Int, what: &str) -> Result<Int, DbError> {
     Result.Ok(v)
 }
 
-fn read_bytes(buf: &[Byte], off: Int, n: Int, what: &str) -> Result<List<Byte>, DbError> {
+fn read_bytes(buf: &[Byte], off: Int, n: Int, what: &Text) -> Result<List<Byte>, DbError> {
     if (buf.len() as Int) < off + n {
         return Result.Err(bad_json(&f"{what}: bytes truncated (want {n} from {off})"));
     }
@@ -371,7 +371,7 @@ fn read_bytes(buf: &[Byte], off: Int, n: Int, what: &str) -> Result<List<Byte>, 
 ///   first byte == 0xFC: length = next u16 LE,    hdr = 3
 ///   first byte == 0xFD: length = next u24 LE,    hdr = 4
 ///   first byte == 0xFE: length = next u64 LE,    hdr = 9
-fn read_lenenc(buf: &[Byte], off: Int, what: &str) -> Result<(Int, Int), DbError> {
+fn read_lenenc(buf: &[Byte], off: Int, what: &Text) -> Result<(Int, Int), DbError> {
     let first = read_u8(buf, off, what)?;
     if first < 0xFB { return Result.Ok((first, 1)); }
     if first == 0xFC {

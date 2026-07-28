@@ -141,7 +141,7 @@ public fn async_mysql_readonly_database_from_pool(pool: AsyncMysqlPool)
     Database.from_readonly_pool(Shared.new(pool))
 }
 
-fn scope_used(what: &str) -> DbError {
+fn scope_used(what: &Text) -> DbError {
     DbError.Adapter(core.database.common.error.AdapterSpecific {
         adapter: AdMysql,
         code: "TX_SCOPE_USED".clone(),

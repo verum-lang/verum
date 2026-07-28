@@ -120,7 +120,7 @@ implement PgRow {
     /// Lookup a column index by name.  Returns the first match
     /// (postgres permits duplicate column aliases in SELECT lists;
     /// callers should disambiguate via aliases when this matters).
-    pub fn column_index(&self, name: &str) -> Maybe<Int> {
+    pub fn column_index(&self, name: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         let cols = &self.description.columns;
         while i < cols.len() as Int {
@@ -134,7 +134,7 @@ implement PgRow {
 
     /// Whether `name` is SQL-NULL (or out of range — caller
     /// disambiguates via `column_index`).
-    pub fn is_null(&self, name: &str) -> Bool {
+    pub fn is_null(&self, name: &Text) -> Bool {
         match self.column_index(name) {
             Maybe.None    => true,
             Maybe.Some(i) => self.values[i] is WvNull,
@@ -147,14 +147,14 @@ implement PgRow {
 
     /// Decode a text-family column.  Errors on NULL OR if the column's
     /// `type_oid` doesn't match the text family.
-    public fn get_text(&self, name: &str) -> Result<Text, DbError> {
+    public fn get_text(&self, name: &Text) -> Result<Text, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_text_family(&col, name)?;
         decode_text_value(&self.values[col_idx], col_idx, name)
     }
 
     /// Nullable text — `Result.Ok(Maybe.None)` if the column is SQL-NULL.
-    public fn get_text_opt(&self, name: &str) -> Result<Maybe<Text>, DbError> {
+    public fn get_text_opt(&self, name: &Text) -> Result<Maybe<Text>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_text_family(&col, name)?;
         if self.values[col_idx] is WvNull {
@@ -169,7 +169,7 @@ implement PgRow {
 
     /// Decode a BOOLEAN column.  Postgres TEXT format is `t`/`f`;
     /// BINARY format is one byte (`0x00`/`0x01`).
-    public fn get_bool(&self, name: &str) -> Result<Bool, DbError> {
+    public fn get_bool(&self, name: &Text) -> Result<Bool, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_oid(&col, PG_TYPE_BOOL, "bool", name)?;
         match &self.values[col_idx] {
@@ -201,7 +201,7 @@ implement PgRow {
     }
 
     /// Nullable BOOLEAN. Returns `Result.Ok(Maybe.None)` for SQL NULL.
-    public fn get_bool_opt(&self, name: &str) -> Result<Maybe<Bool>, DbError> {
+    public fn get_bool_opt(&self, name: &Text) -> Result<Maybe<Bool>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_oid(&col, PG_TYPE_BOOL, "bool", name)?;
         if self.values[col_idx] is WvNull {
@@ -217,14 +217,14 @@ implement PgRow {
 
     /// Decode an integer column (INT2 / INT4 / INT8).  All three
     /// converge on `Int`.  Errors on NULL or non-integer OID.
-    public fn get_int(&self, name: &str) -> Result<Int, DbError> {
+    public fn get_int(&self, name: &Text) -> Result<Int, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_int_family(&col, name)?;
         decode_int_value(&self.values[col_idx], col_idx, name, col.type_oid)
     }
 
     /// Nullable integer.
-    public fn get_int_opt(&self, name: &str) -> Result<Maybe<Int>, DbError> {
+    public fn get_int_opt(&self, name: &Text) -> Result<Maybe<Int>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_int_family(&col, name)?;
         if self.values[col_idx] is WvNull {
@@ -240,7 +240,7 @@ implement PgRow {
     /// Decode a BYTEA column.  TEXT format uses `\x` hex prefix per
     /// `bytea_output=hex` (postgres default); BINARY format is direct
     /// byte stream.
-    public fn get_bytes(&self, name: &str) -> Result<List<Byte>, DbError> {
+    public fn get_bytes(&self, name: &Text) -> Result<List<Byte>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_oid(&col, PG_TYPE_BYTEA, "bytea", name)?;
         match &self.values[col_idx] {
@@ -253,7 +253,7 @@ implement PgRow {
     }
 
     /// Nullable BYTEA. Returns `Result.Ok(Maybe.None)` for SQL NULL.
-    public fn get_bytes_opt(&self, name: &str) -> Result<Maybe<List<Byte>>, DbError> {
+    public fn get_bytes_opt(&self, name: &Text) -> Result<Maybe<List<Byte>>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_oid(&col, PG_TYPE_BYTEA, "bytea", name)?;
         match &self.values[col_idx] {
@@ -270,14 +270,14 @@ implement PgRow {
     // -------------------------------------------------------------------------
 
     /// Decode a TIMESTAMP / TIMESTAMPTZ column to RFC 3339.
-    public fn get_timestamp(&self, name: &str) -> Result<Rfc3339Time, DbError> {
+    public fn get_timestamp(&self, name: &Text) -> Result<Rfc3339Time, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_timestamp_family(&col, name)?;
         decode_timestamp_value(&self.values[col_idx], col_idx, name)
     }
 
     /// Nullable timestamp.
-    public fn get_timestamp_opt(&self, name: &str) -> Result<Maybe<Rfc3339Time>, DbError> {
+    public fn get_timestamp_opt(&self, name: &Text) -> Result<Maybe<Rfc3339Time>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         guard_timestamp_family(&col, name)?;
         if self.values[col_idx] is WvNull {
@@ -294,7 +294,7 @@ implement PgRow {
     /// `{a,b,"with space"}` literal form; BINARY format wraps the
     /// element wire-encoding with array dimensions/lower-bounds.
     /// Supports the three interchangeable text-family array OIDs.
-    public fn get_text_array(&self, name: &str) -> Result<List<Text>, DbError> {
+    public fn get_text_array(&self, name: &Text) -> Result<List<Text>, DbError> {
         let (col_idx, col) = self.column_or_error(name)?;
         let oid = col.type_oid;
         if oid != PG_TYPE_TEXT_ARRAY
@@ -323,7 +323,7 @@ implement PgRow {
     // Internal helpers
     // -------------------------------------------------------------------------
 
-    fn column_or_error(&self, name: &str) -> Result<(Int, ColumnDesc), DbError> {
+    fn column_or_error(&self, name: &Text) -> Result<(Int, ColumnDesc), DbError> {
         match self.column_index(name) {
             Maybe.Some(i) => Result.Ok((i, self.description.columns[i].clone())),
             Maybe.None    => Result.Err(column_not_found(name)),
@@ -335,7 +335,7 @@ implement PgRow {
 // OID guards — surface mismatches as `DbError.DecodeFailed`
 // =============================================================================
 
-fn guard_oid(col: &ColumnDesc, expected_oid: Int, expected_name: &str, col_name: &str)
+fn guard_oid(col: &ColumnDesc, expected_oid: Int, expected_name: &Text, col_name: &Text)
     -> Result<(), DbError>
 {
     if col.type_oid != expected_oid {
@@ -353,7 +353,7 @@ fn guard_oid(col: &ColumnDesc, expected_oid: Int, expected_name: &str, col_name:
     }
 }
 
-fn guard_text_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
+fn guard_text_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
     let oid = col.type_oid;
     if oid == PG_TYPE_TEXT || oid == PG_TYPE_VARCHAR || oid == PG_TYPE_BPCHAR {
         Result.Ok(())
@@ -370,7 +370,7 @@ fn guard_text_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
     }
 }
 
-fn guard_int_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
+fn guard_int_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
     let oid = col.type_oid;
     if oid == PG_TYPE_INT2 || oid == PG_TYPE_INT4 || oid == PG_TYPE_INT8 {
         Result.Ok(())
@@ -387,7 +387,7 @@ fn guard_int_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
     }
 }
 
-fn guard_timestamp_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbError> {
+fn guard_timestamp_family(col: &ColumnDesc, col_name: &Text) -> Result<(), DbError> {
     let oid = col.type_oid;
     if oid == PG_TYPE_TIMESTAMP || oid == PG_TYPE_TIMESTAMPTZ {
         Result.Ok(())
@@ -408,7 +408,7 @@ fn guard_timestamp_family(col: &ColumnDesc, col_name: &str) -> Result<(), DbErro
 // Decoders — wire bytes → typed values
 // =============================================================================
 
-fn decode_text_value(v: &WireValue, col_idx: Int, name: &str) -> Result<Text, DbError> {
+fn decode_text_value(v: &WireValue, col_idx: Int, name: &Text) -> Result<Text, DbError> {
     match v {
         WvNull => Result.Err(null_decode_failed(col_idx, name, "text")),
         WvPresent { bytes, format: _ } => {
@@ -424,7 +424,7 @@ fn decode_text_value(v: &WireValue, col_idx: Int, name: &str) -> Result<Text, Db
     }
 }
 
-fn decode_int_value(v: &WireValue, col_idx: Int, name: &str, oid: Int) -> Result<Int, DbError> {
+fn decode_int_value(v: &WireValue, col_idx: Int, name: &Text, oid: Int) -> Result<Int, DbError> {
     match v {
         WvNull => Result.Err(null_decode_failed(col_idx, name, "int")),
         WvPresent { bytes, format } => match format {
@@ -440,7 +440,7 @@ fn decode_int_value(v: &WireValue, col_idx: Int, name: &str, oid: Int) -> Result
     }
 }
 
-fn decode_int_binary(bytes: &List<Byte>, col_idx: Int, name: &str, oid: Int) -> Result<Int, DbError> {
+fn decode_int_binary(bytes: &List<Byte>, col_idx: Int, name: &Text, oid: Int) -> Result<Int, DbError> {
     // Network byte order (big-endian) per postgres binary spec.
     if oid == PG_TYPE_INT2 {
         if bytes.len() != 2 {
@@ -474,7 +474,7 @@ fn decode_int_binary(bytes: &List<Byte>, col_idx: Int, name: &str, oid: Int) -> 
     }
 }
 
-fn decode_bytea_hex(bytes: &List<Byte>, col_idx: Int, name: &str)
+fn decode_bytea_hex(bytes: &List<Byte>, col_idx: Int, name: &Text)
     -> Result<List<Byte>, DbError>
 {
     // Postgres `bytea_output=hex` format: `\x<hex>`.
@@ -507,7 +507,7 @@ fn hex_nibble(b: Byte) -> Maybe<Int> {
     else { Maybe.None }
 }
 
-fn decode_timestamp_value(v: &WireValue, col_idx: Int, name: &str)
+fn decode_timestamp_value(v: &WireValue, col_idx: Int, name: &Text)
     -> Result<Rfc3339Time, DbError>
 {
     match v {
@@ -566,7 +566,7 @@ fn normalise_pg_timestamp(s: &Text) -> Text {
     Text.from_utf8_lossy(out.as_slice())
 }
 
-fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &str)
+fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &Text)
     -> Result<List<Text>, DbError>
 {
     // Minimal `{a,b,"c with comma","d \"escaped\""}` parser.
@@ -630,7 +630,7 @@ fn parse_text_array_text(bytes: &List<Byte>, col_idx: Int, name: &str)
     Result.Ok(out)
 }
 
-fn parse_text_array_binary(bytes: &List<Byte>, col_idx: Int, name: &str)
+fn parse_text_array_binary(bytes: &List<Byte>, col_idx: Int, name: &Text)
     -> Result<List<Text>, DbError>
 {
     // Postgres binary array format:
@@ -698,7 +698,7 @@ fn read_i32_be(buf: &[Byte], off: Int) -> Int {
 // Error builders — keep the surface uniform across getters
 // =============================================================================
 
-fn null_decode_failed(col_idx: Int, name: &str, expected: &str) -> DbError {
+fn null_decode_failed(col_idx: Int, name: &Text, expected: &Text) -> DbError {
     DbError.DecodeFailed {
         fault: DecodeFault {
             column_index: col_idx,
@@ -710,7 +710,7 @@ fn null_decode_failed(col_idx: Int, name: &str, expected: &str) -> DbError {
     }
 }
 
-fn text_decode_failed(col_idx: Int, name: &str, expected: &str, detail: Text) -> DbError {
+fn text_decode_failed(col_idx: Int, name: &Text, expected: &Text, detail: Text) -> DbError {
     DbError.DecodeFailed {
         fault: DecodeFault {
             column_index: col_idx,
@@ -722,7 +722,7 @@ fn text_decode_failed(col_idx: Int, name: &str, expected: &str, detail: Text) ->
     }
 }
 
-fn column_not_found(name: &str) -> DbError {
+fn column_not_found(name: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter:   AdPostgres,
         code:      "PG_ROW_COL_NOT_FOUND".to_text(),

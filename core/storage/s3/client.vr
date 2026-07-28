@@ -631,7 +631,7 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
     Result.Ok(ListPage { objects, common_prefixes: common, next_token })
 }
 
-fn extract_xml_text(xml: &Text, tag: &str) -> Maybe<Text> {
+fn extract_xml_text(xml: &Text, tag: &Text) -> Maybe<Text> {
     let open = f"<{tag}>";
     let close = f"</{tag}>";
     let s = xml.find_str(&open)?;

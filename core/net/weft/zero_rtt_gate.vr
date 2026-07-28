@@ -72,7 +72,7 @@ mount core.net.weft.error.{WeftError};
 /// arrived through 0-RTT data. Listeners that don't speak 0-RTT
 /// never set the header, so non-0-RTT-aware deployments fall through
 /// transparently.
-public const ZERO_RTT_MARKER_HEADER: &str = "x-weft-via-0rtt";
+public const ZERO_RTT_MARKER_HEADER: &Text = "x-weft-via-0rtt";
 
 /// Read the marker; returns true iff the request arrived via 0-RTT
 /// (header value `"1"` or any non-empty truthy value).

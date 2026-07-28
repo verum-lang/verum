@@ -361,7 +361,7 @@ fn enforce_lifetime_cap(
 // Helpers
 // =============================================================================
 
-fn compose_url(base: &Text, path: &str) -> Text {
+fn compose_url(base: &Text, path: &Text) -> Text {
     if base.ends_with("/") && path.starts_with("/") {
         f"{base.byte_substring(0, base.len() - 1)}{path}"
     } else if !base.ends_with("/") && !path.starts_with("/") {

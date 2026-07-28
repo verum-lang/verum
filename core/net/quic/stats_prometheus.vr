@@ -167,8 +167,8 @@ fn build_conn_labels(conn_label: &Text) -> List<(Text, Text)> {
 
 fn emit_counter(
     out: &mut TextBuilder,
-    name: &str,
-    help: &str,
+    name: &Text,
+    help: &Text,
     value: UInt64,
     labels: &[(Text, Text)],
 ) {
@@ -178,8 +178,8 @@ fn emit_counter(
 
 fn emit_gauge(
     out: &mut TextBuilder,
-    name: &str,
-    help: &str,
+    name: &Text,
+    help: &Text,
     value: UInt64,
     labels: &[(Text, Text)],
 ) {
@@ -187,7 +187,7 @@ fn emit_gauge(
     emit_sample(out, name, labels, value);
 }
 
-fn emit_help_type(out: &mut TextBuilder, name: &str, help: &str, ty: &str) {
+fn emit_help_type(out: &mut TextBuilder, name: &Text, help: &Text, ty: &Text) {
     out.push_str("# HELP ");
     out.push_str(name);
     out.push_str(" ");
@@ -201,7 +201,7 @@ fn emit_help_type(out: &mut TextBuilder, name: &str, help: &str, ty: &str) {
 
 fn emit_sample(
     out: &mut TextBuilder,
-    name: &str,
+    name: &Text,
     labels: &[(Text, Text)],
     value: UInt64,
 ) {
@@ -236,7 +236,7 @@ type TextBuilder is {
 implement TextBuilder {
     fn new() -> TextBuilder { TextBuilder { parts: [] } }
 
-    fn push_str(&mut self, s: &str) {
+    fn push_str(&mut self, s: &Text) {
         self.parts.push(Text.from(s));
     }
 

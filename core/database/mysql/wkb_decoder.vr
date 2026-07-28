@@ -495,7 +495,7 @@ fn has_crs_member(geom: &JsonValue) -> Bool {
     }
 }
 
-fn geo_object(typ: &str, coords: JsonValue) -> JsonValue {
+fn geo_object(typ: &Text, coords: JsonValue) -> JsonValue {
     let mut obj: Map<Text, JsonValue> = Map.new();
     obj.insert("type".clone(), JsonString(typ.to_text()));
     obj.insert("coordinates".clone(), coords);

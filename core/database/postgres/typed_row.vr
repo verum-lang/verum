@@ -286,7 +286,7 @@ public fn expect_arity(row: &List<TypedValue>, want: Int) -> Result<(), DbError>
     Result.Ok(())
 }
 
-fn typed_row_error(col: Int, want: &str, got: &TypedValue) -> DbError {
+fn typed_row_error(col: Int, want: &Text, got: &TypedValue) -> DbError {
     let got_name = got.type_name();
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,

@@ -227,7 +227,7 @@ fn parse_param_value(b: &[Byte], from: Int) -> Result<(Text, Int), LinkHeaderErr
 /// Find the first entry whose `rel` parameter equals `rel` (case-
 /// insensitive per RFC 8288 §3.3). RFC allows space-separated
 /// multi-rel values; we split and check any token matches.
-public fn find_rel<'a>(list: &'a List<LinkEntry>, rel: &str) -> Maybe<&'a LinkEntry> {
+public fn find_rel<'a>(list: &'a List<LinkEntry>, rel: &Text) -> Maybe<&'a LinkEntry> {
     let mut i: Int = 0;
     while i < list.len() {
         let entry = &list[i];

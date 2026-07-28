@@ -491,7 +491,7 @@ fn wire_text_or_empty(v: &WireValue) -> Text {
     }
 }
 
-fn must_be_physical(what: &str) -> DbError {
+fn must_be_physical(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "BB_BAD_MODE".clone(),
@@ -500,7 +500,7 @@ fn must_be_physical(what: &str) -> DbError {
     })
 }
 
-fn bad_state(what: &str) -> DbError {
+fn bad_state(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "BB_BAD_STATE".clone(),

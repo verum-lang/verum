@@ -86,7 +86,7 @@ implement PermissionSet {
 fn check_path(
     allowed: &Maybe<List<Text>>,
     path:    &Path,
-    kind:    &str,
+    kind:    &Text,
 ) -> Result<(), ShellError> {
     match allowed {
         Maybe.None => Result.Ok(()),

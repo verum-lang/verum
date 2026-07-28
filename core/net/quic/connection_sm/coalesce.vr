@@ -262,7 +262,7 @@ fn build_one(plan: &CoalescePlan, pkt: &CoalescedPacket) -> Result<List<Byte>, C
     }
 }
 
-fn map_tx_err(which: &str, e: TxError) -> CoalesceError {
+fn map_tx_err(which: &Text, e: TxError) -> CoalesceError {
     CoalesceError.PacketBuildFailed(Text.from_str(f"build {which}"))
 }
 

@@ -256,7 +256,7 @@ public fn expect_arity(row: &List<RowValue>, want: Int) -> Result<(), DbError> {
     Result.Ok(())
 }
 
-fn typed_row_error(col: Int, want: &str, got: &RowValue) -> DbError {
+fn typed_row_error(col: Int, want: &Text, got: &RowValue) -> DbError {
     let got_name = row_value_name(got);
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,

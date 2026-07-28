@@ -305,7 +305,7 @@ fn parse_attestation_object(bytes: &List<Byte>) -> Result<AttestationObject, Web
     })
 }
 
-fn get_text_keyed_text(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<Text> {
+fn get_text_keyed_text(map: &List<(CborValue, CborValue)>, key: &Text) -> Maybe<Text> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
@@ -317,7 +317,7 @@ fn get_text_keyed_text(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<T
     Maybe.None
 }
 
-fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<List<Byte>> {
+fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &Text) -> Maybe<List<Byte>> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
@@ -329,7 +329,7 @@ fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<
     Maybe.None
 }
 
-fn get_text_keyed_value(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<CborValue> {
+fn get_text_keyed_value(map: &List<(CborValue, CborValue)>, key: &Text) -> Maybe<CborValue> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];

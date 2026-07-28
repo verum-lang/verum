@@ -234,7 +234,7 @@ public async fn with_transaction_async<R, F: fn(&AsyncPgConnection) -> Result<R,
 // Helpers
 // =============================================================================
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "ACTOR_CLOSED".clone(),

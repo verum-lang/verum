@@ -653,7 +653,7 @@ public fn decode_json_diff(buf: &[Byte]) -> Result<List<JsonDiff>, DbError> {
     Result.Ok(out)
 }
 
-fn bad_diff(what: &str) -> DbError {
+fn bad_diff(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "BINLOG_JSON_DIFF".clone(),
@@ -1511,7 +1511,7 @@ implement TableMapCache {
     public fn len(&self) -> Int { self.entries.len() as Int }
 }
 
-fn bad_rows(what: &str) -> DbError {
+fn bad_rows(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdMysql,
         code: "BINLOG_ROWS".clone(),

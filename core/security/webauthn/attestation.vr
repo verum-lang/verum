@@ -456,7 +456,7 @@ fn verify_rsa(
 // Helpers — text-keyed CBOR map lookups
 // =============================================================================
 
-fn get_text_keyed_int(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<Int> {
+fn get_text_keyed_int(map: &List<(CborValue, CborValue)>, key: &Text) -> Maybe<Int> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
@@ -468,7 +468,7 @@ fn get_text_keyed_int(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<In
     Maybe.None
 }
 
-fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<List<Byte>> {
+fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &Text) -> Maybe<List<Byte>> {
     let mut i: Int = 0;
     while i < map.len() {
         let (k, v) = &map[i];
@@ -480,7 +480,7 @@ fn get_text_keyed_bytes(map: &List<(CborValue, CborValue)>, key: &str) -> Maybe<
     Maybe.None
 }
 
-fn get_text_keyed_x5c(map: &List<(CborValue, CborValue)>, key: &str) -> List<List<Byte>> {
+fn get_text_keyed_x5c(map: &List<(CborValue, CborValue)>, key: &Text) -> List<List<Byte>> {
     let mut out: List<List<Byte>> = List.new();
     let mut i: Int = 0;
     while i < map.len() {

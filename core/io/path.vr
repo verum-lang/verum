@@ -213,7 +213,7 @@ implement Path {
 
     /// Create path from raw string.
     @inline(always)
-    public fn from_str(s: &str) -> Path {
+    public fn from_str(s: &Text) -> Path {
         Path { inner: Text.from(s) }
     }
 
@@ -644,7 +644,7 @@ implement PathBuf {
     }
 
     /// Create PathBuf from a string literal.
-    public fn from_str(s: &str) -> PathBuf {
+    public fn from_str(s: &Text) -> PathBuf {
         PathBuf { path: Path { inner: Text.from(s) } }
     }
 

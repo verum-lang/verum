@@ -526,7 +526,7 @@ implement Drop for AsyncPgPoolGuard {
 // Helpers
 // =============================================================================
 
-fn pool_err(what: &str) -> DbError {
+fn pool_err(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "ASYNC_POOL".clone(),

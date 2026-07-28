@@ -786,7 +786,7 @@ fn run_copy_out_subloop(
 // Helpers
 // =============================================================================
 
-fn actor_dropped(what: &str) -> DbError {
+fn actor_dropped(what: &Text) -> DbError {
     DbError.Adapter(AdapterSpecific {
         adapter: AdPostgres,
         code: "ACTOR_CLOSED".clone(),

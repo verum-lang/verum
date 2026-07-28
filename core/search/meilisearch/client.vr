@@ -381,7 +381,7 @@ fn compose_url(cfg: &MeiliConfig, path: &Text) -> Text {
     }
 }
 
-fn auth_headers(cfg: &MeiliConfig, content_type: Maybe<&str>) -> Map<Text, Text> {
+fn auth_headers(cfg: &MeiliConfig, content_type: Maybe<&Text>) -> Map<Text, Text> {
     let mut h: Map<Text, Text> = Map.new();
     h.insert("authorization".to_text(), f"Bearer {cfg.api_key}");
     h.insert("user-agent".to_text(), "verum-meilisearch/0.1".to_text());
