@@ -569,6 +569,30 @@ impl TypeChecker {
                 // Exhaustiveness check (check_expr path)
                 // Only for variant/bool types without guards to avoid false positives
                 let applied_scrut_chk = self.unifier.apply(&scrutinee_ty);
+                // T0647: auto-deref the scrutinee for exhaustiveness purposes,
+                // mirroring infer_expr's Match arm (see the identical block a few
+                // hundred lines below, "Auto-deref scrutinee for match expressions").
+                // Without this, matching on a borrowed sum type (`&Token`,
+                // `&checked Token`, `&unsafe Token`) left `applied_scrut_chk` as
+                // Type::Reference{..}, which never matches the `Type::Variant(_) |
+                // Type::Bool` gate below — so exhaustiveness silently never ran for
+                // any match whose scrutinee is a reference, independent of guards.
+                // Scoped to this local binding only: `scrutinee_ty` itself (used for
+                // `bind_pattern` above) is untouched. bind_pattern_scheme already
+                // auto-derefs references on its own (infer/patterns.rs) — pattern
+                // binding was never the broken half, only this exhaustiveness chain.
+                let applied_scrut_chk = match &applied_scrut_chk {
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. } => match &**inner {
+                        Type::Variant(_)
+                        | Type::Generic { .. }
+                        | Type::Named { .. }
+                        | Type::Record(_) => (**inner).clone(),
+                        _ => applied_scrut_chk,
+                    },
+                    _ => applied_scrut_chk,
+                };
                 // Expand the scrutinee to its variant form, SUBSTITUTING the
                 // concrete type arguments.  The pre-fix code used a bare
                 // `lookup_type(name)` which returns the type's raw variant with
