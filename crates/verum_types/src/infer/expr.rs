@@ -1251,8 +1251,17 @@ impl TypeChecker {
     /// otherwise falls back to synthesis + subsumption.
     fn check_closure_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         use ExprKind::*;
-        let ExprKind::Closure { params, body: closure_body, return_type, async_, .. } = &expr.kind
-            else { unreachable!() };
+        let ExprKind::Closure {
+            params,
+            body: closure_body,
+            return_type,
+            async_,
+            move_,
+            ..
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
                 // Flip `in_async_context` for async closures so their body
                 // may use `.await`. Mirrors the synth-mode handler at
                 // ~11725. The flag is restored by the `AsyncCtxGuard`
@@ -1332,6 +1341,11 @@ impl TypeChecker {
                             });
                         }
 
+                        // T0653: capture exclusivity is checked on THIS path
+                        // too, not only when the closure's type is inferred.
+                        let closure_id =
+                            self.enter_closure_capture_tracking(closure_body, params, *move_)?;
+
                         // Enter new scope for lambda
                         self.ctx.enter_scope();
 
@@ -1359,6 +1373,11 @@ impl TypeChecker {
                         // Never-returning bodies (e.g., panic("...")) are handled correctly too:
                         // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
                         self.check_expr(closure_body, &ret_ty)?;
+
+                        // T0653: close capture tracking and enforce async
+                        // Send-safety BEFORE leaving the closure scope, the
+                        // same order `infer_closure_expr` uses.
+                        self.exit_closure_capture_tracking(closure_id, *async_)?;
 
                         self.ctx.exit_scope();
 
@@ -1403,6 +1422,12 @@ impl TypeChecker {
                             });
                         }
 
+                        // T0653: capture exclusivity is checked on THIS path
+                        // too — this is the branch most closures take
+                        // (`.map(|x| …)`, typed argument, typed binding).
+                        let closure_id =
+                            self.enter_closure_capture_tracking(closure_body, params, *move_)?;
+
                         // Enter new scope for lambda
                         self.ctx.enter_scope();
 
@@ -1431,6 +1456,10 @@ impl TypeChecker {
                         // Never-returning bodies (e.g., panic("...")) are handled correctly too:
                         // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
                         self.check_expr(closure_body, &ret_ty)?;
+
+                        // T0653: close capture tracking and enforce async
+                        // Send-safety BEFORE leaving the closure scope.
+                        self.exit_closure_capture_tracking(closure_id, *async_)?;
 
                         self.ctx.exit_scope();
 
@@ -5236,50 +5265,113 @@ impl TypeChecker {
                     Ok(body_result)
     }
 
+    /// Capture analysis + aliasing-conflict detection, run BEFORE a closure's
+    /// body is type-checked and before its scope is entered.
+    ///
+    /// T0653. This block used to live inline in `infer_closure_expr` only, so
+    /// it ran on the SYNTHESIS path and nowhere else. `check_closure_expr` —
+    /// the path taken whenever a closure is checked against an already-known
+    /// function type, i.e. `.map(|x| …)`, a closure assigned to a typed
+    /// binding, a closure passed as a typed argument, which is most closures
+    /// in real code — never called it. Neither did anything downstream:
+    /// `verum_cbgr::concurrency_analysis::check_thread_safety` returns an
+    /// empty list unconditionally, `nll_analysis`'s real conflict machinery
+    /// has no callers outside its own crate, and the pipeline-wired
+    /// `send_sync_validation` phase covers spawn/Channel/Shared via a
+    /// name-based deny-list, not a closure's own captures. So exclusivity of
+    /// captures was simply unverified on the common path — a hole in the
+    /// guarantee, not a redundant early check.
+    ///
+    /// Returns the tracker's closure id, which the caller MUST pass to
+    /// [`Self::exit_closure_capture_tracking`] so the scope stack stays
+    /// balanced.
+    fn enter_closure_capture_tracking(
+        &mut self,
+        body: &Expr,
+        params: &[verum_ast::expr::ClosureParam],
+        is_move: bool,
+    ) -> Result<crate::aliasing::RefId> {
+        // Determine which outer variables the closure references. Must run
+        // BEFORE entering closure scope, or the lookup sees the closure's own
+        // bindings instead of the enclosing ones.
+        let captures = self.analyze_closure_captures(body, params, is_move);
+        let closure_id = self.borrow_tracker.enter_closure(is_move);
+
+        // Field-path-aware: `x.a` and `x.b` may be captured separately
+        // without conflict (borrow splitting), while `&mut x` conflicts with
+        // an existing immutable borrow of `x`.
+        let mut capture_errors: List<TypeError> = List::new();
+        for (var_name, field_path, capture_mode, capture_span) in &captures {
+            if let Err(e) = self.borrow_tracker.register_capture(
+                closure_id,
+                var_name.clone(),
+                field_path.clone(),
+                *capture_mode,
+                *capture_span,
+            ) {
+                capture_errors.push(e);
+            }
+        }
+        if let Some(first_error) = capture_errors.into_iter().next() {
+            // Balance the scope stack before propagating.
+            self.borrow_tracker.exit_closure(closure_id);
+            return Err(first_error);
+        }
+        Ok(closure_id)
+    }
+
+    /// Closes capture tracking and enforces Send-safety for async closures.
+    ///
+    /// T0653, the epilogue half. Must be called after the body has been
+    /// checked and BEFORE the closure's scope is exited, matching the order
+    /// `infer_closure_expr` has always used: the capture targets are outer
+    /// variables, and the lookup is performed against the environment as it
+    /// stands while the closure scope is still live.
+    ///
+    /// A `MutBorrow` capture of a non-Send type in an `async` closure is
+    /// rejected — the borrow can be live across the closure's own await
+    /// point. This is the only place that property is checked anywhere in the
+    /// pipeline.
+    fn exit_closure_capture_tracking(
+        &mut self,
+        closure_id: crate::aliasing::RefId,
+        is_async: bool,
+    ) -> Result<()> {
+        let capture_set = self.borrow_tracker.exit_closure(closure_id);
+        if let Some(ref cs) = capture_set
+            && is_async
+            && !cs.captures.is_empty()
+        {
+            for capture in &cs.captures {
+                if matches!(capture.mode, crate::aliasing::CaptureMode::MutBorrow)
+                    && let Some(var_scheme) = self.ctx.env.lookup(&capture.target)
+                {
+                    let var_ty = var_scheme.instantiate();
+                    let resolved_ty = self.unifier.apply(&var_ty);
+                    if self.is_non_send_type(&resolved_ty) {
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Cannot capture `{}` by mutable reference in async closure: \
+                             type `{}` is not Send-safe across await points",
+                            capture.target, resolved_ty
+                        ))));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn infer_closure_expr(&mut self, expr: &Expr, outer_span: Span) -> Result<InferResult> {
         let ExprKind::Closure { params, body, return_type, async_, move_, .. } = &expr.kind
             else { unreachable!() };
                     // ============================================================
                     // Closure Capture Analysis
                     // Memory layout and reference representation: ThinRef (16 bytes) for sized types, FatRef (24 bytes) for unsized types — .5 - Closure captures
-                    // ============================================================
-                    // Track what variables this closure captures and check for
-                    // aliasing conflicts with existing borrows.
-
-                    // Analyze captured variables BEFORE entering closure scope
-                    // This determines what outside variables the closure references
-                    let captures = self.analyze_closure_captures(body, params, *move_);
-
-                    // Enter closure tracking for capture analysis
-                    let closure_id = self.borrow_tracker.enter_closure(*move_);
-
-                    // Register each captured variable and check for aliasing conflicts
-                    // Collect all capture errors to report them together
-                    let mut capture_errors: List<TypeError> = List::new();
-
-                    for (var_name, field_path, capture_mode, capture_span) in &captures {
-                        // Check if capturing this variable would conflict with existing borrows
-                        // E.g., can't capture `&mut x` if x is already immutably borrowed
-                        // Field-level tracking enables borrow splitting: `x.a` and `x.b` can be
-                        // captured separately without conflict.
-                        if let Err(e) = self.borrow_tracker.register_capture(
-                            closure_id,
-                            var_name.clone(),
-                            field_path.clone(),
-                            *capture_mode,
-                            *capture_span,
-                        ) {
-                            capture_errors.push(e);
-                        }
-                    }
-
-                    // Report first capture error if any exist
-                    // (We collect all to provide better diagnostics in the future)
-                    if let Some(first_error) = capture_errors.into_iter().next() {
-                        // Clean up before returning error
-                        self.borrow_tracker.exit_closure(closure_id);
-                        return Err(first_error);
-                    }
+                    // T0653: ONE authority, shared with `check_closure_expr`.
+                    // This used to be inline here and nowhere else, which is
+                    // exactly why the check path had no capture checking at all.
+                    let closure_id =
+                        self.enter_closure_capture_tracking(body, params, *move_)?;
 
                     // Enter new scope for lambda
                     self.ctx.enter_scope();
@@ -5336,40 +5428,8 @@ impl TypeChecker {
                         self.in_async_context = prev;
                     }
 
-                    // Exit closure tracking and get capture set
-                    let capture_set = self.borrow_tracker.exit_closure(closure_id);
-
-                    // ============================================================
-                    // Send/Sync Safety for Async Closures
-                    // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Thread safety
-                    // ============================================================
-                    // Async closures that capture references must ensure those
-                    // references are Send if the closure crosses await points.
-                    if let Some(ref cs) = capture_set {
-                        if *async_ && !cs.captures.is_empty() {
-                            // Check thread safety for captured variables
-                            // MutBorrow captures are NOT Send-safe across await points
-                            for capture in &cs.captures {
-                                if matches!(capture.mode, crate::aliasing::CaptureMode::MutBorrow) {
-                                    // Look up the variable's type to check if it's Send
-                                    if let Some(var_scheme) = self.ctx.env.lookup(&capture.target) {
-                                        let var_ty = var_scheme.instantiate();
-                                        let resolved_ty = self.unifier.apply(&var_ty);
-                                        // Check if the type is known to be !Send
-                                        if self.is_non_send_type(&resolved_ty) {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot capture `{}` by mutable reference in async closure: \
-                                                 type `{}` is not Send-safe across await points",
-                                                    capture.target, resolved_ty
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // T0653: ONE authority, shared with `check_closure_expr`.
+                    self.exit_closure_capture_tracking(closure_id, *async_)?;
 
                     // Exit lambda scope
                     self.ctx.exit_scope();
