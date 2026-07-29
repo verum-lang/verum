@@ -402,6 +402,7 @@ public module s_definable;           // S-definability hierarchy
 
 // Mathematical constants
 public mount .constants.{
+
     PI,
     TAU,
     E,
@@ -416,20 +417,24 @@ public mount .constants.{
     INFINITY,
     NEG_INFINITY,
     NAN,
+
 };
 
 // Refinement type aliases for mathematical domains
 public mount .constants.{
+
     NonNegative,
     Positive,
     UnitInterval,
     MathProbability,
     Angle,
     Dim,
+
 };
 
 // IEEE 754 utilities
 public mount .ieee754.{
+
     FpCategory,
     is_nan,
     is_infinite,
@@ -438,10 +443,12 @@ public mount .ieee754.{
     is_subnormal,
     copysign,
     signbit,
+
 };
 
 // Elementary functions
 public mount .elementary.{
+
     // Trigonometric
     sin,
     cos,
@@ -487,28 +494,34 @@ public mount .elementary.{
     // Smooth Interpolation
     smoothstep,
     smootherstep,
+
 };
 
 // Safe variants (return Maybe<T>)
 public mount .elementary.{
+
     sqrt_safe,
     log_safe,
     asin_safe,
     acos_safe,
+
 };
 
 // Hyperbolic functions
 public mount .hyperbolic.{
+
     sinh,
     cosh,
     tanh,
     asinh,
     acosh,
     atanh,
+
 };
 
 // Special functions
 public mount .special.{
+
     gamma,
     lgamma,
     digamma,
@@ -516,10 +529,12 @@ public mount .special.{
     erf,
     erfc,
     erfinv,
+
 };
 
 // Bit operations
 public mount .bits.{
+
     clz,
     ctz,
     popcnt,
@@ -527,10 +542,12 @@ public mount .bits.{
     rotr,
     is_power_of_two,
     next_power_of_two,
+
 };
 
 // Checked arithmetic
 public mount .checked.{
+
     CheckedResult,
     checked_add,
     checked_sub,
@@ -541,10 +558,12 @@ public mount .checked.{
     wrapping_add,
     wrapping_sub,
     wrapping_mul,
+
 };
 
 // Integer operations
 public mount .integers.{
+
     DivMode,
     div_floor,
     div_ceiling,
@@ -552,10 +571,12 @@ public mount .integers.{
     mod_euclidean,
     gcd,
     lcm,
+
 };
 
 // Linear algebra
 public mount .linalg.{
+
     // Types
     Numeric,
     Vector,
@@ -599,10 +620,12 @@ public mount .linalg.{
     determinant,
     inverse,
     solve,
+
 };
 
 // Numerical analysis and calculus
 public mount .calculus.{
+
     // Differentiation
     diff_forward,
     diff_backward,
@@ -640,10 +663,12 @@ public mount .calculus.{
     gradient_descent_bt,
     newton_optimize,
     bfgs,
+
 };
 
 // Random number generation
 public mount .random.{
+
     // Key-based PRNG
     RandomKey,
     // Generators
@@ -664,8 +689,6 @@ public mount .random.{
     exponential,
     bernoulli,
     poisson,
-    gamma,
-    beta,
     chi_squared,
     student_t,
     cauchy,
@@ -675,10 +698,13 @@ public mount .random.{
     permutation,
     shuffle_vec,
     choice,
+
 };
 
 // Tensor system
 public mount .tensor.{
+    DType,
+    scaled_dot_product_attention,
 
     // Data types
     DType,
@@ -749,6 +775,7 @@ public mount .tensor.{
 
 // GPU compute
 public mount .gpu.{
+
     // Backend types
     GPUBackend,
     Vendor,
@@ -796,7 +823,6 @@ public mount .gpu.{
     LaunchConfig,
     // Streams and events
     GpuStream,
-    Event,
     StreamHandle,
     EventHandle,
     device_synchronize,
@@ -822,10 +848,12 @@ public mount .gpu.{
     ComputeDevice,
     CPUDevice,
     GPUDevice,
+
 };
 
 // Automatic differentiation
 public mount .autodiff.{
+
     // Core protocols
     Differentiable,
     // Differentiation modes
@@ -857,11 +885,12 @@ public mount .autodiff.{
     checkpointed_sequential,
     optimal_checkpoint,
     // Contexts
-    GradientAccumulation,
+
 };
 
 // Neural networks
 public mount .nn.{
+
     // Core protocols
     Module,
     Trainable,
@@ -891,7 +920,6 @@ public mount .nn.{
     dropout,
     // Attention
     MultiHeadAttention,
-    scaled_dot_product_attention,
     // Transformer components
     FeedForward,
     TransformerBlock,
@@ -915,10 +943,12 @@ public mount .nn.{
     smooth_l1_loss,
     binary_cross_entropy,
     binary_cross_entropy_with_logits,
+
 };
 
 // State Space Models (SSM/Mamba)
 public mount .ssm.{
+
     // Discretization
     DiscretizationMethod,
     // State Space Kernel
@@ -940,10 +970,12 @@ public mount .ssm.{
     Expert,
     MoELayer,
     MoETransformerBlock,
+
 };
 
 // Distributed Training
 public mount .distributed.{
+
     // Communication backend
     CommBackend,
     ProcessGroup,
@@ -975,7 +1007,6 @@ public mount .distributed.{
     // FSDP
     ShardingStrategy,
     FSDP,
-    DType,
     // Actor mesh
     MeshDims,
     MeshTopology,
@@ -990,17 +1021,16 @@ public mount .distributed.{
     SupervisionStrategy,
     MeshFailure,
     SupervisionDecision,
-    Supervision,
     DefaultSupervision,
     // RDMA
     RdmaRef,
-    RdmaContext,
+
 };
 
 // Agent Systems (LLM/Inference)
 public mount .agent.{
+
     // Tokenization
-    Tokenizer,
     BPETokenizer,
     SentencePieceTokenizer,
     // KV Cache
@@ -1009,7 +1039,6 @@ public mount .agent.{
     // Speculative Decoding
     SpeculativeDecoder,
     // Continuous Batching
-    Request,
     ContinuousBatcher,
     // Agent framework
     Tool,
@@ -1050,11 +1079,12 @@ public mount .agent.{
     CallableTool,
     FunctionCallingAgent,
     ToolChoice,
-    ParseError,
+
 };
 
 // Guardrails and Safety (Section 51)
 public mount .guardrails.{
+
     // Guardrail result types
     GuardrailResult,
     ClassificationResult,
@@ -1078,10 +1108,12 @@ public mount .guardrails.{
     RateLimitGuardrail,
     // Builder pattern
     GuardrailBuilder,
+
 };
 
 // RAG (Retrieval-Augmented Generation) (Section 52)
 public mount .rag.{
+
     // Document types
     Document,
     // Vector store protocol
@@ -1101,6 +1133,7 @@ public mount .rag.{
     BM25Index,
     // Hybrid retrieval
     HybridRetriever,
+
 };
 
 // =============================================================================
@@ -1108,10 +1141,12 @@ public mount .rag.{
 // =============================================================================
 
 public mount .cubical.{
+
     rev, meet, join, interval_eq,
     Face, eval_face,
     comp, Glue, unglue,
     connection_and, connection_or,
+
 };
 
 // =============================================================================
@@ -1119,8 +1154,9 @@ public mount .cubical.{
 // =============================================================================
 
 public mount .hott.{
+
     // Cubical primitives
-    I, i0, i1, Path, refl, transport, hcomp,
+    I, refl, transport, hcomp,
     // Path algebra
     sym, trans, ap, apd, cong, concat,
     // Equivalences
@@ -1137,6 +1173,7 @@ public mount .hott.{
     DecidableEq, hedberg,
     // Path-over
     PathOver,
+
 };
 
 // =============================================================================
@@ -1144,20 +1181,24 @@ public mount .hott.{
 // =============================================================================
 
 public mount .infinity_topos.{
+
     Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
     InfinityTopos, SheafInfinityTopos, construct_sheaf_topos,
     InfSubobjectClassifier, GeometricMorphism,
     CechNerve, compute_cech_nerve, DescentResult, DescentObstruction,
     check_descent, CoherenceViolation, Translation, check_coherence,
+
 };
 
 public mount .kan_extension.{
+
     InfLeftKanExtension, InfRightKanExtension,
     KanExtensionTriple, PointwiseKanExtension, KanPreservingFunctor,
     KanDirection, KanExtensionResult, CommaCategory, CommaObject,
     compute_pointwise_lan, compute_pointwise_ran,
     compute_full_kan_extension, ObstructionPoint, ObstructionData,
     compute_obstruction, is_exact_extension,
+
 };
 
 // =============================================================================
@@ -1165,37 +1206,46 @@ public mount .kan_extension.{
 // =============================================================================
 
 public mount .quantum_logic.{
+
     OrthomodularLattice, EpistemicHilbertSpace, EpistemicState,
     EpistemicProjector, measure, commutator, are_compatible,
     epistemic_fidelity, construct_epistemic_space,
     initial_epistemic_state, superposition,
+
 };
 
 public mount .giry.{
+
     MeasurableSpace, ProbabilityMeasure, Giry,
     giry_unit, giry_bind, LlmOracle,
     sample_above, functor_density,
+
 };
 
 // Note: `mathesis` is retained as a compatibility alias for
 // `theory_universe`; both re-exported during the naming-
 // migration window.
 public mount .epistemic.{
+
     EpistemicStatus, ClaimType, Claim, Theory,
     EpistemicTopology, theory_category, epistemic_topology,
-    theory_site, theory_universe, mathesis,
     propagate_status, compute_kan_extension as epistemic_kan_extension,
     compute_obstruction as epistemic_obstruction,
+
 };
 
 public mount .cohesive.{
+
     CohesiveStructure, DifferentiallyCohesive,
     theory_cohesive_structure, theory_differentially_cohesive,
+
 };
 
 public mount .day_convolution.{
+
     SymmetricMonoidalCategory, DayConvolution,
     CognitiveExtension, cognitive_extension,
+
 };
 
 // =============================================================================
@@ -1203,10 +1253,12 @@ public mount .day_convolution.{
 // =============================================================================
 
 public mount .sdg.{
+
     D, TangentBundle, TangentVector,
     JetBundle, DifferentialForm,
     wedge_product, exterior_derivative,
-    Connection, curvature,
+    curvature,
+
 };
 
 // =============================================================================
