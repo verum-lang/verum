@@ -99,6 +99,12 @@ mount core.base.coercion.{IntCoercible};
 // =============================================================================
 
 // Supported GPU backends
+/// GPU DEVICE AVAILABILITY — which accelerator this host can dispatch to.
+///
+/// Deliberately distinct from `core.simd.gpu.GpuBackend`, which enumerates
+/// COMPILATION TARGETS. This one carries `None` (no GPU present) and `SYCL`;
+/// that one cannot, since there is no artefact for an absent device. The
+/// casing difference follows from them being different types (T0185).
 public type GPUBackend is
     | CUDA       // NVIDIA CUDA
     | ROCm       // AMD ROCm/HIP

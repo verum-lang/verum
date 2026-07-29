@@ -679,25 +679,18 @@ public mount .random.{
 
 // Tensor system
 public mount .tensor.{
+
     // Data types
     DType,
     // Shape types
-    Shape,
-    StaticShape,
-    DynShape,
     // Core tensor types
     Tensor,
     DynTensor,
     // Views
     TensorView,
-    TensorViewMut,
-    DynTensorView,
-    DynTensorViewMut,
     // Strided layout
-    Strides,
     Layout,
     // Scalar tensor
-    Scalar,
     // Constructors
     zeros,
     ones,
@@ -705,13 +698,11 @@ public mount .tensor.{
     eye,
     arange,
     linspace,
-    from_fn,
     from_list,
     // Random tensors
     rand,
     randn,
     // Shape operations
-    broadcast,
     reshape,
     squeeze,
     unsqueeze,
@@ -719,7 +710,6 @@ public mount .tensor.{
     permute,
     flatten,
     // Indexing
-    TensorIndex,
     slice,
     gather,
     scatter,
@@ -749,15 +739,12 @@ public mount .tensor.{
     gt,
     ge,
     // Logical
-    logical_and,
-    logical_or,
-    logical_not,
-    where_cond,
     // Concatenation
     cat,
     stack,
     split,
     chunk,
+
 };
 
 // GPU compute

@@ -52,6 +52,13 @@ public type GpuDevice is {
 };
 
 /// GPU target backend.
+/// GPU COMPILATION TARGET — the artefact kind a kernel is compiled to.
+///
+/// Deliberately distinct from `core.math.gpu.GPUBackend`, which enumerates
+/// DEVICE AVAILABILITY and therefore carries `SYCL` and `None`. This one has
+/// no `None`: you cannot compile *to* the absence of a device. The casing
+/// difference is a consequence of the two names being different types, not
+/// drift — do not "unify" them without merging the concepts first (T0185).
 public type GpuBackend is
     Cuda           // NVIDIA CUDA (PTX → cubin)
     | Rocm         // AMD ROCm (HSACO)
