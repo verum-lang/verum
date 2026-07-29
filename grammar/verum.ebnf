@@ -816,7 +816,28 @@ param           = param_pattern | self_param ;
 (* Example: fn process(@unused x: Int, @must_use result: &mut Out) *)
 param_pattern   = { attribute } , pattern , ':' , type_expr ;
 self_param      = { attribute } , [ ref_modifier ] , 'self' ;
-ref_modifier    = '&' , [ ref_kind ] , [ 'mut' ] ;
+ref_modifier    = '&' , [ lifetime ] , [ ref_kind ] , [ 'mut' ] ;
+
+(* ---------------------------------------------------------------- *)
+(* Lifetime annotations                                              *)
+(* ---------------------------------------------------------------- *)
+(* Real, lexed, parsed syntax -- NOT parser leniency.  `TokenKind::  *)
+(* Lifetime` is a first-class token with an engineered logos regex   *)
+(* and priority 100, matched before Ident and Char so that `'a` is   *)
+(* never mistaken for a character literal.                           *)
+(*                                                                   *)
+(* SEMANTICS: currently PARSED AND DISCARDED.  A lifetime annotation *)
+(* has no effect on type checking -- `&'static Text` and `&Text`     *)
+(* check identically.  The syntax is accepted so that lifetime-aware *)
+(* code can be written and kept compiling; it does not yet constrain *)
+(* anything.  Documented here because the grammar is the normative   *)
+(* description of what the language ACCEPTS, and silently accepting  *)
+(* syntax that the spec omits is how `'arena`-style annotations come *)
+(* to look load-bearing when they are inert.                         *)
+(*                                                                   *)
+(* In use across core/: `&'a` x67, `<'a` x56, `'static` x39,         *)
+(* `&'static` x22, `<'arena` x1.                                     *)
+lifetime        = "'" , ( letter | '_' ) , { letter | dec_digit | '_' } ;
 ref_kind        = 'checked' | 'unsafe' | epsilon ;
 
 generics        = '<' , generic_params , '>' ;
@@ -824,7 +845,7 @@ generic_params  = generic_param , { ',' , generic_param } ;
 (* generic_param supports HKT via extended_generic_param *)
 generic_param   = extended_generic_param ;
 
-type_param      = identifier , [ ':' , bounds ] ;
+type_param      = lifetime | ( identifier , [ ':' , bounds ] ) ;
 meta_param      = identifier , ':' , 'meta' , type_expr , [ refinement ] ;
 refinement      = '{' , predicate_expr , '}' ;
 
@@ -1280,7 +1301,7 @@ slice_type      = '[' , type_expr , ']' ;
 (* &T = managed reference with CBGR (ThinRef 16 bytes / FatRef 32 bytes, automatic selection) *)
 (* &checked T = compile-time verified reference (0ns overhead) *)
 (* &unsafe T = unsafe reference with no checks (0ns overhead, manual safety proof required) *)
-managed_reference_type = '&' , [ 'mut' ] , type_expr ;
+managed_reference_type = '&' , [ lifetime ] , [ 'mut' ] , type_expr ;
 checked_reference_type = '&' , 'checked' , [ 'mut' ] , type_expr ;
 unsafe_reference_type = '&' , 'unsafe' , [ 'mut' ] , type_expr ;
 
@@ -1307,7 +1328,7 @@ rank2_function_type = [ 'async' ] , 'fn' , generics , '(' , type_list , ')'
 generic_type    = path , type_args ;
 type_args       = '<' , type_arg , { ',' , type_arg } , '>' ;
 (* type_arg supports type-level literals and meta expressions *)
-type_arg        = extended_type_arg ;
+type_arg        = lifetime | extended_type_arg ;
 
 (* GenRef type for explicit generation tracking *)
 (* Spec: docs/detailed/18-advanced-protocols.md Section 2 - CBGR-Native Reference Patterns *)
