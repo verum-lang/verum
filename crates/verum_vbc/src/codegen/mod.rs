@@ -543,6 +543,11 @@ pub struct VbcCodegen {
     /// Carries `(alias_name, FunctionId)`.  Drained on every
     /// `finalize_module` so the buffer resets between modules.
     mount_aliases_buffer: Vec<(String, FunctionId, String)>,
+    /// Module-qualified re-export keys (`<module>.<alias>`) that a MOUNT
+    /// created — the provenance half of MOUNT-VS-DECL-KEY-1 (T0670).
+    /// Written only by [`Self::register_mount_qualified_key`], read only
+    /// by the local-declaration registrar.
+    mount_installed_qualified_keys: std::collections::HashSet<String>,
     /// **FIELD-INTERN-FALLBACK visibility** — unique `(type, field)`
     /// pairs that resolved through the global field-name interner
     /// (the wrong-offset landmine class; defect-class-catalogue §40).
@@ -1776,6 +1781,7 @@ impl VbcCodegen {
             // Deferred imports for multi-file modules
             pending_imports: Vec::new(),
             mount_aliases_buffer: Vec::new(),
+            mount_installed_qualified_keys: std::collections::HashSet::new(),
             field_intern_fallbacks: std::collections::HashSet::new(),
             constant_type_refs: std::collections::HashMap::new(),
             // Track variant name collisions
@@ -8661,6 +8667,25 @@ impl VbcCodegen {
             .current_source_module
             .as_deref()
             .unwrap_or(&self.config.module_name);
+        // Emitted BEFORE the guard so a declaration that never reaches the
+        // qualified-key block is visible as a `decl-skip`, not as silence —
+        // an absent trace line cannot be told apart from an unreached site.
+        if std::env::var("VERUM_TRACE_QKEY").is_ok()
+            && !(self.nested_function_scope.is_empty()
+                && !effective_module.is_empty()
+                && effective_module != "main"
+                && !base_name.contains('.')
+                && !base_name.contains("::"))
+        {
+            eprintln!(
+                "[qkey] decl-skip {}::{} id={} nested={} mod_empty={}",
+                effective_module,
+                base_name,
+                info.id.0,
+                !self.nested_function_scope.is_empty(),
+                effective_module.is_empty(),
+            );
+        }
         if self.nested_function_scope.is_empty()
             && !effective_module.is_empty()
             && effective_module != "main"
@@ -8669,10 +8694,60 @@ impl VbcCodegen {
         {
             let dot_qualified = format!("{}.{}", effective_module, base_name);
             let colon_qualified = effective_module.replace('.', "::") + "::" + &base_name;
-            // Preserve existing registrations — don't clobber user-visible
-            // qualified aliases already installed by import/mount passes.
-            if self.ctx.lookup_function(&dot_qualified).is_none() {
+            // A module's own declaration OWNS `<its module>.<its name>`.
+            //
+            // Yield the key to another LOCAL declaration of this module
+            // (arity overloads keep source-order precedence), but TAKE IT
+            // BACK from a mount: a mount is a re-export of a foreign
+            // function and must not shadow the definition this module
+            // itself provides.  Testing occupancy alone conflated the two
+            // and let the mount win, which is MOUNT-VS-DECL-KEY-1 (T0670)
+            // — see `register_mount_qualified_key` for the failure and
+            // its 20-site census.
+            let holder = self.ctx.lookup_function(&dot_qualified).map(|f| f.id.0);
+            let mount_held = self.mount_installed_qualified_keys.contains(&dot_qualified);
+            // An EXTERN/STUB SENTINEL squatting this key does not own it
+            // either.  Same ownership judgement the canonical mirror already
+            // makes one layer down (MIRROR-OWNERSHIP-1): ids at or above
+            // `u32::MAX / 4` are dispatch-band registrations — FFI externs,
+            // forward stubs — and asserting "<scope> DECLARES <name>" for
+            // them fabricates provenance.  Measured damage: the real bodies
+            // of `sys.darwin.tls.{ctx_get,ctx_set,…}`,
+            // `sys.darwin.libsystem.safe_close` and `core.math.libm.clamp`
+            // were emitted UNDER the squatter's id, and because that band is
+            // narrow and shared, unrelated functions landed on one id —
+            // 0xFE7FFFFE carried both `libm.clamp` and a sqlite descriptor,
+            // 0xFE7FFFFF carried three sqlite names. All but the last lose
+            // their body.
+            //
+            // The second conjunct is load-bearing: when a module's own
+            // declaration genuinely IS the extern, both ids sit in the band
+            // and nothing should be reclaimed.
+            const EXTERN_SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+            let stub_held = holder.is_some_and(|h| h >= EXTERN_SENTINEL_THRESHOLD)
+                && info.id.0 < EXTERN_SENTINEL_THRESHOLD;
+            if std::env::var("VERUM_TRACE_QKEY").is_ok() {
+                eprintln!(
+                    "[qkey] {} {} mine={} holder={:?}",
+                    match (holder.is_some(), mount_held, stub_held) {
+                        (false, _, _) => "decl-fresh",
+                        (true, true, _) => "decl-takeback",
+                        (true, false, true) => "decl-takeback-stub",
+                        (true, false, false) => "decl-yield",
+                    },
+                    dot_qualified,
+                    info.id.0,
+                    holder,
+                );
+            }
+            if holder.is_none() {
                 self.ctx.register_function(dot_qualified, info.clone());
+            } else if mount_held || stub_held {
+                self.ctx
+                    .register_function_authoritative(dot_qualified.clone(), info.clone());
+                // The definition owns it now; a later arity overload must
+                // see it as declaration-held, not mount-held.
+                self.mount_installed_qualified_keys.remove(&dot_qualified);
             }
             if self.ctx.lookup_function(&colon_qualified).is_none() {
                 self.ctx.register_function(colon_qualified, info.clone());
@@ -8905,6 +8980,7 @@ impl VbcCodegen {
         };
         let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
+        self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         descriptor.register_count = register_count;
         descriptor.locals_count = params.len() as u16;
@@ -9141,6 +9217,119 @@ impl VbcCodegen {
     /// (first-wins under stdlib bake) — never authoritative — so a
     /// genuine local declaration at the same qualified name cannot be
     /// clobbered by a mount.
+    /// Records one descriptor's `(FunctionId, name)` adoption for the
+    /// T0670 collision census (`VERUM_TRACE_ALLADOPT`).
+    ///
+    /// FOUR sites stamp `descriptor.id = func_info.id` — `compile_function`,
+    /// `compile_pattern_as_function`, `compile_pending_constants` and
+    /// `emit_lenient_panic_stub` — and all four must report, or the census
+    /// measures one emitter while reading as a statement about the archive.
+    /// That is the false-green this instrument exists to prevent, so the
+    /// call belongs at every stamp site, routed through here rather than
+    /// copied.
+    ///
+    /// Deliberately UNFILTERED: collisions are found by grouping on the id
+    /// afterwards. Filtering on guessed names hid the tensor path twice,
+    /// because each NAME appears once while the shared ID appears twice.
+    fn trace_id_adoption(&self, id: u32, descriptor_name: &str) {
+        if std::env::var("VERUM_TRACE_ALLADOPT").is_ok() {
+            eprintln!("[alladopt] {} {}", id, descriptor_name);
+        }
+    }
+
+    /// Installs a mount's re-export key `<module>.<alias>` and records
+    /// that a MOUNT — not a local declaration — is what created it.
+    ///
+    /// MOUNT-VS-DECL-KEY-1 (T0670).  The local-declaration registrar has
+    /// to distinguish two states that a merely-occupied key cannot tell
+    /// apart:
+    ///
+    ///   * occupied by ANOTHER LOCAL DECLARATION of this module — an
+    ///     arity overload; source order decides, first keeps the
+    ///     unsuffixed key, later ones live in their `name#arity` slot;
+    ///   * occupied by a MOUNT — a re-export of a FOREIGN function,
+    ///     which must never shadow the definition this very module
+    ///     provides under that name.
+    ///
+    /// Pre-fix the registrar tested only occupancy, so the mount (bound
+    /// first) kept the key and the definition silently declined it.
+    /// `core/math/tensor.vr` mounts `elementary.{sqrt,exp,log,sin,cos}`
+    /// AND redeclares all five, so `core.math.tensor.sin` still resolved
+    /// to ELEMENTARY's `FunctionInfo`; `compile_function`'s qualified
+    /// lookup then stamped tensor's body with elementary's `FunctionId`
+    /// and the last-wins replace overwrote elementary's real body.
+    /// `core.math.elementary.sin(1.0)` returned nil for every caller of
+    /// the canonical path.  A full-bake id census found the same
+    /// collision at 20 sites — `math.{distributed,nn,tensor}.gather`
+    /// three ways, `base.panic.catch_unwind` vs
+    /// `intrinsics.control.catch_unwind`, `base.env.temp_dir` vs
+    /// `shell.builtins.temp_dir`, both database `connect` pairs — so the
+    /// regression gate is that census reaching zero, not the five math
+    /// names that surfaced it.
+    ///
+    /// The key is recorded ONLY when the mount actually created it: if a
+    /// declaration got there first, the mount's non-authoritative
+    /// registration is a no-op and claiming provenance would hand a
+    /// later arity overload a take-back it has not earned.
+    fn register_mount_qualified_key(&mut self, qualified_alias: &str, func_info: FunctionInfo) {
+        let holder = self.ctx.lookup_function(qualified_alias).map(|f| f.id.0);
+        let mount_held = self
+            .mount_installed_qualified_keys
+            .contains(qualified_alias);
+        // A DECLARATION owns this key — occupied, and not created by a mount.
+        // Return without registering.
+        //
+        // This guard is the whole fix, not a refinement of it.  A re-export
+        // must not overwrite the definition the module itself provides, and
+        // `register_function` is LAST-WINS whenever
+        // `prefer_existing_functions` is false (`context.rs`, the
+        // `self.functions.insert(name, info)` arm), so merely *calling* it
+        // here silently undid the take-back a moment after the declaration
+        // won its key.  That is precisely what left 17 of 20 collisions
+        // standing while three were fixed: the three had no second mount
+        // registration after the declaration, so nothing clobbered them.
+        // `core.math.tensor.sin` went mount-create(16490) →
+        // decl-takeback(17360) → this call with elementary's 15102, and 15102
+        // is the id the emitted descriptor carried.
+        if holder.is_some() && !mount_held {
+            if std::env::var("VERUM_TRACE_QKEY").is_ok() {
+                eprintln!(
+                    "[qkey] mount-declined {} mount_id={} holder={:?}",
+                    qualified_alias, func_info.id.0, holder,
+                );
+            }
+            return;
+        }
+        // Diagnostic (VERUM_TRACE_QKEY, T0670): every module-qualified-key
+        // decision, unfiltered, mount side and declaration side both, so the
+        // branch each name actually takes is readable by grouping rather than
+        // guessed from which site looked plausible.  The branch names state
+        // what the REGISTRATION did, not what this function decided about
+        // provenance — the earlier "mount-noop" label meant only "I did not
+        // record provenance" while the registration underneath still ran and
+        // overwrote the key, and reading that label as "nothing happened"
+        // cost a full build-and-bake cycle.
+        if std::env::var("VERUM_TRACE_QKEY").is_ok() {
+            eprintln!(
+                "[qkey] {} {} mount_id={} holder={:?}",
+                if holder.is_none() {
+                    "mount-create"
+                } else {
+                    "mount-overwrite"
+                },
+                qualified_alias,
+                func_info.id.0,
+                holder,
+            );
+        }
+        self.ctx
+            .register_function(qualified_alias.to_string(), func_info);
+        if holder.is_none() {
+            self.mount_installed_qualified_keys
+                .insert(qualified_alias.to_string());
+        }
+    }
+
     fn bind_mounted_function(
         &mut self,
         alias_name: &str,
@@ -9153,8 +9342,7 @@ impl VbcCodegen {
             && !scope.is_empty()
         {
             let qualified_alias = format!("{}.{}", scope, alias_name);
-            self.ctx
-                .register_function(qualified_alias.clone(), func_info.clone());
+            self.register_mount_qualified_key(&qualified_alias, func_info.clone());
             // The in-process registration above dies at the archive
             // boundary (only descriptors + mount_aliases survive the
             // bake).  Ride the Task-#11 alias channel so
@@ -9211,8 +9399,7 @@ impl VbcCodegen {
             && !scope.is_empty()
         {
             let qualified_alias = format!("{}.{}", scope, alias_name);
-            self.ctx
-                .register_function(qualified_alias.clone(), func_info.clone());
+            self.register_mount_qualified_key(&qualified_alias, func_info.clone());
             self.mount_aliases_buffer.push((
                 qualified_alias,
                 fid,
@@ -13730,6 +13917,7 @@ impl VbcCodegen {
             };
             let name_id = StringId(self.intern_string(&const_descriptor_name));
             let mut descriptor = FunctionDescriptor::new(name_id);
+            self.trace_id_adoption(func_info.id.0, &const_descriptor_name);
             descriptor.id = func_info.id;
             // RETNAME-CARRY-1 — carry the source-level return-type name.
             descriptor.return_type_name = func_info
@@ -15491,6 +15679,33 @@ impl VbcCodegen {
         } else {
             None
         };
+        // Diagnostic (VERUM_TRACE_FNPICK, T0670): WHICH branch supplied the
+        // id this body will be emitted under, and what the qualified key
+        // actually held at that moment.  Registration was proven correct by
+        // VERUM_TRACE_QKEY (the declaration reclaims its key and holds it),
+        // yet the emitted descriptor still carried the MOUNTED function's id
+        // — so the divergence is between the key's contents and what this
+        // lookup returns, and only a trace at the lookup itself can say
+        // which. Paired with the alladopt line at the descriptor site, the
+        // two bracket the value: equal ids mean the lookup chose wrong,
+        // differing ids mean something between them rewrote it.
+        if std::env::var("VERUM_TRACE_FNPICK").is_ok() {
+            let qn = self
+                .ctx
+                .current_source_module
+                .as_deref()
+                .map(|m| format!("{}.{}", m, base_name))
+                .unwrap_or_default();
+            eprintln!(
+                "[fnpick] base={} arity={} qn={} qn_holds={:?} picked_via={} picked_id={:?}",
+                base_name,
+                param_count,
+                qn,
+                self.ctx.lookup_function(&qn).map(|f| (f.id.0, f.param_count)),
+                if qualified_lookup.is_some() { "qualified" } else { "bare-fallback" },
+                qualified_lookup.as_ref().map(|i| i.id.0),
+            );
+        }
         let func_info = match qualified_lookup {
             Some(info) => info,
             None => self
@@ -16139,6 +16354,7 @@ impl VbcCodegen {
         // Create VBC function
         let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
+        self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         // RETNAME-CARRY-1 — carry the source-level return-type name.
         descriptor.return_type_name = func_info
@@ -16762,6 +16978,7 @@ impl VbcCodegen {
         };
         let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
+        self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
         // RETNAME-CARRY-1 — carry the source-level return-type name.
         descriptor.return_type_name = func_info
