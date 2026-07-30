@@ -733,7 +733,30 @@ impl TypeChecker {
                         // resolve the leaf to a value-position
                         // binding (a same-named local var, function,
                         // or imported symbol takes precedence).
-                        if self.ctx.env.lookup(alias_text.as_str()).is_none() {
+                        //
+                        // T0662 — but an AMBIENT compiler-provided
+                        // meta builtin is NOT such an occupant. The
+                        // rib order of
+                        // `docs/architecture/name-resolution.md` puts
+                        // explicit mounts above the ambient/prelude
+                        // surface, so `mount core.base.env;` must make
+                        // `env` denote the MODULE even though the
+                        // compile-time `env("VAR")` meta builtin
+                        // occupies that name. Pre-fix the guard saw
+                        // the builtin, skipped the alias, and every
+                        // `env.var(...)` in the mounting file typed
+                        // its receiver as `fn(Text) -> Maybe<Text>`
+                        // and failed with "no method named `var`" —
+                        // which took core-tests/base/env to 4 of 97.
+                        // Provenance comes from the registration
+                        // itself (`meta_builtin_names`), never from a
+                        // second copy of the name list.
+                        let occupant_is_ambient_builtin = self
+                            .meta_builtin_names
+                            .contains(&alias_text);
+                        if self.ctx.env.lookup(alias_text.as_str()).is_none()
+                            || occupant_is_ambient_builtin
+                        {
                             // Store the full dotted path; downstream
                             // `module_aliases` consumers split on '.'.
                             let full_path: Text = segments.join(".").into();

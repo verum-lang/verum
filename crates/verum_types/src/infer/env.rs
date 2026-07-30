@@ -629,6 +629,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
+            meta_builtin_names: std::collections::HashSet::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -756,6 +757,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
+            meta_builtin_names: std::collections::HashSet::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -884,6 +886,7 @@ impl TypeChecker {
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             module_aliases: Map::new(),
+            meta_builtin_names: std::collections::HashSet::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -7303,6 +7306,11 @@ impl TypeChecker {
         // Use macros for ergonomic registration
         macro_rules! reg {
             ($name:expr, $params:expr, $ret:expr) => {
+                // T0662: record provenance as we register, so the rib
+                // order can tell an ambient builtin from a real
+                // occupant without a second hardcoded name list.
+                self.meta_builtin_names
+                    .insert(verum_common::Text::from($name));
                 self.ctx
                     .env
                     .insert_mono($name, Type::function($params, $ret));
@@ -7311,6 +7319,8 @@ impl TypeChecker {
         // Generic meta builtin: accepts type parameters (e.g., type_name<Int>())
         macro_rules! reg_generic {
             ($name:expr, $params:expr, $ret:expr) => {{
+                self.meta_builtin_names
+                    .insert(verum_common::Text::from($name));
                 let tv = TypeVar::fresh();
                 let ty = Type::function($params, $ret);
                 let scheme = TypeScheme::poly(List::from_iter([tv]), ty);

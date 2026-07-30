@@ -802,6 +802,17 @@ pub struct TypeChecker {
     /// stdlib function and `.get(0)` attempted method dispatch on a
     /// function value.
     pub(crate) module_aliases: Map<Text, Text>,
+    /// Names registered by [`TypeChecker::register_meta_builtins`] —
+    /// the AMBIENT compiler-provided surface (`env`, `is_debug`,
+    /// `load_text`, …), recorded by the registration itself so no
+    /// consumer has to carry a hardcoded copy of the list.
+    ///
+    /// Consumers use it to honour the rib order of
+    /// `docs/architecture/name-resolution.md`: local declarations and
+    /// explicit mounts BOTH outrank the ambient surface, so a binding
+    /// that exists only because it is a meta builtin must not be
+    /// treated as a real occupant of the name. (T0662)
+    pub(crate) meta_builtin_names: std::collections::HashSet<Text>,
     /// Tracks which modules have had their function signatures pre-registered
     /// to avoid redundant pre-registration when importing multiple items from the same module
     preregistered_modules: std::collections::HashSet<String>,
