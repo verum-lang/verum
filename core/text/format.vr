@@ -205,12 +205,13 @@ implement Eq for WriteError {
 }
 
 // =============================================================================
-// FormatResult - Standard formatting result type
+// FmtResult - Standard formatting result type
 // =============================================================================
 
-/// Result type for formatting operations.
-/// This is the standard return type for Display.fmt and similar methods.
-public type FormatResult is Result<(), FormatError>;
+// The standard return type for Display.fmt and similar methods.
+// Canonical declaration lives in core.base.protocols (FmtResult); this module
+// re-exports it. The former local twin `FormatResult` was the same type.
+public mount core.base.protocols.FmtResult;
 
 // =============================================================================
 // Formatter writing surface (canonical spec-aware bodies)

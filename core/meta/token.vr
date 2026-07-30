@@ -375,7 +375,7 @@ implement Add for TokenStream {
 
 // Implement Debug
 implement Debug for TokenStream {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
         f.write_str("TokenStream(")?;
         for (i, tree) in self.tokens.iter().enumerate() {
             if i > 0 { f.write_str(" ")?; }
@@ -387,7 +387,7 @@ implement Debug for TokenStream {
 
 // Implement Display (as source code)
 implement Display for TokenStream {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
         for tree in self.tokens.iter() {
             f.write_str(f"{tree}")?;
         }
@@ -807,7 +807,7 @@ implement LexError {
 }
 
 implement Display for LexError {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
         f.write_str(f"{self.message} at {self.span}")
     }
 }

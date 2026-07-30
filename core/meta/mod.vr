@@ -88,7 +88,7 @@
 
 //  quote {
 //  implement Debug for $name {
-//  fn fmt(&self, f: &mut Formatter) -> FormatResult {
+//  fn fmt(&self, f: &mut Formatter) -> FmtResult {
 //  f.debug_struct($name)
 //  $[for field in fields {
 //  .field(${field.name}, &self.${field.name})
