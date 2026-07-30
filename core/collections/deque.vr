@@ -1555,7 +1555,7 @@ implement<T> Deque<T> {
             if self.head < tail {
                 // Contiguous - single copy
                 unsafe {
-                    memmove(
+                    memmove_addr(
                         new_data as &unsafe Byte,
                         self.data.offset(self.head) as &unsafe Byte,
                         self.len * T.size
@@ -1567,12 +1567,12 @@ implement<T> Deque<T> {
                 let second_len = tail;
 
                 unsafe {
-                    memmove(
+                    memmove_addr(
                         new_data as &unsafe Byte,
                         self.data.offset(self.head) as &unsafe Byte,
                         first_len * T.size
                     );
-                    memmove(
+                    memmove_addr(
                         new_data.offset(first_len) as &unsafe Byte,
                         self.data as &unsafe Byte,
                         second_len * T.size
@@ -1620,7 +1620,7 @@ implement<T> Deque<T> {
             let tail = self.wrap_index(self.head + self.len);
             if self.head < tail {
                 unsafe {
-                    memmove(
+                    memmove_addr(
                         new_data as &unsafe Byte,
                         self.data.offset(self.head) as &unsafe Byte,
                         self.len * T.size
@@ -1630,12 +1630,12 @@ implement<T> Deque<T> {
                 let first_len = self.cap - self.head;
                 let second_len = tail;
                 unsafe {
-                    memmove(
+                    memmove_addr(
                         new_data as &unsafe Byte,
                         self.data.offset(self.head) as &unsafe Byte,
                         first_len * T.size
                     );
-                    memmove(
+                    memmove_addr(
                         new_data.offset(first_len) as &unsafe Byte,
                         self.data as &unsafe Byte,
                         second_len * T.size

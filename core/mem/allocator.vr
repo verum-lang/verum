@@ -1226,7 +1226,7 @@ public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UIn
 /// Earlier revisions zeroed via a per-byte
 /// `for i in 0..size { ptr_write(ptr_offset(ptr, i), 0) }`
 /// loop — for any allocation larger than a single cache line
-/// this is 50–100× slower than `memset(ptr, 0, size)` because
+/// this is 50–100× slower than `memset_addr(ptr, 0, size)` because
 /// the per-byte version emits a serial dependency chain that
 /// the CPU can't vectorize, while `memset` lowers to LLVM's
 /// `memset` intrinsic (rep stosb / NEON / SVE / AVX-512). The
@@ -1238,7 +1238,7 @@ public fn cbgr_alloc(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UIn
 public fn cbgr_alloc_zeroed(size: Int, align: Int) -> Result<(&unsafe Byte, UInt32, UInt16), AllocError> {
     match cbgr_alloc(size, align) {
         Result.Ok(result) => {
-            memset(result.0, 0, size);
+            memset_addr(result.0, 0, size);
             Result.Ok(result)
         }
         Result.Err(e) => Result.Err(e),
@@ -1271,7 +1271,7 @@ public fn cbgr_dealloc(ptr: &unsafe Byte) -> Result<(), AllocError> {
 /// Two improvements over the earlier per-byte implementation:
 ///
 
-///  * Copy via `memcpy(new_ptr, ptr, copy_size)` instead of
+///  * Copy via `memcpy_addr(new_ptr, ptr, copy_size)` instead of
 ///  a per-byte `ptr_write(ptr_offset(ptr, i), byte_val)`
 ///  loop. Same 50-100× speedup story as
 ///  `cbgr_alloc_zeroed`'s memset switch — `memcpy` lowers
@@ -1301,7 +1301,7 @@ public fn cbgr_realloc(
             let new_ptr = new_result.0;
             let copy_size = if old_size < new_size { old_size } else { new_size };
             // Bulk copy via memcpy — see function-level doc.
-            memcpy(new_ptr, ptr, copy_size);
+            memcpy_addr(new_ptr, ptr, copy_size);
 
             match cbgr_dealloc(ptr) {
                 Result.Ok(()) => Result.Ok(new_result),
@@ -1914,7 +1914,7 @@ implement Allocator for MemStackAllocator {
         match result {
             Result.Ok((ptr, gen, caps)) => {
                 unsafe {
-                    memset(ptr, 0, size);
+                    memset_addr(ptr, 0, size);
                 }
                 Result.Ok((ptr, gen, caps))
             }
@@ -1942,7 +1942,7 @@ implement Allocator for MemStackAllocator {
             Result.Ok((new_ptr, gen, caps)) => {
                 let copy_size = if old_size < new_size { old_size } else { new_size };
                 unsafe {
-                    memcpy(new_ptr, ptr, copy_size);
+                    memcpy_addr(new_ptr, ptr, copy_size);
                 }
                 Result.Ok((new_ptr, gen, caps))
             }

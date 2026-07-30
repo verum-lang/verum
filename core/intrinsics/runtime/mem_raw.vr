@@ -34,7 +34,7 @@ module core.intrinsics.runtime.mem_raw;
 /// This is lowered to llvm.memcpy.p0.p0.i64 which generates
 /// optimal code (rep movsb on x86, NEON loads on ARM).
 @intrinsic("memcpy")
-public fn memcpy(dst: Int, src: Int, n: Int) -> Int {
+public fn memcpy_addr(dst: Int, src: Int, n: Int) -> Int {
     // Fallback for interpreter: byte-by-byte copy
     let mut i = 0;
     while i < n {
@@ -48,11 +48,11 @@ public fn memcpy(dst: Int, src: Int, n: Int) -> Int {
 /// Copy n bytes, handling overlapping regions correctly.
 /// Like memmove. Copies backwards if dst > src.
 @intrinsic("memmove")
-public fn memmove(dst: Int, src: Int, n: Int) -> Int {
+public fn memmove_addr(dst: Int, src: Int, n: Int) -> Int {
     if dst == src { return dst; }
     if dst < src {
-        // Forward copy (same as memcpy)
-        memcpy(dst, src, n)
+        // Forward copy (same as memcpy_addr)
+        memcpy_addr(dst, src, n)
     } else {
         // Backward copy to handle overlap
         let mut i = n - 1;
@@ -72,7 +72,7 @@ public fn memmove(dst: Int, src: Int, n: Int) -> Int {
 /// Fill n bytes at dst with value (0-255).
 /// Lowered to llvm.memset.p0.i64.
 @intrinsic("memset")
-public fn memset(dst: Int, value: Int, n: Int) -> Int {
+public fn memset_addr(dst: Int, value: Int, n: Int) -> Int {
     // Fallback for interpreter
     let byte = value % 256;
     let mut i = 0;
@@ -85,7 +85,7 @@ public fn memset(dst: Int, value: Int, n: Int) -> Int {
 
 /// Zero n bytes at dst.
 public fn memzero(dst: Int, n: Int) -> Int {
-    memset(dst, 0, n)
+    memset_addr(dst, 0, n)
 }
 
 // =============================================================================
@@ -94,7 +94,7 @@ public fn memzero(dst: Int, n: Int) -> Int {
 
 /// Compare n bytes. Returns 0 if equal, <0 if a<b, >0 if a>b.
 @intrinsic("memcmp")
-public fn memcmp(a: Int, b: Int, n: Int) -> Int {
+public fn memcmp_addr(a: Int, b: Int, n: Int) -> Int {
     let mut i = 0;
     while i < n {
         let ba = __load_byte(a + i);

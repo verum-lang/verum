@@ -755,7 +755,7 @@ implement LocalHeap {
     @inline
     public fn alloc_zeroed(&mut self, size: Int) -> Result<&unsafe Byte, HeapError> {
         let ptr = self.alloc(size)?;
-        memset(ptr, 0 as Byte, size);
+        memset_addr(ptr, 0 as Byte, size);
         Result.Ok(ptr)
     }
 

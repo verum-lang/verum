@@ -722,7 +722,7 @@ implement ArenaWireBuf {
             return false;
         }
         if self.ptr != 0 && self.len > 0 {
-            let _ = memcpy(new_ptr, self.ptr, self.len);
+            let _ = memcpy_addr(new_ptr, self.ptr, self.len);
         }
         self.ptr = new_ptr;
         self.cap = new_cap;

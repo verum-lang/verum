@@ -512,15 +512,15 @@ implement Text {
         // `bytes[i]` lets the runtime's `GetE` handler unbox each
         // slot to a single byte, so this works for both packed-byte
         // (raw `[Byte; N]`) and Value-per-element (List<Byte>) source
-        // shapes. `memset(_, _, 1)` is the only single-byte write
+        // shapes. `memset_addr(_, _, 1)` is the only single-byte write
         // primitive — `ptr_write<Byte>` lowers to a generic 8-byte
         // store regardless of T and would corrupt adjacent bytes.
         let mut i: Int = 0;
         while i < len {
-            memset(ptr_offset(ptr, i), bytes[i], 1);
+            memset_addr(ptr_offset(ptr, i), bytes[i], 1);
             i = i + 1;
         }
-        memset(ptr_offset(ptr, len), 0 as Byte, 1);
+        memset_addr(ptr_offset(ptr, len), 0 as Byte, 1);
         Text {
             ptr: ptr,
             len: len,
@@ -1046,7 +1046,7 @@ implement Text {
     /// Push a byte (internal, assumes valid UTF-8 context).
     ///
 
-    /// Uses `memset(dst, byte, 1)` rather than `ptr_write` because the
+    /// Uses `memset_addr(dst, byte, 1)` rather than `ptr_write` because the
     /// generic `ptr_write<T>` intrinsic lowers to `DerefMut`, which writes
     /// an 8-byte NaN-boxed `Value` regardless of `T`. Writing a Byte via
     /// `ptr_write` corrupts the seven bytes after the target — enough to
@@ -1058,12 +1058,12 @@ implement Text {
             self.grow();
         }
         unsafe {
-            memset(ptr_offset(self.ptr, self.len), byte, 1);
+            memset_addr(ptr_offset(self.ptr, self.len), byte, 1);
         }
         self.len = self.len + 1;
         // Maintain null terminator.
         unsafe {
-            memset(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
+            memset_addr(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
         }
     }
 
@@ -1080,11 +1080,11 @@ implement Text {
         if n == 0 { return; }
         self.reserve(n);
         unsafe {
-            memcpy(ptr_offset(self.ptr, self.len), s.as_ptr(), n);
+            memcpy_addr(ptr_offset(self.ptr, self.len), s.as_ptr(), n);
         }
         self.len = self.len + n;
         unsafe {
-            memset(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
+            memset_addr(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
         }
     }
 
@@ -1112,7 +1112,7 @@ implement Text {
         }
         if self.len > 0 && !is_null(self.ptr) {
             unsafe {
-                memcpy(new_ptr, self.ptr, self.len);
+                memcpy_addr(new_ptr, self.ptr, self.len);
             }
             // Free old allocation if it was heap-allocated (cap > 0)
             if self.cap > 0 {
@@ -2743,7 +2743,7 @@ implement Text {
         // Maintain null terminator via `memset` (single-byte write).
         if !is_null(self.ptr) {
             unsafe {
-                memset(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
+                memset_addr(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
             }
         }
     }

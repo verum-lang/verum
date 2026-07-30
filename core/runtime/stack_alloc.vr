@@ -349,7 +349,7 @@ implement<const SIZE: Int> Alloc for StackAllocator<SIZE> {
 
         // Copy old data
         let copy_size = old_layout.size().min(new_layout.size());
-        memcpy(new_ptr, ptr, copy_size);
+        memcpy_addr(new_ptr, ptr, copy_size);
 
         Result.Ok(new_ptr)
     }
@@ -538,7 +538,7 @@ implement<const CHUNK_SIZE: Int, const MAX_CHUNKS: Int> Alloc for ArenaAllocator
         // Copy old data (if ptr is non-null)
         if !_ptr.is_null() {
             let copy_size = old_layout.size().min(new_layout.size());
-            memcpy(new_ptr, _ptr, copy_size);
+            memcpy_addr(new_ptr, _ptr, copy_size);
         }
 
         Result.Ok(new_ptr)

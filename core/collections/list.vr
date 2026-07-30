@@ -510,7 +510,7 @@ implement<T> List<T> {
             if idx < self.len {
                 let dst = self.ptr.offset(idx + 1) as &unsafe Byte;
                 let src = self.ptr.offset(idx) as &unsafe Byte;
-                memmove(dst, src, (self.len - idx) * T.size);
+                memmove_addr(dst, src, (self.len - idx) * T.size);
             }
             ptr_write(self.ptr.offset(idx), value);
         }
@@ -531,7 +531,7 @@ implement<T> List<T> {
 
             // Shift elements left
             if idx < self.len - 1 {
-                memmove(
+                memmove_addr(
                     self.ptr.offset(idx) as &unsafe Byte,
                     self.ptr.offset(idx + 1) as &unsafe Byte,
                     (self.len - idx - 1) * T.size,
@@ -1333,7 +1333,7 @@ implement<T> List<T> {
             unsafe {
                 let src = self.ptr.offset(end) as &unsafe Byte;
                 let dst = self.ptr.offset(start + replacement_count) as &unsafe Byte;
-                memmove(dst, src, tail_count * T.size);
+                memmove_addr(dst, src, tail_count * T.size);
             }
         }
 
@@ -3483,7 +3483,7 @@ implement<T> Drop for Drain<T> {
             unsafe {
                 let dst = self.list.ptr.offset(self.start) as &unsafe Byte;
                 let src = self.list.ptr.offset(self.end) as &unsafe Byte;
-                memmove(dst, src, tail_len * T.size);
+                memmove_addr(dst, src, tail_len * T.size);
             }
         }
         self.list.len = self.start + tail_len;

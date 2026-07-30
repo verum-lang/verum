@@ -427,7 +427,7 @@ implement GenerationalArena {
                         // and is also lowered to LLVM's
                         // memcpy intrinsic for optimal
                         // bandwidth (rep movsb / NEON / SVE).
-                        memcpy(new_buf, self.buffer, self.used);
+                        memcpy_addr(new_buf, self.buffer, self.used);
                         // Free old buffer
                         __dealloc_raw(self.buffer, self.capacity);
                         self.buffer = new_buf;
