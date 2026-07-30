@@ -4186,6 +4186,75 @@ pub(in super::super) fn handle_call_method(
         return Ok(DispatchResult::Continue);
     }
 
+    // MODULE-QUALIFIED METHOD NAME — retry as `<Type>.<method>`.
+    //
+    // An explicit type mount lets codegen qualify a method call by the
+    // mount authority (`qualify_method_with_module_authority`), which
+    // emits the FULL module path: `core.text.Text.concat`. That name
+    // exists in the codegen function table, which is why the
+    // qualification passes its own existence check — but method
+    // dispatch resolves a receiver's methods as `<TypeName>.<method>`
+    // (see the type-id path above), so the module segments make every
+    // such call miss and panic.
+    //
+    // Measured: `mount core.text.{Text}` plus a `List<Text>` iterated
+    // with `(*a).concat(b)` panicked with "method
+    // 'core.text.Text.concat' not found on receiver of runtime kind
+    // `Text<small>`", while the identical code without the Text mount
+    // ran fine. It cost 24 tests in core-tests/text/text/property_test
+    // alone, across concat / starts_with / replace / to_lowercase /
+    // to_ascii_uppercase.
+    //
+    // Retry with the last TWO segments before giving up. This only
+    // runs on a name that has already missed every earlier route, so
+    // it cannot change a currently-succeeding dispatch, and it follows
+    // the same failure-path-fallback shape as the `is_null` intercept
+    // above and the interior-ref qualified-name retry (T0613).
+    if method_name.matches('.').count() >= 2 {
+        let short: String = {
+            let mut segments: Vec<&str> = method_name.split('.').collect();
+            let method_seg = segments.pop().unwrap_or("");
+            let type_seg = segments.pop().unwrap_or("");
+            format!("{}.{}", type_seg, method_seg)
+        };
+        if short != method_name
+            && let Some(fid) = state.module.find_function_by_name(&short)
+            && let Some(func) = state.module.get_function(fid)
+            && func.bytecode_length > 0
+        {
+            let takes_self = func
+                .params
+                .first()
+                .and_then(|p| state.module.strings.get(p.name))
+                .map(|n| n == "self")
+                .unwrap_or(false);
+            let reg_count = func.register_count;
+            let return_pc = state.pc();
+            let caller_base = state.reg_base();
+            let new_base = state
+                .call_stack
+                .push_frame(fid, reg_count, return_pc, dst)?;
+            state.registers.push_frame(reg_count);
+            let arg_offset = if takes_self {
+                state.registers.set(new_base, Reg(0), receiver);
+                1u16
+            } else {
+                0u16
+            };
+            for i in 0..args.count {
+                let arg_value = state
+                    .registers
+                    .get(caller_base, Reg(args.start.0 + i as u16));
+                state
+                    .registers
+                    .set(new_base, Reg(i as u16 + arg_offset), arg_value);
+            }
+            state.set_pc(0);
+            state.record_call();
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     let suffix_candidates: Vec<(String, usize)> = {
         let dotted_bare = format!(".{}", bare);
         state
