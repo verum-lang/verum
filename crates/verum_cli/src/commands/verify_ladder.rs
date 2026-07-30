@@ -119,6 +119,14 @@ struct VerdictTotals {
     closed: usize,
     open: usize,
     pending: usize,
+    /// Pendings whose DECLARED strategy sits at-or-above `thorough`
+    /// on the ladder. `thorough`'s documented contract is "formal +
+    /// MANDATORY invariant/frame/termination obligations" — an
+    /// obligation the dispatcher cannot discharge under that
+    /// declaration is a failure, never advisory: a gate that skips
+    /// what it cannot check is indistinguishable from one that is
+    /// not wired. (T0671)
+    pending_strict: usize,
     timeout: usize,
 }
 
@@ -127,7 +135,15 @@ impl VerdictTotals {
         match v {
             LadderVerdict::Closed { .. } => self.closed += 1,
             LadderVerdict::Open { .. } => self.open += 1,
-            LadderVerdict::DispatchPending { .. } => self.pending += 1,
+            LadderVerdict::DispatchPending { strategy, .. } => {
+                self.pending += 1;
+                if matches!(
+                    strategy,
+                    LadderStrategy::Thorough | LadderStrategy::Certified
+                ) {
+                    self.pending_strict += 1;
+                }
+            }
             LadderVerdict::Timeout { .. } => self.timeout += 1,
         }
     }
@@ -136,9 +152,12 @@ impl VerdictTotals {
         self.closed + self.open + self.pending + self.timeout
     }
 
-    /// Hard failure ⇒ Open or Timeout. DispatchPending is advisory.
+    /// Hard failure ⇒ Open or Timeout — or a DispatchPending under a
+    /// declared `thorough`/`certified` strategy (mandatory
+    /// obligations cannot be advisory). Pendings under laxer
+    /// strategies stay advisory.
     fn has_hard_failure(&self) -> bool {
-        self.open > 0 || self.timeout > 0
+        self.open > 0 || self.timeout > 0 || self.pending_strict > 0
     }
 }
 
@@ -448,6 +467,39 @@ mod tests {
         assert_eq!(t.pending, 1);
         assert_eq!(t.timeout, 1);
         assert_eq!(t.total(), 4);
+    }
+
+    #[test]
+    fn pending_under_thorough_or_certified_is_a_hard_failure() {
+        // T0671 — mandatory obligations cannot be advisory. Both
+        // directions: strict strategies fail, laxer ones stay
+        // advisory.
+        for strict in [LadderStrategy::Thorough, LadderStrategy::Certified] {
+            let mut t = VerdictTotals::default();
+            t.record(&LadderVerdict::DispatchPending {
+                strategy: strict,
+                note: Text::from("V1"),
+            });
+            assert!(
+                t.has_hard_failure(),
+                "DispatchPending under {strict:?} must fail the gate"
+            );
+        }
+        for lax in [
+            LadderStrategy::Formal,
+            LadderStrategy::Fast,
+            LadderStrategy::Proof,
+        ] {
+            let mut t = VerdictTotals::default();
+            t.record(&LadderVerdict::DispatchPending {
+                strategy: lax,
+                note: Text::from("V1"),
+            });
+            assert!(
+                !t.has_hard_failure(),
+                "DispatchPending under {lax:?} stays advisory"
+            );
+        }
     }
 
     #[test]
