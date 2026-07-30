@@ -38,7 +38,7 @@ module core.text.format;
 mount core.*;
 // TWIN-TYPE MERGE (task #48): the alias target must be locally
 // visible (braced) for the ALIAS-VS-MARKER scope gate.
-public mount core.base.protocols.{Formatter, TextFormatter, FormatSpec, TextAlignment, Sign, int_to_string, float_to_string};
+public mount core.base.protocols.{Formatter, TextFormatter, FormatSpec, TextAlignment, Sign, FmtResult, int_to_string, float_to_string};
 
 // =============================================================================
 // V-LLSI Native I/O Imports
@@ -205,14 +205,9 @@ implement Eq for WriteError {
 }
 
 // =============================================================================
-// FmtResult - Standard formatting result type
-// =============================================================================
-
-// The standard return type for Display.fmt and similar methods.
-// Canonical declaration lives in core.base.protocols (FmtResult); this module
-// re-exports it. The former local twin `FormatResult` was the same type.
-public mount core.base.protocols.FmtResult;
-
+// FmtResult — the standard formatting result type — is re-exported from
+// core.base.protocols in the braced mount at the top of this file. The
+// former local twin `FormatResult` was the same type and is gone.
 // =============================================================================
 // Formatter writing surface (canonical spec-aware bodies)
 // =============================================================================
