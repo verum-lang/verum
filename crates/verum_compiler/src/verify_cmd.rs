@@ -850,22 +850,67 @@ impl<'s> VerifyCommand<'s> {
             debug!("Preconditions verified for {}", func.name);
         }
 
+        // Return-type refinement → implicit `ensures` (T0678). The
+        // validity claim of `fn foo(n: Int) -> Int{P} { body }` is
+        // "the RETURNED VALUE satisfies P" — exactly a postcondition
+        // with the predicate's binder rewritten to `result`. A
+        // previous revision left this as a comment asserting the
+        // synthesis had happened elsewhere; nothing synthesized it,
+        // so a refined-return-only function skipped Step 1 (no
+        // requires), skipped Step 2 (no ensures), and returned
+        // "Proved in 0.00s" unconditionally. Constant predicates were
+        // saved upstream by the type checker's static evaluation
+        // (E500), which is why exactly the parameter-referencing
+        // predicates — the ones only SMT can decide — escaped as
+        // false "Proved". The check pipeline rejected the same
+        // programs, inverting the trust order between `check` and
+        // `verify`.
+        let implicit_return_ensures =
+            self.synthesize_return_refinement_ensures(&func.return_type, alias_map);
+
         // Step 2: Verify postconditions hold given preconditions. Also
         // pass the function body so `result` gets a proper Z3 binding:
         // for expression-body / block-with-tail-expr functions we assert
         // `result == body` so the SMT can check ensures against the actual
         // return value rather than an unconstrained fresh variable.
-        if has_ensures {
+        //
+        // Declared `ensures` and the return-refinement's implicit
+        // ensures run through the SAME pipeline — the body→result
+        // binding is what makes the obligation non-vacuous.
+        let effective_ensures: Vec<Expr> = func
+            .ensures
+            .iter()
+            .cloned()
+            .chain(implicit_return_ensures.iter().cloned())
+            .collect();
+        if !effective_ensures.is_empty() {
             // Per-ensures timings are recorded inside
             // verify_postconditions (one row per clause),
             // so no aggregate "postcondition" record here —
             // that would double-count when a function has
             // multiple ensures clauses.
+            // Bind `result` in the TRANSLATOR with the sort of the
+            // declared return type (Refined unwraps to its base) so
+            // the ensures-side `result` and the solver-side
+            // body-equality constant agree. Without this, `result`
+            // fell to the translator's Int default and every
+            // Float-returning refined function died in translation
+            // ("incompatible types for binary operation").
+            if let Some(ret_ty) = &func.return_type {
+                let base_ty: &Type = match &ret_ty.kind {
+                    TypeKind::Refined { base, .. } => base,
+                    _ => ret_ty,
+                };
+                if let Ok(z3_result) = translator.create_var("result", base_ty) {
+                    translator.bind(Text::from("result"), z3_result);
+                }
+            }
+
             let post_result = self.verify_postconditions(
                 &ctx,
                 &mut translator,
                 &effective_requires,
-                &func.ensures,
+                &effective_ensures,
                 func.body.as_ref(),
                 timeout,
                 reflection_registry,
@@ -920,22 +965,6 @@ impl<'s> VerifyCommand<'s> {
         // cascade of spurious counterexamples for every refined-param
         // function without losing any soundness: the predicate is still
         // the postcondition hypothesis.
-
-        // Return-type refinement — `fn foo(..) -> T { P }` or
-        // `-> SomeAlias` that flattens to a refinement. Same principle
-        // as Step 3's removed check: the validity claim isn't "every
-        // inhabitant of the base type satisfies P" but "the function's
-        // returned value satisfies P". That's exactly what the
-        // postcondition pipeline verifies once we synthesize an
-        // implicit `ensures P(result)` clause, which we already did
-        // if the return-type refinement was exposed through the
-        // postcondition translation layer.
-        //
-
-        // Rather than double-check via a broken `verify_refinement`
-        // call, we accept that the postcondition pipeline with the
-        // body→result binding is sufficient: a real violation surfaces
-        // there as a standard postcondition counterexample.
 
         // All checks passed - create proof result with cost tracking
         let cost = verum_smt::VerificationCost::new(
@@ -1078,6 +1107,78 @@ impl<'s> VerifyCommand<'s> {
         out
     }
 
+    /// Synthesize the implicit `ensures` clauses carried by a refined
+    /// return type (T0678). `fn f(n: Int) -> Int{== n + 1000}` means
+    /// `ensures result == n + 1000`; the predicate's binder — the
+    /// implicit `it` (the parser's desugar target for leading-operator
+    /// forms), the legacy `self` spelling, or an explicit `|x|`
+    /// binding — is rewritten to `result` so the postcondition
+    /// pipeline's body→result binding makes the obligation
+    /// non-vacuous. Alias-wrapped returns (`-> PageNo` where the alias
+    /// chain carries predicates) contribute their flattened
+    /// predicates the same way.
+    fn synthesize_return_refinement_ensures(
+        &self,
+        return_type: &Option<Type>,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    ) -> Vec<Expr> {
+        synthesize_return_refinement_ensures_impl(return_type, alias_map)
+    }
+
+}
+
+/// Pure core of [`VerifyCommand::synthesize_return_refinement_ensures`]
+/// (T0678) — a free function so the binder-rewrite contract is unit-
+/// testable without constructing a compilation session.
+pub(crate) fn synthesize_return_refinement_ensures_impl(
+    return_type: &Option<Type>,
+    alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+) -> Vec<Expr> {
+    use crate::phases::proof_verification::substitute_ident;
+    let Some(ret_ty) = return_type else {
+        return Vec::new();
+    };
+        let mut out: Vec<Expr> = Vec::new();
+        match &ret_ty.kind {
+            TypeKind::Refined { base: _, predicate } => {
+                let result_ident = |span| verum_ast::ty::Ident::new("result", span);
+                let substitutions: Vec<(Text, verum_ast::ty::Ident)> = match &predicate.binding {
+                    Some(binder) => vec![(
+                        binder.name.clone(),
+                        result_ident(predicate.expr.span),
+                    )],
+                    None => vec![
+                        (Text::from("it"), result_ident(predicate.expr.span)),
+                        (Text::from("self"), result_ident(predicate.expr.span)),
+                    ],
+                };
+                out.push(substitute_ident(&predicate.expr, &substitutions));
+            }
+            TypeKind::Path(path) => {
+                if let Some(id) = path.as_ident()
+                    && let Some(preds) = alias_map.get(&id.name)
+                {
+                    for pred in preds {
+                        let substitutions = vec![
+                            (
+                                Text::from("it"),
+                                verum_ast::ty::Ident::new("result", pred.span),
+                            ),
+                            (
+                                Text::from("self"),
+                                verum_ast::ty::Ident::new("result", pred.span),
+                            ),
+                        ];
+                        out.push(substitute_ident(pred, &substitutions));
+                    }
+                }
+            }
+            _ => {}
+        }
+        out
+}
+
+impl<'s> VerifyCommand<'s> {
     /// Recursively check if type has refinement
     fn type_has_refinement(&self, ty: &Type) -> bool {
         match &ty.kind {
@@ -2198,6 +2299,63 @@ impl BudgetTracker {
 #[cfg(test)]
 mod trust_level_tests {
     use super::*;
+
+
+    #[test]
+    fn return_refinement_synthesis_rewrites_binder_to_result() {
+        // T0678 — the soundness hole was a refined-return-only
+        // function generating NO postcondition obligation at all.
+        // Pin the synthesis contract: an inline `Int{ it == n + 1000 }`
+        // return type yields exactly one implicit ensures whose binder
+        // occurrences are rewritten to `result` (so the postcondition
+        // pipeline's body->result binding applies), with the parameter
+        // reference `n` left intact.
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::ty::{Ident, Path, RefinementPredicate, Type, TypeKind};
+        use verum_common::span::Span;
+
+        let sp = Span::default();
+        let ident_expr = |name: &str| {
+            Expr::new(
+                ExprKind::Path(Path::single(Ident::new(verum_common::Text::from(name), sp))),
+                sp,
+            )
+        };
+        // it == n  (the arithmetic tail is irrelevant to the rewrite)
+        let pred_expr = Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::expr::BinOp::Eq,
+                left: verum_common::Heap::new(ident_expr("it")),
+                right: verum_common::Heap::new(ident_expr("n")),
+            },
+            sp,
+        );
+        let ret_ty = Type::new(
+            TypeKind::Refined {
+                base: verum_common::Heap::new(Type::new(
+                    TypeKind::Path(Path::single(Ident::new(verum_common::Text::from("Int"), sp))),
+                    sp,
+                )),
+                predicate: verum_common::Heap::new(RefinementPredicate {
+                    expr: pred_expr,
+                    binding: verum_common::Maybe::None,
+                    span: sp,
+                }),
+            },
+            sp,
+        );
+        let out = synthesize_return_refinement_ensures_impl(
+            &Some(ret_ty),
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(out.len(), 1, "one implicit ensures per refined return");
+        let rendered = format!("{:?}", out[0]);
+        assert!(rendered.contains("result"), "binder rewritten to result: {rendered}");
+        assert!(!rendered.contains("\"it\""), "no bare `it` remains: {rendered}");
+        assert!(rendered.contains("\"n\""), "parameter reference survives: {rendered}");
+        // An unrefined return synthesizes nothing.
+        assert!(synthesize_return_refinement_ensures_impl(&None, &std::collections::HashMap::new()).is_empty());
+    }
 
     #[test]
     fn parse_trust_level_default_is_signatures() {

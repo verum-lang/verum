@@ -32,7 +32,7 @@ core/math/day_convolution.vr	failures	9	7
 core/math/diakrisis_primitive.vr	clean	7	0
 core/math/distributed.vr	clean	22	0
 core/math/dual_absolute_layer.vr	failures	0	1
-core/math/elementary.vr	clean	62	0
+core/math/elementary.vr	failures	59	3
 core/math/epistemic.vr	failures	8	10
 core/math/examples.vr	failures	246	7
 core/math/fibration.vr	clean	15	0
@@ -41,11 +41,11 @@ core/math/giry.vr	clean	27	0
 core/math/gpu.vr	clean	38	0
 core/math/guardrails.vr	unverifiable	0	0
 core/math/hott.vr	unverifiable	0	0
-core/math/hyperbolic.vr	clean	19	0
+core/math/hyperbolic.vr	failures	14	5
 core/math/ieee754.vr	clean	39	0
 core/math/infinity_category.vr	clean	31	0
 core/math/infinity_topos.vr	clean	22	0
-core/math/integers.vr	clean	45	0
+core/math/integers.vr	failures	39	6
 core/math/internal.vr	clean	34	0
 core/math/kan_extension.vr	failures	19	2
 core/math/libm.vr	clean	46	0
@@ -63,7 +63,7 @@ core/math/s_definable/class_s_s.vr	failures	1	2
 core/math/s_definable/lemma_3_4.vr	failures	0	1
 core/math/simple.vr	clean	38	0
 core/math/simplicial.vr	clean	38	0
-core/math/special.vr	clean	24	0
+core/math/special.vr	failures	22	2
 core/math/ssm.vr	unverifiable	0	0
 core/math/syn_mod.vr	failures	0	2
 core/math/tactics.vr	clean	60	0
