@@ -948,7 +948,18 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // dead carry of unreached baked archive bodies. One
         // O(total-instructions) pass; cleared at the end of
         // `lower_module` so a stale set never leaks into another run.
-        {
+        //
+        // The same walk also SCOPES THE LOWERING LOOP below (T0682) —
+        // the use this module's own doc-comment listed as "later".
+        // Without it, Phase 2 built LLVM IR for every function with a
+        // body, which for any program mounting `core` is the whole
+        // baked stdlib (~48K functions) in ONE module: a three-line
+        // program measured 1.9 -> 4.1 -> 14.4 GB RSS across five
+        // seconds and was still climbing when the watchdog killed it.
+        // Concurrent compiles (the test runner lowers in-process with
+        // ~16 threads) multiply that peak, which is how single
+        // machines ended up with multi-hundred-GB verum processes.
+        let reachable_for_lowering: Option<std::collections::HashSet<u32>> = {
             let reach = verum_vbc::reachability::analyze(vbc_module);
             tracing::debug!(
                 "reachability: {} of {} functions reachable ({} CallM method names)",
@@ -956,8 +967,33 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 vbc_module.functions.len(),
                 reach.called_method_names.len()
             );
+            let ids = reach.reachable_ids.clone();
             super::error::set_reachable_function_names(Some(reach.reachable_names));
-        }
+
+            // Gate, deliberately narrow:
+            //
+            //  * only for PROGRAM builds — `analyze`'s roots are the
+            //    entry function plus ctors/dtors/constant-pool refs/
+            //    mount aliases, so without a `main` the closure would
+            //    be an under-approximation of what a LIBRARY must
+            //    export. No main → lower everything, as before.
+            //  * `VERUM_NO_REACHABILITY_LOWERING=1` restores the
+            //    whole-module behaviour for A/B bisection.
+            //
+            // Declarations (Phase 1) are NOT scoped: a declaration is
+            // one symbol, and keeping them means any edge the walk
+            // missed surfaces as a LOUD undefined symbol at link time
+            // rather than as a miscompile. The walk is conservative by
+            // contract (over-approximates, never under-approximates).
+            let kill_switch =
+                std::env::var("VERUM_NO_REACHABILITY_LOWERING").as_deref() == Ok("1");
+            let has_entry = vbc_module.find_function_by_name("main").is_some();
+            if kill_switch || !has_entry {
+                None
+            } else {
+                Some(ids)
+            }
+        };
 
         // Phase 1.6: Create coverage counter array if coverage is enabled.
         // Global array: i64[N] where N = number of functions.
@@ -1033,7 +1069,18 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
+        let mut skipped_unreachable = 0usize;
         for (_idx, func_desc) in vbc_module.functions.iter().enumerate() {
+            // T0682 — do not build IR for code that cannot run. The
+            // function keeps its declaration (emitted in Phase 1), so
+            // a missed reachability edge is an undefined symbol at
+            // link time, never a silently wrong body.
+            if let Some(reachable) = &reachable_for_lowering
+                && !reachable.contains(&func_desc.id.0)
+            {
+                skipped_unreachable += 1;
+                continue;
+            }
             if let Some(ref instructions) = func_desc.instructions {
                 let vbc_func = VbcFunction::new(func_desc.clone(), instructions.clone());
                 let func_name = vbc_module
@@ -1255,6 +1302,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     );
                 }
             }
+        }
+
+        if skipped_unreachable > 0 {
+            // Say what was skipped, at info level: the saving is the
+            // point of the pass, and a silent filter is indistinguishable
+            // from one that never fired.
+            tracing::info!(
+                "reachability-scoped lowering: skipped {} of {} function bodies (unreachable from `main`)",
+                skipped_unreachable,
+                vbc_module.functions.len()
+            );
         }
 
         if let Some(f) = self.module.get_function("parallel_map") {
