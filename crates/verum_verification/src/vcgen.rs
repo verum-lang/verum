@@ -1497,6 +1497,13 @@ pub struct VCGenerator {
     next_loop_id: u64,
     /// Source file for locations
     pub source_file: Text,
+    /// `@verify(thorough)` contract: termination obligations are
+    /// MANDATORY (`grammar/verum.ebnf:478-479`). When set, a loop
+    /// form that declares no `decreases` measure yields a *failing*
+    /// Termination VC naming the rule — absence is an error, not
+    /// silence. Range-`for` loops are exempt: their iteration count
+    /// is structurally bounded by the range itself. (T0671)
+    termination_required: bool,
 }
 
 impl VCGenerator {
@@ -1509,6 +1516,7 @@ impl VCGenerator {
             current_precondition: Maybe::None,
             next_loop_id: 0,
             source_file: Text::from("<unknown>"),
+            termination_required: false,
         }
     }
 
@@ -1516,6 +1524,33 @@ impl VCGenerator {
     pub fn with_source_file(mut self, file: impl Into<Text>) -> Self {
         self.source_file = file.into();
         self
+    }
+
+    /// Make termination obligations mandatory (the `@verify(thorough)`
+    /// contract): every non-structurally-bounded loop must carry a
+    /// `decreases` measure, and a missing measure is a failing
+    /// Termination VC rather than silence. (T0671)
+    pub fn with_mandatory_termination(mut self, on: bool) -> Self {
+        self.termination_required = on;
+        self
+    }
+
+    /// The failing Termination VC for a loop that declares no
+    /// `decreases` measure while termination obligations are
+    /// mandatory. `Formula::False` is unprovable by construction, so
+    /// the obligation fails through every backend with this message
+    /// as the actionable diagnostic.
+    fn push_missing_measure_vc(&mut self, span: Span, loop_form: &str) {
+        let vc = VerificationCondition::new(
+            Formula::False,
+            SourceLocation::from_span(span, self.source_file.clone()),
+            VCKind::Termination,
+            format!(
+                "{} declares no `decreases` measure — termination obligations are mandatory under @verify(thorough)",
+                loop_form
+            ),
+        );
+        self.push_vc(vc);
     }
 
     /// Generate verification conditions for a function
@@ -1553,6 +1588,15 @@ impl VCGenerator {
         // assumption that the caller honoured the precondition.
         self.current_precondition = Maybe::Some(precondition.clone());
 
+        // A function-level `@verify(thorough)` / `@verify(certified)`
+        // makes termination obligations mandatory for THIS function's
+        // loops regardless of generator configuration — the attribute
+        // is the author's per-item strictness contract. (T0671)
+        let saved_termination_required = self.termination_required;
+        if Self::declares_mandatory_termination(func) {
+            self.termination_required = true;
+        }
+
         // Generate VC for function body if present
         if let Some(body) = &func.body {
             let body_wp = match body {
@@ -1581,7 +1625,37 @@ impl VCGenerator {
         // don't inherit a stale obligation.
         self.current_precondition = Maybe::None;
         self.current_function = Maybe::None;
+        self.termination_required = saved_termination_required;
         self.vcs.clone()
+    }
+
+    /// Whether the function's own attributes demand mandatory
+    /// termination obligations: `@verify(thorough)` or
+    /// `@verify(certified)` (both sit at-or-above `thorough` on the
+    /// strategy ladder, whose documented contract is "formal +
+    /// mandatory invariant / frame / termination obligations").
+    fn declares_mandatory_termination(func: &FunctionDecl) -> bool {
+        Self::attrs_demand_mandatory_termination(&func.attributes)
+    }
+
+    /// Attribute-level half of [`Self::declares_mandatory_termination`],
+    /// split out so the strategy-name scan is testable without
+    /// constructing a full `FunctionDecl`.
+    fn attrs_demand_mandatory_termination(
+        attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    ) -> bool {
+        attrs.iter().any(|attr| {
+            attr.name.as_str() == "verify"
+                && attr.args.as_ref().is_some_and(|args| {
+                    args.iter().any(|arg| match &arg.kind {
+                        ExprKind::Path(path) => path.segments.first().is_some_and(|seg| {
+                            let name = path_segment_to_str(seg);
+                            name == "thorough" || name == "certified"
+                        }),
+                        _ => false,
+                    })
+                })
+        })
     }
 
     /// Weakest precondition for a block
@@ -1756,17 +1830,33 @@ impl VCGenerator {
                 label: _,
                 condition,
                 body,
-                invariants: _,
-                decreases: _,
+                invariants: loop_invs,
+                decreases,
             } => {
                 // wp(while b inv I, Q) = I && (forall v. I && b => wp(S, I)[v/v']) && (I && !b => Q)
                 let loop_id = self.next_loop_id;
                 self.next_loop_id += 1;
 
-                // Extract invariant from annotations (or use true as default)
+                // Invariant: symbol-table override first, else the
+                // conjunction of the loop's own `invariant` clauses
+                // (previously DISCARDED — the `invariants: _` pattern
+                // silently dropped source-level annotations), else
+                // the trivial invariant.
                 let invariant = match self.symbol_table.loop_invariants.get(&loop_id) {
                     Some(inv) => inv.clone(),
-                    None => Formula::True, // Default: true invariant
+                    None => {
+                        if loop_invs.is_empty() {
+                            Formula::True
+                        } else {
+                            let formulas: Vec<Formula> = loop_invs
+                                .iter()
+                                .map(|inv_expr| self.translate_contract(inv_expr))
+                                .collect();
+                            formulas
+                                .into_iter()
+                                .fold(Formula::True, |acc, f| Formula::and(vec![acc, f]))
+                        }
+                    }
                 };
 
                 let cond_formula = self.translate_expr_to_formula(condition);
@@ -1789,7 +1879,7 @@ impl VCGenerator {
                 // 3. Exit: I && !b => Q
                 let exit_vc = VerificationCondition::new(
                     Formula::implies(
-                        Formula::and([invariant.clone(), Formula::not(cond_formula)]),
+                        Formula::and([invariant.clone(), Formula::not(cond_formula.clone())]),
                         postcondition.clone(),
                     ),
                     SourceLocation::from_span(expr.span, self.source_file.clone()),
@@ -1797,6 +1887,58 @@ impl VCGenerator {
                     "Loop invariant implies postcondition",
                 );
                 self.push_vc(exit_vc);
+
+                // 4. Termination: the `decreases` measure is
+                // well-founded — non-negative while the loop runs,
+                // and strictly smaller after each iteration.
+                //
+                // Encoding: snapshot the measure in a fresh variable
+                // V0 pinned equal to it before the body, then require
+                // wp(body, measure < V0) — the body's assignments are
+                // folded into the postcondition by wp, so "the
+                // measure after the body" needs no old-state
+                // machinery. (Previously the While arm DISCARDED
+                // `decreases` entirely: the acceptance example
+                // `while c { … } decreases n - i;` produced zero
+                // termination VCs even with a valid measure. T0671)
+                for decreases_expr in decreases {
+                    let variant = self.translate_expr(decreases_expr);
+                    let snapshot = Variable::new(format!("__variant0_l{}", loop_id));
+
+                    let non_neg = Formula::implies(
+                        Formula::and(vec![invariant.clone(), cond_formula.clone()]),
+                        Formula::ge(variant.clone(), SmtExpr::int(0)),
+                    );
+
+                    let strictly_decreases = Formula::Forall(
+                        vec![snapshot.clone()].into(),
+                        Box::new(Formula::implies(
+                            Formula::and(vec![
+                                invariant.clone(),
+                                cond_formula.clone(),
+                                Formula::Eq(
+                                    Box::new(variant.clone()),
+                                    Box::new(SmtExpr::Var(snapshot.clone())),
+                                ),
+                            ]),
+                            self.wp_block(
+                                body,
+                                &Formula::lt(variant.clone(), SmtExpr::Var(snapshot.clone())),
+                            ),
+                        )),
+                    );
+
+                    let term_vc = VerificationCondition::new(
+                        Formula::and(vec![non_neg, strictly_decreases]),
+                        SourceLocation::from_span(expr.span, self.source_file.clone()),
+                        VCKind::Termination,
+                        "While loop terminates (measure is non-negative and strictly decreases)",
+                    );
+                    self.push_vc(term_vc);
+                }
+                if decreases.is_empty() && self.termination_required {
+                    self.push_missing_measure_vc(expr.span, "`while` loop");
+                }
 
                 // Return invariant as wp
                 invariant
@@ -1966,6 +2108,19 @@ impl VCGenerator {
                         "For loop invariant preservation over collection",
                     );
                     self.push_vc(preserve_vc);
+
+                    // Non-range `for`: the iterator's finiteness is
+                    // not structural (infinite adapters exist —
+                    // cycle, repeat_with), so mandatory termination
+                    // demands a measure here too. Range-`for` is
+                    // exempt: its count is bounded by the range
+                    // bounds themselves.
+                    if decreases.is_empty() && self.termination_required {
+                        self.push_missing_measure_vc(
+                            expr.span,
+                            "`for` loop over an iterator (not a range)",
+                        );
+                    }
                 }
 
                 invariant
@@ -1993,6 +2148,19 @@ impl VCGenerator {
                     "Infinite loop invariant preservation",
                 );
                 self.push_vc(preserve_vc);
+
+                // The `loop` form cannot even carry a `decreases`
+                // measure — under mandatory termination it is
+                // rejected outright with the actionable rewrite.
+                if self.termination_required {
+                    let vc = VerificationCondition::new(
+                        Formula::False,
+                        SourceLocation::from_span(expr.span, self.source_file.clone()),
+                        VCKind::Termination,
+                        "`loop` has no `decreases` measure and cannot terminate by construction — use `while` with a measure under @verify(thorough)",
+                    );
+                    self.push_vc(vc);
+                }
 
                 invariant
             }
@@ -3867,5 +4035,150 @@ mod vc_result_kind_drift_pins {
         assert_eq!(VCResult::Timeout.kind(), VCResultKind::Timeout);
         assert!(VCResult::Timeout.counterexample().is_none());
         assert_eq!(VCResult::Unknown.kind(), VCResultKind::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod mandatory_termination_gate {
+    //! T0671 — the `@verify(thorough)` mandatoriness contract, both
+    //! directions. The NEGATIVE direction is the wiring proof: a gate
+    //! that only ever accepts is indistinguishable from one that is
+    //! not wired.
+    use super::*;
+    use verum_ast::attr::Attribute;
+    use verum_ast::expr::Block;
+    use verum_ast::literal::Literal;
+    use verum_ast::ty::{Ident, Path};
+    use verum_common::span::Span;
+
+    fn sp() -> Span {
+        Span::default()
+    }
+
+    fn bool_true() -> Expr {
+        Expr::literal(Literal::new(verum_ast::literal::LiteralKind::Bool(true), sp()))
+    }
+
+    fn int_lit(v: i128) -> Expr {
+        Expr::literal(Literal::new(
+            verum_ast::literal::LiteralKind::Int(verum_ast::literal::IntLit::new(v)),
+            sp(),
+        ))
+    }
+
+    fn while_expr(decreases: List<Expr>) -> Expr {
+        Expr::new(
+            ExprKind::While {
+                label: Maybe::None,
+                condition: verum_common::Heap::new(bool_true()),
+                body: Block::empty(sp()),
+                invariants: List::new(),
+                decreases,
+            },
+            sp(),
+        )
+    }
+
+    fn termination_vcs(g: &VCGenerator) -> Vec<&VerificationCondition> {
+        g.vcs
+            .iter()
+            .filter(|vc| matches!(vc.kind, VCKind::Termination))
+            .collect()
+    }
+
+    #[test]
+    fn while_without_measure_fails_when_mandatory() {
+        let mut g = VCGenerator::new().with_mandatory_termination(true);
+        let _ = g.wp_expr(&while_expr(List::new()), &Formula::True);
+        let vcs = termination_vcs(&g);
+        assert_eq!(vcs.len(), 1, "exactly one missing-measure obligation");
+        assert!(
+            matches!(vcs[0].formula, Formula::False),
+            "the obligation must be unprovable by construction"
+        );
+        assert!(
+            vcs[0].description.as_str().contains("mandatory"),
+            "diagnostic names the rule: {}",
+            vcs[0].description.as_str()
+        );
+    }
+
+    #[test]
+    fn while_with_measure_gets_real_termination_vc() {
+        let mut g = VCGenerator::new().with_mandatory_termination(true);
+        let mut decreases = List::new();
+        decreases.push(int_lit(5));
+        let _ = g.wp_expr(&while_expr(decreases), &Formula::True);
+        let vcs = termination_vcs(&g);
+        assert_eq!(vcs.len(), 1, "one termination VC for the measure");
+        assert!(
+            !matches!(vcs[0].formula, Formula::False),
+            "a declared measure must produce a REAL obligation, not the missing-measure rejection"
+        );
+        assert!(
+            vcs[0].description.as_str().contains("strictly decreases"),
+            "got: {}",
+            vcs[0].description.as_str()
+        );
+    }
+
+    #[test]
+    fn while_without_measure_stays_silent_when_not_mandatory() {
+        let mut g = VCGenerator::new();
+        let _ = g.wp_expr(&while_expr(List::new()), &Formula::True);
+        assert!(
+            termination_vcs(&g).is_empty(),
+            "default (non-thorough) behaviour is unchanged"
+        );
+    }
+
+    #[test]
+    fn loop_form_is_rejected_when_mandatory() {
+        let mut g = VCGenerator::new().with_mandatory_termination(true);
+        let loop_expr = Expr::new(
+            ExprKind::Loop {
+                label: Maybe::None,
+                body: Block::empty(sp()),
+                invariants: List::new(),
+            },
+            sp(),
+        );
+        let _ = g.wp_expr(&loop_expr, &Formula::True);
+        let vcs = termination_vcs(&g);
+        assert_eq!(vcs.len(), 1);
+        assert!(matches!(vcs[0].formula, Formula::False));
+        assert!(vcs[0].description.as_str().contains("`loop`"));
+    }
+
+    #[test]
+    fn verify_attr_thorough_and_certified_demand_mandatoriness() {
+        let strategy_attr = |name: &str| {
+            let arg = Expr::new(
+                ExprKind::Path(Path::single(Ident {
+                    name: Text::from(name),
+                    span: sp(),
+                })),
+                sp(),
+            );
+            let mut args = List::new();
+            args.push(arg);
+            Attribute::new(Text::from("verify"), Maybe::Some(args), sp())
+        };
+        for demanded in ["thorough", "certified"] {
+            let mut attrs = List::new();
+            attrs.push(strategy_attr(demanded));
+            assert!(
+                VCGenerator::attrs_demand_mandatory_termination(&attrs),
+                "@verify({demanded}) must demand mandatory termination"
+            );
+        }
+        for lax in ["formal", "fast", "proof"] {
+            let mut attrs = List::new();
+            attrs.push(strategy_attr(lax));
+            assert!(
+                !VCGenerator::attrs_demand_mandatory_termination(&attrs),
+                "@verify({lax}) must NOT demand mandatory termination"
+            );
+        }
     }
 }

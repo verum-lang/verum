@@ -31,6 +31,12 @@ pub struct SmtVerificationPass {
     timeout_ms: u32,
     /// Enable proof generation for certification
     generate_proofs: bool,
+    /// `@verify(thorough)` contract: termination obligations are
+    /// mandatory — a loop with no `decreases` measure yields a
+    /// failing Termination VC. Threaded into every [`VCGenerator`]
+    /// this pass constructs; per-function `@verify(thorough)` /
+    /// `@verify(certified)` attributes force it regardless. (T0671)
+    mandatory_termination: bool,
     /// Verification results
     results: List<SmtVerificationResult>,
     /// Statistics
@@ -127,6 +133,7 @@ impl SmtVerificationPass {
         Self {
             timeout_ms: 30000, // 30 second default timeout
             generate_proofs: false,
+            mandatory_termination: false,
             results: List::new(),
             stats: SmtVerificationStats::default(),
         }
@@ -135,6 +142,13 @@ impl SmtVerificationPass {
     /// Set verification timeout in milliseconds.
     pub fn with_timeout(mut self, timeout_ms: u32) -> Self {
         self.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Make termination obligations mandatory (`@verify(thorough)`
+    /// semantics) for every function this pass verifies. (T0671)
+    pub fn with_mandatory_termination(mut self, on: bool) -> Self {
+        self.mandatory_termination = on;
         self
     }
 
@@ -227,7 +241,8 @@ impl SmtVerificationPass {
         }
 
         // Generate verification conditions
-        let mut vc_gen = VCGenerator::new();
+        let mut vc_gen =
+            VCGenerator::new().with_mandatory_termination(self.mandatory_termination);
         let vcs = vc_gen.generate_vcs(func);
 
         // Create Z3 verifier
