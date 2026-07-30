@@ -518,6 +518,12 @@ enum Commands {
  /// `<source-dir>/elaborated/`.
         #[clap(long, value_name = "DIR")]
         output_dir: Option<Text>,
+ /// Exit 0 even when zero certificates were produced (all
+ /// theorems skipped). Without this flag an all-skip run is an
+ /// error: an empty success is indistinguishable from an
+ /// unwired gate, and reads as a pass in CI.
+        #[clap(long)]
+        allow_empty: bool,
     },
 
     /// Format source code
@@ -3292,9 +3298,14 @@ fn run_command(cli: Cli) -> Result<()> {
             let lift = meta_lift.unwrap_or(if meta_mode { 1 } else { 0 });
             commands::check_proof::execute_with_universe_lift(file.as_str(), lift)
         }
-        Commands::ElaborateProof { file, output_dir } => commands::elaborate_proof::execute(
+        Commands::ElaborateProof {
+            file,
+            output_dir,
+            allow_empty,
+        } => commands::elaborate_proof::execute(
             file.as_str(),
             output_dir.as_ref().map(|s| s.as_str()),
+            allow_empty,
         ),
         Commands::Fmt {
             check,

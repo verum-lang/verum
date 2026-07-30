@@ -86,7 +86,7 @@ impl ElaborationStatus {
 ///
 /// `output_dir` is the destination directory for `.vproof` files.
 /// When `None`, defaults to `<source-dir>/elaborated/`.
-pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {
+pub fn execute(path: &str, output_dir: Option<&str>, allow_empty: bool) -> Result<()> {
     let source_path = PathBuf::from(path);
     if !source_path.exists() {
         return Err(CliError::InvalidArgument(format!(
@@ -167,6 +167,19 @@ pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {
         return Err(CliError::VerificationFailed(format!(
             "{} theorem(s) elaborated to ill-typed terms — kernel rejected",
             total_failed,
+        )));
+    }
+    // T0679: an all-skip run produced ZERO certificates. That is not
+    // a success — an empty success is indistinguishable from an
+    // unwired gate, and exits-0 read as passes in CI. Skips are still
+    // not failures (the kernel rejected nothing); the ERROR is
+    // claiming success while certifying nothing.
+    if total_verified == 0 && total_skipped > 0 && !allow_empty {
+        return Err(CliError::VerificationFailed(format!(
+            "0 certificates produced ({} theorem(s) skipped as unsupported) — \
+             refusing to report success for an empty run; pass --allow-empty \
+             if this is intentional",
+            total_skipped,
         )));
     }
     Ok(())
@@ -331,12 +344,25 @@ mod tests {
         let result = execute(
             vr_path.to_string_lossy().as_ref(),
             Some(out_dir.path().to_string_lossy().as_ref()),
+            false,
         );
-        // Skipped (not failed) → exit 0.
+        // T0679: an ALL-SKIP run refuses to report success — zero
+        // certificates is an empty success, which reads as a CI pass
+        // while certifying nothing.
         assert!(
-            result.is_ok(),
-            "expected ok with skipped row, got {:?}",
-            result
+            result.is_err(),
+            "expected the empty (all-skip) run to exit nonzero, got Ok"
+        );
+        // With the explicit opt-out the same run is permitted.
+        let allowed = execute(
+            vr_path.to_string_lossy().as_ref(),
+            Some(out_dir.path().to_string_lossy().as_ref()),
+            true,
+        );
+        assert!(
+            allowed.is_ok(),
+            "expected --allow-empty to permit the all-skip run, got {:?}",
+            allowed
         );
         // No .vproof files emitted on skip. (A module-level
         // verification-surface.json is always emitted — that's
@@ -361,7 +387,7 @@ mod tests {
     /// Pin: missing source file produces a clear error.
     #[test]
     fn elaborate_proof_missing_file_errors_cleanly() {
-        match execute("/tmp/nonexistent_elab_source.vr", None) {
+        match execute("/tmp/nonexistent_elab_source.vr", None, false) {
             Err(CliError::InvalidArgument(msg)) => {
                 assert!(msg.contains("not found"), "got: {}", msg);
             }
@@ -391,6 +417,7 @@ mod tests {
         execute(
             vr_path.to_string_lossy().as_ref(),
             Some(out_dir.path().to_string_lossy().as_ref()),
+            false,
         )
         .expect("verifiable theorem should elaborate");
 
@@ -413,7 +440,7 @@ mod tests {
     fn elaborate_proof_rejects_wrong_extension() {
         let mut src = tempfile::NamedTempFile::new().expect("tempfile");
         src.write_all(b"module x;\n").expect("write");
-        match execute(src.path().to_string_lossy().as_ref(), None) {
+        match execute(src.path().to_string_lossy().as_ref(), None, false) {
             Err(CliError::InvalidArgument(msg)) => {
                 assert!(msg.contains("expected a .vr file"), "got: {}", msg);
             }
