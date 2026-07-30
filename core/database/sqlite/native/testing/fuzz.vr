@@ -12,7 +12,7 @@
 //  * `WalFuzzer` — frame-sequence permutation / drop / duplicate
 //
 
-// All three implement `Mutator<I>` for some input type `I`. The
+// All three implement `PropertyMutator<I>` for some input type `I`. The
 // shrinker interface (`shrink`) lets a failing input be reduced
 // to a minimal repro — implementers return a `List<I>` of strictly
 // smaller candidates ordered by likelihood of preserving the failure.
@@ -30,10 +30,10 @@ mount base.{Text, Maybe, Bool};
 mount collections.List;
 
 // -----------------------------------------------------------------------------
-// Mutator protocol
+// PropertyMutator protocol
 // -----------------------------------------------------------------------------
 
-public type Mutator is protocol {
+public type PropertyMutator is protocol {
     type Input;
 
     fn name(&self) -> Text;
@@ -92,7 +92,7 @@ public fn format_fuzzer(seed: Int64, flips_per_round: Int) -> FormatFuzzer {
     FormatFuzzer { rng: fuzz_rng(seed), flips_per_round: flips_per_round }
 }
 
-implement Mutator for FormatFuzzer {
+implement PropertyMutator for FormatFuzzer {
     type Input = List<Byte>;
 
     fn name(&self) -> Text { "format_fuzzer".clone() }
@@ -150,7 +150,7 @@ public fn wal_fuzzer(seed: Int64, n_frames_max: Int) -> WalFuzzer {
     WalFuzzer { rng: fuzz_rng(seed), n_frames_max: n_frames_max }
 }
 
-implement Mutator for WalFuzzer {
+implement PropertyMutator for WalFuzzer {
     type Input = WalFuzzPlan;
 
     fn name(&self) -> Text { "wal_fuzzer".clone() }
@@ -229,7 +229,7 @@ fn clone_action(a: &WalFuzzAction) -> WalFuzzAction {
 
 // A minimal token-level generator emitting valid-shape DML / DDL.
 // Real coverage comes from the corpus replayer — this exists for
-// quick smoke tests and as a worked example of the Mutator protocol
+// quick smoke tests and as a worked example of the PropertyMutator protocol
 // over a non-byte input.
 // =============================================================================
 
@@ -239,7 +239,7 @@ public fn grammar_fuzzer(seed: Int64) -> GrammarFuzzer {
     GrammarFuzzer { rng: fuzz_rng(seed) }
 }
 
-implement Mutator for GrammarFuzzer {
+implement PropertyMutator for GrammarFuzzer {
     type Input = Text;
 
     fn name(&self) -> Text { "grammar_fuzzer".clone() }

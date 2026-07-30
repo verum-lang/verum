@@ -60,6 +60,7 @@ mount core.database.sqlite.native.l4_vdbe.opcode.{
     Column, RowIdOp,
     Insert, Delete, NewRowid, MakeRecord
 };
+mount core.database.sqlite.native.l4_vdbe.ssa.builder.{ArithOp};
 mount core.database.sqlite.native.l4_vdbe.program.{
     VdbeProgram, ConstantPool, ConstantEntry,
     KInt, KReal, KText, KBlob, KAffinityStr
@@ -370,11 +371,11 @@ fn lift_straight_line(
             reg_state_write(rs, dst_reg, v);
         }
 
-        Add(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.AddOp, pending),
-        Subtract(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.SubOp, pending),
-        Multiply(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.MulOp, pending),
-        Divide(a, b, d)   => arith(prog, rs, span, a, b, d, ArithOp.DivOp, pending),
-        Remainder(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.RemOp, pending),
+        Add(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.AoAdd, pending),
+        Subtract(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.AoSub, pending),
+        Multiply(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.AoMul, pending),
+        Divide(a, b, d)   => arith(prog, rs, span, a, b, d, ArithOp.AoDiv, pending),
+        Remainder(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.AoRem, pending),
 
         BitAnd(a, b, d)    => bitwise(prog, rs, span, a, b, d, BitOp.AndOp, pending),
         BitOr(a, b, d)     => bitwise(prog, rs, span, a, b, d, BitOp.OrOp, pending),
@@ -440,7 +441,6 @@ fn lift_straight_line(
 // Arithmetic / bitwise helpers
 // -----------------------------------------------------------------------------
 
-type ArithOp is AddOp | SubOp | MulOp | DivOp | RemOp;
 type BitOp is AndOp | OrOp | ShlOp | ShrOp;
 
 fn arith(
@@ -459,11 +459,11 @@ fn arith(
     let dst_kind = arith_result_kind(&av.kind, &bv.kind);
     let dst = mint(prog, dst_kind);
     let inst = match op {
-        AddOp => IAdd(dst.clone(), av, bv),
-        SubOp => ISub(dst.clone(), av, bv),
-        MulOp => IMul(dst.clone(), av, bv),
-        DivOp => IDiv(dst.clone(), av, bv),
-        RemOp => IRem(dst.clone(), av, bv),
+        AoAdd => IAdd(dst.clone(), av, bv),
+        AoSub => ISub(dst.clone(), av, bv),
+        AoMul => IMul(dst.clone(), av, bv),
+        AoDiv => IDiv(dst.clone(), av, bv),
+        AoRem => IRem(dst.clone(), av, bv),
     };
     push_inst(prog, &span.block, inst);
     reg_state_write(rs, d, dst);
