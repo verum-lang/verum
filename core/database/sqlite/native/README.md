@@ -2,21 +2,31 @@
 
 Pure-Verum SQLite reimplementation: file format, pager/WAL journaling, btree, VDBE and session layers, built up as l0_vfs → l6_session (see the layer directories below).
 
-## Status (2026-04-21, v0.1 scaffolding)
+## Status (measured 2026-07-30)
 
-| Layer | Module | Status | LOC |
+Code volume per layer, measured by `find <dir> -name '*.vr' | wc` — LOC is
+NOT a completeness claim. The per-layer completeness audit against the spec
+is pool task T0469; wiring status of what exists is tracked by the LOOM
+stage tasks (T0537 scalar dispatch, T0538 name collisions, T0539 re-point
+onto production stdlib, T0555 e2e reds).
+
+| Layer | Module | Files | LOC |
 |---|---|---|---|
-| L0 | `l0_vfs/vfs_protocol.vr` | Scaffolded — protocol defined | ~60 |
-| L0 | `l0_vfs/memdb_vfs.vr` | Minimal in-memory backing | ~140 |
-| L0 | `l0_vfs/posix_vfs.vr` | NOT STARTED — needs Gap 1/2/3 | 0 |
-| L1 | `l1_pager/` | NOT STARTED | 0 |
-| L2 | `l2_record/serial_type.vr` | SerialType + record-header parse | ~130 |
-| L2 | `l2_record/affinity.vr` | NOT STARTED | 0 |
-| L3 | `l3_btree/` | NOT STARTED | 0 |
-| L4 | `l4_vdbe/` | NOT STARTED | 0 |
-| L5 | `l5_sql/` | NOT STARTED | 0 |
-| L6 | `l6_session/` | NOT STARTED | 0 |
-| L7 | `l7_api/` | NOT STARTED | 0 |
+| L0 | `l0_vfs/` | 9 | 3,035 |
+| L1 | `l1_pager/` | 22 | 7,236 |
+| L2 | `l2_record/` | 7 | 1,371 |
+| L3 | `l3_btree/` | 13 | 4,183 |
+| L4 | `l4_vdbe/` | 26 | 8,197 |
+| L5 | `l5_sql/` | 18 | 11,828 |
+| L6 | `l6_session/` | 9 | 2,880 |
+| L7 | `l7_api/` | 10 | 3,058 |
+
+Whole `native/` tree: 1,434 `.vr` files, ~138.7k LOC — much of it decision-table
+and API-catalogue directories that are written but NOT wired into the live
+engine (the wiring is exactly the LOOM stage tasks above). Known live-vs-written
+splits: VDBE scalar dispatch uses 21 inline kinds while 118 implemented builtins
+sit unwired (T0537); 75 `sqlite3_*` C-API dirs and 82 SQL parse/plan rule dirs
+are unwired catalogues (folded into T0469's umbrella journal).
 
 ## Stdlib gaps closed before this work
 

@@ -5,11 +5,15 @@
 // Spec: sqlite-native.md §11.2, Appendix C
 //
 
-// Single source of truth for the wire-level VDBE opcode catalogue.
-// `l4_vdbe/opcode.vr` carries the *enum* the interpreter dispatches
-// on; this module carries the metadata every other layer (codegen,
-// EXPLAIN, optimiser, fuzz mutator, debugger) needs about every
-// opcode WITHOUT re-deriving it from the enum.
+// DESIGN-FORWARD opcode catalogue — NOT the wire-level source of truth.
+// `l4_vdbe/opcode.vr` carries the *enum* the interpreter actually
+// dispatches on (109 opcodes, measured 2026-07-30); this catalogue
+// describes 175 — the 66 extra are planned/spec-side entries the live
+// engine does not implement yet. Until a pin test asserts the engine's
+// enum is a name+number subset of this catalogue (LOOM wiring umbrella,
+// pool T0469), treat the ENGINE enum as authoritative for anything that
+// executes, and this module as forward metadata for codegen, EXPLAIN,
+// the optimiser, fuzz mutators and debuggers.
 //
 
 // Layout:
