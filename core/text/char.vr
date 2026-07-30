@@ -36,10 +36,6 @@ implement Char {
     // ASCII Classification (fast path)
     // =========================================================================
 
-    /// Check if ASCII (< 128).
-    public fn is_ascii(self) -> Bool {
-        (self as Int) < 128
-    }
 
     /// Check if ASCII alphabetic (a-z, A-Z).
     public fn is_ascii_alphabetic(self) -> Bool {
@@ -142,74 +138,14 @@ implement Char {
     // Unicode Classification (full Unicode support)
     // =========================================================================
 
-    /// Check if alphabetic (Unicode).
-    public fn is_alphabetic(self) -> Bool {
-        if self.is_ascii() {
-            return self.is_ascii_alphabetic();
-        }
-        char_is_alphabetic(self)
-    }
 
-    /// Check if numeric (Unicode).
-    public fn is_numeric(self) -> Bool {
-        if self.is_ascii() {
-            return self.is_ascii_digit();
-        }
-        char_is_numeric(self)
-    }
 
-    /// Check if alphanumeric (Unicode).
-    public fn is_alphanumeric(self) -> Bool {
-        self.is_alphabetic() || self.is_numeric()
-    }
 
-    /// Check if whitespace (Unicode).
-    public fn is_whitespace(self) -> Bool {
-        if self.is_ascii() {
-            return self.is_ascii_whitespace();
-        }
-        char_is_whitespace(self)
-    }
 
-    /// Check if control character (Unicode).
-    public fn is_control(self) -> Bool {
-        if self.is_ascii() {
-            return self.is_ascii_control();
-        }
-        char_is_control(self)
-    }
 
-    /// Check if uppercase (Unicode).
-    public fn is_uppercase(self) -> Bool {
-        if self.is_ascii() {
-            return self.is_ascii_uppercase();
-        }
-        char_is_uppercase(self)
-    }
 
-    /// Check if lowercase (Unicode).
-    public fn is_lowercase(self) -> Bool {
-        if self.is_ascii() {
-            return self.is_ascii_lowercase();
-        }
-        char_is_lowercase(self)
-    }
 
-    /// Convert to uppercase (Unicode).
-    public fn to_uppercase(self) -> Char {
-        if self.is_ascii() {
-            return self.to_ascii_uppercase();
-        }
-        char_to_uppercase(self)
-    }
 
-    /// Convert to lowercase (Unicode).
-    public fn to_lowercase(self) -> Char {
-        if self.is_ascii() {
-            return self.to_ascii_lowercase();
-        }
-        char_to_lowercase(self)
-    }
 
     // =========================================================================
     // Digit Conversion
@@ -220,76 +156,13 @@ implement Char {
         self.to_digit(radix).is_some()
     }
 
-    /// Convert character to digit value in given radix.
-    public fn to_digit(self, radix: Int) -> Maybe<Int> {
-        assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
 
-        let code = self as Int;
-
-        let digit = if code >= 48 && code <= 57 {
-            // '0'-'9' -> 0-9
-            code - 48
-        } else if code >= 65 && code <= 90 {
-            // 'A'-'Z' -> 10-35
-            code - 55
-        } else if code >= 97 && code <= 122 {
-            // 'a'-'z' -> 10-35
-            code - 87
-        } else {
-            return Maybe.None;
-        };
-
-        if digit < radix {
-            Maybe.Some(digit)
-        } else {
-            Maybe.None
-        }
-    }
-
-    /// Create character from digit value in given radix.
-    /// Returns lowercase letters for hex digits 10..=35
-    /// (`a`..=`z`), matching the standard `from_digit` convention
-    /// shared with Rust / Swift / Python.  Callers that need
-    /// uppercase output should call `.to_ascii_uppercase()` on the
-    /// result.  Pinned by
-    /// `core-tests/text/char/regression_test.vr.regression_c_from_digit_hex_pinned`.
-    public fn from_digit(digit: Int, radix: Int) -> Maybe<Char> {
-        assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
-
-        if digit < 0 || digit >= radix {
-            return Maybe.None;
-        }
-
-        if digit < 10 {
-            Maybe.Some(('0' as Int + digit) as Char)
-        } else {
-            Maybe.Some(('a' as Int + digit - 10) as Char)
-        }
-    }
 
     // =========================================================================
     // UTF-8 Encoding
     // =========================================================================
 
-    /// Length when encoded as UTF-8.
-    public fn len_utf8(self) -> Int {
-        let code = self as Int;
-        if code < 0x80 {
-            1
-        } else if code < 0x800 {
-            2
-        } else if code < 0x10000 {
-            3
-        } else {
-            4
-        }
-    }
 
-    /// Length when encoded as UTF-16.
-    public fn len_utf16(self) -> Int {
-        let code = self as Int;
-        if code < 0x10000 { 1 } else { 2 }
-    }
 
     // NOTE (TEXT-AOT-CHARS-PUSH-1 / FUNC-REGISTRY-QUALIFICATION-1):
     // the branchy `encode_utf8` that lived here DUPLICATED
