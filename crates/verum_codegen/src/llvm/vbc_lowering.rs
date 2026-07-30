@@ -703,6 +703,23 @@ fn coerce_to_i64_for_switch<'ctx>(
     }
 }
 
+
+/// Whether Phase 2 scopes body lowering to the reachable set (T0682).
+///
+/// Split out so the gate cannot be silently disabled by a refactor:
+/// the whole memory saving (82GB -> 5GB on a suite run, measured)
+/// rests on this returning `true` for ordinary program builds.
+///
+///  * `kill_switch` — `VERUM_NO_REACHABILITY_LOWERING=1`, the A/B
+///    escape hatch; when set, lower everything as before.
+///  * `has_entry` — the module declares `main`. Without an entry
+///    point the reachability roots (ctors/dtors/constant-pool refs/
+///    mount aliases) would UNDER-approximate what a library must
+///    export, so library builds lower everything.
+pub(crate) fn scoped_lowering_enabled(kill_switch: bool, has_entry: bool) -> bool {
+    !kill_switch && has_entry
+}
+
 impl<'ctx> VbcToLlvmLowering<'ctx> {
     /// Create a new VBC → LLVM lowering context.
     pub fn new(context: &'ctx Context, config: LoweringConfig) -> Self {
@@ -988,10 +1005,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let kill_switch =
                 std::env::var("VERUM_NO_REACHABILITY_LOWERING").as_deref() == Ok("1");
             let has_entry = vbc_module.find_function_by_name("main").is_some();
-            if kill_switch || !has_entry {
-                None
-            } else {
+            if scoped_lowering_enabled(kill_switch, has_entry) {
                 Some(ids)
+            } else {
+                None
             }
         };
 
@@ -5249,5 +5266,26 @@ mod tests {
         );
         // Default matches the documented Verum.toml default.
         assert_eq!(PanicStrategy::default(), PanicStrategy::Unwind);
+    }
+
+    #[test]
+    fn scoped_lowering_gate_pins_both_axes() {
+        // T0682 — the reachability-scoped lowering is what keeps an
+        // AOT build from lowering the entire baked stdlib into one
+        // LLVM module (measured: 82GB -> 5GB peak on a suite run).
+        // Pin both axes so a refactor cannot silently switch it off.
+        assert!(
+            super::scoped_lowering_enabled(false, true),
+            "ordinary program build MUST scope lowering to reachable code"
+        );
+        assert!(
+            !super::scoped_lowering_enabled(true, true),
+            "VERUM_NO_REACHABILITY_LOWERING=1 must restore whole-module lowering"
+        );
+        assert!(
+            !super::scoped_lowering_enabled(false, false),
+            "a module without `main` is a library build — its exports are not \
+             reachable from an entry point, so it must lower everything"
+        );
     }
 }
