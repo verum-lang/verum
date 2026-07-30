@@ -203,28 +203,29 @@ fn parametrised_variant_predicate_truth_table(
 // =============================================================================
 
 @test
-fn test_nan_to_json_is_error_or_null() {
+fn test_nan_to_json_is_null() {
     let d = Data.Float(Float.NAN);
-    // NaN is not representable in JSON — either errors or serialises as null
-    let serialised = d.to_json();
-    assert(serialised.is_err() || serialised == Result.Ok("null".to_text()),
-        "NaN must serialise as error or null, not a valid float");
+    // RFC 8259 §6: JSON numbers are finite, so NaN has no
+    // representation. `to_json` is total (`-> Text`), so it emits the
+    // conventional stand-in `null` rather than an unparseable literal.
+    // The previous version of this test called `.is_err()` on the
+    // result, an API `to_json` never had — and the round-trip laws
+    // above, which pass `to_json()` straight into `parse_json(text)`,
+    // prove the signature is Text. The file asserted two contradictory
+    // contracts and could not compile, taking all 18 of its tests down.
+    assert_eq(d.to_json(), "null".to_text());
 }
 
 @test
-fn test_positive_inf_to_json_is_error_or_null() {
+fn test_positive_inf_to_json_is_null() {
     let d = Data.Float(Float.INFINITY);
-    let serialised = d.to_json();
-    assert(serialised.is_err() || serialised == Result.Ok("null".to_text()),
-        "+Inf must serialise as error or null");
+    assert_eq(d.to_json(), "null".to_text());
 }
 
 @test
-fn test_negative_inf_to_json_is_error_or_null() {
+fn test_negative_inf_to_json_is_null() {
     let d = Data.Float(Float.NEG_INFINITY);
-    let serialised = d.to_json();
-    assert(serialised.is_err() || serialised == Result.Ok("null".to_text()),
-        "-Inf must serialise as error or null");
+    assert_eq(d.to_json(), "null".to_text());
 }
 
 // =============================================================================

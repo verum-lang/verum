@@ -512,7 +512,16 @@ implement Data {
             Data.Null => "null".to_text(),
             Data.Bool(b) => if *b { "true" } else { "false" }.to_text(),
             Data.Int(i) => i.to_text(),
-            Data.Float(f) => f.to_text(),
+            // RFC 8259 §6: a JSON number is finite — NaN and the
+            // infinities have no JSON representation. Emitting
+            // `f.to_text()` unguarded produced the literals `NaN` and
+            // `inf`, which no conforming parser accepts, so a single
+            // non-finite float made the whole document unreadable.
+            // `null` is the conventional stand-in (it is what
+            // JavaScript's JSON.stringify emits) and keeps this
+            // conversion total, which is what its `-> Text` signature
+            // promises.
+            Data.Float(f) => if f.is_finite() { f.to_text() } else { "null".to_text() },
             Data.Text(ref s) => Data.escape_json_string(s),
             Data.Array(ref arr) => {
                 let items = arr.iter()
@@ -550,7 +559,16 @@ implement Data {
             Data.Null => "null".to_text(),
             Data.Bool(b) => b.to_text(),
             Data.Int(i) => i.to_text(),
-            Data.Float(f) => f.to_text(),
+            // RFC 8259 §6: a JSON number is finite — NaN and the
+            // infinities have no JSON representation. Emitting
+            // `f.to_text()` unguarded produced the literals `NaN` and
+            // `inf`, which no conforming parser accepts, so a single
+            // non-finite float made the whole document unreadable.
+            // `null` is the conventional stand-in (it is what
+            // JavaScript's JSON.stringify emits) and keeps this
+            // conversion total, which is what its `-> Text` signature
+            // promises.
+            Data.Float(f) => if f.is_finite() { f.to_text() } else { "null".to_text() },
             Data.Text(ref s) => s.clone(),
             Data.Array(_) | Data.Object(_) => self.to_json(),
         }
@@ -568,7 +586,16 @@ implement Data {
             Data.Null => "null".to_text(),
             Data.Bool(b) => if *b { "true" } else { "false" }.to_text(),
             Data.Int(i) => i.to_text(),
-            Data.Float(f) => f.to_text(),
+            // RFC 8259 §6: a JSON number is finite — NaN and the
+            // infinities have no JSON representation. Emitting
+            // `f.to_text()` unguarded produced the literals `NaN` and
+            // `inf`, which no conforming parser accepts, so a single
+            // non-finite float made the whole document unreadable.
+            // `null` is the conventional stand-in (it is what
+            // JavaScript's JSON.stringify emits) and keeps this
+            // conversion total, which is what its `-> Text` signature
+            // promises.
+            Data.Float(f) => if f.is_finite() { f.to_text() } else { "null".to_text() },
             Data.Text(ref s) => Data.escape_json_string(s),
             Data.Array(ref arr) => {
                 if arr.is_empty() {
