@@ -65,6 +65,7 @@ impl<'s> CompilationPipeline<'s> {
         &self,
         func: &verum_ast::decl::FunctionDecl,
         timeout_ms: u64,
+        alias_map: &std::collections::HashMap<Text, Vec<verum_ast::expr::Expr>>,
     ) -> Result<bool> {
         use std::time::Duration;
         use verum_ast::ty::TypeKind;
@@ -94,6 +95,21 @@ impl<'s> CompilationPipeline<'s> {
 
         // Collect parameter refinements for use in return type verification.
         let mut param_constraints: List<(&verum_ast::Type, Text)> = List::new();
+
+        // The parameters' refinement predicates, binder-rewritten to the
+        // parameter's own name — these are the HYPOTHESES the return-
+        // refinement query runs under (T0680). Without them the
+        // identity function over a refined type false-rejected:
+        // `fn f(x: Int{> 0}) -> Int{> 0} { x }` asked Z3 to prove
+        // `x > 0` from nothing and got `result = 0`. Covers the inline
+        // form AND alias-wrapped params (`x: P` where
+        // `type P is Int{> 0}`) via the module's refinement alias map.
+        // Dropping an untranslatable hypothesis is sound (the query
+        // just gets weaker); fabricating one never happens — the
+        // rewrite is the same explicit|it|self -> name contract the
+        // verify path uses (T0678).
+        let param_hypotheses: Vec<verum_ast::expr::Expr> =
+            collect_param_refinement_hypotheses(func, alias_map);
 
         // Verify parameter refinements.
         for param in &func.params {
@@ -193,6 +209,7 @@ impl<'s> CompilationPipeline<'s> {
                     &verifier,
                     &subsumption_checker,
                     &param_constraints,
+                    &param_hypotheses,
                 );
 
                 match return_check_result {
@@ -240,6 +257,7 @@ impl<'s> CompilationPipeline<'s> {
         _verifier: &SmtRefinementVerifier,
         _subsumption_checker: &SubsumptionChecker,
         param_constraints: &List<(&verum_ast::Type, Text)>,
+        param_hypotheses: &[verum_ast::expr::Expr],
     ) -> Result<bool> {
         use verum_ast::ty::TypeKind;
         use verum_smt::translate::Translator;
@@ -317,6 +335,7 @@ impl<'s> CompilationPipeline<'s> {
                 refined_base,
                 &mut translator,
                 smt_context,
+                param_hypotheses,
             );
 
             match z3_result {
@@ -384,6 +403,7 @@ impl<'s> CompilationPipeline<'s> {
         refined_base: Option<&verum_ast::Type>,
         translator: &mut verum_smt::translate::Translator<'_>,
         smt_context: &SmtContext,
+        param_hypotheses: &[verum_ast::expr::Expr],
     ) -> SmtCheckResult {
         use z3::SatResult;
         use z3::ast::{Dynamic, Int};
@@ -474,6 +494,35 @@ impl<'s> CompilationPipeline<'s> {
         };
 
         let solver = smt_context.solver();
+
+        // Assert the parameters' refinement predicates as HYPOTHESES
+        // on THIS solver (T0680). A refined parameter is an
+        // assumption about the argument, established at every call
+        // site by refinement subtyping — without it the identity
+        // function over a refined type false-rejected
+        // (`fn f(x: Int{> 0}) -> Int{> 0} { x }` asked Z3 to prove
+        // `x > 0` from no premises and got `result = 0`).
+        //
+        // These MUST be asserted on the solver the query runs on:
+        // `SmtContext::solver()` constructs a FRESH solver per call
+        // (context.rs:97), so hypotheses asserted anywhere else are
+        // silently discarded. An untranslatable hypothesis is dropped
+        // (the query merely gets weaker — sound), never fabricated.
+        for hyp in param_hypotheses {
+            match translator.translate_expr(hyp) {
+                Ok(z3_hyp) => {
+                    if let Some(b) = z3_hyp.as_bool() {
+                        solver.assert(&b);
+                    }
+                }
+                Err(e) => {
+                    debug!(
+                        "param refinement hypothesis dropped (untranslatable): {:?}",
+                        e
+                    );
+                }
+            }
+        }
 
         // Tie the binder to the returned value AT THE BINDER'S OWN SORT.
         // This was `if let Some(return_int) = z3_return_value.as_int()`, so for
@@ -1013,4 +1062,62 @@ mod refinement_binder_sort_pins {
              no less uninterpreted for having a literal added to it"
         );
     }
+}
+
+/// The refinement predicates carried by a function's parameters,
+/// binder-rewritten to each parameter's own name (T0680). Inline
+/// `x: Int{ it > 0 }` forms rewrite their binder (explicit binding,
+/// or the implicit `it` / legacy `self`); alias-wrapped `x: P` forms
+/// take the module alias map's flattened predicates (stored in the
+/// `self` spelling, `it` also covered). These are the hypotheses a
+/// return-refinement query must run under — a refined parameter IS
+/// an assumption about the argument, established at every call site.
+pub(super) fn collect_param_refinement_hypotheses(
+    func: &verum_ast::decl::FunctionDecl,
+    alias_map: &std::collections::HashMap<Text, Vec<verum_ast::expr::Expr>>,
+) -> Vec<verum_ast::expr::Expr> {
+    use crate::phases::proof_verification::substitute_ident;
+    use verum_ast::ty::TypeKind;
+    let mut out = Vec::new();
+    for param in &func.params {
+        let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else {
+            continue;
+        };
+        let Some(param_name) = extract_pattern_name(pattern) else {
+            continue;
+        };
+        match &ty.kind {
+            TypeKind::Refined { base: _, predicate } => {
+                let target = verum_ast::ty::Ident::new(param_name.as_str(), predicate.expr.span);
+                let substitutions: Vec<(Text, verum_ast::ty::Ident)> = match &predicate.binding {
+                    verum_common::Maybe::Some(binder) => {
+                        vec![(binder.name.clone(), target)]
+                    }
+                    verum_common::Maybe::None => vec![
+                        (Text::from("it"), target.clone()),
+                        (Text::from("self"), target),
+                    ],
+                };
+                out.push(substitute_ident(&predicate.expr, &substitutions));
+            }
+            TypeKind::Path(path) => {
+                if let Some(id) = path.as_ident()
+                    && let Some(preds) = alias_map.get(&id.name)
+                {
+                    for pred in preds {
+                        let target = verum_ast::ty::Ident::new(param_name.as_str(), pred.span);
+                        out.push(substitute_ident(
+                            pred,
+                            &[
+                                (Text::from("it"), target.clone()),
+                                (Text::from("self"), target.clone()),
+                            ],
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }

@@ -1187,6 +1187,14 @@ impl<'s> CompilationPipeline<'s> {
         let timeout_secs = self.session.options().smt_timeout_secs;
         let parallel_verify = std::env::var("VERUM_NO_PARALLEL_VERIFY").is_err();
 
+        // Refinement alias map for the whole module (T0680): the
+        // return-refinement query needs alias-wrapped parameter
+        // predicates (`x: P` with `type P is Int{> 0}`) as hypotheses,
+        // exactly like the verify path. Built once, shared read-only
+        // across the rayon workers.
+        let refinement_alias_map =
+            crate::phases::proof_verification::build_refinement_alias_map(module);
+
         let work: Vec<&verum_ast::decl::FunctionDecl> =
             functions_to_verify.iter().copied().collect();
 
@@ -1232,7 +1240,8 @@ impl<'s> CompilationPipeline<'s> {
             }
 
             // Perform actual SMT-based refinement verification.
-            let verification_result = self.verify_function_refinements(func, timeout_ms);
+            let verification_result =
+                self.verify_function_refinements(func, timeout_ms, &refinement_alias_map);
             let verify_elapsed = verify_start.elapsed();
             let func_name_text: verum_common::Text = func.name.as_str().to_string().into();
 
