@@ -143,7 +143,6 @@ impl AsRef<[u8]> for HashValue {
     }
 }
 
-#[cfg(feature = "serde")]
 impl serde::Serialize for HashValue {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -153,7 +152,6 @@ impl serde::Serialize for HashValue {
     }
 }
 
-#[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for HashValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -390,7 +388,7 @@ pub enum ChangeKind {
 /// - Signature change → all dependents need recompilation
 /// - Body change → dependents only need re-verification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct FunctionHashes {
     /// Hash of the function signature (name, params, return type, contexts, properties)
     pub signature: HashValue,
@@ -591,7 +589,7 @@ impl Default for FunctionHashBuilder {
 ///
 /// Used for fine-grained incremental compilation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ItemHashes {
     /// Map from item name to its hashes
     pub functions: std::collections::HashMap<String, FunctionHashes>,

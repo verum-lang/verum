@@ -222,7 +222,6 @@ pub mod verify_cmd;
 // Compile-time analysis uses types from there
 
 // Meta-system modules: unified compile-time computation (meta fn, @derive, @tagged_literal)
-pub mod asset_registry;
 pub mod derives;
 pub mod hygiene; // Sets-of-scopes hygiene for macro expansion
 pub mod meta; // Consolidated meta-system (context, evaluator, builtins, sandbox, registry, etc.)
