@@ -25,12 +25,12 @@ public type Site is protocol {
     fn is_presentable(self) -> Bool;
 };
 
-/// An abstract ∞-topos. Witnesses the conclusion of HTT 6.2.2.7
-/// (sheafification) and several downstream closure properties.
-public type InfinityTopos is protocol {
-    fn is_presentable(self) -> Bool;
-    fn is_cocartesian_closed(self) -> Bool;
-};
+// The ∞-topos protocol is the canonical one from core.math.infinity_topos
+// (Giraud-axioms formulation). It carries `is_presentable` and
+// `is_cocartesian_closed` — HTT 6.1.0.6 makes presentability a theorem-level
+// property of every ∞-topos, so the predicates live on the canonical
+// protocol rather than on a local twin.
+mount core.math.infinity_topos.{InfinityTopos};
 
 /// A left-adjoint-preserving-limits ∞-functor. Used to state the
 /// Adjoint Functor Theorem.

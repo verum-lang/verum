@@ -197,6 +197,16 @@ public type InfinityTopos is protocol extends InfinityCategory {
     /// Giraud axiom G5: every groupoid object in X is effective.
     @verify(formal)
     fn groupoid_objects_effective(&self) -> Bool;
+
+    /// Presentability — HTT 6.1.0.6: every ∞-topos is an accessible
+    /// left-exact localization of a presheaf ∞-category, hence presentable.
+    /// (Consumed by the Lurie-HTT framework axioms in frameworks/lurie_htt.vr.)
+    @verify(formal)
+    fn is_presentable(&self) -> Bool;
+
+    /// Cartesian closure of the underlying ∞-category (HTT 6.2.1.3 ff.).
+    @verify(formal)
+    fn is_cocartesian_closed(&self) -> Bool;
 };
 
 // =============================================================================
