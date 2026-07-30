@@ -90,8 +90,7 @@ module core.security.tuf.client;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
-mount encoding.json.{JsonValue, decode as json_decode};
-type JsonObject is Map<Text, JsonValue>;
+mount encoding.json.{JsonValue, JsonMap, decode as json_decode};
 mount encoding.hex.{encode as hex_encode};
 mount security.hash.sha256.{digest};
 mount security.hash.sha512.{digest as sha512_digest};
@@ -780,7 +779,7 @@ fn lift_target_file(v: &JsonValue) -> Result<TargetFile, TufClientError> {
     Result.Ok(TargetFile { length, hashes, custom })
 }
 
-fn lift_delegations(obj: &JsonObject) -> Result<Delegations, TufClientError> {
+fn lift_delegations(obj: &JsonMap) -> Result<Delegations, TufClientError> {
     let keys_obj = obj.get("keys").and_then(|v| v.as_object())
         .ok_or_else(|| InvalidJson("delegations.keys missing".to_text()))?;
     let keys = lift_key_map(keys_obj)?;
@@ -814,7 +813,7 @@ fn lift_delegations(obj: &JsonObject) -> Result<Delegations, TufClientError> {
     Result.Ok(Delegations { keys, roles })
 }
 
-fn lift_key_map(obj: &JsonObject) -> Result<Map<KeyId, TufKey>, TufClientError> {
+fn lift_key_map(obj: &JsonMap) -> Result<Map<KeyId, TufKey>, TufClientError> {
     let mut out: Map<KeyId, TufKey> = Map.new();
     for (kid_text, k_v) in obj.iter() {
         let k_obj = k_v.as_object()
@@ -833,7 +832,7 @@ fn lift_key_map(obj: &JsonObject) -> Result<Map<KeyId, TufKey>, TufClientError> 
     Result.Ok(out)
 }
 
-fn lift_root_roles(obj: &JsonObject) -> Result<RootRoles, TufClientError> {
+fn lift_root_roles(obj: &JsonMap) -> Result<RootRoles, TufClientError> {
     Result.Ok(RootRoles {
         root:      lift_role_def(obj, "root")?,
         targets:   lift_role_def(obj, "targets")?,
@@ -842,7 +841,7 @@ fn lift_root_roles(obj: &JsonObject) -> Result<RootRoles, TufClientError> {
     })
 }
 
-fn lift_role_def(obj: &JsonObject, name: &Text) -> Result<RoleDef, TufClientError> {
+fn lift_role_def(obj: &JsonMap, name: &Text) -> Result<RoleDef, TufClientError> {
     let r = obj.get(name).and_then(|v| v.as_object())
         .ok_or_else(|| InvalidJson(f"roles.{name} missing"))?;
     let keyids_arr = r.get("keyids").and_then(|v| v.as_array())
@@ -857,7 +856,7 @@ fn lift_role_def(obj: &JsonObject, name: &Text) -> Result<RoleDef, TufClientErro
     Result.Ok(RoleDef { keyids, threshold })
 }
 
-fn lift_metafile_map(obj: &JsonObject) -> Result<Map<Text, MetafileSpec>, TufClientError> {
+fn lift_metafile_map(obj: &JsonMap) -> Result<Map<Text, MetafileSpec>, TufClientError> {
     let mut out: Map<Text, MetafileSpec> = Map.new();
     for (name, v) in obj.iter() {
         let m_obj = v.as_object()
@@ -878,17 +877,17 @@ fn lift_metafile_map(obj: &JsonObject) -> Result<Map<Text, MetafileSpec>, TufCli
 
 // ----- JSON helpers -----
 
-fn get_string(obj: &JsonObject, key: &Text) -> Result<Text, TufClientError> {
+fn get_string(obj: &JsonMap, key: &Text) -> Result<Text, TufClientError> {
     obj.get(key).and_then(|v| v.as_string())
         .ok_or_else(|| InvalidJson(f"missing/non-string field: {key}"))
 }
 
-fn get_int(obj: &JsonObject, key: &Text) -> Result<Int, TufClientError> {
+fn get_int(obj: &JsonMap, key: &Text) -> Result<Int, TufClientError> {
     obj.get(key).and_then(|v| v.as_int())
         .ok_or_else(|| InvalidJson(f"missing/non-int field: {key}"))
 }
 
-fn get_rfc3339(obj: &JsonObject, key: &Text) -> Result<core.time.rfc3339.Rfc3339Time, TufClientError> {
+fn get_rfc3339(obj: &JsonMap, key: &Text) -> Result<core.time.rfc3339.Rfc3339Time, TufClientError> {
     let s = get_string(obj, key)?;
     core.time.rfc3339.parse(&s)
         .map_err(|e| InvalidJson(f"{key} parse: {e}"))

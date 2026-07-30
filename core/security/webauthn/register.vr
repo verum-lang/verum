@@ -60,8 +60,7 @@ module core.security.webauthn.register;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Set};
-mount encoding.json.{JsonValue, decode};
-type JsonObject is Map<Text, JsonValue>;
+mount encoding.json.{JsonValue, JsonMap, decode};
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
 mount encoding.cbor.{CborValue, decode};
 mount security.hash.sha256.{Sha256, digest};
@@ -266,7 +265,7 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
     })
 }
 
-fn parse_token_binding(obj: &JsonObject) -> Result<TokenBindingStatus, WebAuthnError> {
+fn parse_token_binding(obj: &JsonMap) -> Result<TokenBindingStatus, WebAuthnError> {
     let status = obj.get("status").and_then(|v| v.as_string())
         .ok_or_else(|| WebAuthnError.InvalidJson("tokenBinding.status missing".to_text()))?;
     Result.Ok(match status.as_str() {

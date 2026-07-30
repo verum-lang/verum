@@ -77,10 +77,8 @@ mount security.jwt.{
     decode_header_only,
 };
 mount encoding.json.{
-    JsonValue, decode,
+    JsonValue, JsonMap, decode,
 };
-// JsonObject is Map<Text, JsonValue> — the inner map of a JsonValue.JsonObject(map) match arm.
-type JsonObject is Map<Text, JsonValue>;
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
 mount sync.rwlock.{RwLock};
 mount time.rfc3339.{Rfc3339Time};
@@ -380,7 +378,7 @@ fn parse_jwks(value: &JsonValue) -> Result<Jwks, JwksError> {
 /// Parse a single JWK into a `JwtKey`. Delegates to
 /// `core.security.jwt.JwtKey.from_jwk_object` for the actual
 /// per-algorithm decoding (RSA n+e, EC x+y+crv, OKP x+crv).
-fn parse_jwk(obj: &JsonObject) -> Result<JwtKey, Text> {
+fn parse_jwk(obj: &JsonMap) -> Result<JwtKey, Text> {
     JwtKey.from_jwk_object(obj).map_err(|e| f"{e}")
 }
 
