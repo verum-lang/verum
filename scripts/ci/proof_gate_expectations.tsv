@@ -1,7 +1,7 @@
 # T0230 stdlib proof-gate ratchet manifest — regenerate with proof_gate.py --seed
 # file	status	proved	failed
-core/action/effects.vr	unverifiable	0	0
-core/action/ludics.vr	unverifiable	0	0
+core/action/effects.vr	failures	4	9
+core/action/ludics.vr	failures	2	5
 core/action/ludics_lazy.vr	failures	5	2
 core/action/monads/exception.vr	failures	10	5
 core/action/monads/io.vr	clean	13	0

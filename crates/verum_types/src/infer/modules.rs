@@ -2326,6 +2326,55 @@ impl TypeChecker {
                     {
                         self.ctx.env.insert(bind_name, scheme);
                     }
+
+                    // T0575 — the TYPE twin of the free-fn fallback
+                    // above. The two paths were asymmetric: a public
+                    // item absent from the module's ExportTable could
+                    // still be bound from metadata when it was a free
+                    // FUNCTION, while a declared public TYPE took the
+                    // early return and surfaced as E401 "cannot find X
+                    // in module M" — with an exports list that showed
+                    // only that module's functions and re-exports,
+                    // which is what made the gap visible.
+                    //
+                    // Measured casualties before this: the whole
+                    // core.text.format local surface (WriteError,
+                    // WriteErrorKind, DebugStruct, format_debug…),
+                    // taking core-tests/text/format to 0/146;
+                    // core.action.{enactments.Enactment,
+                    // articulation.Articulation}, which made
+                    // core/action/{effects,ludics}.vr unverifiable;
+                    // and the originally-filed
+                    // core.math.analysis.DifferentiableFunction.
+                    //
+                    // `ensure_mounted_type_loaded_qualified` is the
+                    // existing single authority for this lookup — it
+                    // probes `metadata.types` by qualified key, follows
+                    // the transitive re-export chain, and walks
+                    // ancestor prefixes to bridge leaf-module vs
+                    // archive-module key spaces. Like the free-fn
+                    // probe it returns None for anything that is not a
+                    // type, so non-types keep the normal early return.
+                    let type_bound_from_metadata = if self
+                        .ctx
+                        .lookup_type(bind_name)
+                        .is_some()
+                    {
+                        true
+                    } else {
+                        self.ensure_mounted_type_loaded_qualified(
+                            item_name,
+                            module_path.as_str(),
+                        )
+                        .map(|ty| {
+                            // Publish under the LOCAL name so
+                            // `mount m.{X as Y}` binds `Y`, matching
+                            // how the free-fn arm uses `bind_name`.
+                            self.ctx.define_type(bind_name, ty);
+                            true
+                        })
+                        .unwrap_or(false)
+                    };
                     if std::env::var("VERUM_TRACE_TASK21").is_ok() {
                         eprintln!(
                             "[task21] gate early-return: mod='{}' item='{}' bound_after={}",
@@ -2365,6 +2414,7 @@ impl TypeChecker {
                     //    export-resolves when checking on macOS.
                     if let Some(span) = import_span
                         && self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                        && !type_bound_from_metadata
                         && !self.stdlib_single_file_mode
                     {
                         let available_items: List<Text> = probed_module_info
