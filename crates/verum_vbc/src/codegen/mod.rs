@@ -9592,6 +9592,47 @@ impl VbcCodegen {
                     return Ok(());
                 }
 
+                // T0612 — CURRENT-MODULE-anchored probe for selective
+                // mounts.  A relative re-export (`public mount
+                // .elementary.{sqrt};` inside `module core.math;`)
+                // names a path that resolves ONLY against the current
+                // module's decl-rooted keys (`core.math` +
+                // `elementary.sqrt` = `core.math.elementary.sqrt`).
+                // None of the global-shape probes below construct that
+                // spelling, so before this branch existed the mount
+                // fell through to the bare-name last resort and bound
+                // whichever same-named stranger won the first-wins
+                // race — the poisoned alias was then carried into the
+                // archive and every consumer of the re-export
+                // inherited it.  Most-local meaning wins (rib
+                // precedence, docs/architecture/name-resolution.md).
+                // Gate mirrors the deferred QUALIFIED-CALL-2 probe:
+                // absolute `core.*` spellings keep their existing
+                // resolution order.
+                if full_path.first().map(|s| s.as_str()) != Some("core")
+                    && let Some(cur) = self
+                        .ctx
+                        .current_source_module
+                        .clone()
+                        .filter(|m| !m.is_empty() && m != "main")
+                {
+                    let tail = Self::mount_relative_tail(&full_path);
+                    if !tail.is_empty() {
+                        let anchored = format!("{}.{}", cur, tail);
+                        if let Some(func_info) =
+                            self.ctx.lookup_function(&anchored).cloned()
+                        {
+                            self.bind_mounted_function(
+                                &alias_name,
+                                &func_name,
+                                &anchored,
+                                func_info,
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+
                 // Try module.name without the file component (e.g., sys.ORDERING_ACQUIRE)
                 // This handles the case where imports reference files (sys.intrinsics.X)
                 // but constants are registered at module level (sys.X)
@@ -9973,7 +10014,13 @@ impl VbcCodegen {
                     let written = full_path.join(".");
                     let placeholder = crate::module::FunctionId(u32::MAX);
                     if full_path.first().map(|s| s.as_str()) != Some("core") {
-                        let anchored = format!("{}.{}", owner, written);
+                        // T0612: anchor on the dot-stripped tail — the
+                        // verbatim `written` keeps any leading `.`
+                        // segment and would produce `owner..path`, a
+                        // target that never materialises (the row was
+                        // silently dropped at fixpoint).
+                        let anchored =
+                            format!("{}.{}", owner, Self::mount_relative_tail(&full_path));
                         self.mount_aliases_buffer.push((
                             qualified_alias.clone(),
                             placeholder,
@@ -10107,6 +10154,24 @@ impl VbcCodegen {
     ///
     /// The constant might be registered as `ORDERING_ACQUIRE` or `sys.ORDERING_ACQUIRE`,
     /// but not as `sys.intrinsics.ORDERING_ACQUIRE`.
+    /// Leading `Relative` segments ride mount paths as literal "."
+    /// elements. Joining them verbatim poisons every anchored spelling
+    /// (`"core.math"` + `".elementary.sqrt"` joins to
+    /// `"core.math...elementary.sqrt"`), which is how a relative
+    /// re-export (`public mount .elementary.{sqrt};` inside
+    /// `module core.math;`) used to miss every probe, fall to the
+    /// bare-name last resort, and bind a same-named STRANGER — the
+    /// poisoned alias then rode the archive to every consumer
+    /// (`mount core.math.{sqrt}` → NaN).  T0612 / T0559 Stage D.
+    fn mount_relative_tail(full_path: &[String]) -> String {
+        full_path
+            .iter()
+            .skip_while(|s| s.as_str() == ".")
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
     pub fn resolve_pending_imports(&mut self) {
         // Take ownership of pending imports to avoid borrow issues
         let pending = std::mem::take(&mut self.pending_imports);
@@ -10233,7 +10298,11 @@ impl VbcCodegen {
                 .filter(|m| !m.is_empty() && *m != "main")
                 && full_path.first().map(|s| s.as_str()) != Some("core")
             {
-                let anchored = format!("{}.{}", owner, full_path.join("."));
+                // T0612: strip leading `.` segments — joining them
+                // verbatim produced `owner...path` and the anchored
+                // probe could never hit for dot-relative re-exports.
+                let tail = Self::mount_relative_tail(&full_path);
+                let anchored = format!("{}.{}", owner, tail);
                 if let Some(func_info) = self.ctx.lookup_function(&anchored).cloned() {
                     if should_register(&self.ctx, &alias_name, &func_info) {
                         self.bind_deferred_mounted_function(
@@ -10248,7 +10317,7 @@ impl VbcCodegen {
                 }
                 if let Some(stripped_owner) = owner.strip_prefix("core.") {
                     let anchored2 =
-                        format!("{}.{}", stripped_owner, full_path.join("."));
+                        format!("{}.{}", stripped_owner, tail);
                     if let Some(func_info) =
                         self.ctx.lookup_function(&anchored2).cloned()
                     {
@@ -10268,6 +10337,30 @@ impl VbcCodegen {
 
             // Try just the function name (e.g., ORDERING_ACQUIRE)
             if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
+                // T0612 / T0559 Stage D — an EXPLICITLY QUALIFIED mount
+                // degrading to the bare-name slot is a resolution
+                // failure, not a resolution: the bare slot is owned by
+                // whichever same-named declarer won the first-wins
+                // archive race, and binding it here silently re-routes
+                // the user's named path to a stranger (measured: the
+                // `core.math` re-export family bound a NaN-returning
+                // declarer).  Say so loudly; under VERUM_STRICT_MOUNTS=1
+                // skip the bind entirely so the call surfaces as a
+                // stage-5 stub (loud) instead of silent wrong data.
+                if full_path.len() >= 2 {
+                    let written = full_path.join(".");
+                    let owner_note = owning_module
+                        .as_deref()
+                        .filter(|m| !m.is_empty())
+                        .map(|m| format!(" (in module {m})"))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "[mount-fallback] explicit mount '{written}'{owner_note} did not resolve to its named path; binding bare '{func_name}' owned by a first-wins declarer"
+                    );
+                    if std::env::var("VERUM_STRICT_MOUNTS").as_deref() == Ok("1") {
+                        continue;
+                    }
+                }
                 if should_register(&self.ctx, &alias_name, &func_info) {
                     let bare_key = func_name.clone();
                     self.bind_deferred_mounted_function(
