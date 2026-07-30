@@ -49,7 +49,9 @@ extern {
     fn poll(fds: &mut PollFd, nfds: UInt32, timeout: Int32) -> Int32;
 }
 
-/// poll(2) file descriptor structure.
+/// poll(2) file descriptor structure. Layout must match the kernel's
+/// `struct pollfd` exactly — the address is handed to poll(2).
+@repr(C)
 @cfg(not(target_os = "windows"))
 type PollFd is {
     fd: Int32,
