@@ -40,33 +40,57 @@ public type CheckedResult<T> is
 // Returns Overflow if the result would overflow.
 @inline(always)
 public fn checked_add(a: Int64, b: Int64) -> CheckedResult<Int64> {
-    let (result, overflow) = @intrinsic("llvm.sadd.with.overflow.i64", a, b);
-    if overflow {
-        CheckedResult.Overflow
-    } else {
-        CheckedResult.Ok(result)
+    // Both execution tiers implement this operation as a
+    // `Maybe<Int>`: the interpreter's `ArithSubOpcode::CheckedAddI`
+    // calls `emit_maybe`, and the LLVM lowering builds the
+    // `(value, overflow)` pair only to wrap it back with
+    // `build_maybe_int_wrap` — its own comment says it does so to
+    // produce "the same Maybe<Int> shape the Tier-0 interpreter
+    // emits". This body used to destructure a 2-tuple instead, so it
+    // read the Maybe's slots as a pair: the `Some` TAG landed in
+    // `overflow` and a perfectly fine sum reported Overflow. Match
+    // the shape the tiers actually agree on.
+    match @intrinsic("llvm.sadd.with.overflow.i64", a, b) {
+        Maybe.Some(value) => CheckedResult.Ok(value),
+        Maybe.None => CheckedResult.Overflow,
     }
 }
 
 // Checked signed subtraction
 @inline(always)
 public fn checked_sub(a: Int64, b: Int64) -> CheckedResult<Int64> {
-    let (result, overflow) = @intrinsic("llvm.ssub.with.overflow.i64", a, b);
-    if overflow {
-        CheckedResult.Overflow
-    } else {
-        CheckedResult.Ok(result)
+    // Both execution tiers implement this operation as a
+    // `Maybe<Int>`: the interpreter's `ArithSubOpcode::CheckedSubI`
+    // calls `emit_maybe`, and the LLVM lowering builds the
+    // `(value, overflow)` pair only to wrap it back with
+    // `build_maybe_int_wrap` — its own comment says it does so to
+    // produce "the same Maybe<Int> shape the Tier-0 interpreter
+    // emits". This body used to destructure a 2-tuple instead, so it
+    // read the Maybe's slots as a pair: the `Some` TAG landed in
+    // `overflow` and a perfectly fine sum reported Overflow. Match
+    // the shape the tiers actually agree on.
+    match @intrinsic("llvm.ssub.with.overflow.i64", a, b) {
+        Maybe.Some(value) => CheckedResult.Ok(value),
+        Maybe.None => CheckedResult.Overflow,
     }
 }
 
 // Checked signed multiplication
 @inline(always)
 public fn checked_mul(a: Int64, b: Int64) -> CheckedResult<Int64> {
-    let (result, overflow) = @intrinsic("llvm.smul.with.overflow.i64", a, b);
-    if overflow {
-        CheckedResult.Overflow
-    } else {
-        CheckedResult.Ok(result)
+    // Both execution tiers implement this operation as a
+    // `Maybe<Int>`: the interpreter's `ArithSubOpcode::CheckedMulI`
+    // calls `emit_maybe`, and the LLVM lowering builds the
+    // `(value, overflow)` pair only to wrap it back with
+    // `build_maybe_int_wrap` — its own comment says it does so to
+    // produce "the same Maybe<Int> shape the Tier-0 interpreter
+    // emits". This body used to destructure a 2-tuple instead, so it
+    // read the Maybe's slots as a pair: the `Some` TAG landed in
+    // `overflow` and a perfectly fine sum reported Overflow. Match
+    // the shape the tiers actually agree on.
+    match @intrinsic("llvm.smul.with.overflow.i64", a, b) {
+        Maybe.Some(value) => CheckedResult.Ok(value),
+        Maybe.None => CheckedResult.Overflow,
     }
 }
 
