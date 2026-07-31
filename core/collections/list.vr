@@ -1437,11 +1437,41 @@ implement<T> List<T> {
     public fn drain(&mut self, start: Int, end: Int) -> Drain<T> {
         assert(start >= 0 && start <= end && end <= self.len,
                "drain range out of bounds");
+
+        // Copy the range out, then close the gap. Both halves go through
+        // the intercept-routed accessors (`get` / `set` / `truncate`);
+        // see the note on `Drain<T>` for why the range is extracted here
+        // rather than lazily from the iterator's `Drop`.
+        let width = end - start;
+        let mut taken: List<T> = List.with_capacity(width);
+        let mut i = start;
+        while i < end {
+            match self.get(i) {
+                Maybe.Some(v) => { taken.push(v); }
+                Maybe.None => {}
+            }
+            i = i + 1;
+        }
+
+        if width > 0 {
+            let old_len = self.len;
+            let mut write = start;
+            let mut read = end;
+            while read < old_len {
+                match self.get(read) {
+                    Maybe.Some(v) => { self.set(write, v); }
+                    Maybe.None => {}
+                }
+                write = write + 1;
+                read = read + 1;
+            }
+            self.truncate(old_len - width);
+        }
+
         Drain {
-            list: self,
-            start: start,
-            end: end,
-            current: start,
+            items: taken,
+            front: 0,
+            back: width,
         }
     }
 
@@ -3427,66 +3457,62 @@ implement<T> Drop for IntoList<T> {
 }
 
 // Drain iterator.
+//
+// The iterator OWNS the elements it yields; `drain` extracts them and
+// closes the gap before returning (see `List.drain`). It deliberately
+// does not park a `&mut List<T>` in the record and close the gap from
+// `Drop`, for two independent reasons:
+//
+//   * A `&mut List<T>` held in a record field does not survive at
+//     Tier-0. Reading it back yields null whenever the receiver came
+//     from a field path — `self.retired.drain(0, self.retired.len())`
+//     in `core/mem/hazard.vr` faulted on the first `self.list.ptr`.
+//   * Elements were read with `ptr_read(self.list.ptr.offset(i))`, and
+//     `self.ptr` resolves to the start of the backing heap object
+//     rather than past `OBJECT_HEADER_SIZE`, so that yielded header
+//     bytes instead of elements — silently, with no fault. Same defect
+//     class as `get_mut` / `binary_search` / `pop_front` / `split_off`,
+//     all of which now route through the intercepted accessors.
+//
+// Observable semantics are unchanged: the range leaves the list and the
+// iterator yields exactly those elements, from either end.
 public type Drain<T> is {
-    list: &mut List<T>,
-    start: Int,
-    end: Int,
-    current: Int,
+    items: List<T>,
+    front: Int,
+    back: Int,
 };
 
 implement<T> Iterator for Drain<T> {
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {
-        if self.current >= self.end {
+        if self.front >= self.back {
             return Maybe.None;
         }
-        unsafe {
-            let item = ptr_read(self.list.ptr.offset(self.current));
-            self.current = self.current + 1;
-            Maybe.Some(item)
-        }
+        let item = self.items.get(self.front);
+        self.front = self.front + 1;
+        item
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let remaining = self.end - self.current;
+        let remaining = self.back - self.front;
         (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for Drain<T> {
     fn next_back(&mut self) -> Maybe<T> {
-        if self.current >= self.end {
+        if self.front >= self.back {
             return Maybe.None;
         }
-        self.end = self.end - 1;
-        unsafe {
-            Maybe.Some(ptr_read(self.list.ptr.offset(self.end)))
-        }
+        self.back = self.back - 1;
+        self.items.get(self.back)
     }
 }
 
 implement<T> ExactSizeIterator for Drain<T> {
     fn len(&self) -> Int {
-        self.end - self.current
-    }
-}
-
-implement<T> Drop for Drain<T> {
-    fn drop(&mut self) {
-        // Consume remaining
-        while self.next().is_some() {}
-
-        // Shift tail elements
-        let tail_len = self.list.len - self.end;
-        if tail_len > 0 {
-            unsafe {
-                let dst = self.list.ptr.offset(self.start) as &unsafe Byte;
-                let src = self.list.ptr.offset(self.end) as &unsafe Byte;
-                memmove_addr(dst, src, tail_len * T.size);
-            }
-        }
-        self.list.len = self.start + tail_len;
+        self.back - self.front
     }
 }
 
