@@ -37,7 +37,7 @@ mount sys.mmio.{volatile_load, volatile_store};
 // Stack Allocator — bump allocator over a fixed buffer
 // =============================================================================
 
-type BumpAllocator is {
+public type BumpAllocator is {
     buffer_ptr: Int,
     capacity: Int,
     offset: Int,
@@ -103,7 +103,7 @@ implement BumpAllocator {
 // Embedded Panic Handler — minimal, no formatting
 // =============================================================================
 
-type PanicAction is Halt | Reset | Custom(fn() -> ());
+public type PanicAction is Halt | Reset | Custom(fn() -> ());
 
 /// Global panic action for embedded targets.
 /// Default: Halt (infinite loop).
@@ -137,7 +137,7 @@ public fn embedded_panic() {
 // Static Ring Buffer — fixed-size circular buffer for embedded I/O
 // =============================================================================
 
-type RingBuffer is {
+public type RingBuffer is {
     buffer_ptr: Int,
     capacity: Int,
     head: Int,

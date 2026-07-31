@@ -135,6 +135,12 @@ implement EngineDuration {
         self.0
     }
 
+    /// Get duration as microseconds (truncates sub-microsecond)
+    @inline
+    public pure fn as_micros(&self) -> UInt64 {
+        self.0 / 1_000_u64
+    }
+
     /// Get duration as milliseconds (truncates sub-millisecond)
     @inline
     public pure fn as_millis(&self) -> UInt64 {

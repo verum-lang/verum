@@ -337,7 +337,7 @@ fn prop_name_is_total_returns_nonempty_string() {
     statuses.push(NtStatus(0x12345678_i32));
     statuses.push(NtStatus(0xCAFEBABE_u32 as Int32));
     statuses.push(NtStatus(0));
-    statuses.push(NtStatus(0_i32.bitnot()));
+    statuses.push(NtStatus(0_i32.not()));
     let mut i = 0;
     while i < statuses.len() {
         let s = statuses[i];

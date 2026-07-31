@@ -49,7 +49,7 @@ public fn spawn_sync<T>(task: fn() -> T) -> T {
 // For code that uses channels as synchronous single-element buffers
 // (e.g., one-shot result passing within a single thread).
 
-type SyncChannel<T> is Empty | Full(T);
+public type SyncChannel<T> is Empty | Full(T);
 
 implement SyncChannel {
     public fn new() -> SyncChannel<T> {
@@ -91,7 +91,7 @@ implement SyncChannel {
 // No-op Mutex for Single-Threaded Embedded
 // =============================================================================
 
-type NoOpMutex<T> is {
+public type NoOpMutex<T> is {
     value: T,
 };
 

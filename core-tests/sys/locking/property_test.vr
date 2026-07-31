@@ -28,7 +28,7 @@ fn law_lock_region_start_field_round_trip() {
     let starts = region_starts();
     for s in starts.iter() {
         let r = LockRegion { start: *s, length: 1 };
-        assert_eq(r.start, *s);
+        assert_eq(r.start(), *s);
     }
 }
 
@@ -37,7 +37,7 @@ fn law_lock_region_length_field_round_trip() {
     let lens = region_lengths();
     for l in lens.iter() {
         let r = LockRegion { start: 0, length: *l };
-        assert_eq(r.length, *l);
+        assert_eq(r.length(), *l);
     }
 }
 
@@ -73,8 +73,8 @@ fn law_lock_region_new_preserves_start_and_length() {
     for c in cases.iter() {
         let (s, l) = *c;
         let r = LockRegion.new(s, l);
-        assert_eq(r.start, s);
-        assert_eq(r.length, l);
+        assert_eq(r.start(), s);
+        assert_eq(r.length(), l);
     }
 }
 
@@ -83,8 +83,8 @@ fn law_lock_region_to_eof_yields_length_minus_one() {
     let starts: List<Int> = [0, 1, 1024, 65535];
     for s in starts.iter() {
         let r = LockRegion.to_eof(*s);
-        assert_eq(r.start, *s);
-        assert_eq(r.length, -1);
+        assert_eq(r.start(), *s);
+        assert_eq(r.length(), -1);
     }
 }
 
@@ -93,8 +93,8 @@ fn law_lock_region_byte_yields_length_one() {
     let offsets: List<Int> = [0, 1, 100, 4096, 1_000_000];
     for o in offsets.iter() {
         let r = LockRegion.byte(*o);
-        assert_eq(r.start, *o);
-        assert_eq(r.length, 1);
+        assert_eq(r.start(), *o);
+        assert_eq(r.length(), 1);
     }
 }
 
