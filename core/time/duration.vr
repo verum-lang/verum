@@ -251,6 +251,30 @@ implement Duration {
         self.nanos / NANOS_PER_SEC
     }
 
+    /// Get total minutes (truncated).
+    @inline(always)
+    public fn as_minutes(&self) -> Int {
+        self.nanos / NANOS_PER_MIN
+    }
+
+    /// Get total hours (truncated).
+    @inline(always)
+    public fn as_hours(&self) -> Int {
+        self.nanos / NANOS_PER_HOUR
+    }
+
+    /// Get total days (truncated).
+    @inline(always)
+    public fn as_days(&self) -> Int {
+        self.nanos / (NANOS_PER_HOUR * 24)
+    }
+
+    /// Get total weeks (truncated).
+    @inline(always)
+    public fn as_weeks(&self) -> Int {
+        self.nanos / (NANOS_PER_HOUR * 24 * 7)
+    }
+
     /// Get the fractional seconds part as nanoseconds.
     ///
 

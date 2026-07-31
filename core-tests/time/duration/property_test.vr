@@ -37,6 +37,53 @@ fn law_secs_round_trip() {
     }
 }
 
+// The coarse units had constructors but no accessors — a Duration could
+// be BUILT from weeks and never read back in weeks. These four laws close
+// §A over every unit the constructors accept.
+
+@test
+fn law_minutes_round_trip() {
+    let cases: List<Int> = [0, 1, 59, 60, 1440];
+    for &n in cases.iter() {
+        assert_eq(Duration.from_minutes(n).as_minutes(), n);
+    }
+}
+
+@test
+fn law_hours_round_trip() {
+    let cases: List<Int> = [0, 1, 23, 24, 168];
+    for &n in cases.iter() {
+        assert_eq(Duration.from_hours(n).as_hours(), n);
+    }
+}
+
+@test
+fn law_days_round_trip() {
+    let cases: List<Int> = [0, 1, 6, 7, 365];
+    for &n in cases.iter() {
+        assert_eq(Duration.from_days(n).as_days(), n);
+    }
+}
+
+@test
+fn law_weeks_round_trip() {
+    let cases: List<Int> = [0, 1, 2, 52];
+    for &n in cases.iter() {
+        assert_eq(Duration.from_weeks(n).as_weeks(), n);
+    }
+}
+
+// Coarse accessors TRUNCATE, exactly as as_secs does — pin that rather
+// than leave it to inference from the round-trips above.
+@test
+fn law_coarse_accessors_truncate() {
+    assert_eq(Duration.from_hours(1).as_days(), 0);
+    assert_eq(Duration.from_days(6).as_weeks(), 0);
+    assert_eq(Duration.from_days(9).as_weeks(), 1);
+    assert_eq(Duration.secs(59).as_minutes(), 0);
+    assert_eq(Duration.secs(119).as_minutes(), 1);
+}
+
 // =============================================================================
 // §B  Unit consistency laws
 // =============================================================================
