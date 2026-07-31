@@ -33,6 +33,7 @@ mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{current_dir as fs_current_dir};
 mount core.shell.context.{PermissionSet};
 mount core.shell.result.{ShellError};
+mount core.net.addr.{Ipv6Addr};
 
 // =============================================================================
 // Path checks — read / write
@@ -153,7 +154,7 @@ fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     }
     if is_v6_literal(pattern) {
         return match (parse_ipv6(pattern), parse_ipv6(host)) {
-            (Maybe.Some(p), Maybe.Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            (Maybe.Some(p), Maybe.Some(h)) => p.segments() == h.segments(),
             _                  => false,
         };
     }
@@ -232,7 +233,7 @@ fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     let after:     Text = pattern.slice(close + 1, pattern.len()).into();
     if after.is_empty() {
         return match (parse_ipv6(&addr_text), parse_ipv6(host)) {
-            (Maybe.Some(p), Maybe.Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            (Maybe.Some(p), Maybe.Some(h)) => p.segments() == h.segments(),
             _                  => false,
         };
     }
@@ -250,18 +251,18 @@ fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
         let pat_port: Int = p_str.parse_int().unwrap_or(0);
         if pat_port != 0 && port != 0 && pat_port != port { return false; }
         return match (parse_ipv6(&addr_text), parse_ipv6(host)) {
-            (Maybe.Some(p), Maybe.Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            (Maybe.Some(p), Maybe.Some(h)) => p.segments() == h.segments(),
             _                  => false,
         };
     }
     false
 }
 
-// 128-bit IPv6 address stored as two 64-bit halves. Verum's `Int` is
-// signed 64-bit, so the low 64 bits of each half carry one half of
-// the address; bitwise comparisons and masks treat them as unsigned
-// (sign-extension does not affect bitand/bitor/shl/shr identity).
-type Ipv6Addr is { hi: Int, lo: Int };
+// IPv6 addresses use the CANONICAL `core.net.addr.Ipv6Addr` (eight
+// 16-bit segments). CIDR matching reads its 64-bit halves through
+// `hi_bits()`/`lo_bits()`; bitwise comparisons and masks treat them as
+// unsigned (sign-extension does not affect bitand/bitor/shl/shr
+// identity).
 
 // Heuristic: a textual IPv6 literal contains either `.` (the
 // zero-run shorthand) or two-or-more `:` separators. Single-colon
@@ -288,8 +289,8 @@ fn cidr_v6_match(pat: &Ipv6Addr, host: &Ipv6Addr, prefix: Int) -> Bool {
     };
     let hi_mask = mask_top_bits_u64(hi_bits);
     let lo_mask = mask_top_bits_u64(lo_bits);
-    bitand(pat.hi, hi_mask) == bitand(host.hi, hi_mask)
-        && bitand(pat.lo, lo_mask) == bitand(host.lo, lo_mask)
+    bitand(pat.hi_bits(), hi_mask) == bitand(host.hi_bits(), hi_mask)
+        && bitand(pat.lo_bits(), lo_mask) == bitand(host.lo_bits(), lo_mask)
 }
 
 // 64-bit mask covering the top `bits` bits. `bits == 0 → 0`,
@@ -414,15 +415,10 @@ fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
 
     if final_groups.len() != 8 { return Maybe.None; }
 
-    let hi: Int = bitor(
-        bitor(shl(final_groups[0], 48), shl(final_groups[1], 32)),
-        bitor(shl(final_groups[2], 16), final_groups[3]),
-    );
-    let lo: Int = bitor(
-        bitor(shl(final_groups[4], 48), shl(final_groups[5], 32)),
-        bitor(shl(final_groups[6], 16), final_groups[7]),
-    );
-    Maybe.Some(Ipv6Addr { hi: hi, lo: lo })
+    Maybe.Some(Ipv6Addr.new(
+        final_groups[0], final_groups[1], final_groups[2], final_groups[3],
+        final_groups[4], final_groups[5], final_groups[6], final_groups[7],
+    ))
 }
 
 fn parse_hex_group(text: &Text) -> Maybe<Int> {

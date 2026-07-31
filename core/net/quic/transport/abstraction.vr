@@ -49,7 +49,7 @@ mount core.net.addr.{SocketAddr};
 public type TransportError is
       Closed
     | TooLarge(Int)
-    | Io(Text)
+    | IoFailed(Text)
     | WouldBlock;
 
 implement Display for TransportError {
@@ -57,7 +57,7 @@ implement Display for TransportError {
         match self {
             Closed       => f.write_str("QUIC transport closed"),
             TooLarge(n)  => f.write_str(f"QUIC transport datagram too large ({n} bytes)".as_str()),
-            Io(reason)   => f.write_str(f"QUIC transport I/O error: {reason}".as_str()),
+            IoFailed(reason)   => f.write_str(f"QUIC transport I/O error: {reason}".as_str()),
             WouldBlock   => f.write_str("QUIC transport would block"),
         }
     }
@@ -68,7 +68,7 @@ implement Debug for TransportError {
         match self {
             Closed       => f.write_str("Closed"),
             TooLarge(n)  => f.write_str(f"TooLarge({n})".as_str()),
-            Io(reason)   => f.write_str(f"Io({reason})".as_str()),
+            IoFailed(reason)   => f.write_str(f"IoFailed({reason})".as_str()),
             WouldBlock   => f.write_str("WouldBlock"),
         }
     }
@@ -79,7 +79,7 @@ implement Eq for TransportError {
         match (self, other) {
             (Closed,      Closed)      => true,
             (TooLarge(a), TooLarge(b)) => a == b,
-            (Io(a),       Io(b))       => a == b,
+            (IoFailed(a),       IoFailed(b))       => a == b,
             (WouldBlock,  WouldBlock)  => true,
             _ => false,
         }
@@ -151,9 +151,9 @@ implement RealUdpTransport {
     pub async fn bind(addr: &SocketAddr) -> Result<RealUdpTransport, TransportError> {
         let socket = core.net.udp.UdpSocket.bind(addr)
             .await
-            .map_err(|e| TransportError.Io(Text.from_str(f"udp bind failed")))?;
+            .map_err(|e| TransportError.IoFailed(Text.from_str(f"udp bind failed")))?;
         let local = socket.local_addr()
-            .map_err(|_| TransportError.Io(Text.from_str("local_addr")))?;
+            .map_err(|_| TransportError.IoFailed(Text.from_str("local_addr")))?;
         let is_v6 = local.is_ipv6();
         // Ask the kernel to surface inbound ECN via recvmsg cmsg.
         // Errors here are non-fatal — the socket still works, just
@@ -200,7 +200,7 @@ implement UdpTransport for RealUdpTransport {
                     ecn: EcnCodepoint.NotEct,
                 })
             },
-            Result.Err(_) => Result.Err(TransportError.Io(Text.from_str("recv_from"))),
+            Result.Err(_) => Result.Err(TransportError.IoFailed(Text.from_str("recv_from"))),
         }
     }
 
@@ -223,7 +223,7 @@ implement UdpTransport for RealUdpTransport {
         };
         self.socket.send_to(data, to).await
             .map(|_| ())
-            .map_err(|_| TransportError.Io(Text.from_str("send_to")))
+            .map_err(|_| TransportError.IoFailed(Text.from_str("send_to")))
     }
 
     fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }

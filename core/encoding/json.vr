@@ -263,6 +263,92 @@ fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), JsonError> {
 // usage surface.
 
 /// Build a `JsonValue` representing the JSON null.
+// =============================================================================
+// JsonValue accessors
+// =============================================================================
+//
+
+// Maybe-returning variant extractors, mirroring `core.base.data.Data`'s
+// accessor family — the shape every consumer (security/tuf, oidc,
+// provenance, mesh, …) already calls: `value.as_object()?.get("k")
+// .and_then(|v| v.as_string())`.
+
+implement JsonValue {
+    /// True when this value is `JsonNull`.
+    public fn is_null(&self) -> Bool {
+        match self {
+            JsonValue.JsonNull => true,
+            _ => false,
+        }
+    }
+
+    /// Extract a Bool, `Maybe.None` if not `JsonBool`.
+    public fn as_bool(&self) -> Maybe<Bool> {
+        match self {
+            JsonValue.JsonBool(b) => Maybe.Some(*b),
+            _ => Maybe.None,
+        }
+    }
+
+    /// Extract an Int, `Maybe.None` if not `JsonInt`.
+    public fn as_int(&self) -> Maybe<Int> {
+        match self {
+            JsonValue.JsonInt(i) => Maybe.Some(*i),
+            _ => Maybe.None,
+        }
+    }
+
+    /// Extract a Float; an integer value coerces (JSON numbers are one
+    /// domain), `Maybe.None` otherwise.
+    public fn as_float(&self) -> Maybe<Float> {
+        match self {
+            JsonValue.JsonFloat(f) => Maybe.Some(*f),
+            JsonValue.JsonInt(i) => Maybe.Some(*i as Float),
+            _ => Maybe.None,
+        }
+    }
+
+    /// Extract the string payload, `Maybe.None` if not `JsonString`.
+    public fn as_string(&self) -> Maybe<Text> {
+        match self {
+            JsonValue.JsonString(ref s) => Maybe.Some(s.clone()),
+            _ => Maybe.None,
+        }
+    }
+
+    /// Extract an array reference, `Maybe.None` if not `JsonArray`.
+    public fn as_array(&self) -> Maybe<&List<JsonValue>> {
+        match self {
+            JsonValue.JsonArray(ref arr) => Maybe.Some(arr),
+            _ => Maybe.None,
+        }
+    }
+
+    /// Extract a mutable array reference.
+    public fn as_array_mut(&mut self) -> Maybe<&mut List<JsonValue>> {
+        match self {
+            JsonValue.JsonArray(ref mut arr) => Maybe.Some(arr),
+            _ => Maybe.None,
+        }
+    }
+
+    /// Extract an object reference, `Maybe.None` if not `JsonObject`.
+    public fn as_object(&self) -> Maybe<&Map<Text, JsonValue>> {
+        match self {
+            JsonValue.JsonObject(ref obj) => Maybe.Some(obj),
+            _ => Maybe.None,
+        }
+    }
+
+    /// Extract a mutable object reference.
+    public fn as_object_mut(&mut self) -> Maybe<&mut Map<Text, JsonValue>> {
+        match self {
+            JsonValue.JsonObject(ref mut obj) => Maybe.Some(obj),
+            _ => Maybe.None,
+        }
+    }
+}
+
 public fn json_null() -> JsonValue { JsonValue.JsonNull }
 
 /// Wrap a Verum `Bool` as a JSON boolean.

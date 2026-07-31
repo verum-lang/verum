@@ -93,38 +93,14 @@ const STDERR_FD: Int = 2;
 @inline
 
 // =============================================================================
-// Write Protocol
+// Write protocol — REMOVED parallel declaration
 // =============================================================================
+//
 
-// Protocol for types that can receive formatted output.
-public type Write is protocol {
-    // Write a byte slice.
-    fn write(&mut self, bytes: &[Byte]) -> Result<Int, WriteError>;
-
-
-
-    // ==== Canonical writing surface (moved from core/text/format.vr — task #48) ====
-
-
-    // Write a string.
-    fn write_str(&mut self, s: &Text) -> Result<(), WriteError> {
-        self.write(s.as_bytes())?;
-        Result.Ok(())
-    }
-
-
-
-    // Write a single character.
-    fn write_char(&mut self, c: Char) -> Result<(), WriteError> {
-        let mut buf = [0_u8; 4];
-        let len = c.encode_utf8(&mut buf);
-        self.write(slice_from_raw_parts(&buf[0], len))?;
-        Result.Ok(())
-    }
-
-    // Flush output.
-    fn flush(&mut self) -> Result<(), WriteError>;
-};
+// The byte-sink protocol lives in ONE place: `core.io.protocols.Write`
+// (write/flush/write_all/write_str/write_char). The parallel `Write`
+// this file used to declare had ZERO implementors — a dead twin whose
+// only live artifact is `WriteError` below (kept: it has consumers).
 
 // Write error type.
 public type WriteError is {

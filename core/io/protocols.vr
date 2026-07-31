@@ -557,6 +557,19 @@ public type Write is protocol {
     fn write_fmt(&mut self, s: &Text) -> IoResult<()> {
         self.write_all(s.as_bytes())
     }
+
+    // Write a string (canonical text-into-byte-sink surface; absorbed
+    // from the deleted parallel `core.text.format.Write` twin).
+    fn write_str(&mut self, s: &Text) -> IoResult<()> {
+        self.write_all(s.as_bytes())
+    }
+
+    // Write a single character, UTF-8 encoded.
+    fn write_char(&mut self, c: Char) -> IoResult<()> {
+        let mut buf = [0_u8; 4];
+        let len = c.encode_utf8(&mut buf);
+        self.write_all(&buf[..len])
+    }
 };
 
 // =============================================================================

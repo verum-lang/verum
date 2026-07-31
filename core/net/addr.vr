@@ -269,6 +269,21 @@ implement Ipv6Addr {
         self.segments
     }
 
+    /// The top 64 bits of the address (segments 0-3, big-endian) — the
+    /// half CIDR prefix masks up to /64 operate on.
+    @inline(always)
+    public fn hi_bits(&self) -> Int {
+        (self.segments.0 << 48) | (self.segments.1 << 32)
+            | (self.segments.2 << 16) | self.segments.3
+    }
+
+    /// The bottom 64 bits of the address (segments 4-7, big-endian).
+    @inline(always)
+    public fn lo_bits(&self) -> Int {
+        (self.segments.4 << 48) | (self.segments.5 << 32)
+            | (self.segments.6 << 16) | self.segments.7
+    }
+
     /// Check if this is the localhost address.
     public fn is_loopback(&self) -> Bool {
         self.segments == (0, 0, 0, 0, 0, 0, 0, 1)
