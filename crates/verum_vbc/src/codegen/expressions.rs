@@ -345,6 +345,35 @@ fn is_unsigned_int_type_name(name: &str) -> bool {
     type_names::is_unsigned_integer_type(name)
 }
 
+/// Is `info` callable by a BARE name?
+///
+/// **SOLE authority** for the pinned architectural rule that every bare-name
+/// `Call` dispatch layer excludes impl-block instance methods from its
+/// candidate set — `CallM` (receiver syntax) is the only legal dispatch surface
+/// for those. See the rule's full statement at the `is_free_fn` use site in
+/// `compile_call`.
+///
+/// Method-ness is a CARRIED FACT: `parent_type_name` comes from the
+/// descriptor's `parent_type`, which the archive stores precisely to record
+/// "containing type (for methods)". The rule used to be implemented as the
+/// spelling test `param_names.first() != "self"`, and param names are
+/// best-effort — `archive_ctx_loader` substitutes `_arg{i}` whenever a param's
+/// string id is missing — so an archive-loaded method passed the spelling test
+/// and re-entered the very candidate set the rule excludes. Measured: under
+/// `mount core.prelude.*`, `take(&mut v)` resolved to no free function at all
+/// and `swap(&mut a, &mut b)` bound to `Vector.swap` and null-dereferenced.
+///
+/// Variant constructors carry a parent type as well and ARE legitimately
+/// bare-callable (`Some(x)`, `Ok(v)`), so they are admitted explicitly. The
+/// spelling test is kept as a second gate: it still catches source-declared
+/// methods whose descriptor has no parent type yet at registration time.
+fn is_free_function(info: &FunctionInfo) -> bool {
+    if info.variant_tag.is_some() {
+        return true;
+    }
+    info.parent_type_name.is_none() && info.param_names.first().is_none_or(|n| n != "self")
+}
+
 /// Check if a name is a known type name (primitive or semantic numeric type).
 ///
 /// This is used to distinguish type names from variable names when compiling paths.
@@ -6159,7 +6188,7 @@ impl VbcCodegen {
                     self.ctx
                         .functions
                         .get(&func_name)
-                        .filter(|b| b.param_names.first().is_none_or(|n| n != "self"))
+                        .filter(|b| is_free_function(b))
                         .and_then(|b| {
                             arity_matches.iter().find(|(_, i)| i.id == b.id)
                         })
@@ -6293,11 +6322,7 @@ impl VbcCodegen {
         // dispatch surface for impl methods. Regression-pinned at
         // `core-tests/base/mod/regression_test.vr §B::regression_pin_take_resets_to_default`
         // and the broader `core-tests/base/memory/cbgr_test.vr::test_take`.
-        let is_free_fn = |info: &FunctionInfo| -> bool {
-            info.param_names
-                .first()
-                .is_none_or(|n| n != "self")
-        };
+        let is_free_fn = is_free_function;
         // CURRENT-UNIT-DECL-FIRST (task #20): a free fn DECLARED IN THE
         // COMPILING UNIT wins the bare-name call outright — before the
         // qualified type-aware overload scan can route `take(&v0)` to
