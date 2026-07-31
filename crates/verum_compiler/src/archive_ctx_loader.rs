@@ -2232,7 +2232,7 @@ impl ArchiveCtxCache {
             // silently skip — matching the rest of the loader's filter
             // discipline (alias targets are always REGISTERED functions,
             // which the keep set includes by construction).
-            replay_mount_aliases(module, pruned_remap, codegen);
+            replay_mount_aliases(module, entry_name, pruned_remap, codegen);
         }
         // Phase 2: body merges now see every loaded archive's name
         // bindings in `archive_func_name_to_fid`, so cross-module
@@ -2435,20 +2435,20 @@ impl ArchiveCtxCache {
                 Option<verum_vbc::module::FunctionId>,
                 String,
             )> = Vec::new();
-            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
+            for (i, (entry_name, module)) in matched_modules.iter().enumerate() {
                 pass2_alias_triples
                     .extend(collect_mount_alias_triples(module, &pass2_remaps[i]));
             }
             install_mount_alias_archive_names(&pass2_alias_triples, codegen);
             install_mount_alias_archive_names(&primary_alias_triples, codegen);
-            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
+            for (i, (entry_name, module)) in matched_modules.iter().enumerate() {
                 // Task #11 Phase 4: alias replay in the unqualified
                 // second pass too — symmetric with the Phase-1 site
                 // above.  Aliases captured by stdlib modules brought
                 // in through the bare-name fallback need the same
                 // user-side reinstall as those from explicit-mount
                 // modules in the primary pass.
-                replay_mount_aliases(module, &pass2_remaps[i], codegen);
+                replay_mount_aliases(module, entry_name, &pass2_remaps[i], codegen);
             }
             // UMBRELLA-MOUNT-PRUNE-1 supplemental wave (upgrade-once).
             //
@@ -2531,7 +2531,7 @@ impl ArchiveCtxCache {
             // ── Phase B: body merges — every kept, pass-2,
             // supplemental, and alias name is now in the archive-wide
             // index, so no merge can freeze a name-resolvable XMOD id.
-            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
+            for (i, (entry_name, module)) in matched_modules.iter().enumerate() {
                 // Body merge for the unqualified-wanted second pass —
                 // same Phase 2 path as the primary pass above. See
                 // that site for rationale.
@@ -2576,6 +2576,7 @@ impl ArchiveCtxCache {
 /// loader's filter discipline.
 fn replay_mount_aliases(
     module: &VbcModule,
+    entry_name: &str,
     func_id_remap: &std::collections::HashMap<u32, verum_vbc::module::FunctionId>,
     codegen: &mut verum_vbc::codegen::VbcCodegen,
 ) {
@@ -2600,6 +2601,30 @@ fn replay_mount_aliases(
                     None
                 } else {
                     ctx.lookup_function(&target_key)
+                }
+            })
+            .or_else(|| {
+                // ROOTED fallback. `mount_aliases` carries the target in
+                // the BAKE-TIME spelling (`sys.darwin.errno.is_retryable`),
+                // but `register_module_filtered` registers the same
+                // function under the entry-merged key
+                // (`core.sys.darwin.errno.is_retryable` for entry
+                // `core.sys`). The raw lookup above therefore misses for
+                // every alias whose target sits under a `core.`-rooted
+                // entry, and the alias is never re-installed — which is
+                // what left a two-hop re-exported FUNCTION unresolvable at
+                // codegen while its one-hop and constant siblings worked.
+                // Merge with the same helper the registration path uses so
+                // the two spellings cannot drift.
+                if target_key.is_empty() {
+                    None
+                } else {
+                    let rooted = merge_module_and_simple_name(entry_name, &target_key);
+                    if rooted == target_key {
+                        None
+                    } else {
+                        ctx.lookup_function(&rooted)
+                    }
                 }
             }) {
             Some(info) => info.clone(),
