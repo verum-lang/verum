@@ -1525,19 +1525,7 @@ unsafe fn tensor_unop_f32(src: *const f32, out: *mut f32, n: usize, op: TensorUn
                     }
                 }
                 TensorUnaryOp::Rsqrt => 1.0 / v.sqrt(),
-                TensorUnaryOp::Erf => {
-                    // Error function approximation (Abramowitz-Stegun)
-                    let x = v;
-                    let t = 1.0 / (1.0 + 0.3275911 * x.abs());
-                    let y = 1.0
-                        - (((((1.061_405_4 * t - 1.453_152_1) * t) + 1.421_413_8) * t
-                            - 0.284_496_72)
-                            * t
-                            + 0.254_829_6)
-                            * t
-                            * (-x * x).exp();
-                    if x >= 0.0 { y } else { -y }
-                }
+                TensorUnaryOp::Erf => erf_scalar(v as f64) as f32,
                 TensorUnaryOp::Log2 => v.log2(),
                 TensorUnaryOp::Softplus => (1.0 + v.exp()).ln(),
                 TensorUnaryOp::Mish => v * (1.0 + v.exp()).ln().tanh(),
@@ -1547,9 +1535,38 @@ unsafe fn tensor_unop_f32(src: *const f32, out: *mut f32, n: usize, op: TensorUn
                     0.5 * x * (1.0 + (0.797_884_6 * (x + 0.044715 * x * x * x)).tanh())
                 }
                 TensorUnaryOp::Silu => v * (1.0 / (1.0 + (-v).exp())), // x * sigmoid(x)
+                TensorUnaryOp::Exp2 => v.exp2(),
+                TensorUnaryOp::Expm1 => v.exp_m1(),
+                TensorUnaryOp::Log10 => v.log10(),
+                TensorUnaryOp::Log1p => v.ln_1p(),
+                TensorUnaryOp::Square => v * v,
+                TensorUnaryOp::Asin => v.asin(),
+                TensorUnaryOp::Acos => v.acos(),
+                TensorUnaryOp::Atan => v.atan(),
+                TensorUnaryOp::Sinh => v.sinh(),
+                TensorUnaryOp::Cosh => v.cosh(),
+                TensorUnaryOp::Asinh => v.asinh(),
+                TensorUnaryOp::Acosh => v.acosh(),
+                TensorUnaryOp::Atanh => v.atanh(),
+                TensorUnaryOp::Trunc => v.trunc(),
+                TensorUnaryOp::Erfc => (1.0 - erf_scalar(v as f64)) as f32,
             };
         }
     }
+}
+
+
+/// Error function — Abramowitz–Stegun 7.1.26 approximation
+/// (|error| < 1.5e-7). The ONE scalar erf authority for the tensor
+/// kernels; `Erfc` is its complement.
+pub(crate) fn erf_scalar(x: f64) -> f64 {
+    let t = 1.0 / (1.0 + 0.3275911 * x.abs());
+    let y = 1.0
+        - (((((1.061_405_4 * t - 1.453_152_1) * t) + 1.421_413_8) * t - 0.284_496_72) * t
+            + 0.254_829_6)
+            * t
+            * (-x * x).exp();
+    if x >= 0.0 { y } else { -y }
 }
 
 /// F64 unary operations.
@@ -1604,6 +1621,21 @@ unsafe fn tensor_unop_f64(src: *const f64, out: *mut f64, n: usize, op: TensorUn
                     0.5 * x * (1.0 + (0.7978845608028654 * (x + 0.044715 * x * x * x)).tanh())
                 }
                 TensorUnaryOp::Silu => v * (1.0 / (1.0 + (-v).exp())),
+                TensorUnaryOp::Exp2 => v.exp2(),
+                TensorUnaryOp::Expm1 => v.exp_m1(),
+                TensorUnaryOp::Log10 => v.log10(),
+                TensorUnaryOp::Log1p => v.ln_1p(),
+                TensorUnaryOp::Square => v * v,
+                TensorUnaryOp::Asin => v.asin(),
+                TensorUnaryOp::Acos => v.acos(),
+                TensorUnaryOp::Atan => v.atan(),
+                TensorUnaryOp::Sinh => v.sinh(),
+                TensorUnaryOp::Cosh => v.cosh(),
+                TensorUnaryOp::Asinh => v.asinh(),
+                TensorUnaryOp::Acosh => v.acosh(),
+                TensorUnaryOp::Atanh => v.atanh(),
+                TensorUnaryOp::Trunc => v.trunc(),
+                TensorUnaryOp::Erfc => 1.0 - erf_scalar(v),
             };
         }
     }

@@ -14255,6 +14255,36 @@ pub enum TensorUnaryOp {
     Softplus = 0x14,
     /// Mish activation.
     Mish = 0x15,
+    /// Base-2 exponential.
+    Exp2 = 0x16,
+    /// exp(x) - 1, precise near zero.
+    Expm1 = 0x17,
+    /// Base-10 logarithm.
+    Log10 = 0x18,
+    /// ln(1 + x), precise near zero.
+    Log1p = 0x19,
+    /// Elementwise square.
+    Square = 0x1A,
+    /// Inverse sine.
+    Asin = 0x1B,
+    /// Inverse cosine.
+    Acos = 0x1C,
+    /// Inverse tangent.
+    Atan = 0x1D,
+    /// Hyperbolic sine.
+    Sinh = 0x1E,
+    /// Hyperbolic cosine.
+    Cosh = 0x1F,
+    /// Inverse hyperbolic sine.
+    Asinh = 0x20,
+    /// Inverse hyperbolic cosine.
+    Acosh = 0x21,
+    /// Inverse hyperbolic tangent.
+    Atanh = 0x22,
+    /// Truncate toward zero.
+    Trunc = 0x23,
+    /// Complementary error function.
+    Erfc = 0x24,
 }
 
 impl TensorUnaryOp {
@@ -14283,6 +14313,21 @@ impl TensorUnaryOp {
             0x13 => Self::Log2,
             0x14 => Self::Softplus,
             0x15 => Self::Mish,
+            0x16 => Self::Exp2,
+            0x17 => Self::Expm1,
+            0x18 => Self::Log10,
+            0x19 => Self::Log1p,
+            0x1A => Self::Square,
+            0x1B => Self::Asin,
+            0x1C => Self::Acos,
+            0x1D => Self::Atan,
+            0x1E => Self::Sinh,
+            0x1F => Self::Cosh,
+            0x20 => Self::Asinh,
+            0x21 => Self::Acosh,
+            0x22 => Self::Atanh,
+            0x23 => Self::Trunc,
+            0x24 => Self::Erfc,
             _ => Self::Neg, // Default
         }
     }

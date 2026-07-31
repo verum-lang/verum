@@ -1841,18 +1841,86 @@ pub fn unop_f32_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHand
                 }
             }
             TensorUnaryOp::Erf => {
-                // Abramowitz-Stegun approximation
+                for i in 0..n {
+                    *out_ptr.add(i) =
+                        crate::interpreter::tensor::erf_scalar(*a_ptr.add(i) as f64) as f32;
+                }
+            }
+            TensorUnaryOp::Exp2 => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).exp2();
+                }
+            }
+            TensorUnaryOp::Expm1 => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).exp_m1();
+                }
+            }
+            TensorUnaryOp::Log10 => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).log10();
+                }
+            }
+            TensorUnaryOp::Log1p => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).ln_1p();
+                }
+            }
+            TensorUnaryOp::Square => {
                 for i in 0..n {
                     let x = *a_ptr.add(i);
-                    let t = 1.0 / (1.0 + 0.3275911 * x.abs());
-                    let y = 1.0
-                        - (((((1.061_405_4 * t - 1.453_152_1) * t) + 1.421_413_8) * t
-                            - 0.284_496_72)
-                            * t
-                            + 0.254_829_6)
-                            * t
-                            * (-x * x).exp();
-                    *out_ptr.add(i) = if x >= 0.0 { y } else { -y };
+                    *out_ptr.add(i) = x * x;
+                }
+            }
+            TensorUnaryOp::Asin => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).asin();
+                }
+            }
+            TensorUnaryOp::Acos => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).acos();
+                }
+            }
+            TensorUnaryOp::Atan => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).atan();
+                }
+            }
+            TensorUnaryOp::Sinh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).sinh();
+                }
+            }
+            TensorUnaryOp::Cosh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).cosh();
+                }
+            }
+            TensorUnaryOp::Asinh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).asinh();
+                }
+            }
+            TensorUnaryOp::Acosh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).acosh();
+                }
+            }
+            TensorUnaryOp::Atanh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).atanh();
+                }
+            }
+            TensorUnaryOp::Trunc => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).trunc();
+                }
+            }
+            TensorUnaryOp::Erfc => {
+                for i in 0..n {
+                    *out_ptr.add(i) =
+                        (1.0 - crate::interpreter::tensor::erf_scalar(*a_ptr.add(i) as f64)) as f32;
                 }
             }
         }

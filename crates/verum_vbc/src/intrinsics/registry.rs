@@ -10478,6 +10478,16 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         doc: "Index of maximum value",
     },
     Intrinsic {
+        name: "TENSOR_ARGMIN",
+        category: IntrinsicCategory::Tensor,
+        hints: &[IntrinsicHint::Pure],
+        param_count: 2, // tensor, axis
+        return_count: 1,
+        strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Argmin),
+        mlir_op: Some("verum.tensor_argmin"),
+        doc: "Index of minimum value",
+    },
+    Intrinsic {
         name: "TENSOR_TOPK",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
