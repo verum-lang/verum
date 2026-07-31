@@ -24,7 +24,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module libm;
+module core.math.libm;
 
 // =============================================================================
 // Constants

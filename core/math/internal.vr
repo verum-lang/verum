@@ -43,7 +43,7 @@
 module core.math.internal;
 
 mount super.tensor.{DynTensor, TensorHandle, DType, Device};
-mount super.linalg.Numeric;
+mount super.algebra.RealField;
 
 // =============================================================================
 // Raw VBC Opcode Emission

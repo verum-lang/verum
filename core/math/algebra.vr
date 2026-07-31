@@ -10,10 +10,26 @@
 // with required operations and axiom statements verified by the proof engine.
 //
 
+// This file is the ONE algebra tower: simultaneously OPERATOR-WIRED
+// (the ring hierarchy extends the `core.base.protocols` operator
+// protocols `Add`/`Sub`/`Mul`/`Div`/`Neg` plus `Zero`/`One`, so `+`
+// and `*` work on every `T: Semiring` bound — what linear algebra
+// needs) and AXIOM-BEARING (every law is an executable
+// `@verify(formal)` predicate stated through the operator surface —
+// what proofs and property tests need). Generic numeric code binds on
+// the WEAKEST sufficient tier: `matmul` needs `Semiring`, `adjoint`
+// needs `StarRing`, pivoting decompositions need `Field + Normed<R>`;
+// only genuinely order-dependent operations demand `RealField`. That
+// is why `Complex<Float>` — a field with no total order — works with
+// every algebraic algorithm and is only excluded from the ordered
+// surface.
+//
+
 // Hierarchy:
-//  Magma -> Semigroup -> Monoid -> Group -> AbelianGroup
-//  Ring -> CommutativeRing -> IntegralDomain -> Field
-//  Module -> VectorSpace -> Algebra
+//  Magma -> Semigroup -> Monoid -> Group -> AbelianGroup   (abstract op)
+//  Semiring -> Ring -> CommutativeRing -> IntegralDomain -> Field   (operator-wired)
+//  Ring -> StarRing (conj);  Normed<R> (abs/norm_sq);  Field -> RealField (ordered)
+//  LeftModule -> VectorSpace -> Algebra
 //  Lattice -> DistributiveLattice -> BooleanAlgebra
 // =============================================================================
 
@@ -23,6 +39,11 @@
     lifecycle: Lifecycle.Theorem("v0.1")
 )
 module core.math.algebra;
+
+// For the scalar tier implementations (section 8): hardware FMA +
+// correctly-refined sqrt/abs, and the machine-epsilon witnesses.
+mount super.elementary.{sqrt, sqrt_f32, abs, fma, fma_f32};
+mount super.constants.{EPSILON, EPSILON_F32};
 
 // =============================================================================
 // 1. Groupoid Hierarchy
@@ -78,91 +99,211 @@ public type AbelianGroup is protocol extends Group {
 };
 
 // =============================================================================
-// 2. Ring Hierarchy
+// 2. Ring Hierarchy (operator-wired)
 // =============================================================================
+//
 
-/// A ring is an abelian group under addition with an associative multiplication
-/// that distributes over addition.
-public type Ring is protocol {
-    /// Additive operation.
-    fn add(&self, other: &Self) -> Self;
+// Every tier extends the operator protocols, so a generic bound like
+// `T: Semiring` admits `a + b`, `a * b`, `T.zero()`, `T.one()`
+// directly. Every law is an executable Bool predicate stated through
+// that operator surface: `@verify(formal)` hands it to the proof
+// engine per implementing type (gradual — an undischarged law is an
+// open obligation, not a lie), and the same predicate is directly
+// callable from property tests.
+//
 
-    /// Multiplicative operation.
-    fn mul(&self, other: &Self) -> Self;
+// Laws take operands BY VALUE, matching the operator convention
+// (`fn add(self, rhs: Self)`); algebraic carriers are value types.
 
-    /// Additive identity (zero).
-    fn zero() -> Self;
-
-    /// Multiplicative identity (one).
-    fn one() -> Self;
-
-    /// Additive inverse (negation).
-    fn negate(&self) -> Self;
+/// A semiring: `+` and `*` with identities, no subtraction required.
+/// The natural numbers, and the tropical (min, +) structure of
+/// shortest-path problems, are semirings; so is every ring.
+public type Semiring is protocol extends Add<Self, Output = Self>
+    + Mul<Self, Output = Self> + Zero + One {
+    /// Fused multiply-add: `self * a + b` in one step. The default is
+    /// the composite expression; numeric tiers override it with the
+    /// hardware FMA so inner products round once, not twice.
+    fn mul_add(self, a: Self, b: Self) -> Self {
+        self * a + b
+    }
 
     /// Addition is associative: (a + b) + c = a + (b + c)
     @verify(formal)
-    fn add_associativity(&self, b: &Self, c: &Self) -> Bool;
+    fn add_associativity(self, b: Self, c: Self) -> Bool {
+        (self + b) + c == self + (b + c)
+    }
 
     /// Addition is commutative: a + b = b + a
     @verify(formal)
-    fn add_commutativity(&self, other: &Self) -> Bool;
+    fn add_commutativity(self, other: Self) -> Bool {
+        self + other == other + self
+    }
 
     /// Additive identity: a + 0 = a
     @verify(formal)
-    fn add_identity(&self) -> Bool;
-
-    /// Additive inverse: a + (-a) = 0
-    @verify(formal)
-    fn add_inverse(&self) -> Bool;
+    fn add_identity(self) -> Bool {
+        self + Self.zero() == self
+    }
 
     /// Multiplication is associative: (a * b) * c = a * (b * c)
     @verify(formal)
-    fn mul_associativity(&self, b: &Self, c: &Self) -> Bool;
+    fn mul_associativity(self, b: Self, c: Self) -> Bool {
+        (self * b) * c == self * (b * c)
+    }
 
     /// Multiplicative identity: a * 1 = a and 1 * a = a
     @verify(formal)
-    fn mul_identity(&self) -> Bool;
+    fn mul_identity(self) -> Bool {
+        self * Self.one() == self && Self.one() * self == self
+    }
 
     /// Left distributivity: a * (b + c) = a*b + a*c
     @verify(formal)
-    fn left_distributivity(&self, b: &Self, c: &Self) -> Bool;
+    fn left_distributivity(self, b: Self, c: Self) -> Bool {
+        self * (b + c) == self * b + self * c
+    }
 
     /// Right distributivity: (a + b) * c = a*c + b*c
     @verify(formal)
-    fn right_distributivity(&self, b: &Self, c: &Self) -> Bool;
+    fn right_distributivity(self, b: Self, c: Self) -> Bool {
+        (self + b) * c == self * c + b * c
+    }
+
+    /// Zero annihilates: a * 0 = 0. Independent axiom in a semiring
+    /// (in a ring it follows from distributivity and cancellation).
+    @verify(formal)
+    fn zero_annihilates(self) -> Bool {
+        (self * Self.zero()).is_zero()
+    }
+};
+
+/// A ring is a semiring with additive inverses: an abelian group under
+/// addition with an associative multiplication that distributes over it.
+public type Ring is protocol extends Semiring + Sub<Self, Output = Self>
+    + Neg<Output = Self> {
+    /// Additive inverse: a + (-a) = 0
+    @verify(formal)
+    fn add_inverse(self) -> Bool {
+        (self + (-self)).is_zero()
+    }
+
+    /// Subtraction is addition of the negation: a - b = a + (-b)
+    @verify(formal)
+    fn sub_is_add_neg(self, other: Self) -> Bool {
+        self - other == self + (-other)
+    }
 };
 
 /// A commutative ring has commutative multiplication.
 public type CommutativeRing is protocol extends Ring {
     /// Commutativity of multiplication: a * b = b * a
     @verify(formal)
-    fn mul_commutativity(&self, other: &Self) -> Bool;
+    fn mul_commutativity(self, other: Self) -> Bool {
+        self * other == other * self
+    }
 };
 
 /// An integral domain is a commutative ring with no zero divisors.
 public type IntegralDomain is protocol extends CommutativeRing {
     /// No zero divisors: if a * b = 0, then a = 0 or b = 0
     @verify(formal)
-    fn no_zero_divisors(&self, other: &Self) -> Bool;
+    fn no_zero_divisors(self, other: Self) -> Bool {
+        !(self * other).is_zero() || self.is_zero() || other.is_zero()
+    }
 };
 
 /// A field is a commutative ring in which every nonzero element has a
-/// multiplicative inverse.
-public type Field is protocol extends IntegralDomain {
-    /// Multiplicative inverse for nonzero elements.
-    fn mul_inverse(&self) -> Self;
+/// multiplicative inverse; division is total on nonzero divisors.
+public type Field is protocol extends IntegralDomain + Div<Self, Output = Self> {
+    /// Multiplicative inverse of a nonzero element. (Named
+    /// `mul_inverse`, not `recip`: carriers keep `recip` free for
+    /// their checked `Maybe`-returning variant, e.g. `Complex.recip`.)
+    fn mul_inverse(self) -> Self {
+        Self.one() / self
+    }
 
     /// Multiplicative inverse law: a * a^{-1} = 1 for a != 0
     @verify(formal)
-    fn mul_inverse_axiom(&self) -> Bool;
+    fn mul_inverse_axiom(self) -> Bool {
+        self.is_zero() || (self * self.mul_inverse()).is_one()
+    }
+
+    /// Division is multiplication by the inverse: a / b = a * b^{-1}
+    @verify(formal)
+    fn div_is_mul_inverse(self, other: Self) -> Bool {
+        other.is_zero() || self / other == self * other.mul_inverse()
+    }
+};
+
+/// A star ring (*-ring): a ring with an involution `conj` that fixes
+/// sums and reverses products. `Complex` conjugation is the prototype;
+/// every commutative ring is trivially a star ring with `conj = id`.
+public type StarRing is protocol extends Ring {
+    /// The involution `a ↦ a*` (complex conjugation for `Complex`,
+    /// the identity for real scalars).
+    fn conj(self) -> Self;
+
+    /// Involution: conj(conj(a)) = a
+    @verify(formal)
+    fn conj_involution(self) -> Bool {
+        self.conj().conj() == self
+    }
+
+    /// Additivity: conj(a + b) = conj(a) + conj(b)
+    @verify(formal)
+    fn conj_additive(self, other: Self) -> Bool {
+        (self + other).conj() == self.conj() + other.conj()
+    }
+
+    /// Antimultiplicativity: conj(a * b) = conj(b) * conj(a)
+    @verify(formal)
+    fn conj_antimultiplicative(self, other: Self) -> Bool {
+        (self * other).conj() == other.conj() * self.conj()
+    }
+};
+
+/// A normed carrier: `abs` and `norm_sq` map into an ORDERED real
+/// scalar type `R`, which is what pivot selection, convergence tests
+/// and norms actually compare. Parameterizing over `R` (rather than an
+/// associated type) keeps the projection explicit at every use site:
+/// `Complex<Float>` is `Normed<Float>` — its magnitudes are real even
+/// though the carrier is not ordered.
+public type Normed<R> is protocol {
+    /// Absolute value / magnitude / modulus, into the real scalar.
+    fn abs(self) -> R;
+
+    /// Squared magnitude — cheaper than `abs` when only comparison is
+    /// needed (`|z|² = z · conj(z)` for complex carriers; `x·x` for
+    /// real ones).
+    fn norm_sq(self) -> R;
+};
+
+/// An ordered field with square roots and a machine-precision witness:
+/// the scalar tier real numeric algorithms run on. `Float` and
+/// `Float32` are the canonical carriers. `Complex` is deliberately NOT
+/// `RealField` — it has no total order — which is exactly why every
+/// algorithm that only needs ring/field structure binds lower in the
+/// tower.
+public type RealField is protocol extends Field + PartialOrd + Normed<Self> {
+    /// Square root of a non-negative element.
+    fn sqrt(self) -> Self;
+
+    /// Machine epsilon: the difference between 1 and the least value
+    /// greater than 1 representable in this carrier. Convergence
+    /// tolerances and rank cutoffs are expressed in multiples of it.
+    fn epsilon() -> Self;
 };
 
 // =============================================================================
 // 3. Module and Vector Space Hierarchy
 // =============================================================================
 
-/// A left module over a ring R. Generalizes vector spaces to arbitrary rings.
-public type Module<R: Ring> is protocol extends AbelianGroup {
+/// A left module over a ring R. Generalizes vector spaces to arbitrary
+/// rings. Named `LeftModule` — the precise mathematical term (over a
+/// non-commutative ring the side matters) — which also keeps the flat
+/// namespace collision-free against the neural-network `Module<In, Out>`
+/// protocol in `core.math.nn`.
+public type LeftModule<R: Ring> is protocol extends AbelianGroup {
     /// Scalar multiplication from the left.
     fn scalar_mul(&self, scalar: &R) -> Self;
 
@@ -184,14 +325,14 @@ public type Module<R: Ring> is protocol extends AbelianGroup {
 };
 
 /// A vector space is a module over a field.
-public type VectorSpace<F: Field> is protocol extends Module<F> {
+public type VectorSpace<F: Field> is protocol extends LeftModule<F> {
     /// Dimension of the vector space (may be infinite).
     fn dimension() -> Int;
 };
 
 /// An algebra over a ring R is a module that is also a ring,
 /// with scalar multiplication compatible with the ring structure.
-public type Algebra<R: Ring> is protocol extends Module<R> + Ring {
+public type Algebra<R: Ring> is protocol extends LeftModule<R> + Ring {
     /// Bilinearity: r * (a * b) = (r * a) * b = a * (r * b)
     @verify(formal)
     fn bilinearity(&self, other: &Self, r: &R) -> Bool;
@@ -449,6 +590,102 @@ public type Congruence<G: Group> is protocol extends EquivalenceRelation<G> {
     @verify(formal)
     fn compatibility(&self, a: &G, b: &G, c: &G, d: &G) -> Bool;
 };
+
+// =============================================================================
+// 8. Scalar tier implementations
+// =============================================================================
+//
+
+// The primitive numeric carriers join the tower at their honest
+// mathematical tier:
+//
+//   Int            — integral domain (ℤ): ring but NOT a field.
+//   Float, Float32 — RealField carriers (the IEEE approximation of ℝ;
+//                    the ring laws are exact-arithmetic statements the
+//                    gradual verifier treats as open obligations under
+//                    rounding).
+//
+// All of them are trivially star rings (conj = id) and normed over
+// themselves. `Complex<Float>` joins the tower in `core.math.complex`
+// (Field + StarRing + Normed<Float>, deliberately NOT RealField).
+//
+// The operator prerequisites (`Add`/`Sub`/`Mul`/`Div`/`Neg`,
+// `Zero`/`One`, `Eq`/`PartialOrd`) are implemented for these carriers
+// in `core.base.primitives`.
+
+implement Semiring for Int {}
+implement Ring for Int {}
+implement CommutativeRing for Int {}
+implement IntegralDomain for Int {}
+
+implement StarRing for Int {
+    fn conj(self) -> Int { self }
+}
+
+implement Normed<Int> for Int {
+    fn abs(self) -> Int {
+        if self < 0 { -self } else { self }
+    }
+    fn norm_sq(self) -> Int { self * self }
+}
+
+implement Semiring for Float {
+    /// Hardware fused multiply-add: one rounding for `self * a + b`.
+    fn mul_add(self, a: Float, b: Float) -> Float {
+        fma(self, a, b)
+    }
+}
+implement Ring for Float {}
+implement CommutativeRing for Float {}
+implement IntegralDomain for Float {}
+implement Field for Float {}
+
+implement StarRing for Float {
+    fn conj(self) -> Float { self }
+}
+
+implement Normed<Float> for Float {
+    fn abs(self) -> Float {
+        super.elementary.abs(self)
+    }
+    fn norm_sq(self) -> Float { self * self }
+}
+
+implement RealField for Float {
+    fn sqrt(self) -> Float {
+        super.elementary.sqrt(self)
+    }
+    fn epsilon() -> Float { EPSILON }
+}
+
+implement Semiring for Float32 {
+    /// Hardware fused multiply-add at f32 precision.
+    fn mul_add(self, a: Float32, b: Float32) -> Float32 {
+        fma_f32(self, a, b)
+    }
+}
+implement Ring for Float32 {}
+implement CommutativeRing for Float32 {}
+implement IntegralDomain for Float32 {}
+implement Field for Float32 {}
+
+implement StarRing for Float32 {
+    fn conj(self) -> Float32 { self }
+}
+
+implement Normed<Float32> for Float32 {
+    fn abs(self) -> Float32 {
+        if self < 0.0f32 { -self } else { self }
+    }
+    fn norm_sq(self) -> Float32 { self * self }
+}
+
+implement RealField for Float32 {
+    fn sqrt(self) -> Float32 {
+        sqrt_f32(self)
+    }
+    fn epsilon() -> Float32 { EPSILON_F32 }
+}
 
 // =============================================================================
 // 16. Proven structural facts (SMT-discharged theorems)

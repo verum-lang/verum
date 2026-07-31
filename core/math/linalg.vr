@@ -41,48 +41,43 @@
 module core.math.linalg;
 
 mount core.base.coercion.{IntCoercible, TensorLike, Indexable};
-mount super.constants.{EPSILON};
-mount super.elementary.{sqrt, hypot, abs, fma};
 mount super.ieee754.{is_nan, copysign};
+mount super.elementary.{hypot};
+mount super.algebra.{Semiring, Ring, CommutativeRing, Field, StarRing, Normed, RealField};
 
 // =============================================================================
-// Numeric Protocol
+// Scalar requirements — the algebra tower
 // =============================================================================
+//
 
-// Protocol for numeric types usable in linear algebra
-public type Numeric is protocol {
-    fn zero() -> Self;
-    fn one() -> Self;
-    fn epsilon() -> Self;
-    fn abs(self) -> Self;
-    fn sqrt(self) -> Self;
-    fn conj(self) -> Self;  // Complex conjugate (identity for reals)
-};
-
-implement Numeric for Float {
-    fn zero() -> Self { 0.0 }
-    fn one() -> Self { 1.0 }
-    fn epsilon() -> Self { EPSILON }
-    fn abs(self) -> Self { super.super.elementary.abs(self) }
-    fn sqrt(self) -> Self { super.super.elementary.sqrt(self) }
-    fn conj(self) -> Self { self }
-}
-
-implement Numeric for Float32 {
-    fn zero() -> Self { 0.0f32 }
-    fn one() -> Self { 1.0f32 }
-    fn epsilon() -> Self { 1.19209290e-7f32 }
-    fn abs(self) -> Self { if self < 0.0f32 { -self } else { self } }
-    fn sqrt(self) -> Self { @intrinsic("llvm.sqrt.f32", self) }
-    fn conj(self) -> Self { self }
-}
+// Linear algebra binds every operation on the WEAKEST sufficient tier
+// of the ONE algebra tower (`core.math.algebra`):
+//
+//   Semiring            zeros/eye, matmul, matvec, dot, axpy, scale, trace
+//   Ring                subtraction
+//   StarRing            adjoint, conjugated (sesquilinear) dot, ConjTrans
+//   Field + Normed<R>   LU with partial pivoting, solve, inverse, det
+//   RealField           Givens/Householder decompositions (QR, Cholesky,
+//                       SVD, eigen, Schur) — real-carrier algorithms
+//
+// `Complex<Float>` (Field + StarRing + Normed<Float>, unordered) is a
+// first-class scalar for everything through the LU family. The
+// RealField-bound decompositions state their real-carrier requirement
+// honestly in the signature; their star-aware (complex Householder)
+// generalizations are an intended extension, not an accident of the
+// bounds.
 
 // =============================================================================
 // Type Definitions
 // =============================================================================
+//
+
+// Containers are UNBOUNDED — element requirements live on operations,
+// so `Matrix<Complex<Float>>` is admissible by construction and each
+// operation states exactly the structure it consumes.
 
 // Dynamic vector with runtime size
-public type Vector<T: Numeric> is {
+public type Vector<T> is {
     data: List<T>,
     len: Int,
 };
@@ -90,24 +85,24 @@ public type Vector<T: Numeric> is {
 // TensorLike + IntCoercible + Indexable: Vector behaves as a 1-D
 // tensor for unifier coercion purposes. Indexing produces an Int that
 // should coerce against scalar Int contexts (e.g. `vec[i] + 1`).
-implement<T: Numeric> TensorLike for Vector<T> {}
-implement<T: Numeric> IntCoercible for Vector<T> {}
-implement<T: Numeric> Indexable for Vector<T> {}
+implement<T> TensorLike for Vector<T> {}
+implement<T> IntCoercible for Vector<T> {}
+implement<T> Indexable for Vector<T> {}
 
 // Static vector with compile-time size
-public type StaticVector<T: Numeric, N: meta USize{N > 0}> is {
+public type StaticVector<T, N: meta USize{N > 0}> is {
     data: [T; N],
 };
 
 // Dynamic matrix (row-major storage)
-public type Matrix<T: Numeric> is {
+public type Matrix<T> is {
     data: List<T>,
     rows: Int,
     cols: Int,
 };
 
 // Static matrix with compile-time dimensions (row-major storage)
-public type StaticMatrix<T: Numeric, M: meta USize{M > 0}, N: meta USize{N > 0}> is {
+public type StaticMatrix<T, M: meta USize{M > 0}, N: meta USize{N > 0}> is {
     data: [T; M * N],
 };
 
@@ -140,16 +135,7 @@ public type Side is
 // Vector Implementation
 // =============================================================================
 
-implement<T: Numeric> Vector<T> {
-    // Create a zero vector of given length
-    public fn zeros(n: Int) -> Self {
-        let data = List.with_capacity(n);
-        for _ in 0..n {
-            data.push(T.zero());
-        }
-        Vector { data, len: n }
-    }
-
+implement<T> Vector<T> {
     // Create a vector filled with a value
     public fn filled(n: Int, value: T) -> Self {
         let data = List.with_capacity(n);
@@ -190,71 +176,6 @@ implement<T: Numeric> Vector<T> {
         Vector { data: self.data.clone(), len: self.len }
     }
 
-    // Scale vector by scalar: x := α*x
-    public fn scale(&mut self, alpha: T) {
-        for i in 0..self.len {
-            self.data[i] = self.data[i] * alpha;
-        }
-    }
-
-    // AXPY: y := α*x + y
-    public fn axpy(&mut self, alpha: T, x: &Vector<T>) {
-        assert(self.len == x.len, "dimension mismatch");
-        for i in 0..self.len {
-            self.data[i] = fma(alpha, x.data[i], self.data[i]);
-        }
-    }
-
-    // Dot product: x · y
-    public fn dot(&self, y: &Vector<T>) -> T {
-        assert(self.len == y.len, "dimension mismatch");
-        let mut sum = T.zero();
-        for i in 0..self.len {
-            sum = fma(self.data[i], y.data[i], sum);
-        }
-        sum
-    }
-
-    // L2 norm: ||x||₂
-    public fn norm_l2(&self) -> T {
-        self.dot(self).sqrt()
-    }
-
-    // L1 norm: Σ|xᵢ|
-    public fn norm_l1(&self) -> T {
-        let mut sum = T.zero();
-        for i in 0..self.len {
-            sum = sum + self.data[i].abs();
-        }
-        sum
-    }
-
-    // Infinity norm: max|xᵢ|
-    public fn norm_inf(&self) -> T {
-        let mut max_val = T.zero();
-        for i in 0..self.len {
-            let abs_val = self.data[i].abs();
-            if abs_val > max_val {
-                max_val = abs_val;
-            }
-        }
-        max_val
-    }
-
-    // Index of maximum absolute value (IAMAX)
-    public fn iamax(&self) -> Int {
-        let mut max_idx = 0;
-        let mut max_val = T.zero();
-        for i in 0..self.len {
-            let abs_val = self.data[i].abs();
-            if abs_val > max_val {
-                max_val = abs_val;
-                max_idx = i;
-            }
-        }
-        max_idx
-    }
-
     // Swap contents with another vector
     public fn swap(&mut self, other: &mut Vector<T>) {
         assert(self.len == other.len, "dimension mismatch");
@@ -273,22 +194,52 @@ implement<T: Numeric> Vector<T> {
         }
     }
 
+}
+
+// Additive-multiplicative surface: everything a semiring provides.
+implement<T: Semiring> Vector<T> {
+    // Create a zero vector of given length
+    public fn zeros(n: Int) -> Self {
+        let data = List.with_capacity(n);
+        for _ in 0..n {
+            data.push(T.zero());
+        }
+        Vector { data, len: n }
+    }
+
+    // Scale vector by scalar: x := α*x
+    public fn scale(&mut self, alpha: T) {
+        for i in 0..self.len {
+            self.data[i] = self.data[i] * alpha;
+        }
+    }
+
+    // AXPY: y := α*x + y
+    public fn axpy(&mut self, alpha: T, x: &Vector<T>) {
+        assert(self.len == x.len, "dimension mismatch");
+        for i in 0..self.len {
+            self.data[i] = alpha.mul_add(x.data[i], self.data[i]);
+        }
+    }
+
+    // Bilinear (unconjugated) dot product: Σ xᵢ·yᵢ.
+    // For complex carriers this is BLAS `dotu`; the sesquilinear inner
+    // product is `dot_conj`.
+    public fn dot(&self, y: &Vector<T>) -> T {
+        assert(self.len == y.len, "dimension mismatch");
+        let mut sum = T.zero();
+        for i in 0..self.len {
+            sum = self.data[i].mul_add(y.data[i], sum);
+        }
+        sum
+    }
+
     // Element-wise addition
     public fn add(&self, other: &Vector<T>) -> Vector<T> {
         assert(self.len == other.len, "dimension mismatch");
         let mut result = Vector.zeros(self.len);
         for i in 0..self.len {
             result.data[i] = self.data[i] + other.data[i];
-        }
-        result
-    }
-
-    // Element-wise subtraction
-    public fn sub(&self, other: &Vector<T>) -> Vector<T> {
-        assert(self.len == other.len, "dimension mismatch");
-        let mut result = Vector.zeros(self.len);
-        for i in 0..self.len {
-            result.data[i] = self.data[i] - other.data[i];
         }
         result
     }
@@ -304,40 +255,85 @@ implement<T: Numeric> Vector<T> {
     }
 }
 
+implement<T: Ring> Vector<T> {
+    // Element-wise subtraction
+    public fn sub(&self, other: &Vector<T>) -> Vector<T> {
+        assert(self.len == other.len, "dimension mismatch");
+        let mut result = Vector.zeros(self.len);
+        for i in 0..self.len {
+            result.data[i] = self.data[i] - other.data[i];
+        }
+        result
+    }
+}
+
+implement<T: StarRing> Vector<T> {
+    // Sesquilinear inner product: ⟨x, y⟩ = Σ conj(xᵢ)·yᵢ (BLAS `dotc`).
+    // Coincides with `dot` on real carriers, where conj = id.
+    public fn dot_conj(&self, y: &Vector<T>) -> T {
+        assert(self.len == y.len, "dimension mismatch");
+        let mut sum = T.zero();
+        for i in 0..self.len {
+            sum = self.data[i].conj().mul_add(y.data[i], sum);
+        }
+        sum
+    }
+}
+
+// Norms map into the ORDERED real scalar R of the carrier — the
+// mathematically honest signature: `Vector<Complex<Float>>.norm_l2()`
+// is a `Float`, and pivot/convergence comparisons happen in R.
+implement<T: Semiring + Normed<R>, R: RealField> Vector<T> {
+    // L2 norm: ||x||₂ = √(Σ |xᵢ|²)
+    public fn norm_l2(&self) -> R {
+        let mut sum = R.zero();
+        for i in 0..self.len {
+            sum = sum + self.data[i].norm_sq();
+        }
+        sum.sqrt()
+    }
+
+    // L1 norm: Σ|xᵢ|
+    public fn norm_l1(&self) -> R {
+        let mut sum = R.zero();
+        for i in 0..self.len {
+            sum = sum + self.data[i].abs();
+        }
+        sum
+    }
+
+    // Infinity norm: max|xᵢ|
+    public fn norm_inf(&self) -> R {
+        let mut max_val = R.zero();
+        for i in 0..self.len {
+            let abs_val = self.data[i].abs();
+            if abs_val > max_val {
+                max_val = abs_val;
+            }
+        }
+        max_val
+    }
+
+    // Index of maximum absolute value (IAMAX)
+    public fn iamax(&self) -> Int {
+        let mut max_idx = 0;
+        let mut max_val = R.zero();
+        for i in 0..self.len {
+            let abs_val = self.data[i].abs();
+            if abs_val > max_val {
+                max_val = abs_val;
+                max_idx = i;
+            }
+        }
+        max_idx
+    }
+}
+
 // =============================================================================
 // Matrix Implementation
 // =============================================================================
 
-implement<T: Numeric> Matrix<T> {
-    // Create a zero matrix
-    public fn zeros(rows: Int, cols: Int) -> Self {
-        let size = rows * cols;
-        let data = List.with_capacity(size);
-        for _ in 0..size {
-            data.push(T.zero());
-        }
-        Matrix { data, rows, cols }
-    }
-
-    // Create an identity matrix
-    public fn eye(n: Int) -> Self {
-        let mut m = Matrix.zeros(n, n);
-        for i in 0..n {
-            m.set(i, i, T.one());
-        }
-        m
-    }
-
-    // Create a diagonal matrix from a vector
-    public fn diag(v: &Vector<T>) -> Self {
-        let n = v.len();
-        let mut m = Matrix.zeros(n, n);
-        for i in 0..n {
-            m.set(i, i, v.get(i));
-        }
-        m
-    }
-
+implement<T> Matrix<T> {
     // Create from a list with dimensions
     public fn from_data(data: List<T>, rows: Int, cols: Int) -> Self {
         assert(data.len() == rows * cols, "data size mismatch");
@@ -375,6 +371,64 @@ implement<T: Numeric> Matrix<T> {
         Matrix { data: self.data.clone(), rows: self.rows, cols: self.cols }
     }
 
+    // Set row from vector
+    public fn set_row(&mut self, i: Int, v: &Vector<T>) {
+        assert(i < self.rows && v.len() == self.cols, "dimension mismatch");
+        for j in 0..self.cols {
+            self.set(i, j, v.get(j));
+        }
+    }
+
+    // Set column from vector
+    public fn set_col(&mut self, j: Int, v: &Vector<T>) {
+        assert(j < self.cols && v.len() == self.rows, "dimension mismatch");
+        for i in 0..self.rows {
+            self.set(i, j, v.get(i));
+        }
+    }
+
+    // Swap rows i and j
+    public fn swap_rows(&mut self, i: Int, j: Int) {
+        if i == j { return; }
+        for k in 0..self.cols {
+            let tmp = self.get(i, k);
+            self.set(i, k, self.get(j, k));
+            self.set(j, k, tmp);
+        }
+    }
+}
+
+// Additive-multiplicative surface: everything a semiring provides.
+implement<T: Semiring> Matrix<T> {
+    // Create a zero matrix
+    public fn zeros(rows: Int, cols: Int) -> Self {
+        let size = rows * cols;
+        let data = List.with_capacity(size);
+        for _ in 0..size {
+            data.push(T.zero());
+        }
+        Matrix { data, rows, cols }
+    }
+
+    // Create an identity matrix
+    public fn eye(n: Int) -> Self {
+        let mut m = Matrix.zeros(n, n);
+        for i in 0..n {
+            m.set(i, i, T.one());
+        }
+        m
+    }
+
+    // Create a diagonal matrix from a vector
+    public fn diag(v: &Vector<T>) -> Self {
+        let n = v.len();
+        let mut m = Matrix.zeros(n, n);
+        for i in 0..n {
+            m.set(i, i, v.get(i));
+        }
+        m
+    }
+
     // Transpose
     public fn transpose(&self) -> Matrix<T> {
         let mut result = Matrix.zeros(self.cols, self.rows);
@@ -406,22 +460,6 @@ implement<T: Numeric> Matrix<T> {
         v
     }
 
-    // Set row from vector
-    public fn set_row(&mut self, i: Int, v: &Vector<T>) {
-        assert(i < self.rows && v.len() == self.cols, "dimension mismatch");
-        for j in 0..self.cols {
-            self.set(i, j, v.get(j));
-        }
-    }
-
-    // Set column from vector
-    public fn set_col(&mut self, j: Int, v: &Vector<T>) {
-        assert(j < self.cols && v.len() == self.rows, "dimension mismatch");
-        for i in 0..self.rows {
-            self.set(i, j, v.get(i));
-        }
-    }
-
     // Matrix-vector multiplication: y = A*x
     public fn matvec(&self, x: &Vector<T>) -> Vector<T> {
         assert(self.cols == x.len(), "dimension mismatch");
@@ -429,7 +467,7 @@ implement<T: Numeric> Matrix<T> {
         for i in 0..self.rows {
             let mut sum = T.zero();
             for j in 0..self.cols {
-                sum = fma(self.get(i, j), x.get(j), sum);
+                sum = self.get(i, j).mul_add(x.get(j), sum);
             }
             y.set(i, sum);
         }
@@ -444,24 +482,12 @@ implement<T: Numeric> Matrix<T> {
             for j in 0..b.cols {
                 let mut sum = T.zero();
                 for k in 0..self.cols {
-                    sum = fma(self.get(i, k), b.get(k, j), sum);
+                    sum = self.get(i, k).mul_add(b.get(k, j), sum);
                 }
                 c.set(i, j, sum);
             }
         }
         c
-    }
-
-    // Frobenius norm: ||A||_F
-    public fn norm_frobenius(&self) -> T {
-        let mut sum = T.zero();
-        for i in 0..self.rows {
-            for j in 0..self.cols {
-                let v = self.get(i, j);
-                sum = fma(v, v, sum);
-            }
-        }
-        sum.sqrt()
     }
 
     // Trace (sum of diagonal elements)
@@ -486,18 +512,6 @@ implement<T: Numeric> Matrix<T> {
         result
     }
 
-    // Element-wise subtraction
-    public fn sub(&self, other: &Matrix<T>) -> Matrix<T> {
-        assert(self.rows == other.rows && self.cols == other.cols, "dimension mismatch");
-        let mut result = Matrix.zeros(self.rows, self.cols);
-        for i in 0..self.rows {
-            for j in 0..self.cols {
-                result.set(i, j, self.get(i, j) - other.get(i, j));
-            }
-        }
-        result
-    }
-
     // Scale matrix by scalar
     public fn scale(&mut self, alpha: T) {
         for i in 0..(self.rows * self.cols) {
@@ -511,15 +525,48 @@ implement<T: Numeric> Matrix<T> {
         result.scale(alpha);
         result
     }
+}
 
-    // Swap rows i and j
-    public fn swap_rows(&mut self, i: Int, j: Int) {
-        if i == j { return; }
-        for k in 0..self.cols {
-            let tmp = self.get(i, k);
-            self.set(i, k, self.get(j, k));
-            self.set(j, k, tmp);
+implement<T: Ring> Matrix<T> {
+    // Element-wise subtraction
+    public fn sub(&self, other: &Matrix<T>) -> Matrix<T> {
+        assert(self.rows == other.rows && self.cols == other.cols, "dimension mismatch");
+        let mut result = Matrix.zeros(self.rows, self.cols);
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                result.set(i, j, self.get(i, j) - other.get(i, j));
+            }
         }
+        result
+    }
+}
+
+implement<T: StarRing> Matrix<T> {
+    // Adjoint (conjugate transpose): A† = conj(Aᵀ). THE fundamental
+    // involution of complex linear algebra — Hermitian/unitary
+    // structure, density matrices, inner-product adjointness are all
+    // stated through it. Coincides with `transpose` on real carriers.
+    public fn adjoint(&self) -> Matrix<T> {
+        let mut result = Matrix.zeros(self.cols, self.rows);
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                result.set(j, i, self.get(i, j).conj());
+            }
+        }
+        result
+    }
+}
+
+implement<T: Semiring + Normed<R>, R: RealField> Matrix<T> {
+    // Frobenius norm: ||A||_F = √(Σ |aᵢⱼ|²) — real for every carrier.
+    public fn norm_frobenius(&self) -> R {
+        let mut sum = R.zero();
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                sum = sum + self.get(i, j).norm_sq();
+            }
+        }
+        sum.sqrt()
     }
 }
 
@@ -528,42 +575,42 @@ implement<T: Numeric> Matrix<T> {
 // =============================================================================
 
 // DOT: x · y
-public fn dot<T: Numeric>(x: &Vector<T>, y: &Vector<T>) -> T {
+public fn dot<T: Semiring>(x: &Vector<T>, y: &Vector<T>) -> T {
     x.dot(y)
 }
 
 // NRM2: ||x||₂
-public fn nrm2<T: Numeric>(x: &Vector<T>) -> T {
+public fn nrm2<T: Semiring + Normed<R>, R: RealField>(x: &Vector<T>) -> R {
     x.norm_l2()
 }
 
 // ASUM: Σ|xᵢ|
-public fn asum<T: Numeric>(x: &Vector<T>) -> T {
+public fn asum<T: Semiring + Normed<R>, R: RealField>(x: &Vector<T>) -> R {
     x.norm_l1()
 }
 
 // IAMAX: argmax|xᵢ|
-public fn iamax<T: Numeric>(x: &Vector<T>) -> Int {
+public fn iamax<T: Semiring + Normed<R>, R: RealField>(x: &Vector<T>) -> Int {
     x.iamax()
 }
 
 // SCAL: x := α*x
-public fn scal<T: Numeric>(alpha: T, x: &mut Vector<T>) {
+public fn scal<T: Semiring>(alpha: T, x: &mut Vector<T>) {
     x.scale(alpha);
 }
 
 // AXPY: y := α*x + y
-public fn axpy<T: Numeric>(alpha: T, x: &Vector<T>, y: &mut Vector<T>) {
+public fn axpy<T: Semiring>(alpha: T, x: &Vector<T>, y: &mut Vector<T>) {
     y.axpy(alpha, x);
 }
 
 // COPY: y := x
-public fn copy<T: Numeric>(x: &Vector<T>, y: &mut Vector<T>) {
+public fn copy<T>(x: &Vector<T>, y: &mut Vector<T>) {
     y.copy_from(x);
 }
 
 // SWAP: x ↔ y
-public fn swap<T: Numeric>(x: &mut Vector<T>, y: &mut Vector<T>) {
+public fn swap<T>(x: &mut Vector<T>, y: &mut Vector<T>) {
     x.swap(y);
 }
 
@@ -571,7 +618,7 @@ public fn swap<T: Numeric>(x: &mut Vector<T>, y: &mut Vector<T>) {
 // Returns (r, z, c, s) where:
 //  [c s] [a] [r]
 //  [-s c] [b] = [0]
-public fn rotg<T: Numeric>(a: T, b: T) -> (T, T, T, T) {
+public fn rotg<T: RealField>(a: T, b: T) -> (T, T, T, T) {
     let r = hypot(a, b);
     if r == T.zero() {
         return (T.zero(), T.zero(), T.one(), T.zero());
@@ -591,7 +638,7 @@ public fn rotg<T: Numeric>(a: T, b: T) -> (T, T, T, T) {
 // ROT: Apply Givens rotation
 // [x_i] [c s] [x_i]
 // [y_i] = [-s c] [y_i]
-public fn rot<T: Numeric>(x: &mut Vector<T>, y: &mut Vector<T>, c: T, s: T) {
+public fn rot<T: RealField>(x: &mut Vector<T>, y: &mut Vector<T>, c: T, s: T) {
     assert(x.len() == y.len(), "dimension mismatch");
     for i in 0..x.len() {
         let xi = x.get(i);
@@ -606,7 +653,7 @@ public fn rot<T: Numeric>(x: &mut Vector<T>, y: &mut Vector<T>, c: T, s: T) {
 // =============================================================================
 
 // GEMV: y := α*op(A)*x + β*y
-public fn gemv<T: Numeric>(
+public fn gemv<T: StarRing>(
     trans: Transpose,
     alpha: T,
     a: &Matrix<T>,
@@ -629,7 +676,7 @@ public fn gemv<T: Numeric>(
             for i in 0..m {
                 let mut sum = T.zero();
                 for j in 0..n {
-                    sum = fma(a.get(i, j), x.get(j), sum);
+                    sum = a.get(i, j).mul_add(x.get(j), sum);
                 }
                 y.set(i, y.get(i) + alpha * sum);
             }
@@ -642,7 +689,7 @@ public fn gemv<T: Numeric>(
                         Transpose.ConjTrans => a.get(j, i).conj(),
                         _ => a.get(j, i),
                     };
-                    sum = fma(a_val, x.get(i), sum);
+                    sum = a_val.mul_add(x.get(i), sum);
                 }
                 y.set(j, y.get(j) + alpha * sum);
             }
@@ -651,7 +698,7 @@ public fn gemv<T: Numeric>(
 }
 
 // TRSV: Solve op(A)*x = b where A is triangular
-public fn trsv<T: Numeric>(
+public fn trsv<T: Field + StarRing>(
     uplo: TriangularType,
     trans: Transpose,
     diag: DiagonalType,
@@ -722,17 +769,17 @@ public fn trsv<T: Numeric>(
 }
 
 // GER: A := α*x*yᵀ + A (rank-1 update)
-public fn ger<T: Numeric>(alpha: T, x: &Vector<T>, y: &Vector<T>, a: &mut Matrix<T>) {
+public fn ger<T: Semiring>(alpha: T, x: &Vector<T>, y: &Vector<T>, a: &mut Matrix<T>) {
     assert(a.rows == x.len() && a.cols == y.len(), "dimension mismatch");
     for i in 0..a.rows {
         for j in 0..a.cols {
-            a.set(i, j, fma(alpha * x.get(i), y.get(j), a.get(i, j)));
+            a.set(i, j, (alpha * x.get(i)).mul_add(y.get(j), a.get(i, j)));
         }
     }
 }
 
 // SYR: A := α*x*xᵀ + A (symmetric rank-1 update)
-public fn syr<T: Numeric>(uplo: TriangularType, alpha: T, x: &Vector<T>, a: &mut Matrix<T>) {
+public fn syr<T: Semiring>(uplo: TriangularType, alpha: T, x: &Vector<T>, a: &mut Matrix<T>) {
     let n = x.len();
     assert(a.rows == n && a.cols == n, "dimension mismatch");
 
@@ -740,14 +787,14 @@ public fn syr<T: Numeric>(uplo: TriangularType, alpha: T, x: &Vector<T>, a: &mut
         TriangularType.Upper => {
             for i in 0..n {
                 for j in i..n {
-                    a.set(i, j, fma(alpha * x.get(i), x.get(j), a.get(i, j)));
+                    a.set(i, j, (alpha * x.get(i)).mul_add(x.get(j), a.get(i, j)));
                 }
             }
         }
         TriangularType.Lower => {
             for i in 0..n {
                 for j in 0..=i {
-                    a.set(i, j, fma(alpha * x.get(i), x.get(j), a.get(i, j)));
+                    a.set(i, j, (alpha * x.get(i)).mul_add(x.get(j), a.get(i, j)));
                 }
             }
         }
@@ -759,7 +806,7 @@ public fn syr<T: Numeric>(uplo: TriangularType, alpha: T, x: &Vector<T>, a: &mut
 // =============================================================================
 
 // GEMM: C := α*op(A)*op(B) + β*C
-public fn gemm<T: Numeric>(
+public fn gemm<T: StarRing>(
     trans_a: Transpose,
     trans_b: Transpose,
     alpha: T,
@@ -797,7 +844,7 @@ public fn gemm<T: Numeric>(
                     Transpose.Trans => b.get(j, l),
                     Transpose.ConjTrans => b.get(j, l).conj(),
                 };
-                sum = fma(a_il, b_lj, sum);
+                sum = a_il.mul_add(b_lj, sum);
             }
             c.set(i, j, c.get(i, j) + alpha * sum);
         }
@@ -805,7 +852,7 @@ public fn gemm<T: Numeric>(
 }
 
 // TRSM: Solve op(A)*X = α*B or X*op(A) = α*B
-public fn trsm<T: Numeric>(
+public fn trsm<T: Field + StarRing>(
     side: Side,
     uplo: TriangularType,
     trans_a: Transpose,
@@ -842,7 +889,7 @@ public fn trsm<T: Numeric>(
 }
 
 // SYRK: C := α*A*Aᵀ + β*C or α*Aᵀ*A + β*C (symmetric rank-k update)
-public fn syrk<T: Numeric>(
+public fn syrk<T: StarRing>(
     uplo: TriangularType,
     trans: Transpose,
     alpha: T,
@@ -874,7 +921,7 @@ public fn syrk<T: Numeric>(
                             Transpose.NoTrans => a.get(j, l),
                             _ => a.get(l, j),
                         };
-                        sum = fma(a_il, a_jl, sum);
+                        sum = a_il.mul_add(a_jl, sum);
                     }
                     c.set(i, j, c.get(i, j) + alpha * sum);
                 }
@@ -893,7 +940,7 @@ public fn syrk<T: Numeric>(
                             Transpose.NoTrans => a.get(j, l),
                             _ => a.get(l, j),
                         };
-                        sum = fma(a_il, a_jl, sum);
+                        sum = a_il.mul_add(a_jl, sum);
                     }
                     c.set(i, j, c.get(i, j) + alpha * sum);
                 }
@@ -907,14 +954,14 @@ public fn syrk<T: Numeric>(
 // =============================================================================
 
 // LU decomposition result with partial pivoting
-public type LUDecomposition<T: Numeric> is {
+public type LUDecomposition<T> is {
     lu: Matrix<T>,         // L (below diagonal) and U (diagonal and above)
     pivots: List<Int>,     // Pivot indices
     num_swaps: Int,        // Number of row swaps (for determinant sign)
 };
 
 // Compute PA = LU decomposition with partial pivoting
-public fn lu<T: Numeric>(a: &Matrix<T>) -> LUDecomposition<T> {
+public fn lu<T: Field + Normed<R>, R: RealField>(a: &Matrix<T>) -> LUDecomposition<T> {
     let m = a.rows;
     let n = a.cols;
     let mut lu = a.clone();
@@ -948,7 +995,7 @@ public fn lu<T: Numeric>(a: &Matrix<T>) -> LUDecomposition<T> {
 
         // Skip if pivot is too small (singular matrix)
         let pivot = lu.get(k, k);
-        if pivot.abs() < T.epsilon() {
+        if pivot.abs() < R.epsilon() {
             continue;
         }
 
@@ -966,7 +1013,7 @@ public fn lu<T: Numeric>(a: &Matrix<T>) -> LUDecomposition<T> {
 }
 
 // Solve Ax = b using LU decomposition
-public fn lu_solve<T: Numeric>(decomp: &LUDecomposition<T>, b: &Vector<T>) -> Vector<T> {
+public fn lu_solve<T: Field>(decomp: &LUDecomposition<T>, b: &Vector<T>) -> Vector<T> {
     let n = decomp.lu.rows;
     assert(n == b.len(), "dimension mismatch");
 
@@ -998,7 +1045,7 @@ public fn lu_solve<T: Numeric>(decomp: &LUDecomposition<T>, b: &Vector<T>) -> Ve
 }
 
 // Determinant via LU decomposition
-public fn determinant<T: Numeric>(a: &Matrix<T>) -> T {
+public fn determinant<T: Field + Normed<R>, R: RealField>(a: &Matrix<T>) -> T {
     assert(a.rows == a.cols, "matrix must be square");
     let decomp = lu(a);
     let mut det = if decomp.num_swaps % 2 == 0 { T.one() } else { -T.one() };
@@ -1009,13 +1056,13 @@ public fn determinant<T: Numeric>(a: &Matrix<T>) -> T {
 }
 
 // QR decomposition result: A = Q*R
-public type QRDecomposition<T: Numeric> is {
+public type QRDecomposition<T> is {
     q: Matrix<T>,  // Orthogonal matrix Q
     r: Matrix<T>,  // Upper triangular matrix R
 };
 
 // QR decomposition via Householder reflections
-public fn qr<T: Numeric>(a: &Matrix<T>) -> QRDecomposition<T> {
+public fn qr<T: RealField>(a: &Matrix<T>) -> QRDecomposition<T> {
     let m = a.rows;
     let n = a.cols;
     let mut q = Matrix.eye(m);
@@ -1046,7 +1093,7 @@ public fn qr<T: Numeric>(a: &Matrix<T>) -> QRDecomposition<T> {
         for j in k..n {
             let mut dot_val = T.zero();
             for i in k..m {
-                dot_val = fma(v.get(i - k), r.get(i, j), dot_val);
+                dot_val = v.get(i - k).mul_add(r.get(i, j), dot_val);
             }
             let two = T.one() + T.one();
             for i in k..m {
@@ -1058,7 +1105,7 @@ public fn qr<T: Numeric>(a: &Matrix<T>) -> QRDecomposition<T> {
         for j in 0..m {
             let mut dot_val = T.zero();
             for i in k..m {
-                dot_val = fma(v.get(i - k), q.get(i, j), dot_val);
+                dot_val = v.get(i - k).mul_add(q.get(i, j), dot_val);
             }
             let two = T.one() + T.one();
             for i in k..m {
@@ -1071,7 +1118,7 @@ public fn qr<T: Numeric>(a: &Matrix<T>) -> QRDecomposition<T> {
 }
 
 // Solve least squares min||Ax - b||² using QR
-public fn qr_solve<T: Numeric>(decomp: &QRDecomposition<T>, b: &Vector<T>) -> Vector<T> {
+public fn qr_solve<T: RealField>(decomp: &QRDecomposition<T>, b: &Vector<T>) -> Vector<T> {
     let m = decomp.q.rows;
     let n = decomp.r.cols;
     assert(b.len() == m, "dimension mismatch");
@@ -1096,13 +1143,13 @@ public fn qr_solve<T: Numeric>(decomp: &QRDecomposition<T>, b: &Vector<T>) -> Ve
 }
 
 // Cholesky decomposition result: A = L*Lᵀ
-public type CholeskyDecomposition<T: Numeric> is {
+public type CholeskyDecomposition<T> is {
     l: Matrix<T>,  // Lower triangular matrix L
 };
 
 // Cholesky decomposition for symmetric positive definite matrices
 // Returns Maybe.None if matrix is not positive definite
-public fn cholesky<T: Numeric>(a: &Matrix<T>) -> Maybe<CholeskyDecomposition<T>> {
+public fn cholesky<T: RealField>(a: &Matrix<T>) -> Maybe<CholeskyDecomposition<T>> {
     let n = a.rows;
     assert(a.rows == a.cols, "matrix must be square");
 
@@ -1134,7 +1181,7 @@ public fn cholesky<T: Numeric>(a: &Matrix<T>) -> Maybe<CholeskyDecomposition<T>>
 }
 
 // Solve Ax = b using Cholesky (A = LLᵀ)
-public fn cholesky_solve<T: Numeric>(decomp: &CholeskyDecomposition<T>, b: &Vector<T>) -> Vector<T> {
+public fn cholesky_solve<T: Field>(decomp: &CholeskyDecomposition<T>, b: &Vector<T>) -> Vector<T> {
     let n = decomp.l.rows;
     assert(n == b.len(), "dimension mismatch");
 
@@ -1166,13 +1213,13 @@ public fn cholesky_solve<T: Numeric>(decomp: &CholeskyDecomposition<T>, b: &Vect
 // =============================================================================
 
 // Eigendecomposition result
-public type EigenDecomposition<T: Numeric> is {
+public type EigenDecomposition<T> is {
     values: Vector<T>,    // Eigenvalues
     vectors: Matrix<T>,   // Eigenvectors (columns)
 };
 
 // Power iteration to find dominant eigenvalue/eigenvector
-public fn power_iteration<T: Numeric>(
+public fn power_iteration<T: RealField>(
     a: &Matrix<T>,
     max_iter: Int,
     tol: T,
@@ -1215,7 +1262,7 @@ public fn power_iteration<T: Numeric>(
 }
 
 // Inverse iteration to find eigenvector for given eigenvalue estimate
-public fn inverse_iteration<T: Numeric>(
+public fn inverse_iteration<T: RealField>(
     a: &Matrix<T>,
     sigma: T,
     max_iter: Int,
@@ -1273,7 +1320,7 @@ public fn inverse_iteration<T: Numeric>(
 // =============================================================================
 
 // Matrix inverse via LU decomposition
-public fn inverse<T: Numeric>(a: &Matrix<T>) -> Maybe<Matrix<T>> {
+public fn inverse<T: Field + Normed<R>, R: RealField>(a: &Matrix<T>) -> Maybe<Matrix<T>> {
     let n = a.rows;
     assert(a.rows == a.cols, "matrix must be square");
 
@@ -1281,7 +1328,7 @@ public fn inverse<T: Numeric>(a: &Matrix<T>) -> Maybe<Matrix<T>> {
 
     // Check if singular (any zero diagonal in U)
     for i in 0..n {
-        if decomp.lu.get(i, i).abs() < T.epsilon() {
+        if decomp.lu.get(i, i).abs() < R.epsilon() {
             return Maybe.None;
         }
     }
@@ -1299,14 +1346,14 @@ public fn inverse<T: Numeric>(a: &Matrix<T>) -> Maybe<Matrix<T>> {
 }
 
 // Solve linear system Ax = b
-public fn solve<T: Numeric>(a: &Matrix<T>, b: &Vector<T>) -> Maybe<Vector<T>> {
+public fn solve<T: Field + Normed<R>, R: RealField>(a: &Matrix<T>, b: &Vector<T>) -> Maybe<Vector<T>> {
     assert(a.rows == a.cols && a.rows == b.len(), "dimension mismatch");
 
     let decomp = lu(a);
 
     // Check if singular
     for i in 0..a.rows {
-        if decomp.lu.get(i, i).abs() < T.epsilon() {
+        if decomp.lu.get(i, i).abs() < R.epsilon() {
             return Maybe.None;
         }
     }
@@ -1316,7 +1363,7 @@ public fn solve<T: Numeric>(a: &Matrix<T>, b: &Vector<T>) -> Maybe<Vector<T>> {
 
 // Matrix condition number (2-norm) approximation
 // Uses power iteration to estimate largest/smallest singular values
-public fn cond<T: Numeric>(a: &Matrix<T>) -> T {
+public fn cond<T: RealField>(a: &Matrix<T>) -> T {
     // Estimate largest singular value via A*Aᵀ
     let aat = a.matmul(&a.transpose());
     let (max_sq, _) = power_iteration(&aat, 100, T.epsilon());
@@ -1333,7 +1380,7 @@ public fn cond<T: Numeric>(a: &Matrix<T>) -> T {
 }
 
 // Rank of matrix (via QR decomposition)
-public fn rank<T: Numeric>(a: &Matrix<T>, tol: T) -> Int {
+public fn rank<T: RealField>(a: &Matrix<T>, tol: T) -> Int {
     let decomp = qr(a);
     let n = a.rows.min(a.cols);
     let mut r = 0;
@@ -1347,7 +1394,7 @@ public fn rank<T: Numeric>(a: &Matrix<T>, tol: T) -> Int {
 
 // Null space basis (kernel) via QR decomposition
 // Returns columns that span null(A)
-public fn null_space<T: Numeric>(a: &Matrix<T>, tol: T) -> Matrix<T> {
+public fn null_space<T: RealField>(a: &Matrix<T>, tol: T) -> Matrix<T> {
     let decomp = qr(&a.transpose());
     let m = a.cols;
     let n = a.rows;
@@ -1379,7 +1426,7 @@ public fn null_space<T: Numeric>(a: &Matrix<T>, tol: T) -> Matrix<T> {
 // - U: m×m orthogonal matrix (left singular vectors)
 // - s: min(m,n) vector of non-negative singular values (descending)
 // - Vt: n×n orthogonal matrix (right singular vectors, transposed)
-public type SVDDecomposition<T: Numeric> is {
+public type SVDDecomposition<T> is {
     u: Matrix<T>,
     s: Vector<T>,
     vt: Matrix<T>,
@@ -1401,7 +1448,7 @@ public type SVDDecomposition<T: Numeric> is {
 // let decomp = svd(&a);
 // // decomp.s contains [5.0, 1.0] (singular values)
 // ```
-public fn svd<T: Numeric>(a: &Matrix<T>) -> SVDDecomposition<T> {
+public fn svd<T: RealField>(a: &Matrix<T>) -> SVDDecomposition<T> {
     let m = a.rows;
     let n = a.cols;
     let k = m.min(n);
@@ -1544,7 +1591,7 @@ public fn svd<T: Numeric>(a: &Matrix<T>) -> SVDDecomposition<T> {
 // let decomp = eigh(&a);
 // // decomp.values contains eigenvalues in descending order
 // ```
-public fn eigh<T: Numeric>(a: &Matrix<T>) -> EigenDecomposition<T> {
+public fn eigh<T: RealField>(a: &Matrix<T>) -> EigenDecomposition<T> {
     let n = a.rows;
     assert(n == a.cols, "Matrix must be square");
 
@@ -1652,12 +1699,12 @@ public fn eigh<T: Numeric>(a: &Matrix<T>) -> EigenDecomposition<T> {
 
 // # Note
 // For symmetric matrices, use `eigh` which is more efficient.
-public type ComplexEigenDecomposition<T: Numeric> is {
+public type ComplexEigenDecomposition<T> is {
     real_parts: Vector<T>,
     imag_parts: Vector<T>,
 };
 
-public fn eig<T: Numeric>(a: &Matrix<T>) -> ComplexEigenDecomposition<T> {
+public fn eig<T: RealField>(a: &Matrix<T>) -> ComplexEigenDecomposition<T> {
     let n = a.rows;
     assert(n == a.cols, "Matrix must be square");
 
@@ -1816,7 +1863,7 @@ public fn eig<T: Numeric>(a: &Matrix<T>) -> ComplexEigenDecomposition<T> {
 // Schur decomposition result: A = Z * T * Zᵀ
 // - T: Upper quasi-triangular (real eigenvalues on diagonal, 2x2 blocks for complex pairs)
 // - Z: Orthogonal matrix (Schur vectors)
-public type SchurDecomposition<T: Numeric> is {
+public type SchurDecomposition<T> is {
     t: Matrix<T>,   // Upper quasi-triangular
     z: Matrix<T>,   // Orthogonal Schur vectors
 };
@@ -1837,7 +1884,7 @@ public type SchurDecomposition<T: Numeric> is {
 // let decomp = schur(&a);
 // // decomp.t is quasi-triangular, decomp.z is orthogonal
 // ```
-public fn schur<T: Numeric>(a: &Matrix<T>) -> SchurDecomposition<T> {
+public fn schur<T: RealField>(a: &Matrix<T>) -> SchurDecomposition<T> {
     let n = a.rows;
     assert(n == a.cols, "Matrix must be square");
 
@@ -2177,7 +2224,7 @@ theorem scalar_mul_distributes(c: Int, u: Int, v: Int)
 // Length protocol — enables free-function `len(vector)` dispatch
 // =============================================================================
 
-implement<T: Numeric> Length for Vector<T> {
+implement<T> Length for Vector<T> {
     @inline(always)
     fn len(&self) -> Int {
         self.data.len()

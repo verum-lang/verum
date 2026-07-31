@@ -46,7 +46,7 @@ module core.math.graph;
 
 mount core.math.category.{Category, Functor};
 mount core.math.simplicial.{SimplicialSet, Simplex};
-mount core.math.algebra.{Monoid, Ring};
+mount core.math.algebra.{Semiring};
 mount core.math.topology.{TopologicalSpace, ConnectedSpace, PathConnectedSpace};
 mount core.math.linalg.{Matrix, Vector, EigenDecomposition, eigh};
 mount core.base.protocols.{Eq, Ord};
@@ -186,10 +186,13 @@ public type GraphPresheaf<V, L, S> is protocol {
 // §5. Spectral theory bridge
 // =============================================================================
 
-/// A graph equipped with a real-valued edge weight — the carrier
-/// for Laplacian / adjacency matrix methods. The weight is a Monoid
-/// so that parallel edges (in a multigraph) sum their contributions.
-public type WeightedGraph<V, W: Monoid> is protocol extends Graph<V, W> {
+/// A graph equipped with an algebraic edge weight — the carrier
+/// for Laplacian / adjacency matrix methods. The weight is a Semiring
+/// (`+`, `*`, zero, one): parallel edges in a multigraph sum their
+/// contributions, and the adjacency-matrix view composes with the
+/// `core.math.linalg` Semiring-bound operations (tropical semirings
+/// give shortest-path algebra for free).
+public type WeightedGraph<V, W: Semiring> is protocol extends Graph<V, W> {
     /// Adjacency-matrix view (row index = source, column index =
     /// target). Defers to core/math/linalg.vr for spectral decomposition.
     fn adjacency_matrix(&self) -> List<List<W>>;

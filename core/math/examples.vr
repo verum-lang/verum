@@ -90,7 +90,7 @@ mount core.math.category.{
 };
 mount core.math.algebra.{
     Magma, Semigroup, Monoid, Group, AbelianGroup,
-    Ring, CommutativeRing, IntegralDomain, Field,
+    Semiring, Ring, CommutativeRing, IntegralDomain, Field, StarRing,
     Lattice, BoundedLattice, DistributiveLattice,
     ComplementedLattice, BooleanAlgebra,
     OrthomodularLattice, CommutingPair, BooleanSublattice,
@@ -3668,92 +3668,102 @@ public fn f2_eq(x: &F2, y: &F2) -> Bool {
 }
 
 // Full `Field` instance for `F2` — the deepest protocol chain the
-// stdlib exposes: `Ring → CommutativeRing → IntegralDomain → Field`.
-// Demonstrates that a concrete Verum type can carry the entire
-// field-theoretic protocol stack, with every `@verify(formal)`
-// obligation discharged by the SMT backend.
+// stdlib exposes: `Semiring → Ring → CommutativeRing → IntegralDomain
+// → Field` on the operator-wired tower. The type provides its operator
+// impls (`Add`/`Sub`/`Mul`/`Div`/`Neg` + `Zero`/`One`) and the tower's
+// `@verify(formal)` laws are INHERITED as real statements over the
+// operator surface (the pre-tower instance discharged every axiom with
+// a hand-written `true` — vacuous). Over the refined carrier
+// `Int{>= 0, <= 1}` each law is a finite SMT goal.
 
-implement Ring for F2 {
-    fn add(&self, other: &F2) -> F2 {
-        let s = self.value + other.value;
+implement Eq for F2 {
+    fn eq(&self, other: &F2) -> Bool {
+        self.value == other.value
+    }
+}
+
+implement Add for F2 {
+    type Output = F2;
+    /// Addition in F₂ is XOR: `(x + y) mod 2`.
+    fn add(self, rhs: F2) -> F2 {
+        let s = self.value + rhs.value;
         if s >= 2 {
             F2 { value: s - 2 }
         } else {
             F2 { value: s }
         }
     }
+}
 
-    fn mul(&self, other: &F2) -> F2 {
-        F2 { value: self.value * other.value }
+implement Sub for F2 {
+    type Output = F2;
+    /// Characteristic 2: subtraction coincides with addition.
+    fn sub(self, rhs: F2) -> F2 {
+        self + rhs
     }
+}
 
+implement Mul for F2 {
+    type Output = F2;
+    /// Multiplication in F₂ is AND.
+    fn mul(self, rhs: F2) -> F2 {
+        F2 { value: self.value * rhs.value }
+    }
+}
+
+implement Div for F2 {
+    type Output = F2;
+    /// Division by the only invertible element (`1`) is the identity;
+    /// dividing by zero is excluded by field discipline.
+    fn div(self, rhs: F2) -> F2 {
+        F2 { value: self.value * rhs.value }
+    }
+}
+
+implement Neg for F2 {
+    type Output = F2;
+    /// Every element is its own additive inverse in characteristic 2.
+    fn neg(self) -> F2 {
+        self
+    }
+}
+
+implement Zero for F2 {
     fn zero() -> F2 {
         F2 { value: 0 }
     }
+    fn is_zero(&self) -> Bool {
+        self.value == 0
+    }
+}
 
+implement One for F2 {
     fn one() -> F2 {
         F2 { value: 1 }
     }
-
-    fn negate(&self) -> F2 {
-        F2 { value: self.value }
-    }
-
-    fn add_associativity(&self, b: &F2, c: &F2) -> Bool {
-        true
-    }
-
-    fn add_commutativity(&self, other: &F2) -> Bool {
-        true
-    }
-
-    fn add_identity(&self) -> Bool {
-        true
-    }
-
-    fn add_inverse(&self) -> Bool {
-        true
-    }
-
-    fn mul_associativity(&self, b: &F2, c: &F2) -> Bool {
-        true
-    }
-
-    fn mul_identity(&self) -> Bool {
-        true
-    }
-
-    fn left_distributivity(&self, b: &F2, c: &F2) -> Bool {
-        true
-    }
-
-    fn right_distributivity(&self, b: &F2, c: &F2) -> Bool {
-        true
+    fn is_one(&self) -> Bool {
+        self.value == 1
     }
 }
 
-implement CommutativeRing for F2 {
-    fn mul_commutativity(&self, other: &F2) -> Bool {
-        true
-    }
-}
-
-implement IntegralDomain for F2 {
-    fn no_zero_divisors(&self, other: &F2) -> Bool {
-        true
-    }
-}
+implement Semiring for F2 {}
+implement Ring for F2 {}
+implement CommutativeRing for F2 {}
+implement IntegralDomain for F2 {}
 
 implement Field for F2 {
-    fn mul_inverse(&self) -> F2 {
+    fn mul_inverse(self) -> F2 {
         // In F₂ the only invertible element is `1`, and `1⁻¹ = 1`.
         // The zero case is handled by the `no_zero_divisors` obligation
         // from `IntegralDomain`.
         F2 { value: 1 }
     }
+}
 
-    fn mul_inverse_axiom(&self) -> Bool {
-        true
+implement StarRing for F2 {
+    /// Trivial involution — every commutative ring is a star ring.
+    fn conj(self) -> F2 {
+        self
     }
 }
 

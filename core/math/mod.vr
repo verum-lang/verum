@@ -574,11 +574,23 @@ public mount .integers.{
 
 };
 
+// The ONE algebra tower: operator-wired + axiom-bearing (see
+// core/math/algebra.vr). Scalar bounds for all numeric code.
+public mount .algebra.{
+    Semiring,
+    Ring,
+    CommutativeRing,
+    IntegralDomain,
+    Field,
+    StarRing,
+    Normed,
+    RealField,
+};
+
 // Linear algebra
 public mount .linalg.{
 
     // Types
-    Numeric,
     Vector,
     Matrix,
     StaticVector,
@@ -981,8 +993,8 @@ public mount .distributed.{
     ProcessGroup,
     current_rank,
     world_size,
-    // Reduction operations
-    ReduceOp,
+    // Cross-rank reduction operations (distinct from tensor axis folds)
+    CollectiveReduceOp,
     // Collective operations
     all_reduce,
     all_gather,

@@ -58,7 +58,7 @@ module core.math.quantum_logic;
 mount core.math.algebra.{
     Lattice, BoundedLattice, OrthomodularLattice, CommutingPair,
 };
-mount core.math.linalg.{Matrix, Vector, Numeric};
+mount core.math.linalg.{Matrix, Vector};
 mount core.math.category.{Category};
 mount core.math.epistemic.{EpistemicStatus};
 

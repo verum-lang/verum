@@ -1,0 +1,84 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: math, linalg, complex, algebra-tower
+// @timeout: 30000
+// @description: Matrix<Complex<Float>> — the operator-wired algebra tower
+//   admits complex matrices in every Semiring/Ring/StarRing-bound
+//   operation (T0499 acceptance: SYNARC Issue 1). matmul, add/sub, scale,
+//   trace, adjoint, Frobenius norm, dotu/dotc — all through the
+//   weakest-tier bounds; no ordered-Numeric god-protocol anywhere.
+// @expected-stdout: complex matmul: PASS
+
+mount core.*;
+mount core.math.complex.Complex;
+mount core.math.linalg.{Matrix, Vector};
+
+fn approx(a: Float, b: Float) -> Bool {
+    let d = if a > b { a - b } else { b - a };
+    d < 0.000001
+}
+
+fn main() {
+    // A = [[1+2i, 3+4i], [5+6i, 7+8i]]
+    let mut a: Matrix<Complex<Float>> = Matrix.zeros(2, 2);
+    a.set(0, 0, Complex.new(1.0, 2.0));
+    a.set(0, 1, Complex.new(3.0, 4.0));
+    a.set(1, 0, Complex.new(5.0, 6.0));
+    a.set(1, 1, Complex.new(7.0, 8.0));
+
+    // Identity: A·I = A.
+    let b: Matrix<Complex<Float>> = Matrix.eye(2);
+    let ab = a.matmul(&b);
+    assert(approx(ab.get(0, 0).re, 1.0) && approx(ab.get(0, 0).im, 2.0));
+    assert(approx(ab.get(1, 1).re, 7.0) && approx(ab.get(1, 1).im, 8.0));
+
+    // Full complex inner products, hand-computed:
+    //   (1+2i)²        = -3 +  4i
+    //   (3+4i)(5+6i)   = -9 + 38i
+    //   (1+2i)(3+4i)   = -5 + 10i
+    //   (3+4i)(7+8i)   = -11 + 52i
+    // So (A·A)₀₀ = -12+42i and (A·A)₀₁ = -16+62i.
+    let aa = a.matmul(&a);
+    assert(approx(aa.get(0, 0).re, -12.0) && approx(aa.get(0, 0).im, 42.0));
+    assert(approx(aa.get(0, 1).re, -16.0) && approx(aa.get(0, 1).im, 62.0));
+
+    // Ring surface: (A + A) - A == A.
+    let a2 = a.add(&a).sub(&a);
+    assert(approx(a2.get(1, 0).re, 5.0) && approx(a2.get(1, 0).im, 6.0));
+
+    // Scale by the imaginary unit: i·(1+2i) = -2+i.
+    let mut asc = a.clone();
+    asc.scale(Complex.i());
+    assert(approx(asc.get(0, 0).re, -2.0) && approx(asc.get(0, 0).im, 1.0));
+
+    // Trace: (1+2i) + (7+8i) = 8+10i.
+    let tr = a.trace();
+    assert(approx(tr.re, 8.0) && approx(tr.im, 10.0));
+
+    // Adjoint (conjugate transpose): (A†)₀₀ = conj(A₀₀) = 1-2i and
+    // (A†)₀₁ = conj(A₁₀) = 5-6i.
+    let adj = a.adjoint();
+    assert(approx(adj.get(0, 0).re, 1.0) && approx(adj.get(0, 0).im, -2.0));
+    assert(approx(adj.get(0, 1).re, 5.0) && approx(adj.get(0, 1).im, -6.0));
+
+    // Frobenius norm is REAL (Normed<Float>): ||A||_F² = 5+25+61+113 = 204.
+    let fro = a.norm_frobenius();
+    assert(approx(fro * fro, 204.0));
+
+    // Vector surface. x = [1+2i, 3-i].
+    let mut x: Vector<Complex<Float>> = Vector.zeros(2);
+    x.set(0, Complex.new(1.0, 2.0));
+    x.set(1, Complex.new(3.0, -1.0));
+    // Sesquilinear (dotc): ⟨x,x⟩ = |1+2i|² + |3-i|² = 5 + 10 = 15 + 0i.
+    let ip = x.dot_conj(&x);
+    assert(approx(ip.re, 15.0) && approx(ip.im, 0.0));
+    // Bilinear (dotu) differs: (1+2i)² + (3-i)² = (-3+4i) + (8-6i) = 5-2i.
+    let du = x.dot(&x);
+    assert(approx(du.re, 5.0) && approx(du.im, -2.0));
+    // L2 norm through Normed<Float>: ||x||² = 15, and it is a Float.
+    let n2 = x.norm_l2();
+    assert(approx(n2 * n2, 15.0));
+
+    print("complex matmul: PASS");
+}
