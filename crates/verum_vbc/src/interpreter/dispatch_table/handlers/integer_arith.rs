@@ -132,6 +132,21 @@ pub(in super::super) fn handle_addi(
             Value::from_ptr(obj.as_ptr() as *mut u8)
         };
         state.set_reg(dst, result);
+    } else if val_a.is_ptr()
+        && super::object_dispatch::try_push_operator_method_frame(
+            state,
+            dst,
+            val_a,
+            Some(val_b),
+            "add",
+        )?
+    {
+        // OBJECT arm: a heap record whose type implements `add`
+        // (generic `a + b` with T = a user type, e.g. Complex inside
+        // matmul) dispatches to it; the pushed frame's return lands in
+        // `dst`. Pre-fix this fell into the integer-extract arm below
+        // and summed the two NaN-box pointers.
+        return Ok(DispatchResult::Continue);
     } else {
         // Non-inline integers (boxed, pointer-tagged from compiled stdlib, etc.) — extract and add
         let result = val_a
@@ -165,6 +180,19 @@ pub(in super::super) fn handle_subi(
             dst,
             Value::from_i128_raw_signed(result, i128_result_signed(va, vb)),
         );
+        return Ok(DispatchResult::Continue);
+    }
+    // OBJECT arm: see `handle_addi` — user types with a `sub` impl
+    // reached through generic erasure dispatch instead of extracting.
+    if va.is_ptr()
+        && super::object_dispatch::try_push_operator_method_frame(
+            state,
+            dst,
+            va,
+            Some(vb),
+            "sub",
+        )?
+    {
         return Ok(DispatchResult::Continue);
     }
     // Use `as_integer_compatible` (matches `handle_addi`) so operands that
@@ -204,6 +232,19 @@ pub(in super::super) fn handle_muli(
             dst,
             Value::from_i128_raw_signed(result, i128_result_signed(va, vb)),
         );
+        return Ok(DispatchResult::Continue);
+    }
+    // OBJECT arm: see `handle_addi` — user types with a `mul` impl
+    // reached through generic erasure dispatch instead of extracting.
+    if va.is_ptr()
+        && super::object_dispatch::try_push_operator_method_frame(
+            state,
+            dst,
+            va,
+            Some(vb),
+            "mul",
+        )?
+    {
         return Ok(DispatchResult::Continue);
     }
     // Same tag-robustness as handle_addi / handle_subi.
@@ -247,6 +288,21 @@ pub(in super::super) fn handle_divi(
         );
         return Ok(DispatchResult::Continue);
     }
+    // OBJECT arm: see `handle_addi` — user types with a `div` impl
+    // reached through generic erasure dispatch instead of extracting.
+    // Placed before the divisor extraction so a heap-object divisor
+    // never reads as a spurious integer zero.
+    if va.is_ptr()
+        && super::object_dispatch::try_push_operator_method_frame(
+            state,
+            dst,
+            va,
+            Some(vb),
+            "div",
+        )?
+    {
+        return Ok(DispatchResult::Continue);
+    }
     let divisor = vb.as_integer_compatible();
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
@@ -286,6 +342,19 @@ pub(in super::super) fn handle_modi(
             dst,
             Value::from_i128_raw_signed(result as u128, i128_result_signed(va, vb)),
         );
+        return Ok(DispatchResult::Continue);
+    }
+    // OBJECT arm: see `handle_addi`/`handle_divi` — `rem` impls
+    // dispatch; heap-object divisors never read as integer zero.
+    if va.is_ptr()
+        && super::object_dispatch::try_push_operator_method_frame(
+            state,
+            dst,
+            va,
+            Some(vb),
+            "rem",
+        )?
+    {
         return Ok(DispatchResult::Continue);
     }
     let divisor = vb.as_integer_compatible();
@@ -387,6 +456,14 @@ pub(in super::super) fn handle_negi(
             dst,
             Value::from_i128_raw_signed(result, sv.boxed_i128_is_signed()),
         );
+        return Ok(DispatchResult::Continue);
+    }
+    // OBJECT arm: see `handle_addi` — user types with a `neg` impl
+    // (generic unary `-x` with T = a user type) dispatch instead of
+    // extracting.
+    if sv.is_ptr()
+        && super::object_dispatch::try_push_operator_method_frame(state, dst, sv, None, "neg")?
+    {
         return Ok(DispatchResult::Continue);
     }
     let result = sv.as_integer_compatible().wrapping_neg();

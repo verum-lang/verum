@@ -551,6 +551,15 @@ pub struct InterpreterState {
     /// they have no concrete receiver type anyway.
     pub method_cache: HashMap<(u32, u32), crate::FunctionId>,
 
+    /// Operator-method dispatch memo for the generic-arithmetic object
+    /// arm: (receiver_type_id, operator method name) → the resolved
+    /// bodied function, or `None` when the type has no such method
+    /// (negative results are cached too, so non-dispatchable heap
+    /// operands don't rescan the function table on every element op).
+    /// Same never-stale lifecycle as `method_cache`: modules are
+    /// Arc-shared and immutable post-load.
+    pub operator_method_cache: HashMap<(u32, &'static str), Option<crate::FunctionId>>,
+
     /// **Type-name → TypeId index** built once per loaded module so the
     /// 163 `wrap_in_variant` / `alloc_record_n_fields` callsites in
     /// `handlers/heap_helpers.rs` resolve in O(1) instead of doing a
@@ -2653,6 +2662,7 @@ impl InterpreterState {
             gpu_shared_memory: None,
             gpu_shared_mem_offset: 0,
             method_cache: HashMap::new(),
+            operator_method_cache: HashMap::new(),
             type_name_index,
             protocol_name_index,
             string_const_cache: Vec::new(),

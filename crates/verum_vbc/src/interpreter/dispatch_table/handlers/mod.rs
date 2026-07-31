@@ -30,6 +30,10 @@ pub(super) mod data_movement;
 // Arithmetic (0x10-0x2F)
 pub(super) mod float_arith;
 pub(super) mod integer_arith;
+// Runtime operator-method dispatch for heap-record operands in the
+// generic arithmetic opcodes (object arm) + the ONE runtime-type-name
+// resolution authority shared with comparison's Eq/Ord fallback.
+pub(super) mod object_dispatch;
 
 // Bitwise + generic arithmetic (0x30-0x3F)
 pub(super) mod bitwise;

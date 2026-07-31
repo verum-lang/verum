@@ -2713,7 +2713,13 @@ impl VbcCodegen {
             if let Some(method) = op_method_name
                 && let Some(type_name) = self.extract_expr_type_name(left)
             {
-                let qualified = format!("{}.{}", type_name, method);
+                // Function keys are generic-stripped ("Complex.add", never
+                // "Complex<Float>.add") — normalise exactly like the
+                // Ord/cmp route below, or every annotated binding
+                // (`let z: Complex<Float> = …`) skips its operator impl
+                // and falls through to raw pointer arithmetic.
+                let base_ty = VbcCodegen::strip_generic_args(&type_name);
+                let qualified = format!("{}.{}", base_ty, method);
                 if self.ctx.lookup_function(&qualified).is_some() {
                     // Found operator method — emit CallM with qualified name
                     // (e.g., "Weight.add" not just "add") so the LLVM handler
@@ -5036,7 +5042,8 @@ impl VbcCodegen {
                     // type-inference-failure cases the bidirectional
                     // checker already validated).
                     let has_neg_method = type_name.as_ref().is_some_and(|name| {
-                        let qualified = format!("{}.neg", name);
+                        let qualified =
+                            format!("{}.neg", VbcCodegen::strip_generic_args(name));
                         self.ctx.lookup_function(&qualified).is_some()
                     });
                     if has_neg_method {
@@ -7325,6 +7332,38 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
+    /// Language-default type of a bare literal, for the FREE-generic
+    /// binding position only. `infer_expr_type_name`'s Literal arm
+    /// deliberately answers `None` for unsuffixed `Int`/`Float`
+    /// literals (their type can be context-driven — an annotated
+    /// binding can make `1.5` a `Float32`); but when a literal is the
+    /// argument BINDING a free type parameter (`gzero(9.0)` against
+    /// `fn gzero<T: Zero>(x: T)`), there is no external constraint by
+    /// construction, so the literal takes its language default. Without
+    /// this, literal-argument calls emitted plain `Call` (no witness
+    /// table) and every `T.zero()`-style static in the callee loaded
+    /// nil.
+    fn literal_default_type_name(expr: &Expr) -> Option<String> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::literal::{FloatSuffix, LiteralKind};
+        let ExprKind::Literal(lit) = &expr.kind else {
+            return None;
+        };
+        match &lit.kind {
+            LiteralKind::Float(fl) => match fl.suffix {
+                Some(FloatSuffix::F32) => Some("Float32".to_string()),
+                Some(FloatSuffix::F64) | None => Some("Float".to_string()),
+                // Custom unit suffix (`1.5_km`) — dimensional typing
+                // owns it, not the plain float default.
+                Some(FloatSuffix::Custom(_)) => None,
+            },
+            // Suffixed ints already resolve in `infer_expr_type_name`;
+            // an unsuffixed one defaults to `Int` in this free position.
+            LiteralKind::Int(il) if il.suffix.is_none() => Some("Int".to_string()),
+            _ => None,
+        }
+    }
+
     /// Record a generic-function instantiation discovered at a call site.
     ///
     /// Looks up the callee's descriptor by `func_id`, and if it is generic
@@ -7460,7 +7499,10 @@ impl VbcCodegen {
             std::collections::BTreeMap::new();
         for (i, ptr) in param_trs.iter().enumerate() {
             if let Some(arg) = args.get(i) {
-                if let Some(concrete) = self.infer_expr_type_name(arg) {
+                if let Some(concrete) = self
+                    .infer_expr_type_name(arg)
+                    .or_else(|| Self::literal_default_type_name(arg))
+                {
                     let stripped = strip_ref(&concrete);
                     let base = stripped.split('<').next().unwrap_or(&stripped).trim();
                     // Carried fact, not name shape: a 2-char PascalCase

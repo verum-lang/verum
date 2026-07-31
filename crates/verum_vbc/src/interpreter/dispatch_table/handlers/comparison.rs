@@ -367,64 +367,26 @@ pub(in super::super) fn handle_eqg(
 /// inside `<T: Eq>` blanket-impl bodies — see the dispatch-chain
 /// comment in `handle_eqg`).
 fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<String> {
-    use crate::interpreter::heap;
-    // A byte/raw-element slice FatRef (`reserved != 0`, generic
-    // `slice_from_raw_parts` output) carries the FAT_REF_MARKER payload
-    // in `as_ptr::<u8>()`, which `ObjectHeader::ref_or_stub` would then
-    // dereference → SIGSEGV (reached through EqG's protocol_id-0
-    // fallback). It has no nominal pointee type; return None so the
-    // operands fall through to `deep_value_eq`, which byte-compares slices.
-    // NOTE: kept narrow to byte/raw slices — NOT all non-`is_regular_ptr`
-    // values — because a value-ref ThinRef/FatRef to a custom-`Eq` object
-    // must still resolve its pointee type here so the custom `.eq`
-    // dispatches (broadening to `!is_regular_ptr` regressed custom-Ord/Eq
-    // by diverting reference comparisons to structural `deep_value_eq`).
-    if v.is_fat_ref() && v.as_fat_ref().reserved != 0 {
-        return None;
-    }
-    // BYTE_SLICE byte-view objects (`Text.as_bytes()`, ARCH-P5) are
-    // structural byte ranges, not nominal-`Eq` carriers — same
-    // fall-through-to-`deep_value_eq` contract as the raw-slice FatRef
-    // arm above (the handle_eqg entry trigger already routes them, this
-    // arm keeps the protocol_id-0 fallback consistent).
-    if is_byte_slice_value(v) {
-        return None;
-    }
-    if !v.is_ptr() || v.is_nil() {
-        return None;
-    }
-    let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() {
-        return None;
-    }
-    // Safety: any non-null pointer Value in a well-formed module
-    // points at a heap allocation whose first `OBJECT_HEADER_SIZE`
-    // bytes are an ObjectHeader.  `ref_or_stub` returns a benign
-    // stub header (type_id == INVALID) for pointers that don't
-    // satisfy the alignment / sentinel check, so the subsequent
-    // lookup naturally falls through to `None`.
-    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-    let raw_id = header.type_id.0;
+    // ONE authority: `object_dispatch::runtime_type_for_dispatch` owns
+    // the header-probe guards (raw-slice FatRef, BYTE_SLICE views,
+    // `ref_or_stub` stubbing). The guards' rationale lives there; this
+    // wrapper only keeps the Eq-specific trace hook.
+    let resolved = super::object_dispatch::runtime_type_for_dispatch(v, state);
     if std::env::var("VERUM_TRACE_EQ_RUNTIME").is_ok() {
-        eprintln!(
-            "[eq-runtime] raw_id={} (0x{:x}) is_synthetic={} is_maybe={} is_result={}",
-            raw_id,
-            raw_id,
-            verum_common::layout::is_synthetic_variant_type_id(raw_id),
-            raw_id == crate::types::TypeId::MAYBE.0,
-            raw_id == crate::types::TypeId::RESULT.0,
-        );
+        match &resolved {
+            Some((raw_id, name)) => eprintln!(
+                "[eq-runtime] raw_id={} (0x{:x}) name={} is_synthetic={} is_maybe={} is_result={}",
+                raw_id,
+                raw_id,
+                name,
+                verum_common::layout::is_synthetic_variant_type_id(*raw_id),
+                *raw_id == crate::types::TypeId::MAYBE.0,
+                *raw_id == crate::types::TypeId::RESULT.0,
+            ),
+            None => eprintln!("[eq-runtime] unresolved (guarded or headerless)"),
+        }
     }
-    if raw_id == 0 {
-        return None;
-    }
-    state
-        .module
-        .types
-        .iter()
-        .find(|td| td.id.0 == raw_id)
-        .and_then(|td| state.module.strings.get(td.name))
-        .map(|s| s.to_string())
+    resolved.map(|(_, name)| name)
 }
 
 /// CmpG (0x3D) - Generic comparison via Ord protocol.
