@@ -22,14 +22,14 @@ mount core.io.protocols.{IoErrorKind};
 @test
 fn regression_exists_nonexistent_returns_false() {
     let p = Path.new(&Text.from("/nonexistent-path-12345/foo.txt"));
-    assert(!exists(&p));
+    assert(!p.exists());
 }
 
 @ignore
 @test
 fn regression_exists_root_returns_true() {
     let p = Path.new(&Text.from("/"));
-    assert(exists(&p));
+    assert(p.exists());
 }
 
 @ignore
