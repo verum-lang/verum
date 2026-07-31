@@ -198,57 +198,7 @@ use std::string::String;  // Use Text
 use std::collections::*;  // Use Map/Set
 ```
 
-## Crate Map (VBC-First Architecture)
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           LAYER 4: TOOLS                                │
-│  verum_cli ─────────── verum_compiler ─────────── verum_lsp            │
-│      │                       │                        │                 │
-│      └───────────────────────┼───────────────────────►│                 │
-│                              │                        │                 │
-│                    verum_interactive ◄────────────────┘                 │
-│                    (Playbook TUI, REPL)                                 │
-└──────┼───────────────────────┼────────────────────────┼─────────────────┘
-       │                       │                        │
-┌──────▼───────────────────────▼────────────────────────▼─────────────────┐
-│                        LAYER 3: EXECUTION (VBC-First)                   │
-│                                                                         │
-│  verum_vbc ◄────────────────── verum_codegen                           │
-│  (bytecode, interpreter,       (VBC→LLVM for AOT)                      │
-│   codegen, intrinsics)                                                  │
-│       │                              │                                  │
-│       ▼                              ▼                                  │
-│  verum_verification          verum_modules                              │
-└───────┼──────────────────────────────┼──────────────────────────────────┘
-        │                              │
-┌───────▼──────────────────────────────▼──────────────────────────────────┐
-│                      LAYER 2: TYPE SYSTEM                               │
-│  verum_types ◄──────── verum_smt ◄──────── verum_cbgr                  │
-│       │                   │ (z3)                │                        │
-│       ▼                   ▼                     ▼                        │
-│  verum_diagnostics    verum_error                                       │
-└───────┼───────────────────┼─────────────────────────────────────────────┘
-        │                   │
-┌───────▼───────────────────▼─────────────────────────────────────────────┐
-│                      LAYER 1: PARSING                                   │
-│  verum_fast_parser ◄──── verum_lexer ◄──────── verum_ast               │
-│  (main parser)           │ (logos)              │                       │
-│       │                  │                      │                       │
-│  verum_parser            │                      │                       │
-│  (IDE: lossless/incr)    │                      │                       │
-└───────┼─────────────────────┼──────────────────────┼────────────────────┘
-        │                     │                      │
-┌───────▼─────────────────────▼──────────────────────▼────────────────────┐
-│                      LAYER 0: FOUNDATION                                │
-│                         verum_common                                    │
-│                         (List, Text, Map, Maybe)                        │
-│                                                                         │
-│                         core/ (Verum stdlib in .vr)                     │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Crate Responsibilities
+## Crate Responsibilities (VBC-First Architecture)
 
 | Crate | Purpose | Key Files |
 |-------|---------|-----------|
@@ -276,27 +226,9 @@ use std::collections::*;  // Use Map/Set
 | **verum_core** | Core support crate | shared runtime pieces |
 | **verum_integration_tests** | Cross-crate integration tests | test-only crate |
 
-### core/ Directory (Verum Standard Library)
-
-The `core/` directory contains the Verum standard library written in `.vr` files:
-
-| Module | Purpose |
-|--------|---------|
-| `core/base/` | Core types, protocols (Eq, Ord, Hash, etc.) |
-| `core/collections/` | List, Map, Set, Deque |
-| `core/mem/` | CBGR allocator, memory management |
-| `core/async/` | Futures, Tasks, Channels |
-| `core/io/` | File I/O, streams |
-| `core/intrinsics/` | Compiler intrinsic declarations |
-
-### External Dependencies
-
-| Library | Version | Crate | Purpose |
-|---------|---------|-------|---------|
-| **SMT backend** | 0.19.5 | verum_smt | SMT solving, refinement verification |
-| **LLVM** | 21.x | verum_codegen | Native code generation (AOT) |
-| **logos** | 0.15.1 | verum_lexer | DFA-based lexer generation |
-| **rayon** | 1.11 | verum_compiler | Parallel compilation |
+The `core/` directory is the Verum standard library written in `.vr` files
+(one subdirectory per module; see `core/`). External dependency versions:
+the workspace `Cargo.toml` is authoritative.
 
 ## Performance Targets
 
@@ -340,17 +272,6 @@ fix(crate): Fix issue
 perf(crate): Optimize by X%
 ```
 
-## Build Order
-
-```
-1. verum_common
-2. verum_cbgr
-3. verum_ast, verum_lexer, verum_syntax, verum_fast_parser, verum_parser, verum_diagnostics, verum_error
-4. verum_types, verum_smt, verum_kernel, verum_modules
-5. verum_vbc, verum_codegen, verum_verification
-6. verum_compiler, verum_lsp, verum_dap, verum_interactive, verum_cli, verum_stdlib_precompiler
-```
-
 ## Reference Documentation
 
 | Topic | Location |
@@ -371,71 +292,8 @@ perf(crate): Optimize by X%
 
 ## VCS: Verum Conformance Suite
 
-The `vcs/` directory contains the comprehensive test and verification infrastructure.
-
-### Directory Structure
-
-```
-vcs/
-├── specs/                    # Language specification tests (1000+ files)
-│   ├── L0-critical/          # Lexer, parser, ownership, memory-safety
-│   ├── L1-core/              # Types, refinement, verification
-│   ├── L2-standard/          # Async, contexts, modules
-│   ├── L3-extended/          # Dependent types, FFI, GPU, meta
-│   └── L4-performance/       # Performance benchmarks
-├── differential/             # Differential testing (interpreter vs AOT)
-│   ├── tier-oracle/          # Reference implementations
-│   └── cross-impl/           # Cross-implementation compatibility
-├── benchmarks/               # Performance measurements
-│   ├── micro/                # Micro-benchmarks (30 tests)
-│   └── macro/                # Real-world scenarios (10 tests)
-├── fuzz/                     # Fuzzing infrastructure
-│   └── seeds/                # Fuzz test seeds
-├── runner/                   # Test runners
-│   ├── vtest/                # Test execution framework
-│   └── vbench/               # Benchmark runner
-├── tools/                    # Stand-alone VCS utilities
-│   └── isabelle_graph_import/ # Isabelle/HOL .thy → Verum .vr theorem importer
-└── scripts/                  # Automation scripts
-```
-
-### Spec Levels
-
-| Level | Purpose | Examples |
-|-------|---------|----------|
-| **L0-critical** | Must never fail | Lexer tokens, parser AST, memory safety |
-| **L1-core** | Type system correctness | Type inference, refinements, generics |
-| **L2-standard** | Language features | Async/await, context system, modules |
-| **L3-extended** | Advanced features | Dependent types, FFI, GPU compute |
-| **L4-performance** | Performance targets | CBGR latency, compilation speed |
-
-### Test File Format (.vr)
-
-```verum
-// @test: unit|integration|property|differential
-// @tier: 0|1|2|3 (execution tier)
-// @level: L0|L1|L2|L3|L4
-// @tags: comma, separated, tags
-// @timeout: milliseconds
-// @expect: pass|fail|error(ErrorType)
-
-fn main() {
-    // Test implementation using correct Verum syntax
-}
-```
-
-### Running VCS
-
-```bash
-cd vcs
-make test              # Run all tests
-make test-l0           # Run L0-critical only
-make bench             # Run benchmarks
-make fuzz              # Run fuzzer
-make differential      # Run differential tests
-```
-
-### IMPORTANT: .vr File Syntax
-
-All `.vr` files MUST use correct Verum syntax as defined in `grammar/verum.ebnf`.
-**DO NOT** use Rust syntax (struct, enum, impl, trait, Box::new, Vec, String, etc.).
+`vcs/` holds the spec-test and verification infrastructure. Everything —
+test-type/level tables, `@test:`/`@tier:` directive format, runner and
+Makefile invocations — is documented in `vcs/CLAUDE.md`, which loads
+automatically when working under `vcs/`. All `.vr` test files follow the
+grammar rules above (`grammar/verum.ebnf`), never Rust syntax.
