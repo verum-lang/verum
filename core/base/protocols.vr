@@ -1516,6 +1516,40 @@ public type FromStr is protocol {
     fn from_str(s: &Text) -> Result<Self, Self.ParseError>;
 };
 
+/// The canonical parse-failure record for the `FromStr` /
+/// `from_str_radix` family: what failed, as a human-readable reason.
+/// One error surface for BOTH parse entry points (semantic honesty:
+/// a failed parse has a reason, not just an absence).
+/// Parse error.
+public type ParseError is {
+    message: Text,
+};
+
+implement ParseError {
+    fn new(msg: &Text) -> ParseError {
+        ParseError { message: msg.clone() }
+    }
+}
+
+implement Debug for ParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("ParseError: ")?;
+        f.write_str(&self.message)
+    }
+}
+
+implement Display for ParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message)
+    }
+}
+
+implement Eq for ParseError {
+    fn eq(&self, other: &ParseError) -> Bool {
+        self.message == other.message
+    }
+}
+
 // =============================================================================
 // ToString Protocol
 // =============================================================================

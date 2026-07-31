@@ -43,51 +43,51 @@ fn test_int_midpoint_no_overflow() {
 @test
 fn test_int_from_str_radix_decimal() {
     let s = "42";
-    assert_eq(Int.from_str_radix(&s, 10), Some(42));
+    assert_eq(Int.from_str_radix(&s, 10), Ok(42));
 }
 
 @test
 fn test_int_from_str_radix_binary() {
     let s = "1010";
-    assert_eq(Int.from_str_radix(&s, 2), Some(10));
+    assert_eq(Int.from_str_radix(&s, 2), Ok(10));
 }
 
 @test
 fn test_int_from_str_radix_hex() {
     let s = "ff";
-    assert_eq(Int.from_str_radix(&s, 16), Some(255));
+    assert_eq(Int.from_str_radix(&s, 16), Ok(255));
 }
 
 @test
 fn test_int_from_str_radix_hex_upper() {
     let s = "FF";
-    assert_eq(Int.from_str_radix(&s, 16), Some(255));
+    assert_eq(Int.from_str_radix(&s, 16), Ok(255));
 }
 
 @test
 fn test_int_from_str_radix_octal() {
     let s = "77";
-    assert_eq(Int.from_str_radix(&s, 8), Some(63));
+    assert_eq(Int.from_str_radix(&s, 8), Ok(63));
 }
 
 @test
 fn test_int_from_str_radix_negative() {
     let s = "-42";
-    assert_eq(Int.from_str_radix(&s, 10), Some(-42));
+    assert_eq(Int.from_str_radix(&s, 10), Ok(-42));
 }
 
 @test
 fn test_int_from_str_radix_plus_sign() {
     let s = "+42";
-    assert_eq(Int.from_str_radix(&s, 10), Some(42));
+    assert_eq(Int.from_str_radix(&s, 10), Ok(42));
 }
 
 @test
 fn test_int_from_str_radix_zero() {
     let s = "0";
-    assert_eq(Int.from_str_radix(&s, 10), Some(0));
-    assert_eq(Int.from_str_radix(&s, 2), Some(0));
-    assert_eq(Int.from_str_radix(&s, 16), Some(0));
+    assert_eq(Int.from_str_radix(&s, 10), Ok(0));
+    assert_eq(Int.from_str_radix(&s, 2), Ok(0));
+    assert_eq(Int.from_str_radix(&s, 16), Ok(0));
 }
 
 @test
@@ -112,7 +112,7 @@ fn test_int_from_str_radix_invalid_radix() {
 @test
 fn test_int_from_str_radix_base36() {
     let s = "z";
-    assert_eq(Int.from_str_radix(&s, 36), Some(35));
+    assert_eq(Int.from_str_radix(&s, 36), Ok(35));
 }
 
 @test

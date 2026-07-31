@@ -41,7 +41,7 @@ public type CheckedResult<T> is
 @inline(always)
 public fn checked_add(a: Int64, b: Int64) -> CheckedResult<Int64> {
     // Both execution tiers implement this operation as a
-    // `Maybe<Int>`: the interpreter's `ArithSubOpcode::CheckedAddI`
+    // `Maybe<Int>`: the interpreter's `ArithSubOpcode.CheckedAddI`
     // calls `emit_maybe`, and the LLVM lowering builds the
     // `(value, overflow)` pair only to wrap it back with
     // `build_maybe_int_wrap` — its own comment says it does so to
@@ -60,7 +60,7 @@ public fn checked_add(a: Int64, b: Int64) -> CheckedResult<Int64> {
 @inline(always)
 public fn checked_sub(a: Int64, b: Int64) -> CheckedResult<Int64> {
     // Both execution tiers implement this operation as a
-    // `Maybe<Int>`: the interpreter's `ArithSubOpcode::CheckedSubI`
+    // `Maybe<Int>`: the interpreter's `ArithSubOpcode.CheckedSubI`
     // calls `emit_maybe`, and the LLVM lowering builds the
     // `(value, overflow)` pair only to wrap it back with
     // `build_maybe_int_wrap` — its own comment says it does so to
@@ -79,7 +79,7 @@ public fn checked_sub(a: Int64, b: Int64) -> CheckedResult<Int64> {
 @inline(always)
 public fn checked_mul(a: Int64, b: Int64) -> CheckedResult<Int64> {
     // Both execution tiers implement this operation as a
-    // `Maybe<Int>`: the interpreter's `ArithSubOpcode::CheckedMulI`
+    // `Maybe<Int>`: the interpreter's `ArithSubOpcode.CheckedMulI`
     // calls `emit_maybe`, and the LLVM lowering builds the
     // `(value, overflow)` pair only to wrap it back with
     // `build_maybe_int_wrap` — its own comment says it does so to

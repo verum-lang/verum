@@ -4302,35 +4302,11 @@ implement Eq for Utf16Error {
     }
 }
 
-/// Parse error.
-public type ParseError is {
-    message: Text,
-};
-
-implement ParseError {
-    fn new(msg: &Text) -> ParseError {
-        ParseError { message: msg.clone() }
-    }
-}
-
-implement Debug for ParseError {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str("ParseError: ")?;
-        f.write_str(&self.message)
-    }
-}
-
-implement Display for ParseError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.message)
-    }
-}
-
-implement Eq for ParseError {
-    fn eq(&self, other: &ParseError) -> Bool {
-        self.message == other.message
-    }
-}
+// `ParseError` — the canonical parse-failure record — lives beside the
+// `FromStr` protocol that names it, in `core.base.protocols` (moved
+// there so `from_str` and `from_str_radix` share ONE error surface
+// without a text→base→text cycle). Re-exported from this module for
+// the established `core.text.ParseError` call surface.
 
 // =============================================================================
 // Helper Functions

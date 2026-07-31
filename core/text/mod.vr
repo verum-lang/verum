@@ -27,7 +27,7 @@ module core.text;
 public mount .text.Text;
 public mount .text.Utf8Error;
 public mount .text.Utf16Error;
-public mount .text.ParseError;
+public mount core.base.protocols.ParseError;
 
 // Iterators
 public mount .text.Chars;
@@ -60,7 +60,6 @@ public mount .char.any_of;
 public mount .char.char_range;
 
 // Formatting
-public mount .format.Write;
 public mount .format.WriteError;
 public mount .format.WriteErrorKind;
 public mount .format.FmtResult;
