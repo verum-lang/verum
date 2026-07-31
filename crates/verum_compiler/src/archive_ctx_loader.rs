@@ -621,7 +621,24 @@ fn register_module(
             .next()
             .unwrap_or(&simple_name)
             .to_string();
-        if ctx.lookup_function(&simple_alias).is_none() {
+        // A METHOD must never own the bare leaf slot. `CallM` (receiver
+        // syntax) is the only legal dispatch surface for impl-block methods —
+        // the rule is pinned in `verum_vbc`'s `is_free_function`, which
+        // filters every bare-name `Call` layer's candidates through it.
+        // First-wins registration ignored the rule: whichever `X.take`
+        // happened to load first squatted the bare key `take`, so under
+        // `mount core.prelude.*` a call to `take(&mut v)` found the slot held
+        // by a method, was correctly rejected as a non-free candidate, and
+        // reported "undefined function" while `core.base.memory.take` sat
+        // unreachable behind it. `swap(&mut a, &mut b)` lost the same race to
+        // `Vector.swap` and silently EXECUTED it, null-dereferencing.
+        //
+        // Variant constructors carry a parent type as well and ARE
+        // legitimately bare-callable (`Some(x)`, `Ok(v)`), so they keep the
+        // slot. When only methods bear a leaf, the slot now stays empty and a
+        // bare call fails loudly instead of running a foreign body.
+        let claims_bare_slot = info.variant_tag.is_some() || info.parent_type_name.is_none();
+        if claims_bare_slot && ctx.lookup_function(&simple_alias).is_none() {
             ctx.register_function(simple_alias, info);
             stats.functions_registered += 1;
         }
@@ -4788,9 +4805,20 @@ fn register_module_filtered(
                 // already excluded above; keep the branch total.
                 (false, false) => true,
             };
+            // Same bare-slot rule as the sibling registrations: a method may
+            // take a DOTTED wanted spelling (`Vector.swap`) but never a BARE
+            // one — that leaf belongs to the free function, and `CallM` is a
+            // method's only dispatch surface. Without this, `Vector.swap`
+            // claimed the bare `swap` and a glob-mounted `swap(&mut a, &mut b)`
+            // executed it.
+            let bare_wanted = !w.contains('.');
+            let may_claim = !bare_wanted
+                || info.variant_tag.is_some()
+                || info.parent_type_name.is_none();
             if w_leaf == simple_leaf
                 && w != simple_name.as_str()
                 && prefixes_compatible
+                && may_claim
                 && ctx.lookup_function(w).is_none()
             {
                 ctx.register_function(w.clone(), info.clone());
@@ -4804,8 +4832,13 @@ fn register_module_filtered(
         // `PAGE_SIZE` and the descriptor is `sys.common.PAGE_SIZE` —
         // without this, user-side `PAGE_SIZE` references the bare-name
         // slot which never gets the archive-loaded value, defaulting to 0.
+        // Same bare-slot rule as the primary registration above: an
+        // impl-block method never claims a bare leaf, even when the user
+        // mounted that leaf — the mount names the free function or constant,
+        // and `CallM` remains the only dispatch surface for methods.
         if simple_leaf != simple_name.as_str()
             && wanted.contains(simple_leaf)
+            && (info.variant_tag.is_some() || info.parent_type_name.is_none())
             && ctx.lookup_function(simple_leaf).is_none()
         {
             ctx.register_function(simple_leaf.to_string(), info.clone());
@@ -4875,7 +4908,25 @@ fn register_module_filtered(
         } else {
             simple_name
         };
-        ctx.register_function(simple_for_registration, info);
+        // A METHOD must never own the bare leaf slot — `CallM` (receiver
+        // syntax) is the only legal dispatch surface for impl-block methods,
+        // the rule `verum_vbc`'s `is_free_function` enforces on every
+        // bare-name `Call` layer. This registration strips `Vector.swap` and
+        // `CycleIter.take` down to `swap` / `take` and stores them
+        // unconditionally, so a method claimed the leaf that belongs to
+        // `core.base.memory.swap` / `.take`. Under `mount core.prelude.*`
+        // that made `take(&mut v)` report "undefined function" (the slot's
+        // occupant was correctly rejected as non-free while the real free
+        // function sat unreachable behind it) and made `swap(&mut a, &mut b)`
+        // silently EXECUTE `Vector.swap`, null-dereferencing.
+        //
+        // Variant constructors carry a parent type as well and ARE
+        // legitimately bare-callable (`Some(x)`, `Ok(v)`), so they keep the
+        // slot. `Type.method` stays reachable through the qualified key and
+        // the `Type.method` fanout above — only the BARE form is withheld.
+        if info.variant_tag.is_some() || info.parent_type_name.is_none() {
+            ctx.register_function(simple_for_registration, info);
+        }
     }
 
     // Pass 4: register every sum-type's variant constructors from
