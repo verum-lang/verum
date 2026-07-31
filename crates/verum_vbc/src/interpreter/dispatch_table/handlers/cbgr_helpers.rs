@@ -234,6 +234,54 @@ pub(super) fn resolve_arg_value(
     val
 }
 
+/// Peel one `Heap<T>` CBGR cell, yielding the boxed value.
+///
+/// **SOLE authority** for the IMPLICIT cell peel — the one every object reader
+/// performs on the way to a tag or a field. (`handle_deref`, the explicit
+/// `Deref` opcode, keeps its own longer form: it validates the header's `FREED`
+/// flag to surface use-after-free and records `cbgr_deref_source` for a
+/// following `RefCreate`. Those are deref semantics, not a peel.)
+///
+/// A `Heap<T>` reaches a handler as the cell's DATA pointer — 8 bytes holding
+/// the boxed `Value`, sitting `ALLOCATION_HEADER_SIZE` past an
+/// `AllocationHeader` registered in `state.cbgr_allocations`. Those 8 bytes are
+/// NOT an object header, so every reader that expects an object — variant tag,
+/// variant payload field, record field — addresses the cell instead of the
+/// object unless it peels first.
+///
+/// The consequence is not a fault but a silent out-of-bounds read: the cell
+/// allocation is `ALLOCATION_HEADER_SIZE + 8` bytes, while a payload read
+/// lands at `data + OBJECT_HEADER_SIZE + 8 + field * 8`, past its end. That is
+/// how `alpha_eq(replicate(send(..)), ..)` returned `false` for structurally
+/// identical terms: the tag test peeled (so the arm fired) and the payload
+/// bindings did not (so the arm compared garbage).
+///
+/// One level only — the boxed value is the object itself, or nil, never
+/// another cell. Values that are not a live cell data pointer come back
+/// unchanged, so callers apply this unconditionally and keep whatever
+/// `is_ptr` / `is_regular_ptr` gate they already had.
+#[inline]
+pub(super) fn peel_heap_cell(
+    state: &super::super::super::state::InterpreterState,
+    value: Value,
+) -> Value {
+    if !value.is_ptr() || value.is_nil() {
+        return value;
+    }
+    let base_ptr = value.as_ptr::<u8>();
+    if base_ptr.is_null() {
+        return value;
+    }
+    let header_addr = (base_ptr as usize)
+        .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
+    if !state.cbgr_allocations.contains(&header_addr) {
+        return value;
+    }
+    // SAFETY: a data pointer whose header is live in `cbgr_allocations`
+    // addresses the cell's inner `Value`; the cell is exactly one `Value` wide.
+    unsafe { *(base_ptr as *const Value) }
+}
+
 /// Write `value` through whatever reference shape `slot_val` holds, mutating
 /// the ORIGIN storage the reference points at. Write-side twin of
 /// [`resolve_arg_value`] — the same three reference shapes, resolved for a

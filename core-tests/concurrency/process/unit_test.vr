@@ -166,13 +166,13 @@ fn test_alpha_eq_restrict_rename_bound() {
     assert(alpha_eq(&p, &q));
 }
 
-// SURFACED DEFECT: alpha_eq on (νx) free1.0 vs (νy) free2.0 returns
-// true when it should return false. The free names `free1` / `free2`
-// fall to `(Maybe.None, Maybe.None) => a == b` which should yield false but the
-// outer Restrict-binder env-extend may be incorrectly treating them
-// as bound. Same task #17/#39 root suspected on `name_eq_under_env`
-// resolution. Pinned for investigation.
-@ignore
+// Different FREE names under a binder are NOT α-equivalent: `free1` /
+// `free2` reach `(Maybe.None, Maybe.None) => a == b`, which is false.
+// This was @ignore'd while it reported true — not a `name_eq_under_env`
+// resolution bug as the note here guessed, but the Tier-0 Heap-cell peel
+// missing from the variant PAYLOAD readers: the `Send` bindings under the
+// `Restrict` body were read out of bounds, so both sides compared garbage
+// that happened to agree. Fixed with `peel_heap_cell`.
 @test
 fn test_alpha_eq_restrict_different_free_name_distinct() {
     let p = proc_restrict(

@@ -5,7 +5,7 @@ use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, resolve_arg_value};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, peel_heap_cell, resolve_arg_value};
 use crate::instruction::Reg;
 use crate::types::TypeId;
 use crate::value::Value;
@@ -48,6 +48,10 @@ pub(in super::super) fn handle_as_var(
             variant = inner;
         }
     }
+
+    // Peel a `Heap<T>` cell before the payload read, as the tag-read twin
+    // does — see `peel_heap_cell`.
+    variant = peel_heap_cell(state, variant);
 
     // #54: marker-tagged (FatRef/ThinRef) values are NOT payload-readable
     // heap objects — reading at marker+offset SIGSEGVs; nil-result mirrors
@@ -339,7 +343,7 @@ pub(in super::super) fn handle_set_variant_data(
     let field = read_varint(state)? as usize;
     let value_reg = read_reg(state)?;
 
-    let variant = state.get_reg(variant_reg);
+    let variant = peel_heap_cell(state, state.get_reg(variant_reg));
     let value = state.get_reg(value_reg);
 
     // #54: write twin of the read gate above — marker+offset stores are
@@ -410,6 +414,12 @@ pub(in super::super) fn handle_get_variant_data(
             variant = inner;
         }
     }
+
+    // Peel a `Heap<T>` cell so the payload is read from the boxed variant
+    // rather than from the cell — the tag-read twin has done this since
+    // T0163 and this reader was left behind, which read every payload of a
+    // `Heap`-boxed variant out of bounds. See `peel_heap_cell`.
+    variant = peel_heap_cell(state, variant);
 
     if variant.is_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
@@ -492,6 +502,11 @@ pub(in super::super) fn handle_get_variant_data_ref(
             variant = inner;
         }
     }
+
+    // Peel a `Heap<T>` cell — same omission the by-value twin carried; a
+    // `ref` binding into a `Heap`-boxed variant would otherwise hand out a
+    // pointer past the end of the cell allocation. See `peel_heap_cell`.
+    variant = peel_heap_cell(state, variant);
 
     if variant.is_ptr() && !variant.is_nil() {
         let base_ptr = variant.as_ptr::<u8>();
@@ -585,25 +600,13 @@ pub(in super::super) fn handle_match_tag(
     }
 
     // **T0163/T0147/T0109 — Heap<T> CBGR-cell peel.** `&*Heap<T>` reaches here
-    // as the cell's DATA pointer (a `cbgr_allocations` allocation whose header
-    // sits 32 bytes before it), which addresses the inner boxed `Value` — NOT a
-    // variant object. Reading the tag at `data_ptr + OBJECT_HEADER_SIZE` lands
-    // inside the inner Value / padding and yields ~0, so every `&*Heap<P>` read
-    // as the first variant (`Zero`); `alpha_eq`'s recursion into `Heap<Process>`
-    // bodies then matched `(Zero,Zero)` and short-circuited all comparisons.
-    // Peel to the inner value (mirrors `handle_deref`'s cbgr_allocations arm,
-    // cbgr.rs) so the tag is read from the boxed variant. One level: the inner
-    // value is the variant object (or nil), never another Heap cell here.
-    if value.is_ptr() && !value.is_nil() {
-        let base_ptr = value.as_ptr::<u8>();
-        let header_addr = (base_ptr as usize)
-            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
-        if state.cbgr_allocations.contains(&header_addr) {
-            // SAFETY: a live CBGR data pointer addresses the cell's inner Value.
-            let inner = unsafe { *(base_ptr as *const Value) };
-            value = inner;
-        }
-    }
+    // as the cell's DATA pointer, which addresses the inner boxed `Value` —
+    // NOT a variant object. Reading the tag at `data_ptr + OBJECT_HEADER_SIZE`
+    // lands inside the inner Value / padding and yields ~0, so every
+    // `&*Heap<P>` read as the first variant (`Zero`); `alpha_eq`'s recursion
+    // into `Heap<Process>` bodies then matched `(Zero,Zero)` and
+    // short-circuited all comparisons. See `peel_heap_cell`.
+    value = peel_heap_cell(state, value);
 
     // Check if value is a pointer to a variant object
     let matches = if value.is_ptr() && !value.is_nil() {
@@ -685,17 +688,8 @@ pub(in super::super) fn handle_get_tag(
     // **T0163/T0147/T0109 — Heap<T> CBGR-cell peel** (mirror of the sibling
     // handle_match_tag site above): `&*Heap<T>` is the cell's data pointer;
     // peel to the inner boxed value so the tag is read from the boxed variant,
-    // not the Heap wrapper. Mirrors handle_deref's cbgr_allocations arm.
-    if value.is_ptr() && !value.is_nil() {
-        let base_ptr = value.as_ptr::<u8>();
-        let header_addr = (base_ptr as usize)
-            .wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
-        if state.cbgr_allocations.contains(&header_addr) {
-            // SAFETY: a live CBGR data pointer addresses the cell's inner Value.
-            let inner = unsafe { *(base_ptr as *const Value) };
-            value = inner;
-        }
-    }
+    // not the Heap wrapper. See `peel_heap_cell`.
+    value = peel_heap_cell(state, value);
 
     // Extract tag from variant object
     // Variant layout: ObjectHeader + [tag:u32][padding:u32][payload:Value]

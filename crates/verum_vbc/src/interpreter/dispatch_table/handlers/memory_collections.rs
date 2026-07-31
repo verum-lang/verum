@@ -5,7 +5,7 @@ use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, peel_heap_cell};
 use crate::types::TypeId;
 use crate::value::Value;
 
@@ -275,25 +275,21 @@ pub(in super::super) fn handle_get_field(
     // The returned pointer is to the data area (after the 32-byte header).
     // If the stored Value is a pointer to a struct, follow it for field access.
     {
-        let header_addr = (ptr as usize).wrapping_sub(32);
-        if state.cbgr_allocations.contains(&header_addr) {
-            // This pointer is the data area of a CBGR allocation.
-            // Read the stored Value.
-            // SAFETY: `ptr` points to the data area of a CBGR allocation
-            // (verified via `header_addr` lookup in `cbgr_allocations`). The
-            // data area begins with a single Value slot (Heap<T> layout),
-            // which is aligned and initialized at allocation time.
-            let inner_value = unsafe { *(ptr as *const Value) };
-            if inner_value.is_ptr() && !inner_value.is_nil() {
+        let inner_value = peel_heap_cell(state, Value::from_ptr(ptr));
+        if inner_value.is_ptr() && !inner_value.is_nil() {
+            let inner_ptr = inner_value.as_ptr::<u8>();
+            // `peel_heap_cell` returns its argument unchanged when `ptr` is
+            // not a live cell, so an unchanged pointer means "not a cell".
+            if inner_ptr != ptr {
                 // The inner value is a pointer (e.g., to a struct). Follow it.
-                ptr = inner_value.as_ptr::<u8>();
+                ptr = inner_ptr;
                 if ptr.is_null() {
                     return Err(InterpreterError::NullPointer);
                 }
             }
-            // If inner_value is not a pointer (e.g., Int, Float), fall through
-            // to read field at offset (which will handle it as a regular object).
         }
+        // If the cell boxes a non-pointer (e.g., Int, Float), fall through to
+        // read the field at offset (which handles it as a regular object).
     }
 
     // Auto-deref for interior references produced by `&list[i]` (RefListElement)
