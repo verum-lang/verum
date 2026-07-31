@@ -171,8 +171,8 @@ fn law_set_bit_disjoint_commute() {
     while i < n {
         let mut j: USize = i + (1 as USize);
         while j < n {
-            let a = *positions.get(i).unwrap();
-            let b = *positions.get(j).unwrap();
+            let a = positions.get(i).unwrap();
+            let b = positions.get(j).unwrap();
             let left  = bitfield.set_bit(bitfield.set_bit(0 as USize, a), b);
             let right = bitfield.set_bit(bitfield.set_bit(0 as USize, b), a);
             assert_eq(left, right);

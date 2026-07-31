@@ -62,8 +62,8 @@ fn law_barrier_kind_dispatch_tags_are_pairwise_distinct() {
     while i < n {
         let mut j: USize = i + (1 as USize);
         while j < n {
-            let a = *tags.get(i).unwrap();
-            let b = *tags.get(j).unwrap();
+            let a = tags.get(i).unwrap();
+            let b = tags.get(j).unwrap();
             assert(a != b);
             j = j + (1 as USize);
         }
@@ -134,8 +134,8 @@ fn law_memory_flags_pairwise_disjoint() {
     while i < n {
         let mut j: USize = i + (1 as USize);
         while j < n {
-            let a = *flags.get(i).unwrap();
-            let b = *flags.get(j).unwrap();
+            let a = flags.get(i).unwrap();
+            let b = flags.get(j).unwrap();
             assert_eq(a & b, 0 as UInt32);
             j = j + (1 as USize);
         }

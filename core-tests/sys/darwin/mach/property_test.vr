@@ -38,7 +38,7 @@ fn law_kern_return_codes_consecutive_zero_to_eight() {
     let mut i: USize = 0 as USize;
     while i < codes.len() {
         let expected = i as Int32;
-        let actual = *codes.get(i).unwrap();
+        let actual = codes.get(i).unwrap();
         assert_eq(actual, expected);
         i = i + (1 as USize);
     }
@@ -91,8 +91,8 @@ fn law_vm_prot_single_bits_pairwise_disjoint() {
     while i < n {
         let mut j: USize = i + (1 as USize);
         while j < n {
-            let a = *bits.get(i).unwrap();
-            let b = *bits.get(j).unwrap();
+            let a = bits.get(i).unwrap();
+            let b = bits.get(j).unwrap();
             assert_eq(a & b, 0 as Int32);
             j = j + (1 as USize);
         }

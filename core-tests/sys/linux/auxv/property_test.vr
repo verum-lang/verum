@@ -21,8 +21,8 @@ fn law_at_codes_pairwise_distinct() {
     while i < n {
         let mut j: USize = i + (1 as USize);
         while j < n {
-            let a = *codes.get(i).unwrap();
-            let b = *codes.get(j).unwrap();
+            let a = codes.get(i).unwrap();
+            let b = codes.get(j).unwrap();
             assert(a != b);
             j = j + (1 as USize);
         }

@@ -38,8 +38,8 @@ fn law_once_states_pairwise_distinct() {
     while i < n {
         let mut j: USize = i + (1 as USize);
         while j < n {
-            let a = *states.get(i).unwrap();
-            let b = *states.get(j).unwrap();
+            let a = states.get(i).unwrap();
+            let b = states.get(j).unwrap();
             assert(a != b);
             j = j + (1 as USize);
         }

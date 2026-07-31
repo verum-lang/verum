@@ -234,7 +234,7 @@ fn integration_bitfield_test_bit_filter_collect() {
         4 as USize, 5 as USize, 6 as USize, 7 as USize,
     ];
     let set_positions: List<USize> = positions.iter()
-        .filter(|n| bitfield.test_bit(v, **n))
+        .filter(|n| bitfield.test_bit(v, *n))
         .map(|n| *n)
         .collect();
     // 0xA5 has bits 0, 2, 5, 7 set.

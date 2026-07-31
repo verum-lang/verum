@@ -37,8 +37,8 @@ fn law_ioring_setup_flags_pairwise_disjoint() {
     while i < n {
         let mut j: USize = i + (1 as USize);
         while j < n {
-            let a = *flags.get(i).unwrap();
-            let b = *flags.get(j).unwrap();
+            let a = flags.get(i).unwrap();
+            let b = flags.get(j).unwrap();
             assert_eq(a & b, 0 as UInt32);
             j = j + (1 as USize);
         }

@@ -162,8 +162,8 @@ fn test_filedesc_into_maybe_via_predicate() {
 fn test_filedesc_list_collects_only_valid() {
     let raws: List<Int> = [-1, 0, -2, 1, 2, -10, 5];
     let valid: List<FileDesc> = raws.iter()
-        .filter(|r| **r >= 0)
-        .map(|r| FileDesc.from_raw(**r))
+        .filter(|r| *r >= 0)
+        .map(|r| FileDesc.from_raw(*r))
         .collect();
     assert_eq(valid.len(), 4);
     for fd in valid.iter() {
