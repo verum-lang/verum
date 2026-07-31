@@ -2435,7 +2435,7 @@ impl ArchiveCtxCache {
                 Option<verum_vbc::module::FunctionId>,
                 String,
             )> = Vec::new();
-            for (i, (entry_name, module)) in matched_modules.iter().enumerate() {
+            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
                 pass2_alias_triples
                     .extend(collect_mount_alias_triples(module, &pass2_remaps[i]));
             }
@@ -2531,7 +2531,7 @@ impl ArchiveCtxCache {
             // ── Phase B: body merges — every kept, pass-2,
             // supplemental, and alias name is now in the archive-wide
             // index, so no merge can freeze a name-resolvable XMOD id.
-            for (i, (entry_name, module)) in matched_modules.iter().enumerate() {
+            for (i, (_entry_name, module)) in matched_modules.iter().enumerate() {
                 // Body merge for the unqualified-wanted second pass —
                 // same Phase 2 path as the primary pass above. See
                 // that site for rationale.
