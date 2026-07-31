@@ -619,6 +619,21 @@ public type Response is {
 };
 
 implement Response {
+    /// Create a response carrying the given status.
+    ///
+    /// `Response`'s fields are private and it had no constructor, so the
+    /// type was public, accessor-rich and UNCONSTRUCTIBLE from outside this
+    /// module — the mirror of `Request.new` was simply missing. Defaults
+    /// match `Request.new`: HTTP/1.1, empty headers, empty body.
+    public fn new(status: StatusCode) -> Response {
+        Response {
+            status: status,
+            version: Version.Http11,
+            headers: Headers.new(),
+            body: List.new(),
+        }
+    }
+
     /// Get the response body as text (UTF-8).
     public fn body_text(&self) -> Text {
         Text.from_utf8_lossy(&self.body)
@@ -979,11 +994,16 @@ public type Cookie is {
     same_site: Maybe<SameSite>,
 };
 
-/// SameSite cookie attribute.
+/// SameSite cookie attribute — the three values of RFC 6265bis §5.4.7.
+///
+/// `None` is spelled `None`, not a disambiguated `NoneSameSite`: a variant
+/// may share a bare name with `Maybe.None` as long as uses are qualified,
+/// and callers write `SameSite.None`. The suffix was an unnecessary
+/// workaround and it leaked onto the wire.
 public type SameSite is
     | Strict
     | Lax
-    | NoneSameSite;
+    | None;
 
 implement Cookie {
     /// Create a new cookie with the given name and value.
@@ -1050,9 +1070,14 @@ implement Cookie {
         }
         if let Maybe.Some(ss) = &self.same_site {
             let ss_str = match ss {
-                Strict => "Strict",
-                Lax => "Lax",
-                NoneSameSite => "Maybe.None",
+                // Arms are QUALIFIED: a bare `None` here would be read as
+                // `Maybe.None`. The wire strings are the RFC's, and must not
+                // pick up the `Maybe.` prefix a past rename stamped onto this
+                // literal — that shipped the invalid `SameSite=Maybe.None` in
+                // every cookie header.
+                SameSite.Strict => "Strict",
+                SameSite.Lax => "Lax",
+                SameSite.None => "None",
             };
             result = f"{result}; SameSite={ss_str}";
         }

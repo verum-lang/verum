@@ -98,7 +98,7 @@ pub type AttestationType is
     | SelfAtt
     /// "AnonCA" — anonymous CA (e.g., Apple).
     | AnonCa
-    /// "Maybe.None" — no attestation.
+    /// "None" — no attestation.
     | NoneAtt;
 
 @derive(Clone, Debug)

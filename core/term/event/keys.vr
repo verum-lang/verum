@@ -171,7 +171,7 @@ implement Modifiers {
         if self.contains(Modifiers.HYPER) { parts.push("Hyper"); }
         if self.contains(Modifiers.META)  { parts.push("Meta"); }
         if parts.len() == 0 {
-            "Maybe.None"
+            "None"
         } else {
             parts.join("+")
         }
