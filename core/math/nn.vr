@@ -46,17 +46,19 @@ mount super.gpu.{ComputeDevice};
 mount super.tensor.{tensor_pow, tensor_exp, tensor_log, tensor_sqrt, tensor_sin, tensor_cos, tensor_tanh};
 
 // Convenience aliases for tensor math ops
-fn exp<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_exp(x) }
-fn log<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_log(x) }
-fn sqrt<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_sqrt(x) }
-fn sin<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_sin(x) }
-fn cos<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_cos(x) }
-fn tanh<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> { tensor_tanh(x) }
-fn pow<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> { tensor_pow(a, b) }
+fn exp<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> { tensor_exp(x) }
+fn log<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> { tensor_log(x) }
+fn sqrt<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> { tensor_sqrt(x) }
+fn sin<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> { tensor_sin(x) }
+fn cos<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> { tensor_cos(x) }
+fn tanh<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> { tensor_tanh(x) }
+fn pow<T: RealField>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<T> { tensor_pow(a, b) }
 mount super.tensor.{matmul, transpose, softmax, sum_axis, mean_axis, var_axis};
 mount super.tensor.{randn, rand, rand_uniform, index_select, scatter, unsqueeze, gather, mean, log_softmax};
 mount super.autodiff.{Differentiable, grad, value_and_grad, checkpoint};
-mount super.linalg.{Vector, Matrix, Numeric};
+mount super.linalg.{Vector, Matrix};
+mount super.algebra.RealField;
+mount super.tensor.{ReduceOp, UnaryOp, BinaryOp, CompareOp};
 
 // =============================================================================
 // Module Protocol
@@ -81,6 +83,22 @@ public type Module<In, Out> is protocol {
     fn num_parameters(&self) -> USize {
         self.parameters().iter().map(|p| p.numel()).sum()
     }
+};
+
+// Parameter-carrying module: exposes its `Parameter` records — value
+// AND gradient state together — which is the surface optimizers step
+// over. Kept separate from `Module` on purpose: forward-only carriers
+// (state-space kernels, distributed shards) are Modules without being
+// Parameterized, and demanding Parameter records from them would force
+// a false restructuring. `Module.parameters()` remains the tensor-level
+// `.data` projection for serialization/inspection; it cannot drive an
+// update (it loses the paired gradient).
+public type Parameterized is protocol {
+    // Parameter records (read).
+    fn params(&self) -> List<&Parameter>;
+
+    // Parameter records (mutable — optimizer updates).
+    fn params_mut(&mut self) -> List<&mut Parameter>;
 };
 
 // Trainable module (supports backpropagation)
@@ -247,6 +265,24 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Linear {
     }
 }
 
+implement Parameterized for Linear {
+    fn params(&self) -> List<&Parameter> {
+        let mut params = List.from([&self.weight]);
+        if let Maybe.Some(bias) = &self.bias {
+            params.push(&bias);
+        }
+        params
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        let mut params = List.from([&mut self.weight]);
+        if let Maybe.Some(bias) = &mut self.bias {
+            params.push(&mut bias);
+        }
+        params
+    }
+}
+
 // Embedding lookup table
 //
 
@@ -302,6 +338,16 @@ implement Module<DynTensor<USize>, DynTensor<Float>> for Embedding {
 
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         List.from([&mut self.weight.data])
+    }
+}
+
+implement Parameterized for Embedding {
+    fn params(&self) -> List<&Parameter> {
+        List.from([&self.weight])
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        List.from([&mut self.weight])
     }
 }
 
@@ -400,6 +446,24 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Conv2d {
     }
 }
 
+implement Parameterized for Conv2d {
+    fn params(&self) -> List<&Parameter> {
+        let mut params = List.from([&self.weight]);
+        if let Maybe.Some(bias) = &self.bias {
+            params.push(&bias);
+        }
+        params
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        let mut params = List.from([&mut self.weight]);
+        if let Maybe.Some(bias) = &mut self.bias {
+            params.push(&mut bias);
+        }
+        params
+    }
+}
+
 // =============================================================================
 // 1D Convolution Layer
 // =============================================================================
@@ -478,6 +542,24 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Conv1d {
     }
 }
 
+implement Parameterized for Conv1d {
+    fn params(&self) -> List<&Parameter> {
+        let mut params = List.from([&self.weight]);
+        if let Maybe.Some(bias) = &self.bias {
+            params.push(&bias);
+        }
+        params
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        let mut params = List.from([&mut self.weight]);
+        if let Maybe.Some(bias) = &mut self.bias {
+            params.push(&mut bias);
+        }
+        params
+    }
+}
+
 // =============================================================================
 // Normalization Layers
 // =============================================================================
@@ -546,6 +628,16 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for LayerNorm {
     }
 }
 
+implement Parameterized for LayerNorm {
+    fn params(&self) -> List<&Parameter> {
+        List.from([&self.weight, &self.bias])
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        List.from([&mut self.weight, &mut self.bias])
+    }
+}
+
 // RMS Normalization (used in LLaMA, Gemma, etc.)
 //
 
@@ -582,6 +674,16 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for RMSNorm {
 
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         List.from([&mut self.weight.data])
+    }
+}
+
+implement Parameterized for RMSNorm {
+    fn params(&self) -> List<&Parameter> {
+        List.from([&self.weight])
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        List.from([&mut self.weight])
     }
 }
 
@@ -657,6 +759,16 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for BatchNorm {
 
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         List.from([&mut self.weight.data, &mut self.bias.data])
+    }
+}
+
+implement Parameterized for BatchNorm {
+    fn params(&self) -> List<&Parameter> {
+        List.from([&self.weight, &self.bias])
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        List.from([&mut self.weight, &mut self.bias])
     }
 }
 
@@ -793,6 +905,16 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for Dropout {
     }
 }
 
+implement Parameterized for Dropout {
+    fn params(&self) -> List<&Parameter> {
+        List.new()
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        List.new()
+    }
+}
+
 // Functional dropout (standalone function)
 public fn dropout(
     x: &DynTensor<Float>,
@@ -914,6 +1036,24 @@ implement Module<AttentionInput, DynTensor<Float>> for MultiHeadAttention {
     }
 }
 
+implement Parameterized for MultiHeadAttention {
+    fn params(&self) -> List<&Parameter> {
+        let mut params = self.q_proj.params();
+        params.extend(self.k_proj.params());
+        params.extend(self.v_proj.params());
+        params.extend(self.out_proj.params());
+        params
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        let mut params = self.q_proj.params_mut();
+        params.extend(self.k_proj.params_mut());
+        params.extend(self.v_proj.params_mut());
+        params.extend(self.out_proj.params_mut());
+        params
+    }
+}
+
 // Feed-Forward Network (MLP)
 //
 
@@ -961,6 +1101,20 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for FeedForward {
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         let mut params = self.w1.parameters_mut();
         params.extend(self.w2.parameters_mut());
+        params
+    }
+}
+
+implement Parameterized for FeedForward {
+    fn params(&self) -> List<&Parameter> {
+        let mut params = self.w1.params();
+        params.extend(self.w2.params());
+        params
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        let mut params = self.w1.params_mut();
+        params.extend(self.w2.params_mut());
         params
     }
 }
@@ -1026,6 +1180,24 @@ implement Module<AttentionInput, DynTensor<Float>> for TransformerBlock {
         params.extend(self.attn.parameters_mut());
         params.extend(self.ln2.parameters_mut());
         params.extend(self.ffn.parameters_mut());
+        params
+    }
+}
+
+implement Parameterized for TransformerBlock {
+    fn params(&self) -> List<&Parameter> {
+        let mut params = self.ln1.params();
+        params.extend(self.attn.params());
+        params.extend(self.ln2.params());
+        params.extend(self.ffn.params());
+        params
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        let mut params = self.ln1.params_mut();
+        params.extend(self.attn.params_mut());
+        params.extend(self.ln2.params_mut());
+        params.extend(self.ffn.params_mut());
         params
     }
 }
@@ -1101,10 +1273,13 @@ fn rotate_half(x: &DynTensor<Float>) -> DynTensor<Float> {
 // Base optimizer protocol
 public type Optimizer is protocol {
     // Update parameters using gradients
-    fn step(&mut self, params: &mut [Parameter]);
+    // Steps over the Module's `params_mut()` ref-list — a composite
+    // model's Parameters live scattered across its layers, so the
+    // canonical carrier is the list of mutable references.
+    fn step(&mut self, params: &mut List<&mut Parameter>);
 
     // Zero all gradients
-    fn zero_grad(&mut self, params: &mut [Parameter]);
+    fn zero_grad(&mut self, params: &mut List<&mut Parameter>);
 
     // Get current learning rate
     fn lr(&self) -> Float;
@@ -1132,10 +1307,10 @@ implement SGD {
 }
 
 implement Optimizer for SGD {
-    fn step(&mut self, params: &mut [Parameter]) {
+    fn step(&mut self, params: &mut List<&mut Parameter>) {
         let mut i: Int = 0;
         while i < params.len() {
-            let p = &mut params[i];
+            let p = params[i];
             if let Maybe.Some(grad) = &p.grad.clone() {
                 // Apply weight decay (L2 regularization)
                 let grad = if self.weight_decay > 0.0 {
@@ -1157,7 +1332,7 @@ implement Optimizer for SGD {
         }
     }
 
-    fn zero_grad(&mut self, params: &mut [Parameter]) {
+    fn zero_grad(&mut self, params: &mut List<&mut Parameter>) {
         for p in params {
             p.zero_grad();
         }
@@ -1206,7 +1381,7 @@ implement AdamW {
 }
 
 implement Optimizer for AdamW {
-    fn step(&mut self, params: &mut [Parameter]) {
+    fn step(&mut self, params: &mut List<&mut Parameter>) {
         self.step_count += 1;
         let t = self.step_count as Float;
 
@@ -1216,7 +1391,7 @@ implement Optimizer for AdamW {
 
         let mut i: Int = 0;
         while i < params.len() {
-            let p = &mut params[i];
+            let p = params[i];
             if let Maybe.Some(grad) = &p.grad.clone() {
                 // Decoupled weight decay (applied before momentum)
                 if self.weight_decay > 0.0 {
@@ -1255,7 +1430,7 @@ implement Optimizer for AdamW {
         }
     }
 
-    fn zero_grad(&mut self, params: &mut [Parameter]) {
+    fn zero_grad(&mut self, params: &mut List<&mut Parameter>) {
         for p in params {
             p.zero_grad();
         }
@@ -1326,7 +1501,7 @@ implement LRScheduler for LinearWarmup {
 //
 
 // Returns the original global norm (before clipping).
-public fn clip_grad_norm(params: &mut [Parameter], max_norm: Float) -> Float {
+public fn clip_grad_norm(params: &mut List<&mut Parameter>, max_norm: Float) -> Float {
     // Compute global norm
     let mut total_norm_sq = 0.0;
     let len = params.len();
@@ -1362,7 +1537,7 @@ public fn clip_grad_norm(params: &mut [Parameter], max_norm: Float) -> Float {
 }
 
 // Clip gradients by value
-public fn clip_grad_value(params: &mut [Parameter], clip_value: Float) {
+public fn clip_grad_value(params: &mut List<&mut Parameter>, clip_value: Float) {
     let len = params.len();
     let mut idx = 0;
     while idx < len {
@@ -1605,16 +1780,10 @@ fn conv2d(
 const PI: Float = 3.14159265358979323846;
 
 // Reduce operation types (for VBC)
-type ReduceOp is Sum | Mean | Max | Min | Prod;
-
-// Unary operation types (for VBC)
-type UnaryOp is Neg | Abs | Exp | Log | Sqrt | Sin | Cos | Tan | Tanh | Sigmoid;
-
-// Binary operation types (for VBC)
-type BinaryOp is Add | Sub | Mul | Div | Pow | Max | Min;
-
-// Comparison operation types (for VBC)
-type CompareOp is Eq | Ne | Lt | Le | Gt | Ge;
+// Tensor op enums: mounted from the ONE authority in
+// `core.math.tensor` (wire-order pinned there). The local copies this
+// module used to declare were ORDER-DRIFTED against the wire —
+// `ReduceOp.Max` at tag 3 executed the wire's Min.
 
 // =============================================================================
 // Neural-network protocol inheritance theorems (SMT-discharged)

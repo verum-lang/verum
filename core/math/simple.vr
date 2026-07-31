@@ -76,7 +76,7 @@ mount super.nn.{
     Linear, LayerNorm, RMSNorm, Dropout,
     relu, gelu, silu, sigmoid,
     cross_entropy_loss, mse_loss,
-    AdamW, SGD,
+    AdamW, SGD, Parameter, Parameterized,
 };
 // Re-export nn's Module protocol as THE module protocol of the simple API:
 // one source of truth, not a stripped parallel copy. Downstream code keeps
@@ -328,13 +328,16 @@ public fn softmax_dim(a: &SimpleTensor, dim: ISize) -> SimpleTensor {
 // ]);
 // train(&mut model, &train_loader, 10);
 // ```
-public fn train<M: Module<SimpleTensor, SimpleTensor>>(
+public fn train<M: Module<SimpleTensor, SimpleTensor> + Parameterized>(
     model: &mut M,
     data: &DataLoader,
     epochs: USize,
 ) using [GradientTape, Random, ComputeDevice]
 {
-    let mut optimizer = AdamW.default();
+    // AdamW with the standard defaults (lr 1e-3, decoupled weight
+    // decay 1e-2) — the canonical `AdamW.new` constructor; there is no
+    // `default()` on optimizers (construction states its hyperparams).
+    let mut optimizer = AdamW.new(0.001, 0.01);
 
     for epoch in 0..epochs {
         let mut total_loss = 0.0;
@@ -350,7 +353,7 @@ public fn train<M: Module<SimpleTensor, SimpleTensor>>(
             let grads = result.1;
 
             // Update parameters using gradients
-            optimizer.step(&mut model.parameters_mut());
+            optimizer.step(&mut model.params_mut());
 
             total_loss += loss.item();
             batch_count += 1;
@@ -511,6 +514,24 @@ implement Module<SimpleTensor, SimpleTensor> for Sequential {
         let mut params: List<&mut DynTensor<Float>> = List.new();
         for lyr in &mut self.layers {
             params.extend(lyr.parameters_mut());
+        }
+        params
+    }
+}
+
+implement Parameterized for Sequential {
+    fn params(&self) -> List<&Parameter> {
+        let mut params: List<&Parameter> = List.new();
+        for lyr in &self.layers {
+            params.extend(lyr.params());
+        }
+        params
+    }
+
+    fn params_mut(&mut self) -> List<&mut Parameter> {
+        let mut params: List<&mut Parameter> = List.new();
+        for lyr in &mut self.layers {
+            params.extend(lyr.params_mut());
         }
         params
     }

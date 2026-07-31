@@ -42,7 +42,8 @@ module core.math.autodiff;
 mount super.tensor.{DynTensor, Tensor, zeros, ones, full, zeros_like, ones_like, full_like};
 mount super.tensor.{add, sub, mul, div, neg, tensor_pow, tensor_exp, tensor_log, tensor_sqrt, tensor_sin, tensor_cos, tensor_tanh};
 mount super.tensor.{matmul, transpose, softmax, sum_axis, mean_axis, var_axis};
-mount super.linalg.{Vector, Matrix, Numeric};
+mount super.linalg.{Vector, Matrix};
+mount super.algebra.RealField;
 
 // =============================================================================
 // Differentiation Mode
@@ -110,7 +111,7 @@ implement Differentiable for Float {
 }
 
 // Implement Differentiable for dynamic tensors
-implement<T: Numeric> Differentiable for DynTensor<T> {
+implement<T: RealField> Differentiable for DynTensor<T> {
     type Tangent = DynTensor<T>;
     type Cotangent = DynTensor<T>;
 
@@ -434,7 +435,7 @@ where
 // VJP rule for addition: z = x + y
 // ∂L/∂x = ∂L/∂z, ∂L/∂y = ∂L/∂z
 @vjp_rule(add)
-fn add_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+fn add_vjp<T: RealField>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
     // Handle broadcasting by reducing along broadcast dimensions
     let grad_x = reduce_to_shape(grad_z, x.shape());
     let grad_y = reduce_to_shape(grad_z, y.shape());
@@ -444,7 +445,7 @@ fn add_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>
 // VJP rule for subtraction: z = x - y
 // ∂L/∂x = ∂L/∂z, ∂L/∂y = -∂L/∂z
 @vjp_rule(sub)
-fn sub_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+fn sub_vjp<T: RealField>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
     let grad_x = reduce_to_shape(grad_z, x.shape());
     let grad_y = reduce_to_shape(&neg(grad_z), y.shape());
     (grad_x, grad_y)
@@ -453,7 +454,7 @@ fn sub_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>
 // VJP rule for multiplication: z = x * y
 // ∂L/∂x = ∂L/∂z * y, ∂L/∂y = ∂L/∂z * x
 @vjp_rule(mul)
-fn mul_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+fn mul_vjp<T: RealField>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
     let grad_x = reduce_to_shape(&mul(grad_z, y), x.shape());
     let grad_y = reduce_to_shape(&mul(grad_z, x), y.shape());
     (grad_x, grad_y)
@@ -462,7 +463,7 @@ fn mul_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>
 // VJP rule for division: z = x / y
 // ∂L/∂x = ∂L/∂z / y, ∂L/∂y = -∂L/∂z * x / y²
 @vjp_rule(div)
-fn div_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+fn div_vjp<T: RealField>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
     let grad_x = reduce_to_shape(&div(grad_z, y), x.shape());
     let y_sq = mul(y, y);
     let grad_y = reduce_to_shape(&neg(&div(&mul(grad_z, x), &y_sq)), y.shape());
@@ -473,7 +474,7 @@ fn div_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>
 // ∂L/∂x = ∂L/∂z * y * x^(y-1)
 // ∂L/∂y = ∂L/∂z * x^y * ln(x)
 @vjp_rule(pow)
-fn pow_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
+fn pow_vjp<T: RealField>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>) -> (DynTensor<T>, DynTensor<T>) {
     let one = ones_like(y);
     let y_minus_one = sub(y, &one);
     let x_pow_y_minus_one = pow(x, &y_minus_one);
@@ -489,7 +490,7 @@ fn pow_vjp<T: Numeric>(x: &DynTensor<T>, y: &DynTensor<T>, grad_z: &DynTensor<T>
 // VJP rule for negation: z = -x
 // ∂L/∂x = -∂L/∂z
 @vjp_rule(neg)
-fn neg_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn neg_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     neg(grad_z)
 }
 
@@ -500,21 +501,21 @@ fn neg_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> 
 // VJP rule for exponential: z = e^x
 // ∂L/∂x = ∂L/∂z * e^x
 @vjp_rule(exp)
-fn exp_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn exp_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     mul(grad_z, &exp(x))
 }
 
 // VJP rule for logarithm: z = ln(x)
 // ∂L/∂x = ∂L/∂z / x
 @vjp_rule(log)
-fn log_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn log_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     div(grad_z, x)
 }
 
 // VJP rule for square root: z = √x
 // ∂L/∂x = ∂L/∂z / (2√x)
 @vjp_rule(sqrt)
-fn sqrt_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn sqrt_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     let two = full_like(x, T.from_float(2.0));
     let two_sqrt_x = mul(&two, &sqrt(x));
     div(grad_z, &two_sqrt_x)
@@ -523,21 +524,21 @@ fn sqrt_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T>
 // VJP rule for sine: z = sin(x)
 // ∂L/∂x = ∂L/∂z * cos(x)
 @vjp_rule(sin)
-fn sin_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn sin_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     mul(grad_z, &cos(x))
 }
 
 // VJP rule for cosine: z = cos(x)
 // ∂L/∂x = -∂L/∂z * sin(x)
 @vjp_rule(cos)
-fn cos_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn cos_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     neg(&mul(grad_z, &sin(x)))
 }
 
 // VJP rule for hyperbolic tangent: z = tanh(x)
 // ∂L/∂x = ∂L/∂z * (1 - tanh²(x))
 @vjp_rule(tanh)
-fn tanh_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn tanh_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     let t = tanh(x);
     let one = ones_like(&t);
     let t_sq = mul(&t, &t);
@@ -553,7 +554,7 @@ fn tanh_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T>
 // ∂L/∂X = ∂L/∂Z @ Y^T
 // ∂L/∂Y = X^T @ ∂L/∂Z
 @vjp_rule(matmul)
-fn matmul_vjp<T: Numeric>(
+fn matmul_vjp<T: RealField>(
     x: &DynTensor<T>,
     y: &DynTensor<T>,
     grad_z: &DynTensor<T>,
@@ -566,7 +567,7 @@ fn matmul_vjp<T: Numeric>(
 // VJP rule for softmax: z = softmax(x)
 // ∂L/∂x = z * (∂L/∂z - sum(∂L/∂z * z))
 @vjp_rule(softmax)
-fn softmax_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn softmax_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     let z = softmax(x, -1);
     let gz_times_z = mul(grad_z, &z);
     let sum_gz_z = sum_axis(&gz_times_z, x.rank() - 1);
@@ -576,13 +577,13 @@ fn softmax_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor
 
 // VJP rule for sum reduction
 @vjp_rule(sum)
-fn sum_vjp<T: Numeric>(x: &DynTensor<T>, grad_out: T) -> DynTensor<T> {
+fn sum_vjp<T: RealField>(x: &DynTensor<T>, grad_out: T) -> DynTensor<T> {
     full_like(x, grad_out)
 }
 
 // VJP rule for sum along axis
 @vjp_rule(sum_axis)
-fn sum_axis_vjp<T: Numeric>(
+fn sum_axis_vjp<T: RealField>(
     x: &DynTensor<T>,
     axis: USize,
     grad_out: &DynTensor<T>,
@@ -593,14 +594,14 @@ fn sum_axis_vjp<T: Numeric>(
 
 // VJP rule for mean
 @vjp_rule(mean)
-fn mean_vjp<T: Numeric>(x: &DynTensor<T>, grad_out: T) -> DynTensor<T> {
+fn mean_vjp<T: RealField>(x: &DynTensor<T>, grad_out: T) -> DynTensor<T> {
     let n = x.numel() as Float;
     full_like(x, T.from_float(grad_out.to_float() / n))
 }
 
 // VJP rule for mean along axis
 @vjp_rule(mean_axis)
-fn mean_axis_vjp<T: Numeric>(
+fn mean_axis_vjp<T: RealField>(
     x: &DynTensor<T>,
     axis: USize,
     grad_out: &DynTensor<T>,
@@ -613,7 +614,7 @@ fn mean_axis_vjp<T: Numeric>(
 
 // VJP rule for reshape
 @vjp_rule(reshape)
-fn reshape_vjp<T: Numeric>(
+fn reshape_vjp<T: RealField>(
     x: &DynTensor<T>,
     new_shape: &[USize],
     grad_out: &DynTensor<T>,
@@ -623,7 +624,7 @@ fn reshape_vjp<T: Numeric>(
 
 // VJP rule for transpose
 @vjp_rule(transpose)
-fn transpose_vjp<T: Numeric>(x: &DynTensor<T>, grad_out: &DynTensor<T>) -> DynTensor<T> {
+fn transpose_vjp<T: RealField>(x: &DynTensor<T>, grad_out: &DynTensor<T>) -> DynTensor<T> {
     transpose(grad_out)
 }
 
@@ -634,7 +635,7 @@ fn transpose_vjp<T: Numeric>(x: &DynTensor<T>, grad_out: &DynTensor<T>) -> DynTe
 // VJP rule for ReLU: z = max(0, x)
 // ∂L/∂x = ∂L/∂z * (x > 0)
 @vjp_rule(relu)
-fn relu_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn relu_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     let mask = tensor_gt(x, &zeros_like(x));
     where_tensor(&mask, grad_z, &zeros_like(grad_z))
 }
@@ -642,7 +643,7 @@ fn relu_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T>
 // VJP rule for sigmoid: z = 1 / (1 + e^(-x))
 // ∂L/∂x = ∂L/∂z * z * (1 - z)
 @vjp_rule(sigmoid)
-fn sigmoid_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn sigmoid_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     let z = sigmoid(x);
     let one = ones_like(&z);
     let one_minus_z = sub(&one, &z);
@@ -651,7 +652,7 @@ fn sigmoid_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor
 
 // VJP rule for GELU (Gaussian Error Linear Unit)
 @vjp_rule(gelu)
-fn gelu_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
+fn gelu_vjp<T: RealField>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T> {
     // d/dx GELU(x) = 0.5 * (1 + tanh(k)) + 0.5 * x * sech²(k) * k'
     // where k = sqrt(2/π) * (x + 0.044715 * x³)
     let sqrt_2_pi = T.from_float(0.7978845608);  // sqrt(2/π)
@@ -685,7 +686,7 @@ fn gelu_vjp<T: Numeric>(x: &DynTensor<T>, grad_z: &DynTensor<T>) -> DynTensor<T>
 
 // VJP rule for cross-entropy loss
 @vjp_rule(cross_entropy)
-fn cross_entropy_vjp<T: Numeric>(
+fn cross_entropy_vjp<T: RealField>(
     pred: &DynTensor<T>,
     target: &DynTensor<T>,
     grad_out: T,
@@ -699,7 +700,7 @@ fn cross_entropy_vjp<T: Numeric>(
 
 // VJP rule for layer normalization
 @vjp_rule(layer_norm)
-fn layer_norm_vjp<T: Numeric>(
+fn layer_norm_vjp<T: RealField>(
     x: &DynTensor<T>,
     weight: &DynTensor<T>,
     bias: &DynTensor<T>,
@@ -754,7 +755,7 @@ fn layer_norm_vjp<T: Numeric>(
 
 // VJP rule for 2D convolution
 @vjp_rule(conv2d)
-fn conv2d_vjp<T: Numeric>(
+fn conv2d_vjp<T: RealField>(
     input: &DynTensor<T>,
     weight: &DynTensor<T>,
     grad_output: &DynTensor<T>,
@@ -766,7 +767,7 @@ fn conv2d_vjp<T: Numeric>(
 
 // VJP rule for attention mechanism
 @vjp_rule(attention)
-fn attention_vjp<T: Numeric>(
+fn attention_vjp<T: RealField>(
     q: &DynTensor<T>,
     k: &DynTensor<T>,
     v: &DynTensor<T>,
@@ -894,7 +895,7 @@ public fn recompute<T: Differentiable>(x: T) -> T {
 // Applies checkpointing every `checkpoint_every` layers,
 // achieving sublinear memory usage.
 @differentiable
-public fn checkpointed_sequential<T: Numeric>(
+public fn checkpointed_sequential<T: RealField>(
     layers: &[fn(&DynTensor<T>) -> DynTensor<T>],
     x: &DynTensor<T>,
     checkpoint_every: USize,
@@ -908,7 +909,7 @@ public fn checkpointed_sequential<T: Numeric>(
 
 // Uses binomial checkpointing strategy to achieve
 // √n memory with 2x compute overhead.
-public fn optimal_checkpoint<T: Numeric>(
+public fn optimal_checkpoint<T: RealField>(
     layers: &[fn(&DynTensor<T>) -> DynTensor<T>],
     x: &DynTensor<T>,
 ) -> DynTensor<T> {
@@ -947,7 +948,7 @@ public fn compute_checkpoint_schedule(n: USize, memory_budget: USize) -> List<US
 // Memory: O(batch * heads * seq_len * head_dim)
 // Compute: 2x attention cost during backward
 @differentiable
-public fn memory_efficient_attention<T: Numeric>(
+public fn memory_efficient_attention<T: RealField>(
     q: &DynTensor<T>,  // [batch, heads, seq_len, head_dim]
     k: &DynTensor<T>,  // [batch, heads, seq_len, head_dim]
     v: &DynTensor<T>,  // [batch, heads, seq_len, head_dim]
@@ -983,7 +984,7 @@ context GradientAccumulation {
 
 // Scales gradients by 1/accumulation_steps and only
 // synchronizes on the final micro-batch.
-public fn accumulated_backward<T: Numeric>(
+public fn accumulated_backward<T: RealField>(
     loss: &DynTensor<T>,
     accumulation_steps: USize,
     should_sync: Bool,
@@ -1228,7 +1229,7 @@ fn binomial_checkpoint_selection(nodes: &[GraphNode], memory_budget: USize) -> L
 // =============================================================================
 
 // Reduce gradient to match input shape (for broadcasting)
-fn reduce_to_shape<T: Numeric>(grad: &DynTensor<T>, target_shape: &[USize]) -> DynTensor<T> {
+fn reduce_to_shape<T: RealField>(grad: &DynTensor<T>, target_shape: &[USize]) -> DynTensor<T> {
     if grad.shape() == target_shape {
         return grad.clone();
     }
@@ -1266,12 +1267,12 @@ fn reduce_to_shape<T: Numeric>(grad: &DynTensor<T>, target_shape: &[USize]) -> D
 }
 
 // Broadcast tensor to target shape
-fn broadcast_to<T: Numeric>(x: &DynTensor<T>, target_shape: &[USize]) -> DynTensor<T> {
+fn broadcast_to<T: RealField>(x: &DynTensor<T>, target_shape: &[USize]) -> DynTensor<T> {
     @vbc(TENSOR_BROADCAST_TO, x, target_shape)
 }
 
 // Unsqueeze tensor at specified axis
-fn unsqueeze<T: Numeric>(x: &DynTensor<T>, axis: USize) -> DynTensor<T> {
+fn unsqueeze<T: RealField>(x: &DynTensor<T>, axis: USize) -> DynTensor<T> {
     @vbc(TENSOR_UNSQUEEZE, x, axis)
 }
 
@@ -1282,17 +1283,17 @@ fn unsqueeze<T: Numeric>(x: &DynTensor<T>, axis: USize) -> DynTensor<T> {
 // GRAD_BACKWARD now drives the SCALAR tape (grad()/vjp), taking a tape handle +
 // seed; routing a tensor through it would misread the handle. Fail loudly rather
 // than silently mis-differentiate.
-fn backward<T: Numeric>(loss: &DynTensor<T>) {
+fn backward<T: RealField>(loss: &DynTensor<T>) {
     panic("tensor-level backward() is not yet implemented — see T0460 (AOT) / T0179 (tensor autodiff)")
 }
 
 // Greater-than comparison for masks (tensor-level)
-fn tensor_gt<T: Numeric>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
+fn tensor_gt<T: RealField>(a: &DynTensor<T>, b: &DynTensor<T>) -> DynTensor<Bool> {
     @vbc(TENSOR_COMPARE, a, b, CompareOp.Gt)
 }
 
 // Conditional selection: where(mask, a, b)
-fn where_tensor<T: Numeric>(
+fn where_tensor<T: RealField>(
     mask: &DynTensor<Bool>,
     a: &DynTensor<T>,
     b: &DynTensor<T>,
@@ -1304,12 +1305,12 @@ fn where_tensor<T: Numeric>(
 // unary channel (op 9 = TensorUnaryOp Sigmoid); TENSOR_SIGMOID had
 // a 1-arg wire that could never satisfy the 2-operand UnopFromArgs
 // arm (T0193).
-fn sigmoid<T: Numeric>(x: &DynTensor<T>) -> DynTensor<T> {
+fn sigmoid<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> {
     @vbc(TENSOR_UNOP, x, 9)
 }
 
 // Reshape tensor
-fn reshape<T: Numeric>(x: &DynTensor<T>, shape: &[USize]) -> DynTensor<T> {
+fn reshape<T: RealField>(x: &DynTensor<T>, shape: &[USize]) -> DynTensor<T> {
     @vbc(TENSOR_RESHAPE, x, shape)
 }
 

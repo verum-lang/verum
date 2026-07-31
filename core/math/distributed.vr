@@ -124,15 +124,24 @@ public fn world_size() -> USize {
 // =============================================================================
 
 // Reduction operations for collective communication
-public type ReduceOp is
+// Cross-rank collective reduction op — deliberately a DISTINCT type
+// from `core.math.tensor.CollectiveReduceOp` (axis folds): the collective domain
+// is the NCCL-style set (Avg, not Mean; Product, not Prod; no
+// Var/Std/Norm/LogSumExp), and its wire is the collective opcode
+// family, not TENSOR_REDUCE. Mechanically unifying the two would trade
+// a name for a semantic lie.
+// WIRE CONTRACT (PINNED): variant order mirrors the collective
+// `ReduceOp` in `verum_vbc::interpreter::kernel` (Sum=0, Mean/Avg=1,
+// Max=2, Min=3, Prod/Product=4) — the pre-pin order swapped Min/Max.
+public type CollectiveReduceOp is
     // Sum of all values
     | Sum
     // Average of all values
     | Avg
-    // Minimum value
-    | Min
     // Maximum value
     | Max
+    // Minimum value
+    | Min
     // Product of all values
     | Product;
 
@@ -145,7 +154,7 @@ public type ReduceOp is
 public fn all_reduce<T>(
     t: &mut DynTensor<T>,
     group: &ProcessGroup,
-    op: ReduceOp,
+    op: CollectiveReduceOp,
 ) {
     @vbc(COLLECTIVE_ALL_REDUCE, t, group, op)
 }
@@ -164,7 +173,7 @@ public fn all_gather<T>(
 public fn reduce_scatter<T>(
     t: &DynTensor<T>,
     group: &ProcessGroup,
-    op: ReduceOp,
+    op: CollectiveReduceOp,
 ) -> DynTensor<T> {
     @vbc(COLLECTIVE_REDUCE_SCATTER, t, group, op)
 }
@@ -298,6 +307,7 @@ implement<M: Module<In, Out>, In: DistributedTensor, Out: DistributedTensor> Mod
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         self.model.parameters_mut()
     }
+
 }
 
 // =============================================================================
@@ -338,7 +348,7 @@ implement<M: Module<In, Out>, In, Out> DistributedDataParallel<M> {
 
         for bucket in &mut buckets {
             // All-reduce: average gradients across processes
-            all_reduce(bucket, &self.process_group, ReduceOp.Avg);
+            all_reduce(bucket, &self.process_group, CollectiveReduceOp.Avg);
         }
     }
 }
@@ -355,6 +365,7 @@ implement<M: Module<In, Out>, In, Out> Module<In, Out> for DistributedDataParall
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         self.model.parameters_mut()
     }
+
 }
 
 // Bucket gradients for efficient all-reduce
@@ -440,6 +451,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for ColumnParallelLinear {
         }
         p
     }
+
 }
 
 // Row-parallel linear layer
@@ -493,7 +505,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for RowParallelLinear {
         let partial_output = matmul(&local_input, &transpose(&self.weight.data, 0, 1));
 
         // Reduce-scatter to sum partials
-        let mut output = reduce_scatter(&partial_output, &self.process_group, ReduceOp.Sum);
+        let mut output = reduce_scatter(&partial_output, &self.process_group, CollectiveReduceOp.Sum);
 
         if let Maybe.Some(bias) = &self.bias {
             output = add(&output, &bias.data.unsqueeze(0));
@@ -517,6 +529,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for RowParallelLinear {
         }
         p
     }
+
 }
 
 // =============================================================================
@@ -742,7 +755,7 @@ implement<M: Module<In, Out>, In, Out> FSDP<M> {
         let params: List<&mut DynTensor<Float>> = self.model.parameters_mut();
         for param in params {
             if let Maybe.Some(grad) = get_grad(param) {
-                let sharded_grad = reduce_scatter(&grad, &self.process_group, ReduceOp.Avg);
+                let sharded_grad = reduce_scatter(&grad, &self.process_group, CollectiveReduceOp.Avg);
                 set_grad(param, sharded_grad);
             }
         }
@@ -768,6 +781,7 @@ implement<M: Module<In, Out>, In, Out> Module<In, Out> for FSDP<M> {
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         self.model.parameters_mut()
     }
+
 }
 
 // Get gradient from parameter

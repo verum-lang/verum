@@ -59,7 +59,7 @@ mount super.gpu.{
     GpuStream, GpuEvent, CudaGraph,
 };
 mount super.nn.{Module, Parameter, Trainable};
-mount super.linalg.Numeric;
+mount super.algebra.RealField;
 
 // =============================================================================
 // Tiled Matrix Operations
@@ -82,7 +82,7 @@ mount super.linalg.Numeric;
 // // 32x32x32 tiles for L1 cache (32KB)
 // let c = matmul_tiled(&a, &b, 32, 32, 32);
 // ```
-public fn matmul_tiled<T: Numeric>(
+public fn matmul_tiled<T: RealField>(
     a: &DynTensor<T>,
     b: &DynTensor<T>,
     tile_m: USize,
@@ -103,7 +103,7 @@ public fn matmul_tiled<T: Numeric>(
 // - `TensorFloat32`: Tensor cores with TF32 precision (Ampere+)
 // - `Float16`: Half precision with FP16 accumulation
 // - `BFloat16`: BF16 with FP32 accumulation
-public fn matmul_precise<T: Numeric>(
+public fn matmul_precise<T: RealField>(
     a: &DynTensor<T>,
     b: &DynTensor<T>,
 ) -> DynTensor<T>
@@ -117,7 +117,7 @@ public fn matmul_precise<T: Numeric>(
 
 // # Safety
 // `output` must have the correct shape and be writable.
-public fn matmul_into<T: Numeric>(
+public fn matmul_into<T: RealField>(
     output: &mut DynTensor<T>,
     a: &DynTensor<T>,
     b: &DynTensor<T>,
@@ -217,7 +217,7 @@ public type TensorOp is protocol {
 //  &[64, 1], // Row-major strides
 // );
 // ```
-public fn tensor_with_buffer<T: Numeric>(
+public fn tensor_with_buffer<T: RealField>(
     buffer: &mut [T],
     shape: &[USize],
     strides: &[ISize],
@@ -401,7 +401,7 @@ implement MixedPrecisionContext {
     }
 
     // Scale loss for FP16 gradient computation
-    public fn scale_loss<T: Numeric>(&self, loss: &DynTensor<T>) -> DynTensor<T> {
+    public fn scale_loss<T: RealField>(&self, loss: &DynTensor<T>) -> DynTensor<T> {
         loss.mul_scalar(self.loss_scale as T)
     }
 
@@ -409,7 +409,7 @@ implement MixedPrecisionContext {
     //
 
     // Returns `true` if gradients are valid (no overflow), `false` otherwise.
-    public fn unscale_and_check<T: Numeric>(&mut self, grads: &mut List<DynTensor<T>>) -> Bool {
+    public fn unscale_and_check<T: RealField>(&mut self, grads: &mut List<DynTensor<T>>) -> Bool {
         let inv_scale = (1.0 / self.loss_scale) as T;
 
         // Unscale all gradients
@@ -496,7 +496,7 @@ public fn checkpoint<T, F>(
     using [GradientTape]
 where
     F: Fn(&[&DynTensor<T>]) -> DynTensor<T>,
-    T: Numeric,
+    T: RealField,
 {
     // Forward: compute without saving intermediate activations
     let output = with_no_grad(|| segment(inputs));
@@ -526,7 +526,7 @@ where
 
 // # Returns
 // Final output with optimal checkpointing
-public fn optimal_checkpoint<T: Numeric, F: Fn(&DynTensor<T>) -> DynTensor<T>>(
+public fn optimal_checkpoint<T: RealField, F: Fn(&DynTensor<T>) -> DynTensor<T>>(
     layers: &[F],
     input: &DynTensor<T>,
 ) -> DynTensor<T>
@@ -682,19 +682,19 @@ public fn stream_synchronize() using [ComputeDevice] {
 // In-place operations (VBC intrinsics)
 // These require VBC runtime and operate on tensor data directly.
 
-public fn scale_inplace<T: Numeric>(t: &mut DynTensor<T>, f: T) {
+public fn scale_inplace<T: RealField>(t: &mut DynTensor<T>, f: T) {
     @vbc(TENSOR_SCALE_INPLACE, t, f)
 }
 
-public fn softmax_into<T: Numeric>(out: &mut DynTensor<T>, inp: &DynTensor<T>, ax: ISize) {
+public fn softmax_into<T: RealField>(out: &mut DynTensor<T>, inp: &DynTensor<T>, ax: ISize) {
     @vbc(TENSOR_SOFTMAX_INTO, out, inp, ax)
 }
 
-public fn add_inplace<T: Numeric>(a: &mut DynTensor<T>, b: &DynTensor<T>) {
+public fn add_inplace<T: RealField>(a: &mut DynTensor<T>, b: &DynTensor<T>) {
     @vbc(TENSOR_ADD_INPLACE, a, b)
 }
 
-public fn mul_inplace<T: Numeric>(a: &mut DynTensor<T>, b: &DynTensor<T>) {
+public fn mul_inplace<T: RealField>(a: &mut DynTensor<T>, b: &DynTensor<T>) {
     @vbc(TENSOR_MUL_INPLACE, a, b)
 }
 

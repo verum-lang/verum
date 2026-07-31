@@ -259,6 +259,7 @@ implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         List.from([&mut self.D, &mut self.log_dt])
     }
+
 }
 
 // =============================================================================
@@ -416,6 +417,7 @@ implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
         params.extend(self.out_proj.parameters_mut());
         params
     }
+
 }
 
 // =============================================================================
@@ -486,6 +488,7 @@ implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
         params.extend(self.lm_head.parameters_mut());
         params
     }
+
 }
 
 // =============================================================================
@@ -540,6 +543,7 @@ implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
         params.extend(self.merge_proj.parameters_mut());
         params
     }
+
 }
 
 // =============================================================================
@@ -639,6 +643,7 @@ implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
             },
         }
     }
+
 }
 
 // Full Jamba model
@@ -708,6 +713,7 @@ implement<D: meta USize{D > 0}, N: meta USize{N > 0}>
         p.extend(self.lm_head.parameters_mut());
         p
     }
+
 }
 
 // =============================================================================
@@ -783,6 +789,7 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}>
         p.extend(self.w2.parameters_mut());
         p
     }
+
 }
 
 // MoeRouter network for expert selection
@@ -1006,6 +1013,7 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
         }
         p
     }
+
 }
 
 // Full MoE Transformer block
@@ -1074,6 +1082,7 @@ implement<D: meta USize{D > 0}, H: meta USize{H > 0}, E: meta USize{E > 1}>
         p.extend(self.moe.parameters_mut());
         p
     }
+
 }
 
 // =============================================================================

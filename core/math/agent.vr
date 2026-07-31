@@ -869,6 +869,7 @@ implement Module<DynTensor<Float>, DynTensor<Float>> for QuantizedLinear {
     fn parameters_mut(&mut self) -> List<&mut DynTensor<Float>> {
         List.new()
     }
+
 }
 
 // Per-channel quantization
