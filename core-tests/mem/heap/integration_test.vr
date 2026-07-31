@@ -110,14 +110,14 @@ fn integration_heap_stats_new_yields_zero_state() {
     // baseline state that every per-thread heap reports BEFORE the
     // first allocation.
     let s: HeapStats = HeapStats.new();
-    assert_eq(s.allocated, 0);
-    assert_eq(s.deallocated, 0);
+    assert_eq(s.alloc_count, 0);
+    assert_eq(s.dealloc_count, 0);
     assert_eq(s.bytes_allocated, 0);
-    assert_eq(s.bytes_deallocated, 0);
-    assert_eq(s.peak_bytes, 0);
-    assert_eq(s.pages_allocated, 0);
-    assert_eq(s.pages_freed, 0);
-    assert_eq(s.cache_hits, 0);
+    assert_eq(s.bytes_freed, 0);
+    assert_eq(s.live_count, 0);
+    assert_eq(s.live_bytes, 0);
+    assert_eq(s.pages_in_use, 0);
+    assert_eq(s.segments_owned, 0);
 }
 
 @test
@@ -125,29 +125,31 @@ fn integration_heap_stats_zero_state_live_count_zero() {
     // At zero state, the live-allocation count is zero. This is the
     // load-bearing invariant for any per-thread heap observer: when
     // there have been no allocations, there are no live allocations.
+    // `live_count` is a stored gauge, so pin it against the counter
+    // difference it must agree with rather than on its own.
     let s: HeapStats = HeapStats.new();
-    assert_eq(s.allocated - s.deallocated, 0);
+    assert_eq(s.alloc_count - s.dealloc_count, 0);
+    assert_eq(s.live_count, s.alloc_count - s.dealloc_count);
 }
 
 @test
 fn integration_heap_stats_zero_state_bytes_outstanding_zero() {
-    // At zero state, outstanding bytes (bytes_allocated -
-    // bytes_deallocated) is zero. Pinned for parity with the
-    // live-count zero invariant.
+    // At zero state, outstanding bytes (bytes_allocated - bytes_freed)
+    // is zero, and the stored `live_bytes` gauge agrees with it.
+    // Pinned for parity with the live-count zero invariant.
     let s: HeapStats = HeapStats.new();
-    assert_eq(s.bytes_allocated - s.bytes_deallocated, 0);
-    assert_eq(s.peak_bytes, 0);
+    assert_eq(s.bytes_allocated - s.bytes_freed, 0);
+    assert_eq(s.live_bytes, s.bytes_allocated - s.bytes_freed);
 }
 
 @test
-fn integration_heap_stats_zero_state_no_pages_or_cache_activity() {
-    // At zero state, no pages have been allocated or freed, no cache
-    // hits accrued. Pins the full 8-field zero baseline (4 of the 8
-    // fields exercised here; the other 4 are in the _zero_state test).
+fn integration_heap_stats_zero_state_no_pages_or_segments_held() {
+    // At zero state, the heap holds no pages and owns no segments.
+    // These are the two UInt32 fields of the record; the other six
+    // UInt64 fields are pinned by the _zero_state test above.
     let s: HeapStats = HeapStats.new();
-    assert_eq(s.pages_allocated, 0);
-    assert_eq(s.pages_freed, 0);
-    assert_eq(s.cache_hits, 0);
+    assert_eq(s.pages_in_use, 0);
+    assert_eq(s.segments_owned, 0);
 }
 
 // -----------------------------------------------------------------------------
