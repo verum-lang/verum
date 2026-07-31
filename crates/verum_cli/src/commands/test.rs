@@ -1224,13 +1224,26 @@ fn run_interp_file_subprocess(
             if needs { vec!['\\', c] } else { vec![c] }
         })
         .collect();
+    // A file whose test names carry no `::` suffix is a FILE-LEVEL test —
+    // the whole `.vr` file is one test and its name IS the prefix (the
+    // `rsplit_once("::")` in the caller falls through to the full name).
+    // `^<prefix>::` then matches nothing: `matches_filter`'s `^` is a plain
+    // `starts_with`, so the child runs zero tests and exits 0, and the parent
+    // reports every test in the file as "exited 0 before reporting". That is
+    // what made all 76 tests/language_features/* report red while each one
+    // PASSES when run on its own. Select those by exact name instead, exactly
+    // as `run_aot_subprocess` already does.
+    let file_level = expected.len() == 1 && expected[0].name.as_str() == prefix;
     let mut cmd = Command::new(&exe);
     cmd.arg("test")
         .arg("--interp")
         .arg("--format")
-        .arg("json")
-        .arg("--filter")
-        .arg(format!("^{}::", escaped));
+        .arg("json");
+    if file_level {
+        cmd.arg("--exact").arg("--filter").arg(prefix);
+    } else {
+        cmd.arg("--filter").arg(format!("^{}::", escaped));
+    }
     // T0365: the child re-applies SELECTION over this file's tests, so
     // the parent's selection flags must ride along. Without them the
     // child's default mode silently re-skipped every `@ignore`'d test
