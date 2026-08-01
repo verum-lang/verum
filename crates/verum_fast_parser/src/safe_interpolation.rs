@@ -313,6 +313,12 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
         // there is no width/align spec either, so the common
         // `f"{x}"` path remains a single ToString op.
         _ => {
+            // Numeric-context marker (T0606): a sign flag, a
+            // precision, or a radix type is by definition a NUMBER
+            // being formatted — the default alignment for those is
+            // Right (Python semantics). Only a BARE width defers the
+            // alignment decision to the value's own type via
+            // `format_width`.
             if let Some(prec) = parsed.precision {
                 // `.N` fractional precision — render via `to_precision(n)`,
                 // which returns the value formatted to N decimal places
@@ -322,8 +328,22 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
                 // non-float receiver surfaces a normal missing-method error
                 // at that call site (T0604).
                 method_call_one_int_arg(expr, "to_precision", prec as i64, span)
-            } else if parsed.width == 0 && !parsed.upper {
+            } else if parsed.width == 0
+                && !parsed.upper
+                && matches!(parsed.sign, SpecSign::Default)
+            {
                 return Ok(expr);
+            } else if parsed.width > 0
+                && !parsed.upper
+                && matches!(parsed.sign, SpecSign::Default)
+                && matches!(parsed.align, SpecAlign::Default)
+            {
+                // MARKER-FREE bare width: do NOT erase the value to
+                // Text here — `format_width` must dispatch on the
+                // VALUE's type (Text left-aligns, numbers
+                // right-align). An EXPLICIT align keeps the to_string
+                // below: pad_left/right/center are Text methods.
+                expr
             } else {
                 method_call_no_args(expr, "to_string", span)
             }
@@ -337,19 +357,45 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
         converted
     };
 
-    // Stage 3 — width / alignment / fill.
+    // Stage 2.5 — sign flag (T0606): applied at the TEXT level after
+    // conversion so it composes with hex / precision. Runs BEFORE the
+    // width stage so the sign column counts toward the field width
+    // (Python semantics). Note: the '0'-fill + sign combination pads
+    // between sign and digits in Python ("+0042"); this composition
+    // yields "00+42" — a documented approximation until a native
+    // FormatValue op carries the full spec.
+    let signed = match parsed.sign {
+        SpecSign::Plus => method_call_no_args(cased, "with_sign_plus", span),
+        SpecSign::Space => method_call_no_args(cased, "with_sign_space", span),
+        SpecSign::Default => cased,
+    };
+
+    // Stage 3 — width / alignment / fill. Explicit aligns compose the
+    // type-independent pad methods; the DEFAULT dispatches
+    // `format_width` on the value's own type (`Text` left-aligns,
+    // numeric carriers right-align — a parse-time rewrite cannot know
+    // the receiver's type, so the type system decides).
     if parsed.width > 0 {
         let fill_char = parsed.fill;
         let width_lit = int_literal(parsed.width as i64, span);
         let fill_lit = char_literal(fill_char, span);
-        let pad_method = if parsed.left_align {
-            "pad_right"
-        } else {
-            "pad_left"
+        let numeric_marker = !matches!(parsed.sign, SpecSign::Default)
+            || parsed.precision.is_some()
+            || matches!(parsed.type_char, Some('x') | Some('X') | Some('o') | Some('b'));
+        let pad_method = match parsed.align {
+            SpecAlign::Left => "pad_right",
+            SpecAlign::Right => "pad_left",
+            SpecAlign::Center => "pad_center",
+            // A numeric-context marker fixes Right (the value is
+            // already Text by now — sign/precision/radix rendered
+            // it); only a marker-free bare width dispatches
+            // `format_width` on the value's own type.
+            SpecAlign::Default if numeric_marker => "pad_left",
+            SpecAlign::Default => "format_width",
         };
         let padded = Expr::new(
             ExprKind::MethodCall {
-                receiver: verum_common::Heap::new(cased),
+                receiver: verum_common::Heap::new(signed),
                 method: verum_ast::Ident::new(pad_method, span),
                 type_args: List::new(),
                 args: List::from(vec![width_lit, fill_lit]),
@@ -358,19 +404,40 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
         );
         Ok(padded)
     } else {
-        Ok(cased)
+        Ok(signed)
     }
+}
+
+/// Alignment requested by the spec (T0606). `Default` is TYPE-driven:
+/// the desugar dispatches `format_width` on the value itself — `Text`
+/// left-aligns, the numeric carriers right-align — because a
+/// parse-time rewrite cannot know the receiver's type.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SpecAlign {
+    Default,
+    Left,
+    Right,
+    Center,
+}
+
+/// Sign flag for numeric specs (`+` / ` `). Applied at the TEXT level
+/// (`with_sign_plus` / `with_sign_space`) after conversion so it
+/// composes with hex / precision.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SpecSign {
+    Default,
+    Plus,
+    Space,
 }
 
 /// Compact Python-style format-spec descriptor.
 struct ParsedSpec {
     /// Fill character used by pad_left / pad_right (default ' ').
     fill: char,
-    /// `true` when the spec used `<` alignment (left-pad).
-    /// `false` for default (right-pad) and `>`.
-    /// Centre-align (`^`) is currently treated as right-pad —
-    /// proper centre composition needs a `pad_centre` stdlib method.
-    left_align: bool,
+    /// Requested alignment (see `SpecAlign`).
+    align: SpecAlign,
+    /// Requested sign flag (see `SpecSign`).
+    sign: SpecSign,
     /// Minimum field width (0 = no padding).
     width: u32,
     /// Fractional precision from `.N` (`None` = unspecified). Applied to
@@ -388,8 +455,18 @@ fn parse_format_spec(spec: &str) -> ParsedSpec {
 
     // Default state.
     let mut fill: char = ' ';
-    let mut left_align: bool = false;
+    let mut align = SpecAlign::Default;
+    let mut sign = SpecSign::Default;
     let mut width: u32 = 0;
+
+    let align_of = |c: char| match c {
+        '<' => SpecAlign::Left,
+        '^' => SpecAlign::Center,
+        // '=' (numeric sign-aware fill) approximates to Right — the
+        // shared right-pad path is its closest composition today.
+        '>' | '=' => SpecAlign::Right,
+        _ => SpecAlign::Default,
+    };
 
     // [[fill]align] — fill is a single char immediately followed
     // by an alignment char. Spec like `*<5` means fill='*',
@@ -398,14 +475,27 @@ fn parse_format_spec(spec: &str) -> ParsedSpec {
     let snapshot: Vec<char> = chars.clone().collect();
     if snapshot.len() >= 2 && matches!(snapshot[1], '<' | '>' | '^' | '=') {
         fill = snapshot[0];
-        left_align = snapshot[1] == '<';
+        align = align_of(snapshot[1]);
         // consume both
         chars.next();
         chars.next();
     } else if let Some(&first) = chars.peek()
         && matches!(first, '<' | '>' | '^' | '=')
     {
-        left_align = first == '<';
+        align = align_of(first);
+        chars.next();
+    }
+
+    // [sign] — '+' forces a sign on non-negatives; ' ' reserves the
+    // sign column. '-' is the default and parses to Default.
+    if let Some(&c) = chars.peek()
+        && matches!(c, '+' | '-' | ' ')
+    {
+        sign = match c {
+            '+' => SpecSign::Plus,
+            ' ' => SpecSign::Space,
+            _ => SpecSign::Default,
+        };
         chars.next();
     }
 
@@ -418,6 +508,11 @@ fn parse_format_spec(spec: &str) -> ParsedSpec {
         if probe.peek().is_some_and(|c| c.is_ascii_digit()) {
             if fill == ' ' {
                 fill = '0';
+            }
+            // Zero-pad is inherently a right-align (digits fill from
+            // the left) — it is not the type-driven Default.
+            if align == SpecAlign::Default {
+                align = SpecAlign::Right;
             }
             chars.next(); // consume the '0'
         }
@@ -461,7 +556,8 @@ fn parse_format_spec(spec: &str) -> ParsedSpec {
 
     ParsedSpec {
         fill,
-        left_align,
+        align,
+        sign,
         width,
         precision,
         type_char,

@@ -1610,6 +1610,68 @@ implement Text {
         res
     }
 
+    /// Pad on both sides to center within the target width (extra fill
+    /// goes to the RIGHT on odd padding — Python's `^` convention).
+    /// The f-string `{v:^N}` spec desugars onto this (T0606).
+    public fn pad_center(&self, width: Int, fill: Char) -> Text {
+        let current = self.char_count();
+        if current >= width {
+            return self.clone();
+        }
+        let fill_byte = fill as Byte;
+        let pad_count = width - current;
+        let left = pad_count / 2;
+        let right = pad_count - left;
+        let mut res = Text.new();
+        let mut i = 0;
+        while i < left {
+            res.push_byte(fill_byte);
+            i = i + 1;
+        }
+        res.push_str(self);
+        i = 0;
+        while i < right {
+            res.push_byte(fill_byte);
+            i = i + 1;
+        }
+        res
+    }
+
+    /// Prepend '+' unless this rendered number is negative — the
+    /// f-string `{n:+}` sign flag applied at the TEXT level, after
+    /// numeric conversion, so it composes with hex/precision (T0606).
+    public fn with_sign_plus(&self) -> Text {
+        if self.starts_with("-") {
+            return self.clone();
+        }
+        let mut res = Text.new();
+        res.push_byte('+' as Byte);
+        res.push_str(self);
+        res
+    }
+
+    /// Prepend ' ' unless this rendered number is negative — the
+    /// f-string `{n: }` space sign flag (T0606).
+    public fn with_sign_space(&self) -> Text {
+        if self.starts_with("-") {
+            return self.clone();
+        }
+        let mut res = Text.new();
+        res.push_byte(' ' as Byte);
+        res.push_str(self);
+        res
+    }
+
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): TEXT left-aligns by convention; the numeric
+    /// carriers implement their right-aligning twin in
+    /// `core/base/primitives.vr` — the alignment DEFAULT dispatches on
+    /// the value's own type, which a parse-time desugar cannot know
+    /// (T0606).
+    public fn format_width(&self, width: Int, fill: Char) -> Text {
+        self.pad_right(width, fill)
+    }
+
     /// Alias for pad_left (modern naming: start = left in LTR text).
     public fn pad_start(&self, width: Int, fill: Char) -> Text {
         self.pad_left(width, fill)

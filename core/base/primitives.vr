@@ -76,6 +76,14 @@ fn popcnt<T>(x: T) -> T { @intrinsic("ctpop", x) }
 // =============================================================================
 
 implement Int {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     /// Minimum value (-2^63).
     public const MIN: Int = -9223372036854775808;
 
@@ -828,6 +836,14 @@ implement Shr for Int {
 // =============================================================================
 
 implement Float {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     /// Minimum finite value.
     public const MIN: Float = -1.7976931348623157e+308;
 
@@ -1921,6 +1937,14 @@ implement Display for () {
 // =============================================================================
 
 implement UInt64 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     /// Minimum value (0).
     public const MIN: UInt64 = 0;
 
@@ -2119,6 +2143,14 @@ implement UInt64 {
 // =============================================================================
 
 implement UInt32 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: UInt32 = 0;
     public const MAX: UInt32 = 4294967295;
     public const BITS: Int = 32;
@@ -2268,6 +2300,14 @@ implement UInt32 {
 // =============================================================================
 
 implement UInt16 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: UInt16 = 0;
     public const MAX: UInt16 = 65535;
     public const BITS: Int = 16;
@@ -2418,6 +2458,14 @@ implement UInt16 {
 // Note: Byte is the canonical 8-bit unsigned type. UInt8 provides semantic naming.
 
 implement UInt8 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: UInt8 = 0;
     public const MAX: UInt8 = 255;
     public const BITS: Int = 8;
@@ -2566,6 +2614,14 @@ implement UInt8 {
 // =============================================================================
 
 implement UInt128 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: UInt128 = 0;
     // 2^128 - 1 = 340282366920938463463374607431768211455
     public const MAX: UInt128 = 340282366920938463463374607431768211455;
@@ -2717,6 +2773,14 @@ implement UInt128 {
 // =============================================================================
 
 implement Int8 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: Int8 = -128;
     public const MAX: Int8 = 127;
     public const BITS: Int = 8;
@@ -2877,6 +2941,14 @@ implement Int8 {
 // =============================================================================
 
 implement Int16 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: Int16 = -32768;
     public const MAX: Int16 = 32767;
     public const BITS: Int = 16;
@@ -3038,6 +3110,14 @@ implement Int16 {
 // =============================================================================
 
 implement Int32 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: Int32 = -2147483648;
     public const MAX: Int32 = 2147483647;
     public const BITS: Int = 32;
@@ -3200,6 +3280,14 @@ implement Int32 {
 // Note: Int is the canonical 64-bit signed type. Int64 provides semantic naming.
 
 implement Int64 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: Int64 = -9223372036854775808;
     public const MAX: Int64 = 9223372036854775807;
     public const BITS: Int = 64;
@@ -3361,6 +3449,14 @@ implement Int64 {
 // =============================================================================
 
 implement Int128 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     // -2^127
     public const MIN: Int128 = -170141183460469231731687303715884105728;
     // 2^127 - 1
@@ -3512,6 +3608,14 @@ implement Int128 {
 // =============================================================================
 
 implement ISize {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     // On 64-bit platforms (assumed)
     public const MIN: ISize = -9223372036854775808;
     public const MAX: ISize = 9223372036854775807;
@@ -3670,6 +3774,14 @@ implement ISize {
 
 
 implement USize {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: USize = 0;
     public const MAX: USize = 18446744073709551615;
     public const BITS: Int = 64;
@@ -3818,6 +3930,14 @@ implement USize {
 // =============================================================================
 
 implement Float32 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: Float32 = -3.40282347e+38;
     public const MAX: Float32 = 3.40282347e+38;
     public const MIN_POSITIVE: Float32 = 1.17549435e-38;
@@ -3999,6 +4119,14 @@ implement Float32 {
 // =============================================================================
 
 implement Float64 {
+    /// Bare-width f-string padding (`{v:N}` with no explicit
+    /// alignment): numbers RIGHT-align by convention; `Text` implements
+    /// the left-aligning twin — the default dispatches on the value's
+    /// own type (T0606).
+    public fn format_width(self, width: Int, fill: Char) -> Text {
+        self.to_string().pad_left(width, fill)
+    }
+
     public const MIN: Float64 = -1.7976931348623157e+308;
     public const MAX: Float64 = 1.7976931348623157e+308;
     public const MIN_POSITIVE: Float64 = 2.2250738585072014e-308;
