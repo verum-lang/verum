@@ -1642,8 +1642,29 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let i64_type = self.context.i64_type();
         let i32_type = self.context.i32_type();
 
+        // NULL-variant guard (T0330), twin of lower_get_variant_data:
+        // value 0 IS the tag-0 variant under the unit-variant-as-0
+        // encoding (the IsVar lowering's null arm says so), so its TAG
+        // is 0 — never a [NULL+24] load.
+        let current_fn = builder
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .or_internal("lower_get_tag: no insert block/function")?;
+        let load_bb = self.context.append_basic_block(current_fn, "gtag_load");
+        let merge_bb = self.context.append_basic_block(current_fn, "gtag_merge");
+        let entry_bb = builder
+            .get_insert_block()
+            .or_internal("lower_get_tag: no insert block")?;
+        let is_null = builder
+            .build_is_null(variant_ptr, "gtag_is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, merge_bb, load_bb)
+            .or_llvm_err()?;
+
+        builder.position_at_end(load_bb);
         // Load tag from offset OBJECT_HEADER_SIZE
-        // SAFETY: in-bounds GEP on a pointer to an object with known layout; the offset is within the allocated size
+        // SAFETY: in-bounds GEP on a non-null pointer to an object with known layout; the offset is within the allocated size
         let tag_ptr = unsafe {
             builder
                 .build_in_bounds_gep(
@@ -1658,13 +1679,22 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_load(i32_type, tag_ptr, "tag")
             .or_llvm_err()?
             .into_int_value();
-
         // Zero-extend to i64 for VBC register consistency
-        let tag_i64 = builder
+        let tag_loaded = builder
             .build_int_z_extend(tag, i64_type, "tag_i64")
             .or_llvm_err()?;
+        builder
+            .build_unconditional_branch(merge_bb)
+            .or_llvm_err()?;
 
-        Ok(tag_i64)
+        builder.position_at_end(merge_bb);
+        let tag_i64 = builder.build_phi(i64_type, "gtag_value").or_llvm_err()?;
+        tag_i64.add_incoming(&[
+            (&i64_type.const_zero(), entry_bb),
+            (&tag_loaded, load_bb),
+        ]);
+
+        Ok(tag_i64.as_basic_value().into_int_value())
     }
 
     /// Lower SetVariantData instruction.
@@ -1709,9 +1739,34 @@ impl<'ctx> RuntimeLowering<'ctx> {
     ) -> Result<IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
 
+        // NULL-variant guard (T0330). The IsVariant lowering deliberately
+        // accepts value 0 as "the tag-0 variant" (the unit-variant-as-0
+        // encoding: None / Ok(()) travel as 0 through unmonomorphized
+        // generic returns). Payload extraction must honour the SAME
+        // encoding: the payload of a 0-variant is 0 (unit), never a
+        // dereference of NULL+32 — that exact deref was the Tier-1
+        // SIGSEGV in every `f"{maybe}"` (Maybe.fmt's `?` on a write_str
+        // result the RTS default arm zeroed).
+        let current_fn = builder
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .or_internal("lower_get_variant_data: no insert block/function")?;
+        let load_bb = self.context.append_basic_block(current_fn, "gvd_load");
+        let merge_bb = self.context.append_basic_block(current_fn, "gvd_merge");
+        let entry_bb = builder
+            .get_insert_block()
+            .or_internal("lower_get_variant_data: no insert block")?;
+        let is_null = builder
+            .build_is_null(variant_ptr, "gvd_is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, merge_bb, load_bb)
+            .or_llvm_err()?;
+
+        builder.position_at_end(load_bb);
         // Calculate field offset: VARIANT_PAYLOAD_OFFSET + field_idx * 8
         let field_offset = Self::VARIANT_PAYLOAD_OFFSET + (field_idx as u64 * VALUE_SIZE);
-        // SAFETY: in-bounds GEP on a pointer to an object with known layout; the offset is within the allocated size
+        // SAFETY: in-bounds GEP on a non-null pointer to an object with known layout; the offset is within the allocated size
         let field_ptr = unsafe {
             builder
                 .build_in_bounds_gep(
@@ -1722,13 +1777,24 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 )
                 .or_llvm_err()?
         };
-
-        let value = builder
+        let loaded = builder
             .build_load(i64_type, field_ptr, "field_value")
             .or_llvm_err()?
             .into_int_value();
+        builder
+            .build_unconditional_branch(merge_bb)
+            .or_llvm_err()?;
 
-        Ok(value)
+        builder.position_at_end(merge_bb);
+        let value = builder
+            .build_phi(i64_type, "gvd_value")
+            .or_llvm_err()?;
+        value.add_incoming(&[
+            (&i64_type.const_zero(), entry_bb),
+            (&loaded, load_bb),
+        ]);
+
+        Ok(value.as_basic_value().into_int_value())
     }
 
     /// Lower IsVar instruction.
