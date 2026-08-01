@@ -2343,11 +2343,14 @@ impl TypeChecker {
                     // returns None for anything but a real non-const free fn,
                     // so types/consts still take the normal early-return.
                     let bind_name = local_name.unwrap_or(item_name);
-                    if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                    // T0661 rib order: an ambient meta builtin is not a
+                    // real occupant (see the archive-only gate below).
+                    if (self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                        || self.meta_builtin_names.contains(&Text::from(bind_name)))
                         && let Some(scheme) = self
                             .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
                     {
-                        self.ctx.env.insert(bind_name, scheme);
+                        self.insert_fn_scheme_guarded(bind_name, scheme);
                     }
 
                     // T0575 — the TYPE twin of the free-fn fallback
@@ -3308,11 +3311,24 @@ impl TypeChecker {
             // lives in `metadata.functions`; bind straight from it, trying
             // the recorded module first and its re-export source second.
             let bind_name = local_name.unwrap_or(item_name);
-            if self.ctx.env.lookup(&Text::from(bind_name)).is_none() {
+            // T0661 (rib order, the fn-item twin of T0662's module-alias
+            // leg): an env occupant that exists ONLY because it is an
+            // ambient meta builtin (`load_text`, `env`, …) is NOT a real
+            // occupant — an explicit mount outranks the ambient surface
+            // per docs/architecture/name-resolution.md. Pre-fix the
+            // vacancy gate saw the builtin and silently skipped binding
+            // the mounted item, so `load_text(text, format_id)` kept the
+            // builtin's 1-ary scheme and every 2-arg call died with E102.
+            let occupant_is_ambient_builtin = self
+                .meta_builtin_names
+                .contains(&Text::from(bind_name));
+            if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+                || occupant_is_ambient_builtin
+            {
                 if let Some(scheme) = self
                     .resolve_function_via_metadata_reexports(module_path.as_str(), item_name)
                 {
-                    self.ctx.env.insert(bind_name, scheme);
+                    self.insert_fn_scheme_guarded(bind_name, scheme);
                     return Ok(());
                 }
                 if let Some((true_name, src)) = self
@@ -3327,7 +3343,7 @@ impl TypeChecker {
                     && let Some(scheme) =
                         self.resolve_function_via_metadata_reexports(src.as_str(), true_name.as_str())
                 {
-                    self.ctx.env.insert(bind_name, scheme);
+                    self.insert_fn_scheme_guarded(bind_name, scheme);
                     return Ok(());
                 }
             }
@@ -9676,6 +9692,8 @@ impl TypeChecker {
             // Convert Vec to List for the resolver
             let contexts_list: List<_> = func.contexts.iter().cloned().collect();
 
+            // T0660: value-typed contexts — learn plain types first.
+            self.ensure_using_types_registered(&contexts_list);
             // Expand context groups and validate all contexts
             Some(
                 self.context_resolver

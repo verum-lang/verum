@@ -6442,8 +6442,46 @@ impl TypeChecker {
         };
         if !should_skip {
             self.ctx.env.insert(verum_common::Text::from(name), scheme);
+            // T0661: the occupant is no longer the ambient builtin —
+            // drop the provenance so rib-order consumers (and the
+            // vacancy gates below) see a REAL binding from here on.
+            self.meta_builtin_names
+                .remove(&verum_common::Text::from(name));
         }
         !should_skip
+    }
+
+    /// T0660 — value-typed contexts: `using [X]` accepts any KNOWN
+    /// TYPE as a context, not only `context`/`context protocol`
+    /// declarations. The DI model is `provide X = value` — a plain
+    /// record (`ShellContext { cwd, env, … }`) is a first-class
+    /// context VALUE, and the stdlib itself depends on that
+    /// (`core/shell/*` is `using [ShellContext]` throughout). The
+    /// resolver only auto-learns names that resolve to a REAL type in
+    /// scope; a typo'd `using [Databsae]` still fails as before.
+    /// Call before `resolve_requirement` — the ONE registration
+    /// bridge from the type env to the context registry.
+    pub(crate) fn ensure_using_types_registered(
+        &mut self,
+        contexts: &[verum_ast::context::ContextRequirement],
+    ) {
+        for ctx in contexts {
+            if ctx.is_negative {
+                continue;
+            }
+            let Some(name) = ctx.path.as_ident().map(|i| i.name.clone()) else {
+                continue;
+            };
+            if self.context_resolver.is_defined_context(name.as_str())
+                || self.context_resolver.is_group(name.as_str())
+            {
+                continue;
+            }
+            if let Some(ty) = self.ctx.lookup_type(name.as_str()).cloned() {
+                self.context_resolver
+                    .register_context_type(name.clone(), ty);
+            }
+        }
     }
 
     /// Register true compiler intrinsics that cannot be defined in stdlib.
