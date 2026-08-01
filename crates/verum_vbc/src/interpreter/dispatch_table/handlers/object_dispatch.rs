@@ -102,7 +102,7 @@ fn resolve_operator_method(
     }
     // Descriptor names can be generic-stamped ("Complex<Float>");
     // function keys are generic-stripped ("Complex.add").
-    let base = crate::codegen::VbcCodegen::strip_generic_args(&type_name);
+    let base = crate::module::strip_generic_args(&type_name);
     let qualified = format!("{}.{}", base, method);
     let resolved = state.module.find_function_by_name(&qualified).filter(|fid| {
         // A forward declaration with an empty body is not a dispatch

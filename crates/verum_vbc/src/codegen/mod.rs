@@ -1456,11 +1456,7 @@ impl VbcCodegen {
     /// base type names (e.g., "Maybe.is_some") but variables may have full
     /// generic type names (e.g., "Maybe<Int>").
     pub fn strip_generic_args(type_name: &str) -> &str {
-        if let Some(idx) = type_name.find('<') {
-            &type_name[..idx]
-        } else {
-            type_name
-        }
+        crate::module::strip_generic_args(type_name)
     }
 
     /// Extracts the TYPE component from a method-dispatch id, tolerating

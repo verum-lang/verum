@@ -2569,6 +2569,18 @@ pub struct SourceMapEntry {
 // ============================================================================
 
 /// Module dependency.
+/// Strips generic arguments from a type name: "Maybe<Int>" → "Maybe".
+/// Function keys and method-dispatch ids are generic-stripped; this is
+/// the ONE feature-independent authority (the codegen method of the
+/// same name delegates here — the interpreter's object-dispatch arm
+/// needs it without the `codegen` feature).
+pub fn strip_generic_args(type_name: &str) -> &str {
+    match type_name.find('<') {
+        Some(idx) => &type_name[..idx],
+        None => type_name,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleDependency {
     /// Module name.
