@@ -1189,9 +1189,48 @@ impl<'s> CompilationPipeline<'s> {
         // Debug info verification failures (!dbg location on inlined calls) are
         // non-fatal — the code is correct, only metadata is inconsistent. Emit
         // a warning instead of aborting compilation.
+        //
+        // CLASSIFY PER ASSERTION, not per batch: the verifier reports
+        // EVERY failure in one message, and an any-substring match let a
+        // genuine code failure ride a debug-info failure into the
+        // non-fatal arm (observed: "Incorrect number of arguments passed
+        // to called function! … call i64 @DialogState.next(i64 %r4)" was
+        // waved through because an unrelated "!dbg location" line sat in
+        // the same batch — the invalid call then SIGBUSed the O2 pass
+        // pipeline instead of failing verification, T0278/T0322 class).
+        // Non-fatal requires every assertion line to be debug-info-class.
         if let Err(e) = lowering.verify() {
             let err_str = format!("{:?}", e);
-            if err_str.contains("!dbg location") || err_str.contains("debug info") {
+            let is_debug_info_line = |l: &str| {
+                l.contains("!dbg")
+                    || l.contains("debug info")
+                    || l.contains("debug location")
+                    || l.contains("DILocation")
+                    || l.contains("DISubprogram")
+                    || l.contains("DIExpression")
+            };
+            // Assertion headers end with '!' in LLVM verifier prose
+            // ("Incorrect number of arguments passed to called function!",
+            // "invalid #dbg record expression!", …). Lines that are not
+            // headers are the offending-value printouts belonging to the
+            // preceding header; a code-class header poisons the batch.
+            let mut code_class_lines: Vec<&str> = Vec::new();
+            let mut in_debug_assertion = false;
+            for line in err_str.split("\\n").flat_map(|l| l.split('\n')) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if trimmed.ends_with('!') {
+                    in_debug_assertion = is_debug_info_line(trimmed);
+                    if !in_debug_assertion {
+                        code_class_lines.push(trimmed);
+                    }
+                }
+                // Non-header (value printout) lines inherit their header's
+                // classification — nothing to do.
+            }
+            if code_class_lines.is_empty() {
                 tracing::warn!(
                     "LLVM module has debug info inconsistency (non-fatal): {}",
                     err_str.chars().take(200).collect::<String>()
@@ -1199,15 +1238,28 @@ impl<'s> CompilationPipeline<'s> {
                 // Continue compilation — the actual code is correct
             } else {
                 let ir_path = build_dir.join(format!("{}_debug.ll", module_name));
+                let headline = code_class_lines
+                    .iter()
+                    .take(4)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 if !lowering.has_arity_collisions() {
                     let _ = lowering.write_ir_to_file(&ir_path);
                     return Err(anyhow::anyhow!(
-                        "LLVM module verification failed (IR dumped to {}): {:?}",
+                        "LLVM module verification failed — {} code-class assertion(s), first: [{}] (IR dumped to {}): {:?}",
+                        code_class_lines.len(),
+                        headline,
                         ir_path.display(),
                         e
                     ));
                 } else {
-                    return Err(anyhow::anyhow!("LLVM module verification failed: {:?}", e));
+                    return Err(anyhow::anyhow!(
+                        "LLVM module verification failed — {} code-class assertion(s), first: [{}]: {:?}",
+                        code_class_lines.len(),
+                        headline,
+                        e
+                    ));
                 }
             }
         }

@@ -14592,6 +14592,36 @@ fn lower_call_method<'ctx>(
                     let mut case_blocks = Vec::new();
 
                     for (tid, fname) in &dispatch_entries {
+                        // ARITY GATE: the emitter below supports exactly two
+                        // call shapes — pc == args (method takes receiver) and
+                        // pc == args-1 (static/no-self method, receiver
+                        // dropped). A same-named candidate with any OTHER
+                        // arity is a misresolution (bare `Type.method` names
+                        // collide across types/protocols), and emitting the
+                        // call anyway produced verifier-invalid IR ("Incorrect
+                        // number of arguments … @DialogState.next(i64 %r4)")
+                        // that crashed the O2 pass pipeline once the batch
+                        // classifier let it through. Route such type_ids to
+                        // the default arm (the documented zero contract)
+                        // instead of manufacturing an invalid call.
+                        let pc = ctx
+                            .get_module()
+                            .get_function(fname)
+                            .map(|f| f.count_params() as usize);
+                        let compatible =
+                            pc.map_or(false, |pc| pc == arg_vals.len() || pc + 1 == arg_vals.len());
+                        if !compatible {
+                            if std::env::var_os("VERUM_TRACE_DYN").is_some() {
+                                eprintln!(
+                                    "[dyn-dispatch] tid={} candidate `{}` arity {:?} incompatible with {} arg(s) — routed to default",
+                                    tid,
+                                    fname,
+                                    pc,
+                                    arg_vals.len()
+                                );
+                            }
+                            continue;
+                        }
                         let bb = llvm_cx.append_basic_block(current_fn, &format!("dyn_{}", tid));
                         cases.push((i64_type.const_int(*tid as u64, false), bb));
                         case_blocks.push((bb, fname.clone()));
@@ -14646,10 +14676,20 @@ fn lower_call_method<'ctx>(
                         let pc = target_fn.count_params() as usize;
                         let raw_args: Vec<BasicMetadataValueEnum> = if pc == arg_vals.len() {
                             arg_vals.clone()
-                        } else if pc == arg_vals.len() - 1 {
+                        } else if pc + 1 == arg_vals.len() {
                             arg_vals[1..].to_vec()
                         } else {
-                            arg_vals.clone()
+                            // Unreachable post-ARITY-GATE (case_blocks
+                            // construction filters incompatible candidates).
+                            // A hit here means a future edit bypassed the
+                            // gate — fail the lowering loudly instead of
+                            // emitting a verifier-invalid call.
+                            return Err(LlvmLoweringError::internal(format!(
+                                "dyn-dispatch arity gate bypassed: `{}` declares {} param(s) against {} arg(s)",
+                                fname,
+                                pc,
+                                arg_vals.len()
+                            )));
                         };
 
                         // Coerce each argument to match the target function's parameter type
