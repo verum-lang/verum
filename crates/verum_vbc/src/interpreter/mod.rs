@@ -555,6 +555,12 @@ impl Interpreter {
                         &e,
                         crate::interpreter::error::InterpreterError::Panic { message }
                             if message.starts_with("[xmod-unresolved]")
+                                // XMOD-BAND-NAME-CARRY-1 (T0277): a NAMELESS
+                                // unresolvable external is re-homed to
+                                // REMAP_POISON at build — same lenient class,
+                                // now dying through the named poison
+                                // diagnostic instead of '<no name recorded>'.
+                                || message.starts_with("[remap-poison]")
                     );
                     if is_lenient_stub_panic {
                         // This is a KNOWN, HANDLED, EXPECTED case: a global

@@ -20589,12 +20589,83 @@ impl VbcCodegen {
         // (u32::MAX - …).  Stage-stub ids keep their stub-range ids —
         // those ranges are already disjoint from [0, N) by
         // construction.
-        let xmod_band: std::collections::HashMap<u32, u32> = external_pending
-            .iter()
-            .filter(|fid| !is_stage_stub(**fid))
-            .enumerate()
-            .map(|(seq, fid)| (*fid, crate::module::XMOD_CALL_ID_BAND_BASE + seq as u32))
-            .collect();
+        // **XMOD-BAND-NAME-CARRY-1 (T0277 leg B)**: a band id is a BY-NAME
+        // reference — the name IS the resolution key (`resolve_external_bands`
+        // / ArchiveBodyRemap Tier-0 both chase it). Build the id→name index
+        // BEFORE the re-home so an id with NO recoverable name is never
+        // re-homed to a silently-nameless band (the runtime's
+        // `[xmod-unresolved] … <no name recorded>` dead end, with zero
+        // provenance for the reader). Nameless non-stub externals map to
+        // REMAP_POISON_ID instead: dispatch still dies, but through the
+        // named poison diagnostic, and the build logs the defect with the
+        // raw ids while the compile context still exists. The index is
+        // built ONCE here and reused by the `external_function_names`
+        // emission below (which previously built its own copy).
+        let ext_id_to_name: std::collections::HashMap<u32, String> = {
+            let mut m: std::collections::HashMap<u32, String> =
+                std::collections::HashMap::with_capacity(external_pending.len());
+            for (name, info) in self.ctx.functions.iter() {
+                if !external_seen.contains(&info.id.0) {
+                    continue;
+                }
+                m.entry(info.id.0)
+                    .and_modify(|existing| {
+                        // Canonical ranked choice (see canonical_name_better):
+                        // deterministic across HashMap walk order.
+                        if Self::canonical_name_better(name, existing) {
+                            *existing = name.clone();
+                        }
+                    })
+                    .or_insert_with(|| name.clone());
+            }
+            // SERIALIZE-STUB-IDENTITY-1: sentinel spellings recovered from
+            // the side table when the real body overwrote the ctx slot.
+            for (&sid, nm) in self.ctx.stage3_stub_names.iter() {
+                if external_seen.contains(&sid) {
+                    m.entry(sid).or_insert_with(|| nm.clone());
+                }
+            }
+            // STUB-STAGE-INSUITE-2 (#26): archive-merge band-redirect NAMEs
+            // (drained here; the emission block below consumes the drained
+            // copy).
+            for (fresh_id, name) in self.user_xmod_carry.iter() {
+                m.entry(*fresh_id).or_insert_with(|| name.clone());
+            }
+            m
+        };
+        let carried_externals: Vec<(u32, String)> = std::mem::take(&mut self.user_xmod_carry);
+        let mut nameless_externals: Vec<u32> = Vec::new();
+        let xmod_band: std::collections::HashMap<u32, u32> = {
+            let mut seq: u32 = 0;
+            external_pending
+                .iter()
+                .filter(|fid| !is_stage_stub(**fid))
+                .map(|fid| {
+                    if ext_id_to_name.contains_key(fid) {
+                        let band = crate::module::XMOD_CALL_ID_BAND_BASE + seq;
+                        seq += 1;
+                        (*fid, band)
+                    } else {
+                        nameless_externals.push(*fid);
+                        (*fid, crate::stub_ranges::REMAP_POISON_ID)
+                    }
+                })
+                .collect()
+        };
+        if !nameless_externals.is_empty() {
+            tracing::error!(
+                target: "verum_vbc::codegen::external_funcs",
+                "XMOD-BAND-NAME-CARRY-1: {} cross-module reference id(s) have NO \
+                 recoverable name in module '{}' — re-homed to REMAP_POISON so \
+                 dispatch dies named instead of '<no name recorded>'. Raw ids: {:?}. \
+                 Each is a Call operand that entered the function table without a \
+                 ctx.functions / stage3-stub / band-carry name — fix the producing \
+                 registration, not this diagnostic.",
+                nameless_externals.len(),
+                self.config.module_name,
+                nameless_externals,
+            );
+        }
 
         // Encode functions and their bytecode, remapping name_id and func_id references
         for func in &self.functions {
@@ -20965,79 +21036,26 @@ impl VbcCodegen {
         // See the rationale block at the collection site above for
         // why this is needed and the size budget it lives within.
         if !external_pending.is_empty() {
-            // **STUB-STAGE-INSUITE-2 (#26)** — drain the archive-merge
-            // band redirects (`band_redirect`'s unresolvable-at-merge
-            // externals: NAME → fresh id in `user_xmod_band_by_name`,
-            // carried here).  These fresh ids sit ABOVE the
-            // `in_xmod_call_band` window (`XMOD_CALL_ID_BAND_BASE +
-            // 0x1000_0000` vs the `+ 0x800_0000`-wide predicate), so the
-            // `xmod_band` re-home pass below rewrites every body operand
-            // holding one to a FRESH in-window `XMOD_CALL_ID_BAND_BASE +
-            // seq` id.  Seeding `ctx_id_to_name` with the carried NAME
-            // makes the `external_pending` loop emit
-            // `(re-homed-in-window-id → NAME)` — keyed by exactly the id
-            // the bytecode now carries — so the runtime's
-            // `resolve_xmod_band` binds it BY NAME to the real body once
-            // every archive has loaded (and AOT-STUB-SENTINEL-CHASE-1
-            // does the same on Tier-1).  Pre-fix the carry was appended
-            // UNDER ITS PRE-REHOME id, which no operand references, so
-            // the re-homed operand reached the terminal user module with
-            // NO name record and died `FunctionNotFound(0x2000_00xx)` —
-            // the frozen-band-id root of task #20's global-ctor MISS
-            // class (`__tls_init_*$static$*` statics left nil, e.g.
-            // `static NEXT_ID: AtomicInt = AtomicInt.new(1)` whose
-            // `AtomicInt.new` was unresolvable at the async-module
-            // merge).  Draining here empties the legacy append below.
-            let carried_externals: Vec<(u32, String)> =
-                std::mem::take(&mut self.user_xmod_carry);
-            let mut ctx_id_to_name: std::collections::HashMap<u32, String> =
-                std::collections::HashMap::with_capacity(external_pending.len());
-            for (name, info) in self.ctx.functions.iter() {
-                if !external_seen.contains(&info.id.0) {
-                    continue;
-                }
-                ctx_id_to_name
-                    .entry(info.id.0)
-                    .and_modify(|existing| {
-                        // Canonical ranked choice (see canonical_name_better):
-                        // the previous dots-only rule left EQUAL-dot ties
-                        // (bare vs `name#arity`, both zero dots) to HashMap
-                        // walk order — the `on_signal`/`on_signal#2` byte
-                        // dice in every module's external-name table.
-                        if Self::canonical_name_better(name, existing) {
-                            *existing = name.clone();
-                        }
-                    })
-                    .or_insert_with(|| name.clone());
-            }
-            // SERIALIZE-STUB-IDENTITY-1: a name-resolved stub whose
-            // `ctx.functions` slot was overwritten by the real body's
-            // later registration has NO ctx key left pointing at the
-            // sentinel — recover the spelling from the
-            // `stage3_stub_names` side table (populated at
-            // registration and by `emit_stage3_stub_descriptors`), so
-            // the sentinel still rides `external_function_names` and
-            // stays name-chaseable at archive load.
-            for (&sid, nm) in self.ctx.stage3_stub_names.iter() {
-                if external_seen.contains(&sid) {
-                    ctx_id_to_name.entry(sid).or_insert_with(|| nm.clone());
-                }
-            }
-            // STUB-STAGE-INSUITE-2 (#26): seed the carried band-redirect
-            // NAMEs.  The `external_pending` loop keys each entry through
-            // `xmod_band` (the in-window re-home), so the emitted record
-            // matches the id the body operand now carries.
-            for (fresh_id, name) in &carried_externals {
-                ctx_id_to_name
-                    .entry(*fresh_id)
-                    .or_insert_with(|| name.clone());
-            }
+            // **STUB-STAGE-INSUITE-2 (#26)** — the id→name index
+            // (`ext_id_to_name`) and the band-redirect carry drain were
+            // HOISTED above the `xmod_band` construction
+            // (XMOD-BAND-NAME-CARRY-1): the re-home decision itself needs
+            // name availability now, and building the index twice invited
+            // drift between the re-home's view and the emitted table.
+            // This block emits `(re-homed-in-window-id → NAME)` keyed by
+            // exactly the id the bytecode now carries, so the runtime's
+            // band resolution (`resolve_external_bands`, and
+            // AOT-STUB-SENTINEL-CHASE-1 on Tier-1) binds it BY NAME once
+            // every archive has loaded. Pre-#26 the carry was appended
+            // UNDER ITS PRE-REHOME id, which no operand references — the
+            // frozen-band-id root of task #20's global-ctor MISS class.
+            let _ = &carried_externals; // drained above; names already seeded
             let mut external_list: Vec<(FunctionId, StringId)> =
                 Vec::with_capacity(external_pending.len());
             for fid in external_pending {
-                if let Some(name) = ctx_id_to_name.get(&fid) {
+                if let Some(name) = ext_id_to_name.get(&fid) {
                     // Clone the name out so the borrow on
-                    // `ctx_id_to_name` (and transitively on `self.ctx`)
+                    // `ext_id_to_name` (and transitively on `self.ctx`)
                     // is released before `module.intern_string`.
                     let owned = name.clone();
                     let sid = module.intern_string(&owned);
@@ -22449,6 +22467,26 @@ impl VbcCodegen {
             ctx_func_by_name: &ctx_func_by_name,
             archive_func_by_name: &archive_func_by_name_snapshot,
         };
+
+        // **T0378 producer-side remap: ATTEMPTED AND REVERTED (T0277,
+        // 2026-08-01).** `pi.methods` carries archive-local FunctionIds
+        // cloned verbatim at type import; remapping them HERE through
+        // THIS module's ranked resolution (`remap.map_function` over
+        // every non-u32::MAX slot, gated on the user list still being
+        // element-equal to the archive's) LAUNDERS entries that were
+        // already stale/cross-module AT BAKE TIME into confidently-wrong
+        // live ids: verifier-caught on a 3-line probe as
+        // `call @"__band_wrapper$core$base$memory$cbgr_dealloc"(i64 %r7)`
+        // — a protocol-method slot resolved to an arity-mismatched free
+        // function, which the dispatch consumers then TRUST (the
+        // list-equality provenance test proves the LIST came from this
+        // archive clone, not that each ID inside is in this module's id
+        // space — cross-module impl methods are foreign ids at bake).
+        // A sound producer-side fix needs PER-SLOT provenance (which
+        // module owns each method id) threaded from the importer — the
+        // deeper surgery the T0378 dossier names. Until then the
+        // consumer-side guard (dyn-switch name-prefix check, 9ef39351f)
+        // plus the by-name probe fallback remain the working defense.
 
         // ----- TLS slot remap — fixes cross-archive slot collisions -----
         //
