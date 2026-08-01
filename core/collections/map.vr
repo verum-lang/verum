@@ -2144,19 +2144,37 @@ implement<K: Hash + Eq, V: Hash> Hash for Map<K, V> {
     }
 }
 
+// Both fmt bodies iterate through the PUBLIC `iter()` surface — the
+// same shape `Set`'s fmt bodies use. The previous bodies walked
+// `self.entries` as a raw `Slot{hash, key, value}` array, which is the
+// DECLARED record layout only: the runtime's builtin Map object backs
+// `entries` with a flat `[key, value]` pair array (no hash field), so
+// every raw-slot read misfired at Tier-0 (`print(f"{m}")` null-derefed
+// in `Map.fmt`, T0615). Going through `iter()` is layout-honest on
+// both representations — stdlib bodies speak to containers through
+// their own public API, never through assumed memory.
+
 implement<K: Hash + Eq + Debug, V: Debug> Debug for Map<K, V> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        let mut debug_map = f.debug_map();
-        // Direct iteration over entries to avoid associated type resolution issues
-        for i in range(0, self.cap) {
-            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) {
-                let key: &K = &entry.key;
-                let value: &V = &entry.value;
-                debug_map.entry(key, value);
+        f.write_str("{")?;
+        let mut first = true;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let (key, value) = pair;
+                    key.fmt_debug(f)?;
+                    f.write_str(": ")?;
+                    value.fmt_debug(f)?;
+                }
             }
         }
-        debug_map.finish()
+        f.write_str("}")
     }
 }
 
@@ -2164,18 +2182,20 @@ implement<K: Hash + Eq + Display, V: Display> Display for Map<K, V> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("{")?;
         let mut first = true;
-        for i in range(0, self.cap) {
-            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
-            if (entry.hash > 0) {
-                if !first {
-                    f.write_str(", ")?;
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    first = false;
+                    let (key, value) = pair;
+                    key.fmt(f)?;
+                    f.write_str(": ")?;
+                    value.fmt(f)?;
                 }
-                first = false;
-                let key: &K = &entry.key;
-                let value: &V = &entry.value;
-                key.fmt(f)?;
-                f.write_str(": ")?;
-                value.fmt(f)?;
             }
         }
         f.write_str("}")

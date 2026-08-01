@@ -600,13 +600,16 @@ fn format_map_for_print_depth(
             return "{}".to_string();
         }
         let entries_data = entries_ptr.add(data_offset) as *const Value;
-        // Map entry layout: [hash, key, value, _reserved] = 4 Values per entry
+        // Canonical builtin-Map entry layout (the constructor/insert
+        // intercepts' authority): [key, value] pairs at stride 2, an
+        // EMPTY slot marked by a Unit key. The previous stride-4
+        // [hash, key, value, _] read was a layout lie — a populated
+        // map printed `{}` (T0615).
         let mut parts = Vec::new();
         for i in 0..cap {
-            let hash = (*entries_data.add(i * 4)).as_i64();
-            if hash != 0 {
-                let key = *entries_data.add(i * 4 + 1);
-                let val = *entries_data.add(i * 4 + 2);
+            let key = *entries_data.add(i * 2);
+            if !key.is_unit() {
+                let val = *entries_data.add(i * 2 + 1);
                 parts.push(format!(
                     "{}: {}",
                     format_value_for_print_depth(state, key, depth + 1),
@@ -644,12 +647,15 @@ fn format_set_for_print_depth(
             return "{}".to_string();
         }
         let entries_data = entries_ptr.add(data_offset) as *const Value;
-        // Set entry layout: [hash, key, _unused, _reserved] = 4 Values per entry
+        // Canonical builtin-Set entry layout (the insert intercept's
+        // authority): [element, unit] pairs at stride 2, an EMPTY slot
+        // marked by a Unit element — Set shares Map's flat object
+        // shape. The previous stride-4 [hash, key, _, _] read printed
+        // populated sets as `{}` (T0615 twin).
         let mut parts = Vec::new();
         for i in 0..cap {
-            let hash = (*entries_data.add(i * 4)).as_i64();
-            if hash != 0 {
-                let key = *entries_data.add(i * 4 + 1);
+            let key = *entries_data.add(i * 2);
+            if !key.is_unit() {
                 parts.push(format_value_for_print_depth(state, key, depth + 1));
             }
         }
