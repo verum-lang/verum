@@ -49,8 +49,10 @@ use verum_llvm::AddressSpace;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
-use verum_llvm::types::FunctionType;
-use verum_llvm::values::{FunctionValue, IntValue};
+use verum_llvm::types::{BasicMetadataTypeEnum, FunctionType};
+use verum_llvm::values::{
+    BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue,
+};
 
 use super::error::{BuildExt, CallSiteExt, Result as LlvmResult};
 
@@ -324,6 +326,66 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
     SyscallSig { name: "fork",   args: &[], ret: AbiTy::I64 },
     SyscallSig { name: "dup2",   args: &[AbiTy::I64, AbiTy::I64], ret: AbiTy::I64 },
     SyscallSig { name: "execvp", args: &[AbiTy::Ptr, AbiTy::Ptr], ret: AbiTy::I64 },
+    // ── Memory mapping ───────────────────────────────────────────────
+    // C: void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
+    // Dual-declared symbol: `core/sys/darwin/libsystem.vr` spells the
+    // C widths (prot/flags/fd Int32) while `emit_verum_os_alloc` and
+    // `emit_macos_declarations` hold all-i64. Whichever declaration
+    // landed first, the OTHER path's call was verifier-invalid
+    // ("Call parameter type does not match function signature",
+    // `i64 3` against an `i32` prot slot) — the p32/p35 AOT breakage
+    // of T0278. Canonical i64-everywhere per the module docstring;
+    // the returned void* travels as I64 (pthread_getspecific
+    // precedent), call sites `inttoptr` back.
+    SyscallSig {
+        name: "mmap",
+        args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // ── kqueue event loop (darwin io-engine) ────────────────────────
+    // Dual-declared: `ensure_kqueue_declared` (platform_ir, all-i64)
+    // vs the libsystem.vr externs (Int32 widths). All emit-side calls
+    // route through the adaptive call helper, so either spelling makes
+    // valid IR — the registry entry pins WHICH one deterministically.
+    // C: int kqueue(void)
+    SyscallSig { name: "kqueue", args: &[], ret: AbiTy::I64 },
+    // C: int kevent(int kq, const struct kevent *changelist, int nchanges,
+    //               struct kevent *eventlist, int nevents,
+    //               const struct timespec *timeout)
+    SyscallSig {
+        name: "kevent",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // ── Socket metadata ──────────────────────────────────────────────
+    // C: int getsockopt(int, int, int, void *restrict, socklen_t *restrict)
+    SyscallSig {
+        name: "getsockopt",
+        args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // C: int getsockname(int, struct sockaddr *restrict, socklen_t *restrict)
+    // The T0218 i64-vs-i32 drift symbol: `runtime.rs::
+    // get_or_declare_getsockname` spelled the C widths while the bake's
+    // FFI extern carried i64 — first declarer won nondeterministically.
+    SyscallSig {
+        name: "getsockname",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // C: int fcntl(int fd, int cmd, ... /* arg */)
+    // Declared FIXED 3-arg here, mirroring the libsystem.vr extern and
+    // every emit-path call shape (F_GETFL passes 0, F_SETFL passes the
+    // flag word). NOTE the true C prototype is variadic; on
+    // arm64-darwin variadic args travel on the stack, so if the
+    // fixed-3 convention is ever shown to misdeliver the third arg the
+    // fix is a `verum_raw_fcntl3` C-shim (the `verum_raw_open3`
+    // precedent), not a variadic declaration here.
+    SyscallSig {
+        name: "fcntl",
+        args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
 ];
 
 // =============================================================================
@@ -446,6 +508,164 @@ pub fn canonical_fn_type<'ctx>(
         AbiTy::I64 => i64_t.fn_type(&arg_tys, false),
         AbiTy::Ptr => ptr_t.fn_type(&arg_tys, false),
         AbiTy::Void => cref.void_type().fn_type(&arg_tys, false),
+    }
+}
+
+/// **THE adaptive C-call authority.** Coerce `args` to `func`'s
+/// DECLARED parameter types, build the call, and coerce the result
+/// back to the Verum-uniform `i64` slot (`None` for a void callee).
+///
+/// Why one function: an external symbol can be declared by any of
+/// three authorities — this registry (canonical, via
+/// `predeclare_all`), a stdlib FFI extern
+/// (`core/sys/*/…​.vr`, C widths), or a legacy local
+/// `add_function` — and LLVM requires the call site's argument types
+/// to match the declaration EXACTLY. Every emit path that dials a C
+/// symbol therefore adapts to WHICHEVER declaration won, making the
+/// IR valid independent of declaration order. Pre-consolidation this
+/// logic existed three times with drifting semantics
+/// (`platform_ir::call_native_i64` — zext widening,
+/// `platform_ir::call_ffi_adapted` — sext widening, no arity check,
+/// `runtime::adapt_libc_args` — int-only, no ptr conversions); the
+/// three are now thin delegates of this one body.
+///
+/// Coercions:
+///   * int → narrower int param: `trunc` (bit-exact for every valid
+///     fd / flag / errno value).
+///   * int → wider int param: `sext` — POSIX scalars are C `int`s;
+///     `-1` sentinels (fd, MAP_FAILED, error returns) must stay `-1`.
+///   * int ↔ pointer: `inttoptr` / `ptrtoint` (+trunc when the int
+///     param is narrower than 64).
+///   * sub-64 int return: `sext` to i64 (negative-errno semantics).
+///   * pointer return: `ptrtoint` to i64.
+///
+/// Variadic callees: only the declared fixed parameters are adapted;
+/// trailing variadic args pass through unchanged (the caller owns
+/// their promotion).
+pub(crate) fn call_c_adapted<'ctx>(
+    builder: &Builder<'ctx>,
+    func: FunctionValue<'ctx>,
+    args: &[BasicMetadataValueEnum<'ctx>],
+    name: &str,
+) -> LlvmResult<Option<IntValue<'ctx>>> {
+    use verum_llvm::types::BasicTypeEnum;
+
+    let fn_ty = func.get_type();
+    let param_types = fn_ty.get_param_types();
+    if args.len() < param_types.len()
+        || (args.len() > param_types.len() && !fn_ty.is_var_arg())
+    {
+        return Err(super::error::LlvmLoweringError::internal(format!(
+            "call_c_adapted({}): arity mismatch — caller passed {} args, `{}` declares {}{}",
+            name,
+            args.len(),
+            func.get_name().to_string_lossy(),
+            param_types.len(),
+            if fn_ty.is_var_arg() { "+ (variadic)" } else { "" },
+        )));
+    }
+
+    let mut adapted: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(args.len());
+    for (i, a) in args.iter().enumerate() {
+        let Some(expected) = param_types.get(i) else {
+            // Variadic tail — pass through.
+            adapted.push(*a);
+            continue;
+        };
+        let av: BasicValueEnum<'ctx> = match (*a).try_into() {
+            Ok(v) => v,
+            Err(_) => {
+                // Metadata-only argument (never produced by C-call
+                // emitters) — pass through untouched.
+                adapted.push(*a);
+                continue;
+            }
+        };
+        let coerced: BasicValueEnum<'ctx> = match (av, expected) {
+            (BasicValueEnum::IntValue(iv), BasicMetadataTypeEnum::IntType(want)) => {
+                let have_bits = iv.get_type().get_bit_width();
+                let want_bits = want.get_bit_width();
+                if have_bits == want_bits {
+                    iv.into()
+                } else if have_bits > want_bits {
+                    builder
+                        .build_int_truncate(iv, *want, &format!("{}_a{}_trunc", name, i))
+                        .or_llvm_err()?
+                        .into()
+                } else {
+                    builder
+                        .build_int_s_extend(iv, *want, &format!("{}_a{}_sext", name, i))
+                        .or_llvm_err()?
+                        .into()
+                }
+            }
+            (BasicValueEnum::IntValue(iv), BasicMetadataTypeEnum::PointerType(pt)) => builder
+                .build_int_to_ptr(iv, *pt, &format!("{}_a{}_i2p", name, i))
+                .or_llvm_err()?
+                .into(),
+            (BasicValueEnum::PointerValue(pv), BasicMetadataTypeEnum::PointerType(_)) => {
+                pv.into()
+            }
+            (BasicValueEnum::PointerValue(pv), BasicMetadataTypeEnum::IntType(want)) => {
+                let ctx_i64 = want.get_context().i64_type();
+                let as_i64 = builder
+                    .build_ptr_to_int(pv, ctx_i64, &format!("{}_a{}_p2i", name, i))
+                    .or_llvm_err()?;
+                if want.get_bit_width() == 64 {
+                    as_i64.into()
+                } else {
+                    builder
+                        .build_int_truncate(as_i64, *want, &format!("{}_a{}_ptrtrunc", name, i))
+                        .or_llvm_err()?
+                        .into()
+                }
+            }
+            // Float / vector / struct positions: the C-symbol emitters
+            // never mix these across the int/ptr boundary — pass
+            // through and let the verifier arbitrate genuinely wrong
+            // shapes instead of silently bitcasting.
+            _ => av,
+        };
+        adapted.push(coerced.into());
+    }
+
+    let call_site = builder
+        .build_call(func, &adapted, name)
+        .or_llvm_err()?;
+
+    match fn_ty.get_return_type() {
+        None => Ok(None),
+        Some(BasicTypeEnum::IntType(it)) => {
+            let raw = call_site
+                .basic_value_or_else(|| format!("{}: call returned no basic value", name))?
+                .into_int_value();
+            if it.get_bit_width() == 64 {
+                Ok(Some(raw))
+            } else {
+                // Sign-extend so POSIX `-1` errors stay `-1` in i64 slots.
+                let i64_t = it.get_context().i64_type();
+                Ok(Some(
+                    builder
+                        .build_int_s_extend(raw, i64_t, &format!("{}_ret_sext", name))
+                        .or_llvm_err()?,
+                ))
+            }
+        }
+        Some(BasicTypeEnum::PointerType(_)) => {
+            let raw = call_site
+                .basic_value_or_else(|| format!("{}: call returned no basic value", name))?
+                .into_pointer_value();
+            let i64_t = raw.get_type().get_context().i64_type();
+            Ok(Some(
+                builder
+                    .build_ptr_to_int(raw, i64_t, &format!("{}_ret_p2i", name))
+                    .or_llvm_err()?,
+            ))
+        }
+        Some(other) => Err(super::error::LlvmLoweringError::internal(format!(
+            "call_c_adapted({}): unsupported return type {:?}",
+            name, other
+        ))),
     }
 }
 

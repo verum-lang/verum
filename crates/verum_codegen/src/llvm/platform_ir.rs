@@ -23,7 +23,7 @@ use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
 use verum_llvm::values::{
-    BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, IntValue,
+    BasicValue, BasicValueEnum, FunctionValue, IntValue,
 };
 use verum_llvm::{AddressSpace, IntPredicate};
 
@@ -117,35 +117,14 @@ impl<'ctx> PlatformIR<'ctx> {
 
     /// **Adaptive call helper — Verum-ABI ⇄ POSIX-ABI bridge.** (#96)
     ///
-    /// Calls `func` with Verum-ABI args (caller passes i64 ints,
-    /// pointers, or the actual native type — whichever is available),
-    /// inspects the callee's declared signature, and coerces each arg
-    /// individually to match.  Returns the result coerced back to i64
-    /// (sign-extending i32 returns to preserve negative-error
-    /// semantics: `-1` stays `-1`).
-    ///
-    /// **Why this exists**: pre-fix every socket-family call site in
-    /// `platform_ir.rs` did the ABI dance manually — but inconsistently.
-    /// `verum_tcp_connect` assumed `socket` returned i64; after #96
-    /// fixed the libsys wrapper signature reconciliation, `socket`
-    /// returns i32 (matching the POSIX FFI declaration in
-    /// `core/sys/darwin/libsystem.vr`).  Without coercion the wrapper
-    /// emitted `ret i32 %fd` from an i64-returning function — LLVM
-    /// verifier rejection.  Centralising the dance into one helper
-    /// eliminates the latent class of "i32 leaked into i64 slot"
-    /// bugs uniformly.
-    ///
-    /// **Coercions**:
-    ///   * caller IntValue → callee param IntType: zext / trunc as
-    ///     needed (zext for unsigned widening of fd / port / opt-id).
-    ///   * caller IntValue (i64 address) → callee PointerType:
-    ///     int_to_ptr.
-    ///   * caller PointerValue → callee IntType: ptr_to_int.
-    ///   * caller PointerValue → callee PointerType: pass through.
-    ///
-    /// **Cost**: zero at runtime — the trunc/zext / ptr-conv
-    /// instructions are folded by `instcombine` when the source/dest
-    /// types are statically known.
+    /// Thin delegate of the ONE adaptive C-call authority,
+    /// `syscall_registry::call_c_adapted` — see its doc for the
+    /// coercion table and the declaration-order-independence rationale.
+    /// This wrapper keeps the historical `&[BasicValueEnum]` surface
+    /// its ~40 platform-IR call sites use and preserves the
+    /// void-callee diagnostic below. (`call_ffi_adapted`, the former
+    /// sext-widening twin of this method, is consolidated into the
+    /// same authority and deleted.)
     fn call_native_i64(
         &self,
         builder: &verum_llvm::builder::Builder<'ctx>,
@@ -153,91 +132,12 @@ impl<'ctx> PlatformIR<'ctx> {
         args: &[verum_llvm::values::BasicValueEnum<'ctx>],
         name: &str,
     ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
-        use verum_llvm::types::BasicTypeEnum;
-        use verum_llvm::values::{BasicMetadataValueEnum, BasicValueEnum};
+        use verum_llvm::values::BasicMetadataValueEnum;
 
-        let i64_type = self.context.i64_type();
-        let fn_ty = func.get_type();
-        let n_params = func.count_params() as usize;
-        if args.len() != n_params {
-            return Err(super::error::LlvmLoweringError::internal(format!(
-                "call_native_i64({}): arity mismatch — caller passed {} args, callee declares {}",
-                name,
-                args.len(),
-                n_params
-            )));
-        }
-
-        let mut coerced: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(n_params);
-        for (i, arg) in args.iter().enumerate() {
-            let param_ty = func
-                .get_nth_param(i as u32)
-                .ok_or_else(|| {
-                    super::error::LlvmLoweringError::internal(format!(
-                        "call_native_i64({}): missing param {}",
-                        name, i
-                    ))
-                })?
-                .get_type();
-
-            let v: BasicValueEnum<'ctx> = match (*arg, param_ty) {
-                // Int → Int: trunc (caller wider) or zext (caller narrower)
-                (BasicValueEnum::IntValue(iv), BasicTypeEnum::IntType(pt)) => {
-                    let src_bits = iv.get_type().get_bit_width();
-                    let dst_bits = pt.get_bit_width();
-                    if src_bits == dst_bits {
-                        iv.into()
-                    } else if src_bits > dst_bits {
-                        builder
-                            .build_int_truncate(iv, pt, &format!("{}_a{}_trunc", name, i))
-                            .or_llvm_err()?
-                            .into()
-                    } else {
-                        builder
-                            .build_int_z_extend(iv, pt, &format!("{}_a{}_zext", name, i))
-                            .or_llvm_err()?
-                            .into()
-                    }
-                }
-                // Int → Pointer: inttoptr
-                (BasicValueEnum::IntValue(iv), BasicTypeEnum::PointerType(pt)) => builder
-                    .build_int_to_ptr(iv, pt, &format!("{}_a{}_i2p", name, i))
-                    .or_llvm_err()?
-                    .into(),
-                // Pointer → Pointer: pass through (LLVM opaque ptrs)
-                (BasicValueEnum::PointerValue(pv), BasicTypeEnum::PointerType(_)) => pv.into(),
-                // Pointer → Int: ptrtoint
-                (BasicValueEnum::PointerValue(pv), BasicTypeEnum::IntType(pt)) => {
-                    let as_i64 = builder
-                        .build_ptr_to_int(pv, i64_type, &format!("{}_a{}_p2i", name, i))
-                        .or_llvm_err()?;
-                    if pt.get_bit_width() == 64 {
-                        as_i64.into()
-                    } else {
-                        builder
-                            .build_int_truncate(as_i64, pt, &format!("{}_a{}_ptrtrunc", name, i))
-                            .or_llvm_err()?
-                            .into()
-                    }
-                }
-                (other_arg, other_ty) => {
-                    return Err(super::error::LlvmLoweringError::internal(format!(
-                        "call_native_i64({}): unsupported coercion arg #{} {:?} → {:?}",
-                        name, i, other_arg, other_ty
-                    )));
-                }
-            };
-            coerced.push(v.into());
-        }
-
-        let _ = fn_ty; // reserved for future arity-collision diagnostics
-        let call_site = builder
-            .build_call(func, &coerced, &format!("{}_call", name))
-            .or_llvm_err()?;
-
-        // Coerce return to i64.
-        let ret_ty = func.get_type().get_return_type();
-        match ret_ty {
+        let meta_args: Vec<BasicMetadataValueEnum<'ctx>> =
+            args.iter().map(|v| (*v).into()).collect();
+        match super::syscall_registry::call_c_adapted(builder, func, &meta_args, name)? {
+            Some(ret) => Ok(ret),
             None => Err(super::error::LlvmLoweringError::internal(format!(
                 "call_native_i64({}): callee `{}` returns void; use build_call directly.\n  \
                  callee fn_type: {:?}\n  \
@@ -248,36 +148,6 @@ impl<'ctx> PlatformIR<'ctx> {
                 func.get_name().to_string_lossy(),
                 func.get_type(),
                 func.get_name().to_string_lossy(),
-            ))),
-            Some(BasicTypeEnum::IntType(it)) => {
-                let raw = call_site
-                    .basic_value_or_else(|| format!("{}: call returned no basic value", name))?
-                    .into_int_value();
-                let bits = it.get_bit_width();
-                if bits == 64 {
-                    Ok(raw)
-                } else if bits < 64 {
-                    // Sign-extend so POSIX `-1` errors stay `-1` in i64 slots.
-                    builder
-                        .build_int_s_extend(raw, i64_type, &format!("{}_ret_sext", name))
-                        .or_llvm_err()
-                } else {
-                    builder
-                        .build_int_truncate(raw, i64_type, &format!("{}_ret_trunc", name))
-                        .or_llvm_err()
-                }
-            }
-            Some(BasicTypeEnum::PointerType(_)) => {
-                let raw = call_site
-                    .basic_value_or_else(|| format!("{}: call returned no basic value", name))?
-                    .into_pointer_value();
-                builder
-                    .build_ptr_to_int(raw, i64_type, &format!("{}_ret_p2i", name))
-                    .or_llvm_err()
-            }
-            Some(other) => Err(super::error::LlvmLoweringError::internal(format!(
-                "call_native_i64({}): unsupported return type {:?}",
-                name, other
             ))),
         }
     }
@@ -1637,10 +1507,18 @@ impl<'ctx> PlatformIR<'ctx> {
             };
             builder.build_return(Some(&result_ptr)).or_llvm_err()?;
         } else {
-            // mmap may be pre-declared by VBC (from core/sys FFI) with all-i64 args,
-            // or by emit_macos_declarations with ptr first arg. Adapt to whichever exists.
-            let mmap_fn = module.get_function("mmap").unwrap_or_else(|| {
-                let mmap_type = i64_type.fn_type(
+            // `mmap` is a dual-declared symbol (libsystem.vr FFI extern
+            // spells C widths; the registry canon is all-i64). The
+            // registry-first getter pins the declaration and
+            // `call_native_i64` adapts every argument to whichever
+            // spelling actually won — the mid-position `i32`
+            // prot/flags/fd params were exactly what the old
+            // param0-only adaptation missed (T0278: `i64 3` against an
+            // `i32` slot, verifier-invalid on every allocator inline).
+            let mmap_fn = super::error::get_or_declare_function(
+                module,
+                "mmap",
+                i64_type.fn_type(
                     &[
                         i64_type.into(),
                         i64_type.into(),
@@ -1650,9 +1528,8 @@ impl<'ctx> PlatformIR<'ctx> {
                         i64_type.into(),
                     ],
                     false,
-                );
-                module.add_function("mmap", mmap_type, None)
-            });
+                ),
+            );
 
             // MAP_PRIVATE | MAP_ANON{YMOUS}: Darwin=0x1002, Linux=0x0022.
             let map_flags_val: u64 = if target_is_linux(module) {
@@ -1662,40 +1539,22 @@ impl<'ctx> PlatformIR<'ctx> {
             };
             let map_flags = i64_type.const_int(map_flags_val, false);
 
-            let mmap_param0_is_ptr = mmap_fn
-                .get_type()
-                .get_param_types()
-                .first()
-                .map_or(false, |t| t.is_pointer_type());
-            let addr_arg: BasicMetadataValueEnum = if mmap_param0_is_ptr {
-                ptr_type.const_null().into()
-            } else {
-                i64_type.const_zero().into()
-            };
-
-            let call_result = builder
-                .build_call(
-                    mmap_fn,
-                    &[
-                        addr_arg,
-                        size.into(),
-                        i64_type.const_int(3, false).into(), // PROT_READ|PROT_WRITE
-                        map_flags.into(),
-                        i64_type.const_all_ones().into(), // fd = -1
-                        i64_type.const_int(0, false).into(), // offset = 0
-                    ],
-                    "mmap_result",
-                )
-                .or_llvm_err()?
-            .basic_value_or("expected basic value")?;
-
-            let result = match call_result {
-                BasicValueEnum::PointerValue(p) => p,
-                BasicValueEnum::IntValue(i) => builder
-                    .build_int_to_ptr(i, ptr_type, "mmap_ptr")
-                    .or_llvm_err()?,
-                _ => ptr_type.const_null(),
-            };
+            let raw = self.call_native_i64(
+                &builder,
+                mmap_fn,
+                &[
+                    i64_type.const_zero().into(), // addr = NULL
+                    size.into(),
+                    i64_type.const_int(3, false).into(), // PROT_READ|PROT_WRITE
+                    map_flags.into(),
+                    i64_type.const_all_ones().into(), // fd = -1
+                    i64_type.const_int(0, false).into(), // offset = 0
+                ],
+                "mmap_result",
+            )?;
+            let result = builder
+                .build_int_to_ptr(raw, ptr_type, "mmap_ptr")
+                .or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
 
@@ -1772,27 +1631,19 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?;
             let _ = size_param; // Windows path doesn't need it.
         } else {
-            let munmap_fn = module.get_function("munmap").unwrap_or_else(|| {
-                let munmap_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                module.add_function("munmap", munmap_type, None)
-            });
-
-            let munmap_param0_is_ptr = munmap_fn
-                .get_type()
-                .get_param_types()
-                .first()
-                .map_or(false, |t| t.is_pointer_type());
-            let addr_arg: BasicMetadataValueEnum = if munmap_param0_is_ptr {
-                ptr_param.into()
-            } else {
-                builder
-                    .build_ptr_to_int(ptr_param, i64_type, "ptr_i64")
-                    .or_llvm_err()?
-                    .into()
-            };
-            builder
-                .build_call(munmap_fn, &[addr_arg, size_param.into()], "")
-                .or_llvm_err()?;
+            // Registry-canonical declaration + the ONE adaptive call
+            // authority — same treatment as the mmap site above.
+            let munmap_fn = super::error::get_or_declare_function(
+                module,
+                "munmap",
+                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+            );
+            let _rc = self.call_native_i64(
+                &builder,
+                munmap_fn,
+                &[ptr_param.into(), size_param.into()],
+                "munmap_rc",
+            )?;
         }
 
         builder.build_return(None).or_llvm_err()?;
@@ -7035,11 +6886,17 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
-        // Declare waitpid
-        if module.get_function("waitpid").is_none() {
-            let ft = i32_type.fn_type(&[i32_type.into(), ptr_type.into(), i32_type.into()], false);
-            module.add_function("waitpid", ft, None);
-        }
+        // `waitpid` is registry-canonical (predeclare_all lands the
+        // i64 spelling first). Pre-fix this site hand-declared the C
+        // widths and called with i32-shaped args — which became
+        // verifier-invalid (`i32` args into `i64` params, i64-vs-i32
+        // ICmp) the moment the registry declaration won the name.
+        // Registry getter + the ONE adaptive call authority.
+        let waitpid_fn = super::error::get_or_declare_function(
+            module,
+            "waitpid",
+            i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
+        );
 
         let fn_type = i64_type.fn_type(&[i64_type.into()], false);
         let func = self.get_or_declare_fn(module, "verum_process_wait", fn_type);
@@ -7055,32 +6912,25 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_first_param()
             .or_internal("missing first param")?
             .into_int_value();
-        let pid32 = builder
-            .build_int_truncate(pid, i32_type, "pid32")
-            .or_llvm_err()?;
 
         let status_alloca = builder.build_alloca(i32_type, "status").or_llvm_err()?;
         builder
             .build_store(status_alloca, i32_type.const_zero())
             .or_llvm_err()?;
 
-        let waitpid_fn = module.get_function("waitpid").or_missing_fn("waitpid")?;
-        let result = builder
-            .build_call(
-                waitpid_fn,
-                &[
-                    pid32.into(),
-                    status_alloca.into(),
-                    i32_type.const_zero().into(),
-                ],
-                "wr",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
+        let result = self.call_native_i64(
+            &builder,
+            waitpid_fn,
+            &[
+                pid.into(),
+                status_alloca.into(),
+                i64_type.const_zero().into(),
+            ],
+            "wr",
+        )?;
 
         let failed = builder
-            .build_int_compare(IntPredicate::SLT, result, i32_type.const_zero(), "fail")
+            .build_int_compare(IntPredicate::SLT, result, i64_type.const_zero(), "fail")
             .or_llvm_err()?;
         let status_val = builder
             .build_load(i32_type, status_alloca, "sv")
@@ -10490,114 +10340,16 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
-    /// Call an FFI function whose DECLARED signature may use `i32`
-    /// (POSIX `int`) where this emitter naturally holds `i64`s
-    /// (task #16 verifier hygiene). The stdlib FFI extern
-    /// (`core/sys/darwin/libsystem.vr`) correctly declares
-    /// `kevent`/`kqueue` with `Int32` params/return; when that
-    /// declaration wins the module name, the platform-IR helpers'
-    /// raw-i64 calls produced VERIFIER-INVALID IR ("Call parameter
-    /// type does not match function signature", "Both operands to
-    /// ICmp are not of the same type", "Function return type does
-    /// not match operand type of return inst") — and invalid IR is
-    /// exactly what destabilises the pass pipeline. Coerce every
-    /// int argument to the callee's declared parameter width and
-    /// widen a sub-64-bit int result back to `i64` so the call is
-    /// valid against WHICHEVER declaration won.
-    fn call_ffi_adapted(
-        &self,
-        builder: &Builder<'ctx>,
-        callee: FunctionValue<'ctx>,
-        args: &[BasicMetadataValueEnum<'ctx>],
-        name: &str,
-    ) -> super::error::Result<IntValue<'ctx>> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let mut adapted: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(args.len());
-        for (i, a) in args.iter().enumerate() {
-            let expected = callee.get_nth_param(i as u32).map(|p| p.get_type());
-            let av: BasicValueEnum<'ctx> = match (*a).try_into() {
-                Ok(v) => v,
-                Err(_) => {
-                    adapted.push(*a);
-                    continue;
-                }
-            };
-            let coerced: BasicValueEnum<'ctx> = match (av, expected) {
-                (BasicValueEnum::IntValue(iv), Some(exp)) if exp.is_int_type() => {
-                    let want = exp.into_int_type();
-                    if iv.get_type() == want {
-                        iv.into()
-                    } else if iv.get_type().get_bit_width() > want.get_bit_width() {
-                        builder
-                            .build_int_truncate(iv, want, &format!("{}_arg{}_trunc", name, i))
-                            .or_llvm_err()?
-                            .into()
-                    } else {
-                        builder
-                            .build_int_s_extend(iv, want, &format!("{}_arg{}_sext", name, i))
-                            .or_llvm_err()?
-                            .into()
-                    }
-                }
-                (BasicValueEnum::IntValue(iv), Some(exp)) if exp.is_pointer_type() => builder
-                    .build_int_to_ptr(iv, ptr_type, &format!("{}_arg{}_p", name, i))
-                    .or_llvm_err()?
-                    .into(),
-                (BasicValueEnum::PointerValue(pv), Some(exp)) if exp.is_int_type() => builder
-                    .build_ptr_to_int(
-                        pv,
-                        exp.into_int_type(),
-                        &format!("{}_arg{}_i", name, i),
-                    )
-                    .or_llvm_err()?
-                    .into(),
-                _ => av,
-            };
-            adapted.push(coerced.into());
-        }
-        let ret = builder
-            .build_call(callee, &adapted, name)
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?;
-        match ret {
-            BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() < 64 => builder
-                .build_int_s_extend(iv, i64_type, &format!("{}_widen", name))
-                .or_llvm_err(),
-            BasicValueEnum::IntValue(iv) => Ok(iv),
-            BasicValueEnum::PointerValue(pv) => builder
-                .build_ptr_to_int(pv, i64_type, &format!("{}_p2i", name))
-                .or_llvm_err(),
-            other => Err(super::error::LlvmLoweringError::internal(format!(
-                "call_ffi_adapted: unexpected return value {:?}",
-                other
-            ))),
-        }
-    }
-
-    /// Ensure kqueue/kevent syscalls are declared.
+    /// Ensure kqueue/kevent syscalls are declared — registry-canonical
+    /// spellings (`syscall_registry::POSIX_SYSCALLS`); the local
+    /// hand-declares this replaced were one of the two owners in the
+    /// kqueue dual-declaration (the other is the libsystem.vr extern).
     fn ensure_kqueue_declared(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        if module.get_function("kqueue").is_none() {
-            let ft = i64_type.fn_type(&[], false);
-            module.add_function("kqueue", ft, None);
-        }
-        if module.get_function("kevent").is_none() {
-            let ft = i64_type.fn_type(
-                &[
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                    ptr_type.into(),
-                ],
-                false,
-            );
-            module.add_function("kevent", ft, None);
+        for name in ["kqueue", "kevent"] {
+            super::syscall_registry::get_or_declare(module, self.context, name)
+                .or_internal_else(|| {
+                    format!("`{}` missing from POSIX_SYSCALLS registry", name)
+                })?;
         }
         Ok(())
     }
@@ -10632,7 +10384,7 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.position_at_end(entry);
 
         // Call kqueue()
-        let kq_fd = self.call_ffi_adapted(&builder, kqueue_fn, &[], "kq")?;
+        let kq_fd = self.call_native_i64(&builder, kqueue_fn, &[], "kq")?;
 
         // Alloc 8 bytes for struct
         let eng_ptr = builder
@@ -10800,7 +10552,7 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(flags_p_r, i16_type.const_int(5, false))
             .or_llvm_err()?; // EV_ADD(1)|EV_ENABLE(4)
-        let ret_r = self.call_ffi_adapted(
+        let ret_r = self.call_native_i64(
             &builder,
             kevent_fn,
                 &[
@@ -10859,7 +10611,7 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(flags_p_w, i16_type.const_int(5, false))
             .or_llvm_err()?; // EV_ADD(1)|EV_ENABLE(4)
-        let ret_w = self.call_ffi_adapted(
+        let ret_w = self.call_native_i64(
             &builder,
             kevent_fn,
                 &[
@@ -10989,7 +10741,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?
         };
         builder.build_store(ns_p, nsecs).or_llvm_err()?;
-        let ret_to = self.call_ffi_adapted(
+        let ret_to = self.call_native_i64(
             &builder,
             kevent_fn,
                 &[
@@ -11006,7 +10758,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // no_timeout: pass NULL for timeout (block indefinitely, for timeout_ns < 0)
         builder.position_at_end(no_timeout);
-        let ret_nt = self.call_ffi_adapted(
+        let ret_nt = self.call_native_i64(
             &builder,
             kevent_fn,
                 &[
@@ -11092,7 +10844,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_store(flags_p, i16_type.const_int(2, false))
             .or_llvm_err()?; // EV_DELETE=2
 
-        let ret = self.call_ffi_adapted(
+        let ret = self.call_native_i64(
             &builder,
             kevent_fn,
                 &[
@@ -11357,7 +11109,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_store(flags1, i16_type.const_int(5, false))
             .or_llvm_err()?;
 
-        let ret = self.call_ffi_adapted(
+        let ret = self.call_native_i64(
             &builder,
             kevent_fn,
                 &[

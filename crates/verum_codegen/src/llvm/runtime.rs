@@ -29,7 +29,6 @@ use verum_llvm::AddressSpace;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
-use verum_llvm::types::BasicMetadataTypeEnum;
 use verum_llvm::values::{
     BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
@@ -6348,11 +6347,13 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// Build a call to a libc function, adapting argument types to match the
-    /// actual declaration. FFI extern blocks may declare libc functions with i64
-    /// (Verum Int) parameters, while the native POSIX signatures use i32. This
-    /// helper casts i32→i64 or i64→i32 as needed to match the declared signature.
-    /// Returns the result as i64 (sign-extending if the function returns i32).
+    /// Build a call to a libc function, adapting argument types to
+    /// match the actual declaration. Thin delegate of the ONE adaptive
+    /// C-call authority, `syscall_registry::call_c_adapted` — see its
+    /// doc for the coercion table (this wrapper's former private body,
+    /// `adapt_libc_args`, handled int-width drift only and silently
+    /// passed int↔ptr mismatches through to the verifier).
+    /// Returns the result as i64 (sign-extending a sub-64 int return).
     fn build_libc_call(
         &self,
         builder: &Builder<'ctx>,
@@ -6360,27 +6361,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
         args: &[BasicMetadataValueEnum<'ctx>],
         name: &str,
     ) -> Result<IntValue<'ctx>> {
-        let i64_type = self.context.i64_type();
-        let adapted = self.adapt_libc_args(builder, func, args)?;
-
-        let ret = builder
-            .build_call(func, &adapted, name)
-            .or_llvm_err()?
-            .basic_value_or("call returned void")?
-            .into_int_value();
-
-        // If function returns i32, sign-extend to i64
-        let result = if ret.get_type().get_bit_width() < 64 {
-            builder
-                .build_int_s_extend(ret, i64_type, &format!("{}_ext", name))
-                .or_llvm_err()?
-        } else {
-            ret
-        };
-        Ok(result)
+        super::syscall_registry::call_c_adapted(builder, func, args, name)?.or_internal_else(
+            || {
+                format!(
+                    "build_libc_call({}): callee `{}` returns void",
+                    name,
+                    func.get_name().to_string_lossy()
+                )
+            },
+        )
     }
 
-    /// Like build_libc_call but discards the return value.
+    /// Like build_libc_call but discards the return value (valid for
+    /// void callees too).
     fn build_libc_call_void(
         &self,
         builder: &Builder<'ctx>,
@@ -6388,8 +6381,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         args: &[BasicMetadataValueEnum<'ctx>],
         name: &str,
     ) -> Result<()> {
-        let adapted = self.adapt_libc_args(builder, func, args)?;
-        builder.build_call(func, &adapted, name).or_llvm_err()?;
+        let _ = super::syscall_registry::call_c_adapted(builder, func, args, name)?;
         Ok(())
     }
 
@@ -6443,44 +6435,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::syscall_registry::emit_linux_syscall_inline(
             builder, self.context, module, sys_num, args,
         )
-    }
-
-    /// Adapt argument types for a libc call: sext i32→i64 or trunc i64→i32 as needed.
-    fn adapt_libc_args(
-        &self,
-        builder: &Builder<'ctx>,
-        func: FunctionValue<'ctx>,
-        args: &[BasicMetadataValueEnum<'ctx>],
-    ) -> Result<Vec<BasicMetadataValueEnum<'ctx>>> {
-        let param_types = func.get_type().get_param_types();
-        let mut adapted: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-
-        for (i, arg) in args.iter().enumerate() {
-            if i < param_types.len() {
-                if let BasicMetadataTypeEnum::IntType(expected_int) = param_types[i] {
-                    if let BasicMetadataValueEnum::IntValue(arg_val) = arg {
-                        let arg_width = arg_val.get_type().get_bit_width();
-                        let expected_width = expected_int.get_bit_width();
-                        if arg_width < expected_width {
-                            let ext = builder
-                                .build_int_s_extend(*arg_val, expected_int, "sext")
-                                .or_llvm_err()?;
-                            adapted.push(ext.into());
-                            continue;
-                        } else if arg_width > expected_width {
-                            let trunc = builder
-                                .build_int_truncate(*arg_val, expected_int, "trunc")
-                                .or_llvm_err()?;
-                            adapted.push(trunc.into());
-                            continue;
-                        }
-                    }
-                }
-            }
-            adapted.push(*arg);
-        }
-
-        Ok(adapted)
     }
 
     /// Emit all file I/O IR functions:
@@ -10605,109 +10559,64 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     // --- Libc networking declarations ---
 
+    // Registry-canonical bare-decl helpers. Each symbol's LLVM
+    // signature is owned by `syscall_registry::POSIX_SYSCALLS`
+    // (predeclare_all lands it first); the hint below mirrors the
+    // entry and never controls the shape. The former C-width
+    // fallback arms were dead second owners of the same names —
+    // the T0278 duplicate-declaration class.
     fn get_or_declare_socket(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("socket") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let fn_type = i32_type.fn_type(&[i32_type.into(), i32_type.into(), i32_type.into()], false);
-        module.add_function("socket", fn_type, None)
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "socket", fn_type)
     }
 
     fn get_or_declare_bind(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("bind") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into(), i32_type.into()], false);
-        module.add_function("bind", fn_type, None)
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "bind", fn_type)
     }
 
     fn get_or_declare_listen_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("listen") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let fn_type = i32_type.fn_type(&[i32_type.into(), i32_type.into()], false);
-        module.add_function("listen", fn_type, None)
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "listen", fn_type)
     }
 
     fn get_or_declare_accept_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("accept") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into(), ptr_type.into()], false);
-        module.add_function("accept", fn_type, None)
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), ptr_type.into()], false);
+        super::error::get_or_declare_function(module, "accept", fn_type)
     }
 
     fn get_or_declare_connect_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("connect") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into(), i32_type.into()], false);
-        module.add_function("connect", fn_type, None)
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "connect", fn_type)
     }
 
     fn get_or_declare_send_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("send") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(
-            &[
-                i32_type.into(),
-                ptr_type.into(),
-                i64_type.into(),
-                i32_type.into(),
-            ],
-            false,
-        );
-        module.add_function("send", fn_type, None)
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "send", fn_type)
     }
 
     fn get_or_declare_recv_libc(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("recv") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(
-            &[
-                i32_type.into(),
-                ptr_type.into(),
-                i64_type.into(),
-                i32_type.into(),
-            ],
-            false,
-        );
-        module.add_function("recv", fn_type, None)
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "recv", fn_type)
     }
 
     fn get_or_declare_setsockopt(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("setsockopt") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(
-            &[
-                i32_type.into(),
-                i32_type.into(),
-                i32_type.into(),
-                ptr_type.into(),
-                i32_type.into(),
-            ],
-            false,
-        );
-        module.add_function("setsockopt", fn_type, None)
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "setsockopt", fn_type)
     }
 
     /// Get or declare a libc-free `inet_pton(af, src, dst) -> i32` wrapper.
@@ -11004,123 +10913,75 @@ impl<'ctx> RuntimeLowering<'ctx> {
     }
 
     fn get_or_declare_getsockname(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("getsockname") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
+        // Registry-canonical (T0218: this helper's former C-width
+        // spelling `i32 (i32, ptr, ptr)` raced the bake's i64 FFI
+        // extern — first declarer won nondeterministically). The hint
+        // mirrors the POSIX_SYSCALLS entry; `get_or_declare_function`
+        // is registry-first, so the hint never controls the shape.
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        // int getsockname(int sockfd, sockaddr *addr, socklen_t *addrlen)
-        let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into(), ptr_type.into()], false);
-        module.add_function("getsockname", fn_type, None)
+        let fn_type = i64_type.fn_type(
+            &[i64_type.into(), ptr_type.into(), ptr_type.into()],
+            false,
+        );
+        super::error::get_or_declare_function(module, "getsockname", fn_type)
     }
 
     fn get_or_declare_sendto(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("sendto") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(
-            &[
-                i32_type.into(),
-                ptr_type.into(),
-                i64_type.into(),
-                i32_type.into(),
-                ptr_type.into(),
-                i32_type.into(),
-            ],
-            false,
-        );
-        module.add_function("sendto", fn_type, None)
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "sendto", fn_type)
     }
 
     fn get_or_declare_recvfrom(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("recvfrom") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(
-            &[
-                i32_type.into(),
-                ptr_type.into(),
-                i64_type.into(),
-                i32_type.into(),
-                ptr_type.into(),
-                ptr_type.into(),
-            ],
-            false,
-        );
-        module.add_function("recvfrom", fn_type, None)
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into(), i64_type.into(), ptr_type.into(), ptr_type.into()], false);
+        super::error::get_or_declare_function(module, "recvfrom", fn_type)
     }
 
     // --- Libc process declarations ---
 
     fn get_or_declare_fork(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("fork") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        module.add_function("fork", i32_type.fn_type(&[], false), None)
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[], false);
+        super::error::get_or_declare_function(module, "fork", fn_type)
     }
 
     fn get_or_declare_pipe(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let expected_fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-        // Check if existing "pipe" function matches POSIX signature (1 param, ptr).
-        // If a user-defined `pipe` exists with different arity, create a unique name.
+        let expected_fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+        // A user-defined `pipe` with different arity may own the bare
+        // name — the POSIX declaration then lives under `__libc_pipe`.
         if let Some(f) = module.get_function("pipe") {
             if f.count_params() == 1 {
-                return f; // POSIX pipe or compatible
+                return f; // registry-canonical (predeclare_all) or compatible
             }
-            // User-defined pipe with different arity — use alternative name
-            if let Some(f) = module.get_function("__libc_pipe") {
-                return f;
-            }
-            return module.add_function("__libc_pipe", expected_fn_type, None);
+            return super::error::get_or_declare_function(module, "__libc_pipe", expected_fn_type);
         }
-        module.add_function("pipe", expected_fn_type, None)
+        super::error::get_or_declare_function(module, "pipe", expected_fn_type)
     }
 
     fn get_or_declare_dup2(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("dup2") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        module.add_function(
-            "dup2",
-            i32_type.fn_type(&[i32_type.into(), i32_type.into()], false),
-            None,
-        )
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "dup2", fn_type)
     }
 
     fn get_or_declare_execvp(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("execvp") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        module.add_function(
-            "execvp",
-            i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
-            None,
-        )
+        let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+        super::error::get_or_declare_function(module, "execvp", fn_type)
     }
 
     fn get_or_declare_waitpid(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("waitpid") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        module.add_function(
-            "waitpid",
-            i32_type.fn_type(&[i32_type.into(), ptr_type.into(), i32_type.into()], false),
-            None,
-        )
+        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
+        super::error::get_or_declare_function(module, "waitpid", fn_type)
     }
 
     // =========================================================================
