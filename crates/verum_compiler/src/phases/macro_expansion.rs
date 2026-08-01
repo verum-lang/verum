@@ -1933,6 +1933,7 @@ mod tests {
         // Build a minimal unit type to attach the attribute to
         let type_name = Ident::new("Foo", span);
         let type_decl = TypeDecl {
+            value_params: List::new(),
             visibility: Default::default(),
             name: type_name,
             generics: List::new(),

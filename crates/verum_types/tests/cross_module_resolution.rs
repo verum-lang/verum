@@ -40,6 +40,7 @@ fn create_test_module(_name: &str, file_id: FileId) -> Module {
 fn create_type_decl(name: &str, visibility: Visibility) -> Item {
     let span = Span::dummy();
     let type_decl = TypeDecl {
+        value_params: List::new(),
         name: Ident::new(name, span),
         visibility,
         generics: vec![].into(),

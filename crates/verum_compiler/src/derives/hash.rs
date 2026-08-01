@@ -389,6 +389,7 @@ mod tests {
     };
 
     fn make_record_decl(name: &str, fields: Vec<(&str, &str)>) -> TypeDecl {
+        value_params: List::new(),
         let span = Span::default();
         let record_fields: Vec<RecordField> = fields
             .into_iter()
@@ -406,6 +407,7 @@ mod tests {
             })
             .collect();
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new(name, span),
             generics: List::new(),
@@ -437,6 +439,7 @@ mod tests {
             span,
         );
         let decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("UserId", span),
             generics: List::new(),
@@ -486,6 +489,7 @@ mod tests {
         );
 
         let decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("Status", span),
             generics: List::new(),

@@ -1648,6 +1648,12 @@ pub struct TypeContext {
     pub protocol_impls: Map<Text, Map<Text, ProtocolImpl>>,
     /// Allowed contexts in current scope
     pub allowed_contexts: Set<Text>,
+    /// T0266 — dependent value-parameter ARITY per indexed type family
+    /// (`type Eq<T>(a: T, b: T)` records 2 under "Eq"). Keyed by the
+    /// SIMPLE declared name; consumed by `ast_to_type`'s DependentApp
+    /// arm to reject wrong-arity applications. Per-index TYPE checking
+    /// is the dependent-binder-scoping follow-up (T0266 journal).
+    pub dependent_value_params: Map<Text, usize>,
     /// Inductive type constructors for exhaustiveness checking
     /// Maps type name -> list of constructors
     /// Dependent type checking: bidirectional type checking with dependent types, elaboration to core calculus — .1 - Inductive Types
@@ -1737,6 +1743,7 @@ impl TypeContext {
             module_type_aliases: Map::new(),
             protocol_impls: Map::new(),
             allowed_contexts: Set::new(),
+            dependent_value_params: Map::new(),
             type_var_bounds: Map::new(),
             meta_param_environment: Map::new(),
             inductive_constructors: Map::new(),

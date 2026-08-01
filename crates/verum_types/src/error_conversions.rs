@@ -18,6 +18,17 @@ impl From<TypeError> for VerumError {
                 actual: actual.clone(),
             },
             TypeError::CannotInferLambda { .. } => VerumError::CannotInferLambda,
+            TypeError::DependentValueArgArityMismatch {
+                family,
+                declared,
+                supplied,
+                ..
+            } => VerumError::TypeMismatch {
+                expected: verum_common::Text::from(format!(
+                    "{family} with {declared} value parameter(s)"
+                )),
+                actual: verum_common::Text::from(format!("{supplied} value argument(s)")),
+            },
             TypeError::UnboundVariable { name, .. } => VerumError::UnboundVariable {
                 name: name.clone(),
             },

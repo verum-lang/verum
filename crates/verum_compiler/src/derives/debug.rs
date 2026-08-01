@@ -370,6 +370,7 @@ mod tests {
     fn create_test_struct() -> TypeDecl {
         let span = Span::default();
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("Point", span),
             generics: List::new(),

@@ -514,6 +514,7 @@ mod tests {
     use verum_ast::decl::{RecordField, TypeDecl, TypeDeclBody, Visibility};
 
     fn make_record_decl(name: &str, fields: Vec<(&str, &str)>) -> TypeDecl {
+        value_params: List::new(),
         let span = Span::default();
         let record_fields: Vec<RecordField> = fields
             .into_iter()
@@ -531,6 +532,7 @@ mod tests {
             })
             .collect();
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new(name, span),
             generics: List::new(),
@@ -560,6 +562,7 @@ mod tests {
     fn enum_rejected() {
         let span = Span::default();
         let decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("Tag", span),
             generics: List::new(),
@@ -615,6 +618,7 @@ mod tests {
             span,
         };
         let decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("Container", span),
             generics: List::from(vec![t_param]),
@@ -682,6 +686,7 @@ mod tests {
             span,
         );
         let decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("UserId", span),
             generics: List::new(),

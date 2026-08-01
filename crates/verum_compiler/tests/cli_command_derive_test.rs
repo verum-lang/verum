@@ -103,6 +103,7 @@ fn derive_emits_module_wrapper() {
     let cmd_attr = make_command_attr("mytool", Some("1.0.0"), Some("test cli"));
 
     let decl = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: Ident::new("Cli", span()),
         generics: List::new(),
@@ -157,6 +158,7 @@ fn derive_chain_starts_with_appbuilder_new() {
     let cmd_attr = make_command_attr("tool", None, Some("..."));
 
     let decl = TypeDecl {
+        value_params: List::new(),
         visibility: Visibility::Public,
         name: Ident::new("Tool", span()),
         generics: List::new(),

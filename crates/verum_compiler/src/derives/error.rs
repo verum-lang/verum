@@ -868,6 +868,7 @@ mod tests {
     fn create_simple_error_enum() -> TypeDecl {
         let span = Span::default();
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("MyError", span),
             generics: List::new(),
@@ -887,8 +888,10 @@ mod tests {
     }
 
     fn create_error_with_fields() -> TypeDecl {
+        value_params: List::new(),
         let span = Span::default();
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("AppError", span),
             generics: List::new(),
@@ -951,6 +954,7 @@ mod tests {
     fn test_error_derive_rejects_struct() {
         let span = Span::default();
         let decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("NotAnError", span),
             generics: List::new(),

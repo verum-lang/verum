@@ -890,6 +890,15 @@ pub struct TypeDecl {
     pub attributes: List<Attribute>,
     pub body: TypeDeclBody,
 
+    /// Dependent value-parameters of an indexed type family:
+    /// `type Eq<T>(a: T, b: T) is …` declares TWO value params.
+    /// Empty for ordinary (non-indexed) type declarations. The
+    /// checker validates `T<A>(x, y)` applications against this
+    /// list (T0266); serde-default keeps old serialized ASTs
+    /// loadable.
+    #[serde(default)]
+    pub value_params: List<FunctionParam>,
+
     /// Resource safety modifier
     /// - None: Normal type (can be used multiple times)
     /// - Some(Affine): Affine type (at most once use)

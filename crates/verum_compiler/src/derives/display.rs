@@ -604,6 +604,7 @@ mod tests {
     fn create_simple_enum() -> TypeDecl {
         let span = Span::default();
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("Status", span),
             generics: List::new(),
@@ -620,8 +621,10 @@ mod tests {
     }
 
     fn create_enum_with_fields() -> TypeDecl {
+        value_params: List::new(),
         let span = Span::default();
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("Result", span),
             generics: List::new(),

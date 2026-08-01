@@ -1181,6 +1181,7 @@ mod tests {
         // TypeDecl, not on the outer Item — mimicking the parser's
         // actual attribute placement.
         let type_decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new(Text::from("WindowsOnlyType"), dummy_span()),
             generics: List::new(),

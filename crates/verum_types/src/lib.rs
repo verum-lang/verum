@@ -542,6 +542,17 @@ pub enum TypeError {
     #[error("cannot infer type for lambda without annotation")]
     CannotInferLambda { span: verum_ast::span::Span },
 
+    #[error(
+        "dependent type family '{family}' declares {declared} value parameter(s) \
+         but this application supplies {supplied}"
+    )]
+    DependentValueArgArityMismatch {
+        family: Text,
+        declared: usize,
+        supplied: usize,
+        span: verum_ast::span::Span,
+    },
+
     #[error("infinite type: {var} = {ty}")]
     InfiniteType {
         var: Text,
@@ -1905,6 +1916,7 @@ impl TypeError {
         use TypeError::*;
         match self {
             Mismatch { span, .. } => *span,
+            DependentValueArgArityMismatch { span, .. } => *span,
             CannotInferLambda { span } => *span,
             InfiniteType { span, .. } => *span,
             UnboundVariable { span, .. } => *span,
@@ -2097,6 +2109,25 @@ impl TypeError {
                 let mut builder = DiagnosticBuilder::error()
                     .code("E403")
                     .message(format!("Infinite type: {} = {}", var, ty));
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder.build()
+            }
+
+            DependentValueArgArityMismatch {
+                family,
+                declared,
+                supplied,
+                span,
+            } => {
+                // E408: dependent value-argument arity mismatch (T0266) —
+                // registered in verum_error::registry.
+                let mut builder = DiagnosticBuilder::error().code("E408").message(format!(
+                    "dependent type family '{}' declares {} value parameter(s) \
+                     but this application supplies {}",
+                    family, declared, supplied
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }

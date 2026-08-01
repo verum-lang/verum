@@ -399,6 +399,7 @@ impl AstSink {
         let body = body.unwrap_or(TypeDeclBody::Unit);
 
         Some(TypeDecl {
+            value_params: List::new(),
             visibility,
             name,
             generics,

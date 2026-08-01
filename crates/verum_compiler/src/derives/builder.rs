@@ -170,6 +170,7 @@ impl DeriveBuilder {
     /// - Required fields (no default) become Maybe<T>
     /// - Optional fields (has default) keep their original type T
     fn generate_builder_type(&self, type_info: &TypeInfo, span: Span) -> TypeDecl {
+        value_params: List::new(),
         let builder_name = format!("{}Builder", type_info.name.as_str());
 
         let fields: Vec<RecordField> = type_info
@@ -197,6 +198,7 @@ impl DeriveBuilder {
             .collect();
 
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new(builder_name.as_str(), span),
             generics: type_info.generics.iter().cloned().collect(),
@@ -800,6 +802,7 @@ mod tests {
     use verum_ast::decl::{TypeDecl, TypeDeclBody, Visibility};
 
     fn create_test_record() -> TypeDecl {
+        value_params: List::new(),
         let span = Span::default();
 
         let fields = vec![
@@ -845,6 +848,7 @@ mod tests {
         ];
 
         TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("HttpRequest", span),
             generics: List::new(),
@@ -900,6 +904,7 @@ mod tests {
         ];
 
         let decl = TypeDecl {
+            value_params: List::new(),
             visibility: Visibility::Public,
             name: Ident::new("MyEnum", span),
             generics: List::new(),

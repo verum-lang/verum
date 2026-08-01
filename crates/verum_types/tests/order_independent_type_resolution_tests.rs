@@ -31,7 +31,9 @@ fn make_type_path(name: &str) -> AstType {
 
 /// Helper to create a type declaration
 fn make_type_decl(name: &str, body: TypeDeclBody) -> TypeDecl {
+    value_params: List::new(),
     TypeDecl {
+        value_params: List::new(),
         name: make_ident(name),
         generics: vec![].into(),
         body,

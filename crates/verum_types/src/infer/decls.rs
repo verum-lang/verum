@@ -189,6 +189,16 @@ impl TypeChecker {
         if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
             self.affine_tracker.register_linear_type(type_name.clone());
         }
+        // T0266: record the dependent value-parameter ARITY for indexed
+        // families so the DependentApp arm of `ast_to_type` can reject
+        // `T<A>(x, y, z)` against a two-param declaration. Simple-name
+        // key — the checker validates unqualified heads only (qualified
+        // and aliased carriers skip the check, stdlib-safe).
+        if !type_decl.value_params.is_empty() {
+            self.ctx
+                .dependent_value_params
+                .insert(type_name.clone(), type_decl.value_params.len());
+        }
         // `@must_consume` attribute — alias for `type linear`. Lets API
         // authors mark must-consume types with attribute syntax (which
         // survives derive expansion / macro re-export) instead of the

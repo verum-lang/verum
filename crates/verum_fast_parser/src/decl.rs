@@ -2249,12 +2249,15 @@ impl<'a> RecursiveParser<'a> {
             (Maybe::None, Maybe::None)
         };
 
-        // Optional dependent type parameters: type Eq<T>(a: T, b: T) is ...
-        // These are value-level parameters for indexed/dependent type families
-        let _type_params = if self.stream.check(&TokenKind::LParen) {
-            self.parse_function_params()?
+        // Dependent value-parameters: type Eq<T>(a: T, b: T) is ...
+        // Threaded onto TypeDecl.value_params (T0266) so the checker can
+        // validate `T<A>(x, y)` applications against the declared list —
+        // previously parsed and DISCARDED, which made every dependent
+        // application arity/type hole invisible.
+        let value_params: verum_common::List<_> = if self.stream.check(&TokenKind::LParen) {
+            self.parse_function_params()?.into_iter().collect()
         } else {
-            Vec::new()
+            verum_common::List::new()
         };
 
         // 'is' keyword (canonical) or '=' (for two specific top-level
@@ -2605,6 +2608,7 @@ impl<'a> RecursiveParser<'a> {
         // but "type X is protocol { ... }" creates ItemKind::Type with TypeDeclBody::Protocol
         Ok(Item::new(
             ItemKind::Type(TypeDecl {
+                value_params: value_params.clone(),
                 visibility: vis,
                 name: Ident::new(name, name_span),
                 generics,
@@ -2738,6 +2742,7 @@ impl<'a> RecursiveParser<'a> {
 
         Ok(Item::new(
             ItemKind::Type(TypeDecl {
+                value_params: verum_common::List::new(), // this production has no value-param syntax
                 visibility: vis,
                 name: Ident::new(name, name_span),
                 generics,

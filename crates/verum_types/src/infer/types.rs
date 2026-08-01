@@ -677,15 +677,49 @@ impl TypeChecker {
             // signature here — the carrier carries full generic info,
             // and the value indices are retained for downstream
             // verification passes (see refinement / dependent solver).
-            TypeKind::DependentApp { carrier, .. } => {
-                // For now, ignore the value indices and resolve as the
-                // carrier type. A follow-up lands an index-checking
-                // pass that re-unifies these against the type
-                // constructor declaration. This matches how `Path<A>(a,
-                // b)` worked before the sugared `PathType` split, so it
-                // is the smallest change that keeps the stdlib parsing
-                // without silently dropping index info (we still retain
-                // the AST node for later passes).
+            TypeKind::DependentApp {
+                carrier,
+                value_args,
+            } => {
+                // T0266 — validate the value-index ARITY against the
+                // family's declared value-param list (recorded at type
+                // registration into `ctx.dependent_value_params`). Only
+                // an UNQUALIFIED head is checked: qualified or aliased
+                // carriers resolve through other tables, and a lookup
+                // miss must not fabricate errors (stdlib-safe skip).
+                // Per-index TYPE checking is the dependent-binder
+                // scoping follow-up (T0266 journal).
+                let head_name: Option<&str> = {
+                    let base_kind = match &carrier.kind {
+                        verum_ast::ty::TypeKind::Generic { base, .. } => &base.kind,
+                        other => other,
+                    };
+                    match base_kind {
+                        verum_ast::ty::TypeKind::Path(p) if p.segments.len() == 1 => {
+                            match p.segments.first() {
+                                Some(verum_ast::ty::PathSegment::Name(id)) => {
+                                    Some(id.name.as_str())
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some(name) = head_name
+                    && let Some(&declared) = self
+                        .ctx
+                        .dependent_value_params
+                        .get(&verum_common::Text::from(name))
+                    && declared != value_args.len()
+                {
+                    return Err(crate::TypeError::DependentValueArgArityMismatch {
+                        family: verum_common::Text::from(name),
+                        declared,
+                        supplied: value_args.len(),
+                        span: ast_ty.span,
+                    });
+                }
                 self.ast_to_type(carrier)
             }
 
