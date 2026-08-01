@@ -14592,28 +14592,32 @@ fn lower_call_method<'ctx>(
                     let mut case_blocks = Vec::new();
 
                     for (tid, fname) in &dispatch_entries {
-                        // ARITY GATE: the emitter below supports exactly two
-                        // call shapes — pc == args (method takes receiver) and
+                        // ARITY GATE — ABI-grounded, not shape-strict. The
+                        // emitter supports pc == args (method takes receiver),
                         // pc == args-1 (static/no-self method, receiver
-                        // dropped). A same-named candidate with any OTHER
-                        // arity is a misresolution (bare `Type.method` names
-                        // collide across types/protocols), and emitting the
-                        // call anyway produced verifier-invalid IR ("Incorrect
-                        // number of arguments … @DialogState.next(i64 %r4)")
-                        // that crashed the O2 pass pipeline once the batch
-                        // classifier let it through. Route such type_ids to
-                        // the default arm (the documented zero contract)
-                        // instead of manufacturing an invalid call.
+                        // dropped), and pc < args (candidate declares FEWER
+                        // params: the call passes the first pc args — the
+                        // exact ABI behaviour of the historical
+                        // pass-everything invalid call, whose extra args sat
+                        // in registers the callee never read; `Type.new`
+                        // zero-param candidates constructed real values this
+                        // way and downstream code depends on them). ONLY
+                        // pc > args is uncallable: the callee would read
+                        // argument registers the site never set — garbage in,
+                        // and verifier-invalid IR ("Incorrect number of
+                        // arguments … @DialogState.next(i64 %r4)") that
+                        // crashed the O2 pass pipeline once the batch
+                        // classifier let it through. Those type_ids route to
+                        // the default arm's documented zero contract.
                         let pc = ctx
                             .get_module()
                             .get_function(fname)
                             .map(|f| f.count_params() as usize);
-                        let compatible =
-                            pc.map_or(false, |pc| pc == arg_vals.len() || pc + 1 == arg_vals.len());
-                        if !compatible {
+                        let callable = pc.map_or(false, |pc| pc <= arg_vals.len());
+                        if !callable {
                             if std::env::var_os("VERUM_TRACE_DYN").is_some() {
                                 eprintln!(
-                                    "[dyn-dispatch] tid={} candidate `{}` arity {:?} incompatible with {} arg(s) — routed to default",
+                                    "[dyn-dispatch] tid={} candidate `{}` arity {:?} exceeds {} arg(s) — routed to default",
                                     tid,
                                     fname,
                                     pc,
@@ -14678,9 +14682,18 @@ fn lower_call_method<'ctx>(
                             arg_vals.clone()
                         } else if pc + 1 == arg_vals.len() {
                             arg_vals[1..].to_vec()
+                        } else if pc < arg_vals.len() {
+                            // Candidate declares FEWER params than the site
+                            // provides: pass the first pc args. ABI-equivalent
+                            // to the historical pass-everything invalid call
+                            // (the callee only ever read its declared
+                            // registers), but VALID IR. `Type.new` zero-param
+                            // candidates in bare-name dispatch sets are the
+                            // live population.
+                            arg_vals[..pc].to_vec()
                         } else {
                             // Unreachable post-ARITY-GATE (case_blocks
-                            // construction filters incompatible candidates).
+                            // construction filters pc > args candidates).
                             // A hit here means a future edit bypassed the
                             // gate — fail the lowering loudly instead of
                             // emitting a verifier-invalid call.

@@ -48,6 +48,40 @@ pub(crate) fn canonical_name_better(new: &str, cur: &str) -> bool {
 /// Tracks all state needed during function compilation.
 #[derive(Debug)]
 pub struct CodegenContext {
+    /// **Archive callee param TypeRefs** (T0330 mono-seed fallback).
+    ///
+    /// `record_generic_instantiation` derives a call's generic type
+    /// args by unifying the CALLEE's param TypeRefs against the
+    /// argument exprs — but it reads the callee descriptor from
+    /// `self.functions` only, and archive-loaded stdlib callees are
+    /// not there during user-fn codegen (their bodies merge later).
+    /// The loader records each archive function's raw param TypeRefs
+    /// here, keyed by the SAME globally-unique id it registers in
+    /// `functions`, so the derivation has a second authority to
+    /// consult. RAW archive spelling by policy — the same one
+    /// `FunctionInfo.return_type` already stores.
+    pub archive_fn_param_types:
+        std::collections::HashMap<u32, Vec<crate::types::TypeRef>>,
+
+    /// **Resolution-time id→name carry** (T0277 leg B part 2).
+    ///
+    /// Every name-keyed function lookup that hands codegen a
+    /// `FunctionInfo` records `(info.id → name-as-asked)` here, AT THE
+    /// MOMENT OF RESOLUTION. The emitted bytecode embeds the id; the
+    /// name table (`functions`) is free to REBIND that name to a
+    /// different id later (lazy archive registration overwritten by
+    /// the real merged body is the canonical case). Reconstructing
+    /// names from the CURRENT table at emission therefore orphans
+    /// every operand whose winning id changed — the
+    /// `XMOD-BAND-NAME-CARRY-1 … NO recoverable name` class. This map
+    /// is the carried fact: what the operand MEANT when it was
+    /// emitted. First binding wins; the emission pass consults it
+    /// after the current-table ranking and before declaring an id
+    /// nameless. Interior mutability because the lookup surface is
+    /// `&self` across ~200 call sites; codegen is single-threaded
+    /// (parallel AOT is subprocess-isolated).
+    pub resolved_name_by_id: std::cell::RefCell<HashMap<u32, String>>,
+
     /// Register allocator for current function.
     pub registers: RegisterAllocator,
 
@@ -1408,6 +1442,8 @@ impl CodegenContext {
     /// Creates a new codegen context.
     pub fn new() -> Self {
         Self {
+            archive_fn_param_types: HashMap::new(),
+            resolved_name_by_id: std::cell::RefCell::new(HashMap::new()),
             registers: RegisterAllocator::new(),
             instructions: Vec::new(),
             instruction_spans: Vec::new(),
@@ -3270,9 +3306,23 @@ impl CodegenContext {
         removed
     }
 
+    /// Record the (id → name) fact of a successful name-keyed lookup —
+    /// see `resolved_name_by_id`. First binding wins: the earliest
+    /// resolution is the one whose id the bytecode embedded.
+    fn note_resolution(&self, name: &str, info: &FunctionInfo) {
+        self.resolved_name_by_id
+            .borrow_mut()
+            .entry(info.id.0)
+            .or_insert_with(|| name.to_string());
+    }
+
     /// Looks up a function by name.
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionInfo> {
-        self.functions.get(name)
+        let found = self.functions.get(name);
+        if let Some(info) = found {
+            self.note_resolution(name, info);
+        }
+        found
     }
 
     /// **Scope-aware function lookup** (#17/#39 foundation).
@@ -3289,9 +3339,14 @@ impl CodegenContext {
         if let Some(scope) = &self.current_source_module
             && let Some(info) = self.scoped_functions.get(&(scope.clone(), name.to_string()))
         {
+            self.note_resolution(name, info);
             return Some(info);
         }
-        self.functions.get(name)
+        let found = self.functions.get(name);
+        if let Some(info) = found {
+            self.note_resolution(name, info);
+        }
+        found
     }
 
     /// Look up a function by its globally-unique `FunctionId`.
@@ -3344,19 +3399,26 @@ impl CodegenContext {
     pub fn lookup_function_with_arity(&self, name: &str, arity: usize) -> Option<&FunctionInfo> {
         if let Some(info) = self.functions.get(name) {
             if info.param_count == arity {
+                self.note_resolution(name, info);
                 return Some(info);
             }
             // Primary has wrong arity — check for arity-qualified alternative
             let alt_key = format!("{}#{}", name, arity);
             if let Some(alt_info) = self.functions.get(&alt_key) {
+                self.note_resolution(&alt_key, alt_info);
                 return Some(alt_info);
             }
             // Still return primary (caller will report arity error)
+            self.note_resolution(name, info);
             return Some(info);
         }
         // Check arity-qualified key directly
         let alt_key = format!("{}#{}", name, arity);
-        self.functions.get(&alt_key)
+        let found = self.functions.get(&alt_key);
+        if let Some(info) = found {
+            self.note_resolution(&alt_key, info);
+        }
+        found
     }
 
     /// FUNC-REGISTRY-QUALIFICATION-1 (phase 2) — qualified-aware
@@ -3404,6 +3466,9 @@ impl CodegenContext {
             Err(_) => false,
         };
         let emit_hit = |stage: &str, key: &str, info: &FunctionInfo| {
+            // Every successful resolution passes through here — the one
+            // interception point for the id→name carry (T0277).
+            self.note_resolution(key, info);
             if trace {
                 eprintln!(
                     "[fn-resolve] '{}' (arity={:?}, parent={:?}) -> '{}' via {} (id={}, arity={})",

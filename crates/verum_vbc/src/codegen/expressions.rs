@@ -7433,23 +7433,37 @@ impl VbcCodegen {
             }
         }
         let param_trs: Vec<crate::types::TypeRef> = {
-            let d = self
+            if let Some(d) = self
                 .functions
                 .iter()
                 .find(|f| f.descriptor.id.0 == func_id)
-                .map(|f| &f.descriptor)?;
-            let generic = d.params.iter().any(|p| p.type_ref.is_generic())
-                || d.return_type.is_generic();
-            if !generic {
-                if std::env::var_os("VERUM_TRACE_MONO").is_some() {
-                    let nm = self.ctx.strings.get(d.name.0 as usize).cloned().unwrap_or_default();
-                    if nm.contains("poll_sync") || nm.contains("ready") {
-                        eprintln!("[mono-record] '{}' id={} NOT-generic (params/ret carry no Generic)", nm, func_id);
+                .map(|f| &f.descriptor)
+            {
+                let generic = d.params.iter().any(|p| p.type_ref.is_generic())
+                    || d.return_type.is_generic();
+                if !generic {
+                    if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                        let nm = self.ctx.strings.get(d.name.0 as usize).cloned().unwrap_or_default();
+                        if nm.contains("poll_sync") || nm.contains("ready") {
+                            eprintln!("[mono-record] '{}' id={} NOT-generic (params/ret carry no Generic)", nm, func_id);
+                        }
                     }
+                    return None;
                 }
+                d.params.iter().map(|p| p.type_ref.clone()).collect()
+            } else if let Some(trs) = self.ctx.archive_fn_param_types.get(&func_id) {
+                // T0330: archive-loaded callee — its descriptor is not in
+                // `self.functions` during user-fn codegen (bodies merge in
+                // Phase 5), but the loader carried its raw param TypeRefs.
+                // Same generic gate as the local arm; a non-generic callee
+                // derives nothing.
+                if !trs.iter().any(|t| t.is_generic()) {
+                    return None;
+                }
+                trs.clone()
+            } else {
                 return None;
             }
-            d.params.iter().map(|p| p.type_ref.clone()).collect()
         };
         let strip_ref = |s: &str| -> String {
             s.trim()

@@ -20631,6 +20631,27 @@ impl VbcCodegen {
             for (fresh_id, name) in self.user_xmod_carry.iter() {
                 m.entry(*fresh_id).or_insert_with(|| name.clone());
             }
+            // **Resolution-time carry** (T0277 leg B part 2, final
+            // source): ids whose winning NAME BINDING was rebound after
+            // codegen embedded them (lazy archive placeholder id
+            // overwritten by the merged real body is the canonical
+            // case) are invisible to every table-derived source above —
+            // the current tables simply no longer mention the id. The
+            // codegen context recorded (id → name-as-asked) at the
+            // moment each lookup resolved; that carried fact is exactly
+            // what the operand meant. Names recorded here still resolve
+            // at load time through the same by-name chase as any other
+            // band entry.
+            {
+                let carry = self.ctx.resolved_name_by_id.borrow();
+                for fid in external_seen.iter() {
+                    if !m.contains_key(fid)
+                        && let Some(name) = carry.get(fid)
+                    {
+                        m.insert(*fid, name.clone());
+                    }
+                }
+            }
             m
         };
         let carried_externals: Vec<(u32, String)> = std::mem::take(&mut self.user_xmod_carry);
@@ -20660,11 +20681,80 @@ impl VbcCodegen {
                  dispatch dies named instead of '<no name recorded>'. Raw ids: {:?}. \
                  Each is a Call operand that entered the function table without a \
                  ctx.functions / stage3-stub / band-carry name — fix the producing \
-                 registration, not this diagnostic.",
+                 registration, not this diagnostic. \
+                 (VERUM_TRACE_NAMELESS=1 dumps each id's referencing functions.)",
                 nameless_externals.len(),
                 self.config.module_name,
                 nameless_externals,
             );
+            // **Producing-registration locator** (T0277 leg B): for each
+            // nameless id, name the FUNCTIONS whose bytecode references it
+            // and the instruction kind — the missing provenance that makes
+            // "fix the producing registration" actionable. Mirrors the
+            // func-id-bearing arms of the re-home rewrite below.
+            if std::env::var_os("VERUM_TRACE_NAMELESS").is_some() {
+                let wanted: std::collections::HashSet<u32> =
+                    nameless_externals.iter().copied().collect();
+                // Resolve names from BOTH surfaces: ctx.functions (the
+                // name-keyed registry) AND the assembled self.functions
+                // descriptors (archive-merged bodies live here with
+                // perfectly good descriptor names while never joining
+                // ctx.functions — if a "nameless external" id turns out
+                // to OWN a descriptor in self.functions, the defect is
+                // a registration gap at merge, not a missing body).
+                let id_to_name: std::collections::HashMap<u32, &str> = self
+                    .ctx
+                    .functions
+                    .iter()
+                    .map(|(name, info)| (info.id.0, name.as_str()))
+                    .collect();
+                let descr_name = |raw: u32| -> String {
+                    self.functions
+                        .iter()
+                        .find(|f| f.descriptor.id.0 == raw)
+                        .map(|f| {
+                            self.ctx
+                                .strings
+                                .get(f.descriptor.name.0 as usize)
+                                .cloned()
+                                .unwrap_or_else(|| format!("<desc-name sid={}>", f.descriptor.name.0))
+                        })
+                        .unwrap_or_else(|| "<no descriptor>".to_string())
+                };
+                for wanted_id in &wanted {
+                    eprintln!(
+                        "[nameless-id] id={} ctx_name={:?} descriptor_in_self_functions=`{}`",
+                        wanted_id,
+                        id_to_name.get(wanted_id),
+                        descr_name(*wanted_id),
+                    );
+                }
+                for func in &self.functions {
+                    for (idx, instr) in func.instructions.iter().enumerate() {
+                        let (kind, fid) = match instr {
+                            Instruction::Call { func_id, .. } => ("Call", *func_id),
+                            Instruction::TailCall { func_id, .. } => ("TailCall", *func_id),
+                            Instruction::NewClosure { func_id, .. } => ("NewClosure", *func_id),
+                            Instruction::CallG { func_id, .. } => ("CallG", *func_id),
+                            Instruction::GenCreate { func_id, .. } => ("GenCreate", *func_id),
+                            Instruction::Spawn { func_id, .. } => ("Spawn", *func_id),
+                            _ => continue,
+                        };
+                        if wanted.contains(&fid) {
+                            let holder = func.descriptor.id.0;
+                            eprintln!(
+                                "[nameless-ref] id={} referenced by fn_id={} (ctx=`{}` desc=`{}`) instr#{} kind={}",
+                                fid,
+                                holder,
+                                id_to_name.get(&holder).copied().unwrap_or("<unnamed>"),
+                                descr_name(holder),
+                                idx,
+                                kind
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         // Encode functions and their bytecode, remapping name_id and func_id references
@@ -22466,6 +22556,7 @@ impl VbcCodegen {
             band_redirect: &band_redirect,
             ctx_func_by_name: &ctx_func_by_name,
             archive_func_by_name: &archive_func_by_name_snapshot,
+            resolved_names: std::cell::RefCell::new(std::collections::HashMap::new()),
         };
 
         // **T0378 producer-side remap: ATTEMPTED AND REVERTED (T0277,
@@ -22889,6 +22980,20 @@ impl VbcCodegen {
             copied += 1;
         }
 
+        // **Merge-time carry drain** (T0277 leg B): every id the remap
+        // produced FROM A NAME is now recorded in the emission-side
+        // carry, so a later rebinding of that name (lazy source
+        // re-registration overwriting the merged binding) can no longer
+        // orphan the operand into the '<no name recorded>' class — the
+        // band re-home finds the name here and emits a resolvable
+        // `external_function_names` entry instead of poison.
+        {
+            let mut carry = self.ctx.resolved_name_by_id.borrow_mut();
+            for (fid, name) in remap.resolved_names.borrow().iter() {
+                carry.entry(*fid).or_insert_with(|| name.clone());
+            }
+        }
+
         copied
     }
 
@@ -23183,9 +23288,31 @@ struct ArchiveBodyRemap<'a> {
     /// fallback can therefore never freeze an ARCHIVE-LOCAL band id
     /// (whose number aliases a DIFFERENT name in every other module).
     band_redirect: &'a std::collections::HashMap<u32, crate::module::FunctionId>,
+    /// **Merge-time id→name carry** (T0277 leg B, XMOD-BAND-NAME-CARRY-1
+    /// final source). Every NAME-based tier of `map_function` that
+    /// produces a FunctionId records `(fid → name-that-resolved)` here.
+    /// The remap is the one resolution surface that bypasses the
+    /// `CodegenContext` lookup instrumentation, and its resolved ids are
+    /// exactly the ones a later name REBINDING orphans (lazy source
+    /// re-registration of a merged stdlib module rebinds the name to a
+    /// fresh id; the merged body still carries THIS id). Drained into
+    /// `ctx.resolved_name_by_id` by the merge driver after the body
+    /// walk. Owned RefCell — `map_function` is `&self` via the
+    /// `IdRemap` trait; codegen is single-threaded.
+    resolved_names: std::cell::RefCell<std::collections::HashMap<u32, String>>,
 }
 
 impl ArchiveBodyRemap<'_> {
+    /// Record a name-based resolution fact — see `resolved_names`.
+    /// First binding wins (the earliest resolution is the one whose id
+    /// the rewritten body embedded).
+    fn note(&self, fid: crate::module::FunctionId, name: &str) {
+        self.resolved_names
+            .borrow_mut()
+            .entry(fid.0)
+            .or_insert_with(|| name.to_string());
+    }
+
     /// QUALIFIED-CALL-FIRST-MATCH-1 chase tier — ranked qualified-
     /// suffix resolution for NAME-RESOLVED STUB ids whose recorded
     /// name is a dotted RELATIVE spelling.
@@ -23291,6 +23418,9 @@ impl ArchiveBodyRemap<'_> {
                     name, key, fid.0
                 );
             }
+            // Carry the REGISTERED key (not the relative spelling that
+            // chased to it) — it is the name that resolves again later.
+            self.note(fid, key);
             fid
         })
     }
@@ -23320,6 +23450,9 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
         // body.
         if crate::stub_ranges::in_xmod_call_band(src.0) {
             if let Some(&fid) = self.band_redirect.get(&src.0) {
+                if let Some(name) = self.archive_external_id_to_name.get(&src.0) {
+                    self.note(fid, name);
+                }
                 return fid;
             }
             // No external record for this band id (malformed archive
@@ -23359,6 +23492,7 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
                     if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                         eprintln!("[remap-fallback] tier0-xmod OK src={} → name={:?} → user_fid={} (ctx)", src.0, name, fid.0);
                     }
+                    self.note(fid, name);
                     return fid;
                 }
             }
@@ -23367,6 +23501,7 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
                     if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                         eprintln!("[remap-fallback] tier0-xmod OK src={} → name={:?} → user_fid={} (archive-wide)", src.0, name, fid.0);
                     }
+                    self.note(fid, name);
                     return fid;
                 }
             }
@@ -23415,6 +23550,7 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
                     if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                         eprintln!("[remap-fallback] tier2a OK archive_id={} → name={:?} → user_fid={}", src.0, name, fid.0);
                     }
+                    self.note(fid, name);
                     return fid;
                 } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                     eprintln!("[remap-fallback] tier2a REJECT-STUB archive_id={} → name={:?} → ctx_fid={} (stub-range) — falling through to tier2b", src.0, name, fid.0);
@@ -23442,6 +23578,7 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
                     if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                         eprintln!("[remap-fallback] tier2b OK archive_id={} → name={:?} → user_fid={} (archive-wide)", src.0, name, fid.0);
                     }
+                    self.note(fid, name);
                     return fid;
                 } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                     eprintln!("[remap-fallback] tier2b REJECT-STUB archive_id={} → name={:?} → archive_fid={} (stub-range)", src.0, name, fid.0);

@@ -604,6 +604,15 @@ fn register_module(
             ctx.function_param_defaults
                 .insert(simple_name.to_string(), defaults);
         }
+        // T0330 mono-seed fallback: record the archive callee's raw
+        // param TypeRefs under the SAME globally-unique id, so
+        // `record_generic_instantiation` can derive generic type args
+        // for archive-loaded callees whose descriptors are not in the
+        // codegen's `self.functions` during user-fn compilation.
+        ctx.archive_fn_param_types.insert(
+            new_id.0,
+            fn_desc.params.iter().map(|p| p.type_ref.clone()).collect(),
+        );
         ctx.register_function(qualified, info.clone());
         stats.functions_registered += 1;
 
@@ -1244,6 +1253,15 @@ pub(crate) struct SymbolGraph {
     /// = list of callee descriptor names (qualified or bare) emitted
     /// by this function's bytecode.
     edges: HashMap<u32, HashMap<String, Vec<String>>>,
+    /// Archive entry name → entry index. Home-module resolution for
+    /// callee names that have NO function descriptor anywhere —
+    /// cross-module variant-constructor references
+    /// (`…alter.validator.VeNoSuchTable`), FFI extern names
+    /// (`core.sys.darwin.libsystem.arc4random_buf`) and re-export
+    /// spellings. Such a name still names its HOME MODULE by prefix;
+    /// decoding that module is what registers the constructor / extern
+    /// so merge-time band resolution can bind it (T0277 leg B part 2).
+    entry_by_name: HashMap<String, u32>,
 }
 
 impl SymbolGraph {
@@ -1266,10 +1284,39 @@ impl SymbolGraph {
         let mut leaf_to_qualified: HashMap<String, Vec<String>> = HashMap::new();
         let mut prefix_to_qualified: HashMap<String, Vec<String>> = HashMap::new();
         let mut edges: HashMap<u32, HashMap<String, Vec<String>>> = HashMap::new();
+        let entry_by_name: HashMap<String, u32> = archive
+            .index
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.name.clone(), i as u32))
+            .collect();
         for (idx, view) in per_module {
+            let entry_name: &str = archive
+                .index
+                .get(idx as usize)
+                .map(|e| e.name.as_str())
+                .unwrap_or("");
             let mut module_edges: HashMap<String, Vec<String>> = HashMap::new();
             for ModuleFunction { name, callees } in view.functions {
                 qualified_to_module.entry(name.clone()).or_insert(idx);
+                // **Spelling completeness** (T0277 leg B part 2): a
+                // caller's edge records the callee under the spelling
+                // THE CALLER KNEW — commonly the fully-ROOTED canonical
+                // form (`core.mem.epoch.GLOBAL_EPOCH.on_wraparound`)
+                // while the descriptor stores the promoted/relative
+                // form (`mem.epoch.GLOBAL_EPOCH.on_wraparound`). The
+                // keep-set indexer (`compute_merge_keep_sets`) already
+                // indexes both; the BFS graph indexed ONLY the raw
+                // descriptor spelling, so rooted edges fell off the
+                // graph and the callee's module was never decoded.
+                // Register the canonical spelling as a first-class
+                // node: same module, ALIASED edge row so the BFS can
+                // continue THROUGH the callee's own edges.
+                let canonical = merge_module_and_simple_name(entry_name, &name);
+                if canonical.as_str() != name {
+                    qualified_to_module.entry(canonical.clone()).or_insert(idx);
+                    module_edges.insert(canonical, callees.clone());
+                }
                 if let Some(leaf) = name.rsplit('.').next() {
                     if leaf != name {
                         leaf_to_qualified
@@ -1295,7 +1342,24 @@ impl SymbolGraph {
             leaf_to_qualified,
             prefix_to_qualified,
             edges,
+            entry_by_name,
         }
+    }
+
+    /// Longest-dot-prefix home-module resolution for a qualified name
+    /// with no function descriptor (variant constructor, FFI extern,
+    /// re-export spelling). `a.b.c.D` tries `a.b.c`, then `a.b`, then
+    /// `a` against the archive entry index. Bounded by segment count —
+    /// no fanout.
+    fn home_module_of(&self, name: &str) -> Option<u32> {
+        let mut prefix = name;
+        while let Some(pos) = prefix.rfind('.') {
+            prefix = &prefix[..pos];
+            if let Some(&idx) = self.entry_by_name.get(prefix) {
+                return Some(idx);
+            }
+        }
+        None
     }
 
     /// BFS from seed names. Returns:
@@ -1389,6 +1453,25 @@ impl SymbolGraph {
                             // never fans, so it stays unconditional.
                             if self.qualified_to_module.contains_key(callee) {
                                 enqueue(callee, &mut reached, &mut queue);
+                            } else if callee.contains('.') {
+                                // **Home-module decode edge** (T0277 leg B
+                                // part 2): a dotted callee with NO
+                                // descriptor row anywhere is a by-name
+                                // reference to something that is not a
+                                // function-table entry — a variant
+                                // constructor, an FFI extern, or a
+                                // re-export spelling. It cannot be
+                                // walked further, but its HOME module
+                                // must still join the decode set so the
+                                // constructor/extern REGISTERS and
+                                // merge-time band resolution binds the
+                                // name instead of leaving a dangling
+                                // band id (const-zero stub → SIGBUS at
+                                // AOT; `[xmod-unresolved]` at Tier-0).
+                                // Longest-prefix, one module, no fanout.
+                                if let Some(home_idx) = self.home_module_of(callee) {
+                                    modules.insert(home_idx);
+                                }
                             }
                             // CallM frequently emits `Type.method`-form
                             // strings whose receiver type prefix isn't
