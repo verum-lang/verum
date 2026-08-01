@@ -78,10 +78,13 @@ fn property_encoded_len_in_valid_range_for_typical() {
 
 @test
 fn property_encoded_len_typical_small() {
-    // Small positives fit in 1 byte
+    // Small positives fit in 1 byte — len-1 covers 0..127 (7-bit),
+    // per the boundary table pinned in unit_test.vr §2. The old
+    // `100 -> 2` expectation contradicted both that table and this
+    // law's own comment (100 <= 0x7F is a 1-byte value).
     assert_eq(sqlite_encoded_len(1_i64), 1);
     assert_eq(sqlite_encoded_len(63_i64), 1);
-    assert_eq(sqlite_encoded_len(100_i64), 2);
+    assert_eq(sqlite_encoded_len(100_i64), 1);
 }
 
 @test
