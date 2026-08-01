@@ -52,7 +52,7 @@ pub use cache::MonomorphizationCache;
 pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,
 };
-pub use merger::{FunctionMapping, IncrementalMerger, MergeError, MergeStats, ModuleMerger};
+pub use merger::{FunctionMapping, MergeError, MergeStats, ModuleMerger};
 pub use optimizer::{OptimizationStats, SpecializationOptimizer};
 pub use phase::{
     MonoPhaseConfig, MonoPhaseError, MonoPhaseResult, MonomorphizationPhase, monomorphize,
