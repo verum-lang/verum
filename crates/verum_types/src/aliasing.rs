@@ -628,6 +628,55 @@ impl BorrowTracker {
         Ok(ref_id)
     }
 
+    /// Create an *immutable* FIELD/ELEMENT borrow for a call argument
+    /// (NLL behavior) — the field twin of [`Self::borrow_immut_for_call`].
+    ///
+    /// `f(&x.field)` / `recv.method(&xs[i])` take a borrow that is live
+    /// only for the duration of the call; the callee cannot leak it
+    /// without a reference-carrying return type (handled elsewhere by
+    /// `link_holder_to_last_borrow`). Registering it persistently makes
+    /// it linger for the rest of the lexical scope and phantom-conflict
+    /// with a later mutation (NLL-ARG-BORROW-1 second leg — live
+    /// failure: `words[j].cmp(&words[i])` then `words[i] = t` reported
+    /// E310 with no live holder anywhere).
+    ///
+    /// Same conflict checks as `borrow_field_immut` (a *mutable*
+    /// outstanding borrow of the whole target or the same field is a
+    /// real conflict), NO registration.
+    pub fn borrow_field_immut_for_call(
+        &mut self,
+        target: impl Into<Text>,
+        field: impl Into<Text>,
+        span: Span,
+    ) -> Result<RefId, TypeError> {
+        let target = target.into();
+        let field = field.into();
+        let field_key = format!("{}.{}", target, field);
+
+        if let Some(mut_borrows) = self.active_mut_borrows.get(&target) {
+            if let Some(existing) = mut_borrows.first() {
+                return Err(TypeError::BorrowConflict {
+                    var: target,
+                    existing_borrow_span: existing.span,
+                    existing_is_mut: true,
+                    new_borrow_span: span,
+                    new_is_mut: false,
+                });
+            }
+        }
+        if let Some(existing) = self.field_borrows.get(&Text::from(field_key.as_str())) {
+            if existing.is_mutable {
+                return Err(TypeError::FieldBorrowConflict {
+                    var: target,
+                    field,
+                    existing_span: existing.span,
+                    new_span: span,
+                });
+            }
+        }
+        Ok(RefId::new())
+    }
+
     /// Create a mutable borrow of a field
     pub fn borrow_field_mut(
         &mut self,

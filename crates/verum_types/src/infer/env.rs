@@ -11720,8 +11720,16 @@ with .to_float() or .to_int() (at {:?})",
                         if let Some((base_name, field_path)) =
                             self.extract_field_path(receiver, field.name.as_str())
                         {
-                            self.borrow_tracker
-                                .borrow_field_immut(base_name, field_path, _span)?;
+                            // NLL-ARG-BORROW-1 second leg: a `&x.field` CALL
+                            // ARGUMENT is a temporary that dies at call return
+                            // — same rule the Path arm above already applies.
+                            if self.in_call_arg_context {
+                                self.borrow_tracker
+                                    .borrow_field_immut_for_call(base_name, field_path, _span)?;
+                            } else {
+                                self.borrow_tracker
+                                    .borrow_field_immut(base_name, field_path, _span)?;
+                            }
                         }
                     }
                     // Index expression: &data[i] borrows the element at index i
@@ -11737,13 +11745,33 @@ with .to_float() or .to_int() (at {:?})",
                                 if idx >= 0 {
                                     // Constant index: track as "collection[idx]" (like a field)
                                     let index_path = verum_common::Text::from(format!("[{}]", idx));
-                                    self.borrow_tracker.borrow_field_immut(
-                                        verum_common::Text::from(collection_name.as_str()),
-                                        index_path,
-                                        _span,
-                                    )?;
+                                    // NLL-ARG-BORROW-1 second leg (see Field arm).
+                                    if self.in_call_arg_context {
+                                        self.borrow_tracker.borrow_field_immut_for_call(
+                                            verum_common::Text::from(collection_name.as_str()),
+                                            index_path,
+                                            _span,
+                                        )?;
+                                    } else {
+                                        self.borrow_tracker.borrow_field_immut(
+                                            verum_common::Text::from(collection_name.as_str()),
+                                            index_path,
+                                            _span,
+                                        )?;
+                                    }
                                 }
                                 // Negative indices will fail at runtime, but we still track the borrow
+                            } else if self.in_call_arg_context {
+                                // Non-constant index in call-arg position:
+                                // `recv.method(&xs[i])` — the whole-collection
+                                // borrow is a call temporary (NLL-ARG-BORROW-1
+                                // second leg; live failure: the bubble-sort
+                                // idiom `words[j].cmp(&words[i])` followed by
+                                // `words[i] = t` reported E310 with no live
+                                // holder — 242 text/text tests red on one
+                                // phantom conflict).
+                                self.borrow_tracker
+                                    .borrow_immut_for_call(collection_name.as_str(), _span)?;
                             } else {
                                 // Non-constant index: borrow the whole collection
                                 self.borrow_tracker
