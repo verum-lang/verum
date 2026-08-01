@@ -4630,6 +4630,23 @@ fn register_module_filtered(
             && !is_wholesale_module_mount
             && !last_segment_matches_wanted
         {
+            // **XMOD-BAND-NAME-CARRY-1 final producing registration**
+            // (T0277 leg B): the id above is already IN the remap, so
+            // sibling bodies' Calls WILL be rewritten to it at body
+            // merge (Tier-1) — but this arm never registers a name for
+            // it anywhere, which made every filter-rejected sibling
+            // callee (bodyless platform oracles like
+            // `__ctx_store_tier0_raw`, un-mounted ThreadPool internals)
+            // NAMELESS BY CONSTRUCTION: emission found no name, re-homed
+            // the operand to REMAP_POISON, and dispatch died with zero
+            // provenance. Carry the canonical name for the minted id —
+            // the emission-side fallback then produces a resolvable
+            // `external_function_names` entry (by-name lazy resolution
+            // gets a chance; a genuine miss dies NAMED).
+            ctx.resolved_name_by_id
+                .borrow_mut()
+                .entry(new_id.0)
+                .or_insert_with(|| qualified_borrowed.clone());
             continue;
         }
         registered_ids.insert(fn_desc.id.0);
@@ -4772,6 +4789,16 @@ fn register_module_filtered(
             is_transparent_wrapper: false,
             param_closure_return_type_names,
         };
+        // T0330 mono-seed fallback (filtered-load leg — the sibling
+        // capture lives in `populate_ctx_from_archive`): raw param
+        // TypeRefs under the SAME globally-unique id, so
+        // `record_generic_instantiation` can derive generic type args
+        // for archive-loaded callees (`Maybe.fmt`) whose descriptors
+        // never enter the codegen's `self.functions`.
+        ctx.archive_fn_param_types.insert(
+            new_id.0,
+            fn_desc.params.iter().map(|p| p.type_ref.clone()).collect(),
+        );
         ctx.register_function(qualified.clone(), info.clone());
         // BAKED-DEFAULT-ARG-1: surface the descriptor's default-value
         // channel to the call-site injector under every lookup
