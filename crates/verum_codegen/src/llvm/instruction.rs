@@ -2309,7 +2309,9 @@ fn as_ptr<'ctx>(
 }
 
 // ========================================================================
-// Coherent reference model — pointer tagging (gated by VERUM_ENABLE_MONO_AOT)
+// Coherent reference model — pointer tagging (gated by VERUM_PTR_TAGGING;
+// formerly rode the unrelated VERUM_ENABLE_MONO_AOT flag, so enabling the
+// mono seed silently flipped this experiment too — the flag-run SIGSEGV class)
 // ========================================================================
 // A reference (`&x` / `&mut x`, i.e. Ref/RefMut) is the address of the
 // value's storage slot with bit 0 set. Heap object pointers are 8-aligned,
@@ -2325,7 +2327,7 @@ fn as_ptr<'ctx>(
 
 /// True when the coherent (tagged) reference model is active.
 fn ref_tagging_enabled() -> bool {
-    std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some()
+    std::env::var_os("VERUM_PTR_TAGGING").is_some()
 }
 
 /// Set bit 0 on a slot-address i64 to mark it a reference.
@@ -40639,7 +40641,7 @@ fn lower_ref_mut_family<'ctx>(
         }
     };
 
-    // Coherent reference model (gated VERUM_ENABLE_MONO_AOT, merged from
+    // Coherent reference model (gated VERUM_PTR_TAGGING, merged from
     // intrinsics-conformance-20260703): `&mut x` is the TAGGED address of x's
     // storage slot (bit 0 set), uniformly for heap and primitive referents.
     // Deref / field-access untag+load to reach the value; DerefMut untags to
