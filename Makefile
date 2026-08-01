@@ -4,7 +4,7 @@
 # before pushing — they catch stale-match build breaks across
 # the dependency graph without waiting for the CI run.
 
-.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes
+.PHONY: check check-workspace check-tests check-strict test build help check-vr-syntax check-markers check-internal-refs check-op-bytes check-inventory check-inventory-live
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -47,4 +47,17 @@ check-internal-refs: ## Gate: no references to the internal/ directory in tracke
 
 check-bake-prepass-parity: ## Gate (T0640): every collect_all_declarations pre-pass is classified for the stdlib bake
 	python3 scripts/ci/check_bake_prepass_parity.py
+
+check-inventory: ## Gate (T0220): core-tests/INVENTORY.md structural integrity (rows unique, row<->dir bijection, status tokens)
+	python3 scripts/ci/check_inventory.py --structural-only
+
+check-inventory-live: ## Gate (T0220): INVENTORY liveness — green claims re-verified against a real interp run (INVENTORY_RESULTS=results.json, or it runs the suite)
+	@if [ -n "$(INVENTORY_RESULTS)" ]; then \
+		python3 scripts/ci/check_inventory.py --results "$(INVENTORY_RESULTS)"; \
+	else \
+		tmp=$$(mktemp -t inventory_results.XXXX.json); \
+		echo "check-inventory-live: running verum test --interp --format json (reuse a run with INVENTORY_RESULTS=file)"; \
+		cargo run --release -p verum_cli -- test --interp --format json > $$tmp 2>/dev/null; \
+		python3 scripts/ci/check_inventory.py --results $$tmp; \
+	fi
 
