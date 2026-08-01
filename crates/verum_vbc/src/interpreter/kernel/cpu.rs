@@ -2082,6 +2082,83 @@ pub fn unop_f64_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHand
                     *out_ptr.add(i) = if x >= 0.0 { y } else { -y };
                 }
             }
+            TensorUnaryOp::Exp2 => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).exp2();
+                }
+            }
+            TensorUnaryOp::Expm1 => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).exp_m1();
+                }
+            }
+            TensorUnaryOp::Log10 => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).log10();
+                }
+            }
+            TensorUnaryOp::Log1p => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).ln_1p();
+                }
+            }
+            TensorUnaryOp::Square => {
+                for i in 0..n {
+                    let x = *a_ptr.add(i);
+                    *out_ptr.add(i) = x * x;
+                }
+            }
+            TensorUnaryOp::Asin => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).asin();
+                }
+            }
+            TensorUnaryOp::Acos => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).acos();
+                }
+            }
+            TensorUnaryOp::Atan => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).atan();
+                }
+            }
+            TensorUnaryOp::Sinh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).sinh();
+                }
+            }
+            TensorUnaryOp::Cosh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).cosh();
+                }
+            }
+            TensorUnaryOp::Asinh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).asinh();
+                }
+            }
+            TensorUnaryOp::Acosh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).acosh();
+                }
+            }
+            TensorUnaryOp::Atanh => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).atanh();
+                }
+            }
+            TensorUnaryOp::Trunc => {
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).trunc();
+                }
+            }
+            TensorUnaryOp::Erfc => {
+                for i in 0..n {
+                    *out_ptr.add(i) =
+                        1.0 - crate::interpreter::tensor::erf_scalar(*a_ptr.add(i));
+                }
+            }
         }
     }
 

@@ -1658,6 +1658,16 @@ fn unop_arith_op(op: TensorUnaryOp, dtype: DType) -> Option<&'static str> {
  Round | Erf | Rsqrt => return None,
  // Composed forms — A future iteration wiring point.
  Sigmoid | Relu | Gelu | Silu | Softplus | Mish | Sign => return None,
+ // Direct math-dialect mappings for the extended scalar family.
+ Exp2 => "math.exp2",
+ Expm1 => "math.expm1",
+ Log10 => "math.log10",
+ Log1p => "math.log1p",
+ Trunc => "math.trunc",
+ // `math.asin`/`acos`/`atan`/hyperbolics + erfc lower through
+ // math-to-libm (same unresolved-symbol caveat as rsqrt above),
+ // and Square is a composed form — defer with the same idiom.
+ Square | Asin | Acos | Atan | Sinh | Cosh | Asinh | Acosh | Atanh | Erfc => return None,
  })
 }
 
