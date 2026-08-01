@@ -4654,6 +4654,62 @@ pub(super) fn realtime_nanos_shared() -> i64 {
 }
 
 /// Dispatch built-in methods on primitive types (Int, Float, Bool, Char, Byte).
+
+/// ONE spine-clone authority for the builtin containers (T0499): copy a
+/// container object's inline header slots and its backing array into
+/// fresh allocations. Element Values are copied bit-wise — heap
+/// elements stay shared, the same ownership depth an element read
+/// hands out. `backing_slot` is patched to the fresh array;
+/// `copy_slots` says how many backing Values are live (List copies
+/// `len`; Map/Set copy `cap*2` — hash positions must be preserved;
+/// Deque copies the whole ring).
+fn clone_container_spine(
+    state: &mut InterpreterState,
+    src_obj: *const u8,
+    type_id: TypeId,
+    backing_type: TypeId,
+    header_slots: usize,
+    backing_slot: usize,
+    backing_alloc: usize,
+    copy_slots: usize,
+) -> InterpreterResult<Value> {
+    let src_data =
+        unsafe { src_obj.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    let obj = state
+        .heap
+        .alloc(type_id, header_slots * std::mem::size_of::<Value>())?;
+    state.record_allocation();
+    let new_data = unsafe {
+        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+    };
+    let backing = state.heap.alloc_array(backing_type, backing_alloc.max(1))?;
+    state.record_allocation();
+    // SAFETY: fresh allocations of the exact sizes above; the source is
+    // a validated container object; backing arrays are header-carrying
+    // heap arrays whose elements start at +OBJECT_HEADER_SIZE.
+    unsafe {
+        for i in 0..header_slots {
+            *new_data.add(i) = *src_data.add(i);
+        }
+        *new_data.add(backing_slot) =
+            Value::from_ptr(backing.as_ptr() as *mut u8);
+        let src_backing = (*src_data.add(backing_slot)).as_ptr::<u8>();
+        let dst_elems = (backing.as_ptr() as *mut u8)
+            .add(heap::OBJECT_HEADER_SIZE) as *mut Value;
+        if !src_backing.is_null() && copy_slots > 0 {
+            let src_elems =
+                src_backing.add(heap::OBJECT_HEADER_SIZE) as *const Value;
+            std::ptr::copy_nonoverlapping(src_elems, dst_elems, copy_slots);
+        }
+        // Zero-fill the allocated tail beyond the copied prefix so
+        // uninitialized slots never leak stale heap bytes.
+        for i in copy_slots..backing_alloc.max(1) {
+            *dst_elems.add(i) = Value::unit();
+        }
+    }
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
 pub(super) fn dispatch_primitive_method(
     state: &mut InterpreterState,
     receiver: &Value,
@@ -5159,58 +5215,53 @@ pub(super) fn dispatch_primitive_method(
                 // copied bit-wise — heap elements stay shared, the
                 // same ownership depth an element read hands out.
                 if header.type_id == TypeId::LIST {
+                    // [len, cap, backing]: copy `len` live elements.
                     let data_ptr =
                         unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                    if std::env::var_os("VERUM_TRACE_CLONE").is_some() {
-                        unsafe {
-                            eprintln!(
-                                "[clone-list] len_bits=0x{:x} cap_bits=0x{:x} backing_bits=0x{:x}",
-                                (*data_ptr).to_bits(),
-                                (*data_ptr.add(1)).to_bits(),
-                                (*data_ptr.add(2)).to_bits(),
-                            );
-                        }
-                    }
-                    // SAFETY: validated LIST object — slots are
-                    // [len, cap, backing_ptr].
                     let len = unsafe { (*data_ptr).as_i64().max(0) } as usize;
-                    let cap_raw = unsafe { (*data_ptr.add(1)).as_i64() };
-                    let cap = cap_raw.max(len as i64).max(1) as usize;
-                    let src_backing =
-                        unsafe { (*data_ptr.add(2)).as_ptr::<Value>() };
-                    let obj = state
-                        .heap
-                        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
-                    state.record_allocation();
-                    let new_data = unsafe {
-                        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
-                            as *mut Value
-                    };
-                    let backing = state.heap.alloc_array(TypeId::LIST, cap)?;
-                    state.record_allocation();
-                    // SAFETY: fresh allocations of the exact sizes above;
-                    // src backing holds at least `len` initialized Values.
-                    // The backing is itself a header-carrying heap array —
-                    // elements start at +OBJECT_HEADER_SIZE (the same
-                    // convention every element reader uses).
-                    unsafe {
-                        *new_data = Value::from_i64(len as i64);
-                        *new_data.add(1) = Value::from_i64(cap as i64);
-                        *new_data.add(2) =
-                            Value::from_ptr(backing.as_ptr() as *mut u8);
-                        if !src_backing.is_null() && len > 0 {
-                            let src_elems = (src_backing as *const u8)
-                                .add(heap::OBJECT_HEADER_SIZE)
-                                as *const Value;
-                            let dst_elems = (backing.as_ptr() as *mut u8)
-                                .add(heap::OBJECT_HEADER_SIZE)
-                                as *mut Value;
-                            std::ptr::copy_nonoverlapping(
-                                src_elems, dst_elems, len,
-                            );
-                        }
-                    }
-                    return Ok(Some(Value::from_ptr(obj.as_ptr() as *mut u8)));
+                    let cap = unsafe { (*data_ptr.add(1)).as_i64() }
+                        .max(len as i64)
+                        .max(1) as usize;
+                    let cloned = clone_container_spine(
+                        state, p, TypeId::LIST, TypeId::LIST, 3, 2, cap, len,
+                    )?;
+                    return Ok(Some(cloned));
+                }
+                // Map/Set: [count, cap, entries, tombstones] — the
+                // entries array is `cap * 2` (key, value) slots whose
+                // hash POSITIONS must be preserved, so the whole
+                // region copies.
+                if header.type_id == TypeId::MAP
+                    || header.type_id == TypeId::SET
+                {
+                    let data_ptr =
+                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let cap =
+                        unsafe { (*data_ptr.add(1)).as_i64().max(1) } as usize;
+                    let cloned = clone_container_spine(
+                        state,
+                        p,
+                        header.type_id,
+                        TypeId::UNIT,
+                        4,
+                        2,
+                        cap * 2,
+                        cap * 2,
+                    )?;
+                    return Ok(Some(cloned));
+                }
+                // Deque: [data, head, len, cap] — a ring; head/len are
+                // positions into the buffer, so the whole `cap` ring
+                // copies verbatim.
+                if header.type_id == TypeId::DEQUE {
+                    let data_ptr =
+                        unsafe { p.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                    let cap =
+                        unsafe { (*data_ptr.add(3)).as_i64().max(1) } as usize;
+                    let cloned = clone_container_spine(
+                        state, p, TypeId::DEQUE, TypeId::UNIT, 4, 0, cap, cap,
+                    )?;
+                    return Ok(Some(cloned));
                 }
             }
         }
