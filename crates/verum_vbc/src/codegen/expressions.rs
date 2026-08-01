@@ -38634,14 +38634,49 @@ impl VbcCodegen {
                     src: formatter_reg,
                 });
             }
-            self.ctx.emit(Instruction::Call {
-                dst: fmt_result_reg,
-                func_id: fid,
-                args: crate::instruction::RegRange {
-                    start: call_args_start,
-                    count: 2,
-                },
-            });
+            // T0330: a receiver whose STATIC type instantiates a generic
+            // (`Maybe<Int>`, `Result<Int, E>`) formats through a GENERIC
+            // fmt body — at Tier-1 that body's payload dispatch is a
+            // runtime type switch whose default arm does nothing for
+            // scalar payloads (the `Some()` empty-payload class). The
+            // static type is KNOWN right here, so derive the type args
+            // through the ONE derivation authority
+            // (`record_generic_instantiation`, unifying the callee's
+            // `self: Maybe<T>` against the receiver expr) and emit
+            // `CallG` — the interp witness plumbing and the mono
+            // specialization pipeline both key off it. Non-generic
+            // callees and unresolved receivers derive nothing and keep
+            // the plain `Call` unchanged.
+            let fmt_type_args = if type_name.contains('<') {
+                let mut recv_only: verum_common::List<Expr> = verum_common::List::new();
+                recv_only.push(expr.clone());
+                self.record_generic_instantiation(fid, &recv_only)
+            } else {
+                None
+            };
+            match fmt_type_args {
+                Some(type_args) if !type_args.is_empty() => {
+                    self.ctx.emit(Instruction::CallG {
+                        dst: fmt_result_reg,
+                        func_id: fid,
+                        type_args,
+                        args: crate::instruction::RegRange {
+                            start: call_args_start,
+                            count: 2,
+                        },
+                    });
+                }
+                _ => {
+                    self.ctx.emit(Instruction::Call {
+                        dst: fmt_result_reg,
+                        func_id: fid,
+                        args: crate::instruction::RegRange {
+                            start: call_args_start,
+                            count: 2,
+                        },
+                    });
+                }
+            }
         } else {
             // Dynamic-call shape.
             let fmt_arg_reg = self.ctx.registers.alloc_fresh();
