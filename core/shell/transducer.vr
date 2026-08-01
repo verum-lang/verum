@@ -39,7 +39,7 @@
 
 // =============================================================================
 
-module transducer;
+module core.shell.transducer;
 
 mount core.{Maybe, Result, List, Bool, Int, Text};
 mount core.base.cell.{Cell};

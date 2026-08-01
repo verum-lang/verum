@@ -1,4 +1,4 @@
-module sys.darwin.thread;
+module core.sys.darwin.thread;
 
 // =============================================================================
 // sys/darwin/thread.vr - macOS DarwinThread Creation and Synchronization

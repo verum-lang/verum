@@ -1,7 +1,7 @@
 // =============================================================================
 // tabs.vr - Horizontal tab bar widget
 // =============================================================================
-module tabs;
+module core.term.widget.tabs;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;

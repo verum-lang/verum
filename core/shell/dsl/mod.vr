@@ -15,7 +15,7 @@
 
 // =============================================================================
 
-module dsl;
+module core.shell.dsl;
 
 public module git;
 public module docker;

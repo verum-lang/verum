@@ -1,7 +1,7 @@
 // =============================================================================
 // menu.vr - Menu widget with keyboard navigation
 // =============================================================================
-module menu;
+module core.term.widget.menu;
 
 mount super.protocol.{StatefulWidget, Styled};
 mount super.block.{Block, Borders, BorderType};

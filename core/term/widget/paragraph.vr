@@ -1,7 +1,7 @@
 // =============================================================================
 // paragraph.vr - Paragraph widget (text display with wrapping)
 // =============================================================================
-module paragraph;
+module core.term.widget.paragraph;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.{Block, Alignment};

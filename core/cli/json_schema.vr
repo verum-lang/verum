@@ -22,7 +22,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module json_schema;
+module core.cli.json_schema;
 
 mount core.{Maybe, Result, List, Text, Int, Bool};
 mount core.text.builder.TextBuilder;

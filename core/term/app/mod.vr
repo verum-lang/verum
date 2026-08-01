@@ -5,7 +5,7 @@
 // Integrates with the native async runtime (core.async) for Commands and
 // Subscriptions; structured cancellation on Quit.
 // =============================================================================
-module app;
+module core.term.app;
 
 // Sub-modules
 public module app;

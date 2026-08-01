@@ -18,7 +18,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module parallel;
+module core.async.parallel;
 
 // =============================================================================
 // Parallel Map

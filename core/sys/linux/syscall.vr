@@ -1,4 +1,4 @@
-module sys.linux.syscall;
+module core.sys.linux.syscall;
 
 // =============================================================================
 // syscall.vr - Linux syscall interface

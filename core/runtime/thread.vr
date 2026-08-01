@@ -32,7 +32,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.thread;
+module core.runtime.thread;
 
 mount core.*;
 mount core.intrinsics.type_info.{size_of, align_of};

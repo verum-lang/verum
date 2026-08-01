@@ -11,7 +11,7 @@
 
 // =============================================================================
 
-module panic;
+module core.base.panic;
 
 // Import intrinsics. `unreachable` is renamed to avoid shadowing
 // our own user-facing `unreachable(msg)` defined below — the

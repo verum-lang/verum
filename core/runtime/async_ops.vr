@@ -3,7 +3,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.async_ops;
+module core.runtime.async_ops;
 
 /// Opaque handle for async join operations.
 public type JoinHandleOpaque is (Int);

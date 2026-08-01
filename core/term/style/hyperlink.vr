@@ -21,7 +21,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.3
 // =============================================================================
 
-module hyperlink;
+module core.term.style.hyperlink;
 
 mount core.io.IoResult;
 mount core.io.{IoError, IoErrorKind};

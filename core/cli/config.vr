@@ -22,7 +22,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module config;
+module core.cli.config;
 
 mount core.{Maybe, Result, List, Map, Text, Int, Bool};
 mount core.base.env;

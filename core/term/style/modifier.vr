@@ -9,7 +9,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.2
 // =============================================================================
 
-module modifier;
+module core.term.style.modifier;
 
 // =============================================================================
 // Modifier — bitfield for SGR text attributes

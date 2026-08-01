@@ -35,7 +35,7 @@
 
 // =============================================================================
 
-module meta.span;
+module core.meta.span;
 
 mount core.{Maybe, Text, Ordering};
 

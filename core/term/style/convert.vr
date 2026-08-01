@@ -8,7 +8,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
 // =============================================================================
 
-module convert;
+module core.term.style.convert;
 
 mount core.math.{pow, abs};
 

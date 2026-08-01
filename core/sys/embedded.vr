@@ -1,4 +1,4 @@
-module sys.embedded;
+module core.sys.embedded;
 
 mount sys.mmio.{volatile_load, volatile_store};
 

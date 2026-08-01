@@ -1,4 +1,4 @@
-module sys.darwin;
+module core.sys.darwin;
 
 // =============================================================================
 // sys/darwin/mod.vr - macOS (Darwin/XNU) system interface module

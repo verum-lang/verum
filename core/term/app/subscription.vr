@@ -20,7 +20,7 @@
 
 // =============================================================================
 
-module subscription;
+module core.term.app.subscription;
 
 mount core.time.{Duration, Instant};
 mount core.async.stream.Stream;

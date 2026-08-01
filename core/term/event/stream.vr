@@ -17,7 +17,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.3
 // =============================================================================
 
-module stream;
+module core.term.event.stream;
 
 mount core.io.{IoResult, StreamError, IoErrorKind};
 mount core.time.Duration;

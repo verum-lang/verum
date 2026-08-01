@@ -16,7 +16,7 @@
 // =============================================================================
 
 @cfg(target_os = "windows")
-module wincon;
+module core.term.raw.wincon;
 
 mount core.sys.windows.ntdll.{Handle};
 mount core.sys.windows.kernel32.{

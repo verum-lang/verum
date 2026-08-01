@@ -15,7 +15,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 3
 // =============================================================================
 
-module notification;
+module core.term.widget.notification;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.{Block, Borders, BorderType};

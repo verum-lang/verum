@@ -30,7 +30,7 @@
 
 // =============================================================================
 
-module net.tls;
+module core.net.tls;
 
 mount core.*;
 mount core.io.protocols.{Read, Write};

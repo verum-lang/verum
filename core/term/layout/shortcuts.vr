@@ -8,7 +8,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#16.2
 // =============================================================================
 
-module shortcuts;
+module core.term.layout.shortcuts;
 
 mount super.rect.Rect;
 mount super.constraint.{Constraint, TermLayout};

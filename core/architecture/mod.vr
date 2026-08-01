@@ -61,7 +61,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.architecture.mod;
+module core.architecture;
 
 mount super.types.{
     Lifecycle,

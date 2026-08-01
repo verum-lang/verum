@@ -16,7 +16,7 @@
 // =============================================================================
 
 @cfg(not(target_os = "windows"))
-module termios;
+module core.term.raw.termios;
 
 mount core.sys.{FileDesc, OSError};
 mount core.io.{Read, Write, IoResult, StreamError, IoErrorKind};

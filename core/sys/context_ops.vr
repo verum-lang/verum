@@ -1,4 +1,4 @@
-module sys.context_ops;
+module core.sys.context_ops;
 
 // =============================================================================
 // sys/context_ops.vr - Context System & TLS (replaces C verum_ctx_*/verum_tls_*)

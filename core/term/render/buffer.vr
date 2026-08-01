@@ -1,7 +1,7 @@
 // =============================================================================
 // buffer.vr - 2D cell buffer for terminal rendering
 // =============================================================================
-module buffer;
+module core.term.render.buffer;
 
 mount super.cell.{RenderCell, grapheme_width, char_display_width};
 mount super.super.style.Style;

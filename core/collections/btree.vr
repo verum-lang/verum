@@ -27,7 +27,7 @@
 
 // =============================================================================
 
-module btree;
+module core.collections.btree;
 
 mount core.*;
 

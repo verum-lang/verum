@@ -3,7 +3,7 @@
 // =============================================================================
 // Double-buffered, diff-based terminal rendering.
 // =============================================================================
-module render;
+module core.term.render;
 
 mount core.io.{Write, IoResult, StreamError, IoErrorKind};
 

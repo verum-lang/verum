@@ -9,7 +9,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#8.1
 // =============================================================================
 
-module rect;
+module core.term.layout.rect;
 
 /// Rectangular area in the terminal (cell coordinates).
 public type Rect is {

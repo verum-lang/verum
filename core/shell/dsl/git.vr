@@ -20,7 +20,7 @@
 
 // =============================================================================
 
-module git;
+module core.shell.dsl.git;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};

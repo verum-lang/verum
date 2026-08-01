@@ -9,7 +9,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#8
 // =============================================================================
 
-module layout;
+module core.term.layout;
 
 // Sub-modules
 public module rect;

@@ -53,7 +53,7 @@
 
 // =============================================================================
 
-module meta.diakrisis_attrs;
+module core.meta.diakrisis_attrs;
 
 mount core.{Text, List, Maybe, Result};
 mount meta.attribute.{Attribute, AttributeArg, MetaAttributeValue};

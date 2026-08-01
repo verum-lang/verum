@@ -97,7 +97,7 @@
 
 // =============================================================================
 
-module meta.contexts;
+module core.meta.contexts;
 
 mount core.{Result, Text, List, Maybe, Byte, Map};
 mount meta.span.{Span, SourceLocation};

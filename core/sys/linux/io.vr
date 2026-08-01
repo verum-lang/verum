@@ -1,4 +1,4 @@
-module sys.linux.io;
+module core.sys.linux.io;
 
 // =============================================================================
 // sys/linux/io.vr - Linux Asynchronous I/O (io_uring + epoll fallback)

@@ -70,7 +70,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.stack_alloc;
+module core.runtime.stack_alloc;
 
 mount mem.{Alloc, Layout, AllocError};
 mount sync.{AtomicInt, MemoryOrdering};

@@ -13,7 +13,7 @@
 // The widget is generic over item type `T`; the caller provides a label
 // function so any domain type can be rendered without newtype wrappers.
 // =============================================================================
-module dropdown;
+module core.term.widget.dropdown;
 
 mount super.protocol.{StatefulWidget, Styled};
 mount super.block.{Block, Borders, BorderType};

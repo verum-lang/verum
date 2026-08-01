@@ -43,7 +43,7 @@
 
 // =============================================================================
 
-module meta.token;
+module core.meta.token;
 
 mount core.{Result, Maybe, Text, List, Iterator};
 mount meta.span.{Span};

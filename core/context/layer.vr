@@ -12,7 +12,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module layer;
+module core.context.layer;
 
 // =============================================================================
 // Layer Composition

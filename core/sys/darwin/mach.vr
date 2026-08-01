@@ -1,4 +1,4 @@
-module sys.darwin.mach;
+module core.sys.darwin.mach;
 mount core.base.coercion.{IntCoercible};
 
 // =============================================================================

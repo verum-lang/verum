@@ -1,7 +1,7 @@
 // =============================================================================
 // barchart.vr - Bar chart widget with grouped bars, labels, and values
 // =============================================================================
-module barchart;
+module core.term.widget.barchart;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;

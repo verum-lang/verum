@@ -1,4 +1,4 @@
-module sys.bitfield;
+module core.sys.bitfield;
 
 /// Verum Standard Library: Bitfield Support
 ///

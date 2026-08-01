@@ -26,7 +26,7 @@
 
 // =============================================================================
 
-module waitgroup;
+module core.sync.waitgroup;
 
 mount core.*;
 

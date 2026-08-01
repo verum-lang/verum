@@ -28,7 +28,7 @@
 
 // =============================================================================
 
-module watch;
+module core.shell.watch;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};

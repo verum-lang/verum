@@ -1,4 +1,4 @@
-module sys.linux;
+module core.sys.linux;
 
 // =============================================================================
 // sys/linux/mod.vr - Linux system interface module

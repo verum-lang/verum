@@ -6,7 +6,7 @@
 // so emoji with skin tones, ZWJ-joined families, regional flag pairs, and
 // Indic/Arabic combining sequences all occupy the correct number of columns.
 // =============================================================================
-module cell;
+module core.term.render.cell;
 
 mount super.super.style.{Style, Color, Modifier};
 

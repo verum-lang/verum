@@ -27,7 +27,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module testing;
+module core.cli.testing;
 
 mount core.{Maybe, Result, List, Text, Int, Bool};
 mount core.cli.spec.CommandSpec;

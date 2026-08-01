@@ -11,7 +11,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module provider;
+module core.context.provider;
 
 mount super.scope.Scope;
 mount super.super.runtime.ctx_bridge.{env_ctx_get, env_ctx_set, env_ctx_end};

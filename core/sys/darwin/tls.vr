@@ -1,4 +1,4 @@
-module sys.darwin.tls;
+module core.sys.darwin.tls;
 
 // =============================================================================
 // sys/darwin/tls.vr - macOS DarwinThread-Local Storage and Context System

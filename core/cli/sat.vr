@@ -46,7 +46,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module sat;
+module core.cli.sat;
 
 mount core.{Maybe, Result, List, Map, Set, Text, Int, Bool};
 

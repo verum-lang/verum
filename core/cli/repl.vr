@@ -26,7 +26,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module repl;
+module core.cli.repl;
 
 mount core.{Maybe, Result, List, Text, Bool};
 mount core.io.stdio;

@@ -1,4 +1,4 @@
-module sys.no_runtime;
+module core.sys.no_runtime;
 
 // =============================================================================
 // sys/no_runtime.vr - No-runtime mode declarations

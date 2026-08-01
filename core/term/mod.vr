@@ -25,7 +25,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md
 // =============================================================================
 
-module term;
+module core.term;
 
 // =============================================================================
 // Layer 0: Terminal I/O (raw platform abstraction)

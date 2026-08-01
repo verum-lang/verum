@@ -9,7 +9,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#8.3
 // =============================================================================
 
-module flex;
+module core.term.layout.flex;
 
 mount super.rect.Rect;
 

@@ -1,4 +1,4 @@
-module sys.linux.thread;
+module core.sys.linux.thread;
 
 // =============================================================================
 // sys/linux/thread.vr - Linux LinuxThread Creation and Synchronization

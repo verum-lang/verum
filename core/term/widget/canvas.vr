@@ -1,7 +1,7 @@
 // =============================================================================
 // canvas.vr - Braille / half-block / block pixel canvas widget
 // =============================================================================
-module canvas;
+module core.term.widget.canvas;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;

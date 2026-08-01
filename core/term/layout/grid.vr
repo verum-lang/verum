@@ -24,7 +24,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 8
 // =============================================================================
 
-module grid;
+module core.term.layout.grid;
 
 mount super.rect.Rect;
 

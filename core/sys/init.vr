@@ -1,4 +1,4 @@
-module sys.init;
+module core.sys.init;
 
 // =============================================================================
 // sys/init.vr - V-LLSI Runtime Initialization Entry Point

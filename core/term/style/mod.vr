@@ -9,7 +9,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6
 // =============================================================================
 
-module style;
+module core.term.style;
 
 // Sub-modules
 public module color;

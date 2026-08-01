@@ -18,7 +18,7 @@
 
 // =============================================================================
 
-module verify;
+module core.shell.verify;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Eq};

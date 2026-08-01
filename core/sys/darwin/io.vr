@@ -1,4 +1,4 @@
-module sys.darwin.io;
+module core.sys.darwin.io;
 
 // =============================================================================
 // sys/darwin/io.vr - macOS Completion-Based I/O (kqueue)

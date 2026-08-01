@@ -8,7 +8,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#16.1
 // =============================================================================
 
-module text_builder;
+module core.term.style.text_builder;
 
 mount super.super.widget.paragraph.{Span, Line};
 mount super.style.Style;

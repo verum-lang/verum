@@ -1,7 +1,7 @@
 // =============================================================================
 // scrollbar.vr - Scrollbar as a StatefulWidget (vertical/horizontal)
 // =============================================================================
-module scrollbar;
+module core.term.widget.scrollbar;
 
 mount super.protocol.StatefulWidget;
 mount super.super.render.buffer.Buffer;

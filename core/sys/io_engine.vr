@@ -1,4 +1,4 @@
-module sys.io_engine;
+module core.sys.io_engine;
 
 // =============================================================================
 // sys/io_engine.vr - Cross-Platform Completion-Based I/O Engine

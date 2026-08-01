@@ -39,7 +39,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module parser;
+module core.cli.parser;
 
 mount core.{Maybe, Result, List, Map, Set, Text, Char, Int, Bool};
 mount core.cli.spec.{

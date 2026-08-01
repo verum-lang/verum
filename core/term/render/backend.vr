@@ -4,7 +4,7 @@
 // Defines the Backend protocol that abstracts over different terminal
 // implementations (ANSI, Windows Console, etc.)
 // =============================================================================
-module backend;
+module core.term.render.backend;
 
 mount core.io.{Write, IoResult};
 mount super.cell.Cell;

@@ -1,4 +1,4 @@
-module sys.darwin.libsystem;
+module core.sys.darwin.libsystem;
 mount core.base.coercion.{IntCoercible, BytewiseFfi};
 
 // =============================================================================

@@ -34,7 +34,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module frontmatter;
+module core.cli.frontmatter;
 
 mount core.{Maybe, Result, List, Map, Text, Int, Bool};
 

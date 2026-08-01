@@ -113,7 +113,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module arena;
+module core.mem.arena;
 
 mount super.header.{AllocationHeader, HEADER_SIZE, FLAG_ARENA};
 mount core.intrinsics.runtime.mem_raw.{memcpy, memset, memzero, load_i64, store_i64};

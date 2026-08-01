@@ -32,7 +32,7 @@
 
 // =============================================================================
 
-module interval;
+module core.time.interval;
 
 mount core.*;
 mount core.time.{Duration};

@@ -1,7 +1,7 @@
 // =============================================================================
 // list.vr - Selectable list widget
 // =============================================================================
-module list;
+module core.term.widget.list;
 
 mount super.protocol.{Widget, StatefulWidget, Styled};
 mount super.block.Block;

@@ -1,4 +1,4 @@
-module sys.windows.time;
+module core.sys.windows.time;
 
 // =============================================================================
 // sys/windows/time.vr - Windows Time and WindowsDuration Utilities

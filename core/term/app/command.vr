@@ -21,7 +21,7 @@
 // the runtime interprets. This keeps `update` pure and deterministic.
 // =============================================================================
 
-module command;
+module core.term.app.command;
 
 mount core.time.Duration;
 mount core.async.future.Future;

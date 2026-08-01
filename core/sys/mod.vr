@@ -1,4 +1,4 @@
-module sys;
+module core.sys;
 
 // =============================================================================
 // sys/mod.vr - System-level primitives module

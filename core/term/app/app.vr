@@ -20,7 +20,7 @@
 //  * `run(model)` — synchronous entry (block_on the async runtime).
 //  * `run_async(model)` — async entry, for integration with user futures.
 // =============================================================================
-module app;
+module core.term.app.app;
 
 mount core.time.{Duration, Instant};
 mount core.io.IoResult;

@@ -1,4 +1,4 @@
-module sys.net_ops;
+module core.sys.net_ops;
 
 // =============================================================================
 // sys/net_ops.vr - Network Operations (replaces C verum_tcp_*/verum_udp_*)

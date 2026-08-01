@@ -27,7 +27,7 @@
 // honoured. Resize operations clamp to these bounds so the layout never
 // collapses a pane.
 // =============================================================================
-module split;
+module core.term.widget.split;
 
 mount super.protocol.Styled;
 mount super.super.render.buffer.Buffer;

@@ -1,7 +1,7 @@
 // =============================================================================
 // sparkline.vr - Sparkline widget (compact bar chart using Unicode blocks)
 // =============================================================================
-module sparkline;
+module core.term.widget.sparkline;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;

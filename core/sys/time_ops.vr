@@ -1,4 +1,4 @@
-module sys.time_ops;
+module core.sys.time_ops;
 
 // =============================================================================
 // sys/time_ops.vr - Time Operations (replaces C verum_time_* functions)

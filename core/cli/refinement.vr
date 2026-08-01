@@ -27,7 +27,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module refinement;
+module core.cli.refinement;
 
 mount core.{Maybe, Result, List, Map, Text, Int, Float, Bool};
 mount core.cli.spec.{ArgSpec, FlagSpec, RefinementHandle};

@@ -1,7 +1,7 @@
 // =============================================================================
 // gauge.vr - Progress bar / gauge widget with Unicode sub-cell precision
 // =============================================================================
-module gauge;
+module core.term.widget.gauge;
 
 mount super.protocol.{Widget, Styled};
 mount super.block.Block;

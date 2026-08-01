@@ -1,4 +1,4 @@
-module sys.windows.kernel32;
+module core.sys.windows.kernel32;
 
 // =============================================================================
 // sys/windows/kernel32.vr - Windows API (kernel32.dll) FFI

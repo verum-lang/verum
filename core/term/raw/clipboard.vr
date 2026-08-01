@@ -13,7 +13,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.2
 // =============================================================================
 
-module clipboard;
+module core.term.raw.clipboard;
 
 mount core.io.IoResult;
 mount super.escape.EscapeWriter;

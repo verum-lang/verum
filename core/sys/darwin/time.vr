@@ -1,4 +1,4 @@
-module sys.darwin.time;
+module core.sys.darwin.time;
 
 // =============================================================================
 // sys/darwin/time.vr - macOS Time and Clock Operations

@@ -51,7 +51,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.recovery;
+module core.runtime.recovery;
 
 mount sys.{monotonic_nanos};
 mount core.intrinsics.{inline_cb_as_ref};

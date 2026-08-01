@@ -1,7 +1,7 @@
 // =============================================================================
 // protocol.vr - Widget and StatefulWidget protocols
 // =============================================================================
-module protocol;
+module core.term.widget.protocol;
 
 mount super.super.render.buffer.Buffer;
 mount super.super.layout.rect.Rect;

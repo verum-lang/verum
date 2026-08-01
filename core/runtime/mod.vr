@@ -80,7 +80,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime;
+module core.runtime;
 
 // =============================================================================
 // Submodule Declarations

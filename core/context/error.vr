@@ -9,7 +9,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module error;
+module core.context.error;
 
 /// Error type for context system failures.
 ///

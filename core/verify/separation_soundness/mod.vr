@@ -31,6 +31,6 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.verify.separation_soundness.mod;
+module core.verify.separation_soundness;
 
 mount super.separation_logic_alignment.{kernel_separation_logic_alignment_is_sound};

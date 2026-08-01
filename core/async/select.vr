@@ -28,7 +28,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module select;
+module core.async.select;
 
 mount core.{Maybe, Result, List};
 mount super.future.{Future, FutureExt};

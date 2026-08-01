@@ -1,4 +1,4 @@
-module sys.windows.winsock2;
+module core.sys.windows.winsock2;
 
 // =============================================================================
 // sys/windows/winsock2.vr - Winsock2 API FFI + POSIX-Compatible Wrappers

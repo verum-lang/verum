@@ -14,7 +14,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 11.1
 // =============================================================================
 
-module graphics;
+module core.term.render.graphics;
 
 mount core.io.IoResult;
 mount super.super.raw.escape.EscapeWriter;

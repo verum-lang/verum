@@ -1,4 +1,4 @@
-module sys.common;
+module core.sys.common;
 
 mount core.base.coercion.{IntCoercible};
 

@@ -1,4 +1,4 @@
-module sys.windows;
+module core.sys.windows;
 
 // =============================================================================
 // sys/windows/mod.vr - Windows system interface module

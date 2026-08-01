@@ -25,7 +25,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module permissions;
+module core.cli.permissions;
 
 mount core.{Maybe, Result, List, Text, Bool};
 mount core.cli.spec.CommandSpec;

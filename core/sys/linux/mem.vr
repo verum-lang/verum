@@ -1,4 +1,4 @@
-module sys.linux.mem;
+module core.sys.linux.mem;
 
 // =============================================================================
 // sys/linux/mem.vr - Linux Memory Management Operations

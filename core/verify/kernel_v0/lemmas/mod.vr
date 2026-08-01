@@ -52,7 +52,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.verify.kernel_v0.lemmas.mod;
+module core.verify.kernel_v0.lemmas;
 
 mount super.beta.{church_rosser_confluence};
 mount super.subst.{subst_preserves_typing};

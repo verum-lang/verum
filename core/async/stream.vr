@@ -47,7 +47,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module stream;
+module core.async.stream;
 
 mount core.*;
 mount collections.*;

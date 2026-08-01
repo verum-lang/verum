@@ -1,4 +1,4 @@
-module sys.windows.ntstatus;
+module core.sys.windows.ntstatus;
 
 // =============================================================================
 // sys/windows/ntstatus.vr - NT Status Codes

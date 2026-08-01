@@ -24,7 +24,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module builder;
+module core.cli.builder;
 
 mount core.{Maybe, Result, List, Text, Char, Bool};
 mount core.cli.spec.{

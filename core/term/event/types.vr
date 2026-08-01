@@ -13,7 +13,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.1
 // =============================================================================
 
-module types;
+module core.term.event.types;
 
 mount super.keys.{KeyCode, Modifiers};
 

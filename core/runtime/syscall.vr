@@ -3,7 +3,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.syscall;
+module core.runtime.syscall;
 
 // RUNTIME-DUPLICATE-TREE-1 (task #5/#15): this module used to REDECLARE
 // the runtime intrinsics under dead `@intrinsic("verum.runtime.*")` keys

@@ -42,7 +42,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.verify.kernel_self_soundness.mod;
+module core.verify.kernel_self_soundness;
 
 mount super.predicative_reflection.{
     kernel_reflection_tower_base,

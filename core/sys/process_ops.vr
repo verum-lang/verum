@@ -1,4 +1,4 @@
-module sys.process_ops;
+module core.sys.process_ops;
 
 // =============================================================================
 // sys/process_ops.vr - Process Operations (replaces C verum_process_*)

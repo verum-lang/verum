@@ -1,7 +1,7 @@
 // =============================================================================
 // block.vr - Block widget (borders, title, padding)
 // =============================================================================
-module block;
+module core.term.widget.block;
 
 mount super.protocol.{Widget, Styled};
 mount super.super.render.buffer.Buffer;

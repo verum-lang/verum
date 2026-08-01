@@ -45,7 +45,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.config;
+module core.runtime.config;
 
 mount sys.{
     num_cpus,

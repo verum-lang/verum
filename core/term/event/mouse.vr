@@ -13,7 +13,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5
 // =============================================================================
 
-module mouse;
+module core.term.event.mouse;
 
 mount super.types.{MouseEvent, MouseEventKind, MouseButton};
 mount super.keys.Modifiers;

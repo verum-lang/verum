@@ -60,7 +60,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module context.standard;
+module core.context.standard;
 
 mount core.*;
 mount core.time.{Duration};

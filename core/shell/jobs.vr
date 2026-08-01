@@ -27,7 +27,7 @@
 
 // =============================================================================
 
-module jobs;
+module core.shell.jobs;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};

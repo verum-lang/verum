@@ -12,7 +12,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.1
 // =============================================================================
 
-module keys;
+module core.term.event.keys;
 
 // =============================================================================
 // KeyCode — complete key code sum type

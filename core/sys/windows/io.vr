@@ -1,4 +1,4 @@
-module sys.windows.io;
+module core.sys.windows.io;
 
 // =============================================================================
 // sys/windows/io.vr - Windows Completion-Based I/O (IOCP)

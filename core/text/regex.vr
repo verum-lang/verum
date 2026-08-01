@@ -49,7 +49,7 @@
 // last-repetition semantics. See core/text/regex_engine.vr.
 // =============================================================================
 
-module regex;
+module core.text.regex;
 
 mount core.*;
 mount .regex_engine.{

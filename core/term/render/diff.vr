@@ -8,7 +8,7 @@
 // - Synchronized output (Mode 2026)
 // - Adaptive color downscaling via ColorProfile
 // =============================================================================
-module diff;
+module core.term.render.diff;
 
 mount core.io.{Write, IoResult};
 mount super.cell.RenderCell;

@@ -1,4 +1,4 @@
-module sys.windows.tls;
+module core.sys.windows.tls;
 
 // =============================================================================
 // sys/windows/tls.vr - Windows WindowsThread-Local Storage and Context System

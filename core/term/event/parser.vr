@@ -22,7 +22,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 5.2
 // =============================================================================
 
-module parser;
+module core.term.event.parser;
 
 mount super.types.{
     Event, KeyEvent, KeyEventKind,

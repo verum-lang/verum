@@ -37,7 +37,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime;
+module core.cli.runtime;
 
 mount core.{Maybe, Result, List, Map, Text, Int, Bool, Heap, Unit};
 mount core.base.env;

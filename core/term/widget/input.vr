@@ -17,7 +17,7 @@
 //  * `handle_key` dispatcher that implements the standard Emacs/readline
 //  keybindings out of the box.
 // =============================================================================
-module input;
+module core.term.widget.input;
 
 mount super.protocol.{StatefulWidget, Styled};
 mount super.block.Block;

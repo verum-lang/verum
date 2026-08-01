@@ -63,7 +63,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.task_queue;
+module core.runtime.task_queue;
 
 mount core.intrinsics.{
     atomic_load_u64,

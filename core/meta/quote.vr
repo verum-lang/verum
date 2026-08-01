@@ -36,7 +36,7 @@
 
 // =============================================================================
 
-module meta.quote;
+module core.meta.quote;
 
 mount core.{Text, List, Maybe};
 mount meta.token.{TokenStream, Token, TokenTree, TokenKind, Delimiter, TokenGroup};

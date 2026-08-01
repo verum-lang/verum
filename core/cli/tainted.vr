@@ -30,7 +30,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module tainted;
+module core.cli.tainted;
 
 mount core.{Maybe, Result, List, Text, Bool};
 mount core.cli.error.ParseError;

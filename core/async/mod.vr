@@ -25,7 +25,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module async;
+module core.async;
 
 // =============================================================================
 // Submodules

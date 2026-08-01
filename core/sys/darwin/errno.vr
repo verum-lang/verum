@@ -1,4 +1,4 @@
-module sys.darwin.errno;
+module core.sys.darwin.errno;
 
 // =============================================================================
 // sys/darwin/errno.vr - macOS/BSD error number constants

@@ -1,7 +1,7 @@
 // =============================================================================
 // table.vr - Table widget with headers, rows, footer, and selection
 // =============================================================================
-module table;
+module core.term.widget.table;
 
 mount super.protocol.{Widget, StatefulWidget, Styled};
 mount super.block.Block;

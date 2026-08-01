@@ -1,4 +1,4 @@
-module sys.linux.tls;
+module core.sys.linux.tls;
 
 // =============================================================================
 // sys/linux/tls.vr - Thread-Local Storage Bootstrap for Linux

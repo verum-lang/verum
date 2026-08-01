@@ -1,4 +1,4 @@
-module sys.mmio;
+module core.sys.mmio;
 
 /// Verum Standard Library: Memory-Mapped I/O
 ///

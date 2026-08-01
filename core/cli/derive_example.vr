@@ -28,7 +28,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module derive_example;
+module core.cli.derive_example;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.cli.spec.CommandSpec;

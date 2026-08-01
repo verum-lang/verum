@@ -1,4 +1,4 @@
-module sys.linux.errno;
+module core.sys.linux.errno;
 
 // =============================================================================
 // errno.vr - Linux error number constants

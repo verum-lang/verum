@@ -63,7 +63,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module mem;
+module core.mem;
 
 // =============================================================================
 // Core CBGR Components

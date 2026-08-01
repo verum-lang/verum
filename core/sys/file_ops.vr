@@ -1,4 +1,4 @@
-module sys.file_ops;
+module core.sys.file_ops;
 
 // =============================================================================
 // sys/file_ops.vr - File Operations (replaces C verum_file_* functions)

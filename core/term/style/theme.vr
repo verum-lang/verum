@@ -9,7 +9,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.3
 // =============================================================================
 
-module theme;
+module core.term.style.theme;
 
 mount super.color.{Color, Rgb};
 mount super.style.Style;

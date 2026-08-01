@@ -1,4 +1,4 @@
-module sys.interrupt;
+module core.sys.interrupt;
 
 /// Verum Standard Library: Interrupt Handling Infrastructure
 ///

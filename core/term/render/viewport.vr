@@ -14,7 +14,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 7.3
 // =============================================================================
 
-module viewport;
+module core.term.render.viewport;
 
 mount super.super.layout.rect.Rect;
 

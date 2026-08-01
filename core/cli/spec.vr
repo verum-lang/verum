@@ -38,7 +38,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module spec;
+module core.cli.spec;
 
 mount core.{Maybe, Result, List, Map, Set, Text, Char, Int, Bool, Heap};
 mount core.base.protocols.{Debug, Display, Clone, Eq, Default};

@@ -76,7 +76,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module runtime.spawn;
+module core.runtime.spawn;
 
 mount core.{List, Map, Text, Maybe, Result, TypeId, Any};
 mount sync.{AtomicU64, MemoryOrdering};

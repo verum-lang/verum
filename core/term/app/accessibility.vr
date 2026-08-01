@@ -1,7 +1,7 @@
 // =============================================================================
 // accessibility.vr - OSC 133 semantic zones and screen reader hints
 // =============================================================================
-module accessibility;
+module core.term.app.accessibility;
 
 mount core.io.IoResult;
 mount super.super.raw.EscapeWriter;

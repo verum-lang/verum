@@ -27,7 +27,7 @@
 
 // =============================================================================
 
-module resources;
+module core.shell.resources;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Drop};

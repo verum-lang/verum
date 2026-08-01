@@ -1,7 +1,7 @@
 // =============================================================================
 // spinner.vr - Animated spinner as a StatefulWidget with frame sets
 // =============================================================================
-module spinner;
+module core.term.widget.spinner;
 
 mount super.protocol.{StatefulWidget, Styled};
 mount super.paragraph.Span;

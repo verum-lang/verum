@@ -1,4 +1,4 @@
-module sys.windows.thread;
+module core.sys.windows.thread;
 
 // =============================================================================
 // sys/windows/thread.vr - Windows WindowsThread Creation and Synchronization

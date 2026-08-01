@@ -20,7 +20,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module example;
+module core.cli.example;
 
 mount core.{Maybe, Result, List, Text, Bool};
 mount core.io.stdio;

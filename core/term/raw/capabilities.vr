@@ -14,7 +14,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md Section 4.4
 // =============================================================================
 
-module capabilities;
+module core.term.raw.capabilities;
 
 mount core.sys.{FileDesc, OSError};
 mount core.base.env.{var_opt};

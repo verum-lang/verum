@@ -31,7 +31,7 @@
 // methods could never be called. Closes that architectural gap.
 // =============================================================================
 
-module command;
+module core.shell.command;
 
 mount core.{Text, Result};
 mount core.base.protocols.{Display, Debug, Clone};

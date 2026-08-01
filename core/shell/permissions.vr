@@ -22,7 +22,7 @@
 
 // =============================================================================
 
-module permissions;
+module core.shell.permissions;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.glob.{GlobPattern};

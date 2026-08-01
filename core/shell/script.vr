@@ -20,7 +20,7 @@
 
 // =============================================================================
 
-module script;
+module core.shell.script;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.env.{

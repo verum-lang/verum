@@ -23,7 +23,7 @@
 
 // =============================================================================
 
-module signal;
+module core.shell.signal;
 
 mount core.{Maybe, Result, Bool};
 mount core.base.protocols.{Drop};

@@ -43,7 +43,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.verify.codegen_soundness.mod;
+module core.verify.codegen_soundness;
 
 mount super.vbc_lowering.{kernel_vbc_lowering_preserves_semantics};
 mount super.ssa_construction.{kernel_ssa_construction_preserves_semantics};

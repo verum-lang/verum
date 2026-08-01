@@ -1,4 +1,4 @@
-module sys.linux.time;
+module core.sys.linux.time;
 
 // =============================================================================
 // sys/linux/time.vr - Linux Time and Clock Operations

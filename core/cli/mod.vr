@@ -45,7 +45,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module cli;
+module core.cli;
 
 // =============================================================================
 // Submodule declarations

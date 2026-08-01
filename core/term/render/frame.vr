@@ -1,7 +1,7 @@
 // =============================================================================
 // frame.vr - Frame (draw context) and Terminal (double-buffered backend)
 // =============================================================================
-module frame;
+module core.term.render.frame;
 
 mount core.io.{IoResult, StreamError, IoErrorKind};
 mount super.cell.RenderCell;

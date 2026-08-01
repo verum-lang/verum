@@ -1,4 +1,4 @@
-module sys.windows.ntdll;
+module core.sys.windows.ntdll;
 
 // =============================================================================
 // sys/windows/ntdll.vr - NT Native API (ntdll.dll) FFI

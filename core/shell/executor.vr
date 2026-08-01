@@ -21,7 +21,7 @@
 
 // =============================================================================
 
-module executor;
+module core.shell.executor;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};

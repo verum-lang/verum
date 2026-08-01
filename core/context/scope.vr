@@ -10,7 +10,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module scope;
+module core.context.scope;
 
 /// Dependency injection scope.
 ///

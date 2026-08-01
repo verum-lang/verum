@@ -66,7 +66,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module generator;
+module core.async.generator;
 
 mount core.*;
 mount collections.*;

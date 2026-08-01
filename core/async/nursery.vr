@@ -50,7 +50,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module nursery;
+module core.async.nursery;
 
 mount time.Duration;
 mount text.Text;

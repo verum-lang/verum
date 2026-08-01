@@ -3,7 +3,7 @@
 // =============================================================================
 // Composable, stateful/stateless terminal widgets.
 // =============================================================================
-module widget;
+module core.term.widget;
 
 // Sub-modules
 public module protocol;

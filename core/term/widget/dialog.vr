@@ -1,7 +1,7 @@
 // =============================================================================
 // dialog.vr - Centered modal dialog widget with state
 // =============================================================================
-module dialog;
+module core.term.widget.dialog;
 
 mount super.protocol.{StatefulWidget, Styled};
 mount super.block.{Block, Borders, BorderType, Alignment};

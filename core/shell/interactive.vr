@@ -14,7 +14,7 @@
 
 // =============================================================================
 
-module interactive;
+module core.shell.interactive;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display};

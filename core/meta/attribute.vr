@@ -17,7 +17,7 @@
 
 // =============================================================================
 
-module meta.attribute;
+module core.meta.attribute;
 
 mount core.{Text, List, Maybe};
 mount meta.span.{Span};

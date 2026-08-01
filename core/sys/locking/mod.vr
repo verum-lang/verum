@@ -1,4 +1,4 @@
-module sys.locking;
+module core.sys.locking;
 
 // =============================================================================
 // core/sys/locking/mod.vr — Byte-range advisory file locking (public API)

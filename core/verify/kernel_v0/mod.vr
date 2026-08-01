@@ -47,7 +47,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.verify.kernel_v0.mod;
+module core.verify.kernel_v0;
 
 mount super.core_term.{CoreTerm, type_universe};
 // Context methods (extend / lookup / lookup_shifted / depth) live in the

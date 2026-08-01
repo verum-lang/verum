@@ -9,7 +9,7 @@
 // Spec: docs/detailed/40-terminal-tui-architecture.md#6.1
 // =============================================================================
 
-module profile;
+module core.term.style.profile;
 
 mount super.color.{Color, Rgb, Hsl};
 mount super.convert.{rgb_to_hsl, hsl_to_rgb};

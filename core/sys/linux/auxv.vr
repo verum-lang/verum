@@ -1,4 +1,4 @@
-module sys.linux.auxv;
+module core.sys.linux.auxv;
 
 // =============================================================================
 // sys/linux/auxv.vr - Auxiliary Vector Access (no libc)

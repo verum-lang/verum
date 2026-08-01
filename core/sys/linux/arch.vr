@@ -1,4 +1,4 @@
-module sys.linux.arch;
+module core.sys.linux.arch;
 
 // =============================================================================
 // sys/linux/arch.vr - Architecture-specific Linux syscall numbers

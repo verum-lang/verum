@@ -15,7 +15,7 @@
 
 // =============================================================================
 
-module tagged_literals;
+module core.text.tagged_literals;
 
 mount core.*;
 

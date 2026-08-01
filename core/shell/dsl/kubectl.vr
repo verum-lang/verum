@@ -15,7 +15,7 @@
 
 // =============================================================================
 
-module kubectl;
+module core.shell.dsl.kubectl;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};

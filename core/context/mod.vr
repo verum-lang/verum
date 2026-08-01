@@ -88,7 +88,7 @@
     stratum: MsfsStratum.LCls,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module context;
+module core.context;
 
 // Re-export scope types
 public mount self.scope.*;

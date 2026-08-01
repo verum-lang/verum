@@ -24,7 +24,7 @@
 
 // =============================================================================
 
-module meta.reflection;
+module core.meta.reflection;
 
 mount core.{Text, List, Maybe};
 mount meta.span.{Span};

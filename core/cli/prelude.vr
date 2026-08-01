@@ -25,7 +25,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module prelude;
+module core.cli.prelude;
 
 public mount core.cli.spec.{
     CommandSpec, ArgSpec, FlagSpec, Group, GroupKind, Arity, Example,

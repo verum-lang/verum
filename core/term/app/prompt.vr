@@ -1,7 +1,7 @@
 // =============================================================================
 // prompt.vr - High-level interactive prompts
 // =============================================================================
-module prompt;
+module core.term.app.prompt;
 
 mount core.io.{IoResult, StreamError, IoErrorKind};
 mount super.super.event.{Event, KeyEvent, KeyCode, Modifiers, EventStream};
