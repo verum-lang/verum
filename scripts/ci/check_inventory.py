@@ -66,8 +66,12 @@ CORE_TESTS = REPO / "core-tests"
 ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|")
 # The table's own status vocabulary (census 2026-08-01: 343/378 rows
 # already carry one of these; S4 ratchets the remaining rows in).
+# **unverified** is the honest fifth state: the row exists (so S3 can
+# close) but no measured run has backed its claims yet — the liveness
+# layer treats it like **partial** (no green claim to verify).
 TOKEN_RE = re.compile(
-    r"\*\*(stable|complete|partial|regression-only)[^*]*\*\*", re.IGNORECASE
+    r"\*\*(stable|complete|partial|regression-only|unverified)[^*]*\*\*",
+    re.IGNORECASE,
 )
 GREEN_CLAIMS = {"stable", "complete", "regression-only"}
 # Explicit numeric green claims, most-specific first.

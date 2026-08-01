@@ -157,9 +157,14 @@ fn integration_text_sort_lexicographic_via_cmp() {
         let mut j: Int = i + 1;
         while j < n {
             if words[j].cmp(&words[i]) == Less {
-                let tmp = words[i].clone();
-                words[i] = words[j].clone();
-                words[j] = tmp;
+                // Two-temporary swap: `words[i] = words[j].clone()`
+                // borrows `words` mutably (LHS) while the RHS still
+                // holds the immutable element borrow — E310 under the
+                // sound borrow rules the checker now enforces.
+                let tmp_i = words[i].clone();
+                let tmp_j = words[j].clone();
+                words[i] = tmp_j;
+                words[j] = tmp_i;
             }
             j = j + 1;
         }
